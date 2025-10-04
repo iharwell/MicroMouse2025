@@ -166,8 +166,10 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Vector2fTest.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="MazeRef.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Templates.h" />
   </ItemGroup>

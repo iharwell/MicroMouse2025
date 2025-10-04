@@ -15,12 +15,12 @@ namespace MazeMap
 		TEST_METHOD(TestX)
 		{
 			Cell c(3, 4);
-			Assert::AreEqual(c.GetX(), 3, L"Construct and retrieve on X failed.");
+			Assert::AreEqual((int)c.GetX(), 3, L"Construct and retrieve on X failed.");
 		}
 		TEST_METHOD(TestY)
 		{
 			Cell c(3, 4);
-			Assert::AreEqual(c.GetY(), 4, L"Construct and retrieve on Y failed.");
+			Assert::AreEqual((int)c.GetY(), 4, L"Construct and retrieve on Y failed.");
 		}
 		TEST_METHOD(TestUp)
 		{
@@ -34,10 +34,10 @@ namespace MazeMap
 		TEST_METHOD(TestDown)
 		{
 			Cell c(3, 4, NoWall, NoWall, NoWall, NoWall);
-			Assert::AreEqual(c.GetDown(), NoWall, L"Construct and retrieve Down failed.");
+			Assert::AreEqual(NoWall, c.GetDown(), L"Construct and retrieve Down failed.");
 
 			c.SetDown(Unknown);
-			Assert::AreEqual(c.GetDown(), Unknown, L"Set and retrieve Down failed.");
+			Assert::AreEqual( Unknown, c.GetDown(), L"Set and retrieve Down failed.");
 		}
 		TEST_METHOD(TestLeft)
 		{

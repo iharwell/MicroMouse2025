@@ -27,12 +27,18 @@
     <ClCompile Include="MazeTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Vector2fTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Templates.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeRef.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

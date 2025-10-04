@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 #include "..\MazeMap\Maze.h"
-
+#include "MazeRef.h"
 #include <vector>
 
 #include <sstream>
@@ -12,32 +12,69 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
+
 	TEST_CLASS(MazeTest)
 	{
 	public:
 
+
+
 		static void ValidateMaze(const Maze& maze)
 		{
+			bool error = false;
 			for (int i = 0; i < maze.GetXSize(); i++)
 			{
 				for (int j = 0; j < maze.GetYSize(); j++)
 				{
 					Cell current = maze(i, j);
+					CharBlock cbCur = current.Serialize();
 					if (j < 15)
 					{
 						Cell up = maze(i, j + 1);
-						Assert::AreEqual(current.GetUp(), up.GetDown());
+						CharBlock cbUp = up.Serialize();
+						WallState cu = current.GetUp();
+						WallState ud = up.GetDown();
+						if (cu != ud);
+						{
+							error = true;
+						}
+
+						std::wstringstream ss = std::wstringstream();
+						/*ss << "Error: Expected " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(cu);
+						ss << ", Found " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(ud);*/
+						ss << "\nAt " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(current);
+						ss << " and " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(up) << ".";
+						Assert::AreEqual(current.GetUp(), up.GetDown(), (&ss.str()[0]) );
 					}
 					if (i < 15)
 					{
 						Cell right = maze(i+1, j);
-						Assert::AreEqual(current.GetRight(), right.GetLeft());
+						CharBlock cbRight = right.Serialize();
+
+						WallState cr = current.GetRight();
+						WallState rl = right.GetLeft();
+						if (current.GetRight() != right.GetLeft());
+						{
+							error = true;
+						}
+						std::wstringstream ss = std::wstringstream();
+						/*ss << "Error: Expected " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(cr);
+						ss << ", Found " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(rl);*/
+						ss << "\nAt " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(current);
+						ss << " and " << Microsoft::VisualStudio::CppUnitTestFramework::ToString(right) << ".";
+						Assert::AreEqual(current.GetRight(), right.GetLeft(), (&ss.str()[0]));
 					}
 
 				}
 			}
 		}
 
+		TEST_METHOD(TestUnitTestInfrastructure)
+		{
+			Maze m1 = Mazes::GetMaze1();
+
+			ValidateMaze(m1);
+		}
 		TEST_METHOD(TestConstructor)
 		{
 			Maze m = Maze();
@@ -48,8 +85,8 @@ namespace MazeMap
 				{
 					Cell& c = m(i, j);
 
-					Assert::AreEqual(c.GetX(), i);
-					Assert::AreEqual(c.GetY(), j);
+					Assert::AreEqual((int)c.GetX(), i);
+					Assert::AreEqual((int)c.GetY(), j);
 					Assert::AreEqual(c.GetUp(),    Unknown);
 					Assert::AreEqual(c.GetDown(),  Unknown);
 					Assert::AreEqual(c.GetLeft(),  Unknown);
@@ -62,8 +99,8 @@ namespace MazeMap
 			Maze m = Maze();
 			int xSize = m.GetXSize();
 			int ySize = m.GetYSize();
-			Assert::AreEqual(m.GetXSize(), 16);
-			Assert::AreEqual(m.GetYSize(), 16);
+			Assert::AreEqual(m.GetXSize(), (uint8_t)16);
+			Assert::AreEqual(m.GetYSize(), (uint8_t)16);
 		}
 		TEST_METHOD(TestIndex)
 		{
@@ -80,6 +117,22 @@ namespace MazeMap
 
 			m(1, 1).SetUp(Wall);
 			Assert::AreEqual(c.GetUp(), m(1, 1).GetUp());
+		}
+		TEST_METHOD(TestIndex3)
+		{
+			Maze m = Maze();
+			Cell& c = m(2, 2);
+
+			m(2, 2).SetDown(NoWall);
+			Assert::AreEqual(NoWall, m(2, 2).GetDown());
+		}
+		TEST_METHOD(TestIndex4)
+		{
+			Maze m = Maze();
+			Cell& c = m(2, 2);
+
+			c.SetDown(NoWall);
+			Assert::AreEqual(NoWall, m(2, 2).GetDown());
 		}
 		TEST_METHOD(TestSetWallA)
 		{
@@ -177,6 +230,18 @@ namespace MazeMap
 			Assert::AreEqual(m(15, 1).GetRight(), Wall);
 
 			ValidateMaze(m);
+		}
+		TEST_METHOD(TestGoalFound)
+		{
+			Maze& m = Mazes::GetMaze1();
+
+			Assert::IsTrue(m.HasFoundGoal());
+		}
+		TEST_METHOD(TestIsComplete)
+		{
+			Maze& m = Mazes::GetMaze1();
+
+			Assert::IsTrue(m.IsComplete());
 		}
 	};
 }
