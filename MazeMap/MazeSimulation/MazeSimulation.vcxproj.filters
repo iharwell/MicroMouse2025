@@ -15,39 +15,21 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="MazeMapTest.cpp">
+    <ClCompile Include="MazeSimulation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="pch.cpp">
+    <ClCompile Include="mmsAPI.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="CellTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Vector2fTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMaskTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="DirectionTest.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="PathFinderTest.cpp">
+    <ClCompile Include="SimVehicle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="pch.h">
+    <ClInclude Include="mmsAPI.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Templates.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeRef.h">
+    <ClInclude Include="SimVehicle.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

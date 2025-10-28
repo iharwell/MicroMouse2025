@@ -11,7 +11,9 @@ namespace MazeMap
 		uint16_t _size;
 		CellCoordinates _steps[_SIZE];
 	public:
-		Path() {}
+		Path()
+			: _size(0)
+		{}
 
 		uint16_t GetSize() { return const_cast<const Path*>(this)->GetSize(); }
 		uint16_t GetSize() const { return _size; }
@@ -24,7 +26,7 @@ namespace MazeMap
 
 		bool push_back(CellCoordinates nextStep)
 		{
-			if (_size < 255)
+			if (_size < _SIZE)
 			{
 				_steps[_size] = nextStep;
 				++_size;
@@ -51,6 +53,36 @@ namespace MazeMap
 				return true;
 			}
 			return false;
+		}
+		CellCoordinates first()
+		{
+			if (_size > 0)
+			{
+				return _steps[0];
+			}
+			return CellCoordinates(0, 0);
+		}
+		CellCoordinates last() const
+		{
+			if (_size > 0)
+			{
+				return _steps[_size-1];
+			}
+			return CellCoordinates(0, 0);
+		}
+		CellCoordinates last() { return const_cast<const Path<_SIZE>*>(this)->last(); }
+		CellCoordinates last(uint16_t index) const
+		{
+			if (_size > index)
+			{
+				return _steps[_size - 1 - index];
+			}
+			return CellCoordinates(0, 0);
+		}
+		CellCoordinates last(uint16_t index) { return const_cast<const Path<_SIZE>*>(this)->last(index); }
+		void clear()
+		{
+			_size = 0;
 		}
 
 		bool contains(CellCoordinates coords) { return const_cast<const Path*>(this)->contains(coords); }

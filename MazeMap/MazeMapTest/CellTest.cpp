@@ -58,49 +58,49 @@ namespace MazeMap
 		TEST_METHOD(TestVisited)
 		{
 			Cell c = Cell(3, 4, Unknown, Unknown, Unknown, Unknown);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, NoWall, NoWall, NoWall, Unknown);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, NoWall, NoWall, Unknown, NoWall);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, NoWall, Unknown, NoWall, NoWall);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, Unknown, NoWall, NoWall, NoWall);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, NoWall, NoWall, NoWall, NoWall);
-			Assert::IsTrue(c.IsVisited());
+			Assert::IsTrue(c.IsFullyKnown());
 
 			c = Cell(3, 4, Wall, Wall, Wall, Unknown);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, Wall, Wall, Unknown, Wall);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, Wall, Unknown, Wall, Wall);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, Unknown, Wall, Wall, Wall);
-			Assert::IsFalse(c.IsVisited());
+			Assert::IsFalse(c.IsFullyKnown());
 
 			c = Cell(3, 4, Wall, Wall, Wall, Wall);
-			Assert::IsTrue(c.IsVisited());
+			Assert::IsTrue(c.IsFullyKnown());
 
 			c = Cell(3, 4, Wall, Wall, Wall, NoWall);
-			Assert::IsTrue(c.IsVisited());
+			Assert::IsTrue(c.IsFullyKnown());
 
 			c = Cell(3, 4, Wall, Wall, NoWall, Wall);
-			Assert::IsTrue(c.IsVisited());
+			Assert::IsTrue(c.IsFullyKnown());
 
 			c = Cell(3, 4, Wall, NoWall, Wall, Wall);
-			Assert::IsTrue(c.IsVisited());
+			Assert::IsTrue(c.IsFullyKnown());
 
 			c = Cell(3, 4, NoWall, Wall, Wall, Wall);
-			Assert::IsTrue(c.IsVisited());
+			Assert::IsTrue(c.IsFullyKnown());
 		}
 	};
 }

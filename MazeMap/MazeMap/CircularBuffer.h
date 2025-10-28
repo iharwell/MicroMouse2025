@@ -4,7 +4,7 @@
 
 namespace MazeMap
 {
-	template <typename T>
+	/*template <typename T>
 	class EXPORT TimedValue
 	{
 	private:
@@ -30,7 +30,7 @@ namespace MazeMap
 		time_t GetAge()       { return GetPreciseTime() - _time; }
 	};
 
-	/*template<typename T, int _SIZE>
+	template<typename T, int _SIZE>
 	class EXPORT TimedCircularBuffer
 	{
 	private:
@@ -78,6 +78,7 @@ namespace MazeMap
 		int maxSize() { return _SIZE; }
 	};*/
 
+	// A circular buffer containing elements of the provided type, and of the indicated size.
 	template<typename T, int _SIZE>
 	class EXPORT CircularBuffer
 	{
@@ -91,6 +92,7 @@ namespace MazeMap
 			, _count(0)
 		{}
 
+		// Adds the given value to the buffer, overwriting the oldest value if necessary.
 		bool push_back(const T& value)
 		{
 			if (_count < _SIZE)
