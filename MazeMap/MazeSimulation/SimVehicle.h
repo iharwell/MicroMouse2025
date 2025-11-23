@@ -12,7 +12,10 @@ public:
 
 
 	void Move(MazeMap::RelativeDirection relDir);
+
+	void Move(MazeMap::RelativeDirection relDir, int halfSteps);
 	void Move(MazeMap::Direction dir);
+	void Move(MazeMap::Direction dir, int halfSteps);
 	void Turn(MazeMap::RelativeDirection relDir);
 
 	void MoveTo(MazeMap::MazeLocation location);

@@ -6,6 +6,9 @@
 #include "..\MazeMap\Maze.h"
 #include "CppUnitTest.h"
 #include <sstream>
+#include "../MazeMap/Maneuver.h"
+
+std::wstring CodeString(MazeMap::ManeuverCode code);
 
 
 template<>
@@ -22,31 +25,74 @@ inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(Maze
 		return std::wstring(L"W");
 	}
 }
+//↑↗→↘↓↙←↖
 template<>
 inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(MazeMap::Direction const& direction)
 {
 	switch (direction)
 	{
 	case MazeMap::Direction::Up:
-		return std::wstring(L"UU");
+		return std::wstring(L"↑");
 	case MazeMap::Direction::UpRight:
-		return std::wstring(L"UR");
+		return std::wstring(L"↗");
 	case MazeMap::Direction::Right:
-		return std::wstring(L"RR");
+		return std::wstring(L"→");
 	case MazeMap::Direction::DownRight:
-		return std::wstring(L"DR");
+		return std::wstring(L"↘");
 
 	case MazeMap::Direction::Down:
-		return std::wstring(L"DD");
+		return std::wstring(L"↓");
 	case MazeMap::Direction::DownLeft:
-		return std::wstring(L"DL");
+		return std::wstring(L"↙");
 	case MazeMap::Direction::Left:
-		return std::wstring(L"LL");
+		return std::wstring(L"←");
 	case MazeMap::Direction::UpLeft:
-		return std::wstring(L"UL");
+		return std::wstring(L"↖");
 	default:
 		return std::wstring(L"W");
 	}
+}
+//↑↗→↘↓↙←↖
+template<>
+inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(MazeMap::DirectionalLocation const& dirLoc)
+{
+	std::wstringstream s = std::wstringstream();
+	s << "(";
+	switch (dirLoc.GetDirection())
+	{
+	case MazeMap::Direction::Up:
+		s<< L"↑";
+		break;
+	case MazeMap::Direction::UpRight:
+		s << L"↗";
+		break;
+	case MazeMap::Direction::Right:
+		s << L"→";
+		break;
+	case MazeMap::Direction::DownRight:
+		s << L"↘";
+		break;
+
+	case MazeMap::Direction::Down:
+		s << L"↓";
+		break;
+	case MazeMap::Direction::DownLeft:
+		s << L"↙";
+		break;
+	case MazeMap::Direction::Left:
+		s << L"←";
+		break;
+	case MazeMap::Direction::UpLeft:
+		s << L"↖";
+		break;
+	default:
+		s << L"W";
+		break;
+	}
+
+	s << "," << static_cast<uint16_t>(dirLoc.GetLocation().GetX());
+	s << "," << static_cast<uint16_t>(dirLoc.GetLocation().GetY()) << ")";
+	return std::wstring(s.str());
 }
 template<>
 inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(MazeMap::RelativeDirection const& direction)
@@ -78,6 +124,14 @@ inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(Maze
 }
 template<>
 inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(const MazeMap::CellCoordinates& coords)
+{
+	std::wstringstream s = std::wstringstream();
+	s << "(" << static_cast<int>(coords.GetX()) << ", " << static_cast<int>(coords.GetY()) << ")";
+
+	return std::wstring(s.str());
+}
+template<>
+inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(const MazeMap::MazeLocation& coords)
 {
 	std::wstringstream s = std::wstringstream();
 	s << "(" << static_cast<int>(coords.GetX()) << ", " << static_cast<int>(coords.GetY()) << ")";

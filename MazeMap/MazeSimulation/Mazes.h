@@ -42,7 +42,7 @@ namespace MazeMap
 				{
 					Cell& c = maze((uint8_t)j, (uint8_t)i);
 
-					int cellStart = 5 * (j+i*16);
+					int cellStart = 5 * (j + i * 16);
 
 					char up = mazeData[cellStart];
 					char down = mazeData[cellStart + 1];
@@ -64,17 +64,11 @@ namespace MazeMap
 		static void SetupMazes()
 		{
 			SetupMaze(Maze1, maze1Data);
-			Maze1.PreCalculate();
 			SetupMaze(Maze2, maze2Data);
-			Maze2.PreCalculate();
 			SetupMaze(Maze3, maze3Data);
-			Maze3.PreCalculate();
 			SetupMaze(Maze4, maze4Data);
-			Maze4.PreCalculate();
 			SetupMaze(SingleTurnMaze, singleTurnMazeData);
-			SingleTurnMaze.PreCalculate();
 			SetupMaze(APEC2016, APEC2016Data);
-			APEC2016.PreCalculate();
 
 			_setup = true;
 		}

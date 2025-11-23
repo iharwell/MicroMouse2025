@@ -16,7 +16,7 @@ namespace MazeMap
 		{
 		}
 		template<int _PSIZE>
-		static void HalfStepPathFromPath(const Path<_PSIZE>& path, HalfStepPath<SIZE> hpath)
+		static void HalfStepPathFromPath(const Path<_PSIZE>& path, HalfStepPath<SIZE>& hpath)
 		{
 			hpath.clear();
 			if (path.GetSize() == 0)

@@ -56,8 +56,8 @@ namespace MazeMap
 
 	union EXPORT DoubleMazeBits
 	{
-		uint32_t Ints[16];
-		uint64_t Longs[8];
+		uint32_t Ints[32];
+		uint64_t Longs[16];
 	};
 
 	/// <summary>
@@ -71,7 +71,6 @@ namespace MazeMap
 		DoubleMazeMask();
 		DoubleMazeMask(bool initialValue);
 		DoubleMazeMask(uint32_t initialValues[]);
-		DoubleMazeMask(const MazeMask& maskToClone);
 
 		bool SetFlag(MazeLocation coords, bool value);
 		bool SetFlag(uint8_t x, uint8_t y, bool value);
@@ -81,11 +80,11 @@ namespace MazeMap
 		bool operator()(uint8_t x, uint8_t y);
 		bool operator()(uint8_t x, uint8_t y) const;
 
-		bool operator[](CellCoordinates coords);
-		bool operator[](CellCoordinates coords) const;
+		bool operator[](MazeLocation coords);
+		bool operator[](MazeLocation coords) const;
 
-		MazeMask GetPerimeter(PerimeterType perimeterType);
-		MazeMask GetPerimeter(PerimeterType perimeterType) const;
+		DoubleMazeMask GetPerimeter(PerimeterType perimeterType);
+		DoubleMazeMask GetPerimeter(PerimeterType perimeterType) const;
 
 		uint32_t GetRow(uint8_t row);
 		uint32_t GetRow(uint8_t row) const;

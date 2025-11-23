@@ -218,21 +218,13 @@ namespace MazeMap
 	Direction MazeLocation::DirectionFromCellCenter() const
 	{
 		Direction d = Direction::None;
-		if (GetX() == 32)
+		if ((GetX() & 1) == 0)
 		{
-			d |= Direction::Right;
+			d |= Direction::Left << ((GetX()>>5) & 1);
 		}
-		else if ((GetX() & 1) == 0)
+		if ((GetY() & 1) == 0)
 		{
-			d |= Direction::Left;
-		}
-		if (GetY() == 32)
-		{
-			d |= Direction::Up;
-		}
-		else if ((GetY() & 1) == 0)
-		{
-			d |= Direction::Down;
+			d |= Direction::Up << (((~GetY()) >> 5) & 1);
 		}
 		return d;
 	}

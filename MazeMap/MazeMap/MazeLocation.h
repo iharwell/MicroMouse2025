@@ -14,8 +14,20 @@ namespace MazeMap
 		MazeLocation();
 		MazeLocation(uint8_t halfX, uint8_t halfY);
 
-		static MazeLocation CellCenter(CellCoordinates coords) { return MazeLocation((coords.GetX() << 1) + 1, (coords.GetY() << 1) + 1); }
-		static MazeLocation Between(CellCoordinates a, CellCoordinates b) { return MazeLocation((a.GetX() + b.GetX() + 1), (a.GetY() + b.GetY() + 1)); }
+		static MazeLocation CellCenter(CellCoordinates coords)
+		{
+			return MazeLocation(
+				static_cast<uint8_t>((coords.GetX() << 1) + 1),
+				static_cast<uint8_t>((coords.GetY() << 1) + 1)
+			);
+		}
+		static MazeLocation Between(CellCoordinates a, CellCoordinates b)
+		{
+			return MazeLocation(
+				static_cast<uint8_t>(a.GetX() + b.GetX() + 1),
+				static_cast<uint8_t>(a.GetY() + b.GetY() + 1)
+			);
+		}
 
 		// Returns the x component of the coordinate.
 		uint8_t GetX() const;
@@ -86,6 +98,11 @@ namespace MazeMap
 		// Returns true if moving one cell in the provided direction results in a coordinate that is in the 16x16 bounds of the maze.
 		bool IsValidMove(Direction direction) const;
 
+		// Returns true if moving one cell in the provided direction results in a coordinate that is in the 16x16 bounds of the maze.
+		bool IsValidMove(RelativeDirectionalDistance direction);
+		// Returns true if moving one cell in the provided direction results in a coordinate that is in the 16x16 bounds of the maze.
+		bool IsValidMove(RelativeDirectionalDistance direction) const;
+
 		Direction DirectionFromCellCenter();
 		Direction DirectionFromCellCenter() const;
 
@@ -104,7 +121,7 @@ namespace MazeMap
 			{
 				--y;
 			}
-			return CellCoordinates(x >> 1, y >> 1);
+			return CellCoordinates(static_cast<uint8_t>(x >> 1), static_cast<uint8_t>(y >> 1));
 		}
 
 		bool IntersectsAt(MazeLocation otherLoc, CellCoordinates& intersection)

@@ -10,6 +10,18 @@ namespace MazeMap
 	private:
 		float _currentOutput;
 		float _desiredOutput;
+		const float _gearRatio;
+		const float _wheelRadius;
+		const float _maxCurrent;
+		const float _torqueConstant;
+		const float _speedConstant;
+		const float _motorMomentOfInertia;
+		const float _wheelMomentOfInertia;
+
+		const float _lateralOffset;
+		const float _coefficientOfFriction;
+
+		float _downforce;
 	public:
 		bool SetOutput(float desiredValue);
 		float GetCurrentOutput() const;

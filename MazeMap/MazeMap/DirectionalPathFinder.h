@@ -11,7 +11,7 @@ namespace MazeMap
 	private:
 		MaskQueue _queue;
 		float _data[32][32][8];
-
+		float _lastEstimatedTime;
 	public:
 		DirectionalPathFinder(const Maze& maze, const Vehicle& vehicle);
 
@@ -23,6 +23,8 @@ namespace MazeMap
 
 		// Builds a path from the designated start cell to the goal of the maze, and stores the result in the provided Path object.
 		virtual void HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE*2>& result) override;
+
+		float GetLastEstimatedTime();
 	protected:
 		void EvaluateCosts();
 		void UpdateCell(uint8_t row, uint8_t col);
@@ -38,7 +40,8 @@ namespace MazeMap
 		void UpdateCost(DirectionalLocation dirLoc, float cost);
 		float Cost(MazeLocation loc, Direction d);
 		void UpdateCost(MazeLocation loc, Direction d, float cost);
-
+		Direction GetAscendDirection(MazeLocation loc, Direction d);
+		Direction GetDescendDirection(MazeLocation loc, Direction d);
 		void DescendGradient(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE*2>& result);
 		//uint8_t GetPriorStraightLength(MazeLocation currentLoc, Direction currentDirection);
 		//Direction GetPriorDirection(MazeLocation currentLoc, Direction currentDirection);

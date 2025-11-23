@@ -1,65 +1,324 @@
-#pragma once
+
+#ifndef VECTORF_H
+#define VECTORF_H
 #include "defines.h"
 
 #include <stdint.h>
+#include <cmath>
+
 namespace MazeMap
 {
-	class EXPORT Vector2f
+	template<int DIMENSION>
+	class EXPORT Vectorf
+	{
+	private:
+		float _data[DIMENSION];
+	public:
+		Vectorf()
+			: _data()
+		{
+		}
+
+		float& operator[](int index) { return _data[index]; }
+		const float& operator[](int index) const { return _data[index]; }
+
+		float GetMagnitudeSquared() { return const_cast<const Vectorf<DIMENSION>*>(this)->GetMagnitudeSquared(); }
+		float GetMagnitudeSquared() const
+		{
+			float runningSum = 0.0f;
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				runningSum += _data[i] * _data[i];
+			}
+			return runningSum;
+		}
+
+		float GetMagnitude() { return std::sqrtf(GetMagnitudeSquared()); }
+		float GetMagnitude() const { return std::sqrtf(GetMagnitudeSquared()); }
+		float SetMagnitude(float magnitude)
+		{
+			float k = magnitude / GetMagnitude();
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				_data[i] *= k;
+			}
+		}
+
+		Vectorf<DIMENSION>& operator=(const Vectorf<DIMENSION>& other) noexcept
+		{
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				_data[i] = other._data[i];
+			}
+		}
+		Vectorf<DIMENSION>& operator+=(const Vectorf<DIMENSION>& other) noexcept
+		{
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				_data[i] += other._data[i];
+			}
+		}
+		Vectorf<DIMENSION>& operator-=(const Vectorf<DIMENSION>& other) noexcept
+		{
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				_data[i] -= other._data[i];
+			}
+		}
+		Vectorf<DIMENSION>& operator*=(float scalar) noexcept
+		{
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				_data[i] *= scalar;
+			}
+		}
+		Vectorf<DIMENSION>& operator/=(float scalar)
+		{
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				_data[i] /= scalar;
+			}
+		}
+
+		Vectorf<DIMENSION> operator-() noexcept
+		{
+			return -(*const_cast<const Vectorf<DIMENSION>*>(this));
+		}
+		Vectorf<DIMENSION> operator-() const noexcept
+		{
+			Vectorf<DIMENSION> result(this);
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				result._data[i] = -result._data[i];
+			}
+			return result;
+		}
+
+		Vectorf<DIMENSION> operator+(const Vectorf<DIMENSION>& other) const noexcept
+		{
+			Vectorf<DIMENSION> result(this);
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				result._data[i] += other._data[i];
+			}
+			return result;
+		}
+		Vectorf<DIMENSION> operator-(const Vectorf<DIMENSION>& other) const noexcept
+		{
+			Vectorf<DIMENSION> result(this);
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				result._data[i] -= other._data[i];
+			}
+			return result;
+		}
+		Vectorf<DIMENSION> operator*(float scalar) const noexcept
+		{
+			Vectorf<DIMENSION> result(this);
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				result._data[i] *= scalar;
+			}
+			return result;
+		}
+		Vectorf<DIMENSION> operator/(float scalar) const
+		{
+			Vectorf<DIMENSION> result(this);
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				result._data[i] /= scalar;
+			}
+			return result;
+		}
+
+		Vectorf<DIMENSION> operator+(const Vectorf<DIMENSION>& other) noexcept
+		{
+			return (*const_cast<const Vectorf<DIMENSION>*>(this)) + other;
+		}
+		Vectorf<DIMENSION> operator-(const Vectorf<DIMENSION>& other) noexcept
+		{
+			return (*const_cast<const Vectorf<DIMENSION>*>(this)) - other;
+		}
+		Vectorf<DIMENSION> operator*(float scalar) noexcept
+		{
+			return (*const_cast<const Vectorf<DIMENSION>*>(this)) * scalar;
+		}
+		Vectorf<DIMENSION> operator/(float scalar)
+		{
+			return (*const_cast<const Vectorf<DIMENSION>*>(this)) / scalar;
+		}
+
+		float operator*(const Vectorf<DIMENSION>& other)
+		{
+			return (*const_cast<const Vectorf<DIMENSION>*>(this))* other;
+		}
+		float operator*(const Vectorf<DIMENSION>& other) const
+		{
+			float result = 0.0f;
+			for (size_t i = 0; i < DIMENSION; i++)
+			{
+				result += _data[i] * other._data[i];
+			}
+		}
+	};
+
+	template<>
+	class EXPORT Vectorf<2>
 	{
 	private:
 		float _x, _y;
 	public:
-		Vector2f();
-		Vector2f(float x, float y);
+		Vectorf<2>()
+			: _x(0.f)
+			, _y(0.f)
+		{
+		}
+		Vectorf<2>(float x, float y)
+			: _x(x)
+			, _y(y)
+		{
+		}
 
-		Vector2f& SetXY(float x, float y);
+		Vectorf<2>& SetXY(float x, float y)
+		{
+			_x = x;
+			_y = y;
+			return (*this);
+		}
 
-		float GetX();
-		float GetX() const;
-		float SetX(float x);
+		float GetX() { return const_cast<const Vectorf<2>*>(this)->GetX(); }
+		float GetX() const
+		{
+			return _x;
+		}
+		float SetX(float x)
+		{
+			return (_x = x);
+		}
 
-		float GetY();
-		float GetY() const;
-		float SetY(float y);
+		float GetY() { return const_cast<const Vectorf<2>*>(this)->GetY(); }
+		float GetY() const
+		{
+			return _y;
+		}
+		float SetY(float y)
+		{
+			return (_y = y);
+		}
 
-		float GetMagnitudeSquared();
-		float GetMagnitudeSquared() const;
+		float GetMagnitudeSquared() { return const_cast<const Vectorf<2>*>(this)->GetMagnitudeSquared(); }
+		float GetMagnitudeSquared() const
+		{
+			return _x * _x + _y * _y;
+		}
 
-		float GetMagnitude();
-		float GetMagnitude() const;
-		float SetMagnitude(float magnitude);
+		float GetMagnitude() { return const_cast<const Vectorf<2>*>(this)->GetMagnitude(); }
+		float GetMagnitude() const
+		{
+			return sqrtf(GetMagnitudeSquared());
+		}
+		float SetMagnitude(float magnitude)
+		{
+			float scale = magnitude / GetMagnitude();
+			SetX(_x * scale);
+			SetY(_y * scale);
+			return const_cast<const Vectorf<2>*>(this)->GetMagnitude();
+		}
 
-		float GetAngle();
-		float GetAngle() const;
-		float SetAngle(float angle);
+		float GetAngle() { return const_cast<const Vectorf<2>*>(this)->GetAngle(); }
+		float GetAngle() const
+		{
+			return atan2f(_y, _x);
+		}
+		float SetAngle(float angle)
+		{
+			float mag = GetMagnitude();
+			SetX(mag * cosf(angle));
+			SetY(mag * sinf(angle));
+			return const_cast<const Vectorf<2>*>(this)->GetAngle();
+		}
 
-		float AngleTo(const Vector2f& target);
-		float AngleTo(const Vector2f& target) const;
+		float AngleTo(const Vectorf<2>& target) { return const_cast<const Vectorf<2>*>(this)->AngleTo(target); }
+		float AngleTo(const Vectorf<2>& target) const
+		{
+			// I'm treating this as a complex division to limit the trig calls we use.
+			float x = (*this) * target;
+			float y = this->_x * target._y - this->_y * target._x;
+			return atan2f(y, x);
+		}
 
-		Vector2f& RotateBy(const Vector2f& rotationVector);
+		Vectorf<2>& RotateBy(const Vectorf<2>& rotationVector)
+		{
+			float mag = rotationVector.GetMagnitude();
+			SetX((GetX() * rotationVector.GetX() - GetY() * rotationVector.GetY()) / mag);
+			SetY((GetX() * rotationVector.GetY() + GetY() * rotationVector.GetX()) / mag);
+			return (*this);
+		}
 
-		Vector2f& operator=(const Vector2f& other) noexcept;
-		Vector2f& operator+=(const Vector2f& other) noexcept;
-		Vector2f& operator-=(const Vector2f& other) noexcept;
-		Vector2f& operator*=(float scalar) noexcept;
-		Vector2f& operator/=(float scalar);
+		Vectorf<2>& operator=(const Vectorf<2>& other) noexcept
+		{
+			SetXY(other.GetX(), other.GetY());
+			return (*this);
+		}
+		Vectorf<2>& operator+=(const Vectorf<2>& other) noexcept
+		{
+			SetXY(GetX() + other.GetX(), GetY() + other.GetY());
+			return (*this);
+		}
+		Vectorf<2>& operator-=(const Vectorf<2>& other) noexcept
+		{
+			SetXY(GetX() - other.GetX(), GetY() - other.GetY());
+			return (*this);
+		}
+		Vectorf<2>& operator*=(float scalar) noexcept
+		{
+			SetXY(GetX() * scalar, GetY() * scalar);
+			return (*this);
+		}
+		Vectorf<2>& operator/=(float scalar)
+		{
+			SetXY(GetX() / scalar, GetY() / scalar);
+			return (*this);
+		}
 
-		Vector2f operator-() noexcept;
-		Vector2f operator-() const noexcept;
+		Vectorf<2> operator-() noexcept { return -(*const_cast<const Vectorf<2>*>(this)); }
+		Vectorf<2> operator-() const noexcept
+		{
+			return Vectorf<2>(-GetX(), -GetY());
+		}
 
-		Vector2f operator+(const Vector2f& other) const noexcept;
-		Vector2f operator-(const Vector2f& other) const noexcept;
-		Vector2f operator*(float scalar) const noexcept;
-		Vector2f operator/(float scalar) const;
+		Vectorf<2> operator+(const Vectorf<2>& other) const noexcept
+		{
+			return Vectorf<2>(this->_x + other._x, this->_y + other._y);
+		}
+		Vectorf<2> operator-(const Vectorf<2>& other) const noexcept
+		{
+			return Vectorf<2>(this->_x - other._x, this->_y - other._y);
+		}
+		Vectorf<2> operator*(float scalar) const noexcept
+		{
+			return Vectorf<2>(_x * scalar, _y * scalar);
+		}
+		Vectorf<2> operator/(float scalar) const
+		{
+			return Vectorf<2>(_x / scalar, _y / scalar);
+		}
 
-		Vector2f operator+(const Vector2f& other) noexcept;
-		Vector2f operator-(const Vector2f& other) noexcept;
-		Vector2f operator*(float scalar) noexcept;
-		Vector2f operator/(float scalar);
+		Vectorf<2> operator+(const Vectorf<2>& other) noexcept { return (*const_cast<const Vectorf<2>*>(this)) + other; }
+		Vectorf<2> operator-(const Vectorf<2>& other) noexcept { return (*const_cast<const Vectorf<2>*>(this)) - other; }
+		Vectorf<2> operator*(float scalar) noexcept { return (*const_cast<const Vectorf<2>*>(this)) * scalar; }
+		Vectorf<2> operator/(float scalar) { return (*const_cast<const Vectorf<2>*>(this)) / scalar; }
 
-		float operator*(const Vector2f& other);
-		float operator*(const Vector2f& other) const;
+		float operator*(const Vectorf<2>& other) { return (*const_cast<const Vectorf<2>*>(this)) * other; }
+		float operator*(const Vectorf<2>& other) const
+		{
+			return _x * other._x + _y * other._y;
+		}
 	};
 }
 
-MazeMap::Vector2f operator*(float scalar, const MazeMap::Vector2f& vec);
+inline MazeMap::Vectorf<2> operator*(float scalar, const MazeMap::Vectorf<2>& vec)
+{
+	return vec * scalar;
+}
+#endif

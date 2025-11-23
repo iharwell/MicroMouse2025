@@ -17,7 +17,7 @@ namespace MazeMap
 
 	Cell::Cell(uint8_t x, uint8_t y, WallState up, WallState down, WallState left, WallState right)
 		: _coords(x, y)
-		, _data((up)|(down<<2)|(left<<4)|(right<<6))
+		, _data(static_cast<uint8_t>((up)|(down<<2)|(left<<4)|(right<<6)))
 	{
 	}
 
@@ -41,6 +41,11 @@ namespace MazeMap
 		case Direction::Right:
 			SetRight(state);
 			break;
+		case Direction::UpRight:
+		case Direction::DownRight:
+		case Direction::UpLeft:
+		case Direction::DownLeft:
+		case Direction::None:
 		default:
 			break;
 		}
@@ -58,6 +63,11 @@ namespace MazeMap
 			return GetLeft();
 		case Direction::Right:
 			return GetRight();
+		case Direction::UpRight:
+		case Direction::DownRight:
+		case Direction::UpLeft:
+		case Direction::DownLeft:
+		case Direction::None:
 		default:
 			return WallState::Unknown;
 		}
@@ -86,19 +96,19 @@ namespace MazeMap
 
 	void Cell::SetUp(WallState up)
 	{
-		_data = (_data&0xFC) | (static_cast<char>(up) & 0x03);
+		_data = static_cast<uint8_t>((_data&0xFC) | (static_cast<uint8_t>(up)));
 	}
 	void Cell::SetDown(WallState down)
 	{
-		_data = (_data & 0xF3) | ((static_cast<char>(down) & 0x03) << 2);
+		_data = static_cast<uint8_t>((_data & 0xF3) | ((static_cast<uint8_t>(down)) << 2));
 	}
 	void Cell::SetLeft(WallState left)
 	{
-		_data = (_data & 0xCF) | (static_cast<char>(left) << 4);
+		_data = static_cast<uint8_t>((_data & 0xCF) | (static_cast<uint8_t>(left) << 4));
 	}
 	void Cell::SetRight(WallState right)
 	{
-		_data = (_data & 0x3F) | (static_cast<char>(right) << 6);
+		_data = static_cast<uint8_t>((_data & 0x3F) | (static_cast<uint8_t>(right) << 6));
 	}
 	bool Cell::IsFullyKnown() { return const_cast<const Cell*>(this)->IsFullyKnown(); }
 	bool Cell::IsFullyKnown() const { return (_data & 0x55) == 0x55; }
@@ -106,7 +116,7 @@ namespace MazeMap
 	CharBlock Cell::Serialize() const
 	{
 		char table[] {'?', 'O', '?', 'W'};
-		CharBlock cb;
+		CharBlock cb = CharBlock();
 		cb.data = 0;
 		cb.chars[0] = table[static_cast<int>(GetUp())];
 		cb.chars[1] = table[static_cast<int>(GetDown())];

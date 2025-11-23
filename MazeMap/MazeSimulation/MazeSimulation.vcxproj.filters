@@ -24,12 +24,18 @@
     <ClCompile Include="SimVehicle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Mazes.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="mmsAPI.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SimVehicle.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Mazes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -2,6 +2,7 @@
 #include "Maze.h"
 #include "MazeMask.h"
 #include <cassert>
+#include "MaskQueue.h"
 
 namespace MazeMap
 {
@@ -12,6 +13,7 @@ namespace MazeMap
 		, _complete(false)
 		, _reachableCalculated(false)
 		, _goalFound(false)
+		, _accessible(false)
 	{
 		for (uint8_t i = 0; i < 16; ++i)
 		{
@@ -45,6 +47,7 @@ namespace MazeMap
 		, _complete(false)
 		, _reachableCalculated(false)
 		, _goalFound(false)
+		, _accessible(false)
 	{
 		for (uint8_t i = 0; i < 16; ++i)
 		{
@@ -257,13 +260,17 @@ namespace MazeMap
 		{
 			return _reachable;
 		}
+
 		MazeMask reachable = MazeMask();
 		CellCoordinates current = CellCoordinates(0, 0);
 		FindReachables(reachable, current);
 		return reachable;
 	}
 
-	MazeMask Maze::GetReachableMask() { return const_cast<const Maze*>(this)->GetReachableMask(); }
+	MazeMask Maze::GetReachableMask()
+	{
+		return const_cast<const Maze*>(this)->GetReachableMask();
+	}
 	/*bool Maze::HasFoundGoal()
 	{
 		if (!_goalFound)
@@ -322,6 +329,16 @@ namespace MazeMap
 	{
 		if (IsComplete())
 		{
+
+			for (size_t i = 0; i < 32; i++)
+			{
+				for (size_t j = 0; j < 32; j++)
+				{
+					MazeLocation loc(i, j);
+					_accessible.SetFlag(loc, IsAccessibleLocation(loc));
+
+				}
+			}
 			_complete = true;
 			_reachable = GetReachableMask();
 			_reachableCalculated = true;
@@ -423,25 +440,119 @@ namespace MazeMap
 	bool Maze::IsAccessibleLocation(MazeLocation location) { return const_cast<const Maze*>(this)->IsAccessibleLocation(location); }
 	bool Maze::IsAccessibleLocation(MazeLocation location) const
 	{
+		if (_reachableCalculated)
+		{
+			if (location.GetX() >= 32 || location.GetY() >= 32 || location.GetX() == 0 || location.GetY() == 0)
+			{
+				return false;
+			}
+			return _accessible[location];
+		}
+
 		Direction d = location.DirectionFromCellCenter();
 
-		if (location.GetX() == 0 || location.GetY() == 0)
+		/*if (location.GetX() == 0 || location.GetY() == 0)
 		{
 			return false;
 		}
 		if (location.GetX() >= 32 || location.GetY() >= 32)
 		{
 			return false;
-		}
+		}*/
 		if (d == Direction::None)
 		{
 			return true;
 		}
-		if (IsDiagonal(d))
+		if (((location.GetX()|location.GetY())&1)==0)
 		{
 			return false;
 		}
-		return Index(static_cast<CellCoordinates>(location)).GetWall(location.DirectionFromCellCenter()) == WallState::NoWall;
+		CellCoordinates coords = static_cast<CellCoordinates>(location);
+		Cell c = Index(coords);
+		WallState s = c.GetWall(d);
+		return s == WallState::NoWall;
 	}
+	bool Maze::IsIntersection(CellCoordinates location) const
+	{
+		int openings = (Index(location).GetUp() == WallState::NoWall);
+		openings += (Index(location).GetDown() == WallState::NoWall);
+		openings += (Index(location).GetLeft() == WallState::NoWall);
+		openings += (Index(location).GetRight() == WallState::NoWall);
+		return openings >= 2;
+	}
+	bool Maze::IsIntersection(CellCoordinates location) { return const_cast<const Maze*>(this)->IsIntersection(location); }
+	bool Maze::IsIntersection(MazeLocation location) const { return IsIntersection(static_cast<CellCoordinates>(location)); }
+	MazeMask Maze::DeadEndMask(CellCoordinates startLocation) const
+	{
+		MazeMask mask = MazeMask();
 
+		bool cont = true;
+		while (cont)
+		{
+			cont = false;
+			for (size_t i = 0; i < 16; i++)
+			{
+				for (size_t j = 0; j < 16; j++)
+				{
+					if (i == startLocation.GetX() && j == startLocation.GetY())
+					{
+						continue;
+					}
+
+					if (mask(i, j))
+					{
+						continue;
+					}
+					Cell c = Index(i, j);
+
+
+					int openings = 0;
+					if (j < 15 && !mask(i, j + 1))
+					{
+						openings += (c.GetUp() == WallState::NoWall);
+					}
+					if (j > 0 && !mask(i, j - 1))
+					{
+						openings += (c.GetDown() == WallState::NoWall);
+					}
+					if (i > 0 && !mask(i - 1, j))
+					{
+						openings += (c.GetLeft() == WallState::NoWall);
+					}
+					if (i < 15 && !mask(i+1, j))
+					{
+						openings += (c.GetRight() == WallState::NoWall);
+					}
+
+					if (openings < 2)
+					{
+						mask.SetFlag(i, j, true);
+						cont = true;
+					}
+				}
+			}
+		}
+
+
+		return MazeMask();
+	}
+	bool Maze::IsIntersection(MazeLocation location) { return const_cast<const Maze*>(this)->IsIntersection(location); }
+	bool Maze::IsValidMove(DirectionalLocation location, RelativeDirectionalDistance instruction)
+	{
+		return const_cast<const Maze*>(this)->IsValidMove(location, instruction);
+	}
+	bool Maze::IsValidMove(DirectionalLocation location, RelativeDirectionalDistance instruction) const
+	{
+		MazeLocation loc = location.GetLocation();
+		Direction d = location.GetDirection() + instruction.GetDirection();
+		for (uint8_t i = 0; i < instruction.GetDistance(); ++i)
+		{
+			if (!IsAccessibleLocation(loc))
+			{
+				return false;
+			}
+			loc = loc >> d;
+		}
+		return true;
+	}
 }

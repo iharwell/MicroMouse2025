@@ -2,7 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
-
+#include <windows.h>
 int API::mazeWidth() {
     std::cout << "mazeWidth" << std::endl;
     std::string response;
@@ -51,6 +51,24 @@ void API::moveForward(int distance) {
     if (response != "ack") {
         std::cerr << response << std::endl;
         throw;
+    }
+}
+void API::moveForwardHalf(int distance) {
+    std::cout << "moveForwardHalf ";
+    // Don't print distance argument unless explicitly specified, for
+    // backwards compatibility with older versions of the simulator
+    //if (distance != 1) {
+        std::cout << distance;
+    //}
+    std::cout << std::endl;
+    std::string response;
+    //for (int i = 0; i < distance; ++i)
+    {
+        std::cin >> response;
+        if (response != "ack") {
+            std::cerr << response << std::endl;
+            throw;
+        }
     }
 }
 

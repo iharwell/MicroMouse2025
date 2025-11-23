@@ -91,4 +91,24 @@ namespace MazeMap
 		return OrdinalDirections[(RelativeDirections[dir] - 3) & 0b0111];
 	}
 	Direction Turn180(Direction dir) { return -dir; }
+
+#ifdef SMALL_RDD
+	RelativeDirectionalDistance::RelativeDirectionalDistance()
+		: _data(0)
+	{ }
+	RelativeDirectionalDistance::RelativeDirectionalDistance(RelativeDirection direction, uint8_t distance)
+		: _data((distance<<3)|(direction&7))
+	{ }
+#else
+	RelativeDirectionalDistance::RelativeDirectionalDistance()
+		: _distance(0)
+		, _direction(Forward)
+	{
+	}
+	RelativeDirectionalDistance::RelativeDirectionalDistance(RelativeDirection direction, uint8_t distance)
+		: _distance(distance)
+		, _direction(direction)
+	{
+	}
+#endif
 }

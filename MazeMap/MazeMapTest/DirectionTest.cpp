@@ -38,6 +38,32 @@ namespace MazeMap
 			Assert::AreEqual(expected.GetX(), (loc >> d).GetX());
 			Assert::AreEqual(expected.GetY(), (loc >> d).GetY());
 		}
+		TEST_METHOD(DirectionalLocationStepTest1)
+		{
+			DirectionalLocation loc = DirectionalLocation(MazeLocation(15, 15), Direction::Up);
+			DirectionalLocation expected = DirectionalLocation(MazeLocation(15, 17), Direction::Up);
+			Assert::IsTrue(expected == (loc.MoveForward(2)));
+		}
+		TEST_METHOD(DirectionalLocationStepTest2)
+		{
+			DirectionalLocation loc = DirectionalLocation(MazeLocation(15, 15), Direction::DownLeft);
+			DirectionalLocation expected = DirectionalLocation(MazeLocation(13, 13), Direction::DownLeft);
+			Assert::IsTrue(expected == (loc.MoveForward(2)));
+		}
+		TEST_METHOD(DirectionalLocationStepTest3)
+		{
+			DirectionalLocation loc = DirectionalLocation(MazeLocation(15, 15), Direction::Up);
+			RelativeDirectionalDistance rdd(Right45, 2);
+			DirectionalLocation expected = DirectionalLocation(MazeLocation(17, 17), Direction::UpRight);
+			Assert::AreEqual(expected, (loc >> rdd));
+		}
+		TEST_METHOD(DirectionalLocationStepTest4)
+		{
+			DirectionalLocation loc = DirectionalLocation(MazeLocation(15, 15), Direction::Up);
+			RelativeDirectionalDistance rdd(Left45, 2);
+			DirectionalLocation expected = DirectionalLocation(MazeLocation(13, 17), Direction::UpLeft);
+			Assert::AreEqual(expected, (loc >> rdd));
+		}
 		TEST_METHOD(MazeLocationStepTest2)
 		{
 			MazeLocation loc = MazeLocation(15, 15);
@@ -112,5 +138,46 @@ namespace MazeMap
 			Assert::AreEqual(expected.GetX(), loc.GetSecondConnectedCell().GetX());
 			Assert::AreEqual(expected.GetY(), loc.GetSecondConnectedCell().GetY());
 		}
+
+		TEST_METHOD(RelativeDirectionInvertTest1)
+		{
+			Assert::AreEqual(Forward, -Forward);
+		}
+
+		TEST_METHOD(RelativeDirectionInvertTest2)
+		{
+			Assert::AreEqual(Left45, -Right45);
+		}
+
+		TEST_METHOD(RelativeDirectionInvertTest3)
+		{
+			Assert::AreEqual(Left90, -Right90);
+		}
+
+		TEST_METHOD(RelativeDirectionInvertTest4)
+		{
+			Assert::AreEqual(Left135, -Right135);
+		}
+
+		TEST_METHOD(RelativeDirectionInvertTest5)
+		{
+			Assert::AreEqual(Reverse, -Reverse);
+		}
+
+		TEST_METHOD(RelativeDirectionInvertTest6)
+		{
+			Assert::AreEqual(Right45, -Left45);
+		}
+
+		TEST_METHOD(RelativeDirectionInvertTest7)
+		{
+			Assert::AreEqual(Right90, -Left90);
+		}
+
+		TEST_METHOD(RelativeDirectionInvertTest8)
+		{
+			Assert::AreEqual(Right135, -Left135);
+		}
+
 	};
 }

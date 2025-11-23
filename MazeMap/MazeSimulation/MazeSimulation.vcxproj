@@ -123,11 +123,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Mazes.cpp" />
     <ClCompile Include="MazeSimulation.cpp" />
     <ClCompile Include="mmsAPI.cpp" />
     <ClCompile Include="SimVehicle.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Mazes.h" />
     <ClInclude Include="mmsAPI.h" />
     <ClInclude Include="SimVehicle.h" />
   </ItemGroup>

@@ -1,0 +1,61 @@
+#pragma once
+#include "Defines.h"
+#include "PathFinder.h"
+#include "DirectionalLocation.h"
+#include "HalfStepPath.h"
+#include "ManeuverSet.h"
+#include "ManeuverPath.h"
+
+namespace MazeMap
+{
+	class EXPORT ManeuverPathFinder: public PathFinder
+	{
+	private:
+		class ScoreData
+		{
+		public:
+			ScoreData()
+				: Code(ManeuverCode::MC_NONE)
+				, Cost(INFINITY)
+			{ }
+			ScoreData(ManeuverCode arrivalCode, float cost)
+				: Code(arrivalCode)
+				, Cost(cost)
+			{ }
+			ManeuverCode Code;
+			float Cost;
+		};
+
+		DoubleMaskQueue _queue;
+		ScoreData _data[31][31][8];
+		float _currentBest;
+		DirectionalLocation _startingPoint;
+		MazeMask _deadEndMask;
+	public:
+		ManeuverPathFinder(const Maze& maze, const Vehicle& vehicle);
+
+		// Inherited via PathFinder
+		void HalfStepPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, HalfStepPath<PATH_SIZE * 2>& result) override;
+		void HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result) override;
+		void HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result) override;
+
+		void ManeuverPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, ManeuverPath& result);
+		void ManeuverPathToGoal(CellCoordinates start, Direction startDirection, ManeuverPath& result);
+		float GetLastEstimatedTime() { return _currentBest; }
+
+		ManeuverCode GetCode(DirectionalLocation dirLoc);
+		float GetCost(DirectionalLocation dirLoc);
+
+	protected:
+		ScoreData Score(DirectionalLocation dirLoc);
+		bool UpdateScore(DirectionalLocation dirLoc, ScoreData data);
+		ScoreData Score(MazeLocation loc, Direction d);
+		bool UpdateScore(MazeLocation loc, Direction d, ScoreData cost);
+		bool UpdateScore(MazeLocation loc, Direction d, ScoreData cost, bool suppressQueue);
+		void RadiateLocation(MazeLocation loc);
+		void Reset();
+		void CalculateScores();
+
+		void DescendGradient(CellCoordinates start, Direction startDirection, ManeuverPath& result);
+	};
+}

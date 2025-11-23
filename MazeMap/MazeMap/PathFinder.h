@@ -103,6 +103,9 @@ namespace MazeMap
 
 				preferredCardinal = static_cast<Direction>(preferredCardinal ^ lastEffectiveDirection);
 			}
+
+			Direction minDir = Direction::None;
+
 			for (Direction d = Direction::Up; d <= Direction::Right; d <<= 1)
 			{
 				if (GetMaze()[current].GetWall(d) != WallState::NoWall)
@@ -113,10 +116,15 @@ namespace MazeMap
 				if (cost[target.GetX()][target.GetY()] < minDist)
 				{
 					minDist = cost[target.GetX()][target.GetY()];
+					minDir = d;
+				}
+				else if (cost[target.GetX()][target.GetY()] == minDist)
+				{
+					minDir = minDir | d;
 				}
 			}
 
-			if (GetMaze()[current].GetWall(preferredCardinal) == WallState::NoWall)
+			if ((minDir & preferredCardinal) == preferredCardinal )
 			{
 				target = current >> preferredCardinal;
 				if (cost[target.GetX()][target.GetY()] == minDist)
@@ -128,31 +136,33 @@ namespace MazeMap
 					continue;
 				}
 			}
-			if (GetMaze()[current].GetWall(preferredCardinal + RelativeDirection::R90) == WallState::NoWall)
+			if ((minDir & (preferredCardinal+RelativeDirection::R90)) == (preferredCardinal + RelativeDirection::R90))
 			{
 				target = current >> (preferredCardinal + RelativeDirection::R90);
 				if (cost[target.GetX()][target.GetY()] == minDist)
 				{
-					dir = result.last(1).DirectionTo(result.last()) + RelativeDirection::R45;
+					//dir = result.last(1).DirectionTo(result.last()) + RelativeDirection::R45;
+					dir = result.last().DirectionTo(target) + RelativeDirection::R45;
 					result.push_back(target);
 					distance = minDist;
 					current = target;
 					continue;
 				}
 			}
-			if (GetMaze()[current].GetWall(preferredCardinal + RelativeDirection::L90) == WallState::NoWall)
+			if ((minDir & (preferredCardinal + RelativeDirection::L90)) == (preferredCardinal + RelativeDirection::L90))
 			{
 				target = current >> (preferredCardinal + RelativeDirection::L90);
 				if (cost[target.GetX()][target.GetY()] == minDist)
 				{
-					dir = result.last(1).DirectionTo(result.last()) + RelativeDirection::L45;
+					//dir = result.last(1).DirectionTo(result.last()) + RelativeDirection::L45;
+					dir = result.last().DirectionTo(target) + RelativeDirection::L45;
 					result.push_back(target);
 					distance = minDist;
 					current = target;
 					continue;
 				}
 			}
-			if (GetMaze()[current].GetWall(preferredCardinal + RelativeDirection::Reverse) == WallState::NoWall)
+			if ((minDir & (preferredCardinal + RelativeDirection::Reverse)) == (preferredCardinal + RelativeDirection::Reverse))
 			{
 				target = current >> (preferredCardinal + RelativeDirection::Reverse);
 				if (cost[target.GetX()][target.GetY()] == minDist)
@@ -161,9 +171,13 @@ namespace MazeMap
 					{
 						dir = dir + RelativeDirection::R90;
 					}
-					else
+					else if (result.last(1).DirectionTo(current) == (preferredCardinal + RelativeDirection::L90))
 					{
 						dir = dir + RelativeDirection::L90;
+					}
+					else
+					{
+						dir = dir + RelativeDirection::Reverse;
 					}
 					result.push_back(target);
 					distance = minDist;

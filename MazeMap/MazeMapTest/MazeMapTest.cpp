@@ -1,9 +1,10 @@
 #include "pch.h"
 #include "CppUnitTest.h"
+#include "Templates.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
-namespace MazeMapTest
+namespace MazeMap
 {
 	TEST_CLASS(MazeMapTest)
 	{

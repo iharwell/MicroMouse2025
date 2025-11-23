@@ -1,10 +1,11 @@
 #include "pch.h"
 #include "DirectionalPathFinder.h"
+#include "ManeuverPathFinder.h"
 
 namespace MazeMap
 {
 	HalfStepPath<PATH_SIZE * 4> _hsp = HalfStepPath<PATH_SIZE * 4>();
-	uint8_t DirectionToIndex(Direction d)
+	static uint8_t DirectionToIndex(Direction d)
 	{
 		return static_cast<uint8_t>(d - Direction::Up);
 	}
@@ -12,6 +13,7 @@ namespace MazeMap
 	DirectionalPathFinder::DirectionalPathFinder(const Maze& maze, const Vehicle& vehicle)
 		: PathFinder(maze, vehicle)
 		, _data()
+		, _lastEstimatedTime(0.0f)
 	{
 		for (size_t i = 0; i < 32; i++)
 		{
@@ -24,8 +26,15 @@ namespace MazeMap
 			}
 		}
 	}
-
-	void DirectionalPathFinder::HalfStepPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, HalfStepPath<PATH_SIZE*2>& result)
+	float DirectionalPathFinder::GetLastEstimatedTime()
+	{
+		return _lastEstimatedTime;
+	}
+	void DirectionalPathFinder::HalfStepPathFromTo(
+		CellCoordinates start,
+		Direction startDirection,
+		CellCoordinates end,
+		HalfStepPath<PATH_SIZE * 2>& result)
 	{
 		Reset();
 		for (uint8_t i = 0; i < 8; i++)
@@ -34,21 +43,22 @@ namespace MazeMap
 		}
 		EvaluateCosts();
 
+		DescendGradient(start, startDirection, result);
 	}
-	void DirectionalPathFinder::HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE*2>& result)
+	void DirectionalPathFinder::HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{
 	}
-	void DirectionalPathFinder::HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE*2>& result)
+	void DirectionalPathFinder::HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{
 		Reset();
 		MazeLocation goalLLC = MazeLocation::CellCenter(GetMaze().GetGoalLowerLeft());
-		for (uint8_t i = 0; i < 3; i++)
+		for (uint8_t i = 0; i < 2; i++)
 		{
-			for (uint8_t j = 0; j < 3; j++)
+			for (uint8_t j = 0; j < 2; j++)
 			{
 				for (uint8_t k = 0; k < 8; k++)
 				{
-					UpdateCost(MazeLocation(goalLLC.GetX()+i, goalLLC.GetY()+j), OrdinalDirections[k], 0);
+					UpdateCost(MazeLocation(goalLLC.GetX() + 2 * i, goalLLC.GetY() + 2 * j), OrdinalDirections[k], 0);
 
 				}
 
@@ -120,12 +130,13 @@ namespace MazeMap
 		}
 	}
 
-	void DirectionalPathFinder::DescendGradient(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE*2>& result)
+	void DirectionalPathFinder::DescendGradient(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{
 		_hsp.clear();
 		DirectionalLocation dirLoc(MazeLocation::CellCenter(start), startDirection);
 		result.clear();
 		result.push_back(MazeLocation::CellCenter(start));
+		bool first = true;
 		while (Cost(dirLoc.GetLocation(), -dirLoc.GetDirection()) > 0.001)
 		{
 			float minCost = INFINITY;
@@ -143,6 +154,12 @@ namespace MazeMap
 					}
 				}
 			}
+			if (first)
+			{
+				_lastEstimatedTime = minCost;
+				first = false;
+			}
+
 			if (GetMaze().IsAccessibleLocation(dirLoc.GetLocation() >> minDir))
 			{
 				dirLoc = DirectionalLocation(dirLoc.GetLocation() >> minDir, minDir);
@@ -169,6 +186,44 @@ namespace MazeMap
 
 	}
 
+	Direction DirectionalPathFinder::GetAscendDirection(MazeLocation loc, Direction d)
+	{
+		float minCost = INFINITY;
+		Direction minDir = d;
+		for (uint8_t i = 0; i < 8; ++i)
+		{
+			Direction possibleDirection = OrdinalDirections[i];
+			if (GetMaze().IsAccessibleLocation(loc >> possibleDirection))
+			{
+				float possibleCost = Cost(loc >> possibleDirection, -possibleDirection);
+				if (possibleCost < minCost)
+				{
+					minCost = possibleCost;
+					minDir = possibleDirection;
+				}
+			}
+		}
+		return minDir;
+	}
+	Direction DirectionalPathFinder::GetDescendDirection(MazeLocation loc, Direction d)
+	{
+		float minCost = INFINITY;
+		Direction minDir = d;
+		for (uint8_t i = 0; i < 8; ++i)
+		{
+			Direction possibleDirection = OrdinalDirections[i];
+			if (GetMaze().IsAccessibleLocation(loc >> possibleDirection))
+			{
+				float possibleCost = Cost(loc >> possibleDirection, -possibleDirection);
+				if (possibleCost < minCost)
+				{
+					minCost = possibleCost;
+					minDir = possibleDirection;
+				}
+			}
+		}
+		return minDir;
+	}
 	void DirectionalPathFinder::UpdateCell(uint8_t row, uint8_t col)
 	{
 		// Iterate through all contained half steps.
@@ -191,8 +246,8 @@ namespace MazeMap
 		float fastestTurnSpeed = GetVehicle().GetFastestTurnSpeed(cellDim);
 		for (uint8_t i = 0; i < 8; i++)
 		{
-			Direction d = OrdinalDirections[i];
-			float fromVal = Cost(loc, d);
+			Direction fromDir = OrdinalDirections[i];
+			float fromVal = Cost(loc, fromDir);
 			if (!isfinite(fromVal))
 			{
 				continue;
@@ -200,10 +255,10 @@ namespace MazeMap
 			MazeLocation currentLoc = loc;
 			float distance = 0.0f;
 
-			while (GetMaze().IsAccessibleLocation(currentLoc >> d))
+			while (GetMaze().IsAccessibleLocation(currentLoc >> fromDir))
 			{
-				currentLoc = currentLoc >> (d);
-				if (IsDiagonal(d))
+				currentLoc = currentLoc >> (fromDir);
+				if (IsDiagonal(fromDir))
 				{
 					distance += GetMaze().GetCellDimension() / 100 * sqrtf(2.0f);
 				}
@@ -216,15 +271,15 @@ namespace MazeMap
 				float cost45 = 0.0f;
 				float cost90 = 0.0f;
 
-				if (GetMaze().IsAccessibleLocation(currentLoc >> d))
+				if (GetMaze().IsAccessibleLocation(currentLoc >> fromDir))
 				{
 					float direct = fromVal + GetVehicle().GetStraightLineCost(distance, fastestTurnSpeed, fastestTurnSpeed);
-					if (Cost(currentLoc, d) > direct)
+					if (Cost(currentLoc, fromDir) > direct)
 					{
-						UpdateCost(currentLoc, d, direct);
+						UpdateCost(currentLoc, fromDir, direct);
 					}
 				}
-				if (GetMaze().IsAccessibleLocation(currentLoc >> (d + RelativeDirection::R45)))
+				if (GetMaze().IsAccessibleLocation(currentLoc >> (fromDir + RelativeDirection::R45)))
 				{
 					if (!cost45Ready)
 					{
@@ -233,12 +288,12 @@ namespace MazeMap
 							+ GetVehicle().GetTurnCost(RelativeDirection::R45, cellDim);
 						cost45Ready = true;
 					}
-					if (Cost(currentLoc, d + RelativeDirection::R45) > cost45)
+					if (Cost(currentLoc, fromDir + RelativeDirection::R45) > cost45)
 					{
-						UpdateCost(currentLoc, d + RelativeDirection::R45, cost45);
+						UpdateCost(currentLoc, fromDir + RelativeDirection::R45, cost45);
 					}
 				}
-				if (GetMaze().IsAccessibleLocation(currentLoc >> (d + RelativeDirection::L45)))
+				if (GetMaze().IsAccessibleLocation(currentLoc >> (fromDir + RelativeDirection::L45)))
 				{
 					if (!cost45Ready)
 					{
@@ -247,12 +302,12 @@ namespace MazeMap
 							+ GetVehicle().GetTurnCost(RelativeDirection::R45, cellDim);
 						cost45Ready = true;
 					}
-					if (Cost(currentLoc, d + RelativeDirection::L45) > cost45)
+					if (Cost(currentLoc, fromDir + RelativeDirection::L45) > cost45)
 					{
-						UpdateCost(currentLoc, d + RelativeDirection::L45, cost45);
+						UpdateCost(currentLoc, fromDir + RelativeDirection::L45, cost45);
 					}
 				}
-				if (GetMaze().IsAccessibleLocation(currentLoc >> (d + RelativeDirection::R90)))
+				if (GetMaze().IsAccessibleLocation(currentLoc >> (fromDir + RelativeDirection::R90)))
 				{
 					if (!cost90Ready)
 					{
@@ -261,12 +316,12 @@ namespace MazeMap
 							+ GetVehicle().GetTurnCost(RelativeDirection::R90, cellDim);
 						cost90Ready = true;
 					}
-					if (Cost(currentLoc, d + RelativeDirection::R90) > cost90)
+					if (Cost(currentLoc, fromDir + RelativeDirection::R90) > cost90)
 					{
-						UpdateCost(currentLoc, d + RelativeDirection::R90, cost90);
+						UpdateCost(currentLoc, fromDir + RelativeDirection::R90, cost90);
 					}
 				}
-				if (GetMaze().IsAccessibleLocation(currentLoc >> (d + RelativeDirection::L90)))
+				if (GetMaze().IsAccessibleLocation(currentLoc >> (fromDir + RelativeDirection::L90)))
 				{
 					if (!cost90Ready)
 					{
@@ -275,9 +330,9 @@ namespace MazeMap
 							+ GetVehicle().GetTurnCost(RelativeDirection::R90, cellDim);
 						cost90Ready = true;
 					}
-					if (Cost(currentLoc, d + RelativeDirection::L90) > cost90)
+					if (Cost(currentLoc, fromDir + RelativeDirection::L90) > cost90)
 					{
-						UpdateCost(currentLoc, d + RelativeDirection::L90, cost90);
+						UpdateCost(currentLoc, fromDir + RelativeDirection::L90, cost90);
 					}
 				}
 			}

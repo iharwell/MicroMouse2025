@@ -125,7 +125,6 @@
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
@@ -133,6 +132,8 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <Optimization>MinSpace</Optimization>
       <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -140,6 +141,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -152,8 +154,13 @@
     <ClInclude Include="DirectionalLocation.h" />
     <ClInclude Include="DirectionalPathFinder.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="Fresnel.h" />
     <ClInclude Include="HalfStepPath.h" />
+    <ClInclude Include="Kinematics.h" />
     <ClInclude Include="Maneuver.h" />
+    <ClInclude Include="ManeuverPath.h" />
+    <ClInclude Include="ManeuverPathFinder.h" />
+    <ClInclude Include="ManeuverSet.h" />
     <ClInclude Include="MaskQueue.h" />
     <ClInclude Include="Maze.h" />
     <ClInclude Include="MazeLocation.h" />
@@ -165,6 +172,7 @@
     <ClInclude Include="Sensor.h" />
     <ClInclude Include="Vector2f.h" />
     <ClInclude Include="Vehicle.h" />
+    <ClInclude Include="VehicleState.h" />
     <ClInclude Include="WheelMotor.h" />
   </ItemGroup>
   <ItemGroup>
@@ -175,7 +183,12 @@
     <ClCompile Include="DirectionalLocation.cpp" />
     <ClCompile Include="DirectionalPathFinder.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="Fresnel.cpp" />
+    <ClCompile Include="Kinematics.cpp" />
     <ClCompile Include="Maneuver.cpp" />
+    <ClCompile Include="ManeuverPath.cpp" />
+    <ClCompile Include="ManeuverPathFinder.cpp" />
+    <ClCompile Include="ManeuverSet.cpp" />
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
     <ClCompile Include="MazeLocation.cpp" />
@@ -191,6 +204,7 @@
     </ClCompile>
     <ClCompile Include="Vector2f.cpp" />
     <ClCompile Include="Vehicle.cpp" />
+    <ClCompile Include="VehicleState.cpp" />
     <ClCompile Include="WheelMotor.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
