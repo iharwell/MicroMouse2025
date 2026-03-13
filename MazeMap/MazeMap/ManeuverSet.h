@@ -23,7 +23,7 @@ namespace MazeMap
 		S135D = 12
 	};*/
 	
-	constexpr uint8_t SETSIZE = 18;
+	constexpr uint8_t SETSIZE = 17;
 	class EXPORT ManeuverSet
 	{
 	private:
@@ -34,7 +34,7 @@ namespace MazeMap
 		ManeuverSet();
 	public:
 		static ManeuverSet& GetSet();
-		~ManeuverSet()
+		virtual ~ManeuverSet()
 		{
 			for (size_t i = 0; i < SETSIZE; i++)
 			{
@@ -82,7 +82,7 @@ namespace MazeMap
 			{
 				return -1.0f;
 			}
-			return (*this)[code].GetCost(vehicle, cellSize);
+			return (*this)[code].GetCost(vehicle);
 		}
 		float GetEntrySpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
@@ -94,7 +94,7 @@ namespace MazeMap
 			{
 				return -1.0f;
 			}
-			return (*this)[code].GetEntrySpeed(vehicle, cellSize);
+			return (*this)[code].GetEntrySpeed(vehicle);
 		}
 		float GetExitSpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
@@ -106,7 +106,7 @@ namespace MazeMap
 			{
 				return -1.0f;
 			}
-			return (*this)[code].GetExitSpeed(vehicle, cellSize);
+			return (*this)[code].GetExitSpeed(vehicle);
 		}
 
 		bool IsValidMove(ManeuverCode code, DirectionalLocation start, const Maze& maze) const
@@ -162,4 +162,5 @@ namespace MazeMap
 		void SortByCost(const Vehicle& vehicle, float cellSize);
 	};
 }
+
 

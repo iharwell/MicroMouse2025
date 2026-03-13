@@ -102,6 +102,27 @@
     <ClInclude Include="VehicleState.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Matrixf.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TeensyLayout.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="LSV6DSV16X_IMU.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UKF.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ManeuverInstance.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MotorEncoderDrive.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WallSensor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">

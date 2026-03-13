@@ -9,7 +9,7 @@
 namespace MazeMap
 {
 	template<int DIMENSION>
-	class EXPORT Vectorf
+	class Vectorf
 	{
 	private:
 		float _data[DIMENSION];
@@ -33,8 +33,8 @@ namespace MazeMap
 			return runningSum;
 		}
 
-		float GetMagnitude() { return std::sqrtf(GetMagnitudeSquared()); }
-		float GetMagnitude() const { return std::sqrtf(GetMagnitudeSquared()); }
+		float GetMagnitude() { return MazeMap::Math::Sqrtf(GetMagnitudeSquared()); }
+		float GetMagnitude() const { return MazeMap::Math::Sqrtf(GetMagnitudeSquared()); }
 		float SetMagnitude(float magnitude)
 		{
 			float k = magnitude / GetMagnitude();
@@ -163,7 +163,7 @@ namespace MazeMap
 	};
 
 	template<>
-	class EXPORT Vectorf<2>
+	class Vectorf<2>
 	{
 	private:
 		float _x, _y;
@@ -177,6 +177,23 @@ namespace MazeMap
 			: _x(x)
 			, _y(y)
 		{
+		}
+
+		float& operator[](int index)
+		{
+			if (index == 0)
+			{
+				return _x;
+			}
+			return _y;
+		}
+		const float& operator[](int index) const
+		{
+			if (index == 0)
+			{
+				return _x;
+			}
+			return _y;
 		}
 
 		Vectorf<2>& SetXY(float x, float y)
@@ -215,7 +232,7 @@ namespace MazeMap
 		float GetMagnitude() { return const_cast<const Vectorf<2>*>(this)->GetMagnitude(); }
 		float GetMagnitude() const
 		{
-			return sqrtf(GetMagnitudeSquared());
+			return MazeMap::Math::Sqrtf(GetMagnitudeSquared());
 		}
 		float SetMagnitude(float magnitude)
 		{
@@ -322,3 +339,4 @@ inline MazeMap::Vectorf<2> operator*(float scalar, const MazeMap::Vectorf<2>& ve
 	return vec * scalar;
 }
 #endif
+

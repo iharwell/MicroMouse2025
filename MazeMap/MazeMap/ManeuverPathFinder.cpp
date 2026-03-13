@@ -3,6 +3,14 @@
 
 namespace MazeMap
 {
+	namespace
+	{
+		inline bool IsTrackedLocation(MazeLocation loc)
+		{
+			return loc.GetX() > 0 && loc.GetX() < 32 && loc.GetY() > 0 && loc.GetY() < 32;
+		}
+	}
+
 	ManeuverPathFinder::ManeuverPathFinder(const Maze& maze, const Vehicle& vehicle)
 		: PathFinder(maze, vehicle)
 		, _data()
@@ -39,9 +47,9 @@ namespace MazeMap
 		Reset();
 		result.clear();
 		MazeLocation goalLLC = MazeLocation::CellCenter(GetMaze().GetGoalLowerLeft());
-		for (uint8_t i = 0; i < 3; i+=2)
+		for (uint8_t i = 0; i < 3; i += 2)
 		{
-			for (uint8_t j = 0; j < 3; j+=2)
+			for (uint8_t j = 0; j < 3; j += 2)
 			{
 				if (i == 1 && j == 1)
 				{
@@ -74,7 +82,7 @@ namespace MazeMap
 		result.clear();
 		ManeuverPath* p = new ManeuverPath();
 		ManeuverPathToGoal(start, startDirection, *p);
-		_currentBest = p->Cost(GetVehicle(), GetMaze().GetCellDimension()/100.0f);
+		_currentBest = p->Cost(GetVehicle(), GetMaze().GetCellDimension() / 100.0f);
 		p->ToHalfStepPath(DirectionalLocation(MazeLocation::CellCenter(start), startDirection), result);
 		delete p;
 	}
@@ -141,7 +149,6 @@ namespace MazeMap
 				currentScore = Score(current.GetLocation(), -current.GetDirection());
 			}
 		}
-
 	}
 
 	ManeuverPathFinder::ScoreData ManeuverPathFinder::Score(DirectionalLocation dirLoc)
@@ -150,7 +157,11 @@ namespace MazeMap
 	}
 	ManeuverPathFinder::ScoreData ManeuverPathFinder::Score(MazeLocation loc, Direction d)
 	{
-		return _data[loc.GetX()-1][loc.GetY()-1][RelativeDirections[d]];
+		if (!IsTrackedLocation(loc))
+		{
+			return ScoreData();
+		}
+		return _data[loc.GetX() - 1][loc.GetY() - 1][RelativeDirections[d]];
 	}
 	bool ManeuverPathFinder::UpdateScore(DirectionalLocation dirLoc, ScoreData data)
 	{
@@ -158,17 +169,25 @@ namespace MazeMap
 	}
 	bool ManeuverPathFinder::UpdateScore(MazeLocation loc, Direction d, ScoreData cost)
 	{
-		ScoreData prev = _data[loc.GetX()-1][loc.GetY()-1][RelativeDirections[d]];
+		if (!IsTrackedLocation(loc))
+		{
+			return false;
+		}
+		ScoreData prev = _data[loc.GetX() - 1][loc.GetY() - 1][RelativeDirections[d]];
 		if (prev.Cost > cost.Cost)
 		{
 			_queue.Enqueue(loc);
-			_data[loc.GetX()-1][loc.GetY()-1][RelativeDirections[d]] = cost;
+			_data[loc.GetX() - 1][loc.GetY() - 1][RelativeDirections[d]] = cost;
 			return true;
 		}
 		return false;
 	}
 	bool ManeuverPathFinder::UpdateScore(MazeLocation loc, Direction d, ScoreData cost, bool suppressQueue)
 	{
+		if (!IsTrackedLocation(loc))
+		{
+			return false;
+		}
 		ScoreData prev = _data[loc.GetX() - 1][loc.GetY() - 1][RelativeDirections[d]];
 		if (prev.Cost > cost.Cost)
 		{
@@ -192,12 +211,11 @@ namespace MazeMap
 		{
 			Direction fromDir = OrdinalDirections[i];
 			ScoreData fromVal = Score(loc, fromDir);
-				bool diag = IsDiagonal(fromDir);
-			//const Maneuver& fromMan = ms[fromVal.ArrivalCode];
+			bool diag = IsDiagonal(fromDir);
 			float entrySpeed = 0.0f;
 			if (fromVal.Code != MC_NONE && fromVal.Code > S31)
 			{
-				entrySpeed = ms[fromVal.Code].GetExitSpeed(v, cellDim);
+				entrySpeed = ms[fromVal.Code].GetExitSpeed(v);
 			}
 			if (!isfinite(fromVal.Cost))
 			{
@@ -206,11 +224,11 @@ namespace MazeMap
 			MazeLocation currentLoc = loc;
 			float distance = 0.0f;
 			uint8_t straightDistance = 0;
-			while (m.IsAccessibleLocation(currentLoc)
-				&& !_deadEndMask.GetFlag(currentLoc.GetX()>>1, currentLoc.GetY()>>1)
-				&& !_deadEndMask.GetFlag((currentLoc.GetX()-1) >> 1, (currentLoc.GetY()-1) >> 1))
+			while (IsTrackedLocation(currentLoc)
+				&& m.IsAccessibleLocation(currentLoc)
+				&& !_deadEndMask.GetFlag(currentLoc.GetX() >> 1, currentLoc.GetY() >> 1)
+				&& !_deadEndMask.GetFlag((currentLoc.GetX() - 1) >> 1, (currentLoc.GetY() - 1) >> 1))
 			{
-
 				for (uint8_t j = 0; j < ms.size(); j++)
 				{
 					const Maneuver& man = ms[j];
@@ -227,12 +245,11 @@ namespace MazeMap
 					{
 						continue;
 					}
-					float manCost = man.GetCost(v, cellDim);
+					float manCost = man.GetCost(v);
 					float straightCost = 0.0f;
-					// If there's a straight path preceding this spot, we need to update this cell.
 					if (straightDistance > 0)
 					{
-						straightCost = v.GetStraightLineCost(distance, entrySpeed, man.GetEntrySpeed(v, cellDim));
+						straightCost = v.GetStraightLineCost(distance, entrySpeed, man.GetEntrySpeed(v));
 						if (straightCost < 0.0f)
 						{
 							throw std::errc::invalid_argument;
@@ -247,7 +264,7 @@ namespace MazeMap
 					{
 						DirectionalLocation current = DirectionalLocation(currentLoc, fromDir);
 						current = man.Move(current, false);
-						if (Score(current).Cost > (postManCost))
+						if (Score(current).Cost > postManCost)
 						{
 							UpdateScore(current, ScoreData(man.GetManeuverID(), postManCost));
 						}
@@ -257,13 +274,13 @@ namespace MazeMap
 						DirectionalLocation current = DirectionalLocation(currentLoc, fromDir);
 						current = man.Move(current, true);
 						ScoreData currentScore = Score(current);
-						if (currentScore.Cost > (postManCost))
+						if (currentScore.Cost > postManCost)
 						{
 							UpdateScore(current, ScoreData(man.GetManeuverID() | ManeuverCode::MIRRORED_MANEUVER_FLAG, postManCost));
 						}
 					}
 				}
-				
+
 				ScoreData currentScore = Score(currentLoc, fromDir);
 				float straightCost = v.GetStraightLineCost(distance, entrySpeed, 0.0f);
 				UpdateScore(currentLoc, fromDir, ScoreData(static_cast<ManeuverCode>(straightDistance), fromVal.Cost + straightCost), true);
@@ -275,7 +292,7 @@ namespace MazeMap
 				{
 					distance += GetMaze().GetCellDimension() / 100;
 				}
-				currentLoc = currentLoc >> (fromDir);
+				currentLoc = currentLoc >> fromDir;
 				++straightDistance;
 			}
 		}
@@ -296,3 +313,6 @@ namespace MazeMap
 		_queue.Clear();
 	}
 }
+
+
+

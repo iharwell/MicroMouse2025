@@ -3,7 +3,6 @@
 #include <cstdint>
 namespace MazeMap
 {
-
 	//↑↗→↘↓↙←↖
 	enum EXPORT Direction : uint8_t
 	{
@@ -73,6 +72,51 @@ namespace MazeMap
 		RelativeDirection::Right45,  // 0b1001
 		RelativeDirection::Right135, // 0b1010
 	};
+
+	inline void GetHeading(Direction dir, float& dx, float& dy)
+	{
+		constexpr float rt2on2 = 0.70710678118f;
+		switch (dir)
+		{
+		case Up:
+			dx = 0.0f;
+			dy = 1.0f;
+			return;
+		case Down:
+			dx = 0.0f;
+			dy = -1.0f;
+			return;
+		case Left:
+			dx = -1.0f;
+			dy = 0.0f;
+			return;
+		case Right:
+			dx = 1.0f;
+			dy = 0.0f;
+			return;
+		case UpRight:
+			dx = rt2on2;
+			dy = rt2on2;
+			return;
+		case UpLeft:
+			dx = -rt2on2;
+			dy = rt2on2;
+			return;
+		case DownRight:
+			dx = rt2on2;
+			dy = -rt2on2;
+			return;
+		case DownLeft:
+			dx = -rt2on2;
+			dy = -rt2on2;
+			return;
+		case None:
+			dx = 0;
+			dy = 0;
+			return;
+		}
+	}
+
 	class EXPORT RelativeDirectionalDistance
 	{
 	private:

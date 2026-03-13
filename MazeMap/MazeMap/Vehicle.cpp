@@ -16,6 +16,9 @@ namespace MazeMap
 		, _mass(0.1f)
 		, _centerOfMassHeight(0.005f)
 		, _turningMomentOfInertia(0.00005f)
+		, _trackWidth(0.07f)
+		, _leftDriver()
+		, _rightDriver()
 	{}
 
 	Vehicle::Vehicle(float peakForwardAcceleration, float peakLateralAcceleration, float peakRotationalVelocity, float maxSpeed, float peakAngularAcceleration)
@@ -28,6 +31,9 @@ namespace MazeMap
 		, _mass(0.1f)
 		, _centerOfMassHeight(0.005f)
 		, _turningMomentOfInertia(0.00005f)
+		, _trackWidth(0.07f)
+		, _leftDriver()
+		, _rightDriver()
 	{
 	}
 
@@ -79,6 +85,10 @@ namespace MazeMap
 		float tSymmetric = (sqrtf(vGreater * vGreater + 2.0f * GetMaxForwardAcceleration() * dSymmetric) - vGreater) / GetMaxForwardAcceleration();
 		return tToV1 + 2.0f * tSymmetric;
 	}
+	float Vehicle::GetTurnCost(RelativeDirection relDir, float cellDimensions)
+	{
+		return const_cast<const Vehicle*>(this)->GetTurnCost(relDir, cellDimensions);
+	}
 	float Vehicle::GetTurnCost(RelativeDirection relDir, float cellDimensions) const
 	{
 		float speed = GetTurnSpeed(relDir, cellDimensions);
@@ -101,6 +111,7 @@ namespace MazeMap
 		}
 		return quarterAngles * PI_F * cellDimensions / 2.0f / speed;
 	}
+	float Vehicle::GetTurnSpeed(RelativeDirection relDir, float cellDimensions) { return const_cast<const Vehicle*>(this)->GetTurnSpeed(relDir, cellDimensions); }
 	float Vehicle::GetTurnSpeed(RelativeDirection relDir, float cellDimensions) const
 	{
 		float r = cellDimensions/2.0f;
@@ -111,13 +122,29 @@ namespace MazeMap
 
 		return sqrtf(GetMaxLateralAcceleration() * r);
 	}
+	float Vehicle::GetFastestTurnSpeed(float cellDimensions) { return const_cast<const Vehicle*>(this)->GetFastestTurnSpeed(cellDimensions); }
 	float Vehicle::GetFastestTurnSpeed(float cellDimensions) const
 	{
 		float r = cellDimensions * (2.0f);
 		return sqrtf(GetMaxLateralAcceleration() * r);
 	}
+	float Vehicle::GetCompensatedMaxForwardAcceleration(float velocity) { return const_cast<const Vehicle*>(this)->GetCompensatedMaxForwardAcceleration(velocity); }
+	float Vehicle::GetCompensatedMaxForwardAcceleration(float velocity) const
+	{
+		return GetMaxForwardAcceleration();
+	}
 
 	float Vehicle::GetTurnSpeed(float turningRadius) const { return sqrtf(GetMaxLateralAcceleration() * turningRadius); }
+	float Vehicle::GetSpeedFromCurvature(float curvature) const
+	{
+		float maxSpeed = GetMaxSpeed();
+		float maxLatAccel = GetMaxLateralAcceleration();
+		if (curvature < maxLatAccel / (maxSpeed * maxSpeed))
+		{
+			return maxSpeed;
+		}
+		return sqrtf(maxLatAccel / curvature);
+	}
 	float Vehicle::GetMaxForwardAcceleration() { return const_cast<const Vehicle*>(this)->GetMaxForwardAcceleration(); }
 	float Vehicle::GetMaxForwardAcceleration() const { return _peakForwardAcceleration; }
 	float Vehicle::GetMaxLateralAcceleration() { return const_cast<const Vehicle*>(this)->GetMaxLateralAcceleration(); }
@@ -126,6 +153,10 @@ namespace MazeMap
 	float Vehicle::GetMaxRotationalVelocity() const { return _peakRotationalVelocity; }
 	float Vehicle::GetMaxAngularAcceleration() { return const_cast<const Vehicle*>(this)->GetMaxAngularAcceleration(); }
 	float Vehicle::GetMaxAngularAcceleration() const { return _peakAngularAcceleration; }
+	void Vehicle::SetMaxSpeed(float maxSpeed)
+	{
+		_maxSpeed = maxSpeed;
+	}
 	float Vehicle::GetMaxSpeed() { return const_cast<const Vehicle*>(this)->GetMaxSpeed(); }
 	float Vehicle::GetMaxSpeed() const { return _maxSpeed; }
 	float Vehicle::GetWidth() { return const_cast<const Vehicle*>(this)->GetWidth(); }

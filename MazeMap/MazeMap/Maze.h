@@ -19,7 +19,7 @@ namespace MazeMap
 	{
 	private:
 		Cell _cells[16][16];
-		float _cellDimension;
+		static const float _cellDimension;
 		CellCoordinates _goal;
 		MazeMask _reachable;
 		bool _complete;
@@ -48,8 +48,7 @@ namespace MazeMap
 		Cell& Index(CellCoordinates coords);
 		const Cell& Index(CellCoordinates coords) const;
 
-		float GetCellDimension();
-		float GetCellDimension() const;
+		static float GetCellDimension();
 
 		bool HasFoundGoal();
 

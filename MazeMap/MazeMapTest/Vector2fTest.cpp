@@ -1,15 +1,25 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 #include "..\MazeMap\Vector2f.h"
+#include "..\MazeMap\Matrixf.h"
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 #include <cmath>
-const float PI = 3.14159265358979323846f;
+//const float PI = 3.14159265358979323846f;
 namespace MazeMap
 {
 	TEST_CLASS(Vector2fTest)
 	{
 	public:
+		TEST_METHOD(MatrixTest)
+		{
+			Vectorf<2>v(3.0f, 4.0f);
+			float data[2][2] = { {0.0f,1.0f},{1.0f,0.0f} };
+			Matrixsf<2> mat = Matrixsf<2>(data);
 
+			Vectorf<2> result(0.0f,0.0f);
+			mat.Times(v, result);
+			Assert::AreEqual(v.GetX(), result.GetY());
+		}
 		TEST_METHOD(ConstructorTest1)
 		{
 			Vectorf<2> v = Vectorf<2>();
@@ -37,14 +47,14 @@ namespace MazeMap
 		TEST_METHOD(AngleTest)
 		{
 			Vectorf<2> v(2.0f, 2.0f);
-			Assert::AreEqual(PI/4, v.GetAngle());
+			Assert::AreEqual((float)PI/4, v.GetAngle());
 		}
 		TEST_METHOD(AngleToTest)
 		{
 			Vectorf<2> v1(2.0f, 2.0f);
 			Vectorf<2> v2(0.0f, 2.0f);
-			Assert::AreEqual(PI / 4, v1.AngleTo(v2));
-			Assert::AreEqual(-PI / 4, v2.AngleTo(v1));
+			Assert::AreEqual((float)PI / 4, v1.AngleTo(v2));
+			Assert::AreEqual(-(float)PI / 4, v2.AngleTo(v1));
 		}
 		TEST_METHOD(RotateByTest)
 		{
@@ -52,7 +62,7 @@ namespace MazeMap
 			Vectorf<2> v2(2.0f, 3.0f);
 			Vectorf<2> result = v1.RotateBy(v2);
 
-			Assert::AreEqual(PI / 2, result.GetAngle());
+			Assert::AreEqual((float)PI / 2, result.GetAngle());
 			Assert::AreEqual(v1.GetMagnitude(), result.GetMagnitude());
 		}
 		TEST_METHOD(IncrementTest)

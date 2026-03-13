@@ -5,7 +5,7 @@
 namespace MazeMap
 {
 	template<int _SIZE>
-	class EXPORT Path
+	class Path
 	{
 	private:
 		uint16_t _size;
@@ -105,4 +105,5 @@ namespace MazeMap
 	};
 }
 #endif
+
 

@@ -28,7 +28,7 @@ namespace MazeMap
 		_maneuvers[i++] = new Smooth45ShortDiagonal();
 
 		_maneuvers[i++] = new Smooth90LongStraight();
-		_maneuvers[i++] = new Smooth90LongDiagonal();
+		//_maneuvers[i++] = new Smooth90LongDiagonal();
 		_maneuvers[i++] = new Smooth90ShortStraight();
 		_maneuvers[i++] = new Smooth90ShortDiagonal();
 
@@ -53,7 +53,7 @@ namespace MazeMap
 
 		for (int i = 0; i < SETSIZE; ++i)
 		{
-			costs[i] = _maneuvers[i]->GetCost(vehicle, cellSize) / (0.1f+_maneuvers[i]->DistanceTravelled());
+			costs[i] = _maneuvers[i]->GetCost(vehicle) / (0.1f+_maneuvers[i]->DistanceTravelled());
 
 #ifdef _WINDOWS
 			codes[i] = _maneuvers[i]->GetManeuverID();

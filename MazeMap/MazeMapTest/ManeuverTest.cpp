@@ -38,7 +38,7 @@ std::wstring CodeString(MazeMap::ManeuverCode code)
 	case MazeMap::S135LD: return std::wstring(L"S135LD");
 	case MazeMap::S180SS: return std::wstring(L"S180SS");
 	case MazeMap::S180LS: return std::wstring(L"S180LS");
-	case MazeMap::S90ELS: return std::wstring(L"S90ELS");
+	case MazeMap::S90ELD: return std::wstring(L"S90ELD");
 	case MazeMap::S180ELS: return std::wstring(L"S180ELS");
 	case MazeMap::IP45_M: return std::wstring(L"IP45_M");
 	case MazeMap::IP90_M: return std::wstring(L"IP90_M");
@@ -58,7 +58,7 @@ std::wstring CodeString(MazeMap::ManeuverCode code)
 	case MazeMap::S135LD_M: return std::wstring(L"S135LD_M");
 	case MazeMap::S180SS_M: return std::wstring(L"S180SS_M");
 	case MazeMap::S180LS_M: return std::wstring(L"S180LS_M");
-	case MazeMap::S90ELS_M: return std::wstring(L"S90ELS_M");
+	case MazeMap::S90ELD_M: return std::wstring(L"S90ELD_M");
 	case MazeMap::S180ELS_M: return std::wstring(L"S180ELS_M");
 	}
 }
@@ -161,12 +161,6 @@ namespace MazeMap
 		TEST_METHOD(ReverseSmooth90LongStraight)
 		{
 			auto man = Smooth90LongStraight();
-			ReverseTest(man);
-
-		}
-		TEST_METHOD(ReverseSmooth90LongDiagonal)
-		{
-			auto man = Smooth90LongDiagonal();
 			ReverseTest(man);
 
 		}
@@ -301,10 +295,10 @@ namespace MazeMap
 			auto man1 = Smooth90LongStraight();
 			auto man2 = Smooth90ShortStraight();
 			auto man3 = TurnInPlace45();
-			float cost1 = man1.GetCost(v, cellDim);
-			float cost2 = v.GetStraightLineCost(29 * cellDim, 0.0f, man1.GetEntrySpeed(v, cellDim));
+			float cost1 = man1.GetCost(v);
+			float cost2 = v.GetStraightLineCost(29 * cellDim, 0.0f, man1.GetEntrySpeed(v));
 			float totalCost = cost1 + cost2;
-			float cost3 = man2.GetCost(v, cellDim);
+			float cost3 = man2.GetCost(v);
 			return;
 		}
 		TEST_METHOD(ValidTest1)
@@ -524,3 +518,6 @@ namespace MazeMap
 	};
 
 }
+
+
+

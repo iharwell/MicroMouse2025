@@ -5,7 +5,7 @@
 namespace MazeMap
 {
 	template <int SIZE>
-	class EXPORT HalfStepPath
+	class HalfStepPath
 	{
 	private:
 		uint16_t _size;
@@ -207,3 +207,4 @@ namespace MazeMap
 		}
 	};
 }
+

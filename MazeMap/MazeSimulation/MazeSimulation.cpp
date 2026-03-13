@@ -114,7 +114,7 @@ std::string ToString(MazeMap::ManeuverCode code)
     case MazeMap::S135LD: return std::string("S135LD");
     case MazeMap::S180SS: return std::string("S180SS");
     case MazeMap::S180LS: return std::string("S180LS");
-    case MazeMap::S90ELS: return std::string("S90ELS");
+    case MazeMap::S90ELD: return std::string("S90ELD");
     case MazeMap::S180ELS: return std::string("S180ELS");
 
     case MazeMap::IP45_M:return std::string("IP45_M");
@@ -135,7 +135,7 @@ std::string ToString(MazeMap::ManeuverCode code)
     case MazeMap::S135LD_M:return std::string("S135LD_M");
     case MazeMap::S180SS_M:return std::string("S180SS_M");
     case MazeMap::S180LS_M:return std::string("S180LS_M");
-    case MazeMap::S90ELS_M:return std::string("S90ELS_M");
+    case MazeMap::S90ELD_M:return std::string("S90ELD_M");
     case MazeMap::S180ELS_M:return std::string("S180ELS_M");
     default:
         return std::string("");

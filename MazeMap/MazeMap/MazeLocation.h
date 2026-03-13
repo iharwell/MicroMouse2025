@@ -123,6 +123,27 @@ namespace MazeMap
 			}
 			return CellCoordinates(static_cast<uint8_t>(x >> 1), static_cast<uint8_t>(y >> 1));
 		}
+		explicit operator CellCoordinates() const
+		{
+			uint8_t x = GetX();
+			if (x >= 32)
+			{
+				--x;
+			}
+
+			uint8_t y = GetY();
+			if (y >= 32)
+			{
+				--y;
+			}
+			return CellCoordinates(static_cast<uint8_t>(x >> 1), static_cast<uint8_t>(y >> 1));
+		}
+
+		void GetPhysicalLocation(float cellDim, float& xOut, float& yOut)
+		{
+			xOut = cellDim * 0.5f * GetX();
+			yOut = cellDim * 0.5f * GetY();
+		}
 
 		bool IntersectsAt(MazeLocation otherLoc, CellCoordinates& intersection)
 		{

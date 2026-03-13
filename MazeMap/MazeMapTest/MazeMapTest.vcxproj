@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -101,6 +101,10 @@
       <SubSystem>Windows</SubSystem>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(MSBuildProjectDirectory)\..\MazeMap\$(Platform)\$(Configuration)\MazeMap.dll" "$(OutDir)"</Command>
+      <Message>Copying MazeMap.dll next to the native test DLL.</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -116,6 +120,10 @@
       <SubSystem>Windows</SubSystem>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(MSBuildProjectDirectory)\..\MazeMap\$(Platform)\$(Configuration)\MazeMap.dll" "$(OutDir)"</Command>
+      <Message>Copying MazeMap.dll next to the native test DLL.</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -135,6 +143,10 @@
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(MSBuildProjectDirectory)\..\MazeMap\$(Platform)\$(Configuration)\MazeMap.dll" "$(OutDir)"</Command>
+      <Message>Copying MazeMap.dll next to the native test DLL.</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -155,11 +167,16 @@
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalLibraryDirectories>$(VCInstallDir)UnitTest\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
+    <PostBuildEvent>
+      <Command>copy /Y "$(MSBuildProjectDirectory)\..\MazeMap\$(Platform)\$(Configuration)\MazeMap.dll" "$(OutDir)"</Command>
+      <Message>Copying MazeMap.dll next to the native test DLL.</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CellTest.cpp" />
     <ClCompile Include="DirectionTest.cpp" />
     <ClCompile Include="FresnelTest.cpp" />
+    <ClCompile Include="ManeuverPathFinderTest.cpp" />
     <ClCompile Include="ManeuverTest.cpp" />
     <ClCompile Include="MazeMapTest.cpp" />
     <ClCompile Include="MazeMaskTest.cpp" />
@@ -172,6 +189,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="RelativeDirectionalDistanceTest.cpp" />
+    <ClCompile Include="UKFTest.cpp" />
     <ClCompile Include="Vector2fTest.cpp" />
   </ItemGroup>
   <ItemGroup>

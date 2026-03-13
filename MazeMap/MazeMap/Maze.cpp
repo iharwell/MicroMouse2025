@@ -7,8 +7,7 @@
 namespace MazeMap
 {
 	Maze::Maze()
-		: _cellDimension(18.0)
-		, _goal(0, 0)
+		: _goal(0, 0)
 		, _reachable()
 		, _complete(false)
 		, _reachableCalculated(false)
@@ -41,8 +40,7 @@ namespace MazeMap
 	}
 
 	Maze::Maze(float cellDimension)
-		: _cellDimension(cellDimension)
-		, _goal(0, 0)
+		: _goal(0, 0)
 		, _reachable()
 		, _complete(false)
 		, _reachableCalculated(false)
@@ -168,10 +166,10 @@ namespace MazeMap
 			break;
 		}*/
 	}
-	float Maze::GetCellDimension() const
+	/*float Maze::GetCellDimension() const
 	{
 		return _cellDimension;
-	}
+	}*/
 
 	bool Maze::HasFoundGoal()
 	{
@@ -415,7 +413,12 @@ namespace MazeMap
 		return true;
 	}
 
+	const float Maze::_cellDimension = 18.0f;
 
+float Maze::GetCellDimension()
+{
+	return _cellDimension;
+}
 
 	Cell& Maze::Index(int x, int y)
 	{
@@ -433,7 +436,7 @@ namespace MazeMap
 	{
 		return _cells[coords.GetX()][coords.GetY()];
 	}
-	float Maze::GetCellDimension() { return const_cast<Maze const*>(this)->GetCellDimension(); }
+	//float Maze::GetCellDimension() { return const_cast<Maze const*>(this)->GetCellDimension(); }
 	uint8_t Maze::GetXSize() { return const_cast<Maze const*>(this)->GetXSize(); }
 	uint8_t Maze::GetYSize() { return const_cast<Maze const*>(this)->GetYSize(); }
 
@@ -556,3 +559,6 @@ namespace MazeMap
 		return true;
 	}
 }
+
+
+

@@ -70,6 +70,9 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ExternalIncludePath>$(ProjectDir)\eigen-5.0.0\Eigen;$(ExternalIncludePath)</ExternalIncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
@@ -157,22 +160,29 @@
     <ClInclude Include="Fresnel.h" />
     <ClInclude Include="HalfStepPath.h" />
     <ClInclude Include="Kinematics.h" />
+    <ClInclude Include="LSV6DSV16X_IMU.h" />
     <ClInclude Include="Maneuver.h" />
+    <ClInclude Include="ManeuverInstance.h" />
     <ClInclude Include="ManeuverPath.h" />
     <ClInclude Include="ManeuverPathFinder.h" />
     <ClInclude Include="ManeuverSet.h" />
     <ClInclude Include="MaskQueue.h" />
+    <ClInclude Include="Matrixf.h" />
     <ClInclude Include="Maze.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
+    <ClInclude Include="MotorEncoderDrive.h" />
     <ClInclude Include="Path.h" />
     <ClInclude Include="PathFinder.h" />
     <ClInclude Include="PathPoint.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Sensor.h" />
+    <ClInclude Include="TeensyLayout.h" />
+    <ClInclude Include="UKF.h" />
     <ClInclude Include="Vector2f.h" />
     <ClInclude Include="Vehicle.h" />
     <ClInclude Include="VehicleState.h" />
+    <ClInclude Include="WallSensor.h" />
     <ClInclude Include="WheelMotor.h" />
   </ItemGroup>
   <ItemGroup>

@@ -5,6 +5,7 @@
 #include "Direction.h"
 #include "CircularBuffer.h"
 #include "VehicleState.h"
+#include "MotorEncoderDrive.h"
 
 namespace MazeMap
 {
@@ -21,12 +22,29 @@ namespace MazeMap
 		const float _mass;
 		const float _centerOfMassHeight;
 		const float _turningMomentOfInertia;
+		const float _trackWidth;
+		const MotorEncoderDrive _leftDriver;
+		const MotorEncoderDrive _rightDriver;
+
+		float _downforce;
 
 		float _maxSpeed;
 		float _width;
 	public:
 		Vehicle();
-		Vehicle(float peakForwardAcceleration, float peakLateralAcceleration, float peakRotationalVelocity, float maxSpeed, float peakAngularAcceleration);
+		Vehicle(
+			float peakForwardAcceleration,
+			float peakLateralAcceleration,
+			float peakRotationalVelocity,
+			float maxSpeed,
+			float peakAngularAcceleration);
+		Vehicle(
+			float mass,
+			float centerOfMassHeight,
+			float turningMomentOfInertia,
+			float maxSpeed,
+			float trackWidth,
+			float stallTorqueAtWheels);
 
 		const VehicleState& GetVehicleState();
 		const VehicleState& GetVehicleState() const;
@@ -43,6 +61,7 @@ namespace MazeMap
 		float GetTurnSpeed(RelativeDirection relDir, float cellDimensions) const;
 
 		float GetTurnSpeed(float turningRadius) const;
+		float GetSpeedFromCurvature(float curvature) const;
 
 		float GetFastestTurnSpeed(float cellDimensions);
 		float GetFastestTurnSpeed(float cellDimensions) const;
@@ -51,6 +70,9 @@ namespace MazeMap
 
 		float GetMaxForwardAcceleration();
 		float GetMaxForwardAcceleration() const;
+
+		float GetCompensatedMaxForwardAcceleration(float velocity);
+		float GetCompensatedMaxForwardAcceleration(float velocity) const;
 
 		float GetMaxLateralAcceleration();
 		float GetMaxLateralAcceleration() const;
@@ -61,10 +83,19 @@ namespace MazeMap
 		float GetMaxAngularAcceleration();
 		float GetMaxAngularAcceleration() const;
 
+		void SetMaxSpeed(float maxSpeed);
 		float GetMaxSpeed();
 		float GetMaxSpeed() const;
 
 		float GetWidth();
 		float GetWidth() const;
 	};
+
+	// Vehicle(
+	//		float peakForwardAcceleration,
+	//		float peakLateralAcceleration,
+	//		float peakRotationalVelocity,
+	//		float maxSpeed,
+	//		float peakAngularAcceleration);
+
 }
