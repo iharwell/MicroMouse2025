@@ -24,17 +24,17 @@ namespace MazeMap
 	};*/
 	
 	constexpr uint8_t SETSIZE = 17;
-	class EXPORT ManeuverSet
+	class ManeuverSet
 	{
 	private:
 		static ManeuverSet* singleton;
 
 		const Maneuver* _maneuvers[SETSIZE];
 
-		ManeuverSet();
+		EXPORT ManeuverSet();
 	public:
-		static ManeuverSet& GetSet();
-		virtual ~ManeuverSet()
+		static EXPORT ManeuverSet& GetSet();
+		MAZEMAP_INLINE virtual ~ManeuverSet()
 		{
 			for (size_t i = 0; i < SETSIZE; i++)
 			{
@@ -43,14 +43,14 @@ namespace MazeMap
 			}
 		}
 
-		const Maneuver& operator[](uint8_t index) { return *(_maneuvers[index]); }
-		const Maneuver& operator[](uint8_t index) const { return *(_maneuvers[index]); }
+		MAZEMAP_INLINE const Maneuver& operator[](uint8_t index) { return *(_maneuvers[index]); }
+		MAZEMAP_INLINE const Maneuver& operator[](uint8_t index) const { return *(_maneuvers[index]); }
 
-		const Maneuver& operator[](ManeuverCode index)
+		MAZEMAP_INLINE const Maneuver& operator[](ManeuverCode index)
 		{
 			return (*const_cast<const ManeuverSet*>(this))[index];
 		}
-		const Maneuver& operator[](ManeuverCode index) const
+		MAZEMAP_INLINE const Maneuver& operator[](ManeuverCode index) const
 		{
 			index = static_cast<ManeuverCode>(index & (~MIRRORED_MANEUVER_FLAG));
 			for (size_t i = 0; i < SETSIZE; i++)
@@ -62,17 +62,17 @@ namespace MazeMap
 			}
 			return (*_maneuvers[0]);
 		}
-		uint8_t size() { return SETSIZE; }
-		uint8_t size() const { return SETSIZE; }
+		MAZEMAP_INLINE uint8_t size() { return SETSIZE; }
+		MAZEMAP_INLINE uint8_t size() const { return SETSIZE; }
 
 
-		bool SupportsDiagonalEntry() const;
-		bool SupportsStraightEntry() const;
+		EXPORT bool SupportsDiagonalEntry() const;
+		EXPORT bool SupportsStraightEntry() const;
 
-		uint8_t GetStepCount(ManeuverCode code) const;
-		RelativeDirectionalDistance GetStep(ManeuverCode code, uint8_t index) const;
+		EXPORT uint8_t GetStepCount(ManeuverCode code) const;
+		EXPORT RelativeDirectionalDistance GetStep(ManeuverCode code, uint8_t index) const;
 
-		float GetCost(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
+		MAZEMAP_INLINE float GetCost(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
 			if (code == MC_NONE)
 			{
@@ -84,7 +84,7 @@ namespace MazeMap
 			}
 			return (*this)[code].GetCost(vehicle);
 		}
-		float GetEntrySpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
+		MAZEMAP_INLINE float GetEntrySpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
 			if (code == MC_NONE)
 			{
@@ -96,7 +96,7 @@ namespace MazeMap
 			}
 			return (*this)[code].GetEntrySpeed(vehicle);
 		}
-		float GetExitSpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
+		MAZEMAP_INLINE float GetExitSpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
 			if (code == MC_NONE)
 			{
@@ -109,7 +109,7 @@ namespace MazeMap
 			return (*this)[code].GetExitSpeed(vehicle);
 		}
 
-		bool IsValidMove(ManeuverCode code, DirectionalLocation start, const Maze& maze) const
+		MAZEMAP_INLINE bool IsValidMove(ManeuverCode code, DirectionalLocation start, const Maze& maze) const
 		{
 			if (code <= S31)
 			{
@@ -124,11 +124,11 @@ namespace MazeMap
 			}
 			else
 			{
-
+				return (*this)[code].IsValidMove(start, maze, (code & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG);
 			}
 		}
 
-		ManeuverCode GetReverseCode(ManeuverCode code) const
+		MAZEMAP_INLINE ManeuverCode GetReverseCode(ManeuverCode code) const
 		{
 			if (code <= S31)
 			{
@@ -137,7 +137,7 @@ namespace MazeMap
 			return (*this)[code].GetBackwardsManeuverID() ^ (code&MIRRORED_MANEUVER_FLAG);
 		}
 
-		DirectionalLocation Move(ManeuverCode code, DirectionalLocation start) const
+		MAZEMAP_INLINE DirectionalLocation Move(ManeuverCode code, DirectionalLocation start) const
 		{
 			if (code <= S31)
 			{
@@ -148,7 +148,7 @@ namespace MazeMap
 			return man.Move(start, code & MIRRORED_MANEUVER_FLAG);
 		}
 
-		uint8_t DistanceTravelled(ManeuverCode code) const
+		MAZEMAP_INLINE uint8_t DistanceTravelled(ManeuverCode code) const
 		{
 			if (code <= S31)
 			{
@@ -159,8 +159,18 @@ namespace MazeMap
 			return man.DistanceTravelled();
 		}
 
-		void SortByCost(const Vehicle& vehicle, float cellSize);
+		EXPORT void SortByCost(const Vehicle& vehicle, float cellSize);
 	};
 }
+
+
+
+
+
+
+
+
+
+
 
 

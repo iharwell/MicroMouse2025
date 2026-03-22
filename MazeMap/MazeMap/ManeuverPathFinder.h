@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "Defines.h"
 #include "PathFinder.h"
 #include "DirectionalLocation.h"
@@ -8,17 +8,17 @@
 
 namespace MazeMap
 {
-	class EXPORT ManeuverPathFinder: public PathFinder
+	class ManeuverPathFinder: public PathFinder
 	{
 	private:
 		class ScoreData
 		{
 		public:
-			ScoreData()
+			MAZEMAP_INLINE ScoreData()
 				: Code(ManeuverCode::MC_NONE)
 				, Cost(INFINITY)
 			{ }
-			ScoreData(ManeuverCode arrivalCode, float cost)
+			MAZEMAP_INLINE ScoreData(ManeuverCode arrivalCode, float cost)
 				: Code(arrivalCode)
 				, Cost(cost)
 			{ }
@@ -32,19 +32,19 @@ namespace MazeMap
 		DirectionalLocation _startingPoint;
 		MazeMask _deadEndMask;
 	public:
-		ManeuverPathFinder(const Maze& maze, const Vehicle& vehicle);
+		EXPORT ManeuverPathFinder(const Maze& maze, const Vehicle& vehicle);
 
 		// Inherited via PathFinder
-		void HalfStepPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, HalfStepPath<PATH_SIZE * 2>& result) override;
-		void HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result) override;
-		void HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result) override;
+		EXPORT void HalfStepPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, HalfStepPath<PATH_SIZE * 2>& result) override;
+		EXPORT void HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result) override;
+		EXPORT void HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result) override;
 
-		void ManeuverPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, ManeuverPath& result);
-		void ManeuverPathToGoal(CellCoordinates start, Direction startDirection, ManeuverPath& result);
-		float GetLastEstimatedTime() { return _currentBest; }
+		EXPORT void ManeuverPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, ManeuverPath& result);
+		EXPORT void ManeuverPathToGoal(CellCoordinates start, Direction startDirection, ManeuverPath& result);
+		MAZEMAP_INLINE float GetLastEstimatedTime() { return _currentBest; }
 
-		ManeuverCode GetCode(DirectionalLocation dirLoc);
-		float GetCost(DirectionalLocation dirLoc);
+		EXPORT ManeuverCode GetCode(DirectionalLocation dirLoc);
+		EXPORT float GetCost(DirectionalLocation dirLoc);
 
 	protected:
 		ScoreData Score(DirectionalLocation dirLoc);
@@ -59,3 +59,13 @@ namespace MazeMap
 		void DescendGradient(CellCoordinates start, Direction startDirection, ManeuverPath& result);
 	};
 }
+
+
+
+
+
+
+
+
+
+

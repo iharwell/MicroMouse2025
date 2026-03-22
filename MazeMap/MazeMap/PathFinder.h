@@ -5,6 +5,8 @@
 #include "Vehicle.h"
 #include "MaskQueue.h"
 #include "HalfStepPath.h"
+#include <sstream>
+#include <stdexcept>
 namespace MazeMap
 {
 	class EXPORT PathFinder
@@ -92,19 +94,17 @@ namespace MazeMap
 
 		while (distance > 0)
 		{
-			Direction next = dir;
 			uint16_t minDist = 255;
 			CellCoordinates target;
-			Direction preferredCardinal = next;
+			Direction minDir = Direction::None;
+			Direction preferredCardinal = dir;
 			if (IsDiagonal(dir))
 			{
-				CellCoordinates prev = result.last(1);
-				Direction lastEffectiveDirection = prev.DirectionTo(current);
-
-				preferredCardinal = static_cast<Direction>(preferredCardinal ^ lastEffectiveDirection);
+				const CellCoordinates prev = result.last(1);
+				const Direction lastEffectiveDirection = prev.DirectionTo(current);
+				preferredCardinal = static_cast<Direction>(
+					static_cast<uint8_t>(preferredCardinal) ^ static_cast<uint8_t>(lastEffectiveDirection));
 			}
-
-			Direction minDir = Direction::None;
 
 			for (Direction d = Direction::Up; d <= Direction::Right; d <<= 1)
 			{
@@ -124,26 +124,40 @@ namespace MazeMap
 				}
 			}
 
-			if ((minDir & preferredCardinal) == preferredCardinal )
+			if ((minDir & preferredCardinal) == preferredCardinal)
 			{
 				target = current >> preferredCardinal;
 				if (cost[target.GetX()][target.GetY()] == minDist)
 				{
-					result.push_back(target);
-					dir = next;
+					if (!result.push_back(target))
+					{
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+						throw std::runtime_error("DescendGradient exceeded Path capacity.");
+#else
+						assert(false && "DescendGradient exceeded Path capacity.");
+						return;
+#endif
+					}
 					distance = minDist;
 					current = target;
 					continue;
 				}
 			}
-			if ((minDir & (preferredCardinal+RelativeDirection::R90)) == (preferredCardinal + RelativeDirection::R90))
+			if ((minDir & (preferredCardinal + RelativeDirection::R90)) == (preferredCardinal + RelativeDirection::R90))
 			{
 				target = current >> (preferredCardinal + RelativeDirection::R90);
 				if (cost[target.GetX()][target.GetY()] == minDist)
 				{
-					//dir = result.last(1).DirectionTo(result.last()) + RelativeDirection::R45;
-					dir = result.last().DirectionTo(target) + RelativeDirection::R45;
-					result.push_back(target);
+					dir = result.last().DirectionTo(target) + RelativeDirection::L45;
+					if (!result.push_back(target))
+					{
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+						throw std::runtime_error("DescendGradient exceeded Path capacity.");
+#else
+						assert(false && "DescendGradient exceeded Path capacity.");
+						return;
+#endif
+					}
 					distance = minDist;
 					current = target;
 					continue;
@@ -154,9 +168,16 @@ namespace MazeMap
 				target = current >> (preferredCardinal + RelativeDirection::L90);
 				if (cost[target.GetX()][target.GetY()] == minDist)
 				{
-					//dir = result.last(1).DirectionTo(result.last()) + RelativeDirection::L45;
-					dir = result.last().DirectionTo(target) + RelativeDirection::L45;
-					result.push_back(target);
+					dir = result.last().DirectionTo(target) + RelativeDirection::R45;
+					if (!result.push_back(target))
+					{
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+						throw std::runtime_error("DescendGradient exceeded Path capacity.");
+#else
+						assert(false && "DescendGradient exceeded Path capacity.");
+						return;
+#endif
+					}
 					distance = minDist;
 					current = target;
 					continue;
@@ -179,10 +200,38 @@ namespace MazeMap
 					{
 						dir = dir + RelativeDirection::Reverse;
 					}
-					result.push_back(target);
+					if (!result.push_back(target))
+					{
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+						throw std::runtime_error("DescendGradient exceeded Path capacity.");
+#else
+						assert(false && "DescendGradient exceeded Path capacity.");
+						return;
+#endif
+					}
 					distance = minDist;
 					current = target;
+					continue;
 				}
+			}
+
+			if (preferredCardinal == Direction::None || IsDiagonal(preferredCardinal) || minDir == Direction::None || minDist >= distance)
+			{
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
+				std::ostringstream message;
+				message << "DescendGradient could not find a descending move at ("
+					<< static_cast<int>(current.GetX()) << ","
+					<< static_cast<int>(current.GetY()) << ")"
+					<< " distance=" << static_cast<int>(distance)
+					<< " dir=" << static_cast<int>(dir)
+					<< " preferred=" << static_cast<int>(preferredCardinal)
+					<< " minDir=" << static_cast<int>(minDir)
+					<< " minDist=" << static_cast<int>(minDist);
+				throw std::runtime_error(message.str());
+#else
+				assert(false && "DescendGradient could not find a descending move.");
+				return;
+#endif
 			}
 		}
 	}

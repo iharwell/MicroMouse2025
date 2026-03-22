@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "Defines.h"
 #include "Direction.h"
 #include "CellCoordinates.h"
@@ -6,26 +6,26 @@
 
 namespace MazeMap
 {
-	class EXPORT DirectionalLocation
+	class DirectionalLocation
 	{
 	private:
 		MazeLocation _loc;
 		Direction _dir;
 	public:
-		DirectionalLocation();
-		DirectionalLocation(MazeLocation loc, Direction dir);
-		DirectionalLocation(uint8_t halfX, uint8_t halfY, Direction dir);
+		EXPORT DirectionalLocation();
+		EXPORT DirectionalLocation(MazeLocation loc, Direction dir);
+		EXPORT DirectionalLocation(uint8_t halfX, uint8_t halfY, Direction dir);
 
-		MazeLocation GetLocation();
-		MazeLocation GetLocation() const;
+		EXPORT MazeLocation GetLocation();
+		EXPORT MazeLocation GetLocation() const;
 
-		Direction GetDirection();
-		Direction GetDirection() const;
+		EXPORT Direction GetDirection();
+		EXPORT Direction GetDirection() const;
 
-		CellCoordinates GetFollowingCell();
+		EXPORT CellCoordinates GetFollowingCell();
 
-		DirectionalLocation Turn(RelativeDirection relDir);
-		DirectionalLocation MoveForward(uint8_t halfSteps)
+		EXPORT DirectionalLocation Turn(RelativeDirection relDir);
+		MAZEMAP_INLINE DirectionalLocation MoveForward(uint8_t halfSteps)
 		{
 			int8_t dx = 0;
 			int8_t dy = 0;
@@ -48,17 +48,32 @@ namespace MazeMap
 			return DirectionalLocation(_loc.GetX() + dx, _loc.GetY() + dy, _dir);
 		}
 
-		DirectionalLocation operator>>(uint8_t halfSteps);
-		DirectionalLocation operator>>(RelativeDirection relDir);
-		inline DirectionalLocation operator>>(RelativeDirectionalDistance instruction)
+		EXPORT DirectionalLocation operator>>(uint8_t halfSteps);
+		EXPORT DirectionalLocation operator>>(RelativeDirection relDir);
+		MAZEMAP_INLINE DirectionalLocation operator>>(RelativeDirectionalDistance instruction)
 		{
 			DirectionalLocation loc = (*this);
 			loc = loc.Turn(instruction.GetDirection());
 			loc = loc.MoveForward(instruction.GetDistance());
 			return loc;
 		}
-		bool operator==(const DirectionalLocation& other);
-		bool operator==(const DirectionalLocation& other) const;
+		EXPORT bool operator==(const DirectionalLocation& other);
+		EXPORT bool operator==(const DirectionalLocation& other) const;
 	};
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

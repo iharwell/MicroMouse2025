@@ -252,7 +252,7 @@ namespace MazeMap
 						straightCost = v.GetStraightLineCost(distance, entrySpeed, man.GetEntrySpeed(v));
 						if (straightCost < 0.0f)
 						{
-							throw std::errc::invalid_argument;
+							continue;
 						}
 						if (Score(currentLoc, fromDir).Cost > (fromVal.Cost + straightCost))
 						{
@@ -313,6 +313,7 @@ namespace MazeMap
 		_queue.Clear();
 	}
 }
+
 
 
 

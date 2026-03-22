@@ -5,6 +5,7 @@
 #include "..\MazeMap\Maneuver.h"
 #include "..\MazeMap\ManeuverSet.h"
 #include "../MazeMap/ManeuverPath.h"
+#include "../MazeMap/ManeuverQueue.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -69,6 +70,22 @@ namespace MazeMap
 	public:
 		ManeuverSet& ms = ManeuverSet::GetSet();
 
+		static Vehicle MakeTestVehicle(
+			float maxForwardAcceleration,
+			float maxLateralAcceleration,
+			float maxAngularAcceleration,
+			float maxRotationalVelocity,
+			float maxSpeed)
+		{
+			Vehicle vehicle;
+			vehicle.SetMaxForwardAcceleration(maxForwardAcceleration);
+			vehicle.SetMaxLateralAcceleration(maxLateralAcceleration);
+			vehicle.SetMaxAngularAcceleration(maxAngularAcceleration);
+			vehicle.SetMaxRotationalVelocity(maxRotationalVelocity);
+			vehicle.SetMaxSpeed(maxSpeed);
+			return vehicle;
+		}
+
 		void ReverseTest(const Maneuver& man)
 		{
 			DirectionalLocation dirLoc(MazeLocation(15, 15), Direction::Up);
@@ -89,6 +106,27 @@ namespace MazeMap
 		}
 
 
+		float StraightDistanceMeters(ManeuverCode code)
+		{
+			return static_cast<float>(static_cast<uint8_t>(code)) * 0.5f * Maze::GetCellDimension() / 100.0f;
+		}
+
+		float ReachableStraightSpeed(const Vehicle& vehicle, float entrySpeed, ManeuverCode code)
+		{
+			float distance = StraightDistanceMeters(code);
+			return sqrtf((entrySpeed * entrySpeed) + (2.0f * vehicle.GetMaxForwardAcceleration() * distance));
+		}
+
+		void BuildManeuverInstances(DirectionalLocation start, const ManeuverCode* codes, uint16_t count, ManeuverInstance* result)
+		{
+			DirectionalLocation current = start;
+			ManeuverSet& set = ManeuverSet::GetSet();
+			for (uint16_t i = 0; i < count; ++i)
+			{
+				result[i] = ManeuverInstance(codes[i], current);
+				current = set.Move(codes[i], current);
+			}
+		}
 		TEST_METHOD(ReverseTIP45)
 		{
 			auto man = TurnInPlace45();
@@ -290,7 +328,7 @@ namespace MazeMap
 		}
 		TEST_METHOD(CostTest1)
 		{
-			Vehicle v(15, 18, 35, 4.5f, 5000.0f);
+			Vehicle v = MakeTestVehicle(15.0f, 18.0f, 35.0f, 4.5f, 5000.0f);
 			float cellDim = 0.18f;
 			auto man1 = Smooth90LongStraight();
 			auto man2 = Smooth90ShortStraight();
@@ -303,7 +341,7 @@ namespace MazeMap
 		}
 		TEST_METHOD(ValidTest1)
 		{
-			Vehicle v(15, 18, 35, 4.5f, 5000.0f);
+			Vehicle v = MakeTestVehicle(15.0f, 18.0f, 35.0f, 4.5f, 5000.0f);
 			float cellDim = 0.18f;
 			Mazes::SetupMazes();
 			Maze& m = Mazes::GetSingleTurnMaze();
@@ -316,7 +354,7 @@ namespace MazeMap
 		}
 		TEST_METHOD(SpeedTest1)
 		{
-			Vehicle v(15, 18, 35, 4.5f, 5000.0f);
+			Vehicle v = MakeTestVehicle(15.0f, 18.0f, 35.0f, 4.5f, 5000.0f);
 			float cellDim = 0.18f;
 			ManeuverPath p1 = ManeuverPath();
 			p1.push_back(S29);
@@ -341,7 +379,7 @@ namespace MazeMap
 		}
 		TEST_METHOD(ToHalfStepPathTest)
 		{
-			Vehicle v(15, 18, 35, 4.5f, 5000.0f);
+			Vehicle v = MakeTestVehicle(15.0f, 18.0f, 35.0f, 4.5f, 5000.0f);
 			float cellDim = 0.18f;
 
 			DirectionalLocation start(1, 1, Up);
@@ -429,6 +467,206 @@ namespace MazeMap
 		S90LS = 41,
 		S135S = 42,
 		S135D = 43,*/
+		TEST_METHOD(ManeuverQueueBuildFromPath)
+		{
+			DirectionalLocation start(MazeLocation(15, 15), Up);
+			ManeuverPath path = ManeuverPath();
+			path.push_back(S2);
+			path.push_back(S90SS);
+			path.push_back(S1);
+
+			ManeuverQueue queue(path, start);
+			ManeuverSet& set = ManeuverSet::GetSet();
+
+			Assert::AreEqual(static_cast<uint16_t>(3), queue.size());
+			Assert::AreEqual(start, queue[0].GetStart());
+			Assert::AreEqual(set.Move(S2, start), queue[1].GetStart());
+			Assert::AreEqual(set.Move(S90SS, queue[1].GetStart()), queue[2].GetStart());
+		}
+
+		TEST_METHOD(ManeuverQueueAppendsSequentialCommands)
+		{
+			DirectionalLocation start(MazeLocation(15, 15), Up);
+			ManeuverQueue queue = ManeuverQueue();
+
+			Assert::IsTrue(queue.push_back(S4, start));
+			DirectionalLocation secondStart = queue[0].GetEnd();
+			Assert::IsTrue(queue.push_back(S90SS));
+			Assert::AreEqual(secondStart, queue[1].GetStart());
+		}
+
+		TEST_METHOD(ManeuverQueueHonorsCapacity)
+		{
+			DirectionalLocation start(MazeLocation(100, 100), Up);
+			ManeuverQueue queue = ManeuverQueue();
+
+			Assert::IsTrue(queue.push_back(S1, start));
+			for (uint16_t i = 1; i < MANEUVER_QUEUE_CAPACITY; ++i)
+			{
+				Assert::IsTrue(queue.push_back(S1));
+			}
+
+			Assert::AreEqual(MANEUVER_QUEUE_CAPACITY, queue.size());
+			Assert::IsFalse(queue.push_back(S1));
+		}
+
+		TEST_METHOD(ManeuverQueueComputesStraightTurnStraightSpeeds)
+		{
+			const float tolerance = 0.0001f;
+			Vehicle v = MakeTestVehicle(2.0f, 4.0f, 35.0f, 5.0f, 5000.0f);
+			ManeuverQueue queue = ManeuverQueue();
+
+			Assert::IsTrue(queue.push_back(S10, DirectionalLocation(MazeLocation(15, 15), Up)));
+			Assert::IsTrue(queue.push_back(S90SS));
+			Assert::IsTrue(queue.push_back(S10));
+			queue.ComputeSpeeds(v, 0.0f, 0.0f);
+
+			float turnSpeed = ManeuverSet::GetSet()[S90SS].GetVMax(v);
+			Assert::AreEqual(0.0f, queue[0].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[0].GetExitSpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].GetExitSpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[2].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(0.0f, queue[2].GetExitSpeed(), tolerance);
+		}
+
+		TEST_METHOD(ManeuverQueueFreshSpeedsUpdatePriorStraight)
+		{
+			const float tolerance = 0.0001f;
+			Vehicle v = MakeTestVehicle(2.0f, 4.0f, 35.0f, 5.0f, 5000.0f);
+			ManeuverQueue queue = ManeuverQueue();
+
+			Assert::IsTrue(queue.push_back(S10, DirectionalLocation(MazeLocation(15, 15), Up)));
+			queue.ComputeSpeeds(v, 0.0f, 0.0f);
+			Assert::AreEqual(0.0f, queue[0].GetExitSpeed(), tolerance);
+
+			Assert::IsTrue(queue.push_back(S90SS));
+			queue.ComputeFreshSpeeds(v, 1);
+
+			float turnSpeed = ManeuverSet::GetSet()[S90SS].GetVMax(v);
+			Assert::AreEqual(turnSpeed, queue[0].GetExitSpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].GetExitSpeed(), tolerance);
+		}
+
+		TEST_METHOD(ManeuverQueueComputesConstantSpeedAcrossAdjacentTurns)
+		{
+			const float tolerance = 0.0001f;
+			Vehicle v = MakeTestVehicle(2.0f, 4.0f, 35.0f, 5.0f, 5000.0f);
+			DirectionalLocation start(MazeLocation(15, 15), Up);
+			ManeuverInstance fresh[2] =
+			{
+				ManeuverInstance(S90LS, start),
+				ManeuverInstance(S45SS, ManeuverSet::GetSet().Move(S90LS, start))
+			};
+
+			ManeuverQueue::ComputeSpeeds(v, fresh, 2, v.GetMaxSpeed(), v.GetMaxSpeed());
+
+			float expected = ManeuverSet::GetSet()[S90LS].GetVMax(v);
+			float secondLimit = ManeuverSet::GetSet()[S45SS].GetVMax(v);
+			if (secondLimit < expected)
+			{
+				expected = secondLimit;
+			}
+
+			Assert::AreEqual(expected, fresh[0].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(expected, fresh[0].GetExitSpeed(), tolerance);
+			Assert::AreEqual(expected, fresh[1].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(expected, fresh[1].GetExitSpeed(), tolerance);
+		}
+		TEST_METHOD(ManeuverQueueSpeedPass_ConsecutiveTurnsKeepSameSpeed)
+		{
+			const float tolerance = 0.0001f;
+			Vehicle v = MakeTestVehicle(3.0f, 4.0f, 35.0f, 5.0f, 5000.0f);
+			ManeuverCode codes[3] = { S90LS, S90SS, S180SS };
+			ManeuverInstance fresh[3];
+			BuildManeuverInstances(DirectionalLocation(MazeLocation(15, 15), Up), codes, 3, fresh);
+
+			ManeuverQueue::ComputeSpeeds(v, fresh, 3, v.GetMaxSpeed(), v.GetMaxSpeed());
+
+			float sharedSpeed = fresh[0].GetEntrySpeed();
+			for (uint16_t i = 0; i < 3; ++i)
+			{
+				Assert::AreEqual(sharedSpeed, fresh[i].GetEntrySpeed(), tolerance);
+				Assert::AreEqual(sharedSpeed, fresh[i].GetExitSpeed(), tolerance);
+			}
+		}
+
+		TEST_METHOD(ManeuverQueueSpeedPass_ConsecutiveTurnsUseTightestLimit)
+		{
+			const float tolerance = 0.0001f;
+			Vehicle v = MakeTestVehicle(3.0f, 4.0f, 35.0f, 5.0f, 5000.0f);
+			ManeuverCode codes[3] = { S90LS, S90SS, S180SS };
+			ManeuverInstance fresh[3];
+			BuildManeuverInstances(DirectionalLocation(MazeLocation(15, 15), Up), codes, 3, fresh);
+
+			ManeuverQueue::ComputeSpeeds(v, fresh, 3, v.GetMaxSpeed(), v.GetMaxSpeed());
+
+			float expected = ManeuverSet::GetSet()[S90LS].GetVMax(v);
+			float currentLimit = ManeuverSet::GetSet()[S90SS].GetVMax(v);
+			if (currentLimit < expected)
+			{
+				expected = currentLimit;
+			}
+			currentLimit = ManeuverSet::GetSet()[S180SS].GetVMax(v);
+			if (currentLimit < expected)
+			{
+				expected = currentLimit;
+			}
+
+			for (uint16_t i = 0; i < 3; ++i)
+			{
+				Assert::AreEqual(expected, fresh[i].GetEntrySpeed(), tolerance);
+				Assert::AreEqual(expected, fresh[i].GetExitSpeed(), tolerance);
+			}
+		}
+
+		TEST_METHOD(ManeuverQueueSpeedPass_TurnStraightTurnAccelerationLimitsSecondTurn)
+		{
+			const float tolerance = 0.0001f;
+			Vehicle v = MakeTestVehicle(1.0f, 4.0f, 35.0f, 5.0f, 5000.0f);
+			ManeuverCode codes[3] = { S90SS, S1, S90LS };
+			ManeuverInstance fresh[3];
+			BuildManeuverInstances(DirectionalLocation(MazeLocation(15, 15), Up), codes, 3, fresh);
+
+			ManeuverQueue::ComputeSpeeds(v, fresh, 3, v.GetMaxSpeed(), v.GetMaxSpeed());
+
+			float firstTurnSpeed = ManeuverSet::GetSet()[S90SS].GetVMax(v);
+			float secondTurnLimit = ManeuverSet::GetSet()[S90LS].GetVMax(v);
+			float expectedSecondTurnSpeed = ReachableStraightSpeed(v, firstTurnSpeed, S1);
+			if (secondTurnLimit < expectedSecondTurnSpeed)
+			{
+				expectedSecondTurnSpeed = secondTurnLimit;
+			}
+
+			Assert::AreEqual(firstTurnSpeed, fresh[0].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(firstTurnSpeed, fresh[0].GetExitSpeed(), tolerance);
+			Assert::AreEqual(firstTurnSpeed, fresh[1].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(expectedSecondTurnSpeed, fresh[1].GetExitSpeed(), tolerance);
+			Assert::AreEqual(expectedSecondTurnSpeed, fresh[2].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(expectedSecondTurnSpeed, fresh[2].GetExitSpeed(), tolerance);
+			Assert::IsTrue(expectedSecondTurnSpeed < secondTurnLimit);
+		}
+
+		TEST_METHOD(ManeuverQueueSpeedPass_StraightEntryAndExitFollowAdjacentTurnLimits)
+		{
+			const float tolerance = 0.0001f;
+			Vehicle v = MakeTestVehicle(2.0f, 4.0f, 35.0f, 5.0f, 5000.0f);
+			ManeuverCode codes[3] = { S90LS, S6, S90SS };
+			ManeuverInstance fresh[3];
+			BuildManeuverInstances(DirectionalLocation(MazeLocation(15, 15), Up), codes, 3, fresh);
+
+			ManeuverQueue::ComputeSpeeds(v, fresh, 3, v.GetMaxSpeed(), v.GetMaxSpeed());
+
+			float firstTurnLimit = ManeuverSet::GetSet()[S90LS].GetVMax(v);
+			float secondTurnLimit = ManeuverSet::GetSet()[S90SS].GetVMax(v);
+			Assert::AreEqual(firstTurnLimit, fresh[0].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(firstTurnLimit, fresh[0].GetExitSpeed(), tolerance);
+			Assert::AreEqual(firstTurnLimit, fresh[1].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(secondTurnLimit, fresh[1].GetExitSpeed(), tolerance);
+			Assert::AreEqual(secondTurnLimit, fresh[2].GetEntrySpeed(), tolerance);
+			Assert::AreEqual(secondTurnLimit, fresh[2].GetExitSpeed(), tolerance);
+		}
 		TEST_METHOD(MovementTest)
 		{
 			const ManeuverSet& ms = ManeuverSet::GetSet();
@@ -518,6 +756,9 @@ namespace MazeMap
 	};
 
 }
+
+
+
 
 
 

@@ -1,244 +1,641 @@
 #pragma once
-#include "Defines.h"
 
+#include "Defines.h"
+#include "MotorModelUnits.h"
 
 namespace MazeMap
 {
-	class EXPORT MotorEncoderDrive
-	{
-	private:
-		float _resistance;
-		float _voltage;
-		float _torqueConstant;
-		float _speedConstant;
-		float _gearRatio;
-		float _wheelDiameter;
-		uint16_t _pulsesPerRev;
-		uint8_t _motorOutPinA;
-		uint8_t _motorOutPinB;
-		uint8_t _encoderInPinA;
-		uint8_t _encoderInPinB;
+    struct MotorEncoderDrivePhysicalModel
+    {
+        float nominalVoltageV;
+        float nominalNoLoadSpeedRpm;
+        float supplyVoltageV;
+        float resistanceOhms;
+        float torqueConstantNmPerA;
+        float noLoadCurrentA;
+        float speedConstantRadpsPerVolt;
+        float gearRatio;
+        float wheelDiameterM;
+        uint16_t pulsesPerRev;
+    };
 
-		static constexpr uint16_t kMotorPwmCounts = 1875U;
-		static constexpr uint16_t kMotorPwmMaxCode = kMotorPwmCounts - 1U; // 1874
-		struct FlexPwmPinInfo
-		{
-			IMXRT_FLEXPWM_t* module;
-			uint8_t submodule;
-			uint8_t channel; // 0 = X, 1 = A, 2 = B
-		};
+    struct MotorEncoderDriveHardwareConfig
+    {
+        uint8_t motorOutPinA = Platform::kInvalidPin;
+        uint8_t motorOutPinB = Platform::kInvalidPin;
+        uint8_t encoderInPinA = Platform::kInvalidPin;
+        uint8_t encoderInPinB = Platform::kInvalidPin;
+        uint8_t encoderChannel = Platform::kInvalidEncoderChannel;
+        bool invertMotorDirection = false;
+        bool invertEncoderDirection = false;
+    };
 
-		static bool resolveMotorFlexPwmPin(uint8_t pin, FlexPwmPinInfo& info)
-		{
-			switch (pin)
-			{
-			case 5:
-				info.module = &IMXRT_FLEXPWM2;
-				info.submodule = 1;
-				info.channel = 1; // A
-				return true;
+    class MotorEncoderDrive
+    {
+    private:
+        inline static constexpr MotorEncoderDrivePhysicalModel kSharedPhysicalModel = {
+            6.0f,
+            14100.0f,
+            8.4f,
+            4.31f,
+            MilliNewtonMetersToNewtonMeters(3.96f),
+            MilliAmpsToAmps(45.9f),
+            ComputeMotorSpeedConstantRadpsPerVolt(
+                14100.0f,
+                6.0f,
+                MilliAmpsToAmps(45.9f),
+                4.31f),
+            56.0f / 17.0f,
+            0.025345f,
+            4096U
+        };
+        inline static constexpr MotorEncoderDriveHardwareConfig kLeftHardwareConfig = {
+            24U,
+            25U,
+            2U,
+            3U,
+            2U,
+            true,
+            false
+        };
+        inline static constexpr MotorEncoderDriveHardwareConfig kRightHardwareConfig = {
+            5U,
+            6U,
+            7U,
+            8U,
+            1U,
+            true,
+            false
+        };
+        static constexpr unsigned long kMinEncoderVelocitySampleMicros = 250UL;
+        float _resistance = 1.0f;
+        float _voltage = 0.0f;
+        float _torqueConstant = 0.0f;
+        float _speedConstant = 1.0f;
+        float _noLoadCurrent = 0.0f;
+        float _gearRatio = 1.0f;
+        float _wheelDiameter = 0.0f;
+        uint16_t _pulsesPerRev = 1U;
+        uint8_t _motorOutPinA = Platform::kInvalidPin;
+        uint8_t _motorOutPinB = Platform::kInvalidPin;
+        uint8_t _encoderInPinA = Platform::kInvalidPin;
+        uint8_t _encoderInPinB = Platform::kInvalidPin;
+        uint8_t _encoderChannel = Platform::kInvalidEncoderChannel;
+        bool _invertMotorDirection = false;
+        bool _invertEncoderDirection = false;
+        float _lastDriveCommand = 0.0f;
+        float _lastGroundForceCommand = 0.0f;
+        mutable bool _encoderVelocityInitialized = false;
+        mutable int32_t _lastEncoderCountSample = 0;
+        mutable unsigned long _lastEncoderSampleMicros = 0UL;
+        mutable float _encoderVelocityMetersPerSecond = 0.0f;
 
-			case 6:
-				info.module = &IMXRT_FLEXPWM2;
-				info.submodule = 2;
-				info.channel = 1; // A
-				return true;
+        static float ClampUnit(float value) noexcept
+        {
+            if (value < -1.0f)
+            {
+                return -1.0f;
+            }
 
-			case 24:
-				info.module = &IMXRT_FLEXPWM1;
-				info.submodule = 2;
-				info.channel = 0; // X
-				return true;
+            if (value > 1.0f)
+            {
+                return 1.0f;
+            }
 
-			case 25:
-				info.module = &IMXRT_FLEXPWM1;
-				info.submodule = 3;
-				info.channel = 0; // X
-				return true;
+            return value;
+        }
 
-			default:
-				return false;
-			}
-		}
+        static float Absf(float value) noexcept
+        {
+            return (value < 0.0f) ? -value : value;
+        }
 
-		static void driveLow(uint8_t pin)
-		{
-			pinMode(pin, OUTPUT);
-			digitalWrite(pin, LOW);
-		}
+        static int32_t RoundToInt32(float value) noexcept
+        {
+            return static_cast<int32_t>((value >= 0.0f) ? (value + 0.5f) : (value - 0.5f));
+        }
 
-		static void driveHigh(uint8_t pin)
-		{
-			pinMode(pin, OUTPUT);
-			digitalWrite(pin, HIGH);
-		}
+        static float ClampSymmetric(float value, float limit) noexcept
+        {
+            if (limit <= 0.0f)
+            {
+                return 0.0f;
+            }
 
-		static void writeExactPwmCode(uint8_t pin, uint16_t code)
-		{
-			if (code > kMotorPwmMaxCode)
-			{
-				code = kMotorPwmMaxCode;
-			}
+            if (value > limit)
+            {
+                return limit;
+            }
 
-			FlexPwmPinInfo info;
+            if (value < -limit)
+            {
+                return -limit;
+            }
 
-			if (!resolveMotorFlexPwmPin(pin, info))
-			{
-				return;
-			}
+            return value;
+        }
 
-			// Re-enter PWM mode on this pin. The exact duty update happens below.
-			analogWrite(pin, 0U);
+        static float Signf(float value) noexcept
+        {
+            if (value > 0.0f)
+            {
+                return 1.0f;
+            }
 
-			const uint16_t mask = static_cast<uint16_t>(1U << info.submodule);
+            if (value < 0.0f)
+            {
+                return -1.0f;
+            }
 
-			info.module->MCTRL |= FLEXPWM_MCTRL_CLDOK(mask);
+            return 0.0f;
+        }
 
-			switch (info.channel)
-			{
-			case 0: // X
-				info.module->SM[info.submodule].VAL0 = kMotorPwmMaxCode - code;
-				info.module->OUTEN |= FLEXPWM_OUTEN_PWMX_EN(mask);
-				break;
+        static uint16_t DriveCommandToPwmCode(float driveCommand) noexcept
+        {
+            const float magnitude = Absf(ClampUnit(driveCommand));
+            return static_cast<uint16_t>(magnitude * static_cast<float>(Platform::kMotorPwmMaxCode) + 0.5f);
+        }
 
-			case 1: // A
-				info.module->SM[info.submodule].VAL3 = code;
-				info.module->OUTEN |= FLEXPWM_OUTEN_PWMA_EN(mask);
-				break;
+        bool hasMotorPins() const noexcept
+        {
+            return Platform::IsAssignedPin(_motorOutPinA) && Platform::IsAssignedPin(_motorOutPinB);
+        }
 
-			case 2: // B
-				info.module->SM[info.submodule].VAL5 = code;
-				info.module->OUTEN |= FLEXPWM_OUTEN_PWMB_EN(mask);
-				break;
+        bool hasEncoder() const noexcept
+        {
+            return Platform::IsAssignedEncoder(_encoderChannel, _encoderInPinA, _encoderInPinB);
+        }
 
-			default:
-				info.module->MCTRL |= FLEXPWM_MCTRL_LDOK(mask);
-				return;
-			}
+        void resetEncoderVelocityEstimate() noexcept
+        {
+            _encoderVelocityInitialized = false;
+            _lastEncoderCountSample = 0;
+            _lastEncoderSampleMicros = 0UL;
+            _encoderVelocityMetersPerSecond = 0.0f;
+        }
 
-			info.module->MCTRL |= FLEXPWM_MCTRL_LDOK(mask);
-		}
-	public:
-		// Resistance in Ohms
-		inline float    getResistance() { return const_cast<const MotorEncoderDrive*>(this)->getResistance(); }
-		// Resistance in Ohms
-		inline float    getResistance() const { return _resistance; }
-		// Resistance in Ohms
-		inline void     setResistance(float v) { _resistance = v; }
+        void updateEncoderVelocityEstimate() const noexcept
+        {
+            if (!hasEncoder())
+            {
+                _encoderVelocityMetersPerSecond = 0.0f;
+                return;
+            }
 
-		inline float    getVoltage() { return const_cast<const MotorEncoderDrive*>(this)->getVoltage(); }
-		inline float    getVoltage() const { return _voltage; }
-		inline void     setVoltage(float v) { _voltage = v; }
+            const unsigned long nowMicros = micros();
+            const int32_t countNow = getEncoderCount();
 
-		// Torque Constant in N*m/A
-		inline float    getTorqueConstant() { return const_cast<const MotorEncoderDrive*>(this)->getTorqueConstant(); }
-		inline float    getTorqueConstant() const { return _torqueConstant; }
-		inline void     setTorqueConstant(float v) { _torqueConstant = v; }
+            if (!_encoderVelocityInitialized)
+            {
+                _encoderVelocityInitialized = true;
+                _lastEncoderCountSample = countNow;
+                _lastEncoderSampleMicros = nowMicros;
+                _encoderVelocityMetersPerSecond = 0.0f;
+                return;
+            }
 
-		inline float    getSpeedConstant() { return const_cast<const MotorEncoderDrive*>(this)->getSpeedConstant(); }
-		inline float    getSpeedConstant() const { return _speedConstant; }
-		inline void     setSpeedConstant(float v) { _speedConstant = v; }
+            const unsigned long elapsedMicros = nowMicros - _lastEncoderSampleMicros;
 
-		inline float    getGearRatio() { return const_cast<const MotorEncoderDrive*>(this)->getGearRatio(); }
-		inline float    getGearRatio() const { return _gearRatio; }
-		inline void     setGearRatio(float v) { _gearRatio = v; }
+            // Multiple reads can happen inside one control cycle. Reuse the last valid
+            // estimate until enough time has elapsed to avoid one-count speed spikes.
+            if (elapsedMicros < kMinEncoderVelocitySampleMicros)
+            {
+                return;
+            }
 
-		inline float    getWheelDiameter() { return const_cast<const MotorEncoderDrive*>(this)->getWheelDiameter(); }
-		inline float    getWheelDiameter() const { return _wheelDiameter; }
-		inline void     setWheelDiameter(float v) { _wheelDiameter = v; }
+            const int32_t deltaCounts = countNow - _lastEncoderCountSample;
+            _encoderVelocityMetersPerSecond = pulsesToDistance(deltaCounts) / (static_cast<float>(elapsedMicros) * 1.0e-6f);
+            _lastEncoderCountSample = countNow;
+            _lastEncoderSampleMicros = nowMicros;
+        }
 
-		inline uint16_t getPulsesPerRev() { return const_cast<const MotorEncoderDrive*>(this)->getPulsesPerRev(); }
-		inline uint16_t getPulsesPerRev() const { return _pulsesPerRev; }
-		inline void     setPulsesPerRev(uint16_t v) { _pulsesPerRev = v; }
+    public:
+        MotorEncoderDrive() = default;
 
-		inline uint8_t getMotorOutPinA() { return const_cast<const MotorEncoderDrive*>(this)->getMotorOutPinA(); }
-		inline uint8_t getMotorOutPinA() const { return _motorOutPinA; }
-		inline void setMotorOutPinA(uint8_t v) { _motorOutPinA = v; }
+        static constexpr const MotorEncoderDrivePhysicalModel& GetSharedPhysicalModel() noexcept
+        {
+            return kSharedPhysicalModel;
+        }
 
-		inline uint8_t getMotorOutPinB() { return const_cast<const MotorEncoderDrive*>(this)->getMotorOutPinB(); }
-		inline uint8_t getMotorOutPinB() const { return _motorOutPinB; }
-		inline void setMotorOutPinB(uint8_t v) { _motorOutPinB = v; }
+        static constexpr const MotorEncoderDriveHardwareConfig& GetLeftHardwareConfig() noexcept
+        {
+            return kLeftHardwareConfig;
+        }
 
-		inline uint8_t getEncoderInPinA() { return const_cast<const MotorEncoderDrive*>(this)->getEncoderInPinA(); }
-		inline uint8_t getEncoderInPinA() const { return _encoderInPinA; }
-		inline void setEncoderInPinA(uint8_t v) { _encoderInPinA = v; }
+        static constexpr const MotorEncoderDriveHardwareConfig& GetRightHardwareConfig() noexcept
+        {
+            return kRightHardwareConfig;
+        }
 
-		inline uint8_t getEncoderInPinB() { return const_cast<const MotorEncoderDrive*>(this)->getEncoderInPinB(); }
-		inline uint8_t getEncoderInPinB() const { return _encoderInPinB; }
-		inline void setEncoderInPinB(uint8_t v) { _encoderInPinB = v; }
+        MotorEncoderDrive(
+            float resistance,
+            float voltage,
+            float torqueConstant,
+            float speedConstant,
+            float noLoadCurrent,
+            float gearRatio,
+            float wheelDiameter,
+            uint16_t pulsesPerRev,
+            uint8_t motorOutPinA,
+            uint8_t motorOutPinB,
+            uint8_t encoderInPinA,
+            uint8_t encoderInPinB,
+            uint8_t encoderChannel = Platform::kInvalidEncoderChannel,
+            bool invertMotorDirection = false,
+            bool invertEncoderDirection = false) noexcept
+            : _resistance(resistance)
+            , _voltage(voltage)
+            , _torqueConstant(torqueConstant)
+            , _speedConstant(speedConstant)
+            , _noLoadCurrent(noLoadCurrent)
+            , _gearRatio(gearRatio)
+            , _wheelDiameter(wheelDiameter)
+            , _pulsesPerRev(pulsesPerRev)
+            , _motorOutPinA(motorOutPinA)
+            , _motorOutPinB(motorOutPinB)
+            , _encoderInPinA(encoderInPinA)
+            , _encoderInPinB(encoderInPinB)
+            , _encoderChannel(encoderChannel)
+            , _invertMotorDirection(invertMotorDirection)
+            , _invertEncoderDirection(invertEncoderDirection)
+        {
+        }
 
-		inline float getDistancePerPulse() { return const_cast<const MotorEncoderDrive*>(this)->getDistancePerPulse(); }
-		inline float getDistancePerPulse() const { return (3.14159265358979323846f * _wheelDiameter) / (_gearRatio * static_cast<float>(_pulsesPerRev)); }
+        MotorEncoderDrive(
+            const MotorEncoderDrivePhysicalModel& physicalModel,
+            const MotorEncoderDriveHardwareConfig& hardwareConfig) noexcept
+            : MotorEncoderDrive(
+                physicalModel.resistanceOhms,
+                physicalModel.supplyVoltageV,
+                physicalModel.torqueConstantNmPerA,
+                physicalModel.speedConstantRadpsPerVolt,
+                physicalModel.noLoadCurrentA,
+                physicalModel.gearRatio,
+                physicalModel.wheelDiameterM,
+                physicalModel.pulsesPerRev,
+                hardwareConfig.motorOutPinA,
+                hardwareConfig.motorOutPinB,
+                hardwareConfig.encoderInPinA,
+                hardwareConfig.encoderInPinB,
+                hardwareConfig.encoderChannel,
+                hardwareConfig.invertMotorDirection,
+                hardwareConfig.invertEncoderDirection)
+        {
+        }
 
-		// Assumes: _speedConstant = Kv in (rad/s)/V,
-		// _torqueConstant = Kt in N·m/A,
-		// _wheelDiameter in meters,
-		// velocity in m/s,
-		// result in newtons.
-		inline float getMaxForceAtVelocity(float velocity) { return const_cast<const MotorEncoderDrive*>(this)->getMaxForceAtVelocity(velocity); }
+        static MotorEncoderDrive CreateDefaultLeftDrive() noexcept
+        {
+            return MotorEncoderDrive(GetSharedPhysicalModel(), GetLeftHardwareConfig());
+        }
 
-		inline float getMaxForceAtVelocity(float velocity) const
-		{
-#ifdef _DEBUG
-			const float v = (velocity < 0.0f) ? -velocity : velocity;
-			if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || !(_resistance > 0.0f) || !(_speedConstant > 0.0f)) return 0.0f;
-#endif
-			const float r = 0.5f * _wheelDiameter;
-			const float omega_m = (v / r) * _gearRatio;
-			const float i = (_voltage - (omega_m / _speedConstant)) / _resistance;
-			if (i <= 0.0f) return 0.0f;
-			return (_torqueConstant * i * _gearRatio) / r;
-		}
-		inline float getSpeedAtForceLimit(float maxTractiveForce) const
-		{
-			const float F = (maxTractiveForce < 0.0f) ? -maxTractiveForce : maxTractiveForce;
-			if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || !(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f)) return 0.0f;
-			const float r = 0.5f * _wheelDiameter;
-			const float stallForce = (_torqueConstant * (_voltage / _resistance) * _gearRatio) / r;
-			if (F > stallForce) return 0.0f;
-			const float vNoLoad = (r * _speedConstant * _voltage) / _gearRatio;
-			const float v = (r * _speedConstant / _gearRatio) * (_voltage - (F * r * _resistance) / (_torqueConstant * _gearRatio));
-			if (v < 0.0f) return 0.0f;
-			if (v > vNoLoad) return vNoLoad;
-			return v;
-		}
+        static MotorEncoderDrive CreateDefaultRightDrive() noexcept
+        {
+            return MotorEncoderDrive(GetSharedPhysicalModel(), GetRightHardwareConfig());
+        }
 
-		inline float getSpeedAtForceLimit(float maxTractiveForce)
-		{
-			return const_cast<const MotorEncoderDrive*>(this)->getSpeedAtForceLimit(maxTractiveForce);
-		}
+        bool begin()
+        {
+            bool ok = true;
 
-		/*inline float getSpeedAtForceLimit(float maxTractiveForce) const
-		{
-			const float F = (maxTractiveForce < 0.0f) ? -maxTractiveForce : maxTractiveForce;
+            if (hasMotorPins())
+            {
+                Platform::ConfigureMotorPwmPin(_motorOutPinA);
+                Platform::ConfigureMotorPwmPin(_motorOutPinB);
+                coast();
+            }
 
-			if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || !(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f))
-			{
-				return 0.0f;
-			}
+            if (hasEncoder())
+            {
+                ok = Platform::ConfigureEncoder(_encoderChannel, _encoderInPinA, _encoderInPinB);
+                if (ok)
+                {
+                    setEncoderDistanceMeters(0.0f);
+                }
+            }
 
-			const float r = 0.5f * _wheelDiameter;
-			const float stallForce = (_torqueConstant * (_voltage / _resistance) * _gearRatio) / r;
+            resetEncoderVelocityEstimate();
+            return ok;
+        }
 
-			if (F > stallForce)
-			{
-				return 0.0f;
-			}
+        float getResistance() const noexcept { return _resistance; }
+        void setResistance(float value) noexcept { _resistance = value; }
 
-			const float vNoLoad = (r * _speedConstant * _voltage) / _gearRatio;
-			const float v = (r * _speedConstant / _gearRatio) * (_voltage - (F * r * _resistance) / (_torqueConstant * _gearRatio));
+        float getVoltage() const noexcept { return _voltage; }
+        void setVoltage(float value) noexcept { _voltage = value; }
 
-			if (v < 0.0f)
-			{
-				return 0.0f;
-			}
+        float getTorqueConstant() const noexcept { return _torqueConstant; }
+        void setTorqueConstant(float value) noexcept { _torqueConstant = value; }
 
-			if (v > vNoLoad)
-			{
-				return vNoLoad;
-			}
+        float getSpeedConstant() const noexcept { return _speedConstant; }
+        void setSpeedConstant(float value) noexcept { _speedConstant = value; }
 
-			return v;
-		}*/
-	};
+        float getNoLoadCurrent() const noexcept { return _noLoadCurrent; }
+        void setNoLoadCurrent(float value) noexcept { _noLoadCurrent = value; }
+
+        float getGearRatio() const noexcept { return _gearRatio; }
+        void setGearRatio(float value) noexcept { _gearRatio = value; }
+
+        float getWheelDiameter() const noexcept { return _wheelDiameter; }
+        void setWheelDiameter(float value) noexcept { _wheelDiameter = value; }
+
+        float getWheelRadius() const noexcept { return 0.5f * _wheelDiameter; }
+        float getWheelCircumference() const noexcept { return PI_F * _wheelDiameter; }
+
+        uint16_t getPulsesPerRev() const noexcept { return _pulsesPerRev; }
+        void setPulsesPerRev(uint16_t value) noexcept { _pulsesPerRev = value; }
+
+        uint8_t getMotorOutPinA() const noexcept { return _motorOutPinA; }
+        void setMotorOutPinA(uint8_t value) noexcept { _motorOutPinA = value; }
+
+        uint8_t getMotorOutPinB() const noexcept { return _motorOutPinB; }
+        void setMotorOutPinB(uint8_t value) noexcept { _motorOutPinB = value; }
+
+        uint8_t getEncoderInPinA() const noexcept { return _encoderInPinA; }
+        void setEncoderInPinA(uint8_t value) noexcept
+        {
+            _encoderInPinA = value;
+            resetEncoderVelocityEstimate();
+        }
+
+        uint8_t getEncoderInPinB() const noexcept { return _encoderInPinB; }
+        void setEncoderInPinB(uint8_t value) noexcept
+        {
+            _encoderInPinB = value;
+            resetEncoderVelocityEstimate();
+        }
+
+        uint8_t getEncoderChannel() const noexcept { return _encoderChannel; }
+        void setEncoderChannel(uint8_t value) noexcept
+        {
+            _encoderChannel = value;
+            resetEncoderVelocityEstimate();
+        }
+
+        bool getInvertMotorDirection() const noexcept { return _invertMotorDirection; }
+        void setInvertMotorDirection(bool value) noexcept { _invertMotorDirection = value; }
+
+        bool getInvertEncoderDirection() const noexcept { return _invertEncoderDirection; }
+        void setInvertEncoderDirection(bool value) noexcept
+        {
+            _invertEncoderDirection = value;
+            resetEncoderVelocityEstimate();
+        }
+
+        float getDistancePerPulse() const noexcept
+        {
+            if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || (_pulsesPerRev == 0U))
+            {
+                return 0.0f;
+            }
+
+            return getWheelCircumference() / (_gearRatio * static_cast<float>(_pulsesPerRev));
+        }
+
+        float pulsesToDistance(int32_t pulses) const noexcept
+        {
+            return static_cast<float>(pulses) * getDistancePerPulse();
+        }
+
+        int32_t distanceToPulses(float distanceMeters) const noexcept
+        {
+            const float distancePerPulse = getDistancePerPulse();
+            if (!(distancePerPulse > 0.0f))
+            {
+                return 0;
+            }
+
+            return RoundToInt32(distanceMeters / distancePerPulse);
+        }
+
+        float getMotorAngularVelocityAtGroundSpeed(float groundSpeedMetersPerSecond) const noexcept
+        {
+            const float wheelRadius = getWheelRadius();
+            if (!(wheelRadius > 0.0f) || !(_gearRatio > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            return (groundSpeedMetersPerSecond / wheelRadius) * _gearRatio;
+        }
+
+        float getGroundSpeedFromMotorAngularVelocity(float motorAngularVelocity) const noexcept
+        {
+            if (!(_gearRatio > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            return (motorAngularVelocity / _gearRatio) * getWheelRadius();
+        }
+
+        float getMotorCurrentForGroundForce(float groundForceNewtons) const noexcept
+        {
+            if (!(_torqueConstant > 0.0f) || !(_gearRatio > 0.0f) || !(_wheelDiameter > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            return (groundForceNewtons * getWheelRadius()) / (_torqueConstant * _gearRatio);
+        }
+
+        float getMotorVoltageForGroundForce(float groundForceNewtons, float groundSpeedMetersPerSecond) const noexcept
+        {
+            if (!(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f) || !(_gearRatio > 0.0f) || !(_wheelDiameter > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            float motorCurrent = getMotorCurrentForGroundForce(groundForceNewtons);
+            float noLoadDirection = Signf(groundForceNewtons);
+            if (noLoadDirection == 0.0f)
+            {
+                noLoadDirection = Signf(groundSpeedMetersPerSecond);
+            }
+            motorCurrent += noLoadDirection * _noLoadCurrent;
+            const float motorAngularVelocity = getMotorAngularVelocityAtGroundSpeed(groundSpeedMetersPerSecond);
+            return (motorCurrent * _resistance) + (motorAngularVelocity / _speedConstant);
+        }
+
+        float getDriveCommandForGroundForce(float groundForceNewtons, float groundSpeedMetersPerSecond) const noexcept
+        {
+            if (!(_voltage > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            return ClampUnit(getMotorVoltageForGroundForce(groundForceNewtons, groundSpeedMetersPerSecond) / _voltage);
+        }
+
+        float getMaxForceAtVelocity(float velocityMetersPerSecond) const noexcept
+        {
+            const float groundSpeed = Absf(velocityMetersPerSecond);
+            if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || !(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f) || !(_voltage > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            const float wheelRadius = getWheelRadius();
+            const float motorAngularVelocity = (groundSpeed / wheelRadius) * _gearRatio;
+            const float motorCurrent = ((_voltage - (motorAngularVelocity / _speedConstant)) / _resistance) - _noLoadCurrent;
+            if (motorCurrent <= 0.0f)
+            {
+                return 0.0f;
+            }
+
+            return (_torqueConstant * motorCurrent * _gearRatio) / wheelRadius;
+        }
+
+        float getSpeedAtForceLimit(float maxTractiveForce) const noexcept
+        {
+            const float limitedForce = Absf(maxTractiveForce);
+            if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || !(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f) || !(_voltage > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            const float wheelRadius = getWheelRadius();
+            const float availableCurrent = (_voltage / _resistance) - _noLoadCurrent;
+            if (availableCurrent <= 0.0f)
+            {
+                return 0.0f;
+            }
+
+            const float stallForce = (_torqueConstant * availableCurrent * _gearRatio) / wheelRadius;
+            if (limitedForce > stallForce)
+            {
+                return 0.0f;
+            }
+
+            const float noLoadSpeed = (wheelRadius * _speedConstant * _voltage) / _gearRatio;
+            const float loadCurrent = getMotorCurrentForGroundForce(limitedForce) + _noLoadCurrent;
+            const float speed = (wheelRadius * _speedConstant / _gearRatio) * (_voltage - (loadCurrent * _resistance));
+            if (speed < 0.0f)
+            {
+                return 0.0f;
+            }
+
+            return (speed > noLoadSpeed) ? noLoadSpeed : speed;
+        }
+
+        void coast() noexcept
+        {
+            _lastDriveCommand = 0.0f;
+            if (!hasMotorPins())
+            {
+                return;
+            }
+
+            Platform::DrivePinLow(_motorOutPinA);
+            Platform::DrivePinLow(_motorOutPinB);
+        }
+
+        void brake() noexcept
+        {
+            _lastDriveCommand = 0.0f;
+            if (!hasMotorPins())
+            {
+                return;
+            }
+
+            Platform::DrivePinHigh(_motorOutPinA);
+            Platform::DrivePinHigh(_motorOutPinB);
+        }
+
+        void setDriveCommand(float driveCommand) noexcept
+        {
+            _lastDriveCommand = ClampUnit(driveCommand);
+
+            if (!hasMotorPins())
+            {
+                return;
+            }
+
+            float hardwareCommand = _invertMotorDirection ? -_lastDriveCommand : _lastDriveCommand;
+            if (hardwareCommand > 0.0f)
+            {
+                Platform::DrivePinLow(_motorOutPinB);
+                Platform::WriteMotorPwmCode(_motorOutPinA, DriveCommandToPwmCode(hardwareCommand));
+                return;
+            }
+
+            if (hardwareCommand < 0.0f)
+            {
+                Platform::DrivePinLow(_motorOutPinA);
+                Platform::WriteMotorPwmCode(_motorOutPinB, DriveCommandToPwmCode(hardwareCommand));
+                return;
+            }
+
+            coast();
+        }
+
+        float getDriveCommand() const noexcept
+        {
+            return _lastDriveCommand;
+        }
+
+        void setGroundForce(float groundForceNewtons, float groundSpeedMetersPerSecond) noexcept
+        {
+            const float maxForce = getMaxForceAtVelocity(groundSpeedMetersPerSecond);
+            _lastGroundForceCommand = ClampSymmetric(groundForceNewtons, maxForce);
+            setDriveCommand(getDriveCommandForGroundForce(_lastGroundForceCommand, groundSpeedMetersPerSecond));
+        }
+
+        void setGroundForce(float groundForceNewtons) noexcept
+        {
+            setGroundForce(groundForceNewtons, getEncoderVelocityMetersPerSecond());
+        }
+
+        float getGroundForceCommand() const noexcept
+        {
+            return _lastGroundForceCommand;
+        }
+
+        int32_t getEncoderCount() const noexcept
+        {
+            if (!hasEncoder())
+            {
+                return 0;
+            }
+
+            const int32_t rawCount = Platform::ReadEncoderCount(_encoderChannel);
+            return _invertEncoderDirection ? -rawCount : rawCount;
+        }
+
+        void setEncoderCount(int32_t count) noexcept
+        {
+            if (!hasEncoder())
+            {
+                return;
+            }
+
+            Platform::WriteEncoderCount(_encoderChannel, _invertEncoderDirection ? -count : count);
+            resetEncoderVelocityEstimate();
+        }
+
+        void resetEncoderCount() noexcept
+        {
+            setEncoderCount(0);
+        }
+
+        float getEncoderDistanceMeters() const noexcept
+        {
+            return pulsesToDistance(getEncoderCount());
+        }
+
+        void setEncoderDistanceMeters(float distanceMeters) noexcept
+        {
+            setEncoderCount(distanceToPulses(distanceMeters));
+        }
+
+        void resetEncoderDistanceMeters(float distanceMeters = 0.0f) noexcept
+        {
+            setEncoderDistanceMeters(distanceMeters);
+        }
+
+        float getEncoderVelocityMetersPerSecond() const noexcept
+        {
+            updateEncoderVelocityEstimate();
+            return _encoderVelocityMetersPerSecond;
+        }
+    };
 }

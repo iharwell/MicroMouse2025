@@ -3,7 +3,7 @@
 
 constexpr float AVG_SPD_WEIGHT = 0.3f;
 //#define SMALL_RDD
-#define PATH_SIZE 192
+#define PATH_SIZE 256
 constexpr float PI_F = 3.14159265358979323846f;
 constexpr float RT2 = 1.414213562f;
 constexpr float HALF_RT2 = 0.707106781f;
@@ -13,6 +13,8 @@ constexpr float MIN_CLEARANCE = 0.012f;
 #if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
 
 #include <Arduino.h>
+#include <QuadEncoder.h>
+#include <new>
 
 #ifndef EXPORT
 #define EXPORT
@@ -37,8 +39,9 @@ constexpr float MIN_CLEARANCE = 0.012f;
 #include <sstream>
 #include <string>
 #include <thread>
+#include <new>
 
-using boolean = bool;
+// Host builds avoid defining Arduino's boolean alias to prevent Windows RPC type collisions.
 using byte = std::uint8_t;
 using word = std::uint16_t;
 
@@ -497,6 +500,38 @@ static HardwareSerial Serial6;
 static HardwareSerial Serial7;
 static HardwareSerial Serial8;
 
+class QuadEncoder
+{
+public:
+    QuadEncoder(uint8_t channel = 0U, uint8_t pinA = 0U, uint8_t pinB = 0U, uint8_t pullups = 0U)
+        : channel_(channel)
+        , pin_a_(pinA)
+        , pin_b_(pinB)
+        , pullups_(pullups)
+    {
+    }
+
+    void setInitConfig() {}
+    void init() {}
+
+    int32_t read() const
+    {
+        return count_;
+    }
+
+    void write(int32_t value)
+    {
+        count_ = value;
+    }
+
+private:
+    uint8_t channel_;
+    uint8_t pin_a_;
+    uint8_t pin_b_;
+    uint8_t pullups_;
+    int32_t count_ = 0;
+};
+
 #ifndef IMXRT_FLEXPWM1_ADDRESS
 #define IMXRT_FLEXPWM1_ADDRESS 0x403DC000u
 #endif
@@ -789,10 +824,250 @@ inline int atexit(void (*)()) { return 0; }
 
 #endif
 
+#ifndef MAZEMAP_INLINE
+#define MAZEMAP_INLINE inline
+#endif
+
 #include <cmath>
 
 namespace MazeMap
 {
+    namespace Platform
+    {
+        constexpr uint8_t kInvalidPin = 0xFFU;
+        constexpr uint8_t kInvalidEncoderChannel = 0xFFU;
+        constexpr uint8_t kMaxEncoderChannels = 5U;
+
+        constexpr uint32_t kMotorPwmFrequencyHz = 80000U;
+        // Teensy 4 FlexPWM uses a 150 MHz source on these motor pins, so 1875 counts yields an 80 kHz period.
+        constexpr uint16_t kMotorPwmCounts = 1875U;
+        constexpr uint16_t kMotorPwmMaxCode = kMotorPwmCounts - 1U;
+        constexpr uint8_t kMotorPwmBits = 12U;
+
+        inline bool IsAssignedPin(uint8_t pin)
+        {
+            return pin != kInvalidPin;
+        }
+
+        inline void ConfigureMotorPwmPin(uint8_t pin)
+        {
+            if (!IsAssignedPin(pin))
+            {
+                return;
+            }
+
+            analogWriteResolution(kMotorPwmBits);
+            pinMode(pin, OUTPUT);
+            analogWriteFrequency(pin, kMotorPwmFrequencyHz);
+            analogWrite(pin, 0);
+        }
+
+        inline void DrivePinLow(uint8_t pin)
+        {
+            if (!IsAssignedPin(pin))
+            {
+                return;
+            }
+
+            pinMode(pin, OUTPUT);
+            digitalWrite(pin, LOW);
+        }
+
+        inline void DrivePinHigh(uint8_t pin)
+        {
+            if (!IsAssignedPin(pin))
+            {
+                return;
+            }
+
+            pinMode(pin, OUTPUT);
+            digitalWrite(pin, HIGH);
+        }
+
+#if defined(IMXRT_FLEXPWM1) && defined(IMXRT_FLEXPWM2) && defined(FLEXPWM_MCTRL_CLDOK) && defined(FLEXPWM_OUTEN_PWMX_EN)
+        struct FlexPwmPinInfo
+        {
+            IMXRT_FLEXPWM_t* module;
+            uint8_t submodule;
+            uint8_t channel; // 0 = X, 1 = A, 2 = B
+        };
+
+        inline bool ResolveMotorFlexPwmPin(uint8_t pin, FlexPwmPinInfo& info)
+        {
+            switch (pin)
+            {
+            case 5:
+                info.module = &IMXRT_FLEXPWM2;
+                info.submodule = 1;
+                info.channel = 1;
+                return true;
+
+            case 6:
+                info.module = &IMXRT_FLEXPWM2;
+                info.submodule = 2;
+                info.channel = 1;
+                return true;
+
+            case 24:
+                info.module = &IMXRT_FLEXPWM1;
+                info.submodule = 2;
+                info.channel = 0;
+                return true;
+
+            case 25:
+                info.module = &IMXRT_FLEXPWM1;
+                info.submodule = 3;
+                info.channel = 0;
+                return true;
+
+            default:
+                return false;
+            }
+        }
+#endif
+
+        inline void WriteMotorPwmCode(uint8_t pin, uint16_t code)
+        {
+            if (!IsAssignedPin(pin))
+            {
+                return;
+            }
+
+            if (code > kMotorPwmMaxCode)
+            {
+                code = kMotorPwmMaxCode;
+            }
+
+#if defined(IMXRT_FLEXPWM1) && defined(IMXRT_FLEXPWM2) && defined(FLEXPWM_MCTRL_CLDOK) && defined(FLEXPWM_OUTEN_PWMX_EN)
+            FlexPwmPinInfo info{};
+
+            if (ResolveMotorFlexPwmPin(pin, info))
+            {
+                analogWrite(pin, 0U);
+
+                const uint16_t mask = static_cast<uint16_t>(1U << info.submodule);
+
+                info.module->MCTRL |= FLEXPWM_MCTRL_CLDOK(mask);
+
+                switch (info.channel)
+                {
+                case 0:
+                    info.module->SM[info.submodule].VAL0 = kMotorPwmMaxCode - code;
+                    info.module->OUTEN |= FLEXPWM_OUTEN_PWMX_EN(mask);
+                    break;
+
+                case 1:
+                    info.module->SM[info.submodule].VAL3 = code;
+                    info.module->OUTEN |= FLEXPWM_OUTEN_PWMA_EN(mask);
+                    break;
+
+                case 2:
+                    info.module->SM[info.submodule].VAL5 = code;
+                    info.module->OUTEN |= FLEXPWM_OUTEN_PWMB_EN(mask);
+                    break;
+
+                default:
+                    info.module->MCTRL |= FLEXPWM_MCTRL_LDOK(mask);
+                    return;
+                }
+
+                info.module->MCTRL |= FLEXPWM_MCTRL_LDOK(mask);
+                return;
+            }
+#endif
+
+            analogWrite(pin, static_cast<int>(code));
+        }
+
+        struct EncoderSlot
+        {
+            bool initialized = false;
+            uint8_t pinA = kInvalidPin;
+            uint8_t pinB = kInvalidPin;
+            alignas(QuadEncoder) unsigned char storage[sizeof(QuadEncoder)] = {};
+        };
+
+        inline EncoderSlot* EncoderSlots()
+        {
+            static EncoderSlot slots[kMaxEncoderChannels];
+            return slots;
+        }
+
+        inline QuadEncoder& AccessEncoder(EncoderSlot& slot)
+        {
+            return *reinterpret_cast<QuadEncoder*>(slot.storage);
+        }
+
+        inline const QuadEncoder& AccessEncoder(const EncoderSlot& slot)
+        {
+            return *reinterpret_cast<const QuadEncoder*>(slot.storage);
+        }
+
+        inline bool IsAssignedEncoder(uint8_t channel, uint8_t pinA, uint8_t pinB)
+        {
+            return (channel != kInvalidEncoderChannel) &&
+                   (channel < kMaxEncoderChannels) &&
+                   IsAssignedPin(pinA) &&
+                   IsAssignedPin(pinB);
+        }
+
+        inline bool ConfigureEncoder(uint8_t channel, uint8_t pinA, uint8_t pinB)
+        {
+            if (!IsAssignedEncoder(channel, pinA, pinB))
+            {
+                return false;
+            }
+
+            EncoderSlot& slot = EncoderSlots()[channel];
+
+            if (slot.initialized && (slot.pinA != pinA || slot.pinB != pinB))
+            {
+                AccessEncoder(slot).~QuadEncoder();
+                slot.initialized = false;
+            }
+
+            if (!slot.initialized)
+            {
+                // The encoder hardware drives these lines directly, so leave the library pull-ups disabled.
+                new (slot.storage) QuadEncoder(channel, pinA, pinB, 0U);
+                slot.initialized = true;
+                slot.pinA = pinA;
+                slot.pinB = pinB;
+            }
+
+            AccessEncoder(slot).setInitConfig();
+            AccessEncoder(slot).init();
+            return true;
+        }
+
+        inline int32_t ReadEncoderCount(uint8_t channel)
+        {
+            if (channel >= kMaxEncoderChannels)
+            {
+                return 0;
+            }
+
+            EncoderSlot& slot = EncoderSlots()[channel];
+            return slot.initialized ? AccessEncoder(slot).read() : 0;
+        }
+
+        inline void WriteEncoderCount(uint8_t channel, int32_t value)
+        {
+            if (channel >= kMaxEncoderChannels)
+            {
+                return;
+            }
+
+            EncoderSlot& slot = EncoderSlots()[channel];
+
+            if (!slot.initialized)
+            {
+                return;
+            }
+
+            AccessEncoder(slot).write(value);
+        }
+    }
     namespace Math
     {
         inline float Sqrtf(float value) noexcept
@@ -816,6 +1091,11 @@ namespace MazeMap
 }
 
 #endif
+
+
+
+
+
 
 
 

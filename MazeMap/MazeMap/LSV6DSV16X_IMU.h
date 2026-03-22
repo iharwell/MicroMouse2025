@@ -1,9 +1,14 @@
 #pragma once
 
+#include "Defines.h"
+
 #ifdef ARDUINO_TEENSY41
 
-#include <Arduino.h>
 #include <SPI.h>
+
+#ifdef DISABLE
+#undef DISABLE
+#endif
 
 namespace MazeMap
 {
@@ -13,6 +18,13 @@ namespace MazeMap
     public:
         static constexpr uint8_t WHO_AM_I_VALUE = 0x70;
         static constexpr uint32_t kMaxSpiClockHz = 10000000UL;
+
+        enum class BeginFailureReason : uint8_t
+        {
+            None = 0U,
+            ResetTimeout,
+            WhoAmIMismatch,
+        };
 
         static constexpr uint8_t FUNC_CFG_ACCESS_RW_ADR = 0x01;
         static constexpr uint8_t PIN_CTRL_RW_ADR = 0x02;
@@ -163,6 +175,13 @@ namespace MazeMap
             ODR_7680HZ_HP_N_LP = 0x0C,
         };
 
+        enum class HAODR_SELECTION : uint8_t
+        {
+            NATIVE = 0x00,
+            EXACT_1000_2000_4000_8000 = 0x01,
+            EXACT_800_1600_3200_6400 = 0x02,
+        };
+
         enum class ACCEL_FILTER_FREQ : uint8_t
         {
             FRAC_1_002 = 0x00,
@@ -216,6 +235,13 @@ namespace MazeMap
             DPS4000 = 0x0C,
         };
 
+        enum class SELF_TEST_MODE : uint8_t
+        {
+            DISABLED = 0x00,
+            POSITIVE = 0x01,
+            NEGATIVE = 0x02,
+        };
+
         class StatusReg
         {
         public:
@@ -238,6 +264,9 @@ namespace MazeMap
 
         bool Begin()
         {
+            last_begin_failure_reason_ = BeginFailureReason::None;
+            last_who_am_i_ = 0U;
+
             pinMode(CS_PIN, OUTPUT);
             digitalWrite(CS_PIN, HIGH);
             pinMode(INT_PIN, INPUT);
@@ -249,11 +278,20 @@ namespace MazeMap
 
             if (!Reset())
             {
+                last_begin_failure_reason_ = BeginFailureReason::ResetTimeout;
+                last_who_am_i_ = ReadWhoAmI();
                 return false;
             }
 
             WriteRegister(CTRL3_RW_ADR, static_cast<uint8_t>(CTRL3_BDU | CTRL3_IF_INC));
-            return IsConnected();
+            last_who_am_i_ = ReadWhoAmI();
+            if (last_who_am_i_ != WHO_AM_I_VALUE)
+            {
+                last_begin_failure_reason_ = BeginFailureReason::WhoAmIMismatch;
+                return false;
+            }
+
+            return true;
         }
 
         bool Reset(uint32_t timeout_ms = 50U)
@@ -279,9 +317,39 @@ namespace MazeMap
             return ReadRegister(WHO_AM_I_R_ADR);
         }
 
+        uint8_t ReadWhoAmIWithSettings(uint32_t clock_hz, uint8_t data_mode)
+        {
+            return ReadRegisterWithSettings(WHO_AM_I_R_ADR, clock_hz, data_mode);
+        }
+
         bool IsConnected()
         {
             return ReadWhoAmI() == WHO_AM_I_VALUE;
+        }
+
+        BeginFailureReason GetLastBeginFailureReason() const
+        {
+            return last_begin_failure_reason_;
+        }
+
+        const char* GetLastBeginFailureReasonName() const
+        {
+            switch (last_begin_failure_reason_)
+            {
+            case BeginFailureReason::None:
+                return "none";
+            case BeginFailureReason::ResetTimeout:
+                return "reset-timeout";
+            case BeginFailureReason::WhoAmIMismatch:
+                return "whoami-mismatch";
+            default:
+                return "unknown";
+            }
+        }
+
+        uint8_t GetLastWhoAmI() const
+        {
+            return last_who_am_i_;
         }
 
         void WriteRegister(uint8_t address, uint8_t data)
@@ -297,6 +365,17 @@ namespace MazeMap
         uint8_t ReadRegister(uint8_t address)
         {
             SPI.beginTransaction(GetSpiSettings());
+            Select();
+            SPI.transfer(address | kReadMask);
+            const uint8_t value = SPI.transfer(0x00);
+            Deselect();
+            SPI.endTransaction();
+            return value;
+        }
+
+        uint8_t ReadRegisterWithSettings(uint8_t address, uint32_t clock_hz, uint8_t data_mode)
+        {
+            SPI.beginTransaction(SPISettings(clock_hz, MSBFIRST, data_mode));
             Select();
             SPI.transfer(address | kReadMask);
             const uint8_t value = SPI.transfer(0x00);
@@ -359,6 +438,22 @@ namespace MazeMap
             WriteRegister(CTRL1_RW_ADR, ToU8(mode) | ToU8(odr));
         }
 
+        void ConfigureUiHighAccuracyOdr(HAODR_SELECTION selection, ODR_SETTING accelOdr, ODR_SETTING gyroOdr)
+        {
+            WriteRegister(CTRL1_RW_ADR, ToU8(ACCEL_MODE::HI_ACC) | ToU8(ODR_SETTING::DISABLE));
+            WriteRegister(CTRL2_RW_ADR, ToU8(GYRO_MODE::HI_ACC) | ToU8(ODR_SETTING::DISABLE));
+            delayMicroseconds(500U);
+
+            uint8_t haodrCfg = ReadRegister(HAODR_CFG_RW_ADR);
+            haodrCfg &= static_cast<uint8_t>(~HAODR_CFG_HAODR_SEL_MASK);
+            haodrCfg |= (ToU8(selection) & HAODR_CFG_HAODR_SEL_MASK);
+            WriteRegister(HAODR_CFG_RW_ADR, haodrCfg);
+            delayMicroseconds(500U);
+
+            WriteRegister(CTRL2_RW_ADR, ToU8(GYRO_MODE::HI_ACC) | ToU8(gyroOdr));
+            WriteRegister(CTRL1_RW_ADR, ToU8(ACCEL_MODE::HI_ACC) | ToU8(accelOdr));
+        }
+
         void SetAccelRange(ACCEL_FILTER_FREQ freq, ACCEL_FULLSCALE scale)
         {
             accel_scale_ = scale;
@@ -386,6 +481,13 @@ namespace MazeMap
         {
             gyro_scale_ = range;
             WriteRegister(CTRL6_RW_ADR, ToU8(lpf1) | ToU8(range));
+        }
+
+        void SetSelfTest(SELF_TEST_MODE gyroMode, SELF_TEST_MODE accelMode)
+        {
+            const uint8_t gyroBits = static_cast<uint8_t>((ToU8(gyroMode) & 0x03U) << 2U);
+            const uint8_t accelBits = static_cast<uint8_t>(ToU8(accelMode) & 0x03U);
+            WriteRegister(CTRL10_RW_ADR, gyroBits | accelBits);
         }
 
         StatusReg ReadStatus()
@@ -498,6 +600,7 @@ namespace MazeMap
         static constexpr uint8_t CTRL3_SW_RESET = 0x01;
 
         static constexpr uint8_t CTRL8_HP_LPF2_XL_BW_MASK = 0xE0;
+        static constexpr uint8_t HAODR_CFG_HAODR_SEL_MASK = 0x03;
 
         static constexpr uint8_t CTRL9_HP_SLOPE_XL_EN = 0x10;
         static constexpr uint8_t CTRL9_LPF2_XL_EN = 0x08;
@@ -517,11 +620,13 @@ namespace MazeMap
 
         static constexpr uint8_t ToU8(ACCEL_MODE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(ODR_SETTING value) { return static_cast<uint8_t>(value); }
+        static constexpr uint8_t ToU8(HAODR_SELECTION value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(ACCEL_FILTER_FREQ value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(ACCEL_FULLSCALE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(GYRO_LPF1_MODE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(GYRO_MODE value) { return static_cast<uint8_t>(value); }
         static constexpr uint8_t ToU8(GYRO_FULLSCALE_RANGE value) { return static_cast<uint8_t>(value); }
+        static constexpr uint8_t ToU8(SELF_TEST_MODE value) { return static_cast<uint8_t>(value); }
 
         static void Select()
         {
@@ -553,6 +658,73 @@ namespace MazeMap
 
         ACCEL_FULLSCALE accel_scale_ = ACCEL_FULLSCALE::G2;
         GYRO_FULLSCALE_RANGE gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS0125;
+        BeginFailureReason last_begin_failure_reason_ = BeginFailureReason::None;
+        uint8_t last_who_am_i_ = 0U;
+    };
+
+    template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
+    using LSM6DSV16X_IMU = LSV6DSV16X_IMU<CS_PIN, INT_PIN, MOSI_PIN, MISO_PIN, CLOCK_PIN>;
+}
+
+#else
+
+namespace MazeMap
+{
+    template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
+    class LSV6DSV16X_IMU
+    {
+    public:
+        enum class BeginFailureReason : uint8_t
+        {
+            None = 0U,
+        };
+
+        enum class SELF_TEST_MODE : uint8_t
+        {
+            DISABLED = 0x00,
+            POSITIVE = 0x01,
+            NEGATIVE = 0x02,
+        };
+
+        struct Axes
+        {
+            int16_t x = 0;
+            int16_t y = 0;
+            int16_t z = 0;
+        };
+
+        LSV6DSV16X_IMU() = default;
+
+        bool Begin() { return true; }
+        bool Reset(uint32_t timeout_ms = 50U)
+        {
+            (void)timeout_ms;
+            return true;
+        }
+
+        bool IsConnected() const { return false; }
+        BeginFailureReason GetLastBeginFailureReason() const { return BeginFailureReason::None; }
+        const char* GetLastBeginFailureReasonName() const { return "stub"; }
+        uint8_t GetLastWhoAmI() const { return 0U; }
+        void SetSelfTest(SELF_TEST_MODE gyroMode, SELF_TEST_MODE accelMode) const
+        {
+            (void)gyroMode;
+            (void)accelMode;
+        }
+
+        Axes ReadGyro() const { return {}; }
+        Axes ReadAccel() const { return {}; }
+
+        int16_t ReadGyroX() const { return 0; }
+        int16_t ReadGyroY() const { return 0; }
+        int16_t ReadGyroZ() const { return 0; }
+
+        int16_t ReadAccelX() const { return 0; }
+        int16_t ReadAccelY() const { return 0; }
+        int16_t ReadAccelZ() const { return 0; }
+
+        int16_t ReadTemp() const { return 0; }
+        float ReadTempC() const { return 25.0f; }
     };
 
     template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
@@ -560,3 +732,5 @@ namespace MazeMap
 }
 
 #endif
+
+

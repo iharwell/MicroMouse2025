@@ -7,33 +7,33 @@
 
 namespace MazeMap
 {
-	class EXPORT ManeuverPath
+	class ManeuverPath
 	{
 	private:
 		ManeuverCode _steps[PATH_SIZE * 2];
 		uint16_t _size;
 	public:
 
-		ManeuverPath()
-			: _size(0)
-			, _steps()
+		MAZEMAP_INLINE ManeuverPath()
+			: _steps()
+			, _size(0)
 		{
 		}
 
-		static void FromHalfStep(const HalfStepPath<PATH_SIZE * 2>& hsp, const ManeuverPath mp);
-		float Cost(const Vehicle& v, float cellSize);
-		float Cost(const Vehicle& v, float cellSize) const;
+		static EXPORT bool FromHalfStep(const HalfStepPath<PATH_SIZE * 2>& hsp, DirectionalLocation start, ManeuverPath& mp);
+		EXPORT float Cost(const Vehicle& v, float cellSize);
+		EXPORT float Cost(const Vehicle& v, float cellSize) const;
 
-		uint16_t GetSize() { return const_cast<const ManeuverPath*>(this)->GetSize(); }
-		uint16_t GetSize() const { return _size; }
+		MAZEMAP_INLINE uint16_t GetSize() { return const_cast<const ManeuverPath*>(this)->GetSize(); }
+		MAZEMAP_INLINE uint16_t GetSize() const { return _size; }
 
-		ManeuverCode& Index(uint16_t index) { return _steps[index]; }
-		const ManeuverCode& Index(uint16_t index) const { return _steps[index]; }
+		MAZEMAP_INLINE ManeuverCode& Index(uint16_t index) { return _steps[index]; }
+		MAZEMAP_INLINE const ManeuverCode& Index(uint16_t index) const { return _steps[index]; }
 
-		ManeuverCode& operator[](uint16_t index) { return _steps[index]; }
-		const ManeuverCode& operator[](uint16_t index) const { return _steps[index]; }
+		MAZEMAP_INLINE ManeuverCode& operator[](uint16_t index) { return _steps[index]; }
+		MAZEMAP_INLINE const ManeuverCode& operator[](uint16_t index) const { return _steps[index]; }
 
-		bool push_back(ManeuverCode nextStep)
+		MAZEMAP_INLINE bool push_back(ManeuverCode nextStep)
 		{
 			if (_size < PATH_SIZE * 2)
 			{
@@ -44,7 +44,7 @@ namespace MazeMap
 			return false;
 		}
 
-		bool pop_back()
+		MAZEMAP_INLINE bool pop_back()
 		{
 			if (_size > 0)
 			{
@@ -53,7 +53,7 @@ namespace MazeMap
 			}
 			return false;
 		}
-		bool pop_back(ManeuverCode& valueRemoved)
+		MAZEMAP_INLINE bool pop_back(ManeuverCode& valueRemoved)
 		{
 			if (_size > 0)
 			{
@@ -63,7 +63,7 @@ namespace MazeMap
 			}
 			return false;
 		}
-		ManeuverCode first()
+		MAZEMAP_INLINE ManeuverCode first()
 		{
 			if (_size > 0)
 			{
@@ -71,7 +71,7 @@ namespace MazeMap
 			}
 			return ManeuverCode::MC_NONE;
 		}
-		ManeuverCode last() const
+		MAZEMAP_INLINE ManeuverCode last() const
 		{
 			if (_size > 0)
 			{
@@ -79,8 +79,8 @@ namespace MazeMap
 			}
 			return ManeuverCode::MC_NONE;
 		}
-		ManeuverCode last() { return const_cast<const ManeuverPath*>(this)->last(); }
-		ManeuverCode last(uint16_t index) const
+		MAZEMAP_INLINE ManeuverCode last() { return const_cast<const ManeuverPath*>(this)->last(); }
+		MAZEMAP_INLINE ManeuverCode last(uint16_t index) const
 		{
 			if (_size > index)
 			{
@@ -88,17 +88,17 @@ namespace MazeMap
 			}
 			return ManeuverCode::MC_NONE;
 		}
-		ManeuverCode last(uint16_t index) { return const_cast<const ManeuverPath*>(this)->last(index); }
-		void clear()
+		MAZEMAP_INLINE ManeuverCode last(uint16_t index) { return const_cast<const ManeuverPath*>(this)->last(index); }
+		MAZEMAP_INLINE void clear()
 		{
 			_size = 0;
 		}
 
-		bool contains(ManeuverCode coords) { return const_cast<const ManeuverPath*>(this)->contains(coords); }
-		bool contains(ManeuverCode coords) const { return indexOf(coords) != -1; }
+		MAZEMAP_INLINE bool contains(ManeuverCode coords) { return const_cast<const ManeuverPath*>(this)->contains(coords); }
+		MAZEMAP_INLINE bool contains(ManeuverCode coords) const { return indexOf(coords) != -1; }
 
-		int indexOf(ManeuverCode coords) { return const_cast<const ManeuverPath*>(this)->indexOf(coords); }
-		int indexOf(ManeuverCode coords) const
+		MAZEMAP_INLINE int indexOf(ManeuverCode coords) { return const_cast<const ManeuverPath*>(this)->indexOf(coords); }
+		MAZEMAP_INLINE int indexOf(ManeuverCode coords) const
 		{
 			for (int i = 0; i < _size; i++)
 			{
@@ -110,10 +110,18 @@ namespace MazeMap
 			return -1;
 		}
 
-		DirectionalLocation ExecutePath(DirectionalLocation start) const;
-		DirectionalLocation ExecuteReverse(DirectionalLocation end) const;
+		EXPORT DirectionalLocation ExecutePath(DirectionalLocation start) const;
+		EXPORT DirectionalLocation ExecuteReverse(DirectionalLocation end) const;
 
-		void ToHalfStepPath(DirectionalLocation start, HalfStepPath<PATH_SIZE * 2>& path);
+		EXPORT void ToHalfStepPath(DirectionalLocation start, HalfStepPath<PATH_SIZE * 2>& path);
 
 	};
 }
+
+
+
+
+
+
+
+

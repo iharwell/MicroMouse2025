@@ -73,22 +73,36 @@ namespace MazeMap
             digitalWrite(_ledOutPin, enabled ? HIGH : LOW);
         }
 
-         float ReadLightLevel() const
+        float ReadLightLevel() const
         {
             const uint16_t adcReading = static_cast<uint16_t>(analogRead(_wallSensorInPin));
             return AdcToLightLevel(adcReading);
         }
 
-        float ReadDistance(float darkLightLevel) const
+        static float DifferentialLightLevel(float ambientLightLevel, float litLightLevel)
         {
-            float deltaLightLevel = ReadLightLevel() - darkLightLevel;
+            const float deltaLightLevel = litLightLevel - ambientLightLevel;
+            return (deltaLightLevel > 0.0f) ? deltaLightLevel : 0.0f;
+        }
 
+        float DistanceFromDifferentialLight(float deltaLightLevel) const
+        {
             if (deltaLightLevel < 0.0f)
             {
                 deltaLightLevel = 0.0f;
             }
 
             return DeltaLightToDistance(deltaLightLevel);
+        }
+
+        float DistanceFromLightLevels(float ambientLightLevel, float litLightLevel) const
+        {
+            return DistanceFromDifferentialLight(DifferentialLightLevel(ambientLightLevel, litLightLevel));
+        }
+
+        float ReadDistance(float darkLightLevel) const
+        {
+            return DistanceFromLightLevels(darkLightLevel, ReadLightLevel());
         }
 
     private:

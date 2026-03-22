@@ -47,6 +47,7 @@ namespace MazeMap
 				return CellCoordinates((_loc.GetX()-1) >> 1, _loc.GetY() >> 1);
 			}
 		}
+		return static_cast<CellCoordinates>(_loc);
 	}
 
 	DirectionalLocation DirectionalLocation::Turn(RelativeDirection relDir)

@@ -36,6 +36,9 @@
     <ClCompile Include="DirectionTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DiagnosticCoverageTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="PathFinderTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -46,6 +49,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="FresnelTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="HistoricalMazePathFinderTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ManeuverPathFinderTest.cpp">

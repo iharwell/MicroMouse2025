@@ -1,16 +1,19 @@
 #pragma once
 
 #include "Defines.h"
+#include "DirectionalLocation.h"
 #include "ManeuverSet.h"
 
 namespace MazeMap
 {
-	class EXPORT ManeuverPoint
+	class ManeuverPoint
 	{
 	public:
 		ManeuverPoint(float x, float y, float theta, float omega, float velocity)
 			: X(x), Y(y), Theta(theta), Omega(omega), Velocity(velocity)
-		{ }
+		{
+		}
+
 		float X;
 		float Y;
 		float Theta;
@@ -18,7 +21,7 @@ namespace MazeMap
 		float Velocity;
 	};
 
-	class EXPORT ManeuverInstance
+	class ManeuverInstance
 	{
 	private:
 		ManeuverCode _code;
@@ -26,74 +29,66 @@ namespace MazeMap
 		float _entrySpeed;
 		float _exitSpeed;
 	public:
-		ManeuverInstance(ManeuverCode code, DirectionalLocation start, float entrySpeed, float exitSpeed, float turnInDist, float turnCurvature)
-			: _code(code), _start(start), _entrySpeed(entrySpeed), _exitSpeed(exitSpeed), _turnInDistance(turnInDist), _turnCurvature(turnCurvature)
+		MAZEMAP_INLINE ManeuverInstance()
+			: _code(MC_NONE)
+			, _start()
+			, _entrySpeed(0.0f)
+			, _exitSpeed(0.0f)
 		{
 		}
 
-		ManeuverCode getCode() { return const_cast<const ManeuverInstance*>(this)->getCode(); }
-		ManeuverCode getCode() const { return _code; }
-		void setCode(ManeuverCode code) { _code = code; }
-
-		DirectionalLocation getStart() { return const_cast<const ManeuverInstance*>(this)->getStart(); }
-		DirectionalLocation getStart() const { return _start; }
-		void setCode(DirectionalLocation start) { _start = start; }
-
-		DirectionalLocation getEnd() { return const_cast<const ManeuverInstance*>(this)->getEnd(); }
-		DirectionalLocation getEnd() const
+		MAZEMAP_INLINE ManeuverInstance(
+			ManeuverCode code,
+			DirectionalLocation start,
+			float entrySpeed = 0.0f,
+			float exitSpeed = 0.0f)
+			: _code(code)
+			, _start(start)
+			, _entrySpeed(entrySpeed)
+			, _exitSpeed(exitSpeed)
 		{
-			auto set = ManeuverSet::GetSet();
-			return set.Move(getCode(), getStart());
 		}
 
-		float getEntrySpeed() { return const_cast<const ManeuverInstance*>(this)->getEntrySpeed(); }
-		float getEntrySpeed() const { return _entrySpeed; }
-		void setEntrySpeed(float entrySpeed) { _entrySpeed = entrySpeed; }
+		MAZEMAP_INLINE ManeuverCode GetCode() { return const_cast<const ManeuverInstance*>(this)->GetCode(); }
+		MAZEMAP_INLINE ManeuverCode GetCode() const { return _code; }
+		MAZEMAP_INLINE ManeuverCode getCode() { return GetCode(); }
+		MAZEMAP_INLINE ManeuverCode getCode() const { return GetCode(); }
+		MAZEMAP_INLINE void SetCode(ManeuverCode code) { _code = code; }
+		MAZEMAP_INLINE void setCode(ManeuverCode code) { SetCode(code); }
 
-		float getExitSpeed() { return const_cast<const ManeuverInstance*>(this)->getExitSpeed(); }
-		float getExitSpeed() const { return _exitSpeed; }
-		void setExitSpeed(float exitSpeed) { _exitSpeed = exitSpeed; }
+		MAZEMAP_INLINE DirectionalLocation GetStart() { return const_cast<const ManeuverInstance*>(this)->GetStart(); }
+		MAZEMAP_INLINE DirectionalLocation GetStart() const { return _start; }
+		MAZEMAP_INLINE DirectionalLocation getStart() { return GetStart(); }
+		MAZEMAP_INLINE DirectionalLocation getStart() const { return GetStart(); }
+		MAZEMAP_INLINE void SetStart(DirectionalLocation start) { _start = start; }
+		MAZEMAP_INLINE void setStart(DirectionalLocation start) { SetStart(start); }
 
-		float getTurnInDistance() { return const_cast<const ManeuverInstance*>(this)->getTurnInDistance(); }
-		float getTurnInDistance() const
+		MAZEMAP_INLINE DirectionalLocation GetEnd() { return const_cast<const ManeuverInstance*>(this)->GetEnd(); }
+		MAZEMAP_INLINE DirectionalLocation GetEnd() const
 		{
-			const ManeuverSet& set = ManeuverSet::GetSet();
+			return ManeuverSet::GetSet().Move(_code, _start);
 		}
+		MAZEMAP_INLINE DirectionalLocation getEnd() { return GetEnd(); }
+		MAZEMAP_INLINE DirectionalLocation getEnd() const { return GetEnd(); }
 
-		float getTurnCurvature() { return const_cast<const ManeuverInstance*>(this)->getTurnCurvature(); }
-		float getTurnCurvature() const
-		{
-			if (getCode() <= ManeuverCode::S31)
-			{
-				return 0.0f;
-			}
-		}
+		MAZEMAP_INLINE float GetEntrySpeed() { return const_cast<const ManeuverInstance*>(this)->GetEntrySpeed(); }
+		MAZEMAP_INLINE float GetEntrySpeed() const { return _entrySpeed; }
+		MAZEMAP_INLINE float getEntrySpeed() { return GetEntrySpeed(); }
+		MAZEMAP_INLINE float getEntrySpeed() const { return GetEntrySpeed(); }
+		MAZEMAP_INLINE void SetEntrySpeed(float entrySpeed) { _entrySpeed = entrySpeed; }
+		MAZEMAP_INLINE void setEntrySpeed(float entrySpeed) { SetEntrySpeed(entrySpeed); }
 
-		void EvaluateAtDistance(float distance, ManeuverPoint& result, const Vehicle& vehicle, const Maze& maze)
-		{
-			float initialForwardX, initialForwardY;
-			GetHeading(getStart().GetDirection(), initialForwardX, initialForwardY);
-			float initialX, initialY;
-			getStart().GetLocation().GetPhysicalLocation(maze.GetCellDimension(), initialX, initialY);
+		MAZEMAP_INLINE float GetExitSpeed() { return const_cast<const ManeuverInstance*>(this)->GetExitSpeed(); }
+		MAZEMAP_INLINE float GetExitSpeed() const { return _exitSpeed; }
+		MAZEMAP_INLINE float getExitSpeed() { return GetExitSpeed(); }
+		MAZEMAP_INLINE float getExitSpeed() const { return GetExitSpeed(); }
+		MAZEMAP_INLINE void SetExitSpeed(float exitSpeed) { _exitSpeed = exitSpeed; }
+		MAZEMAP_INLINE void setExitSpeed(float exitSpeed) { SetExitSpeed(exitSpeed); }
 
-			if (getCode() < 32)
-			{
-
-			}
-		}
-	private:
-		void EvaluateTurnInOutAtDistance(float distanceIntoTurnIn, float omega0, float omega1, ManeuverPoint& result, const Vehicle& vehicle, const Maze& maze)
+		MAZEMAP_INLINE bool IsStraight() const
 		{
-			float curvature = getTurnCurvature();
-			float k = 1.0f / (curvature * 2 * vehicle.GetSpeedFromCurvature(curvature));
-			result.Omega = omega0 + (k * distanceIntoTurnIn * distanceIntoTurnIn);
-			
-		}
-		void EvaluateTurnInAtDistance(float distanceIntoTurnIn, ManeuverPoint& result, const Vehicle& vehicle, const Maze& maze)
-		{
-			float curvature = getTurnCurvature();
-			float k = 1.0f / (curvature * 2 * vehicle.GetSpeedFromCurvature(curvature));
-			result.Omega =
+			return _code != MC_NONE && _code <= S31;
 		}
 	};
 }
+

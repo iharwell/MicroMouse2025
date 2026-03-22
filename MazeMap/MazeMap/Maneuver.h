@@ -109,9 +109,11 @@ namespace MazeMap
 			return 0;
 		}
 
-		int8_t mult = 1 - 2 * static_cast<uint8_t>(mc & MIRRORED_MANEUVER_FLAG);
+		// Unmirrored smooth-turn codes are defined as right-hand turns in the maneuver set.
+		// Runtime yaw uses positive angles for CCW rotation, so right turns must carry a negative sign.
+		const int8_t mult = ((mc & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG) ? static_cast<int8_t>(1) : static_cast<int8_t>(-1);
 
-		auto normCode = mc & INVERTED_MIRRORED_MANEUVER_FLAG;
+		const ManeuverCode normCode = mc & INVERTED_MIRRORED_MANEUVER_FLAG;
 
 		switch (normCode)
 		{
@@ -139,13 +141,16 @@ namespace MazeMap
 		case S180LS:
 		case S180ELS:
 			return 180 * mult;
+		default:
+			return 0;
 		}
 	}
 
-	class EXPORT Maneuver
+	class Maneuver
 	{
 		//↑↗→↘↓↙←↖
 	public:
+		virtual ~Maneuver() = default;
 		virtual bool SupportsDiagonalEntry() const = 0; //
 		virtual bool SupportsStraightEntry() const = 0; //
 
@@ -155,6 +160,7 @@ namespace MazeMap
 		virtual float GetCost(const Vehicle& vehicle) const = 0; //
 		virtual float GetEntrySpeed(const Vehicle& vehicle) const = 0; //
 		virtual float GetExitSpeed(const Vehicle& vehicle) const = 0; //
+		virtual float GetNominalTurnRadiusInCells() const { return 0.0f; }
 
 		virtual ManeuverCode GetManeuverID() const = 0;
 		virtual ManeuverCode GetBackwardsManeuverID() const = 0;
@@ -164,7 +170,7 @@ namespace MazeMap
 		//virtual float GetTurnInLength(const Vehicle& vehicle) const = 0;
 
 
-		bool IsValidMove(DirectionalLocation start, const Maze& maze, bool mirrored) const
+		MAZEMAP_INLINE bool IsValidMove(DirectionalLocation start, const Maze& maze, bool mirrored) const
 		{
 			if (IsDiagonal(start.GetDirection()) && !SupportsDiagonalEntry())
 			{
@@ -207,7 +213,7 @@ namespace MazeMap
 			return true;
 		}
 
-		DirectionalLocation Move(DirectionalLocation start, bool mirrored) const
+		MAZEMAP_INLINE DirectionalLocation Move(DirectionalLocation start, bool mirrored) const
 		{
 			DirectionalLocation result = start;
 			for (uint8_t i = 0; i < GetStepCount(); i++)
@@ -223,7 +229,7 @@ namespace MazeMap
 			return result;
 		}
 
-		uint8_t DistanceTravelled() const
+		MAZEMAP_INLINE uint8_t DistanceTravelled() const
 		{
 			uint8_t dist = 0;
 			
@@ -236,20 +242,20 @@ namespace MazeMap
 	};
 
 	template <int STEPSIZE, bool STRAIGHT_ENTRY, bool DIAGONAL_ENTRY>
-	class EXPORT SimpleManeuver : public Maneuver
+	class SimpleManeuver : public Maneuver
 	{
 	protected:
 		RelativeDirectionalDistance _instructions[STEPSIZE];
 	public:
-		virtual bool SupportsDiagonalEntry() const override { return DIAGONAL_ENTRY; };
-		virtual bool SupportsStraightEntry() const override { return STRAIGHT_ENTRY; };
+		virtual MAZEMAP_INLINE bool SupportsDiagonalEntry() const override { return DIAGONAL_ENTRY; };
+		virtual MAZEMAP_INLINE bool SupportsStraightEntry() const override { return STRAIGHT_ENTRY; };
 
-		virtual uint8_t GetStepCount() const override { return STEPSIZE; }
-		virtual RelativeDirectionalDistance GetStep(uint8_t index) const override { return _instructions[index]; }
+		virtual MAZEMAP_INLINE uint8_t GetStepCount() const override { return STEPSIZE; }
+		virtual MAZEMAP_INLINE RelativeDirectionalDistance GetStep(uint8_t index) const override { return _instructions[index]; }
 	};
 
 	template <int STEPSIZE, bool STRAIGHT_ENTRY, bool DIAGONAL_ENTRY>
-	class EXPORT SmoothTurnManeuver : public SimpleManeuver<STEPSIZE, STRAIGHT_ENTRY, DIAGONAL_ENTRY>
+	class SmoothTurnManeuver : public SimpleManeuver<STEPSIZE, STRAIGHT_ENTRY, DIAGONAL_ENTRY>
 	{
 	private:
 		// The turn radius in cells
@@ -263,7 +269,7 @@ namespace MazeMap
 		// The distance travelled after reaching the start of the maneuver, but before altering direction.
 		float _postTurnDist;
 	protected:
-		SmoothTurnManeuver(float radius_in_cells, float radians, float turnInDelta, float preTurnDist, float postTurnDist)
+		MAZEMAP_INLINE SmoothTurnManeuver(float radius_in_cells, float radians, float turnInDelta, float preTurnDist, float postTurnDist)
 			: _radius_in_cells(radius_in_cells)
 			, _radians(radians)
 			, _turnInDelta(turnInDelta)
@@ -272,7 +278,7 @@ namespace MazeMap
 		{
 		}
 
-		float GetArcLengthInCells()
+		MAZEMAP_INLINE float GetArcLengthInCells()
 		{
 			//float angleChangeInDeltas = _turnInDelta / _radius_in_cells;
 			//float arcRadians = _radians - angleChangeInDeltas;
@@ -281,45 +287,46 @@ namespace MazeMap
 			return _radians * _radius_in_cells - _turnInDelta;
 		}
 	public:
-		float GetRadians() const { return _radians; }
-		float GetRadiusInCells() const { return _radius_in_cells; }
-		float GetTurnInDistInCells() const { return _turnInDelta; }
-		float GetPreTurnDistInCells() const { return _preTurnDist; }
-		float GetPostTurnDistInCells() const { return _postTurnDist; }
+		MAZEMAP_INLINE float GetRadians() const { return _radians; }
+		MAZEMAP_INLINE float GetRadiusInCells() const { return _radius_in_cells; }
+		MAZEMAP_INLINE float GetTurnInDistInCells() const { return _turnInDelta; }
+		MAZEMAP_INLINE float GetPreTurnDistInCells() const { return _preTurnDist; }
+		MAZEMAP_INLINE float GetPostTurnDistInCells() const { return _postTurnDist; }
 
-		float GetTravelDistInCells() const
+		MAZEMAP_INLINE float GetTravelDistInCells() const
 		{
 			//return _preTurnDist + 2.0f * _turnInDelta + GetArcLengthInCells() + _postTurnDist;
 			return _preTurnDist + _turnInDelta + _radians * _radius_in_cells + _postTurnDist;
 		}
-        virtual float GetVMax(const Vehicle& vehicle) const override
+        virtual MAZEMAP_INLINE float GetVMax(const Vehicle& vehicle) const override
         {
             const float cellSize = Maze::GetCellDimension() / 100.0f;
             return vehicle.GetTurnSpeed(GetRadiusInCells() * cellSize);
         }
-        virtual float GetCost(const Vehicle& vehicle) const override
+        virtual MAZEMAP_INLINE float GetCost(const Vehicle& vehicle) const override
         {
             const float cellSize = Maze::GetCellDimension() / 100.0f;
             float turnSpeed = vehicle.GetTurnSpeed(cellSize * _radius_in_cells);
             float turnCost = cellSize * GetTravelDistInCells() / turnSpeed;
             return turnCost;
         }
-		virtual float GetEntrySpeed(const Vehicle& vehicle) const override
+		virtual MAZEMAP_INLINE float GetEntrySpeed(const Vehicle& vehicle) const override
 		{
 			//const float cellSize = Maze::GetCellDimension();
 			//return vehicle.GetTurnSpeed(cellSize * _radius_in_cells);
 			return GetVMax(vehicle);
 		}
-		virtual float GetExitSpeed(const Vehicle& vehicle) const override
+		virtual MAZEMAP_INLINE float GetExitSpeed(const Vehicle& vehicle) const override
 		{
 			//const float cellSize = Maze::GetCellDimension();
 			//return vehicle.GetTurnSpeed(cellSize * _radius_in_cells);
 			return GetVMax(vehicle);
 		}
+		virtual MAZEMAP_INLINE float GetNominalTurnRadiusInCells() const override { return _radius_in_cells; }
 	};
 	/*
 	template <int STEPSIZE, bool STRAIGHT_ENTRY, bool DIAGONAL_ENTRY>
-	class EXPORT SimpleSingleTurnManeuver : public SimpleManeuver<STEPSIZE, STRAIGHT_ENTRY, DIAGONAL_ENTRY>
+	class SimpleSingleTurnManeuver : public SimpleManeuver<STEPSIZE, STRAIGHT_ENTRY, DIAGONAL_ENTRY>
 	{
 	private:
 		const float _radius_in_cells;
@@ -330,8 +337,8 @@ namespace MazeMap
 			, _radians(radians)
 		{}
 	public:
-		float GetRadians() const { return _radians; }
-		float GetRadiusInCells() const { return _radius_in_cells; }
+		MAZEMAP_INLINE float GetRadians() const { return _radians; }
+		MAZEMAP_INLINE float GetRadiusInCells() const { return _radius_in_cells; }
 
 		virtual float GetCost(const Vehicle& vehicle, float cellSize) const override
 		{
@@ -346,7 +353,7 @@ namespace MazeMap
 	};
 
 	template <int SIZE, bool STRAIGHT_ENTRY, bool DIAGONAL_ENTRY>
-	class EXPORT ComplexSingleTurnManeuver : public SimpleSingleTurnManeuver<SIZE, STRAIGHT_ENTRY, DIAGONAL_ENTRY>
+	class ComplexSingleTurnManeuver : public SimpleSingleTurnManeuver<SIZE, STRAIGHT_ENTRY, DIAGONAL_ENTRY>
 	{
 	private:
 		float _entryLength;
@@ -386,17 +393,17 @@ namespace MazeMap
 	};
 	*/
 	//↗0
-	class EXPORT TurnInPlace : public SimpleManeuver<1, true, true>
+	class TurnInPlace : public SimpleManeuver<1, true, true>
 	{
 		const float _turnRatio;
 	public:
-		TurnInPlace( float pisTurned, RelativeDirectionalDistance instruction)
+		MAZEMAP_INLINE TurnInPlace( float pisTurned, RelativeDirectionalDistance instruction)
 			: _turnRatio(pisTurned)
 		{
 			_instructions[0] = instruction;
 		}
 
-		virtual float GetVMax(const Vehicle& vehicle) const override
+		virtual MAZEMAP_INLINE float GetVMax(const Vehicle& vehicle) const override
 		{
 			return 0.0f;
 		};
@@ -409,78 +416,78 @@ namespace MazeMap
 			return 0.0f;
 		};*/
 
-		virtual float GetCost(const Vehicle& vehicle)  const override
+		virtual MAZEMAP_INLINE float GetCost(const Vehicle& vehicle)  const override
 		{
-			return 2*sqrtf( PI_F * _turnRatio/vehicle.GetMaxAngularAcceleration());
+			return vehicle.GetInPlaceTurnTime(PI_F * _turnRatio);
 		}
-		virtual float GetEntrySpeed(const Vehicle& vehicle) const override { return 0.0f; }
-		virtual float GetExitSpeed(const Vehicle& vehicle)  const override { return 0.0f; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return GetManeuverID() | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE float GetEntrySpeed(const Vehicle& vehicle) const override { return 0.0f; }
+		virtual MAZEMAP_INLINE float GetExitSpeed(const Vehicle& vehicle)  const override { return 0.0f; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return GetManeuverID() | MIRRORED_MANEUVER_FLAG; }
 	};
 
 	//↗0
-	class EXPORT TurnInPlace45 : public TurnInPlace
+	class TurnInPlace45 : public TurnInPlace
 	{
 	public:
-		TurnInPlace45()
+		MAZEMAP_INLINE TurnInPlace45()
 			: TurnInPlace(0.25f, RelativeDirectionalDistance(Right45, 0))
 		{}
-		virtual ManeuverCode GetManeuverID() const override { return IP45; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return IP45; }
 	};
 	//→0
-	class EXPORT TurnInPlace90 : public TurnInPlace
+	class TurnInPlace90 : public TurnInPlace
 	{
 	public:
-		TurnInPlace90()
+		MAZEMAP_INLINE TurnInPlace90()
 			: TurnInPlace(0.5f, RelativeDirectionalDistance(Right90, 0))
 		{
 		}
 
-		virtual ManeuverCode GetManeuverID() const override { return IP90; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return IP90; }
 	};
 	//↘0
-	class EXPORT TurnInPlace135 : public TurnInPlace
+	class TurnInPlace135 : public TurnInPlace
 	{
 	public:
-		TurnInPlace135()
+		MAZEMAP_INLINE TurnInPlace135()
 			: TurnInPlace(0.75f, RelativeDirectionalDistance(Right135, 0))
 		{}
 
-		virtual ManeuverCode GetManeuverID() const override { return IP135; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return IP135; }
 	};
 	//↓0
-	class EXPORT TurnInPlace180 : public TurnInPlace
+	class TurnInPlace180 : public TurnInPlace
 	{
 	public:
-		TurnInPlace180()
+		MAZEMAP_INLINE TurnInPlace180()
 			: TurnInPlace(1.0f, RelativeDirectionalDistance(Reverse, 0))
 		{
 		}
 
-		virtual ManeuverCode GetManeuverID() const override { return IP180; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return IP180; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return IP180; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return IP180; }
 	};
 
 
 	//↑1 ↗1
-	class EXPORT Smooth45ShortStraight : public SmoothTurnManeuver<2,true,false>
+	class Smooth45ShortStraight : public SmoothTurnManeuver<2,true,false>
 	{
 	public:
-		Smooth45ShortStraight()
+		MAZEMAP_INLINE Smooth45ShortStraight()
 			: SmoothTurnManeuver(156/180.0f, PI_F / 4.0f, 32/180.0f, 9/180.0f,42.3f/180.0f)
 		{
 			_instructions[0] = RelativeDirectionalDistance(Forward, 1);
 			_instructions[1] = RelativeDirectionalDistance(Right45, 1);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S45SS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S45SD | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S45SS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S45SD | MIRRORED_MANEUVER_FLAG; }
 	};
 
 	//↑1 ↗1
-	class EXPORT Smooth45ShortDiagonal : public SmoothTurnManeuver<2, false, true>
+	class Smooth45ShortDiagonal : public SmoothTurnManeuver<2, false, true>
 	{
 	public:
-		Smooth45ShortDiagonal()
+		MAZEMAP_INLINE Smooth45ShortDiagonal()
 			: SmoothTurnManeuver(
 				156 / 180.0f,
 				PI_F / 4.0f,
@@ -491,15 +498,15 @@ namespace MazeMap
 			_instructions[0] = RelativeDirectionalDistance(Forward, 1);
 			_instructions[1] = RelativeDirectionalDistance(Right45, 1);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S45SD; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S45SS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S45SD; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S45SS | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑2 ↗1
-	class EXPORT Smooth45LongStraight : public SmoothTurnManeuver<2, true, false>
+	class Smooth45LongStraight : public SmoothTurnManeuver<2, true, false>
 	{
 	public:
 
-		Smooth45LongStraight()
+		MAZEMAP_INLINE Smooth45LongStraight()
 			: SmoothTurnManeuver(
 				246 / 180.0f,
 				PI_F / 4.0f,
@@ -510,14 +517,14 @@ namespace MazeMap
 			_instructions[0] = RelativeDirectionalDistance(Forward, 2);
 			_instructions[1] = RelativeDirectionalDistance(Right45, 1);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S45LS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S45LD | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S45LS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S45LD | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑1 ↗2
-	class EXPORT Smooth45LongDiagonal : public SmoothTurnManeuver<2, false, true>
+	class Smooth45LongDiagonal : public SmoothTurnManeuver<2, false, true>
 	{
 	public:
-		Smooth45LongDiagonal()
+		MAZEMAP_INLINE Smooth45LongDiagonal()
 			: SmoothTurnManeuver(
 				246 / 180.0f,
 				PI_F / 4.0f,
@@ -528,15 +535,15 @@ namespace MazeMap
 			_instructions[0] = RelativeDirectionalDistance(Forward, 1);
 			_instructions[1] = RelativeDirectionalDistance(Right45, 2);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S45LD; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S45LS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S45LD; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S45LS | MIRRORED_MANEUVER_FLAG; }
 	};
 
 	//↗1 ↗0
-	class EXPORT Smooth90ShortStraight : public SmoothTurnManeuver<2, true, false>
+	class Smooth90ShortStraight : public SmoothTurnManeuver<2, true, false>
 	{
 	public:
-		Smooth90ShortStraight()
+		MAZEMAP_INLINE Smooth90ShortStraight()
 			: SmoothTurnManeuver(
 				63 / 180.0f,
 				PI_F / 2.0f,
@@ -547,14 +554,14 @@ namespace MazeMap
 			_instructions[0] = RelativeDirectionalDistance(Right45, 1);
 			_instructions[1] = RelativeDirectionalDistance(Right45, 0);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S90SS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S90SS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S90SS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S90SS | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑1 →1
-	class EXPORT Smooth90ShortDiagonal : public SmoothTurnManeuver<2, false, true>
+	class Smooth90ShortDiagonal : public SmoothTurnManeuver<2, false, true>
 	{
 	public:
-		Smooth90ShortDiagonal()
+		MAZEMAP_INLINE Smooth90ShortDiagonal()
 			: SmoothTurnManeuver(
 				79 / 180.0f,
 				PI_F / 2.0f,
@@ -565,11 +572,11 @@ namespace MazeMap
 			_instructions[0] = RelativeDirectionalDistance(Forward, 1);
 			_instructions[1] = RelativeDirectionalDistance(Right90, 1);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S90SD; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S90SD | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S90SD; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S90SD | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑2 →2
-	/*class EXPORT Smooth90LongDiagonal : public SmoothTurnManeuver<2, false, true>
+	/*class Smooth90LongDiagonal : public SmoothTurnManeuver<2, false, true>
 	{
 	public:
 		Smooth90LongDiagonal()
@@ -583,14 +590,14 @@ namespace MazeMap
 			_instructions[0] = RelativeDirectionalDistance(Forward, 2);
 			_instructions[1] = RelativeDirectionalDistance(Right90, 2);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S90LD; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S90LD | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S90LD; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S90LD | MIRRORED_MANEUVER_FLAG; }
 	};*/
 	//↑1 ↗1 ↗1
-	class EXPORT Smooth90LongStraight : public SmoothTurnManeuver<3, true, false>
+	class Smooth90LongStraight : public SmoothTurnManeuver<3, true, false>
 	{
 	public:
-		Smooth90LongStraight()
+		MAZEMAP_INLINE Smooth90LongStraight()
 			: SmoothTurnManeuver(
 				153 / 180.0f,
 				PI_F / 2.0f,
@@ -602,13 +609,13 @@ namespace MazeMap
 			_instructions[1] = RelativeDirectionalDistance(Right45, 1);
 			_instructions[2] = RelativeDirectionalDistance(Right45, 1);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S90LS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S90LS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S90LS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S90LS | MIRRORED_MANEUVER_FLAG; }
 	};
 
 
 	/*//↑5 ↗1 ↗5
-	class EXPORT Smooth90ExtraLongStraight : public SmoothTurnManeuver<3, true, false>
+	class Smooth90ExtraLongStraight : public SmoothTurnManeuver<3, true, false>
 	{
 	public:
 		Smooth90ExtraLongStraight()
@@ -618,14 +625,14 @@ namespace MazeMap
 			_instructions[1] = RelativeDirectionalDistance(Right45, 1);
 			_instructions[2] = RelativeDirectionalDistance(Right45, 5);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S90ELS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S90ELS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S90ELS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S90ELS | MIRRORED_MANEUVER_FLAG; }
 	};*/
 	//↑1 ↗2 ↗1
-	class EXPORT Smooth90ExtraLongDiagonal : public SmoothTurnManeuver<3, true, false>
+	class Smooth90ExtraLongDiagonal : public SmoothTurnManeuver<3, true, false>
 	{
 	public:
-		Smooth90ExtraLongDiagonal()
+		MAZEMAP_INLINE Smooth90ExtraLongDiagonal()
 			: SmoothTurnManeuver(
 				225 / 180.0f,
 				PI_F / 2.0f,
@@ -637,18 +644,18 @@ namespace MazeMap
 			_instructions[1] = RelativeDirectionalDistance(Right45, 1);
 			_instructions[2] = RelativeDirectionalDistance(Right45, 5);
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S90ELD; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S90ELD | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S90ELD; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S90ELD | MIRRORED_MANEUVER_FLAG; }
 	};
 
 	//↗1 →1
-	class EXPORT Smooth135ShortStraight : public SmoothTurnManeuver<2, true, false>
+	class Smooth135ShortStraight : public SmoothTurnManeuver<2, true, false>
 	{
 	public:
 		//Radius calculated to maximize distance to wall on diagonal exit of turn.
 		// There's also 0.439 cells of travel on straight entry side, and 0.354 cells on diagonal exit side.
 
-		Smooth135ShortStraight()
+		MAZEMAP_INLINE Smooth135ShortStraight()
 			: SmoothTurnManeuver(
 				63 / 180.0f,
 				PI_F * 3.0f / 4.0f,
@@ -660,16 +667,16 @@ namespace MazeMap
 			_instructions[1] = RelativeDirectionalDistance(Right90, 1);
 
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S135SS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S135SD | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S135SS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S135SD | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑1 →1 ↗0
-	class EXPORT Smooth135ShortDiagonal : public SmoothTurnManeuver<3, false, true>
+	class Smooth135ShortDiagonal : public SmoothTurnManeuver<3, false, true>
 	{
 	public:
 		//Radius calculated to maximize distance to wall on diagonal exit of turn.
 		// There's also 0.439 cells of travel on straight entry side, and 0.354 cells on diagonal exit side.
-		Smooth135ShortDiagonal()
+		MAZEMAP_INLINE Smooth135ShortDiagonal()
 			: SmoothTurnManeuver(
 				63 / 180.0f,
 				PI_F * 3.0f / 4.0f,
@@ -682,17 +689,17 @@ namespace MazeMap
 			_instructions[2] = RelativeDirectionalDistance(Right45, 0);
 
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S135SD; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S135SS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S135SD; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S135SS | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑1 ↗1 →1
-	class EXPORT Smooth135LongStraight : public SmoothTurnManeuver<3, true, false>
+	class Smooth135LongStraight : public SmoothTurnManeuver<3, true, false>
 	{
 	public:
 		//Radius calculated to maximize distance to wall on diagonal exit of turn.
 		// There's also 0.439 cells of travel on straight entry side, and 0.354 cells on diagonal exit side.
 
-		Smooth135LongStraight()
+		MAZEMAP_INLINE Smooth135LongStraight()
 			: SmoothTurnManeuver(
 				86 / 180.0f,
 				PI_F * 3.0f / 4.0f,
@@ -705,16 +712,16 @@ namespace MazeMap
 			_instructions[2] = RelativeDirectionalDistance(Right90, 1);
 
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S135LS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S135LD | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S135LS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S135LD | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑1 →1 ↗1
-	class EXPORT Smooth135LongDiagonal : public SmoothTurnManeuver<3, false, true>
+	class Smooth135LongDiagonal : public SmoothTurnManeuver<3, false, true>
 	{
 	public:
 		//Radius calculated to maximize distance to wall on diagonal exit of turn.
 		// There's also 0.439 cells of travel on straight entry side, and 0.354 cells on diagonal exit side.
-		Smooth135LongDiagonal()
+		MAZEMAP_INLINE Smooth135LongDiagonal()
 			: SmoothTurnManeuver(
 				86 / 180.0f,
 				PI_F* 3.0f / 4.0f,
@@ -727,18 +734,18 @@ namespace MazeMap
 			_instructions[2] = RelativeDirectionalDistance(Right45, 1);
 
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S135LD; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S135LS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S135LD; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S135LS | MIRRORED_MANEUVER_FLAG; }
 	};
 
 	//↗1 →1 ↗0
-	class EXPORT Smooth180ShortStraight : public SmoothTurnManeuver<3, true, false>
+	class Smooth180ShortStraight : public SmoothTurnManeuver<3, true, false>
 	{
 	public:
 		//Radius calculated to maximize distance to wall on diagonal exit of turn.
 		// There's also 0.439 cells of travel on straight entry side, and 0.354 cells on diagonal exit side.
 
-		Smooth180ShortStraight()
+		MAZEMAP_INLINE Smooth180ShortStraight()
 			: SmoothTurnManeuver(
 				89 / 180.0f,
 				PI_F,
@@ -751,11 +758,11 @@ namespace MazeMap
 			_instructions[2] = RelativeDirectionalDistance(Right45, 0);
 
 		}
-		virtual ManeuverCode GetManeuverID() const override { return S180SS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S180SS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S180SS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S180SS | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑1 ↗1 →1 ↗1
-	class EXPORT Smooth180LongStraight : public SmoothTurnManeuver<4, true, false>
+	class Smooth180LongStraight : public SmoothTurnManeuver<4, true, false>
 	{
 	private:
 		float GetLeadingDistance(const Vehicle& vehicle, float cellSize) const
@@ -770,7 +777,7 @@ namespace MazeMap
 		//Radius calculated to maximize distance to wall on diagonal exit of turn.
 		// There's also 0.439 cells of travel on straight entry side, and 0.354 cells on diagonal exit side.
 
-		Smooth180LongStraight()
+		MAZEMAP_INLINE Smooth180LongStraight()
 			: SmoothTurnManeuver(
 				88 / 180.0f,
 				PI_F,
@@ -785,11 +792,11 @@ namespace MazeMap
 
 		}
 
-		virtual ManeuverCode GetManeuverID() const override { return S180LS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S180LS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S180LS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S180LS | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↑5 ↗1 →1 ↗5
-	class EXPORT Smooth180ExtraLongStraight : public SimpleManeuver<4, true, false>
+	class Smooth180ExtraLongStraight : public SimpleManeuver<4, true, false>
 	{
 	private:
 		float GetLeadingDistance(const Vehicle& vehicle, float cellSize) const
@@ -805,7 +812,7 @@ namespace MazeMap
 		//Radius calculated to maximize distance to wall on diagonal exit of turn.
 		// There's also 0.439 cells of travel on straight entry side, and 0.354 cells on diagonal exit side.
 
-		Smooth180ExtraLongStraight()
+		MAZEMAP_INLINE Smooth180ExtraLongStraight()
 		{
 			_instructions[0] = RelativeDirectionalDistance(Forward, 5);
 			_instructions[1] = RelativeDirectionalDistance(Right45, 1);
@@ -814,11 +821,11 @@ namespace MazeMap
 
 		}
 
-		virtual ManeuverCode GetManeuverID() const override { return S180ELS; }
-		virtual ManeuverCode GetBackwardsManeuverID() const override { return S180ELS | MIRRORED_MANEUVER_FLAG; }
+		virtual MAZEMAP_INLINE ManeuverCode GetManeuverID() const override { return S180ELS; }
+		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return S180ELS | MIRRORED_MANEUVER_FLAG; }
 	};
 	//↗2 ↖0
-	/*class EXPORT SingleZig : public SimpleSingleTurnManeuver<2, false, true>
+	/*class SingleZig : public SimpleSingleTurnManeuver<2, false, true>
 	{
 	public:
 		SingleZig()
@@ -830,4 +837,6 @@ namespace MazeMap
 	};*/
 }
 #endif
+
+
 

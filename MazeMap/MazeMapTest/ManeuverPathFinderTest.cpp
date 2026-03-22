@@ -5,6 +5,7 @@
 #include "..\MazeMap\ManeuverPathFinder.h"
 #include "..\MazeMap\ManeuverPath.h"
 #include "..\MazeMap\ManeuverSet.h"
+#include "..\MazeMap\PathFinder.h"
 #include <cmath>
 #include <sstream>
 
@@ -17,7 +18,7 @@ namespace MazeMap
 	private:
 		using HalfPath = HalfStepPath<PATH_SIZE * 2>;
 
-		Vehicle _vehicle = Vehicle(15.0f, 18.0f, 35.0f, 4.5f, 5000.0f);
+		Vehicle _vehicle = Vehicle();
 		static constexpr float kTimeTolerance = 0.001f;
 
 		static Maze CreateOpenMaze()
@@ -34,6 +35,50 @@ namespace MazeMap
 					cell.SetRight(x == 15 ? WallState::Wall : WallState::NoWall);
 				}
 			}
+			maze.PreCalculate();
+			return maze;
+		}
+
+		static Maze CreateGoalReturnCorridorMaze()
+		{
+			Maze maze;
+			for (uint8_t x = 0; x < 16; ++x)
+			{
+				for (uint8_t y = 0; y < 16; ++y)
+				{
+					Cell& cell = maze(x, y);
+					cell.SetUp(WallState::Wall);
+					cell.SetDown(WallState::Wall);
+					cell.SetLeft(WallState::Wall);
+					cell.SetRight(WallState::Wall);
+				}
+			}
+
+			const struct Passage
+			{
+				uint8_t x;
+				uint8_t y;
+				Direction direction;
+			} passages[] = {
+				{ 0, 0, Direction::Up },
+				{ 0, 1, Direction::Up },
+				{ 0, 2, Direction::Up },
+				{ 0, 3, Direction::Up },
+				{ 0, 4, Direction::Right },
+				{ 1, 4, Direction::Down },
+				{ 1, 3, Direction::Down },
+				{ 1, 2, Direction::Down },
+				{ 1, 1, Direction::Down },
+				{ 1, 0, Direction::Right },
+				{ 1, 1, Direction::Right },
+				{ 2, 0, Direction::Up },
+			};
+
+			for (const Passage& passage : passages)
+			{
+				maze.SetWall(maze(passage.x, passage.y), passage.direction, WallState::NoWall);
+			}
+
 			maze.PreCalculate();
 			return maze;
 		}
@@ -64,6 +109,32 @@ namespace MazeMap
 				int dx = static_cast<int>(path[i].GetX()) - static_cast<int>(path[i - 1].GetX());
 				int dy = static_cast<int>(path[i].GetY()) - static_cast<int>(path[i - 1].GetY());
 				if (std::abs(dx) == 1 && std::abs(dy) == 1)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		static bool ContainsSmoothTurn(const ManeuverPath& path)
+		{
+			for (uint16_t i = 0; i < path.GetSize(); ++i)
+			{
+				const ManeuverCode baseCode = static_cast<ManeuverCode>(path[i] & INVERTED_MIRRORED_MANEUVER_FLAG);
+				if (baseCode > S31 && baseCode != IP45 && baseCode != IP90 && baseCode != IP135 && baseCode != IP180)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		static bool ContainsInPlaceTurn(const ManeuverPath& path)
+		{
+			for (uint16_t i = 0; i < path.GetSize(); ++i)
+			{
+				const ManeuverCode baseCode = static_cast<ManeuverCode>(path[i] & INVERTED_MIRRORED_MANEUVER_FLAG);
+				if (baseCode == IP45 || baseCode == IP90 || baseCode == IP135 || baseCode == IP180)
 				{
 					return true;
 				}
@@ -244,6 +315,34 @@ namespace MazeMap
 
 			DirectionalLocation end = path.ExecutePath(start);
 			Assert::AreEqual(MazeLocation::CellCenter(target), end.GetLocation());
+			Assert::AreEqual(start, path.ExecuteReverse(end));
+		}
+
+		TEST_METHOD(ReturnCorridorFromGoalConvertsFloodFillHalfStepPathToSmoothManeuvers)
+		{
+			Maze maze = CreateGoalReturnCorridorMaze();
+			FloodFillPathFinder finder(maze, _vehicle);
+			DirectionalLocation start(MazeLocation::CellCenter(CellCoordinates(2, 1)), Direction::Left);
+			Path<PATH_SIZE> cellPath;
+			finder.PathFromTo(CellCoordinates(2, 1), Direction::Left, CellCoordinates(0, 0), cellPath);
+			Assert::IsTrue(cellPath.GetSize() > 1, L"Expected a non-empty flood-fill return path.");
+
+			HalfPath halfPath;
+			HalfPath::HalfStepPathFromPath(cellPath, halfPath);
+			Assert::IsTrue(halfPath.GetSize() > 1, L"Expected a non-empty half-step return path.");
+
+			ManeuverPath path;
+			Assert::IsTrue(ManeuverPath::FromHalfStep(halfPath, start, path), L"Expected a maneuver path built from the directional return path.");
+
+			HalfPath expandedPath = ExpandPath(start, path);
+			AssertHalfStepPathAccessible(maze, halfPath);
+			AssertHalfStepPathsEqual(halfPath, expandedPath);
+			AssertManeuverPathExecutable(maze, start, path);
+			Assert::IsTrue(ContainsSmoothTurn(path), L"Expected the return path to use at least one smooth turn.");
+			Assert::IsFalse(ContainsInPlaceTurn(path), L"Expected the return path to avoid in-place turns.");
+
+			const DirectionalLocation end = path.ExecutePath(start);
+			Assert::AreEqual(MazeLocation::CellCenter(CellCoordinates(0, 0)), end.GetLocation());
 			Assert::AreEqual(start, path.ExecuteReverse(end));
 		}
 

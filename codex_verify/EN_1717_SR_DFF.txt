@@ -1,0 +1,137 @@
+DC-Micromotors                                                                                                       1,86 mNm
+Precious Metal Commutation                                                                                           4,09 W
+
+
+
+Series 1717 ... SR
+Values at 22°C and nominal voltage                     1717 T                       003 SR           006 SR          012 SR           018 SR         024 SR
+Nominal voltage                                        UN                           3                6               12               18             24             V
+Terminal resistance                                    R                            1,07             4,31            17,2             50,2           69             Ω
+Rotor inductance                                       L                            16,4             65,6            263              766            1 050          µH
+Efficiency, max.                                       ηmax.                        67               67              67               65             68             %
+No-load current, typ.                                  I0                           0,0918           0,0459          0,0229           0,0134         0,0108         A
+No-load speed                                          n0                           14 100           14 100          14 100           12 300         14 100         min-1
+Stall torque                                           MH                           5,35             5,33            5,35             4,67           5,34           mNm
+Rotor inertia                                          J                            0,59             0,58            0,59             0,58           0,59           gcm²
+Friction torque                                        MR                           0,18             0,18            0,18             0,18           0,17           mNm
+Torque constant                                        kM                           1,98             3,96            7,92             13,5           15,8           mNm/A
+Speed constant                                         kn                           4 820            2 410           1 210            706            603            min-1/V
+Slope of n-M curve                                     Δn /ΔM                       2 610            2 630           2 620            2 620          2 630          min-1/mNm
+
+Thermal resistance:
+– winding to housing                                   Rth1             13                                                                                          K/W
+– housing to ambient (external plastic flange)         Rth2 p           32                                                                                          K/W
+– housing to ambient (external metal flange)           Rth2 m           2,6                                                                                         K/W
+Thermal time constant:
+– winding                                              τw1              6,4                                                                                         s
+– housing (external plastic flange)                    τw2 p            250                                                                                         s
+– housing (external metal flange)                      τw2 m            20                                                                                          s
+Operating temperature range:
+– motor                                                                 -30 ... +85 (optional version          -30 ... +125)                                        °C
+– winding, max. permissible                                                    +125                                                                                 °C
+Shaft bearings                                                          sintered bearings                            ball bearings, preloaded
+Shaft diameter                                                          1,5                                          1,5                                            mm
+Radial shaft load max.:
+– dynamic at 3 000 min-1 (3 mm from bearing)                            1,2                                          5                                              N
+Axial shaft load max.:
+– dynamic at 3 000 min-1                                                0,2                                          0,5                                            N
+– static (shaft unsupported)                                            20                                           10                                             N
+Shaft play, max.:
+– radial                                                                0,03                                         0,015                                          mm
+– axial                                                                 0,2                                          0                                              mm
+Speed up to                                            nmax.            16 000                                                                                      min-1
+Number of pole pairs                                                    1
+Mass                                                                    18                                                                                          g
+Housing material                                                        steel, nickel plated
+Magnet material                                                         NdFeB
+
+
+Rated values for continuous operation
+Rated torque                                           MN                           1,16             1,84            1,84             1,86           1,85           mNm
+Rated current (thermal limit)                          IN                           0,7              0,564           0,282            0,167          0,141          A
+Rated speed                                            nN                           10 800           7 290           7 310            5 260          7 280          min-1
+
+
+Note:          Rated values are calculated with nominal voltage and at a 22°C ambient temperature. The Rth2 p value has been reduced by 0%.
+
+
+Note:                                                  n [min-1]                                                                       Plastic flange
+                                                                                                                                       Metal flange
+The diagram indicates the recommended speed 21 000                                                    Watt                             Intermittent operation
+in relation to the available torque at the output                                              2,8             4,2           5,6       Operating point at nominal value
+shaft for a given ambient temperature of 22°C.    18 000
+The diagram shows the motor in different
+conditions of thermal coupling, i.e. mounted 15 000
+respectively on a plastic flange and a metal
+flange.                                           12 000                      UN
+The nominal voltage (UN) curve shows, up to the
+thermal limit, the operating point at nominal               9 000
+voltage for the motor mounted on a plastic
+flange. Higher torque can be achieved by further            6 000
+reducing the thermal resistance.
+Any points of operation above the curve at                  3 000
+nominal voltage will require a higher operating
+voltage. Any points below the nominal voltage                   0                                                                                               M [mNm]
+curve will require less voltage.                                    0         0,5     1,0      1,5       2,0         2,5       3,0        3,5      4,0
+                                                                    Recommended operation areas (example: nominal voltage 18V)
+
+
+For notes on technical data and lifetime performance                                                                                      © DR. FRITZ FAULHABER GMBH & CO. KG
+refer to “Technical Information”.                                                                                                  Specifications subject to change without notice.
+Edition 2024 Dec. 16                                                                                                                                          www.faulhaber.com
+Dimensional drawing
+       Orientation with respect to motor
+       terminals not defined
+        6x                                                                      0             0                 -0,004
+                               M1,6 1,6 deep                  ø15,9      ø17 -0,052      ø6 -0,05          ø1,5 -0,009
+             ø0,3 A
+                                                                                              A                  ø0,05 A
+                                                                                                    ø3,5          0,02
+
+
+
+
+                                       ø10                                                                                                                         10,6
+
+
+                                                                 1                  1
+              6x 60°
+                                                                 2         2,1 ±0,3               6 ±0,3
+                                                                           17±0,2                 8,1 ±0,3                                                         4,2 ±0,5
+                                                                                                                                           2
+
+
+                                                                       1717 T ... SR
+
+Options
+ Example product designation: 1717T012SR-277
+ Option         Type                   Description
+ L              Twin Leads             For motors with twin leads (PVC), length 150 mm, red (+) / black (-)
+ 4924           Twin Leads             For motors with twin leads (PVC), length 300 mm, red (+) / black (-)
+ X4924          Twin Leads             For motors with twin leads (PVC), length 600 mm, red (+) / black (-)
+ 4925           Twin Leads             For motors with twin leads (PVC), length 150 mm, red (+) / black (-), with connector AMP 179228-2
+ X4925          Twin Leads             For motors with twin leads (PVC), length 300 mm, red (+) / black (-), with connector AMP 179228-2
+ Y4925          Twin Leads             For motors with twin leads (PVC), length 600 mm, red (+) / black (-), with connector AMP 179228-2
+ F              Single Leads           For motors with single leads (PTFE), length 150 mm, red (+) / black (-)
+ 277            Bearings               2 preloaded ball bearings
+
+
+
+
+Product combination
+Precision Gearheads / Lead Screws Encoders                                               Drive Electronics                            Cables / Accessories
+
+15A                                          IE2-1024                                    SC 1801 P                                    To view our large range of
+15/10                                        IEH2-4096                                   SC 1801 S                                    accessory parts, please refer to the
+16A                                          IEH3-4096                                   MC 3001 B                                    “Accessories” chapter.
+16/7                                         IEH3-4096L                                  MC 3001 P
+17/1                                                                                     MC 3602 B
+                                                                                         MC 3603 S
+                                                                                         MC 5004 P
+
+
+
+
+For notes on technical data and lifetime performance                                                                                      © DR. FRITZ FAULHABER GMBH & CO. KG
+refer to “Technical Information”.                                                                                                  Specifications subject to change without notice.
+Edition 2024 Dec. 16                                                                                                                                          www.faulhaber.com

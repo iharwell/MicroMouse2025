@@ -1,7 +1,7 @@
 #pragma once
-#include "..\eigen-5.0.0\Eigen\Eigen"
-#include "..\eigen-5.0.0\Eigen\Dense"
-#include "..\eigen-5.0.0\Eigen\Cholesky"
+#include "Eigen\Eigen"
+#include "Eigen\Dense"
+#include "Eigen\Cholesky"
 namespace MazeMap {
 	constexpr float ce_sqrt(float val)
 	{

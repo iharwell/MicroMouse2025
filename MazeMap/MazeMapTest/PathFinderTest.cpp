@@ -14,7 +14,7 @@ namespace MazeMap
 	TEST_CLASS(PathFinderTest)
 	{
 	public:
-		Vehicle v = Vehicle(15.0f, 18.0f, 35.0f, 4.5f, 5000.0f);
+		Vehicle v = Vehicle();
 		void TestPathContinuity(const Path<PATH_SIZE>& path)
 		{
 			for (size_t i = 1; i < path.GetSize(); i++)

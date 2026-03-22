@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "Defines.h"
 #include <cstdint>
 namespace MazeMap
@@ -117,7 +117,7 @@ namespace MazeMap
 		}
 	}
 
-	class EXPORT RelativeDirectionalDistance
+	class RelativeDirectionalDistance
 	{
 	private:
 #ifdef SMALL_RDD
@@ -127,12 +127,12 @@ namespace MazeMap
 		RelativeDirection _direction;
 #endif
 	public:
-		RelativeDirectionalDistance();
-		RelativeDirectionalDistance(RelativeDirection direction, uint8_t distance);
+		EXPORT RelativeDirectionalDistance();
+		EXPORT RelativeDirectionalDistance(RelativeDirection direction, uint8_t distance);
 
 
-		RelativeDirection GetDirection() { return const_cast<const RelativeDirectionalDistance*>(this)->GetDirection(); }
-		RelativeDirection GetDirection() const
+		MAZEMAP_INLINE RelativeDirection GetDirection() { return const_cast<const RelativeDirectionalDistance*>(this)->GetDirection(); }
+		MAZEMAP_INLINE RelativeDirection GetDirection() const
 		{
 #ifdef SMALL_RDD
 			return static_cast<RelativeDirection>(_data & 0b111);
@@ -140,7 +140,7 @@ namespace MazeMap
 			return _direction;
 #endif
 		}
-		void SetDirection(RelativeDirection d)
+		MAZEMAP_INLINE void SetDirection(RelativeDirection d)
 		{
 #ifdef SMALL_RDD
 			_data = static_cast<uint8_t>((_data & 0xF8) | (d));
@@ -149,8 +149,8 @@ namespace MazeMap
 #endif
 		}
 
-		uint8_t GetDistance() { return const_cast<const RelativeDirectionalDistance*>(this)->GetDistance(); }
-		uint8_t GetDistance() const
+		MAZEMAP_INLINE uint8_t GetDistance() { return const_cast<const RelativeDirectionalDistance*>(this)->GetDistance(); }
+		MAZEMAP_INLINE uint8_t GetDistance() const
 		{
 #ifdef SMALL_RDD
 			return static_cast<uint8_t>(_data >> 3);
@@ -158,7 +158,7 @@ namespace MazeMap
 			return _distance;
 #endif
 		}
-		void SetDistance(uint8_t distance)
+		MAZEMAP_INLINE void SetDistance(uint8_t distance)
 		{
 #ifdef SMALL_RDD
 			_data = static_cast<uint8_t>((_data & 0x07) | (distance << 3));
@@ -194,3 +194,7 @@ namespace MazeMap
 	EXPORT Direction TurnLeft135(Direction dir);
 	EXPORT Direction Turn180(Direction dir);
 }
+
+
+
+

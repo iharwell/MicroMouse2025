@@ -3,6 +3,7 @@
 //#define _WINDOWS
 #define MAZE_EXPORT
 #include <stdint.h>
+#include <windows.h>
 #include <iostream>
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\Maze.h"
@@ -10,10 +11,9 @@
 #include "..\MazeMap\DirectionalPathFinder.h"
 #include "Mazes.h"
 #include "SimVehicle.h"
-#include <windows.h>
 #include "../MazeMap/ManeuverPathFinder.h"
 
-MazeMap::Vehicle vehicle = MazeMap::Vehicle(15.0f, 18.0f, 30.0f, 6.0f, 5000.0f);
+MazeMap::Vehicle vehicle = MazeMap::Vehicle();
 MazeMap::Maze maze = MazeMap::Maze();
 MazeMap::DirectionalPathFinder advancedPathFinder = MazeMap::DirectionalPathFinder(maze, vehicle);
 MazeMap::ManeuverPathFinder superAdvancedPathFinder = MazeMap::ManeuverPathFinder(maze, vehicle);
@@ -300,7 +300,7 @@ void runMMSSim()
             //std::cout << n << "\n";
 
         }
-        maze.ExportToFile(std::wstring(L"MazeText.txt"));
+        maze.ExportToFile("MazeText.txt");
         pathfinder.HalfStepPathFromTo(simVehicle.GetPosition().GetFirstConnectedCell(), simVehicle.GetOrientation(), MazeMap::CellCoordinates(0, 0), path);
         MovePath(path);
         simVehicle.Turn(MazeMap::Direction::Up - simVehicle.GetOrientation());
@@ -376,3 +376,7 @@ void runMMSSim()
 //   4. Use the Error List window to view errors
 //   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
 //   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
+
+
+
+

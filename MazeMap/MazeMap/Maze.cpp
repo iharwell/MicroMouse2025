@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Maze.h"
+#include "CoreFileExport.h"
+#include "MissionMazeExport.h"
 #include "MazeMask.h"
 #include <cassert>
 #include "MaskQueue.h"
@@ -558,7 +560,20 @@ float Maze::GetCellDimension()
 		}
 		return true;
 	}
-}
+	void Maze::ExportToFile(const char* fileName)
+	{
+		ExportToFileC(fileName);
+	}
 
+	void Maze::ExportToFileC(const char* fileName) const
+	{
+		(void)ExportMazeSnapshot(*this, fileName);
+	}
+
+	void Maze::DumpMaze() const
+	{
+		ExportToFileC("mazeDump.txt");
+	}
+}
 
 

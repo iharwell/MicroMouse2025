@@ -37,11 +37,17 @@ namespace MazeMap
 		float GetMagnitude() const { return MazeMap::Math::Sqrtf(GetMagnitudeSquared()); }
 		float SetMagnitude(float magnitude)
 		{
-			float k = magnitude / GetMagnitude();
+			const float currentMagnitude = GetMagnitude();
+			if (currentMagnitude <= 0.0f)
+			{
+				return 0.0f;
+			}
+			float k = magnitude / currentMagnitude;
 			for (size_t i = 0; i < DIMENSION; i++)
 			{
 				_data[i] *= k;
 			}
+			return GetMagnitude();
 		}
 
 		Vectorf<DIMENSION>& operator=(const Vectorf<DIMENSION>& other) noexcept
@@ -50,6 +56,7 @@ namespace MazeMap
 			{
 				_data[i] = other._data[i];
 			}
+			return (*this);
 		}
 		Vectorf<DIMENSION>& operator+=(const Vectorf<DIMENSION>& other) noexcept
 		{
@@ -57,6 +64,7 @@ namespace MazeMap
 			{
 				_data[i] += other._data[i];
 			}
+			return (*this);
 		}
 		Vectorf<DIMENSION>& operator-=(const Vectorf<DIMENSION>& other) noexcept
 		{
@@ -64,6 +72,7 @@ namespace MazeMap
 			{
 				_data[i] -= other._data[i];
 			}
+			return (*this);
 		}
 		Vectorf<DIMENSION>& operator*=(float scalar) noexcept
 		{
@@ -71,6 +80,7 @@ namespace MazeMap
 			{
 				_data[i] *= scalar;
 			}
+			return (*this);
 		}
 		Vectorf<DIMENSION>& operator/=(float scalar)
 		{
@@ -78,6 +88,7 @@ namespace MazeMap
 			{
 				_data[i] /= scalar;
 			}
+			return (*this);
 		}
 
 		Vectorf<DIMENSION> operator-() noexcept
@@ -86,7 +97,7 @@ namespace MazeMap
 		}
 		Vectorf<DIMENSION> operator-() const noexcept
 		{
-			Vectorf<DIMENSION> result(this);
+			Vectorf<DIMENSION> result(*this);
 			for (size_t i = 0; i < DIMENSION; i++)
 			{
 				result._data[i] = -result._data[i];
@@ -96,7 +107,7 @@ namespace MazeMap
 
 		Vectorf<DIMENSION> operator+(const Vectorf<DIMENSION>& other) const noexcept
 		{
-			Vectorf<DIMENSION> result(this);
+			Vectorf<DIMENSION> result(*this);
 			for (size_t i = 0; i < DIMENSION; i++)
 			{
 				result._data[i] += other._data[i];
@@ -105,7 +116,7 @@ namespace MazeMap
 		}
 		Vectorf<DIMENSION> operator-(const Vectorf<DIMENSION>& other) const noexcept
 		{
-			Vectorf<DIMENSION> result(this);
+			Vectorf<DIMENSION> result(*this);
 			for (size_t i = 0; i < DIMENSION; i++)
 			{
 				result._data[i] -= other._data[i];
@@ -114,7 +125,7 @@ namespace MazeMap
 		}
 		Vectorf<DIMENSION> operator*(float scalar) const noexcept
 		{
-			Vectorf<DIMENSION> result(this);
+			Vectorf<DIMENSION> result(*this);
 			for (size_t i = 0; i < DIMENSION; i++)
 			{
 				result._data[i] *= scalar;
@@ -123,7 +134,7 @@ namespace MazeMap
 		}
 		Vectorf<DIMENSION> operator/(float scalar) const
 		{
-			Vectorf<DIMENSION> result(this);
+			Vectorf<DIMENSION> result(*this);
 			for (size_t i = 0; i < DIMENSION; i++)
 			{
 				result._data[i] /= scalar;
@@ -159,6 +170,7 @@ namespace MazeMap
 			{
 				result += _data[i] * other._data[i];
 			}
+			return result;
 		}
 	};
 
@@ -267,8 +279,10 @@ namespace MazeMap
 		Vectorf<2>& RotateBy(const Vectorf<2>& rotationVector)
 		{
 			float mag = rotationVector.GetMagnitude();
-			SetX((GetX() * rotationVector.GetX() - GetY() * rotationVector.GetY()) / mag);
-			SetY((GetX() * rotationVector.GetY() + GetY() * rotationVector.GetX()) / mag);
+			const float x = GetX();
+			const float y = GetY();
+			SetX((x * rotationVector.GetX() - y * rotationVector.GetY()) / mag);
+			SetY((x * rotationVector.GetY() + y * rotationVector.GetX()) / mag);
 			return (*this);
 		}
 

@@ -598,7 +598,7 @@ namespace MazeMap
 			int end = 50;
 			double testStart = 1.8;
 			double testEnd = 2.7;
-			double delta = 0.000001;
+			double delta = 0.000005;
 
 			ss << std::fixed << std::setprecision(9);
 			for (size_t i = start; i <= end; i++)
