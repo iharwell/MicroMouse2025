@@ -26,6 +26,7 @@
 #include "..\MazeMap\TurnWallEdgeTracker.h"
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\DiagonalWallCentering.h"
+#include "..\MazeMap\WallContactDetection.h"
 #include "..\MazeMap\WallDetectionThresholds.h"
 #include "..\MazeMap\WheelControlProfile.h"
 #include "..\MazeMap\ManeuverSet.h"
@@ -176,6 +177,10 @@ namespace MazeMap
 				"kArcHeadingKp",
 				"kArcYawD",
 				"kTrackWidthM",
+				"kArcTrackWidthTightRadiusM",
+				"kArcTrackWidthTightM",
+				"kArcTrackWidthWideRadiusM",
+				"kArcTrackWidthWideM",
 			};
 
 			for (const char* token : requiredTokens)
@@ -240,9 +245,13 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(model.massKg - 0.14f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.lengthM - 0.1085f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.frontWallContactOffsetM - 0.056f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthM - 0.08203f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMinM - 0.07004f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMaxM - 0.07868f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.trackWidthM - 0.085114f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMinM - 0.08440f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMaxM - 0.08589f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.tightRadiusM - 0.063f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.tightTrackWidthM - 0.084183f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.wideRadiusM - 0.153f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.wideTrackWidthM - 0.082373f) < 1.0e-6f);
 		}
 
 		TEST_METHOD(MotorEncoderDriveSharedModelMatchesMeasuredDrivetrain)
@@ -256,7 +265,7 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(model.noLoadCurrentA - MilliAmpsToAmps(45.9f)) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.speedConstantRadpsPerVolt - ComputeMotorSpeedConstantRadpsPerVolt(14100.0f, 6.0f, MilliAmpsToAmps(45.9f), 4.31f)) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.gearRatio - (56.0f / 17.0f)) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.wheelDiameterM - 0.025345f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.wheelDiameterM - 0.025327f) < 1.0e-6f);
 			Assert::AreEqual(4096U, static_cast<unsigned>(model.pulsesPerRev));
 		}
 
@@ -281,9 +290,27 @@ namespace MazeMap
 		TEST_METHOD(VehicleDefaultModelUsesMeasuredTurnEnvelope)
 		{
 			Vehicle vehicle;
+			const VehiclePhysicalModel& model = Vehicle::GetPhysicalModel();
+			Assert::IsTrue(std::fabs(model.trackWidthM - 0.085114f) < 1.0e-6f);
+			Assert::IsTrue(model.trackWidthPhysicalMinM <= model.trackWidthM);
+			Assert::IsTrue(model.trackWidthM <= model.trackWidthPhysicalMaxM);
 			Assert::IsTrue(std::fabs(vehicle.GetMaxLateralAcceleration() - 16.5f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(vehicle.GetMaxRotationalVelocity() - 9.0f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(vehicle.GetMaxAngularAcceleration() - 45.0f) < 1.0e-6f);
+		}
+
+		TEST_METHOD(ArcTrackWidthInterpolationClampsAndBlendsByRadius)
+		{
+			Assert::AreEqual(0.084183f, Vehicle::GetArcEffectiveTrackWidth(0.040f), 1.0e-6f);
+			Assert::AreEqual(0.082373f, Vehicle::GetArcEffectiveTrackWidth(0.200f), 1.0e-6f);
+			Assert::AreEqual(0.083278f, Vehicle::GetArcEffectiveTrackWidth(0.108f), 1.0e-5f);
+		}
+
+		TEST_METHOD(ArcTrackWidthInterpolationFallsBackToBaseWidthForStraightAndInPlaceMotion)
+		{
+			Assert::AreEqual(0.085114f, Vehicle::GetEffectiveTrackWidthForMotion(0.0f, 4.0f), 1.0e-6f);
+			Assert::AreEqual(0.085114f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, 0.0f), 1.0e-6f);
+			Assert::AreEqual(0.084183f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, (0.3f / 0.063f)), 1.0e-5f);
 		}
 
 		TEST_METHOD(TryComputeEffectiveTrackWidthMUsesEncoderDifferentialOverYaw)
@@ -299,12 +326,211 @@ namespace MazeMap
 			Assert::AreEqual(153.0f / 180.0f, ManeuverSet::GetSet()[S90LS].GetNominalTurnRadiusInCells(), 1.0e-6f);
 		}
 
+		TEST_METHOD(SmoothTurnExecutionProfileExposureMatchesSmoothTurnDefinitions)
+		{
+			SmoothTurnExecutionProfile shortProfile{};
+			SmoothTurnExecutionProfile longProfile{};
+			Assert::IsTrue(ManeuverSet::GetSet()[S90SS].TryGetSmoothTurnExecutionProfile(shortProfile));
+			Assert::IsTrue(ManeuverSet::GetSet()[S90LS].TryGetSmoothTurnExecutionProfile(longProfile));
+
+			Assert::AreEqual(63.0f / 180.0f, shortProfile.radius, 1.0e-6f);
+			Assert::AreEqual(PI_F / 2.0f, shortProfile.radians, 1.0e-6f);
+			Assert::AreEqual(33.0f / 180.0f, shortProfile.turnInDistance, 1.0e-6f);
+			Assert::AreEqual(10.0f / 180.0f, shortProfile.preTurnDistance, 1.0e-6f);
+			Assert::AreEqual(((PI_F / 2.0f) * (63.0f / 180.0f)) - (33.0f / 180.0f), shortProfile.constantTurnDistance, 1.0e-6f);
+			Assert::AreEqual((10.0f / 180.0f) + (33.0f / 180.0f) + ((PI_F / 2.0f) * (63.0f / 180.0f)) + (10.0f / 180.0f), shortProfile.totalDistance, 1.0e-6f);
+
+			Assert::AreEqual(153.0f / 180.0f, longProfile.radius, 1.0e-6f);
+			Assert::AreEqual(PI_F / 2.0f, longProfile.radians, 1.0e-6f);
+			Assert::AreEqual(36.0f / 180.0f, longProfile.turnInDistance, 1.0e-6f);
+			Assert::AreEqual(9.0f / 180.0f, longProfile.preTurnDistance, 1.0e-6f);
+			Assert::AreEqual(((PI_F / 2.0f) * (153.0f / 180.0f)) - (36.0f / 180.0f), longProfile.constantTurnDistance, 1.0e-6f);
+			Assert::AreEqual((9.0f / 180.0f) + (36.0f / 180.0f) + ((PI_F / 2.0f) * (153.0f / 180.0f)) + (9.0f / 180.0f), longProfile.totalDistance, 1.0e-6f);
+		}
+
+		TEST_METHOD(SmoothTurnExecutionProfileTotalDistanceExceedsHalfStepShortcut)
+		{
+			SmoothTurnExecutionProfile shortProfile{};
+			SmoothTurnExecutionProfile longProfile{};
+			Assert::IsTrue(ManeuverSet::GetSet()[S90SS].TryGetSmoothTurnExecutionProfile(shortProfile));
+			Assert::IsTrue(ManeuverSet::GetSet()[S90LS].TryGetSmoothTurnExecutionProfile(longProfile));
+
+			const float shortShortcutCells = 0.5f * static_cast<float>(ManeuverSet::GetSet().DistanceTravelled(S90SS));
+			const float longShortcutCells = 0.5f * static_cast<float>(ManeuverSet::GetSet().DistanceTravelled(S90LS));
+
+			Assert::IsTrue(shortProfile.totalDistance > shortShortcutCells);
+			Assert::IsTrue(longProfile.totalDistance > longShortcutCells);
+			Assert::IsTrue(shortProfile.totalDistance < longProfile.totalDistance);
+		}
+
+		TEST_METHOD(PositionAuditSmoothTurnValidityAndRunoutDifferentiatesShortAndLongSmooth90)
+		{
+			Maze maze;
+			for (uint8_t y = 0U; y < 5U; ++y)
+			{
+				Cell& cell = maze[CellCoordinates(0U, y)];
+				maze.SetWall(cell, Up, (y < 4U) ? NoWall : Wall);
+				maze.SetWall(cell, Down, (y > 0U) ? NoWall : Wall);
+				maze.SetWall(cell, Left, Wall);
+				maze.SetWall(cell, Right, (y == 4U) ? NoWall : Wall);
+			}
+			for (uint8_t x = 1U; x <= 4U; ++x)
+			{
+				Cell& cell = maze[CellCoordinates(x, 4U)];
+				maze.SetWall(cell, Up, Wall);
+				maze.SetWall(cell, Down, Wall);
+				maze.SetWall(cell, Left, NoWall);
+				maze.SetWall(cell, Right, (x < 4U) ? NoWall : Wall);
+			}
+
+			const DirectionalLocation shortStart(MazeLocation(1U, 8U), Up);
+			const DirectionalLocation longStart(MazeLocation::CellCenter(CellCoordinates(0U, 3U)), Up);
+			const auto countClearHalfSteps = [&maze](DirectionalLocation start)
+			{
+				uint8_t clearHalfSteps = 0U;
+				while (clearHalfSteps < 31U)
+				{
+					start = start.MoveForward(1U);
+					if (!maze.IsAccessibleLocation(start.GetLocation()))
+					{
+						break;
+					}
+
+					++clearHalfSteps;
+				}
+
+				return clearHalfSteps;
+			};
+
+			Assert::IsTrue(maze.IsAccessibleLocation(shortStart.GetLocation()));
+			Assert::IsTrue(maze.IsAccessibleLocation(longStart.GetLocation()));
+			Assert::IsTrue(ManeuverSet::GetSet().IsValidMove(S90SS, shortStart, maze));
+			Assert::IsFalse(ManeuverSet::GetSet().IsValidMove(S90SS, longStart, maze));
+			Assert::IsTrue(ManeuverSet::GetSet().IsValidMove(S90LS, longStart, maze));
+			Assert::IsFalse(ManeuverSet::GetSet().IsValidMove(S90LS, shortStart, maze));
+			const DirectionalLocation shortEnd = ManeuverSet::GetSet().Move(S90SS, shortStart);
+			const DirectionalLocation longEnd = ManeuverSet::GetSet().Move(S90LS, longStart);
+			DirectionalLocation shortLastClear = shortEnd;
+			DirectionalLocation shortBlocked = shortEnd;
+			DirectionalLocation longLastClear = longEnd;
+			DirectionalLocation longBlocked = longEnd;
+			shortLastClear = shortLastClear.MoveForward(7U);
+			shortBlocked = shortBlocked.MoveForward(8U);
+			longLastClear = longLastClear.MoveForward(6U);
+			longBlocked = longBlocked.MoveForward(7U);
+			Assert::IsTrue(shortEnd == DirectionalLocation(MazeLocation(2U, 9U), Right));
+			Assert::IsTrue(longEnd == DirectionalLocation(MazeLocation(3U, 9U), Right));
+			Assert::AreEqual(static_cast<uint8_t>(7U), countClearHalfSteps(shortEnd));
+			Assert::AreEqual(static_cast<uint8_t>(6U), countClearHalfSteps(longEnd));
+			Assert::IsTrue(maze.IsAccessibleLocation(shortLastClear.GetLocation()));
+			Assert::IsFalse(maze.IsAccessibleLocation(shortBlocked.GetLocation()));
+			Assert::IsTrue(maze.IsAccessibleLocation(longLastClear.GetLocation()));
+			Assert::IsFalse(maze.IsAccessibleLocation(longBlocked.GetLocation()));
+		}
+
+		TEST_METHOD(PositionAuditConfiguredFixedFixtureRoutesReturnToStartWhenReversed)
+		{
+			Maze maze;
+			for (uint8_t y = 0U; y < 5U; ++y)
+			{
+				Cell& cell = maze[CellCoordinates(0U, y)];
+				maze.SetWall(cell, Up, (y < 4U) ? NoWall : Wall);
+				maze.SetWall(cell, Down, (y > 0U) ? NoWall : Wall);
+				maze.SetWall(cell, Left, Wall);
+				maze.SetWall(cell, Right, (y == 4U) ? NoWall : Wall);
+			}
+			for (uint8_t x = 1U; x <= 4U; ++x)
+			{
+				Cell& cell = maze[CellCoordinates(x, 4U)];
+				maze.SetWall(cell, Up, Wall);
+				maze.SetWall(cell, Down, Wall);
+				maze.SetWall(cell, Left, NoWall);
+				maze.SetWall(cell, Right, (x < 4U) ? NoWall : Wall);
+			}
+
+			const ManeuverSet& set = ManeuverSet::GetSet();
+			const auto executePath = [&maze, &set](DirectionalLocation current, const ManeuverCode* codes, const size_t count)
+			{
+				for (size_t index = 0U; index < count; ++index)
+				{
+					Assert::IsTrue(set.IsValidMove(codes[index], current, maze));
+					current = set.Move(codes[index], current);
+					Assert::IsTrue(maze.IsAccessibleLocation(current.GetLocation()));
+				}
+
+				return current;
+			};
+
+			const DirectionalLocation start(MazeLocation::CellCenter(CellCoordinates(0U, 0U)), Up);
+			const ManeuverCode straightPhase[] = { S8, IP180, S8 };
+			const DirectionalLocation straightEnd = executePath(start, straightPhase, _countof(straightPhase));
+			Assert::IsTrue(straightEnd == DirectionalLocation(MazeLocation::CellCenter(CellCoordinates(0U, 0U)), Down));
+
+			const ManeuverCode shortPhase[] = { S7, S90SS, S7 };
+			const DirectionalLocation shortEnd = executePath(start, shortPhase, _countof(shortPhase));
+			Assert::IsTrue(shortEnd == DirectionalLocation(MazeLocation::CellCenter(CellCoordinates(4U, 4U)), Right));
+			const ManeuverCode shortReverse[] = {
+				set.GetReverseCode(shortPhase[2]),
+				set.GetReverseCode(shortPhase[1]),
+				set.GetReverseCode(shortPhase[0]),
+			};
+			const DirectionalLocation shortReturnStart(shortEnd.GetLocation(), Left);
+			const DirectionalLocation shortReturnEnd = executePath(shortReturnStart, shortReverse, _countof(shortReverse));
+			Assert::IsTrue(shortReturnEnd == DirectionalLocation(MazeLocation::CellCenter(CellCoordinates(0U, 0U)), Down));
+
+			const ManeuverCode longPhase[] = { S6, S90LS, S6 };
+			const DirectionalLocation longEnd = executePath(start, longPhase, _countof(longPhase));
+			Assert::IsTrue(longEnd == DirectionalLocation(MazeLocation::CellCenter(CellCoordinates(4U, 4U)), Right));
+			const ManeuverCode longReverse[] = {
+				set.GetReverseCode(longPhase[2]),
+				set.GetReverseCode(longPhase[1]),
+				set.GetReverseCode(longPhase[0]),
+			};
+			const DirectionalLocation longReturnStart(longEnd.GetLocation(), Left);
+			const DirectionalLocation longReturnEnd = executePath(longReturnStart, longReverse, _countof(longReverse));
+			Assert::IsTrue(longReturnEnd == DirectionalLocation(MazeLocation::CellCenter(CellCoordinates(0U, 0U)), Down));
+		}
+
 		TEST_METHOD(CodeDegreesUsesRightTurnSignForUnmirroredSmoothTurns)
 		{
 			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90SS)));
 			Assert::AreEqual(static_cast<int>(90), static_cast<int>(CodeDegrees(S90SS_M)));
 			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90LS)));
 			Assert::AreEqual(static_cast<int>(90), static_cast<int>(CodeDegrees(S90LS_M)));
+		}
+
+		TEST_METHOD(TryComputeSmoothTurnTargetUsesStraightRampCurveAndRampOutPhases)
+		{
+			SmoothTurnExecutionProfile profile{};
+			profile.radius = 0.5f;
+			profile.radians = 1.0f;
+			profile.turnInDistance = 0.2f;
+			profile.preTurnDistance = 0.1f;
+			profile.constantTurnDistance = 0.3f;
+			profile.postTurnDistance = 0.1f;
+			profile.totalDistance = 0.9f;
+
+			float yawOffsetRad = 0.0f;
+			float angularVelocityRadps = 0.0f;
+			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.05f, 0.4f, yawOffsetRad, angularVelocityRadps));
+			Assert::AreEqual(0.0f, yawOffsetRad, 1.0e-6f);
+			Assert::AreEqual(0.0f, angularVelocityRadps, 1.0e-6f);
+
+			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.2f, 0.4f, yawOffsetRad, angularVelocityRadps));
+			Assert::AreEqual(0.05f, yawOffsetRad, 1.0e-6f);
+			Assert::AreEqual(0.4f, angularVelocityRadps, 1.0e-6f);
+
+			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.45f, 0.4f, yawOffsetRad, angularVelocityRadps));
+			Assert::AreEqual(0.5f, yawOffsetRad, 1.0e-6f);
+			Assert::AreEqual(0.8f, angularVelocityRadps, 1.0e-6f);
+
+			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.75f, 0.4f, yawOffsetRad, angularVelocityRadps));
+			Assert::AreEqual(0.9875f, yawOffsetRad, 1.0e-6f);
+			Assert::AreEqual(0.2f, angularVelocityRadps, 1.0e-6f);
+
+			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.85f, 0.4f, yawOffsetRad, angularVelocityRadps));
+			Assert::AreEqual(1.0f, yawOffsetRad, 1.0e-6f);
+			Assert::AreEqual(0.0f, angularVelocityRadps, 1.0e-6f);
 		}
 
 		TEST_METHOD(VehicleTurnSpeedRespectsLateralAndMaxSpeedLimits)
@@ -391,11 +617,59 @@ namespace MazeMap
 			Assert::AreEqual(0.0f, invalid.rightDriveCommand, 1.0e-6f);
 		}
 
+		TEST_METHOD(ComputeOpenLoopYawWiggleCommandAlternatesDriveBiasAcrossHalfPeriods)
+		{
+			const OpenLoopDriveCommand firstHalf = ComputeOpenLoopYawWiggleCommand(0.80f, 0UL, 120UL, 0.25f);
+			Assert::AreEqual(0.60f, firstHalf.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(1.00f, firstHalf.rightDriveCommand, 1.0e-6f);
+
+			const OpenLoopDriveCommand secondHalf = ComputeOpenLoopYawWiggleCommand(0.80f, 120UL, 120UL, 0.25f);
+			Assert::AreEqual(1.00f, secondHalf.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(0.60f, secondHalf.rightDriveCommand, 1.0e-6f);
+
+			const OpenLoopDriveCommand disabled = ComputeOpenLoopYawWiggleCommand(0.80f, 0UL, 0UL, 0.25f);
+			Assert::AreEqual(0.80f, disabled.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(0.80f, disabled.rightDriveCommand, 1.0e-6f);
+		}
+
+		TEST_METHOD(ComputeOpenLoopYawWiggleCommandRetainsForwardSeatBiasOnBothWheels)
+		{
+			const OpenLoopDriveCommand firstHalf = ComputeOpenLoopYawWiggleCommand(1.00f, 0UL, 120UL, 0.20f, 0.90f);
+			Assert::AreEqual(0.90f, firstHalf.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(1.00f, firstHalf.rightDriveCommand, 1.0e-6f);
+
+			const OpenLoopDriveCommand secondHalf = ComputeOpenLoopYawWiggleCommand(1.00f, 120UL, 120UL, 0.20f, 0.90f);
+			Assert::AreEqual(1.00f, secondHalf.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(0.90f, secondHalf.rightDriveCommand, 1.0e-6f);
+		}
+
 		TEST_METHOD(TryComputeLinearWallSignalDistanceThresholdMUsesInverseSquareScaling)
 		{
 			float thresholdDistanceM = 0.0f;
 			Assert::IsTrue(TryComputeLinearWallSignalDistanceThresholdM(0.0550f, 1.0f / 6.0f, thresholdDistanceM));
 			Assert::AreEqual(0.1347219f, thresholdDistanceM, 0.0001f);
+		}
+
+		TEST_METHOD(TryComputeInverseSquareSignalAtDistanceFromReferenceKeepsThresholdGeometryConsistent)
+		{
+			float normalizedReferenceSignal = 0.0f;
+			Assert::IsTrue(TryComputeInverseSquareSignalAtDistanceFromReference(0.054f, 0.049633f, 0.055589f, normalizedReferenceSignal));
+
+			float onMeasuredThreshold = 0.0f;
+			float offMeasuredThreshold = 0.0f;
+			Assert::IsTrue(TryComputeSignalHighThresholds(
+				normalizedReferenceSignal,
+				1.0f / 6.0f,
+				1.0f / 8.0f,
+				onMeasuredThreshold,
+				offMeasuredThreshold));
+
+			float onDistanceM = 0.0f;
+			float offDistanceM = 0.0f;
+			Assert::IsTrue(TryComputeInverseSquareDistanceFromReferenceSignal(onMeasuredThreshold, 0.054f, 0.049633f, onDistanceM));
+			Assert::IsTrue(TryComputeInverseSquareDistanceFromReferenceSignal(offMeasuredThreshold, 0.054f, 0.049633f, offDistanceM));
+			Assert::AreEqual(0.136165f, onDistanceM, 0.0001f);
+			Assert::AreEqual(0.157230f, offDistanceM, 0.0001f);
 		}
 
 		TEST_METHOD(TryComputeInverseSquareDistanceFromReferenceSignalReconstructsDistance)
@@ -414,6 +688,306 @@ namespace MazeMap
 			Assert::AreEqual(0.030f, offMeasuredThreshold, 1.0e-6f);
 		}
 
+		TEST_METHOD(TryComputeSignalRiseThresholdsUsesBaselineToWeakestSpan)
+		{
+			float onRiseThreshold = 0.0f;
+			float offRiseThreshold = 0.0f;
+			Assert::IsTrue(TryComputeSignalRiseThresholds(0.052160f, 0.083306f, 0.50f, 0.35f, onRiseThreshold, offRiseThreshold));
+			Assert::AreEqual(0.015573f, onRiseThreshold, 1.0e-6f);
+			Assert::AreEqual(0.010901f, offRiseThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeSignalBandThresholdsInterpolateBetweenBaselineAndWallReference)
+		{
+			float onMeasuredThreshold = 0.0f;
+			float offMeasuredThreshold = 0.0f;
+			Assert::IsTrue(TryComputeSignalBandThresholds(0.006000f, 0.054000f, 1.0f / 6.0f, 1.0f / 8.0f, onMeasuredThreshold, offMeasuredThreshold));
+			Assert::AreEqual(0.014000f, onMeasuredThreshold, 1.0e-6f);
+			Assert::AreEqual(0.012000f, offMeasuredThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeSignalRiseThresholdsUseOpenDeltaSubtractedSideSignal)
+		{
+			float onMeasuredThreshold = 0.0f;
+			float offMeasuredThreshold = 0.0f;
+			Assert::IsTrue(TryComputeSignalRiseThresholds(0.002000f, 0.032000f, 1.0f / 6.0f, 1.0f / 8.0f, onMeasuredThreshold, offMeasuredThreshold));
+			Assert::AreEqual(0.005000f, onMeasuredThreshold, 1.0e-6f);
+			Assert::AreEqual(0.003750f, offMeasuredThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeWallSegmentCenterWindowKepsOnlyMiddleThird)
+		{
+			float minCoordinateM = 0.0f;
+			float maxCoordinateM = 0.0f;
+			Assert::IsTrue(TryComputeWallSegmentCenterWindowM(0.090f, 0.180f, 0.012f, 1.0f / 3.0f, minCoordinateM, maxCoordinateM));
+			Assert::AreEqual(0.062f, minCoordinateM, 1.0e-6f);
+			Assert::AreEqual(0.118f, maxCoordinateM, 1.0e-6f);
+			Assert::IsTrue(IsWithinWallSegmentCenterWindowM(0.090f, 0.180f, 0.012f, 1.0f / 3.0f));
+			Assert::IsFalse(IsWithinWallSegmentCenterWindowM(0.050f, 0.180f, 0.012f, 1.0f / 3.0f));
+			Assert::IsFalse(IsWithinWallSegmentCenterWindowM(0.130f, 0.180f, 0.012f, 1.0f / 3.0f));
+		}
+
+		TEST_METHOD(IsWithinWallSegmentCenterWindowRejectsBoundaryPostCoordinates)
+		{
+			Assert::IsFalse(IsWithinWallSegmentCenterWindowM(0.723477f, 0.180f, 0.012f, 1.0f / 3.0f));
+			Assert::IsFalse(IsWithinWallSegmentCenterWindowM(0.730234f, 0.180f, 0.012f, 1.0f / 3.0f));
+			Assert::IsTrue(IsWithinWallSegmentCenterWindowM(0.810000f, 0.180f, 0.012f, 1.0f / 3.0f));
+		}
+
+		TEST_METHOD(TryComputeSignedTravelToCellCenterAlongHeadingProjectsObservationRecentering)
+		{
+			float signedTravelM = 0.0f;
+			Assert::IsTrue(TryComputeSignedTravelToCellCenterAlongHeadingM(
+				CellCoordinates(0, 1),
+				0.180f,
+				0.0879f,
+				0.3406f,
+				0.0f,
+				1.0f,
+				signedTravelM));
+			Assert::AreEqual(-0.0706f, signedTravelM, 0.0005f);
+
+			Assert::IsTrue(TryComputeSignedTravelToCellCenterAlongHeadingM(
+				CellCoordinates(0, 1),
+				0.180f,
+				0.0900f,
+				0.2500f,
+				0.0f,
+				1.0f,
+				signedTravelM));
+			Assert::AreEqual(0.0200f, signedTravelM, 0.0005f);
+
+			Assert::IsFalse(TryComputeSignedTravelToCellCenterAlongHeadingM(
+				CellCoordinates(0, 1),
+				0.180f,
+				0.0900f,
+				0.2500f,
+				0.0f,
+				0.0f,
+				signedTravelM));
+		}
+
+		TEST_METHOD(TryComputeSideWallObservationPoseTargetsSensorAtCellCenter)
+		{
+			float targetXM = 0.0f;
+			float targetYM = 0.0f;
+			Assert::IsTrue(TryComputeSideWallObservationPoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.05026f,
+				targetXM,
+				targetYM));
+			Assert::AreEqual(0.09000f, targetXM, 1.0e-6f);
+			Assert::AreEqual(0.21974f, targetYM, 1.0e-5f);
+
+			Assert::IsTrue(TryComputeSideWallObservationPoseM(
+				CellCoordinates(2, 3),
+				Right,
+				0.180f,
+				0.05026f,
+				targetXM,
+				targetYM));
+			Assert::AreEqual(0.39974f, targetXM, 1.0e-5f);
+			Assert::AreEqual(0.63000f, targetYM, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeSideWallObservationPoseRejectsInvalidInputs)
+		{
+			float targetXM = 0.0f;
+			float targetYM = 0.0f;
+			Assert::IsFalse(TryComputeSideWallObservationPoseM(
+				CellCoordinates(0, 1),
+				None,
+				0.180f,
+				0.05026f,
+				targetXM,
+				targetYM));
+			Assert::IsFalse(TryComputeSideWallObservationPoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.0f,
+				0.05026f,
+				targetXM,
+				targetYM));
+			Assert::IsFalse(TryComputeSideWallObservationPoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				-0.001f,
+				targetXM,
+				targetYM));
+		}
+
+		TEST_METHOD(TryComputeSideWallObservationSamplePoseSpansTargetRegion)
+		{
+			float targetXM = 0.0f;
+			float targetYM = 0.0f;
+			Assert::IsTrue(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				0U,
+				9U,
+				targetXM,
+				targetYM));
+			Assert::AreEqual(0.09000f, targetXM, 1.0e-6f);
+			Assert::AreEqual(0.19174f, targetYM, 1.0e-5f);
+
+			Assert::IsTrue(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				4U,
+				9U,
+				targetXM,
+				targetYM));
+			Assert::AreEqual(0.09000f, targetXM, 1.0e-6f);
+			Assert::AreEqual(0.21974f, targetYM, 1.0e-5f);
+
+			Assert::IsTrue(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				8U,
+				9U,
+				targetXM,
+				targetYM));
+			Assert::AreEqual(0.09000f, targetXM, 1.0e-6f);
+			Assert::AreEqual(0.24774f, targetYM, 1.0e-5f);
+
+			Assert::IsTrue(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(2, 3),
+				Right,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				0U,
+				9U,
+				targetXM,
+				targetYM));
+			Assert::AreEqual(0.37174f, targetXM, 1.0e-5f);
+			Assert::AreEqual(0.63000f, targetYM, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeSideWallObservationSamplePoseRejectsInvalidInputs)
+		{
+			float targetXM = 0.0f;
+			float targetYM = 0.0f;
+			Assert::IsFalse(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				None,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				0U,
+				9U,
+				targetXM,
+				targetYM));
+			Assert::IsFalse(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				0.0f,
+				0U,
+				9U,
+				targetXM,
+				targetYM));
+			Assert::IsFalse(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				9U,
+				9U,
+				targetXM,
+				targetYM));
+			Assert::IsFalse(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				0U,
+				0U,
+				targetXM,
+				targetYM));
+		}
+
+		TEST_METHOD(TryComputeRobustSignalBandFromSamplesRejectsOutlier)
+		{
+			const std::array<float, 5U> samples = { 1.0f, 1.0f, 1.0f, 1.0f, 10.0f };
+			float median = 0.0f;
+			float low = 0.0f;
+			float high = 0.0f;
+			Assert::IsTrue(TryComputeRobustSignalBandFromSamples(samples, 5U, 3.0f, median, low, high));
+			Assert::AreEqual(1.0f, median, 1.0e-6f);
+			Assert::AreEqual(1.0f, low, 1.0e-6f);
+			Assert::AreEqual(1.0f, high, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeSignalRiseThresholdsSupportNormalizedSideWallReferenceThresholds)
+		{
+			float onMeasuredThreshold = 0.0f;
+			float offMeasuredThreshold = 0.0f;
+			Assert::IsTrue(TryComputeSignalRiseThresholds(0.0f, 0.043248f, 0.10f, 0.07f, onMeasuredThreshold, offMeasuredThreshold));
+			Assert::AreEqual(0.0043248f, onMeasuredThreshold, 1.0e-6f);
+			Assert::AreEqual(0.00302736f, offMeasuredThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeConservativeSignalRiseThresholdsFromBandsUsesConservativeFrontSpan)
+		{
+			float onMeasuredThreshold = 0.0f;
+			float offMeasuredThreshold = 0.0f;
+			float signalBaseline = 0.0f;
+			Assert::IsTrue(TryComputeConservativeSignalRiseThresholdsFromBands(
+				0.050000f,
+				0.056000f,
+				0.080000f,
+				0.086000f,
+				0.50f,
+				0.35f,
+				onMeasuredThreshold,
+				offMeasuredThreshold,
+				signalBaseline));
+			Assert::AreEqual(0.056000f, signalBaseline, 1.0e-6f);
+			Assert::AreEqual(0.012000f, onMeasuredThreshold, 1.0e-6f);
+			Assert::AreEqual(0.008400f, offMeasuredThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryScaleSignalHighThresholdsPreservesThresholdOrdering)
+		{
+			float onMeasuredThreshold = 0.095013f;
+			float offMeasuredThreshold = 0.078842f;
+			Assert::IsTrue(TryScaleSignalHighThresholds(0.70f, onMeasuredThreshold, offMeasuredThreshold));
+			Assert::AreEqual(0.0665091f, onMeasuredThreshold, 1.0e-6f);
+			Assert::AreEqual(0.0551894f, offMeasuredThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(HysteresisSignalHighUsesReleaseThresholdWhileLatched)
+		{
+			Assert::IsFalse(HysteresisSignalHigh(false, 0.0650f, 0.0700f, 0.0550f));
+			Assert::IsTrue(HysteresisSignalHigh(false, 0.0710f, 0.0700f, 0.0550f));
+			Assert::IsTrue(HysteresisSignalHigh(true, 0.0600f, 0.0700f, 0.0550f));
+			Assert::IsFalse(HysteresisSignalHigh(true, 0.0540f, 0.0700f, 0.0550f));
+		}
+
 		TEST_METHOD(RollingAverageWindowUsesLastControlLoopSamples)
 		{
 			RollingAverageWindow<4U> window{};
@@ -422,6 +996,17 @@ namespace MazeMap
 			Assert::AreEqual(2.0f, window.Push(3.0f), 1.0e-6f);
 			Assert::AreEqual(2.5f, window.Push(4.0f), 1.0e-6f);
 			Assert::AreEqual(4.75f, window.Push(10.0f), 1.0e-6f);
+		}
+
+		TEST_METHOD(RollingAverageWindowUsesTrimmedMeanForFiveSampleWindow)
+		{
+			RollingAverageWindow<5U> window{};
+			Assert::AreEqual(1.0f, window.Push(1.0f), 1.0e-6f);
+			Assert::AreEqual(1.0f, window.Push(1.0f), 1.0e-6f);
+			Assert::AreEqual(1.0f, window.Push(1.0f), 1.0e-6f);
+			Assert::AreEqual(1.0f, window.Push(1.0f), 1.0e-6f);
+			Assert::AreEqual(1.0f, window.Push(10.0f), 1.0e-6f);
+			Assert::AreEqual(1.0f, window.Average(), 1.0e-6f);
 		}
 
 		TEST_METHOD(WallSensorCalibrationCurveSupportsDenseMovingFrontSweep)
@@ -549,6 +1134,55 @@ namespace MazeMap
 			Assert::IsTrue(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 100UL, 100UL, true));
 		}
 
+		TEST_METHOD(ComputeAverageEncoderAbsSpeedMpsUsesWheelMagnitudes)
+		{
+			Assert::AreEqual(0.030f, ComputeAverageEncoderAbsSpeedMps(0.020f, -0.040f), 1.0e-6f);
+			Assert::AreEqual(0.0f, ComputeAverageEncoderAbsSpeedMps(NAN, 0.040f), 1.0e-6f);
+		}
+
+		TEST_METHOD(IsWallTapMotionEstablishedAcceptsSpeedOrDistance)
+		{
+			Assert::IsTrue(IsWallTapMotionEstablished(0.020f, 0.001f, 0.018f, 0.003f));
+			Assert::IsTrue(IsWallTapMotionEstablished(0.010f, 0.003f, 0.018f, 0.003f));
+			Assert::IsFalse(IsWallTapMotionEstablished(0.010f, 0.002f, 0.018f, 0.003f));
+		}
+
+		TEST_METHOD(HasSharpEncoderVelocityDeclineRequiresPeakRatioAndDrop)
+		{
+			Assert::IsTrue(HasSharpEncoderVelocityDecline(0.050f, 0.018f, 0.020f, 0.45f, 0.015f));
+			Assert::IsFalse(HasSharpEncoderVelocityDecline(0.050f, 0.026f, 0.020f, 0.45f, 0.015f));
+			Assert::IsFalse(HasSharpEncoderVelocityDecline(0.030f, 0.020f, 0.040f, 0.45f, 0.015f));
+		}
+
+		TEST_METHOD(HasPlanarAccelContactSpikeUsesRiseAboveBaseline)
+		{
+			Assert::IsTrue(HasPlanarAccelContactSpike(0.050f, 0.900f, 0.750f));
+			Assert::IsFalse(HasPlanarAccelContactSpike(0.200f, 0.850f, 0.750f));
+		}
+
+		TEST_METHOD(ShouldArmBoundaryImpactWatchUsesApproachWindow)
+		{
+			Assert::IsTrue(ShouldArmBoundaryImpactWatch(0.030f, 0.040f));
+			Assert::IsTrue(ShouldArmBoundaryImpactWatch(-0.005f, 0.040f));
+			Assert::IsFalse(ShouldArmBoundaryImpactWatch(0.050f, 0.040f));
+			Assert::IsFalse(ShouldArmBoundaryImpactWatch(0.030f, 0.0f));
+		}
+
+		TEST_METHOD(HasClearedBoundaryWithoutImpactRequiresPastTouchTarget)
+		{
+			Assert::IsTrue(HasClearedBoundaryWithoutImpact(-0.010f, 0.010f));
+			Assert::IsFalse(HasClearedBoundaryWithoutImpact(-0.005f, 0.010f));
+			Assert::IsFalse(HasClearedBoundaryWithoutImpact(0.000f, 0.010f));
+			Assert::IsFalse(HasClearedBoundaryWithoutImpact(-0.010f, -0.001f));
+		}
+
+		TEST_METHOD(ShouldRetryWallTapAfterNoMotionWaitsForTimeoutAndMissingMotion)
+		{
+			Assert::IsFalse(ShouldRetryWallTapAfterNoMotion(119UL, 0.000f, 0.000f, 120UL, 0.018f, 0.003f));
+			Assert::IsTrue(ShouldRetryWallTapAfterNoMotion(120UL, 0.010f, 0.002f, 120UL, 0.018f, 0.003f));
+			Assert::IsFalse(ShouldRetryWallTapAfterNoMotion(120UL, 0.020f, 0.002f, 120UL, 0.018f, 0.003f));
+		}
+
 		TEST_METHOD(ComputeFanRampDutyCycleInterpolatesAndClampsInputs)
 		{
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(0.80f, 500UL, 2000UL) - 0.20f) < 1.0e-6f);
@@ -674,6 +1308,43 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeWallTouchPoseFromNorthWallM(0.900f, 0.012f, 0.056f) - 0.838f) < 1.0e-6f);
 		}
 
+		TEST_METHOD(CalibrationCenterCoordinateValidationSupportsMultiCellFixtureTargets)
+		{
+			Assert::IsTrue(IsValidCalibrationCenterCoordinateM(0.090f));
+			Assert::IsTrue(IsValidCalibrationCenterCoordinateM(0.838f));
+			Assert::IsFalse(IsValidCalibrationCenterCoordinateM(-0.010f));
+			Assert::IsFalse(IsValidCalibrationCenterCoordinateM(std::numeric_limits<float>::quiet_NaN()));
+		}
+
+		TEST_METHOD(CalibrationDirectionTowardTargetSelectsExpectedSignedAxisMotion)
+		{
+			Direction selectedDirection = Left;
+			Assert::IsTrue(TrySelectCalibrationDirectionTowardTarget(0.7765f, 0.8100f, 0.0010f, Down, Up, selectedDirection));
+			Assert::AreEqual(static_cast<int>(Up), static_cast<int>(selectedDirection));
+			Assert::IsTrue(TrySelectCalibrationDirectionTowardTarget(0.8400f, 0.8100f, 0.0010f, Down, Up, selectedDirection));
+			Assert::AreEqual(static_cast<int>(Down), static_cast<int>(selectedDirection));
+			Assert::IsFalse(TrySelectCalibrationDirectionTowardTarget(0.8105f, 0.8100f, 0.0010f, Down, Up, selectedDirection));
+		}
+
+		TEST_METHOD(CalibrationDirectionTowardTargetRejectsInvalidInputs)
+		{
+			Direction selectedDirection = Up;
+			Assert::IsFalse(TrySelectCalibrationDirectionTowardTarget(
+				std::numeric_limits<float>::quiet_NaN(),
+				0.8100f,
+				0.0010f,
+				Down,
+				Up,
+				selectedDirection));
+			Assert::IsFalse(TrySelectCalibrationDirectionTowardTarget(
+				0.7765f,
+				0.8100f,
+				-0.0010f,
+				Down,
+				Up,
+				selectedDirection));
+		}
+
 		TEST_METHOD(ComputeCalibrationSafeMaxCenterXLeavesThreeMillimetersFromEastWall)
 		{
 			Assert::IsTrue(std::fabs(ComputeCalibrationSafeMaxCenterXFromEastWallM(0.180f, 0.012f, 0.0525f, 0.003f) - 0.1185f) < 1.0e-6f);
@@ -690,6 +1361,19 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(safeMaxCenterXM - 0.10070479f) < 1.0e-5f);
 		}
 
+		TEST_METHOD(ComputeCalibrationSafeMinCenterXUsesRearCornerSweepRadius)
+		{
+			const float safeMinCenterXM = ComputeCalibrationSafeMinCenterXFromWestWallForRearCornerM(0.012f, 0.0525f, 0.0421f, 0.006f);
+			Assert::IsTrue(std::fabs(safeMinCenterXM - 0.07929521f) < 1.0e-5f);
+		}
+
+		TEST_METHOD(ComputeCalibrationSafeMinAndMaxCenterXMirrorAcrossCellCenter)
+		{
+			const float safeMinCenterXM = ComputeCalibrationSafeMinCenterXFromWestWallForRearCornerM(0.012f, 0.0525f, 0.0421f, 0.006f);
+			const float safeMaxCenterXM = ComputeCalibrationSafeMaxCenterXFromEastWallForRearCornerM(0.180f, 0.012f, 0.0525f, 0.0421f, 0.006f);
+			Assert::IsTrue(std::fabs((safeMinCenterXM + safeMaxCenterXM) - 0.180f) < 1.0e-5f);
+		}
+
 		TEST_METHOD(ComputeStartupWallCalibrationFrontSampleCentersUseFixedWestWallReference)
 		{
 			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterXM(0.062f, 0.000f, 0.020f, 0U) - 0.062f) < 1.0e-6f);
@@ -703,12 +1387,25 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFarthestFrontSampleCenterXM(0.062f, 0.005f, 0.020f, 0U) - 0.067f) < 1.0e-6f);
 		}
 
+		TEST_METHOD(ComputeStartupWallCalibrationFrontSampleCentersUseFixedEastWallReference)
+		{
+			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterFromEastWallXM(0.118f, 0.000f, 0.020f, 0U) - 0.118f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterFromEastWallXM(0.118f, 0.000f, 0.020f, 1U) - 0.098f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterFromEastWallXM(0.118f, 0.005f, 0.020f, 3U) - 0.053f) < 1.0e-6f);
+		}
+
+		TEST_METHOD(ComputeStartupWallCalibrationFarthestFrontSampleCenterFromEastWallUsesLastSweepPoint)
+		{
+			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFarthestFrontSampleCenterFromEastWallXM(0.118f, 0.000f, 0.020f, 4U) - 0.058f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFarthestFrontSampleCenterFromEastWallXM(0.118f, 0.005f, 0.020f, 0U) - 0.113f) < 1.0e-6f);
+		}
+
 		TEST_METHOD(ComputeStartupWallCalibrationFrontSampleCentersRedistributeAcrossSafeSpan)
 		{
 			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterWithinSpanXM(0.062f, 0.10070479f, 4U, 0U) - 0.062f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterWithinSpanXM(0.062f, 0.10070479f, 4U, 1U) - 0.074901596f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterWithinSpanXM(0.062f, 0.10070479f, 4U, 3U) - 0.10070479f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterWithinSpanXM(0.062f, 0.050f, 4U, 3U) - 0.062f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(ComputeStartupWallCalibrationFrontSampleCenterWithinSpanXM(0.118f, 0.07929521f, 4U, 3U) - 0.07929521f) < 1.0e-6f);
 		}
 
 		TEST_METHOD(ComputeMissionStartTurnClearanceRejectsInvalidInputs)
@@ -793,6 +1490,12 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeWallTouchMinimumLatchTravelM(0.028f, 0.030f, 0.008f) - 0.028f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeWallTouchMinimumLatchTravelM(0.033f, 0.030f, 0.008f) - 0.030f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeWallTouchMinimumLatchTravelM(0.045f, 0.030f, 0.008f) - 0.037f) < 1.0e-6f);
+		}
+
+		TEST_METHOD(ComputeWallTouchMaximumApproachDistanceExpandsForKnownLongCorridors)
+		{
+			Assert::IsTrue(std::fabs(ComputeWallTouchMaximumApproachDistanceM(0.045f, 0.168f, 0.008f) - 0.168f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(ComputeWallTouchMaximumApproachDistanceM(0.3984f, 0.168f, 0.008f) - 0.4064f) < 1.0e-6f);
 		}
 
 		TEST_METHOD(IsWallTouchSeatedSampleRejectsAngledOrSingleWheelSpinContact)

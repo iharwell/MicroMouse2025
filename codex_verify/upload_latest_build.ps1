@@ -53,10 +53,16 @@ function Get-LatestFirmwareImage {
         (Join-Path $SearchRoot 'arduino_build\firmware\MazeMap.ino.hex'),
         (Join-Path $SearchRoot 'arduino_build\MazeMap.ino.hex')
     )
+    $canonicalCandidates = @()
     foreach ($canonicalImage in $canonicalImages) {
         if (Test-Path -LiteralPath $canonicalImage) {
-            return Get-Item -LiteralPath $canonicalImage
+            $canonicalCandidates += Get-Item -LiteralPath $canonicalImage
         }
+    }
+    if ($canonicalCandidates.Count -gt 0) {
+        return $canonicalCandidates |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
     }
 
     $preferredImages = @(Get-ChildItem -Path $SearchRoot -Recurse -File -Filter 'MazeMap.ino.hex' |

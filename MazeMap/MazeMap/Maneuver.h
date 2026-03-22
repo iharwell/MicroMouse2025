@@ -9,8 +9,161 @@
 
 namespace MazeMap
 {
+	MAZEMAP_INLINE bool IsFiniteFloat(const float value) noexcept
+	{
+#if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
+		return isfinite(value);
+#else
+		return std::isfinite(value);
+#endif
+	}
+
+	MAZEMAP_INLINE float AbsFloat(const float value) noexcept
+	{
+#if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
+		return fabs(value);
+#else
+		return std::fabs(value);
+#endif
+	}
+
+	MAZEMAP_INLINE float ClampFloat(const float value, const float low, const float high) noexcept
+	{
+		return (value < low) ? low : ((value > high) ? high : value);
+	}
+
+	struct SmoothTurnExecutionProfile
+	{
+		float radius = 0.0f;
+		float radians = 0.0f;
+		float turnInDistance = 0.0f;
+		float preTurnDistance = 0.0f;
+		float constantTurnDistance = 0.0f;
+		float postTurnDistance = 0.0f;
+		float totalDistance = 0.0f;
+
+		MAZEMAP_INLINE bool IsValid() const noexcept
+		{
+			return IsFiniteFloat(radius) &&
+				(radius > 0.0f) &&
+				IsFiniteFloat(radians) &&
+				(AbsFloat(radians) > 0.0f) &&
+				IsFiniteFloat(turnInDistance) &&
+				(turnInDistance >= 0.0f) &&
+				IsFiniteFloat(preTurnDistance) &&
+				(preTurnDistance >= 0.0f) &&
+				IsFiniteFloat(constantTurnDistance) &&
+				(constantTurnDistance >= 0.0f) &&
+				IsFiniteFloat(postTurnDistance) &&
+				(postTurnDistance >= 0.0f) &&
+				IsFiniteFloat(totalDistance) &&
+				(totalDistance > 0.0f);
+		}
+	};
+
+	MAZEMAP_INLINE SmoothTurnExecutionProfile ScaleSmoothTurnExecutionProfile(
+		const SmoothTurnExecutionProfile& profile,
+		float distanceScale) noexcept
+	{
+		if (!(IsFiniteFloat(distanceScale) && (distanceScale > 0.0f)))
+		{
+			return SmoothTurnExecutionProfile{};
+		}
+
+		SmoothTurnExecutionProfile scaled = profile;
+		scaled.radius *= distanceScale;
+		scaled.turnInDistance *= distanceScale;
+		scaled.preTurnDistance *= distanceScale;
+		scaled.constantTurnDistance *= distanceScale;
+		scaled.postTurnDistance *= distanceScale;
+		scaled.totalDistance *= distanceScale;
+		return scaled;
+	}
+
+	MAZEMAP_INLINE bool TryComputeSmoothTurnTarget(
+		const SmoothTurnExecutionProfile& profile,
+		float traveledDistance,
+		float forwardSpeed,
+		float& yawOffsetRad,
+		float& angularVelocityRadps) noexcept
+	{
+		yawOffsetRad = 0.0f;
+		angularVelocityRadps = 0.0f;
+		if (!profile.IsValid() ||
+			!IsFiniteFloat(traveledDistance) ||
+			!IsFiniteFloat(forwardSpeed))
+		{
+			return false;
+		}
+
+		const float clampedDistance = ClampFloat(traveledDistance, 0.0f, profile.totalDistance);
+		const float turnSign = (profile.radians < 0.0f) ? -1.0f : 1.0f;
+		const float radius = profile.radius;
+		const float rampDistance = profile.turnInDistance;
+		const float preTurnEnd = profile.preTurnDistance;
+		const float rampInEnd = preTurnEnd + rampDistance;
+		const float constantEnd = rampInEnd + profile.constantTurnDistance;
+		const float rampOutEnd = constantEnd + rampDistance;
+
+		if (clampedDistance <= preTurnEnd)
+		{
+			return true;
+		}
+
+		if (rampDistance <= 0.0f)
+		{
+			if (clampedDistance <= constantEnd)
+			{
+				const float curveDistance = clampedDistance - preTurnEnd;
+				yawOffsetRad = turnSign * (curveDistance / radius);
+				angularVelocityRadps = turnSign * (forwardSpeed / radius);
+			}
+			else
+			{
+				yawOffsetRad = profile.radians;
+			}
+			return true;
+		}
+
+		if (clampedDistance <= rampInEnd)
+		{
+			const float rampDistanceTravelled = clampedDistance - preTurnEnd;
+			yawOffsetRad = turnSign * ((rampDistanceTravelled * rampDistanceTravelled) / (2.0f * rampDistance * radius));
+			angularVelocityRadps = turnSign * forwardSpeed * (rampDistanceTravelled / (rampDistance * radius));
+			return true;
+		}
+
+		if (clampedDistance <= constantEnd)
+		{
+			const float curveDistanceTravelled = clampedDistance - rampInEnd;
+			yawOffsetRad = turnSign * ((0.5f * rampDistance) + curveDistanceTravelled) / radius;
+			angularVelocityRadps = turnSign * (forwardSpeed / radius);
+			return true;
+		}
+
+		if (clampedDistance <= rampOutEnd)
+		{
+			const float rampDistanceTravelled = clampedDistance - constantEnd;
+			yawOffsetRad = turnSign *
+				((0.5f * rampDistance) +
+					profile.constantTurnDistance +
+					rampDistanceTravelled -
+					((rampDistanceTravelled * rampDistanceTravelled) / (2.0f * rampDistance))) /
+				radius;
+			angularVelocityRadps = turnSign * forwardSpeed * (1.0f - (rampDistanceTravelled / rampDistance)) / radius;
+			return true;
+		}
+
+		yawOffsetRad = profile.radians;
+		return true;
+	}
+
 	enum ManeuverCode : uint8_t
 	{
+		// Before hand-building any path from the codes below, first validate it against the known walls with
+		// ManeuverSet::GetSet().IsValidMove(code, start, maze), then confirm the evaluated endpoint with
+		// ManeuverSet::GetSet().Move(code, start) or ManeuverInstance::GetEnd().
+		// The code name alone does not prove the start/end geometry does what you intend.
 		MC_NONE = 0,
 		S1 = 1,
 		S2 = 2,
@@ -161,6 +314,11 @@ namespace MazeMap
 		virtual float GetEntrySpeed(const Vehicle& vehicle) const = 0; //
 		virtual float GetExitSpeed(const Vehicle& vehicle) const = 0; //
 		virtual float GetNominalTurnRadiusInCells() const { return 0.0f; }
+		virtual bool TryGetSmoothTurnExecutionProfile(SmoothTurnExecutionProfile& profile) const
+		{
+			profile = SmoothTurnExecutionProfile{};
+			return false;
+		}
 
 		virtual ManeuverCode GetManeuverID() const = 0;
 		virtual ManeuverCode GetBackwardsManeuverID() const = 0;
@@ -278,7 +436,7 @@ namespace MazeMap
 		{
 		}
 
-		MAZEMAP_INLINE float GetArcLengthInCells()
+		MAZEMAP_INLINE float GetArcLengthInCells() const
 		{
 			//float angleChangeInDeltas = _turnInDelta / _radius_in_cells;
 			//float arcRadians = _radians - angleChangeInDeltas;
@@ -323,6 +481,17 @@ namespace MazeMap
 			return GetVMax(vehicle);
 		}
 		virtual MAZEMAP_INLINE float GetNominalTurnRadiusInCells() const override { return _radius_in_cells; }
+		virtual MAZEMAP_INLINE bool TryGetSmoothTurnExecutionProfile(SmoothTurnExecutionProfile& profile) const override
+		{
+			profile.radius = _radius_in_cells;
+			profile.radians = _radians;
+			profile.turnInDistance = _turnInDelta;
+			profile.preTurnDistance = _preTurnDist;
+			profile.constantTurnDistance = GetArcLengthInCells();
+			profile.postTurnDistance = _postTurnDist;
+			profile.totalDistance = GetTravelDistInCells();
+			return profile.IsValid();
+		}
 	};
 	/*
 	template <int STEPSIZE, bool STRAIGHT_ENTRY, bool DIAGONAL_ENTRY>

@@ -46,7 +46,9 @@ namespace MazeMap
                 MilliAmpsToAmps(45.9f),
                 4.31f),
             56.0f / 17.0f,
-            0.025345f,
+            // March 22, 2026 straight-audit fit: aux001 speed_idx 0/1 under-reported outbound encoder distance by
+            // 2.42 mm on the 0.72 m north-corridor run, so increase the shared wheel diameter scale by 0.34%.
+            0.025327f,
             4096U
         };
         inline static constexpr MotorEncoderDriveHardwareConfig kLeftHardwareConfig = {

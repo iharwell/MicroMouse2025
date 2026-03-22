@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
+
 #include "WallSensorCalibration.h"
 
 #include <cmath>
@@ -7,6 +10,102 @@
 
 namespace MazeMap
 {
+    template <size_t MaxSamples>
+    inline bool TryComputeRobustSignalBandFromSamples(
+        const std::array<float, MaxSamples>& samples,
+        uint16_t count,
+        float scaledMadMultiplier,
+        float& median,
+        float& low,
+        float& high)
+    {
+        median = 0.0f;
+        low = 0.0f;
+        high = 0.0f;
+        if (count == 0U ||
+            count > static_cast<uint16_t>(MaxSamples) ||
+            !std::isfinite(scaledMadMultiplier) ||
+            scaledMadMultiplier < 0.0f)
+        {
+            return false;
+        }
+
+        auto insertionSort = [](float* values, uint16_t valueCount) noexcept
+        {
+            for (uint16_t index = 1U; index < valueCount; ++index)
+            {
+                const float value = values[index];
+                uint16_t insertIndex = index;
+                while ((insertIndex > 0U) && (values[insertIndex - 1U] > value))
+                {
+                    values[insertIndex] = values[insertIndex - 1U];
+                    --insertIndex;
+                }
+
+                values[insertIndex] = value;
+            }
+        };
+
+        auto computeMedian = [](const float* values, uint16_t valueCount) noexcept
+        {
+            if ((valueCount & 1U) != 0U)
+            {
+                return values[valueCount / 2U];
+            }
+
+            const uint16_t upperIndex = valueCount / 2U;
+            return 0.5f * (values[upperIndex - 1U] + values[upperIndex]);
+        };
+
+        float sortedSamples[MaxSamples] = {};
+        uint16_t validCount = 0U;
+        for (uint16_t index = 0U; index < count; ++index)
+        {
+            const float sample = samples[index];
+            if (!std::isfinite(sample) || sample < 0.0f)
+            {
+                continue;
+            }
+
+            sortedSamples[validCount] = sample;
+            ++validCount;
+        }
+
+        if (validCount == 0U)
+        {
+            return false;
+        }
+
+        insertionSort(sortedSamples, validCount);
+        median = computeMedian(sortedSamples, validCount);
+
+        float absoluteDeviations[MaxSamples] = {};
+        for (uint16_t index = 0U; index < validCount; ++index)
+        {
+            absoluteDeviations[index] = std::fabs(sortedSamples[index] - median);
+        }
+
+        insertionSort(absoluteDeviations, validCount);
+        const float mad = computeMedian(absoluteDeviations, validCount);
+        constexpr float kScaledMadNormalization = 0.67448975f;
+        const float scaledMad =
+            (mad > 0.0f) ? (mad / kScaledMadNormalization) : 0.0f;
+        const float halfWidth = scaledMadMultiplier * scaledMad;
+
+        low = median - halfWidth;
+        if (low < 0.0f)
+        {
+            low = 0.0f;
+        }
+        high = median + halfWidth;
+        return
+            std::isfinite(median) &&
+            std::isfinite(low) &&
+            std::isfinite(high) &&
+            low <= median &&
+            median <= high;
+    }
+
     inline bool TryComputeSignalHighThresholds(
         float calibrationMeasuredValue,
         float latchSignalFraction,
@@ -37,6 +136,165 @@ namespace MazeMap
             offMeasuredThreshold < onMeasuredThreshold;
     }
 
+    inline bool TryComputeSignalRiseThresholds(
+        float baselineMeasuredValue,
+        float highMeasuredValue,
+        float latchSpanFraction,
+        float releaseSpanFraction,
+        float& onRiseThreshold,
+        float& offRiseThreshold)
+    {
+        onRiseThreshold = 0.0f;
+        offRiseThreshold = 0.0f;
+        if (!std::isfinite(baselineMeasuredValue) ||
+            !std::isfinite(highMeasuredValue) ||
+            !std::isfinite(latchSpanFraction) ||
+            !std::isfinite(releaseSpanFraction) ||
+            baselineMeasuredValue < 0.0f ||
+            highMeasuredValue <= baselineMeasuredValue ||
+            latchSpanFraction <= 0.0f ||
+            releaseSpanFraction <= 0.0f ||
+            releaseSpanFraction >= latchSpanFraction)
+        {
+            return false;
+        }
+
+        const float span = highMeasuredValue - baselineMeasuredValue;
+        onRiseThreshold = span * latchSpanFraction;
+        offRiseThreshold = span * releaseSpanFraction;
+        return
+            std::isfinite(onRiseThreshold) &&
+            std::isfinite(offRiseThreshold) &&
+            onRiseThreshold > 0.0f &&
+            offRiseThreshold > 0.0f &&
+            offRiseThreshold < onRiseThreshold;
+    }
+
+    inline bool TryComputeConservativeSignalRiseThresholdsFromBands(
+        float baselineMeasuredValueLow,
+        float baselineMeasuredValueHigh,
+        float highMeasuredValueLow,
+        float highMeasuredValueHigh,
+        float latchSpanFraction,
+        float releaseSpanFraction,
+        float& onRiseThreshold,
+        float& offRiseThreshold,
+        float& signalBaseline)
+    {
+        onRiseThreshold = 0.0f;
+        offRiseThreshold = 0.0f;
+        signalBaseline = 0.0f;
+        if (!std::isfinite(baselineMeasuredValueLow) ||
+            !std::isfinite(baselineMeasuredValueHigh) ||
+            !std::isfinite(highMeasuredValueLow) ||
+            !std::isfinite(highMeasuredValueHigh) ||
+            baselineMeasuredValueLow < 0.0f ||
+            baselineMeasuredValueHigh < baselineMeasuredValueLow ||
+            highMeasuredValueLow <= 0.0f ||
+            highMeasuredValueHigh < highMeasuredValueLow)
+        {
+            return false;
+        }
+
+        if (!TryComputeSignalRiseThresholds(
+                baselineMeasuredValueHigh,
+                highMeasuredValueLow,
+                latchSpanFraction,
+                releaseSpanFraction,
+                onRiseThreshold,
+                offRiseThreshold))
+        {
+            return false;
+        }
+
+        signalBaseline = baselineMeasuredValueHigh;
+        return
+            std::isfinite(signalBaseline) &&
+            signalBaseline >= baselineMeasuredValueLow &&
+            signalBaseline <= baselineMeasuredValueHigh;
+    }
+
+    inline bool TryComputeSignalBandThresholds(
+        float baselineMeasuredValue,
+        float highMeasuredValue,
+        float latchSpanFraction,
+        float releaseSpanFraction,
+        float& onMeasuredThreshold,
+        float& offMeasuredThreshold)
+    {
+        onMeasuredThreshold = 0.0f;
+        offMeasuredThreshold = 0.0f;
+
+        float onRiseThreshold = 0.0f;
+        float offRiseThreshold = 0.0f;
+        if (!TryComputeSignalRiseThresholds(
+                baselineMeasuredValue,
+                highMeasuredValue,
+                latchSpanFraction,
+                releaseSpanFraction,
+                onRiseThreshold,
+                offRiseThreshold))
+        {
+            return false;
+        }
+
+        onMeasuredThreshold = baselineMeasuredValue + onRiseThreshold;
+        offMeasuredThreshold = baselineMeasuredValue + offRiseThreshold;
+        return
+            std::isfinite(onMeasuredThreshold) &&
+            std::isfinite(offMeasuredThreshold) &&
+            onMeasuredThreshold > baselineMeasuredValue &&
+            offMeasuredThreshold > baselineMeasuredValue &&
+            offMeasuredThreshold < onMeasuredThreshold;
+    }
+
+    inline bool TryScaleSignalHighThresholds(
+        float scale,
+        float& onMeasuredThreshold,
+        float& offMeasuredThreshold)
+    {
+        if (!std::isfinite(scale) ||
+            !std::isfinite(onMeasuredThreshold) ||
+            !std::isfinite(offMeasuredThreshold) ||
+            scale <= 0.0f ||
+            onMeasuredThreshold <= 0.0f ||
+            offMeasuredThreshold <= 0.0f ||
+            offMeasuredThreshold >= onMeasuredThreshold)
+        {
+            return false;
+        }
+
+        onMeasuredThreshold *= scale;
+        offMeasuredThreshold *= scale;
+        return
+            std::isfinite(onMeasuredThreshold) &&
+            std::isfinite(offMeasuredThreshold) &&
+            onMeasuredThreshold > 0.0f &&
+            offMeasuredThreshold > 0.0f &&
+            offMeasuredThreshold < onMeasuredThreshold;
+    }
+
+    inline bool HysteresisSignalHigh(
+        bool currentState,
+        float measuredValue,
+        float onMeasuredThreshold,
+        float offMeasuredThreshold)
+    {
+        if (!std::isfinite(measuredValue) ||
+            !std::isfinite(onMeasuredThreshold) ||
+            !std::isfinite(offMeasuredThreshold) ||
+            onMeasuredThreshold <= 0.0f ||
+            offMeasuredThreshold <= 0.0f ||
+            offMeasuredThreshold >= onMeasuredThreshold)
+        {
+            return false;
+        }
+
+        return currentState ?
+            (measuredValue > offMeasuredThreshold) :
+            (measuredValue > onMeasuredThreshold);
+    }
+
     inline bool TryComputeLinearWallSignalDistanceThresholdM(float calibrationDistanceM, float signalFraction, float& distanceThresholdM)
     {
         distanceThresholdM = 0.0f;
@@ -56,6 +314,33 @@ namespace MazeMap
 
         distanceThresholdM = calibrationDistanceM * distanceScale;
         return std::isfinite(distanceThresholdM) && distanceThresholdM > 0.0f;
+    }
+
+    inline bool TryComputeInverseSquareSignalAtDistanceFromReference(
+        float referenceSignal,
+        float referenceDistanceM,
+        float targetDistanceM,
+        float& signal)
+    {
+        signal = 0.0f;
+        if (!std::isfinite(referenceSignal) ||
+            !std::isfinite(referenceDistanceM) ||
+            !std::isfinite(targetDistanceM) ||
+            referenceSignal <= 0.0f ||
+            referenceDistanceM <= 0.0f ||
+            targetDistanceM <= 0.0f)
+        {
+            return false;
+        }
+
+        const float distanceRatio = referenceDistanceM / targetDistanceM;
+        if (!(distanceRatio > 0.0f) || !std::isfinite(distanceRatio))
+        {
+            return false;
+        }
+
+        signal = referenceSignal * distanceRatio * distanceRatio;
+        return std::isfinite(signal) && signal > 0.0f;
     }
 
     inline bool TryComputeInverseSquareDistanceFromReferenceSignal(

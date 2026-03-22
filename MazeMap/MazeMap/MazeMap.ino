@@ -35,6 +35,7 @@
 #include "DiagonalWallCentering.h"
 #include "TractionLimitSweep.h"
 #include "WallDetectionThresholds.h"
+#include "WallContactDetection.h"
 #include "WheelControlProfile.h"
 #include <ctype.h>
 #include <algorithm>
@@ -45,8 +46,18 @@
 #include <string.h>
 
 class WallDistanceCalibration;
+struct SensorSnapshot;
+struct RollingObservationVoteSummary;
 struct AveragedBackLeftImuSample;
 enum class StationaryImuCalibrationResult : uint8_t;
+
+static bool ObservationVoteWinsMajority(uint8_t votes, uint8_t sampleCount);
+static float AverageFiniteObservationValue(float sum, uint8_t count, float fallbackValue);
+static bool BuildMajorityObservationSnapshot(
+    const SensorSnapshot* samples,
+    uint8_t sampleCount,
+    SensorSnapshot& combinedSnapshot,
+    RollingObservationVoteSummary& voteSummary);
 
 namespace MazeMap
 {
@@ -192,6 +203,9 @@ namespace Config
     // [Medium] Number of front-sensor calibration points collected against the west wall. Increase if the front-sensor
     // curve still shows shape error after calibration; decrease if startup time matters more than curve fidelity.
     constexpr uint8_t kStartupWallCalibrationFrontPointCount = 16U;
+    // [Medium] Minimum front-sensor clearance from the west wall during the moving startup calibration sweep. If the
+    // nominal sweep would violate this, the planner should shift or skip the sweep rather than fault the entire run.
+    constexpr float kStartupWallCalibrationFrontSensorMinWallDistanceM = 0.010f;
     // [Medium] Vehicle is the shared source for the mission-start wall-contact geometry.
     constexpr float kRobotFrontWallContactOffsetM = MazeMap::Vehicle::GetPhysicalModel().frontWallContactOffsetM;
     constexpr float kRobotWidthM = MazeMap::Vehicle::GetPhysicalModel().widthM;
@@ -208,9 +222,15 @@ namespace Config
     constexpr float kWallTouchContactStandoffM = kRobotFrontWallContactOffsetM;
     // [Low] Minimum clearance maintained against non-target walls during startup calibration motion planning.
     constexpr float kWallCalibrationWallClearanceM = 0.003f;
-    // [Medium] Open-loop drive command used during wall touch-off. Increase only if the robot fails to make contact;
-    // decrease if the wheels spin, the impact is harsher than desired, or contact repeatability gets worse.
+    // [Medium] Open-loop drive command used during the early portion of wall touch-off. Increase only if the robot
+    // fails to reach the wall in time; decrease if the approach is still too harsh before the slow final section.
     constexpr float kWallTouchDriveCommand = 0.28f;
+    // [Medium] Reduced open-loop drive command used over the last few centimeters of a predicted wall-touch approach.
+    // Lower it if impact still carries through without latching; raise it if the robot hesitates and never finishes.
+    constexpr float kWallTouchFinalApproachDriveCommand = 0.12f;
+    // [Medium] Distance ahead of the predicted first-contact window where wall touch-off should drop into the slower
+    // final approach command so contact happens at a speed the encoders and velocity watchdog can actually observe.
+    constexpr float kWallTouchFinalApproachWindowM = 0.040f;
     // [Medium] Minimum approach distance before wall contact is allowed to latch. Increase if the robot sometimes latches
     // before reaching the wall; decrease if the touch-off starts too close to the wall in practice.
     constexpr float kWallTouchMinApproachDistanceM = 0.030f;
@@ -236,12 +256,34 @@ namespace Config
     constexpr float kWallTouchSeatReleaseMinDriveCommand = 0.80f;
     constexpr float kWallTouchSeatReleaseDistanceM = 0.003f;
     constexpr uint16_t kWallTouchSeatReleaseMinSkidMs = 100U;
-    // [Low] Hard fail-safe timeout for the wall-touch seating ramp. This is only here to avoid an endless push if the
-    // drivetrain never breaks static scrub even at full command.
-    constexpr uint16_t kWallTouchSeatRampTimeoutMs = 3000U;
-    // [Low] Maximum travel allowed while searching for a wall during touch-off. This is tied to the 168 mm clear span
-    // inside one cell, not the full 180 mm pitch, so calibration never assumes it can drive through wall volume.
-    const float kWallTouchMaxApproachDistanceM = kCellClearSpanM;
+    // [High] Half-period for the wall-touch seat wiggle once the push is strong enough to try to break the tires free.
+    constexpr uint16_t kWallTouchSeatWiggleHalfPeriodMs = 120U;
+    // [High] Differential-drive fraction applied during the wall-touch seat wiggle. The wiggle stays forward-driving;
+    // this only biases one side harder than the other to help the chassis scrub square on the wall.
+    constexpr float kWallTouchSeatWiggleTurnFraction = 0.20f;
+    // [High] Minimum fraction of the requested forward seating command that must be retained on both wheels while
+    // yaw-wiggling. This keeps the wiggle from unloading one side enough to look like a back-off.
+    constexpr float kWallTouchSeatWiggleRetainedForwardFraction = 0.90f;
+    // [Low] Base maximum travel allowed while searching for a wall during touch-off. Nearby one-cell touches clamp to
+    // this clear-span budget, while longer known-wall moves expand from the geometry-predicted travel plus slack.
+    const float kWallTouchBaseMaxApproachDistanceM = kCellClearSpanM;
+    // [Medium] Mission boundary-impact wall discovery is currently disabled. These thresholds are retained only so the
+    // contact detector can be re-enabled later without re-deriving them.
+    constexpr bool kEnableMissionBoundaryImpactWallDetection = false;
+    constexpr float kFrontWallTapMinimumMotionSpeedMps = 0.018f;
+    constexpr float kFrontWallTapMinimumMotionDistanceM = 0.003f;
+    // [Medium] Contact is recognized primarily as a sharp encoder-speed collapse after motion is established. Keep the
+    // minimum peak low enough for short taps, but require a meaningful absolute drop and ratio collapse to reject noise.
+    constexpr float kFrontWallTapMinimumPeakEncoderSpeedMps = 0.020f;
+    constexpr float kFrontWallTapMaximumCurrentPeakRatio = 0.45f;
+    constexpr float kFrontWallTapMinimumEncoderDropMps = 0.0075f;
+    // [Medium] The mission contact tap uses planar-acceleration spikes as secondary evidence. Run the mission accel LPF2
+    // at ODR/20 (~50 Hz at the 1 kHz mission loop) instead of ODR/400 (~2.5 Hz), which is too slow for impact events.
+    constexpr auto kMissionRuntimeAccelFilterFreq = MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_020;
+    constexpr uint16_t kFrontWallTapAccelArmDelayMs = 40U;
+    constexpr float kFrontWallTapPlanarAccelSpikeMps2 = 0.375f;
+    constexpr float kSearchBoundaryImpactArmDistanceM = 0.020f;
+    constexpr float kSearchBoundaryOpenConfirmMarginM = 0.010f;
     // [Low] Minimum south-wall clearance required before the startup routine may rotate back to the mission heading.
     // Increase only if chassis geometry changes and the rear still clips the wall during that recovery turn.
     constexpr float kMissionStartTurnClearanceM = 0.026f;
@@ -304,11 +346,36 @@ namespace Config
     constexpr float kFrontWallOffThresholdM = 0.130f;
     // [High] Additional release margin used when converting the derived front-wall latch point into a hysteresis band.
     constexpr float kFrontWallReleaseHysteresisM = kFrontWallOffThresholdM - kFrontWallOnThresholdM;
-    // [High] Linear side sensors should see a wall well before the chassis reaches it. This fraction is applied in
-    // signal space relative to the calibrated wall sample, then converted back into distance with the inverse-square model.
-    constexpr float kSideWallSignalLatchFractionOfCalibration = (1.0f / 6.0f);
-    // [High] Side-wall release fraction, kept slightly lower than the latch fraction to provide hysteresis.
-    constexpr float kSideWallSignalReleaseFractionOfCalibration = (1.0f / 8.0f);
+    // [High] Scale applied to front measured-signal thresholds derived from the startup fit. The log-amp front sensors
+    // read weaker in the far tail than the extrapolated model predicts, so lower values latch sooner on real walls.
+    constexpr float kFrontWallMeasuredSignalThresholdScale = 0.70f;
+    // [High] Front-wall detection is normalized to the measured span from the north-facing start-scene baseline to the
+    // weakest front calibration point. When robust calibration bands are available, use the conservative
+    // baseline-high to wall-low span before falling back to the averaged span.
+    constexpr float kFrontWallSignalLatchFractionOfCalibratedSpan = 0.50f;
+    // [High] Release fraction for the normalized front-wall span. Keep it below the latch fraction to preserve
+    // hysteresis while still releasing when the scene-specific rise mostly disappears.
+    constexpr float kFrontWallSignalReleaseFractionOfCalibratedSpan = 0.35f;
+    // [High] Side-wall measured-signal latch threshold in normalized corrected-signal units. The side thresholds now
+    // use Decimus-style one-point run normalization against the in-cell wall reference rather than an inverse-square
+    // projection of the live signal itself.
+    constexpr float kSideWallMeasuredSignalLatchThreshold = 0.10f;
+    // [High] Side-wall measured-signal release threshold in normalized corrected-signal units.
+    constexpr float kSideWallMeasuredSignalReleaseThreshold = 0.07f;
+    // [High] Only trust side-wall detections while the receiver is aimed at the center third of a wall segment.
+    constexpr float kSideWallSegmentCenterFraction = (1.0f / 3.0f);
+    // WARNING: Search-mode mapping observation on cautious straights is a single constant-velocity traversal.
+    // Do not introduce parallel mapping traversal mechanisms, extra observation passes, stop-and-peek detours, or any
+    // other motion-shape changes here. If mapping quality needs work, change only the observation timing, target
+    // region, or vote logic while the straight itself remains constant velocity through the cell.
+    constexpr uint8_t kSearchRollingObservationSampleCount = 9U;
+    constexpr uint8_t kSearchRollingObservationMajorityCount =
+        static_cast<uint8_t>((kSearchRollingObservationSampleCount / 2U) + 1U);
+    // [High] Distance-domain side-wall threshold fallback geometry. This remains the "wall versus next-cell wall"
+    // ratio used only when the measured-signal threshold path is unavailable.
+    constexpr float kSideWallDistanceLatchFractionOfCalibration = (1.0f / 6.0f);
+    // [High] Distance-domain side-wall release fallback fraction.
+    constexpr float kSideWallDistanceReleaseFractionOfCalibration = (1.0f / 8.0f);
     // [High] Side-wall detection threshold fallback for latching "wall present". The preferred threshold is now derived
     // from the calibrated side-wall distance and the linear inverse-square signal model.
     constexpr float kSideWallOnThresholdM = 0.120f;
@@ -317,6 +384,9 @@ namespace Config
     // [High] Number of raw samples averaged for each startup wall-calibration capture. Raise it if calibration still
     // jitters; lower it only if startup time matters more than wall-fit quality.
     constexpr uint16_t kWallCalibrationAverageSampleCount = 50U;
+    // [High] Robust calibration-band half-width in scaled-MAD units. Raise it if startup calibration samples still
+    // contain outliers; lower it only if the reference bands are obviously over-conservative.
+    constexpr float kWallCalibrationScaledMadMultiplier = 3.0f;
     // [High] Runtime wall-detection averaging window in control-loop cycles. Raise it if false negatives remain under
     // noise; lower it only if detection latency becomes a real control problem.
     constexpr uint8_t kWallDetectionAverageWindowCycles = 10U;
@@ -359,13 +429,13 @@ namespace Config
     constexpr float kStraightYawD = 0.20f;
     // [High] Wall-centering gain used when side walls are available. Increase if the robot does not recenter in a
     // corridor; decrease if wall following hunts or bounces between walls.
-    constexpr float kWallCenterGain = 120.0f;
+    constexpr float kWallCenterGain = 135.0f;
     // [High] Diagonal wall-balance gain used on diagonal straight segments. This uses the live left/right signal
     // balance rather than orthogonal side-wall distance, matching the sensor-balance approach common on top-end mice.
     constexpr float kDiagonalWallCenterGain = 15.0f;
     // [Medium] Minimum side-sensor signal, normalized to the calibration wall sample, required before diagonal
     // centering will trust that side as a valid wall cue.
-    constexpr float kDiagonalWallMinNormalizedSignal = (1.0f / 12.0f);
+    constexpr float kDiagonalWallMinNormalizedSignal = kSideWallMeasuredSignalReleaseThreshold;
     // [Medium] Front-wall skew correction near the end of a straight. Increase if the robot stops angled at front walls;
     // decrease if it twitches too aggressively when approaching a front wall.
     constexpr float kFrontSkewGain = 12.0f;
@@ -407,6 +477,10 @@ namespace Config
     // watchdog can trip. This should cover the launch-assist ramp so high-strung starts do not false-fault.
     constexpr unsigned long kEncoderStallStartupGraceMs = 250UL;
 }
+
+static_assert(
+    (Config::kSearchRollingObservationSampleCount % 2U) == 1U,
+    "Search rolling observation majority vote requires an odd sample count.");
 
 namespace DiagnosticConfig
 {
@@ -655,8 +729,8 @@ namespace AuxMeasurementConfig
     // [Low] Number of cells in the northbound enclosed corridor used by the position-accuracy audit. This count
     // includes the start cell and the corner cell at the far end.
     constexpr uint8_t kPositionAuditNorthCorridorCellCount = 5U;
-    // [Low] Number of cells in the east branch used by the position-accuracy audit. This count includes the corner
-    // cell where the branch begins.
+    // [Low] Number of cells extending east beyond the corner cell in the position-accuracy audit. With the short 90
+    // ending on the half-step east of the corner, a value of four leaves seven clear half-steps before the east wall.
     constexpr uint8_t kPositionAuditEastBranchCellCount = 4U;
     // [Medium] Straight-speed points used by the position-accuracy audit.
     constexpr uint8_t kPositionAuditStraightSpeedCount = 3U;
@@ -681,8 +755,21 @@ namespace AuxMeasurementConfig
         MazeMap::S90SS,
         MazeMap::S90LS,
     };
+    // [Low] Phase 1 runs a straight out-and-back from the start-cell center to the corner-cell center.
+    constexpr uint8_t kPositionAuditPhase1ForwardHalfSteps = 8U;
+    // [Low] Phase 2 runs the short smooth 90 on the fixed fixture using the exact half-step launch and runout that
+    // fit the 5-cell north corridor and 4-cell east leg.
+    constexpr uint8_t kPositionAuditPhase2PreTurnHalfSteps = 7U;
+    constexpr uint8_t kPositionAuditPhase2PostTurnHalfSteps = 7U;
+    // [Low] Phase 3 runs the long smooth 90 on the same fixed fixture.
+    constexpr uint8_t kPositionAuditPhase3PreTurnHalfSteps = 6U;
+    constexpr uint8_t kPositionAuditPhase3PostTurnHalfSteps = 6U;
     // [Medium] Short settle used at the mission start pose and between anchored audit phases.
     constexpr uint16_t kPositionAuditStartSettleMs = 150U;
+    // [Medium] Raw stationary gyro-bias averaging window captured at the start of the position audit for comparison
+    // against the normal IMU runtime calibration.
+    constexpr uint16_t kPositionAuditGyroBiasAverageWindowMs = 5000U;
+    constexpr uint8_t kPositionAuditGyroBiasAverageSampleIntervalMs = 2U;
     // [Medium] SD flush cadence during auxiliary capture. Decrease it if you want less risk of losing data on power
     // interruption; increase it if flush overhead becomes the limiting factor.
     constexpr uint32_t kLogFlushPeriodMs = 250U;
@@ -723,6 +810,7 @@ struct SensorSnapshot
     float sideRightDifferentialLight;
     float corridorErrorM;
     float frontSkewM;
+    float planarAccelMps2;
     float gyroRadps;
     bool frontWall;
     bool frontLeftWall;
@@ -730,6 +818,10 @@ struct SensorSnapshot
     bool frontWallUsesFallbackDetection;
     bool leftWall;
     bool rightWall;
+    bool leftWallObservation;
+    bool rightWallObservation;
+    bool leftWallObservationWindowValid;
+    bool rightWallObservationWindowValid;
 };
 
 struct DriveTelemetry
@@ -857,6 +949,12 @@ enum class CalibrationWall : uint8_t
     North
 };
 
+enum class WallTouchOutcome : uint8_t
+{
+    SeatedContact,
+    PassedThroughNoWall
+};
+
 struct RawWallSensorSample
 {
     float ambientLight = 0.0f;
@@ -874,6 +972,20 @@ struct WallSensorCalibrationInput
     float litLight = 0.0f;
 };
 
+struct RobustSignalBand
+{
+    float median = 0.0f;
+    float low = 0.0f;
+    float high = 0.0f;
+};
+
+struct WallSensorCalibrationCapture
+{
+    WallSensorCalibrationInput input{};
+    RobustSignalBand differentialLightBand{};
+    bool haveDifferentialLightBand = false;
+};
+
 template <uint8_t WindowCycles>
 struct AveragedWallSensorInputWindow
 {
@@ -886,15 +998,25 @@ struct AveragedWallSensorInputWindow
         litLight.Clear();
     }
 
-    WallSensorCalibrationInput PushAndAverage(const WallSensorCalibrationInput& input) noexcept
+    WallSensorCalibrationInput Average() const noexcept
     {
         WallSensorCalibrationInput averaged{};
-        averaged.measuredValue = measuredValue.Push(input.measuredValue);
-        averaged.fallbackDistanceM = fallbackDistanceM.Push(input.fallbackDistanceM);
-        averaged.differentialLight = differentialLight.Push(input.differentialLight);
-        averaged.ambientLight = ambientLight.Push(input.ambientLight);
-        averaged.litLight = litLight.Push(input.litLight);
+        averaged.measuredValue = measuredValue.Average();
+        averaged.fallbackDistanceM = fallbackDistanceM.Average();
+        averaged.differentialLight = differentialLight.Average();
+        averaged.ambientLight = ambientLight.Average();
+        averaged.litLight = litLight.Average();
         return averaged;
+    }
+
+    WallSensorCalibrationInput PushAndAverage(const WallSensorCalibrationInput& input) noexcept
+    {
+        measuredValue.Push(input.measuredValue);
+        fallbackDistanceM.Push(input.fallbackDistanceM);
+        differentialLight.Push(input.differentialLight);
+        ambientLight.Push(input.ambientLight);
+        litLight.Push(input.litLight);
+        return Average();
     }
 
     MazeMap::RollingAverageWindow<WindowCycles> measuredValue;
@@ -1000,7 +1122,9 @@ static StationaryImuCalibrationResult WaitForImuCalibrationSettle(
 static bool ConfigureBackLeftImuForRuntime(
     MazeMap::Vehicle::ImuBackLeft& imu,
     unsigned long controlPeriodUs,
-    bool enableAccel)
+    bool enableAccel,
+    MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
+        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
 {
     const bool imuConfigured = ConfigureLoopMatchedBackLeftImu(imu, controlPeriodUs, enableAccel);
     if (!imuConfigured)
@@ -1014,7 +1138,7 @@ static bool ConfigureBackLeftImuForRuntime(
     if (enableAccel)
     {
         imu.SetAccelRange(
-            MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400,
+            accelFilterFreq,
             MazeMap::Vehicle::ImuBackLeft::ACCEL_FULLSCALE::G8);
     }
 
@@ -1080,9 +1204,11 @@ static StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample(
 static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
     MazeMap::Vehicle::ImuBackLeft& imu,
     unsigned long controlPeriodUs,
-    const MazeMap::EncoderCountPair& startCounts)
+    const MazeMap::EncoderCountPair& startCounts,
+    MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
+        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
 {
-    if (!ConfigureBackLeftImuForRuntime(imu, controlPeriodUs, true))
+    if (!ConfigureBackLeftImuForRuntime(imu, controlPeriodUs, true, accelFilterFreq))
     {
         return StationaryImuCalibrationResult::Failure;
     }
@@ -1205,6 +1331,19 @@ static const char* CalibrationWallName(CalibrationWall wall)
     }
 }
 
+static const char* WallTouchOutcomeName(WallTouchOutcome outcome)
+{
+    switch (outcome)
+    {
+    case WallTouchOutcome::SeatedContact:
+        return "seated_contact";
+    case WallTouchOutcome::PassedThroughNoWall:
+        return "passed_through";
+    default:
+        return "unknown";
+    }
+}
+
 static const char* DirectionName(MazeMap::Direction direction)
 {
     switch (direction)
@@ -1278,10 +1417,48 @@ public:
             _curves[i].Clear();
         }
         InvalidateFrontSignalModelCache();
+        _frontWallBaselineDifferentialLight[0] = 0.0f;
+        _frontWallBaselineDifferentialLight[1] = 0.0f;
+        _frontWallBaselineValid[0] = false;
+        _frontWallBaselineValid[1] = false;
+        _frontWallBaselineDifferentialLightLow[0] = 0.0f;
+        _frontWallBaselineDifferentialLightLow[1] = 0.0f;
+        _frontWallBaselineDifferentialLightHigh[0] = 0.0f;
+        _frontWallBaselineDifferentialLightHigh[1] = 0.0f;
+        _frontWallBaselineBandValid[0] = false;
+        _frontWallBaselineBandValid[1] = false;
+        _frontWallWeakestCalibrationMeasuredValue[0] = 0.0f;
+        _frontWallWeakestCalibrationMeasuredValue[1] = 0.0f;
+        _frontWallWeakestCalibrationDifferentialLightLow[0] = 0.0f;
+        _frontWallWeakestCalibrationDifferentialLightLow[1] = 0.0f;
+        _frontWallWeakestCalibrationDifferentialLightHigh[0] = 0.0f;
+        _frontWallWeakestCalibrationDifferentialLightHigh[1] = 0.0f;
+        _frontWallWeakestCalibrationBandValid[0] = false;
+        _frontWallWeakestCalibrationBandValid[1] = false;
+        _sideWallBaselineDifferentialLight[0] = 0.0f;
+        _sideWallBaselineDifferentialLight[1] = 0.0f;
+        _sideWallBaselineValid[0] = false;
+        _sideWallBaselineValid[1] = false;
+        _sideWallBaselineDifferentialLightLow[0] = 0.0f;
+        _sideWallBaselineDifferentialLightLow[1] = 0.0f;
+        _sideWallBaselineDifferentialLightHigh[0] = 0.0f;
+        _sideWallBaselineDifferentialLightHigh[1] = 0.0f;
+        _sideWallBaselineBandValid[0] = false;
+        _sideWallBaselineBandValid[1] = false;
         _sideWallReferenceDifferentialLight[0] = 0.0f;
         _sideWallReferenceDifferentialLight[1] = 0.0f;
         _sideWallReferenceValid[0] = false;
         _sideWallReferenceValid[1] = false;
+        _sideWallReferenceDifferentialLightLow[0] = 0.0f;
+        _sideWallReferenceDifferentialLightLow[1] = 0.0f;
+        _sideWallReferenceDifferentialLightHigh[0] = 0.0f;
+        _sideWallReferenceDifferentialLightHigh[1] = 0.0f;
+        _sideWallReferenceBandValid[0] = false;
+        _sideWallReferenceBandValid[1] = false;
+        _sideWallReferenceDistanceM[0] = 0.0f;
+        _sideWallReferenceDistanceM[1] = 0.0f;
+        _sideWallReferenceDistanceValid[0] = false;
+        _sideWallReferenceDistanceValid[1] = false;
         _expectedSideWallDistanceM = Config::kExpectedSideWallDistanceM;
     }
 
@@ -1335,6 +1512,139 @@ public:
         return _expectedSideWallDistanceM;
     }
 
+    void SetFrontWallBaselineDifferentialLight(WallSensorId sensorId, float differentialLight)
+    {
+        if (!IsFrontWallSensor(sensorId) ||
+            !std::isfinite(differentialLight) ||
+            differentialLight < 0.0f)
+        {
+            return;
+        }
+
+        const uint8_t index = FrontWallIndex(sensorId);
+        _frontWallBaselineDifferentialLight[index] = differentialLight;
+        _frontWallBaselineValid[index] = true;
+    }
+
+    void SetFrontWallBaselineDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight)
+    {
+        if (!IsFrontWallSensor(sensorId) ||
+            !std::isfinite(lowDifferentialLight) ||
+            !std::isfinite(highDifferentialLight) ||
+            lowDifferentialLight < 0.0f ||
+            highDifferentialLight < lowDifferentialLight)
+        {
+            return;
+        }
+
+        const uint8_t index = FrontWallIndex(sensorId);
+        _frontWallBaselineDifferentialLightLow[index] = lowDifferentialLight;
+        _frontWallBaselineDifferentialLightHigh[index] = highDifferentialLight;
+        _frontWallBaselineBandValid[index] = true;
+    }
+
+    bool TryGetFrontWallBaselineDifferentialLight(WallSensorId sensorId, float& differentialLight) const
+    {
+        differentialLight = 0.0f;
+        if (!IsFrontWallSensor(sensorId))
+        {
+            return false;
+        }
+
+        const uint8_t index = FrontWallIndex(sensorId);
+        if (!_frontWallBaselineValid[index])
+        {
+            return false;
+        }
+
+        differentialLight = _frontWallBaselineDifferentialLight[index];
+        return std::isfinite(differentialLight) && differentialLight >= 0.0f;
+    }
+
+    bool TryGetFrontWallBaselineDifferentialLightBand(
+        WallSensorId sensorId,
+        float& lowDifferentialLight,
+        float& highDifferentialLight) const
+    {
+        lowDifferentialLight = 0.0f;
+        highDifferentialLight = 0.0f;
+        if (!IsFrontWallSensor(sensorId))
+        {
+            return false;
+        }
+
+        const uint8_t index = FrontWallIndex(sensorId);
+        if (!_frontWallBaselineBandValid[index])
+        {
+            return false;
+        }
+
+        lowDifferentialLight = _frontWallBaselineDifferentialLightLow[index];
+        highDifferentialLight = _frontWallBaselineDifferentialLightHigh[index];
+        return
+            std::isfinite(lowDifferentialLight) &&
+            std::isfinite(highDifferentialLight) &&
+            lowDifferentialLight >= 0.0f &&
+            highDifferentialLight >= lowDifferentialLight;
+    }
+
+    void SetFrontWeakestCalibrationDifferentialLightBand(
+        WallSensorId sensorId,
+        float measuredValue,
+        float lowDifferentialLight,
+        float highDifferentialLight)
+    {
+        if (!IsFrontWallSensor(sensorId) ||
+            !std::isfinite(measuredValue) ||
+            !std::isfinite(lowDifferentialLight) ||
+            !std::isfinite(highDifferentialLight) ||
+            measuredValue <= 0.0f ||
+            lowDifferentialLight <= 0.0f ||
+            highDifferentialLight < lowDifferentialLight)
+        {
+            return;
+        }
+
+        const uint8_t index = FrontWallIndex(sensorId);
+        if (_frontWallWeakestCalibrationBandValid[index] &&
+            (measuredValue > (_frontWallWeakestCalibrationMeasuredValue[index] + 0.001f)))
+        {
+            return;
+        }
+
+        _frontWallWeakestCalibrationMeasuredValue[index] = measuredValue;
+        _frontWallWeakestCalibrationDifferentialLightLow[index] = lowDifferentialLight;
+        _frontWallWeakestCalibrationDifferentialLightHigh[index] = highDifferentialLight;
+        _frontWallWeakestCalibrationBandValid[index] = true;
+    }
+
+    bool TryGetFrontWeakestCalibrationDifferentialLightBand(
+        WallSensorId sensorId,
+        float& lowDifferentialLight,
+        float& highDifferentialLight) const
+    {
+        lowDifferentialLight = 0.0f;
+        highDifferentialLight = 0.0f;
+        if (!IsFrontWallSensor(sensorId))
+        {
+            return false;
+        }
+
+        const uint8_t index = FrontWallIndex(sensorId);
+        if (!_frontWallWeakestCalibrationBandValid[index])
+        {
+            return false;
+        }
+
+        lowDifferentialLight = _frontWallWeakestCalibrationDifferentialLightLow[index];
+        highDifferentialLight = _frontWallWeakestCalibrationDifferentialLightHigh[index];
+        return
+            std::isfinite(lowDifferentialLight) &&
+            std::isfinite(highDifferentialLight) &&
+            lowDifferentialLight > 0.0f &&
+            highDifferentialLight >= lowDifferentialLight;
+    }
+
     bool TryComputeSideWallDistanceThresholds(float latchSignalFraction, float releaseSignalFraction, float& onThresholdM, float& offThresholdM) const
     {
         onThresholdM = Config::kSideWallOnThresholdM;
@@ -1381,28 +1691,225 @@ public:
         _sideWallReferenceValid[index] = true;
     }
 
-    bool TryComputeSideWallMeasuredThresholds(
-        WallSensorId sensorId,
-        float latchSignalFraction,
-        float releaseSignalFraction,
-        float& onMeasuredThreshold,
-        float& offMeasuredThreshold) const
+    void SetSideWallReferenceDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight)
     {
-        onMeasuredThreshold = 0.0f;
-        offMeasuredThreshold = 0.0f;
+        if (!IsSideWallSensor(sensorId) ||
+            !std::isfinite(lowDifferentialLight) ||
+            !std::isfinite(highDifferentialLight) ||
+            lowDifferentialLight <= 0.0f ||
+            highDifferentialLight < lowDifferentialLight)
+        {
+            return;
+        }
+
+        const uint8_t index = SideWallIndex(sensorId);
+        _sideWallReferenceDifferentialLightLow[index] = lowDifferentialLight;
+        _sideWallReferenceDifferentialLightHigh[index] = highDifferentialLight;
+        _sideWallReferenceBandValid[index] = true;
+    }
+
+    void SetSideWallReferenceDistanceM(WallSensorId sensorId, float distanceM)
+    {
+        if (!IsSideWallSensor(sensorId) ||
+            !std::isfinite(distanceM) ||
+            distanceM <= 0.0f)
+        {
+            return;
+        }
+
+        const uint8_t index = SideWallIndex(sensorId);
+        _sideWallReferenceDistanceM[index] = distanceM;
+        _sideWallReferenceDistanceValid[index] = true;
+    }
+
+    void SetSideWallBaselineDifferentialLight(WallSensorId sensorId, float differentialLight)
+    {
+        if (!IsSideWallSensor(sensorId) ||
+            !std::isfinite(differentialLight) ||
+            differentialLight < 0.0f)
+        {
+            return;
+        }
+
+        const uint8_t index = SideWallIndex(sensorId);
+        _sideWallBaselineDifferentialLight[index] = differentialLight;
+        _sideWallBaselineValid[index] = true;
+    }
+
+    void SetSideWallBaselineDifferentialLightBand(WallSensorId sensorId, float lowDifferentialLight, float highDifferentialLight)
+    {
+        if (!IsSideWallSensor(sensorId) ||
+            !std::isfinite(lowDifferentialLight) ||
+            !std::isfinite(highDifferentialLight) ||
+            lowDifferentialLight < 0.0f ||
+            highDifferentialLight < lowDifferentialLight)
+        {
+            return;
+        }
+
+        const uint8_t index = SideWallIndex(sensorId);
+        _sideWallBaselineDifferentialLightLow[index] = lowDifferentialLight;
+        _sideWallBaselineDifferentialLightHigh[index] = highDifferentialLight;
+        _sideWallBaselineBandValid[index] = true;
+    }
+
+    bool TryGetSideWallBaselineDifferentialLight(WallSensorId sensorId, float& differentialLight) const
+    {
+        differentialLight = 0.0f;
         if (!IsSideWallSensor(sensorId))
         {
             return false;
         }
 
         const uint8_t index = SideWallIndex(sensorId);
-        if (!_sideWallReferenceValid[index])
+        if (!_sideWallBaselineValid[index])
         {
             return false;
         }
 
+        differentialLight = _sideWallBaselineDifferentialLight[index];
+        return std::isfinite(differentialLight) && differentialLight >= 0.0f;
+    }
+
+    bool TryGetSideWallReferenceDifferentialLightBand(WallSensorId sensorId, float& lowDifferentialLight, float& highDifferentialLight) const
+    {
+        lowDifferentialLight = 0.0f;
+        highDifferentialLight = 0.0f;
+        if (!IsSideWallSensor(sensorId))
+        {
+            return false;
+        }
+
+        const uint8_t index = SideWallIndex(sensorId);
+        if (!_sideWallReferenceBandValid[index])
+        {
+            return false;
+        }
+
+        lowDifferentialLight = _sideWallReferenceDifferentialLightLow[index];
+        highDifferentialLight = _sideWallReferenceDifferentialLightHigh[index];
+        return
+            std::isfinite(lowDifferentialLight) &&
+            std::isfinite(highDifferentialLight) &&
+            lowDifferentialLight > 0.0f &&
+            highDifferentialLight >= lowDifferentialLight;
+    }
+
+    bool TryGetSideWallBaselineDifferentialLightBand(WallSensorId sensorId, float& lowDifferentialLight, float& highDifferentialLight) const
+    {
+        lowDifferentialLight = 0.0f;
+        highDifferentialLight = 0.0f;
+        if (!IsSideWallSensor(sensorId))
+        {
+            return false;
+        }
+
+        const uint8_t index = SideWallIndex(sensorId);
+        if (!_sideWallBaselineBandValid[index])
+        {
+            return false;
+        }
+
+        lowDifferentialLight = _sideWallBaselineDifferentialLightLow[index];
+        highDifferentialLight = _sideWallBaselineDifferentialLightHigh[index];
+        return
+            std::isfinite(lowDifferentialLight) &&
+            std::isfinite(highDifferentialLight) &&
+            lowDifferentialLight >= 0.0f &&
+            highDifferentialLight >= lowDifferentialLight;
+    }
+
+    bool TryComputeSideWallNormalizedReferenceDifferentialLight(
+        WallSensorId sensorId,
+        float& differentialLight) const
+    {
+        differentialLight = 0.0f;
+        return TryGetSideWallReferenceDifferentialLight(sensorId, differentialLight);
+    }
+
+    bool TryComputeSideWallMeasuredThresholds(
+        WallSensorId sensorId,
+        float latchSignalFraction,
+        float releaseSignalFraction,
+        float& onMeasuredThreshold,
+        float& offMeasuredThreshold,
+        float& signalBaseline) const
+    {
+        onMeasuredThreshold = 0.0f;
+        offMeasuredThreshold = 0.0f;
+        signalBaseline = 0.0f;
+        if (!IsSideWallSensor(sensorId))
+        {
+            return false;
+        }
+
+        float referenceDifferentialLight = 0.0f;
+        if (!TryGetSideWallReferenceDifferentialLight(
+                sensorId,
+                referenceDifferentialLight))
+        {
+            return false;
+        }
+
+        float baselineDifferentialLight = 0.0f;
+        float baselineDifferentialLightLow = 0.0f;
+        float baselineDifferentialLightHigh = 0.0f;
+        float referenceDifferentialLightLow = 0.0f;
+        float referenceDifferentialLightHigh = 0.0f;
+        if (TryGetSideWallReferenceDifferentialLightBand(
+                sensorId,
+                referenceDifferentialLightLow,
+                referenceDifferentialLightHigh))
+        {
+            referenceDifferentialLight = referenceDifferentialLightLow;
+        }
+        else
+        {
+            referenceDifferentialLightLow = referenceDifferentialLight;
+            referenceDifferentialLightHigh = referenceDifferentialLight;
+        }
+
+        if (TryGetSideWallBaselineDifferentialLightBand(
+                sensorId,
+                baselineDifferentialLightLow,
+                baselineDifferentialLightHigh))
+        {
+        }
+        else if (TryGetSideWallBaselineDifferentialLight(sensorId, baselineDifferentialLight))
+        {
+            baselineDifferentialLightLow = baselineDifferentialLight;
+            baselineDifferentialLightHigh = baselineDifferentialLight;
+        }
+
+        if (MazeMap::TryComputeConservativeSignalRiseThresholdsFromBands(
+                baselineDifferentialLightLow,
+                baselineDifferentialLightHigh,
+                referenceDifferentialLightLow,
+                referenceDifferentialLightHigh,
+                latchSignalFraction,
+                releaseSignalFraction,
+                onMeasuredThreshold,
+                offMeasuredThreshold,
+                signalBaseline))
+        {
+            return true;
+        }
+
+        if (TryGetSideWallBaselineDifferentialLight(sensorId, baselineDifferentialLight) &&
+            MazeMap::TryComputeSignalRiseThresholds(
+                baselineDifferentialLight,
+                referenceDifferentialLight,
+                latchSignalFraction,
+                releaseSignalFraction,
+                onMeasuredThreshold,
+                offMeasuredThreshold))
+        {
+            signalBaseline = baselineDifferentialLight;
+            return true;
+        }
+
         return MazeMap::TryComputeSignalHighThresholds(
-            _sideWallReferenceDifferentialLight[index],
+            referenceDifferentialLight,
             latchSignalFraction,
             releaseSignalFraction,
             onMeasuredThreshold,
@@ -1435,6 +1942,13 @@ public:
             return false;
         }
 
+        const uint8_t index = SideWallIndex(sensorId);
+        if (_sideWallReferenceDistanceValid[index])
+        {
+            distanceM = _sideWallReferenceDistanceM[index];
+            return std::isfinite(distanceM) && distanceM > 0.0f;
+        }
+
         const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
         if (curve.GetCount() == 0U)
         {
@@ -1462,6 +1976,26 @@ public:
 
         distanceM = distanceSumM / static_cast<float>(validCount);
         return std::isfinite(distanceM) && distanceM > 0.0f;
+    }
+
+    bool TryGetWeakestFrontCalibrationMeasuredValue(
+        WallSensorId sensorId,
+        float& measuredValue) const
+    {
+        measuredValue = 0.0f;
+        if (!IsFrontWallSensor(sensorId))
+        {
+            return false;
+        }
+
+        const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
+        if (curve.GetCount() == 0U)
+        {
+            return false;
+        }
+
+        measuredValue = curve.GetPoint(0U).measuredValue;
+        return std::isfinite(measuredValue) && measuredValue > 0.0f;
     }
 
     bool TryComputeFrontWallDistanceThresholds(
@@ -1501,14 +2035,58 @@ public:
         float releaseHysteresisDistanceM,
         float ambientLight,
         float& onMeasuredThreshold,
-        float& offMeasuredThreshold) const
+        float& offMeasuredThreshold,
+        float& signalBaseline) const
     {
         onMeasuredThreshold = 0.0f;
         offMeasuredThreshold = 0.0f;
+        signalBaseline = 0.0f;
 
         if (!IsFrontWallSensor(sensorId))
         {
             return false;
+        }
+
+        float weakestCalibrationDifferentialLightLow = 0.0f;
+        float weakestCalibrationDifferentialLightHigh = 0.0f;
+        float baselineDifferentialLightLow = 0.0f;
+        float baselineDifferentialLightHigh = 0.0f;
+        if (TryGetFrontWeakestCalibrationDifferentialLightBand(
+                sensorId,
+                weakestCalibrationDifferentialLightLow,
+                weakestCalibrationDifferentialLightHigh) &&
+            TryGetFrontWallBaselineDifferentialLightBand(
+                sensorId,
+                baselineDifferentialLightLow,
+                baselineDifferentialLightHigh) &&
+            MazeMap::TryComputeConservativeSignalRiseThresholdsFromBands(
+                baselineDifferentialLightLow,
+                baselineDifferentialLightHigh,
+                weakestCalibrationDifferentialLightLow,
+                weakestCalibrationDifferentialLightHigh,
+                Config::kFrontWallSignalLatchFractionOfCalibratedSpan,
+                Config::kFrontWallSignalReleaseFractionOfCalibratedSpan,
+                onMeasuredThreshold,
+                offMeasuredThreshold,
+                signalBaseline))
+        {
+            return true;
+        }
+
+        float weakestCalibrationSignal = 0.0f;
+        float baselineDifferentialLight = 0.0f;
+        if (TryGetWeakestFrontCalibrationMeasuredValue(sensorId, weakestCalibrationSignal) &&
+            TryGetFrontWallBaselineDifferentialLight(sensorId, baselineDifferentialLight) &&
+            MazeMap::TryComputeSignalRiseThresholds(
+                baselineDifferentialLight,
+                weakestCalibrationSignal,
+                Config::kFrontWallSignalLatchFractionOfCalibratedSpan,
+                Config::kFrontWallSignalReleaseFractionOfCalibratedSpan,
+                onMeasuredThreshold,
+                offMeasuredThreshold))
+        {
+            signalBaseline = baselineDifferentialLight;
+            return true;
         }
 
         float onDistanceThresholdM = 0.0f;
@@ -1545,6 +2123,16 @@ public:
                 offDistanceThresholdM,
                 offMeasuredThreshold))
         {
+            return false;
+        }
+
+        if (!MazeMap::TryScaleSignalHighThresholds(
+                Config::kFrontWallMeasuredSignalThresholdScale,
+                onMeasuredThreshold,
+                offMeasuredThreshold))
+        {
+            onMeasuredThreshold = 0.0f;
+            offMeasuredThreshold = 0.0f;
             return false;
         }
 
@@ -1608,8 +2196,27 @@ private:
 
     MazeMap::WallSensorCalibrationCurve _curves[static_cast<uint8_t>(WallSensorId::Count)];
     mutable FrontSignalModelCache _frontSignalModelCache[2];
+    float _frontWallBaselineDifferentialLight[2] = {};
+    bool _frontWallBaselineValid[2] = {};
+    float _frontWallBaselineDifferentialLightLow[2] = {};
+    float _frontWallBaselineDifferentialLightHigh[2] = {};
+    bool _frontWallBaselineBandValid[2] = {};
+    float _frontWallWeakestCalibrationMeasuredValue[2] = {};
+    float _frontWallWeakestCalibrationDifferentialLightLow[2] = {};
+    float _frontWallWeakestCalibrationDifferentialLightHigh[2] = {};
+    bool _frontWallWeakestCalibrationBandValid[2] = {};
+    float _sideWallBaselineDifferentialLight[2] = {};
+    bool _sideWallBaselineValid[2] = {};
+    float _sideWallBaselineDifferentialLightLow[2] = {};
+    float _sideWallBaselineDifferentialLightHigh[2] = {};
+    bool _sideWallBaselineBandValid[2] = {};
     float _sideWallReferenceDifferentialLight[2] = {};
     bool _sideWallReferenceValid[2] = {};
+    float _sideWallReferenceDifferentialLightLow[2] = {};
+    float _sideWallReferenceDifferentialLightHigh[2] = {};
+    bool _sideWallReferenceBandValid[2] = {};
+    float _sideWallReferenceDistanceM[2] = {};
+    bool _sideWallReferenceDistanceValid[2] = {};
     float _expectedSideWallDistanceM;
 
     static bool IsSideWallSensor(WallSensorId sensorId)
@@ -1620,6 +2227,11 @@ private:
     static uint8_t SideWallIndex(WallSensorId sensorId)
     {
         return (sensorId == WallSensorId::SideRight) ? 1U : 0U;
+    }
+
+    static uint8_t FrontWallIndex(WallSensorId sensorId)
+    {
+        return (sensorId == WallSensorId::FrontRight) ? 1U : 0U;
     }
 
     void InvalidateFrontSignalModelCache()
@@ -1637,7 +2249,7 @@ private:
             return;
         }
 
-        _frontSignalModelCache[static_cast<uint8_t>(sensorId)] = FrontSignalModelCache{};
+        _frontSignalModelCache[FrontWallIndex(sensorId)] = FrontSignalModelCache{};
     }
 
     bool TryGetFrontSignalModel(WallSensorId sensorId, float& gain, float& lightScale) const
@@ -1649,7 +2261,7 @@ private:
             return false;
         }
 
-        FrontSignalModelCache& cache = _frontSignalModelCache[static_cast<uint8_t>(sensorId)];
+        FrontSignalModelCache& cache = _frontSignalModelCache[FrontWallIndex(sensorId)];
         if (!cache.valid)
         {
             const MazeMap::WallSensorCalibrationCurve& curve = _curves[static_cast<uint8_t>(sensorId)];
@@ -1676,8 +2288,8 @@ static float ComputeDiagonalWallCenterOmegaRadps(
 {
     float leftReferenceSignal = 0.0f;
     float rightReferenceSignal = 0.0f;
-    if (!wallCalibration.TryGetSideWallReferenceDifferentialLight(WallSensorId::SideLeft, leftReferenceSignal) ||
-        !wallCalibration.TryGetSideWallReferenceDifferentialLight(WallSensorId::SideRight, rightReferenceSignal))
+    if (!wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideLeft, leftReferenceSignal) ||
+        !wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideRight, rightReferenceSignal))
     {
         return 0.0f;
     }
@@ -1720,6 +2332,45 @@ static bool TryComputeSideWallSignalDistanceM(
         distanceM);
 }
 
+static float ComputeSignalRiseAboveBaselineValue(
+    float measuredDifferentialLight,
+    float signalBaseline)
+{
+    // Exclusively for the purpose of centering.
+    if (!std::isfinite(measuredDifferentialLight) ||
+        !std::isfinite(signalBaseline))
+    {
+        return 0.0f;
+    }
+
+    return (measuredDifferentialLight > signalBaseline) ?
+        (measuredDifferentialLight - signalBaseline) :
+        0.0f;
+}
+
+static bool IsCalibratedSideCenteringSignalPresent(
+    const WallDistanceCalibration& wallCalibration,
+    WallSensorId sensorId,
+    float measuredDifferentialLight)
+{
+    // Exclusively for the purpose of centering.
+    float onMeasuredThreshold = 0.0f;
+    float offMeasuredThreshold = 0.0f;
+    float signalBaseline = 0.0f;
+    if (!wallCalibration.TryComputeSideWallMeasuredThresholds(
+            sensorId,
+            Config::kSideWallMeasuredSignalLatchThreshold,
+            Config::kSideWallMeasuredSignalReleaseThreshold,
+            onMeasuredThreshold,
+            offMeasuredThreshold,
+            signalBaseline))
+    {
+        return false;
+    }
+
+    return ComputeSignalRiseAboveBaselineValue(measuredDifferentialLight, signalBaseline) >= onMeasuredThreshold;
+}
+
 static bool TryComputeStraightWallCenterErrorM(
     const WallDistanceCalibration& wallCalibration,
     float leftMeasuredSignal,
@@ -1741,14 +2392,14 @@ static bool TryComputeStraightWallCenterErrorM(
         float leftReferenceSignal = 0.0f;
         float rightReferenceSignal = 0.0f;
         float balanceError = 0.0f;
-        if (wallCalibration.TryGetSideWallReferenceDifferentialLight(WallSensorId::SideLeft, leftReferenceSignal) &&
-            wallCalibration.TryGetSideWallReferenceDifferentialLight(WallSensorId::SideRight, rightReferenceSignal) &&
+        if (wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideLeft, leftReferenceSignal) &&
+            wallCalibration.TryComputeSideWallNormalizedReferenceDifferentialLight(WallSensorId::SideRight, rightReferenceSignal) &&
             MazeMap::TryComputeNormalizedWallSignalBalanceError(
                 leftMeasuredSignal,
                 leftReferenceSignal,
                 rightMeasuredSignal,
                 rightReferenceSignal,
-                Config::kSideWallSignalReleaseFractionOfCalibration,
+                Config::kSideWallMeasuredSignalReleaseThreshold,
                 balanceError))
         {
             corridorErrorM = -0.5f * expectedDistanceM * balanceError;
@@ -2041,11 +2692,6 @@ static bool TryComputeEffectiveTurnRadiusM(
     return std::isfinite(turnRadiusM) && (turnRadiusM > 0.0f);
 }
 
-static bool IsCellCenterLocation(const MazeMap::MazeLocation& location)
-{
-    return ((location.GetX() & 1U) == 1U) && ((location.GetY() & 1U) == 1U);
-}
-
 static bool TryGetCellCenterMeters(const MazeMap::CellCoordinates& cell, float& xMeters, float& yMeters)
 {
     MazeMap::MazeLocation::CellCenter(cell).GetPhysicalLocation(Config::kCellSizeM, xMeters, yMeters);
@@ -2073,6 +2719,42 @@ static bool TryGetCellWallFaceCoordinateM(
         return true;
     case MazeMap::Up:
         coordinateM = cellBaseYM + MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool TryComputeWallTouchTargetCoordinateForCellWall(
+    const MazeMap::CellCoordinates& cell,
+    MazeMap::Direction wallDirection,
+    float& targetCoordinateM,
+    CalibrationWall& calibrationWall)
+{
+    targetCoordinateM = 0.0f;
+    float wallFaceCoordinateM = 0.0f;
+    if (!TryGetCellWallFaceCoordinateM(cell, wallDirection, wallFaceCoordinateM))
+    {
+        return false;
+    }
+
+    switch (wallDirection)
+    {
+    case MazeMap::Left:
+        calibrationWall = CalibrationWall::West;
+        targetCoordinateM = wallFaceCoordinateM + Config::kWallTouchContactStandoffM;
+        return true;
+    case MazeMap::Right:
+        calibrationWall = CalibrationWall::East;
+        targetCoordinateM = wallFaceCoordinateM - Config::kWallTouchContactStandoffM;
+        return true;
+    case MazeMap::Down:
+        calibrationWall = CalibrationWall::South;
+        targetCoordinateM = wallFaceCoordinateM + Config::kWallTouchContactStandoffM;
+        return true;
+    case MazeMap::Up:
+        calibrationWall = CalibrationWall::North;
+        targetCoordinateM = wallFaceCoordinateM - Config::kWallTouchContactStandoffM;
         return true;
     default:
         return false;
@@ -2221,79 +2903,83 @@ static void SampleWallCalibrationInputRawPair(
     secondInput = BuildWallSensorCalibrationInput(secondSensorId, secondSample);
 }
 
-static WallSensorCalibrationInput SampleWallCalibrationInputAverageRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor)
+static WallSensorCalibrationCapture SampleWallCalibrationCaptureAverageRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor)
 {
-    double measuredValueSum = 0.0;
-    double fallbackDistanceSum = 0.0;
-    double differentialLightSum = 0.0;
-    double ambientLightSum = 0.0;
-    double litLightSum = 0.0;
+    AveragedWallSensorInputWindow<static_cast<uint8_t>(Config::kWallCalibrationAverageSampleCount)> averageWindow{};
+    std::array<float, Config::kWallCalibrationAverageSampleCount> differentialLightSamples{};
+    uint16_t differentialLightCount = 0U;
     for (uint16_t i = 0U; i < Config::kWallCalibrationAverageSampleCount; ++i)
     {
-        const RawWallSensorSample sample = SampleWallSensorRaw(sensorId, sensor);
-        measuredValueSum += static_cast<double>(WallSensorMeasuredValueForCalibration(sensorId, sample));
-        fallbackDistanceSum += static_cast<double>(sample.rawDistanceM);
-        differentialLightSum += static_cast<double>(sample.differentialLight);
-        ambientLightSum += static_cast<double>(sample.ambientLight);
-        litLightSum += static_cast<double>(sample.litLight);
+        const WallSensorCalibrationInput input = SampleWallCalibrationInputRaw(sensorId, sensor);
+        averageWindow.PushAndAverage(input);
+        differentialLightSamples[differentialLightCount] = input.differentialLight;
+        ++differentialLightCount;
     }
 
-    WallSensorCalibrationInput input{};
-    const double normalization = 1.0 / static_cast<double>(Config::kWallCalibrationAverageSampleCount);
-    input.measuredValue = static_cast<float>(measuredValueSum * normalization);
-    input.fallbackDistanceM = static_cast<float>(fallbackDistanceSum * normalization);
-    input.differentialLight = static_cast<float>(differentialLightSum * normalization);
-    input.ambientLight = static_cast<float>(ambientLightSum * normalization);
-    input.litLight = static_cast<float>(litLightSum * normalization);
-    return input;
+    WallSensorCalibrationCapture capture{};
+    capture.input = averageWindow.Average();
+    capture.haveDifferentialLightBand = MazeMap::TryComputeRobustSignalBandFromSamples(
+        differentialLightSamples,
+        differentialLightCount,
+        Config::kWallCalibrationScaledMadMultiplier,
+        capture.differentialLightBand.median,
+        capture.differentialLightBand.low,
+        capture.differentialLightBand.high);
+    return capture;
 }
 
-static void SampleWallCalibrationInputAverageRawPair(
+static void SampleWallCalibrationCaptureAverageRawPair(
     WallSensorId firstSensorId,
     const MazeMap::WallSensor& firstSensor,
     WallSensorId secondSensorId,
     const MazeMap::WallSensor& secondSensor,
-    WallSensorCalibrationInput& firstInput,
-    WallSensorCalibrationInput& secondInput)
+    WallSensorCalibrationCapture& firstCapture,
+    WallSensorCalibrationCapture& secondCapture)
 {
-    double firstMeasuredValueSum = 0.0;
-    double secondMeasuredValueSum = 0.0;
-    double firstFallbackDistanceSum = 0.0;
-    double secondFallbackDistanceSum = 0.0;
-    double firstDifferentialLightSum = 0.0;
-    double secondDifferentialLightSum = 0.0;
-    double firstAmbientLightSum = 0.0;
-    double secondAmbientLightSum = 0.0;
-    double firstLitLightSum = 0.0;
-    double secondLitLightSum = 0.0;
+    AveragedWallSensorInputWindow<static_cast<uint8_t>(Config::kWallCalibrationAverageSampleCount)> firstAverageWindow{};
+    AveragedWallSensorInputWindow<static_cast<uint8_t>(Config::kWallCalibrationAverageSampleCount)> secondAverageWindow{};
+    std::array<float, Config::kWallCalibrationAverageSampleCount> firstDifferentialLightSamples{};
+    std::array<float, Config::kWallCalibrationAverageSampleCount> secondDifferentialLightSamples{};
+    uint16_t firstDifferentialLightCount = 0U;
+    uint16_t secondDifferentialLightCount = 0U;
     for (uint16_t i = 0U; i < Config::kWallCalibrationAverageSampleCount; ++i)
     {
-        RawWallSensorSample firstSample{};
-        RawWallSensorSample secondSample{};
-        SampleWallSensorPairRaw(firstSensorId, firstSensor, secondSensorId, secondSensor, firstSample, secondSample);
-        firstMeasuredValueSum += static_cast<double>(WallSensorMeasuredValueForCalibration(firstSensorId, firstSample));
-        secondMeasuredValueSum += static_cast<double>(WallSensorMeasuredValueForCalibration(secondSensorId, secondSample));
-        firstFallbackDistanceSum += static_cast<double>(firstSample.rawDistanceM);
-        secondFallbackDistanceSum += static_cast<double>(secondSample.rawDistanceM);
-        firstDifferentialLightSum += static_cast<double>(firstSample.differentialLight);
-        secondDifferentialLightSum += static_cast<double>(secondSample.differentialLight);
-        firstAmbientLightSum += static_cast<double>(firstSample.ambientLight);
-        secondAmbientLightSum += static_cast<double>(secondSample.ambientLight);
-        firstLitLightSum += static_cast<double>(firstSample.litLight);
-        secondLitLightSum += static_cast<double>(secondSample.litLight);
+        WallSensorCalibrationInput rawFirstInput{};
+        WallSensorCalibrationInput rawSecondInput{};
+        SampleWallCalibrationInputRawPair(
+            firstSensorId,
+            firstSensor,
+            secondSensorId,
+            secondSensor,
+            rawFirstInput,
+            rawSecondInput);
+        firstAverageWindow.PushAndAverage(rawFirstInput);
+        secondAverageWindow.PushAndAverage(rawSecondInput);
+        firstDifferentialLightSamples[firstDifferentialLightCount] = rawFirstInput.differentialLight;
+        ++firstDifferentialLightCount;
+        secondDifferentialLightSamples[secondDifferentialLightCount] = rawSecondInput.differentialLight;
+        ++secondDifferentialLightCount;
     }
 
-    const double normalization = 1.0 / static_cast<double>(Config::kWallCalibrationAverageSampleCount);
-    firstInput.measuredValue = static_cast<float>(firstMeasuredValueSum * normalization);
-    firstInput.fallbackDistanceM = static_cast<float>(firstFallbackDistanceSum * normalization);
-    firstInput.differentialLight = static_cast<float>(firstDifferentialLightSum * normalization);
-    firstInput.ambientLight = static_cast<float>(firstAmbientLightSum * normalization);
-    firstInput.litLight = static_cast<float>(firstLitLightSum * normalization);
-    secondInput.measuredValue = static_cast<float>(secondMeasuredValueSum * normalization);
-    secondInput.fallbackDistanceM = static_cast<float>(secondFallbackDistanceSum * normalization);
-    secondInput.differentialLight = static_cast<float>(secondDifferentialLightSum * normalization);
-    secondInput.ambientLight = static_cast<float>(secondAmbientLightSum * normalization);
-    secondInput.litLight = static_cast<float>(secondLitLightSum * normalization);
+    firstCapture = {};
+    firstCapture.input = firstAverageWindow.Average();
+    firstCapture.haveDifferentialLightBand = MazeMap::TryComputeRobustSignalBandFromSamples(
+        firstDifferentialLightSamples,
+        firstDifferentialLightCount,
+        Config::kWallCalibrationScaledMadMultiplier,
+        firstCapture.differentialLightBand.median,
+        firstCapture.differentialLightBand.low,
+        firstCapture.differentialLightBand.high);
+
+    secondCapture = {};
+    secondCapture.input = secondAverageWindow.Average();
+    secondCapture.haveDifferentialLightBand = MazeMap::TryComputeRobustSignalBandFromSamples(
+        secondDifferentialLightSamples,
+        secondDifferentialLightCount,
+        Config::kWallCalibrationScaledMadMultiplier,
+        secondCapture.differentialLightBand.median,
+        secondCapture.differentialLightBand.low,
+        secondCapture.differentialLightBand.high);
 }
 
 static bool HysteresisWall(bool currentState, float distanceM, float onThresholdM, float offThresholdM)
@@ -2558,18 +3244,56 @@ static float EstimateMissionGyroBiasRadps(MazeMap::Vehicle& vehicle)
     return accumulatedRadps / static_cast<float>(requiredSamples);
 }
 
+static bool TryAverageRawGyroBiasRadpsOverWindow(
+    MazeMap::Vehicle& vehicle,
+    unsigned long durationMs,
+    unsigned long sampleIntervalMs,
+    float& averageRadps,
+    unsigned long& sampleCount)
+{
+    averageRadps = 0.0f;
+    sampleCount = 0UL;
+    if (durationMs == 0UL || sampleIntervalMs == 0UL)
+    {
+        return false;
+    }
+
+    const unsigned long requiredSamples =
+        (std::max)(1UL, (durationMs + sampleIntervalMs - 1UL) / sampleIntervalMs);
+    double accumulatedRadps = 0.0;
+    for (unsigned long i = 0UL; i < requiredSamples; ++i)
+    {
+        accumulatedRadps += static_cast<double>(ReadBackLeftGyroZRadpsRaw(vehicle));
+        ++sampleCount;
+        if ((i + 1UL) < requiredSamples)
+        {
+            delay(sampleIntervalMs);
+        }
+    }
+
+    if (sampleCount == 0UL)
+    {
+        return false;
+    }
+
+    averageRadps = static_cast<float>(accumulatedRadps / static_cast<double>(sampleCount));
+    return true;
+}
+
 static bool CalibrateStationaryBackLeftGyroBias(
     MazeMap::Vehicle& vehicle,
     unsigned long controlPeriodUs,
     bool enableAccelRuntime,
-    float& gyroBiasRadps)
+    float& gyroBiasRadps,
+    MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
+        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
 {
 #if defined(ARDUINO_TEENSY41)
     while (true)
     {
         const MazeMap::EncoderCountPair startCounts = CaptureDriveEncoderCounts();
         const StationaryImuCalibrationResult selfTestResult =
-            RunStationaryBackLeftImuSelfTest(vehicle.IMU_BL, controlPeriodUs, startCounts);
+            RunStationaryBackLeftImuSelfTest(vehicle.IMU_BL, controlPeriodUs, startCounts, accelFilterFreq);
         if (selfTestResult == StationaryImuCalibrationResult::RestartEncoderMotion)
         {
             Serial.println("Encoder motion detected during stationary IMU self-test; restarting bias calibration");
@@ -2580,7 +3304,7 @@ static bool CalibrateStationaryBackLeftGyroBias(
             return false;
         }
 
-        if (!ConfigureBackLeftImuForRuntime(vehicle.IMU_BL, controlPeriodUs, enableAccelRuntime))
+        if (!ConfigureBackLeftImuForRuntime(vehicle.IMU_BL, controlPeriodUs, enableAccelRuntime, accelFilterFreq))
         {
             return false;
         }
@@ -2630,6 +3354,286 @@ static bool CalibrateStationaryBackLeftGyroBias(
 #endif
 }
 
+static bool TryComputeSideWallAimCoordinateM(
+    const PoseEstimate& pose,
+    const MazeMap::WallSensor& sensor,
+    float& alongWallCoordinateM)
+{
+    alongWallCoordinateM = 0.0f;
+    if (!std::isfinite(pose.xMeters) ||
+        !std::isfinite(pose.yMeters) ||
+        !std::isfinite(pose.yawRad))
+    {
+        return false;
+    }
+
+    const float yawCos = std::cos(pose.yawRad);
+    const float yawSin = std::sin(pose.yawRad);
+    const MazeMap::Vectorf<2>& sensorPosition = sensor.GetPosition();
+    const MazeMap::Vectorf<2>& sensorFacing = sensor.GetFacingDirection();
+    const float sensorXM =
+        pose.xMeters +
+        (yawCos * sensorPosition.GetX()) -
+        (yawSin * sensorPosition.GetY());
+    const float sensorYM =
+        pose.yMeters +
+        (yawSin * sensorPosition.GetX()) +
+        (yawCos * sensorPosition.GetY());
+    const float facingXM =
+        (yawCos * sensorFacing.GetX()) -
+        (yawSin * sensorFacing.GetY());
+    const float facingYM =
+        (yawSin * sensorFacing.GetX()) +
+        (yawCos * sensorFacing.GetY());
+    const float innerMinCoordinateM =
+        MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
+    const float innerMaxCoordinateM =
+        MazeMap::ComputeCellInnerMaxCoordinateM(
+            Config::kCellSizeM,
+            Config::kMazeWallThicknessM);
+
+    if (std::fabs(facingXM) >= std::fabs(facingYM))
+    {
+        if (!(std::fabs(facingXM) > 1.0e-4f))
+        {
+            return false;
+        }
+
+        const float cellBaseXM =
+            std::floor(sensorXM / Config::kCellSizeM) * Config::kCellSizeM;
+        const float wallFaceXM =
+            (facingXM >= 0.0f) ?
+            (cellBaseXM + innerMaxCoordinateM) :
+            (cellBaseXM + innerMinCoordinateM);
+        const float rayScale = (wallFaceXM - sensorXM) / facingXM;
+        if (!(rayScale >= 0.0f) || !std::isfinite(rayScale))
+        {
+            return false;
+        }
+
+        alongWallCoordinateM = sensorYM + (rayScale * facingYM);
+        return std::isfinite(alongWallCoordinateM);
+    }
+
+    if (!(std::fabs(facingYM) > 1.0e-4f))
+    {
+        return false;
+    }
+
+    const float cellBaseYM =
+        std::floor(sensorYM / Config::kCellSizeM) * Config::kCellSizeM;
+    const float wallFaceYM =
+        (facingYM >= 0.0f) ?
+        (cellBaseYM + innerMaxCoordinateM) :
+        (cellBaseYM + innerMinCoordinateM);
+    const float rayScale = (wallFaceYM - sensorYM) / facingYM;
+    if (!(rayScale >= 0.0f) || !std::isfinite(rayScale))
+    {
+        return false;
+    }
+
+    alongWallCoordinateM = sensorXM + (rayScale * facingXM);
+    return std::isfinite(alongWallCoordinateM);
+}
+
+static bool IsSideWallDetectionWindowValid(
+    const PoseEstimate& pose,
+    const MazeMap::WallSensor& sensor)
+{
+    float alongWallCoordinateM = 0.0f;
+    return
+        TryComputeSideWallAimCoordinateM(
+            pose,
+            sensor,
+            alongWallCoordinateM) &&
+        MazeMap::IsWithinWallSegmentCenterWindowM(
+            alongWallCoordinateM,
+            Config::kCellSizeM,
+            Config::kMazeWallThicknessM,
+            Config::kSideWallSegmentCenterFraction);
+}
+
+struct RollingObservationVoteSummary
+{
+    uint8_t sampleCount = 0U;
+    uint8_t frontWallVotes = 0U;
+    uint8_t frontLeftWallVotes = 0U;
+    uint8_t frontRightWallVotes = 0U;
+    uint8_t frontFallbackVotes = 0U;
+    uint8_t leftWallVotes = 0U;
+    uint8_t rightWallVotes = 0U;
+    uint8_t leftWindowValidVotes = 0U;
+    uint8_t rightWindowValidVotes = 0U;
+};
+
+static bool ObservationVoteWinsMajority(uint8_t votes, uint8_t sampleCount)
+{
+    return sampleCount > 0U && votes >= static_cast<uint8_t>((sampleCount / 2U) + 1U);
+}
+
+static float AverageFiniteObservationValue(float sum, uint8_t count, float fallbackValue)
+{
+    return (count > 0U) ? (sum / static_cast<float>(count)) : fallbackValue;
+}
+
+static bool BuildMajorityObservationSnapshot(
+    const SensorSnapshot* samples,
+    uint8_t sampleCount,
+    SensorSnapshot& combinedSnapshot,
+    RollingObservationVoteSummary& voteSummary)
+{
+    if (samples == nullptr || sampleCount == 0U)
+    {
+        return false;
+    }
+
+    voteSummary = RollingObservationVoteSummary{};
+    voteSummary.sampleCount = sampleCount;
+    memset(&combinedSnapshot, 0, sizeof(combinedSnapshot));
+
+    float frontLeftDistanceSum = 0.0f;
+    float frontRightDistanceSum = 0.0f;
+    float sideLeftDistanceSum = 0.0f;
+    float sideRightDistanceSum = 0.0f;
+    float sideLeftDifferentialLightSum = 0.0f;
+    float sideRightDifferentialLightSum = 0.0f;
+    float corridorErrorSum = 0.0f;
+    float frontSkewSum = 0.0f;
+    float planarAccelSum = 0.0f;
+    float gyroSum = 0.0f;
+    uint8_t frontLeftDistanceCount = 0U;
+    uint8_t frontRightDistanceCount = 0U;
+    uint8_t sideLeftDistanceCount = 0U;
+    uint8_t sideRightDistanceCount = 0U;
+    uint8_t sideLeftDifferentialLightCount = 0U;
+    uint8_t sideRightDifferentialLightCount = 0U;
+    uint8_t corridorErrorCount = 0U;
+    uint8_t frontSkewCount = 0U;
+    uint8_t planarAccelCount = 0U;
+    uint8_t gyroCount = 0U;
+
+    for (uint8_t sampleIndex = 0U; sampleIndex < sampleCount; ++sampleIndex)
+    {
+        const SensorSnapshot& sample = samples[sampleIndex];
+        if (sample.frontWall)
+        {
+            ++voteSummary.frontWallVotes;
+        }
+        if (sample.frontLeftWall)
+        {
+            ++voteSummary.frontLeftWallVotes;
+        }
+        if (sample.frontRightWall)
+        {
+            ++voteSummary.frontRightWallVotes;
+        }
+        if (sample.frontWallUsesFallbackDetection)
+        {
+            ++voteSummary.frontFallbackVotes;
+        }
+        if (sample.leftWallObservation)
+        {
+            ++voteSummary.leftWallVotes;
+        }
+        if (sample.rightWallObservation)
+        {
+            ++voteSummary.rightWallVotes;
+        }
+        if (sample.leftWallObservationWindowValid)
+        {
+            ++voteSummary.leftWindowValidVotes;
+        }
+        if (sample.rightWallObservationWindowValid)
+        {
+            ++voteSummary.rightWindowValidVotes;
+        }
+
+        if (std::isfinite(sample.frontLeftDistanceM))
+        {
+            frontLeftDistanceSum += sample.frontLeftDistanceM;
+            ++frontLeftDistanceCount;
+        }
+        if (std::isfinite(sample.frontRightDistanceM))
+        {
+            frontRightDistanceSum += sample.frontRightDistanceM;
+            ++frontRightDistanceCount;
+        }
+        if (std::isfinite(sample.sideLeftDistanceM))
+        {
+            sideLeftDistanceSum += sample.sideLeftDistanceM;
+            ++sideLeftDistanceCount;
+        }
+        if (std::isfinite(sample.sideRightDistanceM))
+        {
+            sideRightDistanceSum += sample.sideRightDistanceM;
+            ++sideRightDistanceCount;
+        }
+        if (std::isfinite(sample.sideLeftDifferentialLight))
+        {
+            sideLeftDifferentialLightSum += sample.sideLeftDifferentialLight;
+            ++sideLeftDifferentialLightCount;
+        }
+        if (std::isfinite(sample.sideRightDifferentialLight))
+        {
+            sideRightDifferentialLightSum += sample.sideRightDifferentialLight;
+            ++sideRightDifferentialLightCount;
+        }
+        if (std::isfinite(sample.corridorErrorM))
+        {
+            corridorErrorSum += sample.corridorErrorM;
+            ++corridorErrorCount;
+        }
+        if (std::isfinite(sample.frontSkewM))
+        {
+            frontSkewSum += sample.frontSkewM;
+            ++frontSkewCount;
+        }
+        if (std::isfinite(sample.planarAccelMps2))
+        {
+            planarAccelSum += sample.planarAccelMps2;
+            ++planarAccelCount;
+        }
+        if (std::isfinite(sample.gyroRadps))
+        {
+            gyroSum += sample.gyroRadps;
+            ++gyroCount;
+        }
+    }
+
+    const SensorSnapshot& lastSample = samples[sampleCount - 1U];
+    combinedSnapshot.frontLeftDistanceM =
+        AverageFiniteObservationValue(frontLeftDistanceSum, frontLeftDistanceCount, lastSample.frontLeftDistanceM);
+    combinedSnapshot.frontRightDistanceM =
+        AverageFiniteObservationValue(frontRightDistanceSum, frontRightDistanceCount, lastSample.frontRightDistanceM);
+    combinedSnapshot.sideLeftDistanceM =
+        AverageFiniteObservationValue(sideLeftDistanceSum, sideLeftDistanceCount, lastSample.sideLeftDistanceM);
+    combinedSnapshot.sideRightDistanceM =
+        AverageFiniteObservationValue(sideRightDistanceSum, sideRightDistanceCount, lastSample.sideRightDistanceM);
+    combinedSnapshot.sideLeftDifferentialLight =
+        AverageFiniteObservationValue(sideLeftDifferentialLightSum, sideLeftDifferentialLightCount, lastSample.sideLeftDifferentialLight);
+    combinedSnapshot.sideRightDifferentialLight =
+        AverageFiniteObservationValue(sideRightDifferentialLightSum, sideRightDifferentialLightCount, lastSample.sideRightDifferentialLight);
+    combinedSnapshot.corridorErrorM =
+        AverageFiniteObservationValue(corridorErrorSum, corridorErrorCount, lastSample.corridorErrorM);
+    combinedSnapshot.frontSkewM =
+        AverageFiniteObservationValue(frontSkewSum, frontSkewCount, lastSample.frontSkewM);
+    combinedSnapshot.planarAccelMps2 =
+        AverageFiniteObservationValue(planarAccelSum, planarAccelCount, lastSample.planarAccelMps2);
+    combinedSnapshot.gyroRadps =
+        AverageFiniteObservationValue(gyroSum, gyroCount, lastSample.gyroRadps);
+    combinedSnapshot.frontWall = ObservationVoteWinsMajority(voteSummary.frontWallVotes, sampleCount);
+    combinedSnapshot.frontLeftWall = ObservationVoteWinsMajority(voteSummary.frontLeftWallVotes, sampleCount);
+    combinedSnapshot.frontRightWall = ObservationVoteWinsMajority(voteSummary.frontRightWallVotes, sampleCount);
+    combinedSnapshot.frontWallUsesFallbackDetection = ObservationVoteWinsMajority(voteSummary.frontFallbackVotes, sampleCount);
+    combinedSnapshot.leftWallObservation = ObservationVoteWinsMajority(voteSummary.leftWallVotes, sampleCount);
+    combinedSnapshot.rightWallObservation = ObservationVoteWinsMajority(voteSummary.rightWallVotes, sampleCount);
+    combinedSnapshot.leftWall = combinedSnapshot.leftWallObservation;
+    combinedSnapshot.rightWall = combinedSnapshot.rightWallObservation;
+    combinedSnapshot.leftWallObservationWindowValid = ObservationVoteWinsMajority(voteSummary.leftWindowValidVotes, sampleCount);
+    combinedSnapshot.rightWallObservationWindowValid = ObservationVoteWinsMajority(voteSummary.rightWindowValidVotes, sampleCount);
+    return true;
+}
+
 class SensorSuite
 {
 public:
@@ -2645,6 +3649,8 @@ public:
         , _frontRightWallSignalFiltered(0.0f)
         , _sideLeftWallSignalFiltered(0.0f)
         , _sideRightWallSignalFiltered(0.0f)
+        , _accelBiasXG(0.0f)
+        , _accelBiasYG(0.0f)
         , _frontLeftWallState(false)
         , _frontRightWallState(false)
         , _frontWallUsesFallbackDetection(false)
@@ -2652,6 +3658,7 @@ public:
         , _frontRightWallSignalInitialized(false)
         , _sideLeftWallSignalInitialized(false)
         , _sideRightWallSignalInitialized(false)
+        , _accelBiasInitialized(false)
     {
     }
 
@@ -2676,6 +3683,9 @@ public:
         _frontRightWallSignalInitialized = false;
         _sideLeftWallSignalInitialized = false;
         _sideRightWallSignalInitialized = false;
+        _accelBiasXG = 0.0f;
+        _accelBiasYG = 0.0f;
+        _accelBiasInitialized = false;
         bool ok = true;
 #if defined(ARDUINO_TEENSY41)
         Serial.println("IMU_FR disabled; using IMU_BL only");
@@ -2700,7 +3710,7 @@ public:
 #endif
         if (ok)
         {
-            ok = CalibrateGyroBias(Config::kControlPeriodUs, false) && ok;
+            ok = CalibrateGyroBias(Config::kControlPeriodUs, true) && ok;
         }
         return ok;
     }
@@ -2711,10 +3721,11 @@ public:
             _vehicle,
             controlPeriodUs,
             enableAccelRuntime,
-            _gyroBiasRadps);
+            _gyroBiasRadps,
+            Config::kMissionRuntimeAccelFilterFreq);
     }
 
-    SensorSnapshot Capture(bool stationary)
+    SensorSnapshot Capture(bool stationary, const PoseEstimate& pose)
     {
         SensorSnapshot snapshot{};
         WallSensorCalibrationInput frontLeftRawInput{};
@@ -2737,8 +3748,8 @@ public:
         float sideWallOnThresholdM = Config::kSideWallOnThresholdM;
         float sideWallOffThresholdM = Config::kSideWallOffThresholdM;
         _wallCalibration.TryComputeSideWallDistanceThresholds(
-            Config::kSideWallSignalLatchFractionOfCalibration,
-            Config::kSideWallSignalReleaseFractionOfCalibration,
+            Config::kSideWallDistanceLatchFractionOfCalibration,
+            Config::kSideWallDistanceReleaseFractionOfCalibration,
             sideWallOnThresholdM,
             sideWallOffThresholdM);
         snapshot.frontLeftDistanceM = UpdateChannelFromMeasuredDistance(
@@ -2783,26 +3794,66 @@ public:
         snapshot.frontLeftWall = _frontLeftWallState;
         snapshot.frontRightWall = _frontRightWallState;
         snapshot.frontWallUsesFallbackDetection = _frontWallUsesFallbackDetection;
+        const bool sideLeftWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideLeft);
+        const bool sideRightWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideRight);
+        snapshot.leftWallObservationWindowValid = sideLeftWindowValid;
+        snapshot.rightWallObservationWindowValid = sideRightWindowValid;
         snapshot.leftWall = UpdateSideWallState(
             WallSensorId::SideLeft,
             sideLeftInput.differentialLight,
-            snapshot.sideLeftDistanceM,
+            sideLeftInput.fallbackDistanceM,
             sideWallOnThresholdM,
             sideWallOffThresholdM,
+            sideLeftWindowValid,
             _sideLeftWallSignalFiltered,
             _sideLeftWallSignalInitialized,
             _sideLeft.wall);
         snapshot.rightWall = UpdateSideWallState(
             WallSensorId::SideRight,
             sideRightInput.differentialLight,
-            snapshot.sideRightDistanceM,
+            sideRightInput.fallbackDistanceM,
             sideWallOnThresholdM,
             sideWallOffThresholdM,
+            sideRightWindowValid,
             _sideRightWallSignalFiltered,
             _sideRightWallSignalInitialized,
             _sideRight.wall);
+        snapshot.leftWallObservation = ComputeSideWallObservationHit(
+            WallSensorId::SideLeft,
+            sideLeftInput.differentialLight,
+            sideLeftInput.fallbackDistanceM,
+            sideWallOnThresholdM,
+            sideLeftWindowValid);
+        snapshot.rightWallObservation = ComputeSideWallObservationHit(
+            WallSensorId::SideRight,
+            sideRightInput.differentialLight,
+            sideRightInput.fallbackDistanceM,
+            sideWallOnThresholdM,
+            sideRightWindowValid);
         snapshot.frontSkewM = snapshot.frontLeftDistanceM - snapshot.frontRightDistanceM;
         snapshot.corridorErrorM = ComputeCorridorError(snapshot);
+
+#if defined(ARDUINO_TEENSY41)
+        const MazeMap::Vehicle::ImuBackLeft::Axes accel = _vehicle.IMU_BL.ReadAccel();
+        const float accelXG = _vehicle.IMU_BL.AccelRawToG(accel.x);
+        const float accelYG = _vehicle.IMU_BL.AccelRawToG(accel.y);
+        if (!_accelBiasInitialized)
+        {
+            _accelBiasXG = accelXG;
+            _accelBiasYG = accelYG;
+            _accelBiasInitialized = true;
+        }
+        if (stationary)
+        {
+            _accelBiasXG = (0.998f * _accelBiasXG) + (0.002f * accelXG);
+            _accelBiasYG = (0.998f * _accelBiasYG) + (0.002f * accelYG);
+        }
+        const float accelDeltaXG = accelXG - _accelBiasXG;
+        const float accelDeltaYG = accelYG - _accelBiasYG;
+        snapshot.planarAccelMps2 = kStandardGravityMps2 * std::sqrt((accelDeltaXG * accelDeltaXG) + (accelDeltaYG * accelDeltaYG));
+#else
+        snapshot.planarAccelMps2 = 0.0f;
+#endif
 
         const float rawGyroRadps = ReadGyroZRadpsRaw();
         if (stationary && MazeMap::ShouldUpdateGyroBiasFromStationarySample(rawGyroRadps, Config::kGyroBiasUpdateMaxAbsRateRadps))
@@ -2832,6 +3883,8 @@ private:
     float _frontRightWallSignalFiltered;
     float _sideLeftWallSignalFiltered;
     float _sideRightWallSignalFiltered;
+    float _accelBiasXG;
+    float _accelBiasYG;
     AveragedWallSensorInputWindow<Config::kWallDetectionAverageWindowCycles> _frontLeftInputAverage;
     AveragedWallSensorInputWindow<Config::kWallDetectionAverageWindowCycles> _frontRightInputAverage;
     AveragedWallSensorInputWindow<Config::kWallDetectionAverageWindowCycles> _sideLeftInputAverage;
@@ -2843,6 +3896,7 @@ private:
     bool _frontRightWallSignalInitialized;
     bool _sideLeftWallSignalInitialized;
     bool _sideRightWallSignalInitialized;
+    bool _accelBiasInitialized;
 
     float ComputeCorridorError(const SensorSnapshot& snapshot) const
     {
@@ -2884,34 +3938,96 @@ private:
         bool& currentState,
         bool& initialized)
     {
-        (void)offMeasuredThreshold;
         filteredSignal = measuredDifferentialLight;
         initialized = true;
-        currentState = measuredDifferentialLight > onMeasuredThreshold;
+        currentState = MazeMap::HysteresisSignalHigh(
+            currentState,
+            measuredDifferentialLight,
+            onMeasuredThreshold,
+            offMeasuredThreshold);
         return currentState;
+    }
+
+    static float ComputeSignalRiseAboveBaseline(
+        float measuredDifferentialLight,
+        float signalBaseline)
+    {
+        if (!std::isfinite(measuredDifferentialLight) ||
+            !std::isfinite(signalBaseline))
+        {
+            return 0.0f;
+        }
+
+        return (measuredDifferentialLight > signalBaseline) ?
+            (measuredDifferentialLight - signalBaseline) :
+            0.0f;
+    }
+
+    bool ComputeSideWallObservationHit(
+        WallSensorId sensorId,
+        float measuredDifferentialLight,
+        float fallbackDistanceM,
+        float onThresholdM,
+        bool detectionWindowValid) const
+    {
+        if (!detectionWindowValid)
+        {
+            return false;
+        }
+
+        float onMeasuredThreshold = 0.0f;
+        float offMeasuredThreshold = 0.0f;
+        float signalBaseline = 0.0f;
+        if (_wallCalibration.TryComputeSideWallMeasuredThresholds(
+                sensorId,
+                Config::kSideWallMeasuredSignalLatchThreshold,
+                Config::kSideWallMeasuredSignalReleaseThreshold,
+                onMeasuredThreshold,
+                offMeasuredThreshold,
+                signalBaseline))
+        {
+            return ComputeSignalRiseAboveBaseline(
+                       measuredDifferentialLight,
+                       signalBaseline) >= onMeasuredThreshold;
+        }
+
+        return std::isfinite(fallbackDistanceM) && fallbackDistanceM < onThresholdM;
     }
 
     bool UpdateSideWallState(
         WallSensorId sensorId,
         float measuredDifferentialLight,
-        float filteredDistanceM,
+        float fallbackDistanceM,
         float onThresholdM,
         float offThresholdM,
+        bool detectionWindowValid,
         float& filteredSignal,
         bool& signalInitialized,
         bool& currentState)
     {
+        if (!detectionWindowValid)
+        {
+            filteredSignal = 0.0f;
+            signalInitialized = false;
+            currentState = false;
+            return false;
+        }
+
         float onMeasuredThreshold = 0.0f;
         float offMeasuredThreshold = 0.0f;
+        float signalBaseline = 0.0f;
         if (_wallCalibration.TryComputeSideWallMeasuredThresholds(
                 sensorId,
-                Config::kSideWallSignalLatchFractionOfCalibration,
-                Config::kSideWallSignalReleaseFractionOfCalibration,
+                Config::kSideWallMeasuredSignalLatchThreshold,
+                Config::kSideWallMeasuredSignalReleaseThreshold,
                 onMeasuredThreshold,
-                offMeasuredThreshold))
+                offMeasuredThreshold,
+                signalBaseline))
         {
             return UpdateFilteredSignalState(
-                measuredDifferentialLight,
+                ComputeSignalRiseAboveBaseline(
+                    measuredDifferentialLight,
+                    signalBaseline),
                 onMeasuredThreshold,
                 offMeasuredThreshold,
                 filteredSignal,
@@ -2920,8 +4036,11 @@ private:
         }
 
         signalInitialized = false;
-        (void)offThresholdM;
-        currentState = filteredDistanceM < onThresholdM;
+        currentState = HysteresisWall(
+            currentState,
+            fallbackDistanceM,
+            onThresholdM,
+            offThresholdM);
         return currentState;
     }
 
@@ -2934,8 +4053,10 @@ private:
     {
         float leftOnMeasuredThreshold = 0.0f;
         float leftOffMeasuredThreshold = 0.0f;
+        float leftSignalBaseline = 0.0f;
         float rightOnMeasuredThreshold = 0.0f;
         float rightOffMeasuredThreshold = 0.0f;
+        float rightSignalBaseline = 0.0f;
         const bool haveLeftThreshold =
             _wallCalibration.TryComputeFrontSensorMeasuredThresholds(
                 WallSensorId::FrontLeft,
@@ -2943,7 +4064,8 @@ private:
                 Config::kFrontWallReleaseHysteresisM,
                 leftAmbientLight,
                 leftOnMeasuredThreshold,
-                leftOffMeasuredThreshold);
+                leftOffMeasuredThreshold,
+                leftSignalBaseline);
         const bool haveRightThreshold =
             _wallCalibration.TryComputeFrontSensorMeasuredThresholds(
                 WallSensorId::FrontRight,
@@ -2951,7 +4073,8 @@ private:
                 Config::kFrontWallReleaseHysteresisM,
                 rightAmbientLight,
                 rightOnMeasuredThreshold,
-                rightOffMeasuredThreshold);
+                rightOffMeasuredThreshold,
+                rightSignalBaseline);
 
         if (haveLeftThreshold || haveRightThreshold)
         {
@@ -2959,7 +4082,9 @@ private:
             if (haveLeftThreshold)
             {
                 UpdateFilteredSignalState(
-                    leftMeasuredDifferentialLight,
+                    ComputeSignalRiseAboveBaseline(
+                        leftMeasuredDifferentialLight,
+                        leftSignalBaseline),
                     leftOnMeasuredThreshold,
                     leftOffMeasuredThreshold,
                     _frontLeftWallSignalFiltered,
@@ -2975,7 +4100,9 @@ private:
             if (haveRightThreshold)
             {
                 UpdateFilteredSignalState(
-                    rightMeasuredDifferentialLight,
+                    ComputeSignalRiseAboveBaseline(
+                        rightMeasuredDifferentialLight,
+                        rightSignalBaseline),
                     rightOnMeasuredThreshold,
                     rightOffMeasuredThreshold,
                     _frontRightWallSignalFiltered,
@@ -2992,10 +4119,10 @@ private:
         }
 
         const bool fallbackState = HysteresisWall(
-            false,
+            _frontLeftWallState || _frontRightWallState,
             fallbackDistanceM,
             Config::kFrontWallOnThresholdM,
-            Config::kFrontWallOnThresholdM);
+            Config::kFrontWallOffThresholdM);
         _frontWallUsesFallbackDetection = true;
         _frontLeftWallState = fallbackState;
         _frontRightWallState = fallbackState;
@@ -3140,14 +4267,17 @@ public:
         _lastRightDistanceM = rightDistanceM;
 
         const float centerDeltaM = 0.5f * (leftDeltaM + rightDeltaM);
-        const float encoderYawDeltaRad = (rightDeltaM - leftDeltaM) / Config::kTrackWidthM;
+        const float measuredLinearSpeedMps = (dtSeconds > 0.0f) ? (centerDeltaM / dtSeconds) : 0.0f;
+        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(measuredLinearSpeedMps, gyroRadps);
+        const float encoderYawDeltaRad =
+            (effectiveTrackWidthM > 0.0f) ? ((rightDeltaM - leftDeltaM) / effectiveTrackWidthM) : 0.0f;
         const float predictedYawRad = _pose.yawRad + (gyroRadps * dtSeconds);
         const float encoderYawRad = _pose.yawRad + encoderYawDeltaRad;
         _pose.yawRad = WrapAngleRad((0.98f * predictedYawRad) + (0.02f * encoderYawRad));
         _pose.headingUnit = HeadingUnitFromYawRad(_pose.yawRad);
         _pose.xMeters += centerDeltaM * _pose.headingUnit.GetX();
         _pose.yMeters += centerDeltaM * _pose.headingUnit.GetY();
-        _pose.linearSpeedMps = (dtSeconds > 0.0f) ? (centerDeltaM / dtSeconds) : 0.0f;
+        _pose.linearSpeedMps = measuredLinearSpeedMps;
         _pose.angularSpeedRadps = gyroRadps;
     }
 
@@ -3155,8 +4285,9 @@ public:
     {
         _lastLinearCommandMps = linearSpeedMps;
         _lastAngularCommandRadps = angularSpeedRadps;
-        const float leftTargetMps = linearSpeedMps - (0.5f * Config::kTrackWidthM * angularSpeedRadps);
-        const float rightTargetMps = linearSpeedMps + (0.5f * Config::kTrackWidthM * angularSpeedRadps);
+        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(linearSpeedMps, angularSpeedRadps);
+        const float leftTargetMps = linearSpeedMps - (0.5f * effectiveTrackWidthM * angularSpeedRadps);
+        const float rightTargetMps = linearSpeedMps + (0.5f * effectiveTrackWidthM * angularSpeedRadps);
         const float leftMeasuredMps = _leftMotor.getEncoderVelocityMetersPerSecond();
         const float rightMeasuredMps = _rightMotor.getEncoderVelocityMetersPerSecond();
         const unsigned long nowMs = millis();
@@ -3499,7 +4630,7 @@ public:
             _gyroBiasRadps);
     }
 
-    DiagnosticSensorSnapshot Capture(bool stationary)
+    DiagnosticSensorSnapshot Capture(bool stationary, const PoseEstimate& pose)
     {
         DiagnosticSensorSnapshot snapshot{};
         WallSensorCalibrationInput frontLeftRawInput{};
@@ -3536,8 +4667,8 @@ public:
         float sideWallOnThresholdM = Config::kSideWallOnThresholdM;
         float sideWallOffThresholdM = Config::kSideWallOffThresholdM;
         _wallCalibration.TryComputeSideWallDistanceThresholds(
-            Config::kSideWallSignalLatchFractionOfCalibration,
-            Config::kSideWallSignalReleaseFractionOfCalibration,
+            Config::kSideWallDistanceLatchFractionOfCalibration,
+            Config::kSideWallDistanceReleaseFractionOfCalibration,
             sideWallOnThresholdM,
             sideWallOffThresholdM);
 
@@ -3547,21 +4678,25 @@ public:
             frontRightInput.ambientLight,
             frontRightInput.measuredValue,
             (std::min)(snapshot.frontLeft.distanceM, snapshot.frontRight.distanceM));
+        const bool sideLeftWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideLeft);
+        const bool sideRightWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideRight);
         snapshot.leftWall = UpdateSideWallState(
             WallSensorId::SideLeft,
             sideLeftInput.differentialLight,
-            snapshot.sideLeft.distanceM,
+            sideLeftInput.fallbackDistanceM,
             sideWallOnThresholdM,
             sideWallOffThresholdM,
+            sideLeftWindowValid,
             _sideLeftWallSignalFiltered,
             _sideLeftWallSignalInitialized,
             _leftWallState);
         snapshot.rightWall = UpdateSideWallState(
             WallSensorId::SideRight,
             sideRightInput.differentialLight,
-            snapshot.sideRight.distanceM,
+            sideRightInput.fallbackDistanceM,
             sideWallOnThresholdM,
             sideWallOffThresholdM,
+            sideRightWindowValid,
             _sideRightWallSignalFiltered,
             _sideRightWallSignalInitialized,
             _rightWallState);
@@ -3668,34 +4803,65 @@ private:
         bool& currentState,
         bool& initialized)
     {
-        (void)offMeasuredThreshold;
         filteredSignal = measuredDifferentialLight;
         initialized = true;
-        currentState = measuredDifferentialLight > onMeasuredThreshold;
+        currentState = MazeMap::HysteresisSignalHigh(
+            currentState,
+            measuredDifferentialLight,
+            onMeasuredThreshold,
+            offMeasuredThreshold);
         return currentState;
+    }
+
+    static float ComputeSignalRiseAboveBaseline(
+        float measuredDifferentialLight,
+        float signalBaseline)
+    {
+        if (!std::isfinite(measuredDifferentialLight) ||
+            !std::isfinite(signalBaseline))
+        {
+            return 0.0f;
+        }
+
+        return (measuredDifferentialLight > signalBaseline) ?
+            (measuredDifferentialLight - signalBaseline) :
+            0.0f;
     }
 
     bool UpdateSideWallState(
         WallSensorId sensorId,
         float measuredDifferentialLight,
-        float distanceM,
+        float fallbackDistanceM,
         float onThresholdM,
         float offThresholdM,
+        bool detectionWindowValid,
         float& filteredSignal,
         bool& signalInitialized,
         bool& currentState)
     {
+        if (!detectionWindowValid)
+        {
+            filteredSignal = 0.0f;
+            signalInitialized = false;
+            currentState = false;
+            return false;
+        }
+
         float onMeasuredThreshold = 0.0f;
         float offMeasuredThreshold = 0.0f;
+        float signalBaseline = 0.0f;
         if (_wallCalibration.TryComputeSideWallMeasuredThresholds(
                 sensorId,
-                Config::kSideWallSignalLatchFractionOfCalibration,
-                Config::kSideWallSignalReleaseFractionOfCalibration,
+                Config::kSideWallMeasuredSignalLatchThreshold,
+                Config::kSideWallMeasuredSignalReleaseThreshold,
                 onMeasuredThreshold,
-                offMeasuredThreshold))
+                offMeasuredThreshold,
+                signalBaseline))
         {
             return UpdateFilteredSignalState(
-                measuredDifferentialLight,
+                ComputeSignalRiseAboveBaseline(
+                    measuredDifferentialLight,
+                    signalBaseline),
                 onMeasuredThreshold,
                 offMeasuredThreshold,
                 filteredSignal,
@@ -3704,8 +4870,11 @@ private:
         }
 
         signalInitialized = false;
-        (void)offThresholdM;
-        currentState = distanceM < onThresholdM;
+        currentState = HysteresisWall(
+            currentState,
+            fallbackDistanceM,
+            onThresholdM,
+            offThresholdM);
         return currentState;
     }
 
@@ -3718,8 +4887,10 @@ private:
     {
         float leftOnMeasuredThreshold = 0.0f;
         float leftOffMeasuredThreshold = 0.0f;
+        float leftSignalBaseline = 0.0f;
         float rightOnMeasuredThreshold = 0.0f;
         float rightOffMeasuredThreshold = 0.0f;
+        float rightSignalBaseline = 0.0f;
         const bool haveLeftThreshold =
             _wallCalibration.TryComputeFrontSensorMeasuredThresholds(
                 WallSensorId::FrontLeft,
@@ -3727,7 +4898,8 @@ private:
                 Config::kFrontWallReleaseHysteresisM,
                 leftAmbientLight,
                 leftOnMeasuredThreshold,
-                leftOffMeasuredThreshold);
+                leftOffMeasuredThreshold,
+                leftSignalBaseline);
         const bool haveRightThreshold =
             _wallCalibration.TryComputeFrontSensorMeasuredThresholds(
                 WallSensorId::FrontRight,
@@ -3735,14 +4907,17 @@ private:
                 Config::kFrontWallReleaseHysteresisM,
                 rightAmbientLight,
                 rightOnMeasuredThreshold,
-                rightOffMeasuredThreshold);
+                rightOffMeasuredThreshold,
+                rightSignalBaseline);
 
         if (haveLeftThreshold || haveRightThreshold)
         {
             if (haveLeftThreshold)
             {
                 UpdateFilteredSignalState(
-                    leftMeasuredDifferentialLight,
+                    ComputeSignalRiseAboveBaseline(
+                        leftMeasuredDifferentialLight,
+                        leftSignalBaseline),
                     leftOnMeasuredThreshold,
                     leftOffMeasuredThreshold,
                     _frontLeftWallSignalFiltered,
@@ -3758,7 +4933,9 @@ private:
             if (haveRightThreshold)
             {
                 UpdateFilteredSignalState(
-                    rightMeasuredDifferentialLight,
+                    ComputeSignalRiseAboveBaseline(
+                        rightMeasuredDifferentialLight,
+                        rightSignalBaseline),
                     rightOnMeasuredThreshold,
                     rightOffMeasuredThreshold,
                     _frontRightWallSignalFiltered,
@@ -3775,10 +4952,10 @@ private:
         }
 
         const bool fallbackState = HysteresisWall(
-            false,
+            _frontLeftWallState || _frontRightWallState,
             fallbackDistanceM,
             Config::kFrontWallOnThresholdM,
-            Config::kFrontWallOnThresholdM);
+            Config::kFrontWallOffThresholdM);
         _frontLeftWallState = fallbackState;
         _frontRightWallState = fallbackState;
         _frontLeftWallSignalInitialized = false;
@@ -4130,6 +5307,16 @@ public:
         return _fileName;
     }
 
+    bool WriteMetadataUnsigned(const char* key, unsigned long value)
+    {
+        return WriteMetadataUL(key, value);
+    }
+
+    bool WriteMetadataValueFloat(const char* key, float value, uint8_t precision)
+    {
+        return WriteMetadataFloat(key, value, precision);
+    }
+
 private:
     MazeMap::CoreFileExport _file;
     char _fileName[24];
@@ -4197,6 +5384,7 @@ private:
     bool WriteDiagnosticTuningMetadata()
     {
         const auto& driveModel = MazeMap::MotorEncoderDrive::GetSharedPhysicalModel();
+        const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
         auto writeUL = [this](const char* key, unsigned long value) -> bool
         {
             return WriteMetadataUL(key, value);
@@ -4210,6 +5398,10 @@ private:
         if (!writeUL("kGyroBiasMinimumAveragingWindowMs", static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs))) return false;
         if (!writeFloat("kGyroBiasUpdateMaxAbsRateRadps", Config::kGyroBiasUpdateMaxAbsRateRadps)) return false;
         if (!writeFloat("kTrackWidthM", Config::kTrackWidthM)) return false;
+        if (!writeFloat("kArcTrackWidthTightRadiusM", vehicleModel.arcTrackWidthInterpolation.tightRadiusM)) return false;
+        if (!writeFloat("kArcTrackWidthTightM", vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM)) return false;
+        if (!writeFloat("kArcTrackWidthWideRadiusM", vehicleModel.arcTrackWidthInterpolation.wideRadiusM)) return false;
+        if (!writeFloat("kArcTrackWidthWideM", vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM)) return false;
         if (!writeFloat("kWheelDiameterM", driveModel.wheelDiameterM)) return false;
         if (!writeUL("kEncoderCountsPerRev", static_cast<unsigned long>(driveModel.pulsesPerRev))) return false;
         if (!writeFloat("kMotorToWheelGearRatio", driveModel.gearRatio)) return false;
@@ -4453,6 +5645,7 @@ public:
         AuxMeasurementConfig::Routine routine,
         const char* fileName = nullptr)
     {
+        const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
         if (!SelectSequentialCsvFileName(_fileName, sizeof(_fileName), fileName, "aux%03u.csv", "aux_measurement_log.csv"))
         {
             return false;
@@ -4487,6 +5680,10 @@ public:
         if (!WriteMetadataFloat("imu_accel_mg_per_lsb", sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
         if (!WriteMetadataFloat("mission_gyro_bias_estimate_radps", sensors.GetGyroBiasRadps(), 6)) return false;
         if (!WriteMetadataFloat("kTrackWidthM", Config::kTrackWidthM, 6)) return false;
+        if (!WriteMetadataFloat("kArcTrackWidthTightRadiusM", vehicleModel.arcTrackWidthInterpolation.tightRadiusM, 6)) return false;
+        if (!WriteMetadataFloat("kArcTrackWidthTightM", vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM, 6)) return false;
+        if (!WriteMetadataFloat("kArcTrackWidthWideRadiusM", vehicleModel.arcTrackWidthInterpolation.wideRadiusM, 6)) return false;
+        if (!WriteMetadataFloat("kArcTrackWidthWideM", vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM, 6)) return false;
         if (routine == AuxMeasurementConfig::Routine::FanStaticSurvey)
         {
             if (!WriteMetadataUL("baseline_hold_ms", static_cast<unsigned long>(AuxMeasurementConfig::kBaselineHoldMs))) return false;
@@ -4946,7 +6143,7 @@ private:
             uint32_t dtUs = 0U;
             WaitForNextSample(timestampUs, dtUs);
 
-            const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(false);
+            const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(false, _drive.GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
             _drive.UpdateOdometry(dtSeconds, sensorSnapshot.gyroRadps);
             if (!tighteningTurn)
@@ -4974,12 +6171,14 @@ private:
                 Config::kArcHeadingKp,
                 Config::kArcYawD,
                 AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps);
+            const float effectiveTrackWidthM =
+                MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(commandedSpeedMps, lastCommandedOmegaRadps);
             if (static_cast<unsigned long>(nowMs - phaseStartMs) < AuxMeasurementConfig::kTurningTractionLaunchMs)
             {
                 const MazeMap::TurningLaunchCommands launchCommands = MazeMap::ComputeTurningLaunchCommands(
                     commandedSpeedMps,
                     lastCommandedOmegaRadps,
-                    Config::kTrackWidthM,
+                    effectiveTrackWidthM,
                     Config::kWheelRestLaunchDriveCommand);
                 _drive.CommandOpenLoopRaw(launchCommands.leftCommand, launchCommands.rightCommand);
             }
@@ -4993,7 +6192,7 @@ private:
             const MazeMap::TurningTractionMetrics metrics = MazeMap::ComputeTurningTractionMetrics(
                 driveTelemetry.leftVelocityMps,
                 driveTelemetry.rightVelocityMps,
-                Config::kTrackWidthM,
+                effectiveTrackWidthM,
                 sensorSnapshot.gyroRadps,
                 planarAccelMps2);
             lastMetrics = metrics;
@@ -5112,7 +6311,7 @@ private:
             WaitForNextSample(timestampUs, dtUs);
 
             _drive.Brake();
-            const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(stationary);
+            const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(stationary, _drive.GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
             _drive.UpdateOdometry(dtSeconds, sensorSnapshot.gyroRadps);
             const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
@@ -5554,9 +6753,14 @@ private:
         const long rightCountDelta = static_cast<long>(endTelemetry.rightEncoderCount - startTelemetry.rightEncoderCount);
         const float leftDistanceDeltaM = endTelemetry.leftDistanceM - startTelemetry.leftDistanceM;
         const float rightDistanceDeltaM = endTelemetry.rightDistanceM - startTelemetry.rightDistanceM;
-        const float encoderYawDeg = RAD_TO_DEG * ((rightDistanceDeltaM - leftDistanceDeltaM) / Config::kTrackWidthM);
         const float averageOmegaRadps = (metrics.durationSeconds > 0.0f) ? (metrics.omegaIntegralRad / metrics.durationSeconds) : 0.0f;
         const float averageSpeedMps = (metrics.durationSeconds > 0.0f) ? (metrics.speedIntegralMpsSeconds / metrics.durationSeconds) : 0.0f;
+        const float effectiveTrackWidthM =
+            MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(averageSpeedMps, averageOmegaRadps);
+        const float encoderYawDeg =
+            (effectiveTrackWidthM > 0.0f)
+            ? (RAD_TO_DEG * ((rightDistanceDeltaM - leftDistanceDeltaM) / effectiveTrackWidthM))
+            : 0.0f;
         const float estimatedLateralAccelMps2 = std::fabs(averageSpeedMps * averageOmegaRadps);
         const float averageLateralAccelMps2 = (metrics.durationSeconds > 0.0f) ? (metrics.planarAccelIntegralMps2Seconds / metrics.durationSeconds) : 0.0f;
 
@@ -5690,7 +6894,7 @@ private:
         dtSeconds = static_cast<float>(timestampUs - _lastControlMicros) * 1.0e-6f;
         _lastControlMicros = timestampUs;
 
-        snapshot = _sensors.Capture(stationary);
+        snapshot = _sensors.Capture(stationary, _drive.GetPose());
         _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
 
         if (!IsWithinBoundary())
@@ -6402,7 +7606,7 @@ public:
         }
         if (!_logger.Begin(_sensors, "maneuver_test.csv", Config::kControlPeriodUs, "maneuver_test"))
         {
-            return Fail("Unable to open maneuver_test.csv");
+            Serial.println("MANEUVER FILE LOGGING ISSUE: maneuver_test.csv unavailable");
         }
 
         _expectedDirectionalLocation = MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up);
@@ -6411,7 +7615,7 @@ public:
 
         if (!_logger.WriteEvent("source", "test.txt"))
         {
-            return Fail("Unable to write maneuver source metadata");
+            Serial.println("MANEUVER FILE LOGGING ISSUE: Source metadata write failed");
         }
 
         return LoadQueueFromSdFile("test.txt");
@@ -6462,8 +7666,32 @@ private:
         return limits;
     }
 
+    static bool TryGetSmoothTurnExecutionProfileMeters(MazeMap::ManeuverCode code, MazeMap::SmoothTurnExecutionProfile& profile)
+    {
+        profile = MazeMap::SmoothTurnExecutionProfile{};
+        if ((code == MazeMap::MC_NONE) || IsStraightCode(code))
+        {
+            return false;
+        }
+
+        MazeMap::SmoothTurnExecutionProfile profileInCells{};
+        if (!MazeMap::ManeuverSet::GetSet()[code].TryGetSmoothTurnExecutionProfile(profileInCells))
+        {
+            return false;
+        }
+
+        profile = MazeMap::ScaleSmoothTurnExecutionProfile(profileInCells, Config::kCellSizeM);
+        profile.radians = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD;
+        return profile.IsValid();
+    }
+
     static float ManeuverDistanceMeters(MazeMap::ManeuverCode code)
     {
+        MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
+        if (TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile))
+        {
+            return smoothTurnProfile.totalDistance;
+        }
         return 0.5f * Config::kCellSizeM * static_cast<float>(MazeMap::ManeuverSet::GetSet().DistanceTravelled(code));
     }
 
@@ -6491,6 +7719,14 @@ private:
         return false;
     }
 
+    bool ReportManeuverFileIssue(const char* message)
+    {
+        _drive.Brake();
+        Serial.print("MANEUVER FILE ISSUE: ");
+        Serial.println((message != nullptr) ? message : "unknown");
+        return false;
+    }
+
     bool StartPhase(const char* name)
     {
         Serial.print("Maneuver test phase: ");
@@ -6512,7 +7748,7 @@ private:
         timestampUs = micros();
         dtSeconds = static_cast<float>(timestampUs - _lastControlMicros) * 1.0e-6f;
         _lastControlMicros = timestampUs;
-        snapshot = _sensors.Capture(stationary);
+        snapshot = _sensors.Capture(stationary, _drive.GetPose());
         _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
         return true;
     }
@@ -6562,7 +7798,7 @@ private:
         File file = SD.open(fileName, FILE_READ);
         if (!file)
         {
-            return Fail("Unable to open test.txt");
+            return ReportManeuverFileIssue("Maneuver file unavailable");
         }
 
         _path.clear();
@@ -6594,14 +7830,14 @@ private:
                 if (!TryParseManeuverCodeToken(token, code))
                 {
                     char errorMessage[96] = {};
-                    snprintf(errorMessage, sizeof(errorMessage), "Invalid maneuver token on line %u: %s", lineNumber, token);
+                    snprintf(errorMessage, sizeof(errorMessage), "Maneuver file token issue on line %u: %s", lineNumber, token);
                     file.close();
-                    return Fail(errorMessage);
+                    return ReportManeuverFileIssue(errorMessage);
                 }
                 if (!_path.push_back(code))
                 {
                     file.close();
-                    return Fail("test.txt exceeded maneuver path capacity");
+                    return ReportManeuverFileIssue("Maneuver file exceeded path capacity");
                 }
             }
         }
@@ -6610,11 +7846,11 @@ private:
 
         if (_path.GetSize() == 0)
         {
-            return Fail("test.txt did not contain any maneuvers");
+            return ReportManeuverFileIssue("Maneuver file did not contain any maneuvers");
         }
         if (!_queue.push_back(_path, _expectedDirectionalLocation))
         {
-            return Fail("Unable to build maneuver queue from test.txt");
+            return ReportManeuverFileIssue("Unable to build maneuver queue from maneuver file");
         }
 
         _queue.ComputeSpeeds(_vehicle, 0.0f, 0.0f);
@@ -6622,7 +7858,7 @@ private:
         return LogQueueDefinition();
 #else
         (void)fileName;
-        return Fail("Maneuver test mode requires the Teensy target");
+        return ReportManeuverFileIssue("Maneuver-file test mode requires the Teensy target");
 #endif
     }
 
@@ -6632,7 +7868,8 @@ private:
         snprintf(message, sizeof(message), "count,%u", static_cast<unsigned>(_queue.size()));
         if (!_logger.WriteEvent("queue", message))
         {
-            return Fail("Unable to log queue size");
+            Serial.println("MANEUVER FILE LOGGING ISSUE: Queue size logging failed");
+            return true;
         }
 
         for (uint16_t i = 0; i < _queue.size(); ++i)
@@ -6651,7 +7888,8 @@ private:
 
             if (!_logger.WriteEvent("queue_entry", queueLine))
             {
-                return Fail("Unable to log queue entry definition");
+                Serial.println("MANEUVER FILE LOGGING ISSUE: Queue entry logging failed");
+                return true;
             }
         }
 
@@ -6662,7 +7900,7 @@ private:
     {
         if (_queue.empty())
         {
-            return Fail("Maneuver queue is empty");
+            return ReportManeuverFileIssue("Maneuver queue is empty");
         }
 
         const MotionLimits limits = SpeedRunLimits();
@@ -6692,16 +7930,25 @@ private:
             }
             else
             {
-                const float distanceM = ManeuverDistanceMeters(code);
                 const float angleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD;
-                if (distanceM <= 0.0f)
+                MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
+                if (TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile))
                 {
-                    ok = ExecuteTurnProfile(phaseName, angleRad, limits);
+                    const float maneuverSpeedLimit = ManeuverSpeedLimit(code);
+                    ok = ExecuteSmoothTurnProfile(phaseName, code, entrySpeed, exitSpeed, maneuverSpeedLimit, limits);
                 }
                 else
                 {
-                    const float maneuverSpeedLimit = ManeuverSpeedLimit(code);
-                    ok = ExecuteArcProfile(phaseName, distanceM, angleRad, entrySpeed, exitSpeed, maneuverSpeedLimit, limits);
+                    const float distanceM = ManeuverDistanceMeters(code);
+                    if (distanceM <= 0.0f)
+                    {
+                        ok = ExecuteTurnProfile(phaseName, angleRad, limits);
+                    }
+                    else
+                    {
+                        const float maneuverSpeedLimit = ManeuverSpeedLimit(code);
+                        ok = ExecuteArcProfile(phaseName, distanceM, angleRad, entrySpeed, exitSpeed, maneuverSpeedLimit, limits);
+                    }
                 }
             }
 
@@ -6786,21 +8033,31 @@ private:
                 else
                 {
                     float signalCorridorErrorM = 0.0f;
+                    const bool useLeftWall =
+                        IsCalibratedSideCenteringSignalPresent(
+                            gWallDistanceCalibration,
+                            WallSensorId::SideLeft,
+                            snapshot.sideLeft.differentialLight);
+                    const bool useRightWall =
+                        IsCalibratedSideCenteringSignalPresent(
+                            gWallDistanceCalibration,
+                            WallSensorId::SideRight,
+                            snapshot.sideRight.differentialLight);
                     if (TryComputeStraightWallCenterErrorM(
                             gWallDistanceCalibration,
                             snapshot.sideLeft.differentialLight,
-                            snapshot.leftWall,
+                            useLeftWall,
                             snapshot.sideRight.differentialLight,
-                            snapshot.rightWall,
+                            useRightWall,
                             signalCorridorErrorM))
                     {
                         wallOmegaRadps += Config::kWallCenterGain * signalCorridorErrorM;
                     }
-                    else
-                    {
-                        wallOmegaRadps += Config::kWallCenterGain * snapshot.corridorErrorM;
-                    }
-                    if (snapshot.frontWall && remainingM < 0.07f)
+                    if (std::isfinite(snapshot.frontLeftDistanceM) &&
+                        std::isfinite(snapshot.frontRightDistanceM) &&
+                        snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+                        snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+                        remainingM < 0.07f)
                     {
                         wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
                     }
@@ -6944,6 +8201,93 @@ private:
             float angularCommandRadps = (curvature * commandedSpeedMps) + (Config::kArcHeadingKp * headingErrorRad) - (Config::kArcYawD * _drive.GetPose().angularSpeedRadps);
             angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
             _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+
+            if (!LogSample(false, timestampUs, dtSeconds, snapshot))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool ExecuteSmoothTurnProfile(
+        const char* phaseName,
+        MazeMap::ManeuverCode code,
+        float entrySpeed,
+        float exitSpeed,
+        float cruiseSpeed,
+        const MotionLimits& limits)
+    {
+        if (!StartPhase(phaseName))
+        {
+            return false;
+        }
+
+        MazeMap::SmoothTurnExecutionProfile profile{};
+        if (!TryGetSmoothTurnExecutionProfileMeters(code, profile))
+        {
+            return Fail("Maneuver smooth turn geometry is unavailable");
+        }
+
+        float maneuverSpeedMps = cruiseSpeed;
+        if (!(maneuverSpeedMps > 0.0f))
+        {
+            maneuverSpeedMps = (std::max)(entrySpeed, exitSpeed);
+        }
+        if (!(maneuverSpeedMps > 0.0f))
+        {
+            return Fail("Maneuver smooth turn speed is invalid");
+        }
+
+        const float startDistanceM = _drive.GetAverageDistanceMeters();
+        const float startYawRad = _drive.GetPose().yawRad;
+        const unsigned long timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * profile.totalDistance));
+        EncoderProgressWatchdog translationWatchdog{};
+        translationWatchdog.Reset(0.0f, millis());
+
+        while (true)
+        {
+            float dtSeconds = 0.0f;
+            uint32_t timestampUs = 0UL;
+            DiagnosticSensorSnapshot snapshot{};
+            if (!TickControl(false, dtSeconds, timestampUs, snapshot))
+            {
+                return false;
+            }
+
+            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+            const float remainingM = (std::max)(0.0f, profile.totalDistance - traveledM);
+            if (remainingM <= Config::kDistanceToleranceM)
+            {
+                if (!LogSample(false, timestampUs, dtSeconds, snapshot))
+                {
+                    return false;
+                }
+                break;
+            }
+            if (translationWatchdog.Stalled(traveledM, maneuverSpeedMps, remainingM, millis()))
+            {
+                _drive.Brake();
+                return Fail("Maneuver smooth turn encoder progress stalled");
+            }
+            if (static_cast<long>(timeoutMs - millis()) <= 0)
+            {
+                return Fail("Maneuver smooth turn profile timed out");
+            }
+
+            float yawOffsetRad = 0.0f;
+            float nominalOmegaRadps = 0.0f;
+            if (!MazeMap::TryComputeSmoothTurnTarget(profile, traveledM, maneuverSpeedMps, yawOffsetRad, nominalOmegaRadps))
+            {
+                return Fail("Maneuver smooth turn target became invalid");
+            }
+
+            const float targetYawRad = WrapAngleRad(startYawRad + yawOffsetRad);
+            const float headingErrorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
+            float angularCommandRadps = nominalOmegaRadps + (Config::kArcHeadingKp * headingErrorRad) - (Config::kArcYawD * _drive.GetPose().angularSpeedRadps);
+            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
+            _drive.CommandVelocity(maneuverSpeedMps, angularCommandRadps, dtSeconds);
 
             if (!LogSample(false, timestampUs, dtSeconds, snapshot))
             {
@@ -7119,13 +8463,21 @@ public:
         }
         if (!_telemetryLogger.Begin(_telemetrySensors, "maneuver_test.csv", Config::kControlPeriodUs, "maneuver_test"))
         {
-            return Fail("Unable to open maneuver_test.csv");
+            AppendStartupTrace("maneuver_test:telemetry_logger_open_failed");
+            Serial.println("Maneuver test telemetry log unavailable; continuing without telemetry file");
+            _telemetryLoggingEnabled = false;
+            return true;
         }
         _telemetryLoggingEnabled = true;
         AppendStartupTrace("maneuver_test:telemetry_logger_opened");
         if (!_telemetryLogger.WriteEvent("source", "test.txt"))
         {
-            return Fail("Unable to write maneuver source metadata");
+            AppendStartupTrace("maneuver_test:source_metadata_write_failed");
+            Serial.println("Maneuver test source metadata write failed; disabling telemetry file logging");
+            _telemetryLogger.Flush();
+            _telemetryLogger.Close();
+            _telemetryLoggingEnabled = false;
+            return true;
         }
         AppendStartupTrace("maneuver_test:source_metadata_written");
         if (!LogWallCalibrationMetadata())
@@ -7206,6 +8558,18 @@ public:
             return Fail("Telemetry sensor init failed");
         }
 
+        float positionAuditGyroBiasAverageRadps = 0.0f;
+        unsigned long positionAuditGyroBiasAverageSamples = 0UL;
+        if (!TryAverageRawGyroBiasRadpsOverWindow(
+                _speedVehicle,
+                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageWindowMs),
+                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageSampleIntervalMs),
+                positionAuditGyroBiasAverageRadps,
+                positionAuditGyroBiasAverageSamples))
+        {
+            return Fail("Unable to average position audit gyro bias");
+        }
+
         char fileName[32] = {};
         if (!SelectSequentialCsvFileName(fileName, sizeof(fileName), nullptr, "aux%03u.csv", "position_accuracy_audit.csv"))
         {
@@ -7218,11 +8582,44 @@ public:
 
         _telemetryLoggingEnabled = true;
         AppendStartupTrace("position_accuracy_audit:telemetry_logger_opened");
+        if (!_telemetryLogger.WriteMetadataUnsigned(
+                "position_audit_gyro_bias_average_window_ms",
+                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageWindowMs)))
+        {
+            return Fail("Unable to write position audit gyro bias metadata");
+        }
+        if (!_telemetryLogger.WriteMetadataUnsigned(
+                "position_audit_gyro_bias_average_interval_ms",
+                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageSampleIntervalMs)))
+        {
+            return Fail("Unable to write position audit gyro bias metadata");
+        }
+        if (!_telemetryLogger.WriteMetadataUnsigned(
+                "position_audit_gyro_bias_average_samples",
+                positionAuditGyroBiasAverageSamples))
+        {
+            return Fail("Unable to write position audit gyro bias metadata");
+        }
+        if (!_telemetryLogger.WriteMetadataValueFloat(
+                "position_audit_gyro_bias_average_radps",
+                positionAuditGyroBiasAverageRadps,
+                6))
+        {
+            return Fail("Unable to write position audit gyro bias metadata");
+        }
+        if (!_telemetryLogger.WriteMetadataValueFloat(
+                "position_audit_gyro_bias_delta_vs_mission_radps",
+                positionAuditGyroBiasAverageRadps - _telemetrySensors.GetGyroBiasRadps(),
+                6))
+        {
+            return Fail("Unable to write position audit gyro bias metadata");
+        }
         if (!LogWallCalibrationMetadata())
         {
             return false;
         }
-        if (!LogPositionAccuracyAuditMetadata())
+        const PositionAuditFixtureGeometry positionAuditGeometry = BuildPositionAuditFixtureGeometry();
+        if (!LogPositionAccuracyAuditMetadata(positionAuditGeometry))
         {
             return false;
         }
@@ -7290,11 +8687,7 @@ public:
             return;
         }
 
-        if (!WriteMissionMazeSnapshot("mission_complete"))
-        {
-            (void)Fail("Unable to write maze.txt");
-            return;
-        }
+        (void)WriteMissionMazeSnapshot("mission_complete");
 
         SetRacingFanEnabled(false);
         _drive.Brake();
@@ -7393,6 +8786,253 @@ public:
     }
 
 private:
+    static void SetKnownMazeCellWalls(
+        MazeMap::Maze& maze,
+        const MazeMap::CellCoordinates& cellCoordinates,
+        MazeMap::WallState up,
+        MazeMap::WallState down,
+        MazeMap::WallState left,
+        MazeMap::WallState right)
+    {
+        MazeMap::Cell& cell = maze[cellCoordinates];
+        maze.SetWall(cell, MazeMap::Up, up);
+        maze.SetWall(cell, MazeMap::Down, down);
+        maze.SetWall(cell, MazeMap::Left, left);
+        maze.SetWall(cell, MazeMap::Right, right);
+    }
+
+    struct PositionAuditFixtureGeometry
+    {
+        MazeMap::Maze maze;
+        uint8_t northCorridorCellCount = 0U;
+        uint8_t eastExtensionCellCount = 0U;
+        uint8_t eastTotalCellCount = 0U;
+        float northCorridorSpanYM = 0.0f;
+        float eastBranchSpanXM = 0.0f;
+        float outDistanceM = 0.0f;
+        float farCellCenterYM = 0.0f;
+        float farWallTouchYM = 0.0f;
+        float eastWallTouchXM = 0.0f;
+    };
+
+    static MazeMap::Maze BuildPositionAuditMazeFixture(uint8_t northCorridorCellCount, uint8_t eastExtensionCellCount)
+    {
+        MazeMap::Maze maze;
+
+        for (uint8_t y = 0U; y < northCorridorCellCount; ++y)
+        {
+            const MazeMap::CellCoordinates cell(0U, y);
+            SetKnownMazeCellWalls(
+                maze,
+                cell,
+                (y + 1U < northCorridorCellCount) ? MazeMap::NoWall : MazeMap::Wall,
+                (y > 0U) ? MazeMap::NoWall : MazeMap::Wall,
+                MazeMap::Wall,
+                (y + 1U == northCorridorCellCount) ? MazeMap::NoWall : MazeMap::Wall);
+        }
+
+        for (uint8_t x = 1U; x <= eastExtensionCellCount; ++x)
+        {
+            const MazeMap::CellCoordinates cell(
+                x,
+                static_cast<uint8_t>(northCorridorCellCount - 1U));
+            SetKnownMazeCellWalls(
+                maze,
+                cell,
+                MazeMap::Wall,
+                MazeMap::Wall,
+                MazeMap::NoWall,
+                (x < eastExtensionCellCount) ? MazeMap::NoWall : MazeMap::Wall);
+        }
+
+        return maze;
+    }
+
+    static PositionAuditFixtureGeometry BuildPositionAuditFixtureGeometry()
+    {
+        PositionAuditFixtureGeometry geometry{};
+        geometry.northCorridorCellCount = AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount;
+        geometry.eastExtensionCellCount = AuxMeasurementConfig::kPositionAuditEastBranchCellCount;
+        geometry.eastTotalCellCount = static_cast<uint8_t>(geometry.eastExtensionCellCount + 1U);
+        geometry.northCorridorSpanYM = Config::kCellSizeM * static_cast<float>(geometry.northCorridorCellCount);
+        geometry.eastBranchSpanXM = Config::kCellSizeM * static_cast<float>(geometry.eastTotalCellCount);
+        geometry.outDistanceM =
+            Config::kCellSizeM *
+            static_cast<float>(geometry.northCorridorCellCount - 1U);
+        geometry.farCellCenterYM =
+            (static_cast<float>(geometry.northCorridorCellCount) - 0.5f) *
+            Config::kCellSizeM;
+        geometry.farWallTouchYM = MazeMap::ComputeWallTouchPoseFromNorthWallM(
+            geometry.northCorridorSpanYM,
+            Config::kMazeWallThicknessM,
+            Config::kWallTouchContactStandoffM);
+        geometry.eastWallTouchXM = MazeMap::ComputeWallTouchPoseFromEastWallM(
+            geometry.eastBranchSpanXM,
+            Config::kMazeWallThicknessM,
+            Config::kWallTouchContactStandoffM);
+        geometry.maze = BuildPositionAuditMazeFixture(
+            geometry.northCorridorCellCount,
+            geometry.eastExtensionCellCount);
+        return geometry;
+    }
+
+    static uint8_t CountClearForwardHalfStepsUntilBlocked(
+        const MazeMap::Maze& maze,
+        const MazeMap::DirectionalLocation& start,
+        uint8_t maxHalfSteps = 31U)
+    {
+        MazeMap::DirectionalLocation cursor = start;
+        uint8_t clearHalfSteps = 0U;
+        while (clearHalfSteps < maxHalfSteps)
+        {
+            cursor = cursor.MoveForward(1U);
+            if (!maze.IsAccessibleLocation(cursor.GetLocation()))
+            {
+                break;
+            }
+
+            ++clearHalfSteps;
+        }
+
+        return clearHalfSteps;
+    }
+
+    static bool TryResolvePositionAuditSmoothTurnLaunchLocation(
+        const PositionAuditFixtureGeometry& geometry,
+        MazeMap::ManeuverCode code,
+        MazeMap::DirectionalLocation& launchLocation)
+    {
+        const uint8_t corridorCenterHalfX = 1U;
+        const uint8_t maxHalfY = static_cast<uint8_t>(
+            (geometry.northCorridorCellCount << 1U) - 1U);
+        const MazeMap::Maze& auditMaze = geometry.maze;
+
+        for (uint8_t halfY = maxHalfY; halfY > 0U; --halfY)
+        {
+            const MazeMap::DirectionalLocation candidate(
+                MazeMap::MazeLocation(corridorCenterHalfX, halfY),
+                MazeMap::Up);
+            if (!auditMaze.IsAccessibleLocation(candidate.GetLocation()))
+            {
+                continue;
+            }
+            if (!MazeMap::ManeuverSet::GetSet().IsValidMove(code, candidate, auditMaze))
+            {
+                continue;
+            }
+
+            const MazeMap::DirectionalLocation maneuverEnd = MazeMap::ManeuverSet::GetSet().Move(code, candidate);
+            if (!auditMaze.IsAccessibleLocation(maneuverEnd.GetLocation()))
+            {
+                continue;
+            }
+            if (CountClearForwardHalfStepsUntilBlocked(auditMaze, maneuverEnd) == 0U)
+            {
+                continue;
+            }
+
+            launchLocation = candidate;
+            return true;
+        }
+
+        launchLocation = MazeMap::DirectionalLocation();
+        return false;
+    }
+
+    static bool TryBuildReverseManeuverPath(
+        const MazeMap::ManeuverPath& forwardPath,
+        MazeMap::ManeuverPath& reversePath)
+    {
+        reversePath.clear();
+        const MazeMap::ManeuverSet& maneuverSet = MazeMap::ManeuverSet::GetSet();
+        for (int index = static_cast<int>(forwardPath.GetSize()) - 1; index >= 0; --index)
+        {
+            if (!reversePath.push_back(maneuverSet.GetReverseCode(forwardPath[static_cast<uint16_t>(index)])))
+            {
+                reversePath.clear();
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static bool TryResolvePositionAuditSmoothTurnHalfSteps(
+        MazeMap::ManeuverCode code,
+        uint8_t& preTurnHalfSteps,
+        uint8_t& postTurnHalfSteps)
+    {
+        switch (code)
+        {
+        case MazeMap::S90SS:
+            preTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase2PreTurnHalfSteps;
+            postTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase2PostTurnHalfSteps;
+            return true;
+        case MazeMap::S90LS:
+            preTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase3PreTurnHalfSteps;
+            postTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase3PostTurnHalfSteps;
+            return true;
+        default:
+            preTurnHalfSteps = 0U;
+            postTurnHalfSteps = 0U;
+            return false;
+        }
+    }
+
+    static bool TryBuildPositionAuditSmoothTurnPaths(
+        MazeMap::ManeuverCode code,
+        MazeMap::ManeuverPath& forwardPath,
+        MazeMap::ManeuverPath& reversePath,
+        uint8_t& preTurnHalfSteps,
+        uint8_t& postTurnHalfSteps)
+    {
+        forwardPath.clear();
+        reversePath.clear();
+        if (!TryResolvePositionAuditSmoothTurnHalfSteps(code, preTurnHalfSteps, postTurnHalfSteps))
+        {
+            return false;
+        }
+
+        if (!forwardPath.push_back(static_cast<MazeMap::ManeuverCode>(preTurnHalfSteps)) ||
+            !forwardPath.push_back(code) ||
+            !forwardPath.push_back(static_cast<MazeMap::ManeuverCode>(postTurnHalfSteps)))
+        {
+            forwardPath.clear();
+            return false;
+        }
+
+        return TryBuildReverseManeuverPath(forwardPath, reversePath);
+    }
+
+    static bool TryValidatePositionAuditPath(
+        const MazeMap::Maze& maze,
+        const MazeMap::ManeuverPath& path,
+        MazeMap::DirectionalLocation start,
+        MazeMap::DirectionalLocation& end)
+    {
+        MazeMap::DirectionalLocation current = start;
+        const MazeMap::ManeuverSet& maneuverSet = MazeMap::ManeuverSet::GetSet();
+        for (uint16_t index = 0U; index < path.GetSize(); ++index)
+        {
+            const MazeMap::ManeuverCode code = path[index];
+            if (!maneuverSet.IsValidMove(code, current, maze))
+            {
+                end = MazeMap::DirectionalLocation();
+                return false;
+            }
+
+            current = maneuverSet.Move(code, current);
+            if (!maze.IsAccessibleLocation(current.GetLocation()))
+            {
+                end = MazeMap::DirectionalLocation();
+                return false;
+            }
+        }
+
+        end = current;
+        return true;
+    }
+
     MazeMap::Vehicle& _speedVehicle;
     MazeMap::Maze& _maze;
     MazeMap::FloodFillPathFinder& _searchPathFinder;
@@ -7558,6 +9198,41 @@ private:
         return true;
     }
 
+    void DisableMissionTextLogging(const char* traceLabel)
+    {
+        if (!_missionTextLoggingEnabled)
+        {
+            return;
+        }
+
+        if (traceLabel != nullptr && traceLabel[0] != '\0')
+        {
+            AppendStartupTrace(traceLabel);
+            Serial.print("Mission text logging disabled: ");
+            Serial.println(traceLabel);
+        }
+
+        FlushMissionTextLog();
+        CloseMissionTextLog();
+        _missionTextLoggingEnabled = false;
+    }
+
+    bool WriteMissionTraceLineBestEffort(const char* message, const char* traceLabel)
+    {
+        if (!_missionTextLoggingEnabled)
+        {
+            return true;
+        }
+
+        if (WriteMissionTextLineIfEnabled(message))
+        {
+            return true;
+        }
+
+        DisableMissionTextLogging(traceLabel);
+        return true;
+    }
+
     static const char* FrontObservationSourceName(const SensorSnapshot& snapshot)
     {
         if (snapshot.frontWallUsesFallbackDetection)
@@ -7580,6 +9255,7 @@ private:
     }
 
     bool LogWallObservationDecision(
+        const MazeMap::CellCoordinates& observedCell,
         const char* relativeDirectionName,
         MazeMap::Direction absoluteDirection,
         MazeMap::WallState observedState,
@@ -7599,8 +9275,8 @@ private:
                 line,
                 sizeof(line),
                 "wall_obs,cell=(%u,%u),rel=%s,abs=%s,state=%s,sensor=%s,mode=%s,primary_hit=%u,secondary_hit=%u,primary_m=%.4f,secondary_m=%.4f",
-                static_cast<unsigned>(_currentCell.GetX()),
-                static_cast<unsigned>(_currentCell.GetY()),
+                static_cast<unsigned>(observedCell.GetX()),
+                static_cast<unsigned>(observedCell.GetY()),
                 (relativeDirectionName != nullptr) ? relativeDirectionName : "unknown",
                 DirectionName(absoluteDirection),
                 WallStateName(observedState),
@@ -7614,8 +9290,8 @@ private:
                 line,
                 sizeof(line),
                 "wall_obs,cell=(%u,%u),rel=%s,abs=%s,state=%s,sensor=%s,primary_hit=%u,primary_m=%.4f",
-                static_cast<unsigned>(_currentCell.GetX()),
-                static_cast<unsigned>(_currentCell.GetY()),
+                static_cast<unsigned>(observedCell.GetX()),
+                static_cast<unsigned>(observedCell.GetY()),
                 (relativeDirectionName != nullptr) ? relativeDirectionName : "unknown",
                 DirectionName(absoluteDirection),
                 WallStateName(observedState),
@@ -7628,10 +9304,7 @@ private:
         }
 
         AppendStartupTrace(line);
-        if (!WriteMissionTextLineIfEnabled(line))
-        {
-            return Fail("Unable to write logging.txt");
-        }
+        (void)WriteMissionTraceLineBestEffort(line, "mission_text_logging:wall_observation_write_failed");
         if (_telemetryLoggingEnabled && !_telemetryLogger.WriteEvent("wall_observation", line))
         {
             return Fail("Unable to write wall observation log");
@@ -7649,7 +9322,12 @@ private:
 
         if (_missionTextLoggingEnabled)
         {
-            return WriteMissionTextLineIfEnabled(message);
+            if (WriteMissionTextLineIfEnabled(message))
+            {
+                return true;
+            }
+
+            DisableMissionTextLogging("mission_text_logging:controller_write_failed");
         }
 
         Serial.println(message);
@@ -7678,19 +9356,14 @@ private:
 
     bool EmitMissionControllerLineOrFail(const char* message)
     {
-        if (EmitMissionControllerLine(message))
-        {
-            return true;
-        }
-
-        return Fail("Unable to write logging.txt");
+        return EmitMissionControllerLine(message);
     }
 
     bool EmitMissionControllerFormattedOrFail(const char* format, ...)
     {
         if (format == nullptr)
         {
-            return Fail("Unable to write logging.txt");
+            return false;
         }
 
         char line[192] = {};
@@ -7700,7 +9373,7 @@ private:
         va_end(args);
         if (written <= 0 || written >= static_cast<int>(sizeof(line)))
         {
-            return Fail("Unable to write logging.txt");
+            return false;
         }
 
         return EmitMissionControllerLineOrFail(line);
@@ -7714,7 +9387,7 @@ private:
         }
 
         AppendStartupTrace(message);
-        (void)WriteMissionTextLineIfEnabled(message);
+        (void)WriteMissionTraceLineBestEffort(message, "mission_text_logging:trace_write_failed");
     }
 
     void AppendMissionTraceFormatted(const char* format, ...)
@@ -7724,7 +9397,7 @@ private:
             return;
         }
 
-        char line[224] = {};
+        char line[320] = {};
         va_list args;
         va_start(args, format);
         const int written = vsnprintf(line, sizeof(line), format, args);
@@ -7763,7 +9436,7 @@ private:
     {
         const PoseEstimate& pose = _drive.GetPose();
         const DriveTelemetry telemetry = _drive.GetTelemetry();
-        char line[224] = {};
+        char line[320] = {};
         snprintf(
             line,
             sizeof(line),
@@ -7815,16 +9488,18 @@ private:
         CalibrationWall wall,
         float expectedTravelM,
         float minLatchTravelM,
+        float maxApproachTravelM,
         float targetYawRad)
     {
-        char line[224] = {};
+        char line[256] = {};
         snprintf(
             line,
             sizeof(line),
-            "startup_cal_touch_plan:wall=%s,expected=%.4f,min_latch=%.4f,target_yaw_deg=%.2f",
+            "startup_cal_touch_plan:wall=%s,expected=%.4f,min_latch=%.4f,max_travel=%.4f,target_yaw_deg=%.2f",
             CalibrationWallName(wall),
             expectedTravelM,
             minLatchTravelM,
+            maxApproachTravelM,
             targetYawRad * (180.0f / PI));
         AppendStartupTrace(line);
     }
@@ -7928,12 +9603,16 @@ private:
         return true;
     }
 
-    bool LogPositionAccuracyAuditMetadata()
+    bool LogPositionAccuracyAuditMetadata(const PositionAuditFixtureGeometry& geometry)
     {
-        char line[192] = {};
-        if (!_telemetryLogger.WriteEvent(
-                "summary",
-                "Build a one-cell-wide fixture: normal mission start, a 5-cell north corridor including the start cell, and a 4-cell east branch at the far end with solid side walls." ))
+        char line[320] = {};
+        snprintf(
+            line,
+            sizeof(line),
+            "Build a one-cell-wide fixture: normal mission start, a %u-cell north corridor including the start and corner cells, and a %u-cell east extension beyond that corner with solid side walls. All following phases reuse this same fixed geometry.",
+            static_cast<unsigned>(geometry.northCorridorCellCount),
+            static_cast<unsigned>(geometry.eastExtensionCellCount));
+        if (!_telemetryLogger.WriteEvent("summary", line))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
@@ -7955,13 +9634,38 @@ private:
         {
             return Fail("Unable to write position accuracy audit summary");
         }
+        if (!_telemetryLogger.WriteEvent(
+                "summary",
+                "position_audit_gyro_bias_average_radps is a 5 s raw stationary average; compare it against mission_gyro_bias_estimate_radps and position_audit_gyro_bias_delta_vs_mission_radps to judge startup gyro-bias repeatability."))
+        {
+            return Fail("Unable to write position accuracy audit summary");
+        }
+        if (!_telemetryLogger.WriteEvent(
+                "summary",
+                "Phase 1 runs S8, centers in the north corner, turns in place to face down, and runs S8 back to start."))
+        {
+            return Fail("Unable to write position accuracy audit summary");
+        }
+        if (!_telemetryLogger.WriteEvent(
+                "summary",
+                "Phase 2 reseats at start, runs S7 + S90SS + S7, centers at the east end, turns to face left, and returns on the reversed maneuver path."))
+        {
+            return Fail("Unable to write position accuracy audit summary");
+        }
+        if (!_telemetryLogger.WriteEvent(
+                "summary",
+                "Phase 3 reseats at start, runs S6 + S90LS + S6, recenters at the east end, and returns on the reversed maneuver path."))
+        {
+            return Fail("Unable to write position accuracy audit summary");
+        }
 
         snprintf(
             line,
             sizeof(line),
-            "north_corridor_cells,%u;east_branch_cells,%u",
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount),
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditEastBranchCellCount));
+            "north_corridor_cells,%u;east_extension_cells,%u;east_total_cells,%u",
+            static_cast<unsigned>(geometry.northCorridorCellCount),
+            static_cast<unsigned>(geometry.eastExtensionCellCount),
+            static_cast<unsigned>(geometry.eastTotalCellCount));
         if (!_telemetryLogger.WriteEvent("position_audit", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
@@ -7975,6 +9679,39 @@ private:
             AuxMeasurementConfig::kPositionAuditDecelMps2,
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditStartSettleMs));
         if (!_telemetryLogger.WriteEvent("position_audit", line))
+        {
+            return Fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "phase=1;forward_half_steps=%u;turn=IP180;return_half_steps=%u",
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps),
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps));
+        if (!_telemetryLogger.WriteEvent("position_audit_phase", line))
+        {
+            return Fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "phase=2;forward=%u,S90SS,%u;return=reverse(forward)",
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PreTurnHalfSteps),
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PostTurnHalfSteps));
+        if (!_telemetryLogger.WriteEvent("position_audit_phase", line))
+        {
+            return Fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "phase=3;forward=%u,S90LS,%u;return=reverse(forward)",
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PreTurnHalfSteps),
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PostTurnHalfSteps));
+        if (!_telemetryLogger.WriteEvent("position_audit_phase", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
         }
@@ -8274,6 +10011,11 @@ private:
         const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
         char phaseName[64] = {};
 
+        if (!RetreatCalibrationPoseFromSideWallForSafeRotation(Config::kCellSizeM, centeringLimits, phasePrefix))
+        {
+            return false;
+        }
+
         snprintf(phaseName, sizeof(phaseName), "%s_touch_south", (phasePrefix != nullptr) ? phasePrefix : "reseat");
         if (!BeginTelemetryPhase(phaseName))
         {
@@ -8290,6 +10032,26 @@ private:
             return false;
         }
         if (!DriveCalibrationPoseToKnownY(0.5f * Config::kCellSizeM, centeringLimits))
+        {
+            return false;
+        }
+
+        snprintf(phaseName, sizeof(phaseName), "%s_touch_west", (phasePrefix != nullptr) ? phasePrefix : "reseat");
+        if (!BeginTelemetryPhase(phaseName))
+        {
+            return false;
+        }
+        if (!TouchWallAndSetPose(MazeMap::Left, CalibrationWall::West))
+        {
+            return false;
+        }
+
+        snprintf(phaseName, sizeof(phaseName), "%s_center_x", (phasePrefix != nullptr) ? phasePrefix : "reseat");
+        if (!BeginTelemetryPhase(phaseName))
+        {
+            return false;
+        }
+        if (!DriveCalibrationPoseToKnownX(0.5f * Config::kCellSizeM, centeringLimits))
         {
             return false;
         }
@@ -8458,19 +10220,16 @@ private:
     }
 
     bool RunSinglePositionStraightAuditPass(
+        const PositionAuditFixtureGeometry& geometry,
         uint8_t speedIndex,
-        float cruiseSpeedMps,
-        float outDistanceM,
-        float northCorridorSpanYM,
-        float farCellCenterYM,
-        float farWallTouchYM)
+        float cruiseSpeedMps)
     {
         const MotionLimits limits = PositionAccuracyAuditStraightLimits(cruiseSpeedMps);
         const MotionLimits touchLimits = StartupWallCalibrationLimits();
         const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
         const MazeMap::Vectorf<2> northHeading = DirectionToUnitVector(MazeMap::Up);
         const MazeMap::Vectorf<2> southHeading = DirectionToUnitVector(MazeMap::Down);
-        const MazeMap::Vectorf<2> farCellCenter(0.5f * Config::kCellSizeM, farCellCenterYM);
+        const MazeMap::Vectorf<2> farCellCenter(0.5f * Config::kCellSizeM, geometry.farCellCenterYM);
         const MazeMap::Vectorf<2> startCellCenter(0.5f * Config::kCellSizeM, 0.5f * Config::kCellSizeM);
         char phaseName[64] = {};
 
@@ -8488,19 +10247,19 @@ private:
         {
             return false;
         }
-        if (!ExecuteStraightProfile(outDistanceM, 0.0f, cruiseSpeedMps, 0.0f, limits, true, &northHeading, &farCellCenter))
+        if (!ExecuteStraightProfile(geometry.outDistanceM, 0.0f, cruiseSpeedMps, 0.0f, limits, true, &northHeading, &farCellCenter))
         {
             return false;
         }
 
         const PoseEstimate poseBeforeTouch = _drive.GetPose();
         const DriveTelemetry outTelemetry = _drive.GetTelemetry();
-        const float northStopErrorM = farCellCenterYM - poseBeforeTouch.yMeters;
+        const float northStopErrorM = geometry.farCellCenterYM - poseBeforeTouch.yMeters;
         const float encoderOutDistanceM =
             0.5f *
             ((outTelemetry.leftDistanceM - startTelemetry.leftDistanceM) +
                 (outTelemetry.rightDistanceM - startTelemetry.rightDistanceM));
-        const float encoderOutErrorM = encoderOutDistanceM - outDistanceM;
+        const float encoderOutErrorM = encoderOutDistanceM - geometry.outDistanceM;
 
         snprintf(phaseName, sizeof(phaseName), "position_straight_%u_touch_far", static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
@@ -8508,7 +10267,7 @@ private:
             return false;
         }
         float northTouchCorrectionM = 0.0f;
-        if (!TouchWallAndSetKnownWallCoordinate(MazeMap::Up, CalibrationWall::North, farWallTouchYM, &northTouchCorrectionM))
+        if (!TouchWallAndSetKnownWallCoordinate(MazeMap::Up, CalibrationWall::North, geometry.farWallTouchYM, &northTouchCorrectionM))
         {
             return false;
         }
@@ -8518,11 +10277,13 @@ private:
         {
             return false;
         }
-        if (!DriveCalibrationPoseToKnownY(farCellCenterYM, centeringLimits, northCorridorSpanYM))
+        if (!DriveCalibrationPoseToKnownY(geometry.farCellCenterYM, centeringLimits, geometry.northCorridorSpanYM))
         {
             return false;
         }
 
+        const DriveTelemetry turnStartTelemetry = _drive.GetTelemetry();
+        const float turnStartYawRad = _drive.GetPose().yawRad;
         snprintf(phaseName, sizeof(phaseName), "position_straight_%u_turn_far", static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
@@ -8536,13 +10297,26 @@ private:
         {
             return false;
         }
+        const DriveTelemetry turnEndTelemetry = _drive.GetTelemetry();
+        const float yawChangeRad = WrapAngleRad(_drive.GetPose().yawRad - turnStartYawRad);
+        const float leftTurnDeltaM = turnEndTelemetry.leftDistanceM - turnStartTelemetry.leftDistanceM;
+        const float rightTurnDeltaM = turnEndTelemetry.rightDistanceM - turnStartTelemetry.rightDistanceM;
+        if (!WritePositionInPlaceTurnAuditResult(
+                MazeMap::Down,
+                northTouchCorrectionM,
+                leftTurnDeltaM,
+                rightTurnDeltaM,
+                yawChangeRad))
+        {
+            return false;
+        }
 
         snprintf(phaseName, sizeof(phaseName), "position_straight_%u_back", static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
             return false;
         }
-        if (!ExecuteStraightProfile(outDistanceM, 0.0f, cruiseSpeedMps, 0.0f, limits, true, &southHeading, &startCellCenter))
+        if (!ExecuteStraightProfile(geometry.outDistanceM, 0.0f, cruiseSpeedMps, 0.0f, limits, true, &southHeading, &startCellCenter))
         {
             return false;
         }
@@ -8559,9 +10333,7 @@ private:
             return false;
         }
 
-        char phasePrefix[48] = {};
-        snprintf(phasePrefix, sizeof(phasePrefix), "position_straight_%u_reseat", static_cast<unsigned>(speedIndex));
-        return ReseatMissionStartPoseWithPhasePrefix(phasePrefix, AuxMeasurementConfig::kPositionAuditStartSettleMs);
+        return true;
     }
 
     bool RunSinglePositionInPlaceTurnAuditPass(uint8_t turnIndex, MazeMap::Direction targetDirection)
@@ -8643,44 +10415,70 @@ private:
     }
 
     bool RunSinglePositionSmoothTurnAuditPass(
+        const PositionAuditFixtureGeometry& geometry,
         uint8_t codeIndex,
         MazeMap::ManeuverCode code,
         uint8_t speedIndex,
-        float requestedCruiseSpeedMps,
-        float launchCellYM,
-        float eastWallTouchXM)
+        float requestedCruiseSpeedMps)
     {
+        MazeMap::ManeuverPath forwardPath;
+        MazeMap::ManeuverPath reversePath;
+        uint8_t launchHalfSteps = 0U;
+        uint8_t postStraightHalfSteps = 0U;
+        if (!TryBuildPositionAuditSmoothTurnPaths(code, forwardPath, reversePath, launchHalfSteps, postStraightHalfSteps))
+        {
+            return Fail("Position audit smooth turn path is invalid");
+        }
+
+        const MazeMap::DirectionalLocation auditStart(
+            MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0U, 0U)),
+            MazeMap::Up);
+        MazeMap::DirectionalLocation finalLocation;
+        if (!TryValidatePositionAuditPath(geometry.maze, forwardPath, auditStart, finalLocation))
+        {
+            return Fail("Position audit smooth turn path does not fit fixture");
+        }
+        const MazeMap::DirectionalLocation returnStart(finalLocation.GetLocation(), -finalLocation.GetDirection());
+        MazeMap::DirectionalLocation returnEnd;
+        if (!TryValidatePositionAuditPath(geometry.maze, reversePath, returnStart, returnEnd))
+        {
+            return Fail("Position audit smooth turn reverse path does not fit fixture");
+        }
+        if (!(returnEnd.GetLocation() == auditStart.GetLocation()) || returnEnd.GetDirection() != MazeMap::Down)
+        {
+            return Fail("Position audit smooth turn reverse path does not return to start");
+        }
+
         const float nominalRadiusM = MazeMap::ManeuverSet::GetSet()[code].GetNominalTurnRadiusInCells() * Config::kCellSizeM;
         const MotionLimits straightLimits = PositionAccuracyAuditStraightLimits(requestedCruiseSpeedMps);
         const MotionLimits cornerLimits = PositionAccuracyAuditCornerLimits(requestedCruiseSpeedMps, nominalRadiusM);
+        const MotionLimits calibrationLimits = StartupWallCalibrationLimits();
+        const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
         const float turnCruiseSpeedMps = ManeuverSpeedLimit(code, cornerLimits);
         if (!(turnCruiseSpeedMps > 0.0f))
         {
             return Fail("Position audit smooth turn speed is invalid");
         }
 
-        const MazeMap::CellCoordinates launchCell(0U, static_cast<uint8_t>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount - 2U));
-        const MazeMap::DirectionalLocation launchLocation(MazeMap::MazeLocation::CellCenter(launchCell), MazeMap::Up);
-        const MazeMap::ManeuverInstance turnInstance(code, launchLocation);
-        MazeMap::DirectionalLocation maneuverEnd = turnInstance.GetEnd();
-        MazeMap::DirectionalLocation finalLocation = maneuverEnd;
-        float postStraightDistanceM = 0.0f;
-        if (!IsCellCenterLocation(maneuverEnd.GetLocation()))
-        {
-            finalLocation = maneuverEnd.MoveForward(1U);
-            postStraightDistanceM = 0.5f * Config::kCellSizeM;
-        }
+        const MazeMap::DirectionalLocation launchLocation = auditStart.MoveForward(launchHalfSteps);
+        const MazeMap::DirectionalLocation maneuverEnd = MazeMap::ManeuverSet::GetSet().Move(code, launchLocation);
+        const float postStraightDistanceM = 0.5f * Config::kCellSizeM * static_cast<float>(postStraightHalfSteps);
 
         float finalTargetXM = 0.0f;
         float finalTargetYM = 0.0f;
         finalLocation.GetLocation().GetPhysicalLocation(Config::kCellSizeM, finalTargetXM, finalTargetYM);
         const MazeMap::Vectorf<2> northHeading = DirectionToUnitVector(MazeMap::Up);
         const MazeMap::Vectorf<2> finalHeading = DirectionToUnitVector(finalLocation.GetDirection());
-        const MazeMap::Vectorf<2> launchPosition(0.5f * Config::kCellSizeM, launchCellYM);
+        float launchXM = 0.0f;
+        float launchYM = 0.0f;
+        launchLocation.GetLocation().GetPhysicalLocation(Config::kCellSizeM, launchXM, launchYM);
+        const MazeMap::Vectorf<2> launchPosition(launchXM, launchYM);
         const MazeMap::Vectorf<2> finalPosition(finalTargetXM, finalTargetYM);
-        const float launchDistanceM = launchCellYM - (0.5f * Config::kCellSizeM);
-        const float arcDistanceM = ManeuverDistanceMeters(code);
-        const float arcAngleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD;
+        const float launchDistanceM = launchYM - (0.5f * Config::kCellSizeM);
+        const float maneuverDistanceM = ManeuverDistanceMeters(code);
+        const float maneuverAngleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD;
+        MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
+        const bool hasSmoothTurnProfile = TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile);
         char phaseName[64] = {};
 
         snprintf(
@@ -8729,11 +10527,24 @@ private:
         {
             return false;
         }
-        if (!ExecuteArcProfile(
-                arcDistanceM,
-                arcAngleRad,
+        const float maneuverExitSpeedMps = turnCruiseSpeedMps;
+        if (hasSmoothTurnProfile)
+        {
+            if (!ExecuteSmoothTurnProfile(
+                    code,
+                    turnCruiseSpeedMps,
+                    maneuverExitSpeedMps,
+                    turnCruiseSpeedMps,
+                    cornerLimits))
+            {
+                return false;
+            }
+        }
+        else if (!ExecuteArcProfile(
+                maneuverDistanceM,
+                maneuverAngleRad,
                 turnCruiseSpeedMps,
-                (postStraightDistanceM > 0.0f) ? turnCruiseSpeedMps : 0.0f,
+                maneuverExitSpeedMps,
                 turnCruiseSpeedMps,
                 cornerLimits))
         {
@@ -8772,7 +10583,7 @@ private:
         }
 
         const PoseEstimate poseBeforeTouch = _drive.GetPose();
-        const SensorSnapshot snapshotBeforeTouch = _sensors.Capture(true);
+        const SensorSnapshot snapshotBeforeTouch = _sensors.Capture(true, _drive.GetPose());
         const float yawErrorDeg = RAD_TO_DEG * AngleErrorRad(DirectionToYawRad(finalLocation.GetDirection()), poseBeforeTouch.yawRad);
 
         snprintf(
@@ -8786,7 +10597,7 @@ private:
             return false;
         }
         float eastTouchCorrectionM = 0.0f;
-        if (!TouchWallAndSetKnownWallCoordinate(MazeMap::Right, CalibrationWall::East, eastWallTouchXM, &eastTouchCorrectionM))
+        if (!TouchWallAndSetKnownWallCoordinate(MazeMap::Right, CalibrationWall::East, geometry.eastWallTouchXM, &eastTouchCorrectionM))
         {
             return false;
         }
@@ -8809,30 +10620,54 @@ private:
         snprintf(
             phaseName,
             sizeof(phaseName),
-            "position_turn_%u_%u_return_column",
+            "position_turn_%u_%u_center_east",
             static_cast<unsigned>(codeIndex),
             static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
             return false;
         }
-        if (!RotateCalibrationTo(MazeMap::Left, StartupWallCalibrationLimits()))
-        {
-            return false;
-        }
-        if (!DriveCalibrationPoseToKnownX(0.5f * Config::kCellSizeM, StartupWallCalibrationCenteringLimits()))
+        if (!DriveCalibrationPoseToKnownX(finalTargetXM, centeringLimits))
         {
             return false;
         }
 
-        char phasePrefix[56] = {};
         snprintf(
-            phasePrefix,
-            sizeof(phasePrefix),
-            "position_turn_%u_%u_reseat",
+            phaseName,
+            sizeof(phaseName),
+            "position_turn_%u_%u_face_left",
             static_cast<unsigned>(codeIndex),
             static_cast<unsigned>(speedIndex));
-        return ReseatMissionStartPoseWithPhasePrefix(phasePrefix, AuxMeasurementConfig::kPositionAuditStartSettleMs);
+        if (!BeginTelemetryPhase(phaseName))
+        {
+            return false;
+        }
+        if (!RotateCalibrationTo(MazeMap::Left, calibrationLimits))
+        {
+            return false;
+        }
+        if (!HoldPosition(AuxMeasurementConfig::kPositionAuditStartSettleMs))
+        {
+            return false;
+        }
+        snprintf(
+            phaseName,
+            sizeof(phaseName),
+            "position_turn_%u_%u_return",
+            static_cast<unsigned>(codeIndex),
+            static_cast<unsigned>(speedIndex));
+        if (!BeginTelemetryPhase(phaseName))
+        {
+            return false;
+        }
+
+        _currentDirectionalLocation = returnStart;
+        _currentDirection = _currentDirectionalLocation.GetDirection();
+        _currentCell = static_cast<MazeMap::CellCoordinates>(_currentDirectionalLocation.GetLocation());
+        MazeMap::ManeuverQueue queue(reversePath, _currentDirectionalLocation);
+        queue.ComputeSpeeds(_speedVehicle, 0.0f, 0.0f);
+        ApplyAsymmetricQueueLimits(queue, cornerLimits, 0.0f, 0.0f);
+        return ExecuteQueuedManeuvers(queue, cornerLimits, false);
     }
 
     bool RunPositionAccuracyAuditPasses()
@@ -8841,74 +10676,57 @@ private:
         {
             return Fail("Position accuracy audit north corridor must be at least three cells");
         }
-        if (AuxMeasurementConfig::kPositionAuditEastBranchCellCount < 2U)
+        if (AuxMeasurementConfig::kPositionAuditEastBranchCellCount < 1U)
         {
-            return Fail("Position accuracy audit east branch must be at least two cells");
+            return Fail("Position accuracy audit east extension must be at least one cell");
         }
 
-        const float northCorridorSpanYM =
-            Config::kCellSizeM *
-            static_cast<float>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount);
-        const float eastBranchSpanXM =
-            Config::kCellSizeM *
-            static_cast<float>(AuxMeasurementConfig::kPositionAuditEastBranchCellCount);
-        const float outDistanceM =
-            Config::kCellSizeM *
-            static_cast<float>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount - 1U);
-        const float farCellCenterYM =
-            (static_cast<float>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount) - 0.5f) *
-            Config::kCellSizeM;
-        const float farWallTouchYM = MazeMap::ComputeWallTouchPoseFromNorthWallM(
-            northCorridorSpanYM,
-            Config::kMazeWallThicknessM,
-            Config::kWallTouchContactStandoffM);
-        const float eastWallTouchXM = MazeMap::ComputeWallTouchPoseFromEastWallM(
-            eastBranchSpanXM,
-            Config::kMazeWallThicknessM,
-            Config::kWallTouchContactStandoffM);
-        const float launchCellYM =
-            (static_cast<float>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount) - 1.5f) *
-            Config::kCellSizeM;
+        const PositionAuditFixtureGeometry geometry = BuildPositionAuditFixtureGeometry();
 
         for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kPositionAuditStraightSpeedCount; ++speedIndex)
         {
+            char phasePrefix[56] = {};
+            snprintf(phasePrefix, sizeof(phasePrefix), "position_pass_%u_phase1", static_cast<unsigned>(speedIndex));
+            if (!ReseatMissionStartPoseWithPhasePrefix(phasePrefix, AuxMeasurementConfig::kPositionAuditStartSettleMs))
+            {
+                return false;
+            }
             if (!RunSinglePositionStraightAuditPass(
+                    geometry,
                     speedIndex,
-                    AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[speedIndex],
-                    outDistanceM,
-                    northCorridorSpanYM,
-                    farCellCenterYM,
-                    farWallTouchYM))
+                    AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[speedIndex]))
             {
                 return false;
             }
-        }
 
-        for (uint8_t turnIndex = 0U; turnIndex < AuxMeasurementConfig::kPositionAuditInPlaceTurnCount; ++turnIndex)
-        {
-            if (!RunSinglePositionInPlaceTurnAuditPass(
-                    turnIndex,
-                    AuxMeasurementConfig::kPositionAuditInPlaceTurnTargets[turnIndex]))
+            snprintf(phasePrefix, sizeof(phasePrefix), "position_pass_%u_phase2", static_cast<unsigned>(speedIndex));
+            if (!ReseatMissionStartPoseWithPhasePrefix(phasePrefix, AuxMeasurementConfig::kPositionAuditStartSettleMs))
             {
                 return false;
             }
-        }
-
-        for (uint8_t codeIndex = 0U; codeIndex < AuxMeasurementConfig::kPositionAuditSmoothTurnCodeCount; ++codeIndex)
-        {
-            const MazeMap::ManeuverCode code = AuxMeasurementConfig::kPositionAuditSmoothTurnCodes[codeIndex];
-            for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kPositionAuditCornerSpeedCount; ++speedIndex)
+            if (!RunSinglePositionSmoothTurnAuditPass(
+                    geometry,
+                    0U,
+                    MazeMap::S90SS,
+                    speedIndex,
+                    AuxMeasurementConfig::kPositionAuditCornerSpeedsMps[speedIndex]))
             {
-                if (!RunSinglePositionSmoothTurnAuditPass(
-                        codeIndex,
-                        code,
-                        speedIndex,
-                        AuxMeasurementConfig::kPositionAuditCornerSpeedsMps[speedIndex],
-                        launchCellYM,
-                        eastWallTouchXM))
-                {
-                    return false;
-                }
+                return false;
+            }
+
+            snprintf(phasePrefix, sizeof(phasePrefix), "position_pass_%u_phase3", static_cast<unsigned>(speedIndex));
+            if (!ReseatMissionStartPoseWithPhasePrefix(phasePrefix, AuxMeasurementConfig::kPositionAuditStartSettleMs))
+            {
+                return false;
+            }
+            if (!RunSinglePositionSmoothTurnAuditPass(
+                    geometry,
+                    1U,
+                    MazeMap::S90LS,
+                    speedIndex,
+                    AuxMeasurementConfig::kPositionAuditCornerSpeedsMps[speedIndex]))
+            {
+                return false;
             }
         }
 
@@ -8946,7 +10764,8 @@ private:
 
     bool DriveCalibrationPoseToKnownX(float targetXMeters, const MotionLimits& limits)
     {
-        if (!(std::isfinite(targetXMeters) && targetXMeters >= 0.0f && targetXMeters <= Config::kCellSizeM))
+        // Audit reseat can target a global fixture x beyond one cell after an east-wall touch.
+        if (!MazeMap::IsValidCalibrationCenterCoordinateM(targetXMeters))
         {
             return Fail("Startup calibration target x is invalid");
         }
@@ -9031,6 +10850,84 @@ private:
         return DriveCalibrationPoseToKnownY(targetYMeters, limits, Config::kCellSizeM);
     }
 
+    float ComputeCalibrationSideRotationClearanceM() const
+    {
+        return Config::kWallCalibrationWallClearanceM + Config::kDistanceToleranceM;
+    }
+
+    float ComputeCalibrationSafeMinCenterXForWestWallRotationM() const
+    {
+        return MazeMap::ComputeCalibrationSafeMinCenterXFromWestWallForRearCornerM(
+            Config::kMazeWallThicknessM,
+            Config::kRobotRearWallContactOffsetM,
+            Config::kRobotHalfWidthM,
+            ComputeCalibrationSideRotationClearanceM());
+    }
+
+    float ComputeCalibrationSafeMaxCenterXForEastWallRotationM(float spanXMeters) const
+    {
+        return MazeMap::ComputeCalibrationSafeMaxCenterXFromEastWallForRearCornerM(
+            spanXMeters,
+            Config::kMazeWallThicknessM,
+            Config::kRobotRearWallContactOffsetM,
+            Config::kRobotHalfWidthM,
+            ComputeCalibrationSideRotationClearanceM());
+    }
+
+    bool RetreatCalibrationPoseFromSideWallForSafeRotation(
+        float spanXMeters,
+        const MotionLimits& limits,
+        const char* phasePrefix = nullptr)
+    {
+        if (!(std::isfinite(spanXMeters) && spanXMeters > 0.0f))
+        {
+            return Fail("Startup calibration side-clear span is invalid");
+        }
+
+        const PoseEstimate& pose = _drive.GetPose();
+        const float headingX = pose.headingUnit.GetX();
+        if (std::fabs(headingX) < 0.5f)
+        {
+            return true;
+        }
+
+        const float safeMinCenterXM = ComputeCalibrationSafeMinCenterXForWestWallRotationM();
+        const float safeMaxCenterXM = ComputeCalibrationSafeMaxCenterXForEastWallRotationM(spanXMeters);
+        if (!(safeMinCenterXM > 0.0f &&
+            safeMaxCenterXM > safeMinCenterXM &&
+            safeMaxCenterXM < spanXMeters))
+        {
+            return Fail("Startup calibration side-clear target is invalid");
+        }
+
+        float targetXMeters = pose.xMeters;
+        if (headingX > 0.5f)
+        {
+            targetXMeters = (std::min)(pose.xMeters, safeMaxCenterXM);
+        }
+        else
+        {
+            targetXMeters = (std::max)(pose.xMeters, safeMinCenterXM);
+        }
+
+        if (std::fabs(targetXMeters - pose.xMeters) <= Config::kDistanceToleranceM)
+        {
+            return true;
+        }
+
+        if (phasePrefix != nullptr)
+        {
+            char phaseName[64] = {};
+            snprintf(phaseName, sizeof(phaseName), "%s_clear_side", phasePrefix);
+            if (!BeginTelemetryPhase(phaseName))
+            {
+                return false;
+            }
+        }
+
+        return DriveCalibrationPoseToKnownX(targetXMeters, limits);
+    }
+
     static bool HasWallTouchEncoderMotion(
         const DriveTelemetry& reference,
         const DriveTelemetry& current,
@@ -9069,15 +10966,51 @@ private:
             (std::fabs(current.rightDistanceM - reference.rightDistanceM) >= minimumPerWheelDistanceDeltaM);
     }
 
-    bool ExecuteWallTouchOff(float targetYawRad, float minLatchTravelM, float& traveledDistanceM)
+    static float ComputeWallTouchApproachDriveCommand(
+        float traveledDistanceM,
+        float minLatchTravelM)
     {
+        if (!std::isfinite(traveledDistanceM) || !std::isfinite(minLatchTravelM))
+        {
+            return Config::kWallTouchFinalApproachDriveCommand;
+        }
+
+        const float remainingToLatchM = minLatchTravelM - traveledDistanceM;
+        if (remainingToLatchM <= Config::kWallTouchFinalApproachWindowM)
+        {
+            return Config::kWallTouchFinalApproachDriveCommand;
+        }
+
+        return Config::kWallTouchDriveCommand;
+    }
+
+    bool ExecuteWallTouchOff(
+        float targetYawRad,
+        float minLatchTravelM,
+        float maxApproachTravelM,
+        bool allowPassThroughNoWall,
+        WallTouchOutcome& outcome,
+        float& traveledDistanceM)
+    {
+        outcome = WallTouchOutcome::SeatedContact;
         const float startDistanceM = _drive.GetAverageDistanceMeters();
         const unsigned long touchStartMs = millis();
         const float clampedMinLatchTravelM = (std::max)(0.0f, minLatchTravelM);
+        const float clampedMaxApproachTravelM = (std::max)(clampedMinLatchTravelM, maxApproachTravelM);
+        if (!(std::isfinite(clampedMaxApproachTravelM) && clampedMaxApproachTravelM > 0.0f))
+        {
+            return Fail("Wall touch-off max travel is invalid");
+        }
         const float motionEpsilonM = Config::kWallTouchProgressStallDistanceM;
         DriveTelemetry lastMotionTelemetry = _drive.GetTelemetry();
         unsigned long lastMotionMs = touchStartMs;
+        float approachDriveCommand = Config::kWallTouchDriveCommand;
         (void)targetYawRad;
+        const auto finishWallTouch = [this](const char* timeoutMessage) -> bool
+        {
+            _drive.Brake();
+            return HoldBrakedUntilDriveSettles(timeoutMessage, Config::kStartupWallCalibrationSettleMs, 0U);
+        };
 
         while (true)
         {
@@ -9090,7 +11023,7 @@ private:
             (void)snapshot;
 
             traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            if (traveledDistanceM >= Config::kWallTouchMaxApproachDistanceM)
+            if (traveledDistanceM >= clampedMaxApproachTravelM)
             {
                 char traceLine[192] = {};
                 snprintf(
@@ -9099,15 +11032,46 @@ private:
                     "startup_cal_touch:max_travel_during_approach,travel=%.4f,expected=%.4f,max=%.4f",
                     traveledDistanceM,
                     clampedMinLatchTravelM,
-                    Config::kWallTouchMaxApproachDistanceM);
+                    clampedMaxApproachTravelM);
                 AppendStartupTrace(traceLine);
+                if (allowPassThroughNoWall)
+                {
+                    outcome = WallTouchOutcome::PassedThroughNoWall;
+                    return finishWallTouch("Wall touch-off failed to settle after pass-through");
+                }
                 return Fail("Wall touch-off exceeded max travel");
             }
 
-            CommandOpenLoop(MazeMap::MakeSymmetricOpenLoopDriveCommand(Config::kWallTouchDriveCommand));
+            approachDriveCommand = ComputeWallTouchApproachDriveCommand(traveledDistanceM, clampedMinLatchTravelM);
+            CommandOpenLoop(MazeMap::MakeSymmetricOpenLoopDriveCommand(approachDriveCommand));
 
             const unsigned long nowMs = millis();
+            const unsigned long elapsedMs = nowMs - touchStartMs;
+            const PoseEstimate& pose = _drive.GetPose();
             const DriveTelemetry telemetry = _drive.GetTelemetry();
+            if (MazeMap::IsWallTouchContactSample(
+                    traveledDistanceM,
+                    pose.linearSpeedMps,
+                    Config::kWallTouchMinApproachDistanceM,
+                    clampedMinLatchTravelM,
+                    Config::kMotionSettleSpeedThresholdMps,
+                    elapsedMs,
+                    Config::kWallTouchMinCommandTimeMs))
+            {
+                char traceLine[224] = {};
+                snprintf(
+                    traceLine,
+                    sizeof(traceLine),
+                    "startup_cal_touch:contact,travel=%.4f,expected=%.4f,elapsed_ms=%lu,v=%.4f",
+                    traveledDistanceM,
+                    clampedMinLatchTravelM,
+                    elapsedMs,
+                    pose.linearSpeedMps);
+                AppendStartupTrace(traceLine);
+                outcome = WallTouchOutcome::SeatedContact;
+                return finishWallTouch("Wall touch-off failed to settle at contact");
+            }
+
             if (HasWallTouchEncoderMotion(lastMotionTelemetry, telemetry, motionEpsilonM))
             {
                 lastMotionMs = nowMs;
@@ -9115,7 +11079,7 @@ private:
                 continue;
             }
 
-            if ((nowMs - touchStartMs) < Config::kWallTouchMinCommandTimeMs)
+            if (elapsedMs < Config::kWallTouchMinCommandTimeMs)
             {
                 continue;
             }
@@ -9135,6 +11099,33 @@ private:
                 nowMs - touchStartMs);
             AppendStartupTrace(traceLine);
 
+            if (MazeMap::IsWallTouchSeatedSample(
+                    traveledDistanceM,
+                    clampedMinLatchTravelM,
+                    pose.linearSpeedMps,
+                    pose.angularSpeedRadps,
+                    telemetry.leftVelocityMps,
+                    telemetry.rightVelocityMps,
+                    Config::kMotionSettleSpeedThresholdMps,
+                    Config::kMotionSettleAngularSpeedThresholdRadps,
+                    Config::kMotionSettleSpeedThresholdMps))
+            {
+                char seatedTraceLine[256] = {};
+                snprintf(
+                    seatedTraceLine,
+                    sizeof(seatedTraceLine),
+                    "startup_cal_touch:seated,travel=%.4f,expected=%.4f,v=%.4f,w=%.4f,left_v=%.4f,right_v=%.4f",
+                    traveledDistanceM,
+                    clampedMinLatchTravelM,
+                    pose.linearSpeedMps,
+                    pose.angularSpeedRadps,
+                    telemetry.leftVelocityMps,
+                    telemetry.rightVelocityMps);
+                AppendStartupTrace(seatedTraceLine);
+                outcome = WallTouchOutcome::SeatedContact;
+                return finishWallTouch("Wall touch-off failed to settle after seating");
+            }
+
             const DriveTelemetry stallTelemetry = telemetry;
             const unsigned long seatStartMs = nowMs;
             while (true)
@@ -9148,7 +11139,7 @@ private:
                 (void)seatSnapshot;
 
                 traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-                if (traveledDistanceM >= Config::kWallTouchMaxApproachDistanceM)
+                if (traveledDistanceM >= clampedMaxApproachTravelM)
                 {
                     char seatTraceLine[192] = {};
                     snprintf(
@@ -9157,75 +11148,107 @@ private:
                         "startup_cal_touch:max_travel_during_seat,travel=%.4f,expected=%.4f,max=%.4f",
                         traveledDistanceM,
                         clampedMinLatchTravelM,
-                        Config::kWallTouchMaxApproachDistanceM);
+                        clampedMaxApproachTravelM);
                     AppendStartupTrace(seatTraceLine);
+                    if (allowPassThroughNoWall)
+                    {
+                        outcome = WallTouchOutcome::PassedThroughNoWall;
+                        return finishWallTouch("Wall touch-off failed to settle after pass-through");
+                    }
                     return Fail("Wall touch-off exceeded max travel");
                 }
 
                 const unsigned long seatNowMs = millis();
+                const unsigned long seatElapsedMs = seatNowMs - seatStartMs;
                 const float seatDriveCommand = MazeMap::ComputeLaunchAssistDriveFloor(
-                    Config::kWallTouchDriveCommand,
+                    approachDriveCommand,
                     Config::kWallTouchSeatRampMaxDriveCommand,
-                    seatNowMs - seatStartMs,
+                    seatElapsedMs,
                     Config::kWallTouchSeatRampMs);
-                CommandOpenLoop(MazeMap::MakeSymmetricOpenLoopDriveCommand(seatDriveCommand));
+                const MazeMap::OpenLoopDriveCommand seatCommand =
+                    (seatDriveCommand >= Config::kWallTouchSeatReleaseMinDriveCommand) ?
+                    MazeMap::ComputeOpenLoopYawWiggleCommand(
+                        seatDriveCommand,
+                        seatElapsedMs,
+                        Config::kWallTouchSeatWiggleHalfPeriodMs,
+                        Config::kWallTouchSeatWiggleTurnFraction,
+                        Config::kWallTouchSeatWiggleRetainedForwardFraction) :
+                    MazeMap::MakeSymmetricOpenLoopDriveCommand(seatDriveCommand);
+                CommandOpenLoop(seatCommand);
 
                 const DriveTelemetry seatTelemetry = _drive.GetTelemetry();
+                const PoseEstimate& seatPose = _drive.GetPose();
                 const float leftSeatDeltaM = std::fabs(seatTelemetry.leftDistanceM - stallTelemetry.leftDistanceM);
                 const float rightSeatDeltaM = std::fabs(seatTelemetry.rightDistanceM - stallTelemetry.rightDistanceM);
+                if (MazeMap::IsWallTouchSeatedSample(
+                        traveledDistanceM,
+                        clampedMinLatchTravelM,
+                        seatPose.linearSpeedMps,
+                        seatPose.angularSpeedRadps,
+                        seatTelemetry.leftVelocityMps,
+                        seatTelemetry.rightVelocityMps,
+                        Config::kMotionSettleSpeedThresholdMps,
+                        Config::kMotionSettleAngularSpeedThresholdRadps,
+                        Config::kMotionSettleSpeedThresholdMps))
+                {
+                    char seatedTraceLine[320] = {};
+                    snprintf(
+                        seatedTraceLine,
+                        sizeof(seatedTraceLine),
+                        "startup_cal_touch:seat_contact,drive=%.3f,left_cmd=%.3f,right_cmd=%.3f,travel=%.4f,elapsed_ms=%lu,left_v=%.4f,right_v=%.4f,left_delta=%.4f,right_delta=%.4f",
+                        seatDriveCommand,
+                        seatCommand.leftDriveCommand,
+                        seatCommand.rightDriveCommand,
+                        traveledDistanceM,
+                        seatElapsedMs,
+                        seatTelemetry.leftVelocityMps,
+                        seatTelemetry.rightVelocityMps,
+                        leftSeatDeltaM,
+                        rightSeatDeltaM);
+                    AppendStartupTrace(seatedTraceLine);
+                    outcome = WallTouchOutcome::SeatedContact;
+                    return finishWallTouch("Wall touch-off failed to settle after seating");
+                }
                 const bool seatReleaseMotionDetected =
                     HasWallTouchSeatReleaseMotion(stallTelemetry, seatTelemetry, Config::kWallTouchSeatReleaseDistanceM);
                 if (MazeMap::ShouldReleaseWallTouchSeat(
                         seatDriveCommand,
                         Config::kWallTouchSeatReleaseMinDriveCommand,
-                        seatNowMs - seatStartMs,
+                        seatElapsedMs,
                         Config::kWallTouchSeatReleaseMinSkidMs,
                         seatReleaseMotionDetected))
                 {
-                    char seatTraceLine[224] = {};
+                    char seatTraceLine[288] = {};
                     snprintf(
                         seatTraceLine,
                         sizeof(seatTraceLine),
-                        "startup_cal_touch:seat_released,drive=%.3f,travel=%.4f,elapsed_ms=%lu,left_v=%.4f,right_v=%.4f,left_delta=%.4f,right_delta=%.4f",
+                        "startup_cal_touch:seat_skid,drive=%.3f,left_cmd=%.3f,right_cmd=%.3f,travel=%.4f,elapsed_ms=%lu,left_v=%.4f,right_v=%.4f,left_delta=%.4f,right_delta=%.4f",
                         seatDriveCommand,
+                        seatCommand.leftDriveCommand,
+                        seatCommand.rightDriveCommand,
                         traveledDistanceM,
-                        seatNowMs - seatStartMs,
+                        seatElapsedMs,
                         seatTelemetry.leftVelocityMps,
                         seatTelemetry.rightVelocityMps,
                         leftSeatDeltaM,
                         rightSeatDeltaM);
                     AppendStartupTrace(seatTraceLine);
-                    _drive.Brake();
-                    return HoldBrakedUntilDriveSettles("Wall touch-off failed to settle after release", Config::kStartupWallCalibrationSettleMs);
-                }
-
-                if ((seatNowMs - seatStartMs) >= Config::kWallTouchSeatRampTimeoutMs)
-                {
-                    char seatTraceLine[256] = {};
-                    snprintf(
-                        seatTraceLine,
-                        sizeof(seatTraceLine),
-                        "startup_cal_touch:seat_timeout,drive=%.3f,travel=%.4f,left_v=%.4f,right_v=%.4f,left_delta=%.4f,right_delta=%.4f",
-                        seatDriveCommand,
-                        traveledDistanceM,
-                        seatTelemetry.leftVelocityMps,
-                        seatTelemetry.rightVelocityMps,
-                        leftSeatDeltaM,
-                        rightSeatDeltaM);
-                    AppendStartupTrace(seatTraceLine);
-                    _drive.Brake();
-                    return Fail("Wall touch-off failed to break free after stall");
+                    outcome = WallTouchOutcome::SeatedContact;
+                    return finishWallTouch("Wall touch-off failed to settle after seating");
                 }
             }
         }
     }
 
-    bool TouchWallAndSetKnownWallCoordinate(
+    bool TryTouchWallAndMaybeSetKnownWallCoordinate(
         MazeMap::Direction facingDirection,
         CalibrationWall wall,
         float targetCoordinateM,
+        bool allowPassThroughNoWall,
+        WallTouchOutcome& outcome,
         float* traveledDistanceM = nullptr)
     {
+        outcome = WallTouchOutcome::SeatedContact;
         if (!(std::isfinite(targetCoordinateM) && targetCoordinateM >= 0.0f))
         {
             return Fail("Startup calibration touch coordinate is invalid");
@@ -9272,23 +11295,58 @@ private:
             expectedTravelM,
             Config::kWallTouchMinApproachDistanceM,
             Config::kWallTouchExpectedTravelSlackM);
-        AppendStartupCalibrationTouchPlanTrace(wall, expectedTravelM, minLatchTravelM, targetYawRad);
+        const float maxApproachTravelM = MazeMap::ComputeWallTouchMaximumApproachDistanceM(
+            expectedTravelM,
+            Config::kWallTouchBaseMaxApproachDistanceM,
+            Config::kWallTouchExpectedTravelSlackM);
+        AppendStartupCalibrationTouchPlanTrace(wall, expectedTravelM, minLatchTravelM, maxApproachTravelM, targetYawRad);
 
         float localTravelM = 0.0f;
-        if (!ExecuteWallTouchOff(targetYawRad, minLatchTravelM, localTravelM))
+        if (!ExecuteWallTouchOff(
+                targetYawRad,
+                minLatchTravelM,
+                maxApproachTravelM,
+                allowPassThroughNoWall,
+                outcome,
+                localTravelM))
         {
             return false;
         }
 
-        const float finalYawErrorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
-        _drive.SetPose(xMeters, yMeters, DirectionToYawRad(facingDirection));
-        _lastControlMicros = micros();
-        AppendStartupCalibrationTouchTrace(wall, localTravelM, expectedTravelM, minLatchTravelM, finalYawErrorRad);
-        AppendStartupCalibrationStateTrace("touch_pose_set");
+        if (outcome == WallTouchOutcome::SeatedContact)
+        {
+            const float finalYawErrorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
+            _drive.SetPose(xMeters, yMeters, DirectionToYawRad(facingDirection));
+            _lastControlMicros = micros();
+            AppendStartupCalibrationTouchTrace(wall, localTravelM, expectedTravelM, minLatchTravelM, finalYawErrorRad);
+            AppendStartupCalibrationStateTrace("touch_pose_set");
+        }
+
         if (traveledDistanceM != nullptr)
         {
             *traveledDistanceM = localTravelM;
         }
+        return true;
+    }
+
+    bool TouchWallAndSetKnownWallCoordinate(
+        MazeMap::Direction facingDirection,
+        CalibrationWall wall,
+        float targetCoordinateM,
+        float* traveledDistanceM = nullptr)
+    {
+        WallTouchOutcome outcome = WallTouchOutcome::SeatedContact;
+        if (!TryTouchWallAndMaybeSetKnownWallCoordinate(
+                facingDirection,
+                wall,
+                targetCoordinateM,
+                false,
+                outcome,
+                traveledDistanceM))
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -9348,7 +11406,12 @@ private:
         }
     }
 
-    bool StoreWallCalibrationPoint(WallSensorId sensorId, CalibrationWall wall, float actualDistanceM, const WallSensorCalibrationInput& input)
+    bool StoreWallCalibrationPoint(
+        WallSensorId sensorId,
+        CalibrationWall wall,
+        float actualDistanceM,
+        const WallSensorCalibrationInput& input,
+        const RobustSignalBand* differentialLightBand = nullptr)
     {
         if (!(std::isfinite(actualDistanceM) && actualDistanceM > 0.0f))
         {
@@ -9361,7 +11424,37 @@ private:
         }
         if ((sensorId == WallSensorId::SideLeft) || (sensorId == WallSensorId::SideRight))
         {
-            gWallDistanceCalibration.SetSideWallReferenceDifferentialLight(sensorId, input.differentialLight);
+            if (std::isfinite(input.differentialLight) && input.differentialLight > 0.0f)
+            {
+                gWallDistanceCalibration.SetSideWallReferenceDifferentialLight(sensorId, input.differentialLight);
+                gWallDistanceCalibration.SetSideWallReferenceDistanceM(sensorId, actualDistanceM);
+                if ((differentialLightBand != nullptr) &&
+                    std::isfinite(differentialLightBand->low) &&
+                    std::isfinite(differentialLightBand->high) &&
+                    differentialLightBand->low > 0.0f &&
+                    differentialLightBand->high >= differentialLightBand->low)
+                {
+                    gWallDistanceCalibration.SetSideWallReferenceDifferentialLightBand(
+                        sensorId,
+                        differentialLightBand->low,
+                        differentialLightBand->high);
+                }
+            }
+        }
+        else if (IsFrontWallSensor(sensorId) &&
+            (differentialLightBand != nullptr) &&
+            std::isfinite(input.measuredValue) &&
+            input.measuredValue > 0.0f &&
+            std::isfinite(differentialLightBand->low) &&
+            std::isfinite(differentialLightBand->high) &&
+            differentialLightBand->low > 0.0f &&
+            differentialLightBand->high >= differentialLightBand->low)
+        {
+            gWallDistanceCalibration.SetFrontWeakestCalibrationDifferentialLightBand(
+                sensorId,
+                input.measuredValue,
+                differentialLightBand->low,
+                differentialLightBand->high);
         }
         AppendStartupCalibrationSampleTrace(sensorId, wall, input.measuredValue, input.fallbackDistanceM, actualDistanceM);
 
@@ -9375,19 +11468,29 @@ private:
             return Fail("Unable to compute startup wall calibration reference");
         }
 
-        const WallSensorCalibrationInput input = SampleWallCalibrationInputAverageRaw(sensorId, sensor);
-        return StoreWallCalibrationPoint(sensorId, wall, actualDistanceM, input);
+        const WallSensorCalibrationCapture capture = SampleWallCalibrationCaptureAverageRaw(sensorId, sensor);
+        return StoreWallCalibrationPoint(
+            sensorId,
+            wall,
+            actualDistanceM,
+            capture.input,
+            capture.haveDifferentialLightBand ? &capture.differentialLightBand : nullptr);
     }
 
     bool CollectMovingFrontCalibrationSweep(
         float startCenterXM,
         float farthestCenterXM,
         uint8_t pointCount,
+        CalibrationWall wall,
         const MotionLimits& limits)
     {
         if (pointCount == 0U)
         {
             return true;
+        }
+        if (wall != CalibrationWall::West && wall != CalibrationWall::East)
+        {
+            return Fail("Startup front calibration sweep requires side wall reference");
         }
 
         const PoseEstimate& startPose = _drive.GetPose();
@@ -9437,26 +11540,36 @@ private:
                     break;
                 }
 
-                WallSensorCalibrationInput frontLeftInput{};
-                WallSensorCalibrationInput frontRightInput{};
-                SampleWallCalibrationInputAverageRawPair(
+                WallSensorCalibrationCapture frontLeftCapture{};
+                WallSensorCalibrationCapture frontRightCapture{};
+                SampleWallCalibrationCaptureAverageRawPair(
                     WallSensorId::FrontLeft,
                     _speedVehicle.FrontLeft,
                     WallSensorId::FrontRight,
                     _speedVehicle.FrontRight,
-                    frontLeftInput,
-                    frontRightInput);
+                    frontLeftCapture,
+                    frontRightCapture);
 
                 float frontLeftActualDistanceM = 0.0f;
-                if (!TryComputeCalibrationReferenceDistanceM(_speedVehicle.FrontLeft, CalibrationWall::West, frontLeftActualDistanceM) ||
-                    !StoreWallCalibrationPoint(WallSensorId::FrontLeft, CalibrationWall::West, frontLeftActualDistanceM, frontLeftInput))
+                if (!TryComputeCalibrationReferenceDistanceM(_speedVehicle.FrontLeft, wall, frontLeftActualDistanceM) ||
+                    !StoreWallCalibrationPoint(
+                        WallSensorId::FrontLeft,
+                        wall,
+                        frontLeftActualDistanceM,
+                        frontLeftCapture.input,
+                        frontLeftCapture.haveDifferentialLightBand ? &frontLeftCapture.differentialLightBand : nullptr))
                 {
                     return false;
                 }
 
                 float frontRightActualDistanceM = 0.0f;
-                if (!TryComputeCalibrationReferenceDistanceM(_speedVehicle.FrontRight, CalibrationWall::West, frontRightActualDistanceM) ||
-                    !StoreWallCalibrationPoint(WallSensorId::FrontRight, CalibrationWall::West, frontRightActualDistanceM, frontRightInput))
+                if (!TryComputeCalibrationReferenceDistanceM(_speedVehicle.FrontRight, wall, frontRightActualDistanceM) ||
+                    !StoreWallCalibrationPoint(
+                        WallSensorId::FrontRight,
+                        wall,
+                        frontRightActualDistanceM,
+                        frontRightCapture.input,
+                        frontRightCapture.haveDifferentialLightBand ? &frontRightCapture.differentialLightBand : nullptr))
                 {
                     return false;
                 }
@@ -9512,6 +11625,15 @@ private:
         return HoldPosition(Config::kMotionSettleHoldMs);
     }
 
+    // WARNING: Keep this procedure aligned with the validated hardware sequence unless it is re-proven on the robot.
+    // The startup wall calibration must remain:
+    // 1. start north with the rear touching the south wall
+    // 2. complete the stationary settle
+    // 3. drive forward to the start-cell center
+    // 4. face west and calibrate the left side sensor against the south-wall-referenced distance
+    // 5. face east and calibrate the right side sensor against the south-wall-referenced distance
+    // 6. touch the east wall, then back away while calibrating the front sensors against that east wall
+    // 7. return to cell center, snap the centered pose, rotate north, and exit
     bool RunStartupWallCalibration()
     {
         if (!EmitMissionControllerLineOrFail("Startup wall calibration"))
@@ -9527,75 +11649,73 @@ private:
         }
         AppendStartupTrace("startup_wall_calibration:begin");
 
-        const uint8_t frontPointCount = Config::kStartupWallCalibrationFrontPointCount;
-        const float westWallTouchCenterXM = MazeMap::ComputeWallTouchPoseFromWestWallM(
+        const uint8_t configuredFrontPointCount = Config::kStartupWallCalibrationFrontPointCount;
+        const float targetCenterXM = 0.5f * Config::kCellSizeM;
+        const float targetCenterYM = 0.5f * Config::kCellSizeM;
+        const float eastWallTouchCenterXM = MazeMap::ComputeWallTouchPoseFromEastWallM(
+            Config::kCellSizeM,
             Config::kMazeWallThicknessM,
             Config::kWallTouchContactStandoffM);
-        const float frontSweepStartCenterXM = MazeMap::ComputeStartupWallCalibrationFrontSampleCenterXM(
-            westWallTouchCenterXM,
-            Config::kStartupWallCalibrationFrontFarOffsetM,
-            Config::kStartupWallCalibrationFrontStepM,
-            0U);
-        const float centerOffsetFromTouchM = MazeMap::ComputeMissionStartCenterAdvanceM(
-            Config::kCellSizeM,
-            Config::kMissionStartRearWallInsetM);
-        const float southWallTurnClearanceM = MazeMap::ComputeMissionStartTurnClearanceM(
-            Config::kCellSizeM,
-            Config::kMissionStartRearWallInsetM);
-        const float unclampedFarthestFrontCalibrationCenterXM = MazeMap::ComputeStartupWallCalibrationFarthestFrontSampleCenterXM(
-            westWallTouchCenterXM,
-            Config::kStartupWallCalibrationFrontFarOffsetM,
-            Config::kStartupWallCalibrationFrontStepM,
-            frontPointCount);
-        const float safeFrontCalibrationMaxCenterXM = MazeMap::ComputeCalibrationSafeMaxCenterXFromEastWallForRearCornerM(
-            Config::kCellSizeM,
+        const float requestedFarthestFrontCalibrationCenterXM =
+            MazeMap::ComputeStartupWallCalibrationFarthestFrontSampleCenterFromEastWallXM(
+                eastWallTouchCenterXM,
+                Config::kStartupWallCalibrationFrontFarOffsetM,
+                Config::kStartupWallCalibrationFrontStepM,
+                configuredFrontPointCount);
+        const float safeFrontCalibrationMinCenterXM = MazeMap::ComputeCalibrationSafeMinCenterXFromWestWallM(
             Config::kMazeWallThicknessM,
             Config::kRobotRearWallContactOffsetM,
-            Config::kRobotHalfWidthM,
             Config::kWallCalibrationWallClearanceM + Config::kDistanceToleranceM);
-        const float farthestFrontCalibrationCenterXM = (std::min)(unclampedFarthestFrontCalibrationCenterXM, safeFrontCalibrationMaxCenterXM);
-        const float nearestFrontSensorDistanceM =
+        const float frontSweepStartCenterXM = eastWallTouchCenterXM;
+        uint8_t frontPointCount = configuredFrontPointCount;
+        float farthestFrontCalibrationCenterXM = (std::max)(
+            safeFrontCalibrationMinCenterXM,
+            (std::min)(frontSweepStartCenterXM, requestedFarthestFrontCalibrationCenterXM));
+        const float nearestFrontSensorDistanceM = MazeMap::ComputeCellInnerMaxCoordinateM(
+            Config::kCellSizeM,
+            Config::kMazeWallThicknessM) -
             frontSweepStartCenterXM -
-            MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM) -
-            _speedVehicle.FrontLeft.GetPosition().GetX();
-        const float rearCornerSweepRadiusM = std::sqrt(
-            (Config::kRobotRearWallContactOffsetM * Config::kRobotRearWallContactOffsetM) +
-            (Config::kRobotHalfWidthM * Config::kRobotHalfWidthM));
+            (std::max)(_speedVehicle.FrontLeft.GetPosition().GetX(), _speedVehicle.FrontRight.GetPosition().GetX());
 
         char geometryTraceLine[256] = {};
         snprintf(
             geometryTraceLine,
             sizeof(geometryTraceLine),
-            "startup_cal_geometry:cell_pitch=%.4f,cell_clear=%.4f,west_touch_x=%.4f,front_start_x=%.4f,front_farthest_x=%.4f,front_safe_max_x=%.4f,front_sensor_wall_dist=%.4f,rear_corner_sweep=%.4f",
+            "startup_cal_geometry:cell_pitch=%.4f,cell_clear=%.4f,center_y=%.4f,east_touch_x=%.4f,front_start_x=%.4f,front_farthest_x=%.4f,front_safe_min_x=%.4f,front_sensor_wall_dist=%.4f",
             Config::kCellSizeM,
             Config::kCellClearSpanM,
-            westWallTouchCenterXM,
+            targetCenterYM,
+            eastWallTouchCenterXM,
             frontSweepStartCenterXM,
             farthestFrontCalibrationCenterXM,
-            safeFrontCalibrationMaxCenterXM,
-            nearestFrontSensorDistanceM,
-            rearCornerSweepRadiusM);
+            safeFrontCalibrationMinCenterXM,
+            nearestFrontSensorDistanceM);
         AppendStartupTrace(geometryTraceLine);
 
-        if (centerOffsetFromTouchM <= 0.0f)
+        if (farthestFrontCalibrationCenterXM > (requestedFarthestFrontCalibrationCenterXM + Config::kDistanceToleranceM))
         {
-            return Fail("Wall-touch standoff too large for start-cell centering");
+            char traceLine[192] = {};
+            snprintf(
+                traceLine,
+                sizeof(traceLine),
+                "startup_wall_calibration:recover_front_sweep_end,requested=%.4f,adjusted=%.4f,safe_min_x=%.4f",
+                requestedFarthestFrontCalibrationCenterXM,
+                farthestFrontCalibrationCenterXM,
+                safeFrontCalibrationMinCenterXM);
+            AppendStartupTrace(traceLine);
         }
-        if (southWallTurnClearanceM < Config::kMissionStartTurnClearanceM)
+        if ((frontSweepStartCenterXM - farthestFrontCalibrationCenterXM) <= Config::kDistanceToleranceM)
         {
-            return Fail("Start-cell turn clearance too small for south-wall recovery");
-        }
-        if (safeFrontCalibrationMaxCenterXM <= frontSweepStartCenterXM)
-        {
-            return Fail("Front calibration sweep has no safe east-wall clearance");
-        }
-        if (farthestFrontCalibrationCenterXM >= (safeFrontCalibrationMaxCenterXM + Config::kDistanceToleranceM))
-        {
-            return Fail("Front calibration sweep reaches too close to east wall");
-        }
-        if (nearestFrontSensorDistanceM <= 0.010f)
-        {
-            return Fail("Startup wall calibration front sweep too close to wall");
+            frontPointCount = 0U;
+            farthestFrontCalibrationCenterXM = frontSweepStartCenterXM;
+            char traceLine[192] = {};
+            snprintf(
+                traceLine,
+                sizeof(traceLine),
+                "startup_wall_calibration:skip_front_sweep_no_safe_span,start_x=%.4f,safe_min_x=%.4f",
+                frontSweepStartCenterXM,
+                safeFrontCalibrationMinCenterXM);
+            AppendStartupTrace(traceLine);
         }
 
         const MotionLimits limits = StartupWallCalibrationLimits();
@@ -9605,12 +11725,12 @@ private:
         {
             return false;
         }
-        AppendStartupTrace("startup_wall_calibration:clear_south_wall_before_first_turn");
-        if (!DriveCalibrationPoseToKnownY(0.5f * Config::kCellSizeM, centeringLimits))
+        AppendStartupTrace("startup_wall_calibration:move_forward_to_center");
+        if (!DriveCalibrationPoseToKnownY(targetCenterYM, centeringLimits))
         {
             return false;
         }
-        AppendStartupTrace("startup_wall_calibration:settle_before_west_touch");
+        AppendStartupTrace("startup_wall_calibration:settle_after_forward_move");
         if (!HoldPosition(Config::kStartupWallCalibrationSettleMs))
         {
             return false;
@@ -9619,103 +11739,99 @@ private:
         float actualDistanceM = 0.0f;
         float sideDistanceSumM = 0.0f;
         uint8_t sideDistanceCount = 0U;
-        float westTouchTravelM = 0.0f;
-        float eastTouchTravelM = 0.0f;
 
-        AppendStartupTrace("startup_wall_calibration:touch_west");
-        if (!TouchWallAndSetPose(MazeMap::Left, CalibrationWall::West, &westTouchTravelM))
+        AppendStartupTrace("startup_wall_calibration:rotate_west_for_left_side_sample");
+        if (!RotateCalibrationTo(MazeMap::Left, limits))
         {
             return false;
         }
-        AppendStartupTrace("startup_wall_calibration:reverse_to_center_from_west_touch");
-        if (!DriveCalibrationPoseToKnownX(0.5f * Config::kCellSizeM, centeringLimits))
-        {
-            return false;
-        }
-        AppendStartupTrace("startup_wall_calibration:touch_east");
-        if (!TouchWallAndSetPose(MazeMap::Right, CalibrationWall::East, &eastTouchTravelM))
-        {
-            return false;
-        }
-
-        const float westToEastTouchTravelM = westTouchTravelM + eastTouchTravelM;
-        const float touchStandoffEstimateM = 0.5f * (Config::kCellClearSpanM - westToEastTouchTravelM);
-        if (std::isfinite(touchStandoffEstimateM) && touchStandoffEstimateM > 0.0f && touchStandoffEstimateM < (0.5f * Config::kCellSizeM))
-        {
-            _lastWallTouchStandoffEstimateM = touchStandoffEstimateM;
-            _hasWallTouchStandoffEstimate = true;
-            if (!EmitMissionControllerFormattedOrFail("Touch standoff estimate (m): %.6f", _lastWallTouchStandoffEstimateM))
-            {
-                return false;
-            }
-            char traceLine[160] = {};
-            snprintf(
-                traceLine,
-                sizeof(traceLine),
-                "startup_cal_touch_standoff_estimate:%.6f",
-                _lastWallTouchStandoffEstimateM);
-            AppendStartupTrace(traceLine);
-        }
-
-        AppendStartupTrace("startup_wall_calibration:reverse_to_center_from_east_touch");
-        if (!DriveCalibrationPoseToKnownX(0.5f * Config::kCellSizeM, centeringLimits))
-        {
-            return false;
-        }
-
-        AppendStartupTrace("startup_wall_calibration:rotate_up_for_side_samples");
-        if (!RotateCalibrationTo(MazeMap::Up, limits))
-        {
-            return false;
-        }
-        AppendStartupTrace("startup_wall_calibration:settle_for_side_samples");
+        AppendStartupTrace("startup_wall_calibration:settle_for_left_side_sample");
         if (!HoldPosition(Config::kStartupWallCalibrationSettleMs))
         {
             return false;
         }
-        AppendStartupTrace("startup_wall_calibration:sample_side_walls");
-        if (!AddWallCalibrationPoint(WallSensorId::SideLeft, _speedVehicle.SideLeft, CalibrationWall::West, actualDistanceM))
+        AppendStartupTrace("startup_wall_calibration:sample_left_side");
+        if (!AddWallCalibrationPoint(WallSensorId::SideLeft, _speedVehicle.SideLeft, CalibrationWall::South, actualDistanceM))
         {
             return false;
         }
-        sideDistanceSumM += actualDistanceM;
-        ++sideDistanceCount;
-        if (!AddWallCalibrationPoint(WallSensorId::SideRight, _speedVehicle.SideRight, CalibrationWall::East, actualDistanceM))
+        const WallSensorCalibrationCapture rightSideBaselineCapture =
+            SampleWallCalibrationCaptureAverageRaw(WallSensorId::SideRight, _speedVehicle.SideRight);
+        gWallDistanceCalibration.SetSideWallBaselineDifferentialLight(
+            WallSensorId::SideRight,
+            rightSideBaselineCapture.input.differentialLight);
+        if (rightSideBaselineCapture.haveDifferentialLightBand)
         {
-            return false;
+            gWallDistanceCalibration.SetSideWallBaselineDifferentialLightBand(
+                WallSensorId::SideRight,
+                rightSideBaselineCapture.differentialLightBand.low,
+                rightSideBaselineCapture.differentialLightBand.high);
         }
         sideDistanceSumM += actualDistanceM;
         ++sideDistanceCount;
 
-        AppendStartupTrace("startup_wall_calibration:touch_west_again");
-        if (!TouchWallAndSetPose(MazeMap::Left, CalibrationWall::West))
+        AppendStartupTrace("startup_wall_calibration:rotate_east_for_right_side_sample");
+        if (!RotateCalibrationTo(MazeMap::Right, limits))
         {
             return false;
         }
-        if ((frontSweepStartCenterXM - westWallTouchCenterXM) > Config::kDistanceToleranceM)
+        AppendStartupTrace("startup_wall_calibration:settle_for_right_side_sample");
+        if (!HoldPosition(Config::kStartupWallCalibrationSettleMs))
         {
-            AppendStartupTrace("startup_wall_calibration:reverse_to_front_sweep_start");
-            if (!DriveCalibrationPoseToKnownX(frontSweepStartCenterXM, centeringLimits))
+            return false;
+        }
+        AppendStartupTrace("startup_wall_calibration:sample_right_side");
+        if (!AddWallCalibrationPoint(WallSensorId::SideRight, _speedVehicle.SideRight, CalibrationWall::South, actualDistanceM))
+        {
+            return false;
+        }
+        const WallSensorCalibrationCapture leftSideBaselineCapture =
+            SampleWallCalibrationCaptureAverageRaw(WallSensorId::SideLeft, _speedVehicle.SideLeft);
+        gWallDistanceCalibration.SetSideWallBaselineDifferentialLight(
+            WallSensorId::SideLeft,
+            leftSideBaselineCapture.input.differentialLight);
+        if (leftSideBaselineCapture.haveDifferentialLightBand)
+        {
+            gWallDistanceCalibration.SetSideWallBaselineDifferentialLightBand(
+                WallSensorId::SideLeft,
+                leftSideBaselineCapture.differentialLightBand.low,
+                leftSideBaselineCapture.differentialLightBand.high);
+        }
+        sideDistanceSumM += actualDistanceM;
+        ++sideDistanceCount;
+
+        AppendStartupTrace("startup_wall_calibration:touch_east");
+        if (!TouchWallAndSetPose(MazeMap::Right, CalibrationWall::East))
+        {
+            return false;
+        }
+        if (frontPointCount > 0U)
+        {
+            AppendStartupTrace("startup_wall_calibration:moving_front_sweep_begin");
+            if (!CollectMovingFrontCalibrationSweep(
+                    frontSweepStartCenterXM,
+                    farthestFrontCalibrationCenterXM,
+                    frontPointCount,
+                    CalibrationWall::East,
+                    centeringLimits))
             {
                 return false;
             }
         }
-        AppendStartupTrace("startup_wall_calibration:moving_front_sweep_begin");
-        if (!CollectMovingFrontCalibrationSweep(
-                frontSweepStartCenterXM,
-                farthestFrontCalibrationCenterXM,
-                frontPointCount,
-                centeringLimits))
+        else
         {
-            return false;
+            AppendStartupTrace("startup_wall_calibration:moving_front_sweep_skipped");
         }
 
-        const float targetCenterXM = 0.5f * Config::kCellSizeM;
         AppendStartupTrace("startup_wall_calibration:return_to_center_from_front_sweep");
         if (!DriveCalibrationPoseToKnownX(targetCenterXM, centeringLimits))
         {
             return false;
         }
+        AppendStartupTrace("startup_wall_calibration:set_pose_at_start_center");
+        _drive.SetPose(targetCenterXM, targetCenterYM, DirectionToYawRad(MazeMap::Right));
+        _lastControlMicros = micros();
+        AppendStartupCalibrationStateTrace("center_pose_set");
         AppendStartupTrace("startup_wall_calibration:rotate_up_at_start_center");
         if (!RotateCalibrationTo(MazeMap::Up, limits))
         {
@@ -9726,6 +11842,36 @@ private:
         if (!HoldPosition(Config::kStartupWallCalibrationSettleMs))
         {
             return false;
+        }
+
+        WallSensorCalibrationCapture frontLeftBaselineCapture{};
+        WallSensorCalibrationCapture frontRightBaselineCapture{};
+        SampleWallCalibrationCaptureAverageRawPair(
+            WallSensorId::FrontLeft,
+            _speedVehicle.FrontLeft,
+            WallSensorId::FrontRight,
+            _speedVehicle.FrontRight,
+            frontLeftBaselineCapture,
+            frontRightBaselineCapture);
+        gWallDistanceCalibration.SetFrontWallBaselineDifferentialLight(
+            WallSensorId::FrontLeft,
+            frontLeftBaselineCapture.input.differentialLight);
+        gWallDistanceCalibration.SetFrontWallBaselineDifferentialLight(
+            WallSensorId::FrontRight,
+            frontRightBaselineCapture.input.differentialLight);
+        if (frontLeftBaselineCapture.haveDifferentialLightBand)
+        {
+            gWallDistanceCalibration.SetFrontWallBaselineDifferentialLightBand(
+                WallSensorId::FrontLeft,
+                frontLeftBaselineCapture.differentialLightBand.low,
+                frontLeftBaselineCapture.differentialLightBand.high);
+        }
+        if (frontRightBaselineCapture.haveDifferentialLightBand)
+        {
+            gWallDistanceCalibration.SetFrontWallBaselineDifferentialLightBand(
+                WallSensorId::FrontRight,
+                frontRightBaselineCapture.differentialLightBand.low,
+                frontRightBaselineCapture.differentialLightBand.high);
         }
 
         if (sideDistanceCount > 0U)
@@ -9752,7 +11898,7 @@ private:
         if (!OpenMissionTextLog())
         {
             AppendStartupTrace("initialize:logging_txt_open_failed");
-            return false;
+            DisableMissionTextLogging("initialize:mission_text_log_unavailable");
         }
         if (!EmitMissionControllerLine(banner))
         {
@@ -9872,8 +12018,8 @@ private:
         float sideWallOnThresholdM = Config::kSideWallOnThresholdM;
         float sideWallOffThresholdM = Config::kSideWallOffThresholdM;
         if (gWallDistanceCalibration.TryComputeSideWallDistanceThresholds(
-                Config::kSideWallSignalLatchFractionOfCalibration,
-                Config::kSideWallSignalReleaseFractionOfCalibration,
+                Config::kSideWallDistanceLatchFractionOfCalibration,
+                Config::kSideWallDistanceReleaseFractionOfCalibration,
                 sideWallOnThresholdM,
                 sideWallOffThresholdM))
         {
@@ -9883,6 +12029,164 @@ private:
                 "derived_side_wall_thresholds_m,%.6f,%.6f",
                 sideWallOnThresholdM,
                 sideWallOffThresholdM);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float sideLeftReferenceDifferentialLight = 0.0f;
+        float sideRightReferenceDifferentialLight = 0.0f;
+        const bool haveSideLeftReferenceDifferentialLight = gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(
+            WallSensorId::SideLeft,
+            sideLeftReferenceDifferentialLight);
+        const bool haveSideRightReferenceDifferentialLight = gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(
+            WallSensorId::SideRight,
+            sideRightReferenceDifferentialLight);
+        if (haveSideLeftReferenceDifferentialLight || haveSideRightReferenceDifferentialLight)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "side_wall_reference_diff,%.6f,%.6f",
+                sideLeftReferenceDifferentialLight,
+                sideRightReferenceDifferentialLight);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float sideLeftReferenceDifferentialLightLow = 0.0f;
+        float sideLeftReferenceDifferentialLightHigh = 0.0f;
+        float sideRightReferenceDifferentialLightLow = 0.0f;
+        float sideRightReferenceDifferentialLightHigh = 0.0f;
+        const bool haveSideLeftReferenceDifferentialLightBand = gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLightBand(
+            WallSensorId::SideLeft,
+            sideLeftReferenceDifferentialLightLow,
+            sideLeftReferenceDifferentialLightHigh);
+        const bool haveSideRightReferenceDifferentialLightBand = gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLightBand(
+            WallSensorId::SideRight,
+            sideRightReferenceDifferentialLightLow,
+            sideRightReferenceDifferentialLightHigh);
+        if (haveSideLeftReferenceDifferentialLightBand || haveSideRightReferenceDifferentialLightBand)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "side_wall_reference_diff_band,%.6f,%.6f,%.6f,%.6f",
+                sideLeftReferenceDifferentialLightLow,
+                sideLeftReferenceDifferentialLightHigh,
+                sideRightReferenceDifferentialLightLow,
+                sideRightReferenceDifferentialLightHigh);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float sideLeftReferenceDistanceM = 0.0f;
+        float sideRightReferenceDistanceM = 0.0f;
+        const bool haveSideLeftReferenceDistanceM = gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
+            WallSensorId::SideLeft,
+            sideLeftReferenceDistanceM);
+        const bool haveSideRightReferenceDistanceM = gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
+            WallSensorId::SideRight,
+            sideRightReferenceDistanceM);
+        if (haveSideLeftReferenceDistanceM || haveSideRightReferenceDistanceM)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "side_wall_reference_distance_m,%.6f,%.6f",
+                sideLeftReferenceDistanceM,
+                sideRightReferenceDistanceM);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float sideLeftBaselineDifferentialLight = 0.0f;
+        float sideRightBaselineDifferentialLight = 0.0f;
+        const bool haveSideLeftBaselineDifferentialLight = gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(
+            WallSensorId::SideLeft,
+            sideLeftBaselineDifferentialLight);
+        const bool haveSideRightBaselineDifferentialLight = gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(
+            WallSensorId::SideRight,
+            sideRightBaselineDifferentialLight);
+        if (haveSideLeftBaselineDifferentialLight || haveSideRightBaselineDifferentialLight)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "side_scene_baseline_diff,%.6f,%.6f",
+                sideLeftBaselineDifferentialLight,
+                sideRightBaselineDifferentialLight);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float sideLeftBaselineDifferentialLightLow = 0.0f;
+        float sideLeftBaselineDifferentialLightHigh = 0.0f;
+        float sideRightBaselineDifferentialLightLow = 0.0f;
+        float sideRightBaselineDifferentialLightHigh = 0.0f;
+        const bool haveSideLeftBaselineDifferentialLightBand = gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLightBand(
+            WallSensorId::SideLeft,
+            sideLeftBaselineDifferentialLightLow,
+            sideLeftBaselineDifferentialLightHigh);
+        const bool haveSideRightBaselineDifferentialLightBand = gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLightBand(
+            WallSensorId::SideRight,
+            sideRightBaselineDifferentialLightLow,
+            sideRightBaselineDifferentialLightHigh);
+        if (haveSideLeftBaselineDifferentialLightBand || haveSideRightBaselineDifferentialLightBand)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "side_scene_baseline_diff_band,%.6f,%.6f,%.6f,%.6f",
+                sideLeftBaselineDifferentialLightLow,
+                sideLeftBaselineDifferentialLightHigh,
+                sideRightBaselineDifferentialLightLow,
+                sideRightBaselineDifferentialLightHigh);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float sideLeftOnMeasuredThreshold = 0.0f;
+        float sideLeftOffMeasuredThreshold = 0.0f;
+        float sideRightOnMeasuredThreshold = 0.0f;
+        float sideRightOffMeasuredThreshold = 0.0f;
+        float sideLeftSignalBaseline = 0.0f;
+        float sideRightSignalBaseline = 0.0f;
+        const bool haveSideLeftMeasuredThreshold = gWallDistanceCalibration.TryComputeSideWallMeasuredThresholds(
+            WallSensorId::SideLeft,
+            Config::kSideWallMeasuredSignalLatchThreshold,
+            Config::kSideWallMeasuredSignalReleaseThreshold,
+            sideLeftOnMeasuredThreshold,
+            sideLeftOffMeasuredThreshold,
+            sideLeftSignalBaseline);
+        const bool haveSideRightMeasuredThreshold = gWallDistanceCalibration.TryComputeSideWallMeasuredThresholds(
+            WallSensorId::SideRight,
+            Config::kSideWallMeasuredSignalLatchThreshold,
+            Config::kSideWallMeasuredSignalReleaseThreshold,
+            sideRightOnMeasuredThreshold,
+            sideRightOffMeasuredThreshold,
+            sideRightSignalBaseline);
+        if (haveSideLeftMeasuredThreshold || haveSideRightMeasuredThreshold)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "derived_side_wall_diff_thresholds,%.6f,%.6f,%.6f,%.6f",
+                sideLeftOnMeasuredThreshold,
+                sideLeftOffMeasuredThreshold,
+                sideRightOnMeasuredThreshold,
+                sideRightOffMeasuredThreshold);
             if (!_telemetryLogger.WriteEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
@@ -9911,8 +12215,10 @@ private:
 
         float frontLeftOnMeasuredThreshold = 0.0f;
         float frontLeftOffMeasuredThreshold = 0.0f;
+        float frontLeftSignalBaseline = 0.0f;
         float frontRightOnMeasuredThreshold = 0.0f;
         float frontRightOffMeasuredThreshold = 0.0f;
+        float frontRightSignalBaseline = 0.0f;
         float frontLeftReferenceAmbientLight = 0.0f;
         float frontRightReferenceAmbientLight = 0.0f;
         const bool haveFrontLeftAmbient = gWallDistanceCalibration.TryComputeFrontSensorRepresentativeAmbientLight(
@@ -9927,14 +12233,16 @@ private:
             Config::kFrontWallReleaseHysteresisM,
             haveFrontLeftAmbient ? frontLeftReferenceAmbientLight : NAN,
             frontLeftOnMeasuredThreshold,
-            frontLeftOffMeasuredThreshold);
+            frontLeftOffMeasuredThreshold,
+            frontLeftSignalBaseline);
         const bool haveFrontRightThreshold = gWallDistanceCalibration.TryComputeFrontSensorMeasuredThresholds(
             WallSensorId::FrontRight,
             _speedVehicle,
             Config::kFrontWallReleaseHysteresisM,
             haveFrontRightAmbient ? frontRightReferenceAmbientLight : NAN,
             frontRightOnMeasuredThreshold,
-            frontRightOffMeasuredThreshold);
+            frontRightOffMeasuredThreshold,
+            frontRightSignalBaseline);
         if (haveFrontLeftAmbient || haveFrontRightAmbient)
         {
             snprintf(
@@ -9958,6 +12266,81 @@ private:
                 frontLeftOffMeasuredThreshold,
                 frontRightOnMeasuredThreshold,
                 frontRightOffMeasuredThreshold);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+        const bool haveFrontLeftBaselineDifferentialLight = gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLight(
+            WallSensorId::FrontLeft,
+            frontLeftSignalBaseline);
+        const bool haveFrontRightBaselineDifferentialLight = gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLight(
+            WallSensorId::FrontRight,
+            frontRightSignalBaseline);
+        if (haveFrontLeftBaselineDifferentialLight || haveFrontRightBaselineDifferentialLight)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "front_scene_baseline_diff,%.6f,%.6f",
+                frontLeftSignalBaseline,
+                frontRightSignalBaseline);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float frontLeftBaselineDifferentialLightLow = 0.0f;
+        float frontLeftBaselineDifferentialLightHigh = 0.0f;
+        float frontRightBaselineDifferentialLightLow = 0.0f;
+        float frontRightBaselineDifferentialLightHigh = 0.0f;
+        const bool haveFrontLeftBaselineDifferentialLightBand = gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLightBand(
+            WallSensorId::FrontLeft,
+            frontLeftBaselineDifferentialLightLow,
+            frontLeftBaselineDifferentialLightHigh);
+        const bool haveFrontRightBaselineDifferentialLightBand = gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLightBand(
+            WallSensorId::FrontRight,
+            frontRightBaselineDifferentialLightLow,
+            frontRightBaselineDifferentialLightHigh);
+        if (haveFrontLeftBaselineDifferentialLightBand || haveFrontRightBaselineDifferentialLightBand)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "front_scene_baseline_diff_band,%.6f,%.6f,%.6f,%.6f",
+                frontLeftBaselineDifferentialLightLow,
+                frontLeftBaselineDifferentialLightHigh,
+                frontRightBaselineDifferentialLightLow,
+                frontRightBaselineDifferentialLightHigh);
+            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            {
+                return Fail("Unable to write wall calibration metadata");
+            }
+        }
+
+        float frontLeftWeakestDifferentialLightLow = 0.0f;
+        float frontLeftWeakestDifferentialLightHigh = 0.0f;
+        float frontRightWeakestDifferentialLightLow = 0.0f;
+        float frontRightWeakestDifferentialLightHigh = 0.0f;
+        const bool haveFrontLeftWeakestDifferentialLightBand = gWallDistanceCalibration.TryGetFrontWeakestCalibrationDifferentialLightBand(
+            WallSensorId::FrontLeft,
+            frontLeftWeakestDifferentialLightLow,
+            frontLeftWeakestDifferentialLightHigh);
+        const bool haveFrontRightWeakestDifferentialLightBand = gWallDistanceCalibration.TryGetFrontWeakestCalibrationDifferentialLightBand(
+            WallSensorId::FrontRight,
+            frontRightWeakestDifferentialLightLow,
+            frontRightWeakestDifferentialLightHigh);
+        if (haveFrontLeftWeakestDifferentialLightBand || haveFrontRightWeakestDifferentialLightBand)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "front_weakest_calibration_diff_band,%.6f,%.6f,%.6f,%.6f",
+                frontLeftWeakestDifferentialLightLow,
+                frontLeftWeakestDifferentialLightHigh,
+                frontRightWeakestDifferentialLightLow,
+                frontRightWeakestDifferentialLightHigh);
             if (!_telemetryLogger.WriteEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
@@ -10009,7 +12392,7 @@ private:
             return true;
         }
 
-        const DiagnosticSensorSnapshot telemetrySnapshot = _telemetrySensors.Capture(stationary);
+        const DiagnosticSensorSnapshot telemetrySnapshot = _telemetrySensors.Capture(stationary, _drive.GetPose());
         const DriveTelemetry telemetry = _drive.GetTelemetry();
         if (_telemetryLogger.LogSample(stationary, timestampUs, dtUs, _drive.GetPose(), _drive, telemetry, telemetrySnapshot))
         {
@@ -10055,7 +12438,7 @@ private:
         const unsigned long now = micros();
         dtSeconds = static_cast<float>(now - _lastControlMicros) * 1.0e-6f;
         _lastControlMicros = now;
-        snapshot = _sensors.Capture(stationary);
+        snapshot = _sensors.Capture(stationary, _drive.GetPose());
         _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
         return LogTelemetrySample(stationary, now, static_cast<uint32_t>(dtSeconds * 1.0e6f));
     }
@@ -10097,7 +12480,7 @@ private:
 
     bool HoldBrakedUntilDriveSettles(const char* timeoutMessage, uint16_t stationaryHoldMs = Config::kMotionSettleHoldMs, uint16_t timeoutMs = Config::kMotionSettleTimeoutMs)
     {
-        if (timeoutMessage == nullptr)
+        if (timeoutMs > 0U && timeoutMessage == nullptr)
         {
             timeoutMessage = "Drive settle timed out";
         }
@@ -10214,6 +12597,7 @@ private:
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
         const unsigned long timeoutMs = millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
+        bool projectionFallbackLogged = false;
 
         while (true)
         {
@@ -10240,9 +12624,16 @@ private:
                     -targetHeading.GetY(),
                     projectedRemainingM))
                 {
-                    return Fail("Reverse straight target projection is invalid");
+                    if (!projectionFallbackLogged)
+                    {
+                        projectionFallbackLogged = true;
+                        AppendStartupTrace("reverse_profile:projection_fallback_to_encoder_distance");
+                    }
                 }
-                remainingM = (std::max)(0.0f, projectedRemainingM);
+                else
+                {
+                    remainingM = (std::max)(0.0f, projectedRemainingM);
+                }
             }
             if ((remainingM <= Config::kDistanceToleranceM) && IsDriveMotionSettled())
             {
@@ -10252,11 +12643,14 @@ private:
             if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
             {
                 _drive.Brake();
-                return Fail("Startup reverse encoder progress stalled");
+                AppendStartupTrace("reverse_profile:encoder_progress_stalled_holding_position");
+                return HoldPosition(Config::kMotionSettleHoldMs);
             }
             if (static_cast<long>(timeoutMs - millis()) <= 0)
             {
-                return Fail("Startup reverse profile timed out");
+                _drive.Brake();
+                AppendStartupTrace("reverse_profile:elapsed_budget_reached_holding_position");
+                return HoldPosition(Config::kMotionSettleHoldMs);
             }
 
             const float accelLimitedSpeedMps = (std::min)(limits.maxSpeedMps, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
@@ -10276,7 +12670,9 @@ private:
         File file = SD.open(fileName, FILE_READ);
         if (!file)
         {
-            return Fail("Unable to open test.txt");
+            AppendStartupTrace("maneuver_test:test_file_unavailable");
+            Serial.println("Maneuver file unavailable; skipping maneuver-file test");
+            return false;
         }
         AppendStartupTrace("maneuver_test:test_txt_opened");
 
@@ -10307,14 +12703,18 @@ private:
                 if (!TryParseManeuverCodeToken(token, code))
                 {
                     char message[96] = {};
-                    snprintf(message, sizeof(message), "Invalid maneuver token on line %u: %s", lineNumber, token);
+                    snprintf(message, sizeof(message), "Maneuver file token issue on line %u: %s", lineNumber, token);
                     file.close();
-                    return Fail(message);
+                    AppendStartupTrace("maneuver_test:test_file_parse_issue");
+                    Serial.println(message);
+                    return false;
                 }
                 if (!path.push_back(code))
                 {
                     file.close();
-                    return Fail("test.txt exceeded maneuver path capacity");
+                    AppendStartupTrace("maneuver_test:test_file_path_capacity_reached");
+                    Serial.println("Maneuver file exceeded path capacity; skipping maneuver-file test");
+                    return false;
                 }
             }
         }
@@ -10323,14 +12723,18 @@ private:
 
         if (path.GetSize() == 0)
         {
-            return Fail("test.txt did not contain any maneuvers");
+            AppendStartupTrace("maneuver_test:test_file_empty");
+            Serial.println("Maneuver file did not contain any maneuvers");
+            return false;
         }
         AppendStartupTrace("maneuver_test:path_parsed");
 
         queue.clear();
         if (!queue.push_back(path, _currentDirectionalLocation))
         {
-            return Fail("Unable to build maneuver queue from test.txt");
+            AppendStartupTrace("maneuver_test:queue_build_issue");
+            Serial.println("Maneuver file could not be converted into a queue");
+            return false;
         }
         AppendStartupTrace("maneuver_test:queue_built");
 
@@ -10341,7 +12745,9 @@ private:
 #else
         (void)fileName;
         (void)queue;
-        return Fail("Maneuver file test mode requires the Teensy target");
+        AppendStartupTrace("maneuver_test:teensy_target_required");
+        Serial.println("Maneuver-file test mode requires the Teensy target");
+        return false;
 #endif
     }
 
@@ -10356,7 +12762,12 @@ private:
         snprintf(message, sizeof(message), "count,%u", static_cast<unsigned>(queue.size()));
         if (!_telemetryLogger.WriteEvent("queue", message))
         {
-            return Fail("Unable to log maneuver queue size");
+            AppendStartupTrace("maneuver_test:queue_logging_disabled");
+            Serial.println("Maneuver queue logging unavailable; continuing without queue metadata");
+            _telemetryLogger.Flush();
+            _telemetryLogger.Close();
+            _telemetryLoggingEnabled = false;
+            return true;
         }
 
         for (uint16_t i = 0; i < queue.size(); ++i)
@@ -10375,7 +12786,12 @@ private:
 
             if (!_telemetryLogger.WriteEvent("queue_entry", queueLine))
             {
-                return Fail("Unable to log maneuver queue entry");
+                AppendStartupTrace("maneuver_test:queue_logging_disabled");
+                Serial.println("Maneuver queue entry logging unavailable; continuing without queue metadata");
+                _telemetryLogger.Flush();
+                _telemetryLogger.Close();
+                _telemetryLoggingEnabled = false;
+                return true;
             }
         }
 
@@ -10431,16 +12847,25 @@ private:
             }
             else
             {
-                const float distanceM = ManeuverDistanceMeters(code);
                 const float angleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD;
-                if (distanceM <= 0.0f)
+                MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
+                if (TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile))
                 {
-                    ok = ExecuteTurnProfile(angleRad, limits);
+                    const float maneuverSpeedLimit = ManeuverSpeedLimit(code, limits);
+                    ok = ExecuteSmoothTurnProfile(code, entrySpeed, exitSpeed, maneuverSpeedLimit, limits);
                 }
                 else
                 {
-                    const float maneuverSpeedLimit = ManeuverSpeedLimit(code, limits);
-                    ok = ExecuteArcProfile(distanceM, angleRad, entrySpeed, exitSpeed, maneuverSpeedLimit, limits);
+                    const float distanceM = ManeuverDistanceMeters(code);
+                    if (distanceM <= 0.0f)
+                    {
+                        ok = ExecuteTurnProfile(angleRad, limits);
+                    }
+                    else
+                    {
+                        const float maneuverSpeedLimit = ManeuverSpeedLimit(code, limits);
+                        ok = ExecuteArcProfile(distanceM, angleRad, entrySpeed, exitSpeed, maneuverSpeedLimit, limits);
+                    }
                 }
             }
 
@@ -10478,20 +12903,106 @@ private:
         return ExecuteQueuedManeuvers(queue, FinalLimits(), snapToExpectedLocation);
     }
 
-    bool ObserveCurrentCellFromSnapshot(const SensorSnapshot& snapshot)
+    bool SnapPoseCoordinateOnConfirmedWallContact(CalibrationWall touchWall, float targetCoordinateM)
+    {
+        if (!(std::isfinite(targetCoordinateM) && targetCoordinateM >= 0.0f))
+        {
+            return Fail("Front wall contact snap coordinate is invalid");
+        }
+
+        const PoseEstimate& pose = _drive.GetPose();
+        float xMeters = pose.xMeters;
+        float yMeters = pose.yMeters;
+        switch (touchWall)
+        {
+        case CalibrationWall::West:
+        case CalibrationWall::East:
+            xMeters = targetCoordinateM;
+            break;
+        case CalibrationWall::South:
+        case CalibrationWall::North:
+            yMeters = targetCoordinateM;
+            break;
+        default:
+            return Fail("Front wall contact snap wall is invalid");
+        }
+
+        _drive.SetPose(xMeters, yMeters, pose.yawRad);
+        _lastControlMicros = micros();
+        AppendMissionTraceFormatted(
+            "mission_front_touch_snap,cell=(%d,%d),wall=%s,target=%.4f,x=%.4f,y=%.4f,yaw_deg=%.2f",
+            _currentCell.GetX(),
+            _currentCell.GetY(),
+            CalibrationWallName(touchWall),
+            targetCoordinateM,
+            xMeters,
+            yMeters,
+            RAD_TO_DEG * pose.yawRad);
+        return true;
+    }
+
+    bool BackOffToCurrentCellCenterAlongCurrentHeading()
+    {
+        float centerXMeters = 0.0f;
+        float centerYMeters = 0.0f;
+        if (!TryGetCellCenterMeters(_currentCell, centerXMeters, centerYMeters))
+        {
+            return Fail("Unable to compute current cell center for front-wall backoff");
+        }
+
+        const PoseEstimate& pose = _drive.GetPose();
+        const MazeMap::Vectorf<2> targetHeading = pose.headingUnit;
+        const MazeMap::Vectorf<2> targetPosition(centerXMeters, centerYMeters);
+        float reverseDistanceM = 0.0f;
+        if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                pose.xMeters,
+                pose.yMeters,
+                centerXMeters,
+                centerYMeters,
+                -targetHeading.GetX(),
+                -targetHeading.GetY(),
+                reverseDistanceM))
+        {
+            return Fail("Front-wall backoff target projection is invalid");
+        }
+
+        reverseDistanceM = (std::max)(0.0f, reverseDistanceM);
+        AppendMissionTraceFormatted(
+            "mission_front_touch_backoff,cell=(%d,%d),distance_m=%.4f,target_x=%.4f,target_y=%.4f",
+            _currentCell.GetX(),
+            _currentCell.GetY(),
+            reverseDistanceM,
+            centerXMeters,
+            centerYMeters);
+        if (reverseDistanceM <= Config::kDistanceToleranceM)
+        {
+            return HoldPosition(Config::kMotionSettleHoldMs);
+        }
+
+        return ExecuteReverseStraightProfile(
+            reverseDistanceM,
+            SearchLimits(),
+            &targetHeading,
+            &targetPosition);
+    }
+
+    bool ObserveCellFromSnapshot(
+        const MazeMap::CellCoordinates& observedCell,
+        MazeMap::Direction observedDirection,
+        const SensorSnapshot& snapshot)
     {
         MazeMap::WallState knownWallState = MazeMap::WallState::Unknown;
-        if (MazeMap::TryGetKnownMissionStartWallState(_currentCell, MazeMap::Up, knownWallState))
+        if (MazeMap::TryGetKnownMissionStartWallState(observedCell, MazeMap::Up, knownWallState))
         {
             PrimeKnownMissionStartCell();
             AppendStartupTrace("observe_current_cell:used_known_start_cell_topology");
             return true;
         }
 
-        MazeMap::Cell& cell = _maze[_currentCell];
-        const MazeMap::Direction forwardDirection = _currentDirection + MazeMap::Forward;
-        const MazeMap::Direction leftDirection = _currentDirection + MazeMap::Left90;
-        const MazeMap::Direction rightDirection = _currentDirection + MazeMap::Right90;
+        MazeMap::Cell& cell = _maze[observedCell];
+        const MazeMap::Direction forwardDirection = observedDirection + MazeMap::Forward;
+        const MazeMap::Direction leftDirection = observedDirection + MazeMap::Left90;
+        const MazeMap::Direction rightDirection = observedDirection + MazeMap::Right90;
         const bool forwardUnknown = cell.GetWall(forwardDirection) == MazeMap::WallState::Unknown;
         const bool leftUnknown = cell.GetWall(leftDirection) == MazeMap::WallState::Unknown;
         const bool rightUnknown = cell.GetWall(rightDirection) == MazeMap::WallState::Unknown;
@@ -10503,14 +13014,17 @@ private:
 
         if (forwardUnknown)
         {
-            const MazeMap::WallState observedState = snapshot.frontWall ? MazeMap::Wall : MazeMap::NoWall;
+            MazeMap::WallState observedState = snapshot.frontWall ? MazeMap::Wall : MazeMap::NoWall;
+            const char* sensorSource = FrontObservationSourceName(snapshot);
+            const char* sensorMode = snapshot.frontWallUsesFallbackDetection ? "fallback" : "differential";
             _maze.SetWall(cell, forwardDirection, observedState);
             if (!LogWallObservationDecision(
+                    observedCell,
                     "forward",
                     forwardDirection,
                     observedState,
-                    FrontObservationSourceName(snapshot),
-                    snapshot.frontWallUsesFallbackDetection ? "fallback" : "differential",
+                    sensorSource,
+                    sensorMode,
                     snapshot.frontLeftDistanceM,
                     snapshot.frontRightDistanceM,
                     snapshot.frontLeftWall,
@@ -10522,43 +13036,56 @@ private:
         }
         if (leftUnknown)
         {
-            const MazeMap::WallState observedState = snapshot.leftWall ? MazeMap::Wall : MazeMap::NoWall;
-            _maze.SetWall(cell, leftDirection, observedState);
-            if (!LogWallObservationDecision(
-                    "left",
-                    leftDirection,
-                    observedState,
-                    WallSensorIdName(WallSensorId::SideLeft),
-                    nullptr,
-                    snapshot.sideLeftDistanceM,
-                    NAN,
-                    snapshot.leftWall,
-                    false,
-                    snapshot))
+            if (snapshot.leftWallObservationWindowValid)
             {
-                return false;
+                const MazeMap::WallState observedState = snapshot.leftWallObservation ? MazeMap::Wall : MazeMap::NoWall;
+                _maze.SetWall(cell, leftDirection, observedState);
+                if (!LogWallObservationDecision(
+                        observedCell,
+                        "left",
+                        leftDirection,
+                        observedState,
+                        WallSensorIdName(WallSensorId::SideLeft),
+                        nullptr,
+                        snapshot.sideLeftDistanceM,
+                        NAN,
+                        snapshot.leftWallObservation,
+                        false,
+                        snapshot))
+                {
+                    return false;
+                }
             }
         }
         if (rightUnknown)
         {
-            const MazeMap::WallState observedState = snapshot.rightWall ? MazeMap::Wall : MazeMap::NoWall;
-            _maze.SetWall(cell, rightDirection, observedState);
-            if (!LogWallObservationDecision(
-                    "right",
-                    rightDirection,
-                    observedState,
-                    WallSensorIdName(WallSensorId::SideRight),
-                    nullptr,
-                    snapshot.sideRightDistanceM,
-                    NAN,
-                    snapshot.rightWall,
-                    false,
-                    snapshot))
+            if (snapshot.rightWallObservationWindowValid)
             {
-                return false;
+                const MazeMap::WallState observedState = snapshot.rightWallObservation ? MazeMap::Wall : MazeMap::NoWall;
+                _maze.SetWall(cell, rightDirection, observedState);
+                if (!LogWallObservationDecision(
+                        observedCell,
+                        "right",
+                        rightDirection,
+                        observedState,
+                        WallSensorIdName(WallSensorId::SideRight),
+                        nullptr,
+                        snapshot.sideRightDistanceM,
+                        NAN,
+                        snapshot.rightWallObservation,
+                        false,
+                        snapshot))
+                {
+                    return false;
+                }
             }
         }
         return true;
+    }
+
+    bool ObserveCurrentCellFromSnapshot(const SensorSnapshot& snapshot)
+    {
+        return ObserveCellFromSnapshot(_currentCell, _currentDirection, snapshot);
     }
 
     bool ObserveCurrentCell()
@@ -10576,11 +13103,6 @@ private:
         }
         _drive.Brake();
         return ObserveCurrentCellFromSnapshot(snapshot);
-    }
-
-    bool ObserveCurrentCellWhileRolling()
-    {
-        return ObserveCurrentCellFromSnapshot(_sensors.Capture(true));
     }
 
     bool ExploreFullMaze()
@@ -10657,7 +13179,7 @@ private:
     bool ReturnToStart()
     {
         const MazeMap::CellCoordinates start(0, 0);
-        if (_currentCell != start)
+        while (_currentCell != start)
         {
             MazeMap::HalfStepPath<PATH_SIZE * 2> returnHalfStepPath;
             _searchPathFinder.HalfStepPathFromTo(_currentCell, _currentDirection, start, returnHalfStepPath);
@@ -10793,18 +13315,25 @@ private:
         float entrySpeedMps,
         float cruiseSpeedMps,
         float exitSpeedMps,
-        bool snapAtEnd)
+        bool snapAtEnd,
+        bool observeWhileRolling = false,
+        bool* outInterruptedByBoundaryImpact = nullptr)
     {
+        (void)snapAtEnd;
+        if (outInterruptedByBoundaryImpact != nullptr)
+        {
+            *outInterruptedByBoundaryImpact = false;
+        }
+
         if (cellCount == 0U)
         {
             return true;
         }
 
-        MazeMap::CellCoordinates destination = _currentCell;
+        const MazeMap::CellCoordinates startCell = _currentCell;
+        MazeMap::CellCoordinates destination = startCell;
         for (uint16_t i = 0U; i < cellCount; ++i)
         {
-            MazeMap::Cell& current = _maze[destination];
-            _maze.SetWall(current, direction, MazeMap::NoWall);
             destination = destination >> direction;
         }
 
@@ -10812,13 +13341,12 @@ private:
         float targetXMeters = 0.0f;
         float targetYMeters = 0.0f;
         MazeMap::MazeLocation::CellCenter(destination).GetPhysicalLocation(Config::kCellSizeM, targetXMeters, targetYMeters);
-        const MazeMap::Vectorf<2> targetPosition(targetXMeters, targetYMeters);
 
-        const PoseEstimate& pose = _drive.GetPose();
+        const PoseEstimate startPose = _drive.GetPose();
         float distanceToTargetM = 0.0f;
         if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-            pose.xMeters,
-            pose.yMeters,
+            startPose.xMeters,
+            startPose.yMeters,
             targetXMeters,
             targetYMeters,
             targetHeading.GetX(),
@@ -10832,22 +13360,474 @@ private:
             return Fail("Search straight target fell behind the current pose");
         }
 
-        if (!ExecuteStraightProfile(
-            (std::max)(0.0f, distanceToTargetM),
-            entrySpeedMps,
-            cruiseSpeedMps,
-            exitSpeedMps,
-            SearchLimits(),
-            true,
-            &targetHeading,
-            &targetPosition))
+        struct BoundaryImpactWatch
         {
-            return false;
+            bool armed = false;
+            float peakEncoderSpeedMps = 0.0f;
+            float baselinePlanarAccelMps2 = 0.0f;
+            bool baselinePlanarAccelValid = false;
+            bool motionEstablished = false;
+            unsigned long motionEstablishedMs = 0UL;
+        };
+
+        BoundaryImpactWatch boundaryImpactWatch{};
+        MazeMap::CellCoordinates nextBoundaryCell = startCell;
+        uint16_t unresolvedBoundaryCount = cellCount;
+        const float sideSensorForwardOffsetM =
+            (std::max)(_speedVehicle.SideLeft.GetPosition().GetX(), _speedVehicle.SideRight.GetPosition().GetX());
+        uint16_t rollingObservationCount = 0U;
+        MazeMap::CellCoordinates nextRollingObservationCell = startCell;
+        float rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount] = {};
+        SensorSnapshot rollingObservationSamples[Config::kSearchRollingObservationSampleCount] = {};
+        uint8_t rollingObservationNextSampleIndex = 0U;
+        bool rollingObservationPlanInitialized = false;
+        if (observeWhileRolling)
+        {
+            nextRollingObservationCell = nextRollingObservationCell >> direction;
+        }
+
+        const auto resetBoundaryImpactWatch = [&boundaryImpactWatch]()
+        {
+            boundaryImpactWatch = BoundaryImpactWatch{};
+        };
+
+        const auto resetRollingObservationPlan = [&]()
+        {
+            rollingObservationNextSampleIndex = 0U;
+            rollingObservationPlanInitialized = false;
+            memset(rollingObservationTriggerTravelM, 0, sizeof(rollingObservationTriggerTravelM));
+            memset(rollingObservationSamples, 0, sizeof(rollingObservationSamples));
+        };
+
+        const auto initializeRollingObservationPlan = [&]() -> bool
+        {
+            if (!observeWhileRolling || rollingObservationCount >= cellCount)
+            {
+                return true;
+            }
+            if (rollingObservationPlanInitialized)
+            {
+                return true;
+            }
+
+            // WARNING: Mapping observation here is intentionally one constant-velocity traversal through the cell.
+            // Do not add any parallel traversal mechanism, extra pass, or speed-shape change here. The only permitted
+            // refinement is to move the observation timing inside the target region while the chassis keeps the same
+            // steady mapping straight.
+            for (uint8_t sampleIndex = 0U; sampleIndex < Config::kSearchRollingObservationSampleCount; ++sampleIndex)
+            {
+                float targetObservationXMeters = 0.0f;
+                float targetObservationYMeters = 0.0f;
+                if (!MazeMap::TryComputeSideWallObservationSamplePoseM(
+                        nextRollingObservationCell,
+                        direction,
+                        Config::kCellSizeM,
+                        Config::kMazeWallThicknessM,
+                        sideSensorForwardOffsetM,
+                        Config::kSideWallSegmentCenterFraction,
+                        sampleIndex,
+                        Config::kSearchRollingObservationSampleCount,
+                        targetObservationXMeters,
+                        targetObservationYMeters))
+                {
+                    return Fail("Search straight rolling observation sample pose is invalid");
+                }
+
+                float triggerTravelM = 0.0f;
+                if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                        startPose.xMeters,
+                        startPose.yMeters,
+                        targetObservationXMeters,
+                        targetObservationYMeters,
+                        targetHeading.GetX(),
+                        targetHeading.GetY(),
+                        triggerTravelM))
+                {
+                    return Fail("Search straight rolling observation sample trigger is invalid");
+                }
+                if (sampleIndex > 0U &&
+                    triggerTravelM < (rollingObservationTriggerTravelM[sampleIndex - 1U] - Config::kDistanceToleranceM))
+                {
+                    AppendMissionTraceFormatted(
+                        "mission_observation_trigger_recovered,cell=(%d,%d),abs=%s,sample=%u,prev_m=%.4f,raw_m=%.4f",
+                        nextRollingObservationCell.GetX(),
+                        nextRollingObservationCell.GetY(),
+                        DirectionName(direction),
+                        static_cast<unsigned>(sampleIndex),
+                        rollingObservationTriggerTravelM[sampleIndex - 1U],
+                        triggerTravelM);
+                    triggerTravelM = rollingObservationTriggerTravelM[sampleIndex - 1U];
+                }
+
+                rollingObservationTriggerTravelM[sampleIndex] = triggerTravelM;
+            }
+
+            rollingObservationPlanInitialized = true;
+            return true;
+        };
+
+        const auto tryComputeDistanceToBoundaryTouch = [&](
+                                                      const MazeMap::CellCoordinates& boundaryCell,
+                                                      const PoseEstimate& poseEstimate,
+                                                      float& distanceToBoundaryTouchM,
+                                                      float& targetCoordinateM,
+                                                      CalibrationWall& touchWall) -> bool
+        {
+            distanceToBoundaryTouchM = 0.0f;
+            targetCoordinateM = 0.0f;
+            if (!TryComputeWallTouchTargetCoordinateForCellWall(boundaryCell, direction, targetCoordinateM, touchWall))
+            {
+                return false;
+            }
+
+            float targetXM = poseEstimate.xMeters;
+            float targetYM = poseEstimate.yMeters;
+            switch (touchWall)
+            {
+            case CalibrationWall::West:
+            case CalibrationWall::East:
+                targetXM = targetCoordinateM;
+                break;
+            case CalibrationWall::South:
+            case CalibrationWall::North:
+                targetYM = targetCoordinateM;
+                break;
+            default:
+                return false;
+            }
+
+            return MazeMap::TryComputeProjectedDistanceToTargetM(
+                poseEstimate.xMeters,
+                poseEstimate.yMeters,
+                targetXM,
+                targetYM,
+                targetHeading.GetX(),
+                targetHeading.GetY(),
+                distanceToBoundaryTouchM);
+        };
+
+        const auto tryObserveRollingCells = [&](float projectedTravelM, const SensorSnapshot& liveSnapshot) -> bool
+        {
+            if (!observeWhileRolling)
+            {
+                return true;
+            }
+
+            while (rollingObservationCount < cellCount)
+            {
+                if (!initializeRollingObservationPlan())
+                {
+                    return false;
+                }
+
+                while (rollingObservationNextSampleIndex < Config::kSearchRollingObservationSampleCount &&
+                    (projectedTravelM + Config::kDistanceToleranceM) >= rollingObservationTriggerTravelM[rollingObservationNextSampleIndex])
+                {
+                    rollingObservationSamples[rollingObservationNextSampleIndex] = liveSnapshot;
+                    ++rollingObservationNextSampleIndex;
+                }
+
+                if (rollingObservationNextSampleIndex < Config::kSearchRollingObservationSampleCount)
+                {
+                    break;
+                }
+
+                SensorSnapshot majoritySnapshot{};
+                RollingObservationVoteSummary voteSummary{};
+                if (!BuildMajorityObservationSnapshot(
+                        rollingObservationSamples,
+                        Config::kSearchRollingObservationSampleCount,
+                        majoritySnapshot,
+                        voteSummary))
+                {
+                    return Fail("Search straight rolling observation majority snapshot is invalid");
+                }
+
+                AppendMissionTraceFormatted(
+                    "mission_observation_timed,cell=(%d,%d),abs=%s,samples=%u,start_m=%.4f,end_m=%.4f,travel_m=%.4f,front_votes=%u,left_valid=%u,left_votes=%u,right_valid=%u,right_votes=%u",
+                    nextRollingObservationCell.GetX(),
+                    nextRollingObservationCell.GetY(),
+                    DirectionName(direction),
+                    static_cast<unsigned>(voteSummary.sampleCount),
+                    rollingObservationTriggerTravelM[0],
+                    rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount - 1U],
+                    projectedTravelM,
+                    static_cast<unsigned>(voteSummary.frontWallVotes),
+                    static_cast<unsigned>(voteSummary.leftWindowValidVotes),
+                    static_cast<unsigned>(voteSummary.leftWallVotes),
+                    static_cast<unsigned>(voteSummary.rightWindowValidVotes),
+                    static_cast<unsigned>(voteSummary.rightWallVotes));
+                if (!ObserveCellFromSnapshot(nextRollingObservationCell, direction, majoritySnapshot))
+                {
+                    return false;
+                }
+
+                ++rollingObservationCount;
+                if (rollingObservationCount < cellCount)
+                {
+                    nextRollingObservationCell = nextRollingObservationCell >> direction;
+                }
+                resetRollingObservationPlan();
+            }
+
+            return true;
+        };
+
+        const MotionLimits searchLimits = SearchLimits();
+        const float startDistanceM = _drive.GetAverageDistanceMeters();
+        float commandedSpeedMps = (std::max)(entrySpeedMps, 0.0f);
+        const unsigned long expectedCompletionDeadlineMs = millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceToTargetM));
+        EncoderProgressWatchdog translationWatchdog{};
+        translationWatchdog.Reset(0.0f, millis());
+        bool stallLogged = false;
+        bool durationLogged = false;
+
+        while (true)
+        {
+            float dtSeconds = 0.0f;
+            SensorSnapshot snapshot{};
+            if (!TickControl(false, dtSeconds, snapshot))
+            {
+                return false;
+            }
+
+            const PoseEstimate& livePose = _drive.GetPose();
+            const DriveTelemetry telemetry = _drive.GetTelemetry();
+            const float encoderSpeedMps = MazeMap::ComputeAverageEncoderAbsSpeedMps(
+                telemetry.leftVelocityMps,
+                telemetry.rightVelocityMps);
+            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+
+            float projectedRemainingM = 0.0f;
+            if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                    livePose.xMeters,
+                    livePose.yMeters,
+                    targetXMeters,
+                    targetYMeters,
+                    targetHeading.GetX(),
+                    targetHeading.GetY(),
+                    projectedRemainingM))
+            {
+                return Fail("Search straight target projection is invalid");
+            }
+            const float remainingM = (std::max)(0.0f, projectedRemainingM);
+            const float projectedTravelM = (std::clamp)(distanceToTargetM - projectedRemainingM, 0.0f, distanceToTargetM);
+
+            if (Config::kEnableMissionBoundaryImpactWallDetection && unresolvedBoundaryCount > 0U)
+            {
+                float distanceToBoundaryTouchM = 0.0f;
+                float boundaryTargetCoordinateM = 0.0f;
+                CalibrationWall boundaryTouchWall = CalibrationWall::North;
+                if (!tryComputeDistanceToBoundaryTouch(
+                        nextBoundaryCell,
+                        livePose,
+                        distanceToBoundaryTouchM,
+                        boundaryTargetCoordinateM,
+                        boundaryTouchWall))
+                {
+                    AppendMissionTraceFormatted(
+                        "mission_boundary_watch_disable,cell=(%d,%d),abs=%s,reason=target_unavailable",
+                        nextBoundaryCell.GetX(),
+                        nextBoundaryCell.GetY(),
+                        DirectionName(direction));
+                    unresolvedBoundaryCount = 0U;
+                    resetBoundaryImpactWatch();
+                }
+                else
+                {
+                    if (!boundaryImpactWatch.armed &&
+                        MazeMap::ShouldArmBoundaryImpactWatch(
+                            distanceToBoundaryTouchM,
+                            Config::kSearchBoundaryImpactArmDistanceM))
+                    {
+                        boundaryImpactWatch.armed = true;
+                        boundaryImpactWatch.baselinePlanarAccelMps2 = snapshot.planarAccelMps2;
+                        boundaryImpactWatch.baselinePlanarAccelValid = true;
+                        AppendMissionTraceFormatted(
+                            "mission_boundary_watch_arm,cell=(%d,%d),abs=%s,target=%.4f,distance_to_touch_m=%.4f",
+                            nextBoundaryCell.GetX(),
+                            nextBoundaryCell.GetY(),
+                            DirectionName(direction),
+                            boundaryTargetCoordinateM,
+                            distanceToBoundaryTouchM);
+                    }
+
+                    if (boundaryImpactWatch.armed)
+                    {
+                        boundaryImpactWatch.peakEncoderSpeedMps =
+                            (std::max)(boundaryImpactWatch.peakEncoderSpeedMps, encoderSpeedMps);
+                        if (!boundaryImpactWatch.motionEstablished &&
+                            MazeMap::IsWallTapMotionEstablished(
+                                boundaryImpactWatch.peakEncoderSpeedMps,
+                                traveledM,
+                                Config::kFrontWallTapMinimumMotionSpeedMps,
+                                Config::kFrontWallTapMinimumMotionDistanceM))
+                        {
+                            boundaryImpactWatch.motionEstablished = true;
+                            boundaryImpactWatch.motionEstablishedMs = millis();
+                        }
+
+                        const bool encoderImpactDetected =
+                            boundaryImpactWatch.motionEstablished &&
+                            MazeMap::HasSharpEncoderVelocityDecline(
+                                boundaryImpactWatch.peakEncoderSpeedMps,
+                                encoderSpeedMps,
+                                Config::kFrontWallTapMinimumPeakEncoderSpeedMps,
+                                Config::kFrontWallTapMaximumCurrentPeakRatio,
+                                Config::kFrontWallTapMinimumEncoderDropMps);
+                        const bool accelImpactDetected =
+                            boundaryImpactWatch.motionEstablished &&
+                            ((millis() - boundaryImpactWatch.motionEstablishedMs) >= Config::kFrontWallTapAccelArmDelayMs) &&
+                            MazeMap::HasPlanarAccelContactSpike(
+                                boundaryImpactWatch.baselinePlanarAccelMps2,
+                                snapshot.planarAccelMps2,
+                                Config::kFrontWallTapPlanarAccelSpikeMps2);
+                        if (encoderImpactDetected || accelImpactDetected)
+                        {
+                            _drive.Brake();
+                            if (!HoldBrakedUntilDriveSettles(
+                                    nullptr,
+                                    Config::kMotionSettleHoldMs,
+                                    0U))
+                            {
+                                return false;
+                            }
+
+                            _maze.SetWall(_maze[nextBoundaryCell], direction, MazeMap::Wall);
+                            _currentCell = nextBoundaryCell;
+                            _currentDirection = direction;
+                            _currentDirectionalLocation = MazeMap::DirectionalLocation(
+                                MazeMap::MazeLocation::CellCenter(_currentCell),
+                                _currentDirection);
+                            AppendMissionTraceFormatted(
+                                "mission_boundary_impact,cell=(%d,%d),abs=%s,target=%.4f,enc_v_mps=%.4f,peak_enc_v_mps=%.4f,planar_accel_mps2=%.4f",
+                                _currentCell.GetX(),
+                                _currentCell.GetY(),
+                                DirectionName(direction),
+                                boundaryTargetCoordinateM,
+                                encoderSpeedMps,
+                                boundaryImpactWatch.peakEncoderSpeedMps,
+                                snapshot.planarAccelMps2);
+                            if (!SnapPoseCoordinateOnConfirmedWallContact(boundaryTouchWall, boundaryTargetCoordinateM))
+                            {
+                                return false;
+                            }
+                            if (!BackOffToCurrentCellCenterAlongCurrentHeading())
+                            {
+                                return false;
+                            }
+
+                            if (outInterruptedByBoundaryImpact != nullptr)
+                            {
+                                *outInterruptedByBoundaryImpact = true;
+                            }
+                            return true;
+                        }
+                    }
+
+                    if (MazeMap::HasClearedBoundaryWithoutImpact(
+                            distanceToBoundaryTouchM,
+                            Config::kSearchBoundaryOpenConfirmMarginM))
+                    {
+                        _maze.SetWall(_maze[nextBoundaryCell], direction, MazeMap::NoWall);
+                        AppendMissionTraceFormatted(
+                            "mission_boundary_clear,cell=(%d,%d),abs=%s,target=%.4f,distance_to_touch_m=%.4f",
+                            nextBoundaryCell.GetX(),
+                            nextBoundaryCell.GetY(),
+                            DirectionName(direction),
+                            boundaryTargetCoordinateM,
+                            distanceToBoundaryTouchM);
+                        nextBoundaryCell = nextBoundaryCell >> direction;
+                        --unresolvedBoundaryCount;
+                        resetBoundaryImpactWatch();
+                    }
+                }
+            }
+
+            if (!tryObserveRollingCells(projectedTravelM, snapshot))
+            {
+                return false;
+            }
+
+            const bool stoppingAtEndpoint = exitSpeedMps <= 0.05f;
+            const bool terminalReached =
+                stoppingAtEndpoint ?
+                ((remainingM <= Config::kDistanceToleranceM) && IsDriveMotionSettled()) :
+                ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeedMps) <= Config::kSpeedToleranceMps));
+            if (terminalReached)
+            {
+                _drive.Brake();
+                break;
+            }
+
+            const unsigned long nowMs = millis();
+            if (!stallLogged && translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, nowMs))
+            {
+                stallLogged = true;
+                AppendMissionTraceFormatted(
+                    "mission_motion_watchdog,mode=search_straight,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                    _currentCell.GetX(),
+                    _currentCell.GetY(),
+                    traveledM,
+                    remainingM,
+                    commandedSpeedMps);
+            }
+            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - nowMs) <= 0)
+            {
+                durationLogged = true;
+                AppendMissionTraceFormatted(
+                    "mission_motion_watchdog,mode=search_straight,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                    _currentCell.GetX(),
+                    _currentCell.GetY(),
+                    traveledM,
+                    remainingM,
+                    commandedSpeedMps);
+            }
+
+            const float accelLimitedSpeedMps = (std::min)(cruiseSpeedMps, commandedSpeedMps + (searchLimits.accelMps2 * dtSeconds));
+            const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(exitSpeedMps, remainingM, searchLimits.decelMps2);
+            commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+
+            float wallOmegaRadps = 0.0f;
+            float signalCorridorErrorM = 0.0f;
+            bool useLeftWall = false;
+            bool useRightWall = false;
+            ResolveMapQualifiedSideWalls(snapshot, useLeftWall, useRightWall);
+            if (TryComputeStraightWallCenterErrorM(
+                    gWallDistanceCalibration,
+                    snapshot.sideLeftDifferentialLight,
+                    useLeftWall,
+                    snapshot.sideRightDifferentialLight,
+                    useRightWall,
+                    signalCorridorErrorM))
+            {
+                wallOmegaRadps += Config::kWallCenterGain * signalCorridorErrorM;
+            }
+            if (std::isfinite(snapshot.frontLeftDistanceM) &&
+                std::isfinite(snapshot.frontRightDistanceM) &&
+                snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+                snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+                remainingM < 0.07f)
+            {
+                wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
+            }
+
+            const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
+            float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps) + wallOmegaRadps;
+            angularCommandRadps = (std::clamp)(angularCommandRadps, -searchLimits.maxAngularSpeedRadps, searchLimits.maxAngularSpeedRadps);
+            _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+        }
+
+        if (exitSpeedMps <= 0.05f)
+        {
+            if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+            {
+                return false;
+            }
         }
 
         _currentCell = destination;
         _currentDirectionalLocation = MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(_currentCell), _currentDirection);
-        (void)snapAtEnd;
         return true;
     }
 
@@ -10879,15 +13859,22 @@ private:
             if (plan.fullSpeedCellCount > 0U)
             {
                 const float exitSpeedMps = (plan.cautiousCellCount > 0U) ? cautiousCruiseSpeedMps : 0.0f;
+                bool interruptedByBoundaryImpact = false;
                 if (!ExecuteSearchStraightCells(
                     plan.direction,
                     plan.fullSpeedCellCount,
                     0.0f,
                     searchLimits.maxSpeedMps,
                     exitSpeedMps,
-                    plan.cautiousCellCount == 0U))
+                    plan.cautiousCellCount == 0U,
+                    false,
+                    &interruptedByBoundaryImpact))
                 {
                     return false;
+                }
+                if (interruptedByBoundaryImpact)
+                {
+                    return ObserveCurrentCell();
                 }
                 rollingEntrySpeedMps = exitSpeedMps;
             }
@@ -10897,15 +13884,22 @@ private:
                 if (!observeFinalCell)
                 {
                     const float cautiousEntrySpeedMps = (plan.fullSpeedCellCount > 0U) ? cautiousCruiseSpeedMps : 0.0f;
+                    bool interruptedByBoundaryImpact = false;
                     if (!ExecuteSearchStraightCells(
                             plan.direction,
                             plan.cautiousCellCount,
                             cautiousEntrySpeedMps,
                             cautiousCruiseSpeedMps,
                             0.0f,
-                            true))
+                            true,
+                            false,
+                            &interruptedByBoundaryImpact))
                     {
                         return false;
+                    }
+                    if (interruptedByBoundaryImpact)
+                    {
+                        return ObserveCurrentCell();
                     }
                     pathIndex = static_cast<uint16_t>(plan.segmentEndIndex + 1U);
                     continue;
@@ -10914,29 +13908,31 @@ private:
                 float cautiousEntrySpeedMps = (plan.fullSpeedCellCount > 0U) ? rollingEntrySpeedMps : 0.0f;
                 while (true)
                 {
+                    bool interruptedByBoundaryImpact = false;
                     if (!ExecuteSearchStraightCells(
                             plan.direction,
                             1U,
                             cautiousEntrySpeedMps,
                             cautiousCruiseSpeedMps,
                             cautiousCruiseSpeedMps,
-                            false))
+                            false,
+                            true,
+                            &interruptedByBoundaryImpact))
                     {
                         return false;
+                    }
+                    if (interruptedByBoundaryImpact)
+                    {
+                        return ObserveCurrentCell();
                     }
 
                     cautiousEntrySpeedMps = cautiousCruiseSpeedMps;
-                    if (!ObserveCurrentCellWhileRolling())
-                    {
-                        return false;
-                    }
-
                     MazeMap::Path<PATH_SIZE> continuingPath;
                     _searchPathFinder.PathToNearestUnknown(_currentCell, _currentDirection, continuingPath);
                     if (continuingPath.GetSize() < 2U)
                     {
                         _drive.Brake();
-                        if (!HoldBrakedUntilDriveSettles("Search straight failed to settle at exploration stop", Config::kMotionSettleHoldMs, 0U))
+                        if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
                         {
                             return false;
                         }
@@ -10952,7 +13948,7 @@ private:
                     if (nextPlan.direction != plan.direction)
                     {
                         _drive.Brake();
-                        if (!HoldBrakedUntilDriveSettles("Search straight failed to settle before turn", Config::kMotionSettleHoldMs, 0U))
+                        if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
                         {
                             return false;
                         }
@@ -10962,15 +13958,22 @@ private:
                     if (nextPlan.fullSpeedCellCount > 0U)
                     {
                         const float exitSpeedMps = (nextPlan.cautiousCellCount > 0U) ? cautiousCruiseSpeedMps : 0.0f;
+                        bool interruptedByBoundaryImpact = false;
                         if (!ExecuteSearchStraightCells(
                                 plan.direction,
                                 nextPlan.fullSpeedCellCount,
                                 cautiousEntrySpeedMps,
                                 searchLimits.maxSpeedMps,
                                 exitSpeedMps,
-                                nextPlan.cautiousCellCount == 0U))
+                                nextPlan.cautiousCellCount == 0U,
+                                false,
+                                &interruptedByBoundaryImpact))
                         {
                             return false;
+                        }
+                        if (interruptedByBoundaryImpact)
+                        {
+                            return ObserveCurrentCell();
                         }
 
                         if (nextPlan.cautiousCellCount == 0U)
@@ -10987,6 +13990,26 @@ private:
         }
 
         return observeFinalCell ? ObserveCurrentCell() : true;
+    }
+
+    void ResolveMapQualifiedSideWalls(const SensorSnapshot& snapshot, bool& useLeftWall, bool& useRightWall) const
+    {
+        // Exclusively for the purpose of centering.
+        const MazeMap::Cell& currentCell = _maze.Index(_currentCell);
+        const MazeMap::WallState leftWallState = currentCell.GetWall(_currentDirection + MazeMap::Left90);
+        const MazeMap::WallState rightWallState = currentCell.GetWall(_currentDirection + MazeMap::Right90);
+        useLeftWall =
+            (leftWallState == MazeMap::Wall) &&
+            IsCalibratedSideCenteringSignalPresent(
+                gWallDistanceCalibration,
+                WallSensorId::SideLeft,
+                snapshot.sideLeftDifferentialLight);
+        useRightWall =
+            (rightWallState == MazeMap::Wall) &&
+            IsCalibratedSideCenteringSignalPresent(
+                gWallDistanceCalibration,
+                WallSensorId::SideRight,
+                snapshot.sideRightDifferentialLight);
     }
 
     bool TryComputeWallGroundedCorridorCoordinateM(const SensorSnapshot& snapshot, float& coordinateM, bool& correctsXAxis) const
@@ -11013,8 +14036,11 @@ private:
         float rightCoordinateM = 0.0f;
         bool haveLeftCoordinate = false;
         bool haveRightCoordinate = false;
+        bool useLeftWall = false;
+        bool useRightWall = false;
+        ResolveMapQualifiedSideWalls(snapshot, useLeftWall, useRightWall);
 
-        if (snapshot.leftWall)
+        if (useLeftWall)
         {
             haveLeftCoordinate = TryComputePoseAxisFromObservedWall(
                 _drive.GetPose(),
@@ -11025,7 +14051,7 @@ private:
                 leftCoordinateM);
         }
 
-        if (snapshot.rightWall)
+        if (useRightWall)
         {
             haveRightCoordinate = TryComputePoseAxisFromObservedWall(
                 _drive.GetPose(),
@@ -11249,10 +14275,7 @@ private:
             _currentCell.GetX(),
             _currentCell.GetY());
         AppendStartupTrace(traceLine);
-        if (!WriteMissionTextLineIfEnabled(traceLine))
-        {
-            return Fail("Unable to write logging.txt");
-        }
+        (void)WriteMissionTraceLineBestEffort(traceLine, "mission_text_logging:turn_edge_snap_write_failed");
 
         return true;
     }
@@ -11293,7 +14316,7 @@ private:
             return false;
         }
 
-        const SensorSnapshot settledSnapshot = _sensors.Capture(true);
+        const SensorSnapshot settledSnapshot = _sensors.Capture(true, _drive.GetPose());
         if (!ApplyTurnWallEdgePoseCorrection(targetDirection, settledSnapshot, wallEdgeTracker))
         {
             return false;
@@ -11416,21 +14439,24 @@ private:
                 else
                 {
                     float signalCorridorErrorM = 0.0f;
+                    bool useLeftWall = false;
+                    bool useRightWall = false;
+                    ResolveMapQualifiedSideWalls(snapshot, useLeftWall, useRightWall);
                     if (TryComputeStraightWallCenterErrorM(
                             gWallDistanceCalibration,
                             snapshot.sideLeftDifferentialLight,
-                            snapshot.leftWall,
+                            useLeftWall,
                             snapshot.sideRightDifferentialLight,
-                            snapshot.rightWall,
+                            useRightWall,
                             signalCorridorErrorM))
                     {
                         wallOmegaRadps += Config::kWallCenterGain * signalCorridorErrorM;
                     }
-                    else
-                    {
-                        wallOmegaRadps += Config::kWallCenterGain * snapshot.corridorErrorM;
-                    }
-                    if (snapshot.frontWall && remainingM < 0.07f)
+                    if (std::isfinite(snapshot.frontLeftDistanceM) &&
+                        std::isfinite(snapshot.frontRightDistanceM) &&
+                        snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+                        snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+                        remainingM < 0.07f)
                     {
                         wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
                     }
@@ -11445,7 +14471,7 @@ private:
 
         if (exitSpeed <= 0.05f)
         {
-            if (!HoldBrakedUntilDriveSettles("Straight profile failed to settle at stop", Config::kMotionSettleHoldMs, 0U))
+            if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
             {
                 return false;
             }
@@ -11509,7 +14535,7 @@ private:
             _drive.CommandVelocity(0.0f, angularCommandRadps, dtSeconds);
         }
 
-        if (!HoldBrakedUntilDriveSettles("Turn profile failed to settle at stop", Config::kMotionSettleHoldMs, 0U))
+        if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
         {
             return false;
         }
@@ -11593,11 +14619,100 @@ private:
 
         if (exitSpeed <= 0.05f)
         {
-            if (!HoldBrakedUntilDriveSettles("Arc profile failed to settle at stop", Config::kMotionSettleHoldMs, 0U))
+            if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
             {
                 return false;
             }
         }
+        return true;
+    }
+
+    bool ExecuteSmoothTurnProfile(
+        MazeMap::ManeuverCode code,
+        float entrySpeed,
+        float exitSpeed,
+        float cruiseSpeed,
+        const MotionLimits& limits)
+    {
+        MazeMap::SmoothTurnExecutionProfile profile{};
+        if (!TryGetSmoothTurnExecutionProfileMeters(code, profile))
+        {
+            return Fail("Smooth turn geometry is unavailable");
+        }
+
+        float maneuverSpeedMps = cruiseSpeed;
+        if (!(maneuverSpeedMps > 0.0f))
+        {
+            maneuverSpeedMps = (std::max)(entrySpeed, exitSpeed);
+        }
+        if (!(maneuverSpeedMps > 0.0f))
+        {
+            return Fail("Smooth turn speed is invalid");
+        }
+
+        const float startDistanceM = _drive.GetAverageDistanceMeters();
+        const float startYawRad = _drive.GetPose().yawRad;
+        EncoderProgressWatchdog translationWatchdog{};
+        translationWatchdog.Reset(0.0f, millis());
+        const unsigned long expectedCompletionDeadlineMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * profile.totalDistance));
+        bool stallLogged = false;
+        bool durationLogged = false;
+
+        while (true)
+        {
+            float dtSeconds = 0.0f;
+            SensorSnapshot snapshot{};
+            if (!TickControl(false, dtSeconds, snapshot))
+            {
+                return false;
+            }
+            (void)snapshot;
+
+            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+            const float remainingM = (std::max)(0.0f, profile.totalDistance - traveledM);
+            if (remainingM <= Config::kDistanceToleranceM)
+            {
+                break;
+            }
+
+            const unsigned long nowMs = millis();
+            if (!stallLogged && translationWatchdog.Stalled(traveledM, maneuverSpeedMps, remainingM, nowMs))
+            {
+                stallLogged = true;
+                AppendMissionTraceFormatted(
+                    "mission_motion_watchdog,mode=smooth_turn,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                    _currentCell.GetX(),
+                    _currentCell.GetY(),
+                    traveledM,
+                    remainingM,
+                    maneuverSpeedMps);
+            }
+            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - nowMs) <= 0)
+            {
+                durationLogged = true;
+                AppendMissionTraceFormatted(
+                    "mission_motion_watchdog,mode=smooth_turn,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                    _currentCell.GetX(),
+                    _currentCell.GetY(),
+                    traveledM,
+                    remainingM,
+                    maneuverSpeedMps);
+            }
+
+            float yawOffsetRad = 0.0f;
+            float nominalOmegaRadps = 0.0f;
+            if (!MazeMap::TryComputeSmoothTurnTarget(profile, traveledM, maneuverSpeedMps, yawOffsetRad, nominalOmegaRadps))
+            {
+                return Fail("Smooth turn target became invalid");
+            }
+
+            const float targetYawRad = WrapAngleRad(startYawRad + yawOffsetRad);
+            const float headingErrorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
+            float angularCommandRadps = nominalOmegaRadps + (Config::kArcHeadingKp * headingErrorRad) - (Config::kArcYawD * _drive.GetPose().angularSpeedRadps);
+            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
+            _drive.CommandVelocity(maneuverSpeedMps, angularCommandRadps, dtSeconds);
+        }
+
         return true;
     }
 
@@ -11614,8 +14729,32 @@ private:
         return xMatch && yMatch;
     }
 
+    static bool TryGetSmoothTurnExecutionProfileMeters(MazeMap::ManeuverCode code, MazeMap::SmoothTurnExecutionProfile& profile)
+    {
+        profile = MazeMap::SmoothTurnExecutionProfile{};
+        if ((code == MazeMap::MC_NONE) || IsStraightCode(code))
+        {
+            return false;
+        }
+
+        MazeMap::SmoothTurnExecutionProfile profileInCells{};
+        if (!MazeMap::ManeuverSet::GetSet()[code].TryGetSmoothTurnExecutionProfile(profileInCells))
+        {
+            return false;
+        }
+
+        profile = MazeMap::ScaleSmoothTurnExecutionProfile(profileInCells, Config::kCellSizeM);
+        profile.radians = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD;
+        return profile.IsValid();
+    }
+
     static float ManeuverDistanceMeters(MazeMap::ManeuverCode code)
     {
+        MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
+        if (TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile))
+        {
+            return smoothTurnProfile.totalDistance;
+        }
         return 0.5f * Config::kCellSizeM * static_cast<float>(MazeMap::ManeuverSet::GetSet().DistanceTravelled(code));
     }
 

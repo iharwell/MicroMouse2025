@@ -7,9 +7,18 @@
 #include "VehicleState.h"
 #include "WallSensor.h"
 #include "LSV6DSV16X_IMU.h"
+#include <cmath>
 
 namespace MazeMap
 {
+    struct ArcTrackWidthInterpolation
+    {
+        float tightRadiusM;
+        float tightTrackWidthM;
+        float wideRadiusM;
+        float wideTrackWidthM;
+    };
+
     struct VehiclePhysicalModel
     {
         float massKg;
@@ -19,6 +28,7 @@ namespace MazeMap
         float trackWidthM;
         float trackWidthPhysicalMinM;
         float trackWidthPhysicalMaxM;
+        ArcTrackWidthInterpolation arcTrackWidthInterpolation;
     };
 
     class EXPORT Vehicle
@@ -29,13 +39,16 @@ namespace MazeMap
             0.0842f,
             0.1085f,
             0.056f,
-            // March 21, 2026 diagnostic fit: blended from dedicated in-place turns (~82.98 mm effective)
-            // and full-circle encoder-vs-yaw closure (~81.10 mm effective). This kinematic fit currently sits
-            // outside the raw contact-patch envelope, which points to remaining wheel-diameter/compliance error,
-            // but it is the best available motion-model value for turn prediction.
-            0.08203f,
+            // March 22, 2026 aux000 in-place-turn fit: the latest completed position-audit turn points centered
+            // at 86.191 mm effective, with the two completed passes spanning 86.154-86.227 mm.
+            0.086191f,
+            // Physical tire contact patch span measured on the chassis. Effective track width may exceed this due to
+            // scrub dynamics, so these remain informational rather than hard bounds.
             0.07004f,
-            0.07868f
+            0.07868f,
+            // March 22, 2026 aux000 smooth-turn fit: the completed S90SS and S90LS passes implied effective arc
+            // widths of 85.809 mm at the 63 mm nominal radius and 84.519 mm at the 153 mm nominal radius.
+            { 0.063f, 0.085809f, 0.153f, 0.084519f }
         };
         CircularBuffer<VehicleState, 15> _stateHistory;
         float _peakForwardAcceleration;
@@ -95,6 +108,8 @@ namespace MazeMap
 
         float GetMass() const;
         float GetTrackWidth() const;
+        static float GetArcEffectiveTrackWidth(float turningRadiusM) noexcept;
+        static float GetEffectiveTrackWidthForMotion(float linearSpeedMps, float angularSpeedRadps) noexcept;
         float GetLength() const;
         float GetFrontWallContactOffset() const;
         float GetRearWallContactOffset() const;

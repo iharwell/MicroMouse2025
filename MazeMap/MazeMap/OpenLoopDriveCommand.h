@@ -45,4 +45,41 @@ namespace MazeMap
             (std::clamp)(command.rightDriveCommand, -1.0f, 1.0f)
         };
     }
+
+    inline OpenLoopDriveCommand ComputeOpenLoopYawWiggleCommand(
+        float forwardDriveCommand,
+        unsigned long elapsedMs,
+        unsigned long wiggleHalfPeriodMs,
+        float wiggleTurnFraction,
+        float minimumRetainedForwardFraction = 0.0f) noexcept
+    {
+        const float clampedForwardDriveCommand =
+            std::isfinite(forwardDriveCommand) ?
+            (std::clamp)(forwardDriveCommand, -1.0f, 1.0f) :
+            0.0f;
+        if (!(std::isfinite(wiggleTurnFraction) && wiggleTurnFraction > 0.0f) ||
+            wiggleHalfPeriodMs == 0UL)
+        {
+            return MakeSymmetricOpenLoopDriveCommand(clampedForwardDriveCommand);
+        }
+
+        const float clampedRetainedForwardFraction =
+            std::isfinite(minimumRetainedForwardFraction) ?
+            (std::clamp)(minimumRetainedForwardFraction, 0.0f, 1.0f) :
+            0.0f;
+        const float clampedTurnFraction = (std::clamp)(wiggleTurnFraction, 0.0f, 1.0f);
+        const bool biasRight = ((elapsedMs / wiggleHalfPeriodMs) & 1UL) == 0UL;
+        const float forwardSign = (clampedForwardDriveCommand >= 0.0f) ? 1.0f : -1.0f;
+        const float forwardMagnitude = std::fabs(clampedForwardDriveCommand);
+        const float turnMagnitude = clampedTurnFraction * forwardMagnitude;
+        const float minimumRetainedMagnitude = clampedRetainedForwardFraction * forwardMagnitude;
+        const float lowMagnitude = (std::max)(forwardMagnitude - turnMagnitude, minimumRetainedMagnitude);
+        const float highMagnitude = (std::min)(1.0f, lowMagnitude + (2.0f * turnMagnitude));
+        const float leftMagnitude = biasRight ? lowMagnitude : highMagnitude;
+        const float rightMagnitude = biasRight ? highMagnitude : lowMagnitude;
+        return ClampOpenLoopDriveCommand(
+            MakeOpenLoopDriveCommand(
+                forwardSign * leftMagnitude,
+                forwardSign * rightMagnitude));
+    }
 }

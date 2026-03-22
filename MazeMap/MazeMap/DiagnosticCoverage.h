@@ -21,7 +21,8 @@ namespace MazeMap
         { "straight", "straight_* -> kStraightHeadingKp, kStraightYawD, kDistanceToleranceM, and kSpeedToleranceMps. Use straight_result heading and stop error." },
         { "watchdog", "straight_* faults -> kEncoderProgressEpsilonM, kEncoderStallCommandThresholdMps, kEncoderStallTimeoutMs, and kEncoderStallStartupGraceMs." },
         { "arc", "arc_* -> kArcHeadingKp and kArcYawD. Use arc_result and arc_circle_result heading and closure error." },
-        { "circle", "circle_* -> kArcHeadingKp, kArcYawD, and kTrackWidthM. Use circle_result counts, avg_omega_radps, est_lat_mps2, and avg_lat_mps2." },
+        { "arc_track_width", "arc_* also uses kArcTrackWidthTightM, kArcTrackWidthTightRadiusM, kArcTrackWidthWideM, and kArcTrackWidthWideRadiusM." },
+        { "circle", "circle_* -> kArcHeadingKp, kArcYawD, and the arc track-width model. Use circle_result counts, avg_omega_radps, est_lat_mps2, and avg_lat_mps2." },
         { "square", "square_* -> kTrackWidthM with kStraightHeadingKp/kStraightYawD and kTurnHeadingKp/kTurnYawD. Use square_result closure and final heading error." },
     };
 

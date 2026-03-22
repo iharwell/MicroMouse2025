@@ -22,6 +22,8 @@ namespace
     constexpr uint8_t kSideRightWallSensorLedPin = 17U;
     constexpr uint8_t kSideLeftWallSensorPin = 20U;
     constexpr uint8_t kSideLeftWallSensorLedPin = 16U;
+    constexpr float kArcTrackWidthLinearSpeedEpsilonMps = 1.0e-4f;
+    constexpr float kArcTrackWidthAngularSpeedEpsilonRadps = 1.0e-4f;
 
     const std::array<float, 8>& GetDefaultWallSensorAdcToLightTable()
     {
@@ -237,6 +239,50 @@ namespace MazeMap
     float Vehicle::GetMaxAngularAcceleration() const { return _peakAngularAcceleration; }
     float Vehicle::GetMass() const { return GetPhysicalModel().massKg; }
     float Vehicle::GetTrackWidth() const { return GetPhysicalModel().trackWidthM; }
+    float Vehicle::GetArcEffectiveTrackWidth(float turningRadiusM) noexcept
+    {
+        const ArcTrackWidthInterpolation& interpolation = GetPhysicalModel().arcTrackWidthInterpolation;
+        if (!std::isfinite(turningRadiusM) || !(turningRadiusM > 0.0f))
+        {
+            return GetPhysicalModel().trackWidthM;
+        }
+
+        if (!(interpolation.tightRadiusM > 0.0f) ||
+            !(interpolation.wideRadiusM > interpolation.tightRadiusM) ||
+            !std::isfinite(interpolation.tightTrackWidthM) ||
+            !std::isfinite(interpolation.wideTrackWidthM))
+        {
+            return GetPhysicalModel().trackWidthM;
+        }
+
+        if (turningRadiusM <= interpolation.tightRadiusM)
+        {
+            return interpolation.tightTrackWidthM;
+        }
+
+        if (turningRadiusM >= interpolation.wideRadiusM)
+        {
+            return interpolation.wideTrackWidthM;
+        }
+
+        const float blend =
+            (turningRadiusM - interpolation.tightRadiusM) /
+            (interpolation.wideRadiusM - interpolation.tightRadiusM);
+        return interpolation.tightTrackWidthM +
+            (blend * (interpolation.wideTrackWidthM - interpolation.tightTrackWidthM));
+    }
+    float Vehicle::GetEffectiveTrackWidthForMotion(float linearSpeedMps, float angularSpeedRadps) noexcept
+    {
+        if (!std::isfinite(linearSpeedMps) ||
+            !std::isfinite(angularSpeedRadps) ||
+            std::fabs(linearSpeedMps) <= kArcTrackWidthLinearSpeedEpsilonMps ||
+            std::fabs(angularSpeedRadps) <= kArcTrackWidthAngularSpeedEpsilonRadps)
+        {
+            return GetPhysicalModel().trackWidthM;
+        }
+
+        return GetArcEffectiveTrackWidth(std::fabs(linearSpeedMps / angularSpeedRadps));
+    }
     float Vehicle::GetLength() const { return GetPhysicalModel().lengthM; }
     float Vehicle::GetFrontWallContactOffset() const { return GetPhysicalModel().frontWallContactOffsetM; }
     float Vehicle::GetRearWallContactOffset() const { return GetLength() - GetFrontWallContactOffset(); }
