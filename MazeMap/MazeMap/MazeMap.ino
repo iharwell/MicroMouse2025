@@ -36,8 +36,10 @@
 #include "DiagonalWallCentering.h"
 #include "FrontWallCharacterizationStorage.h"
 #include "TractionLimitSweep.h"
+#include "WallBeliefMap.h"
 #include "WallDetectionThresholds.h"
 #include "WallContactDetection.h"
+#include "WallObservationPipeline.h"
 #include "WheelControlProfile.h"
 
 #if defined(ARDUINO_TEENSY41)
@@ -61,7 +63,7 @@ enum class StationaryImuCalibrationResult : uint8_t;
 
 static bool ObservationVoteWinsMajority(uint8_t votes, uint8_t sampleCount);
 static float AverageFiniteObservationValue(float sum, uint8_t count, float fallbackValue);
-static bool BuildMajorityObservationSnapshot(
+static bool BuildEvidenceObservationSnapshot(
     const SensorSnapshot* samples,
     uint8_t sampleCount,
     SensorSnapshot& combinedSnapshot,
@@ -441,6 +443,36 @@ namespace Config
     // [High] Runtime wall-detection averaging window in control-loop cycles. Raise it if false negatives remain under
     // noise; lower it only if detection latency becomes a real control problem.
     constexpr uint8_t kWallDetectionAverageWindowCycles = 10U;
+    // [High] Side-wall signal delta, expressed as a fraction of the calibrated latch threshold, that indicates the
+    // receiver is crossing an opening or post edge instead of seeing a stable corridor wall.
+    constexpr float kSideWallTransitionSignalFractionOfLatch = 0.60f;
+    // [High] Fraction of the latch threshold below which a gated sample is considered a confident "open" miss for the
+    // short-horizon map evidence accumulator.
+    constexpr float kWallMapMissSignalFractionOfLatch = 0.35f;
+    // [High] Per-sample weight for confident wall-hit classifications inside a map decision window.
+    constexpr float kWallMapEvidenceHitWeight = 0.55f;
+    // [High] Per-sample weight for confident wall-miss classifications inside a map decision window.
+    constexpr float kWallMapEvidenceMissWeight = 0.55f;
+    // [Medium] Extra miss impulse applied when a strong side-wall transition is observed during a map decision window.
+    constexpr float kWallMapEvidenceTransitionMissWeight = 0.35f;
+    // [Medium] Amount by which unknown samples pull the short-horizon evidence accumulator back toward zero.
+    constexpr float kWallMapEvidenceUnknownDecay = 0.08f;
+    // [High] Minimum evidence magnitude required before a gated decision window is allowed to touch the wall-belief
+    // map.
+    constexpr float kWallMapEvidenceCommitThreshold = 1.00f;
+    // [High] Log-odds increment applied to a confident wall-hit observation.
+    constexpr float kWallBeliefHitLogOdds = 1.20f;
+    // [High] Log-odds decrement applied to a confident wall-miss observation when the wall is still unknown or open.
+    constexpr float kWallBeliefMissLogOdds = 1.20f;
+    // [High] Reduced log-odds decrement applied to a contradictory wall-miss observation so one weak miss cannot erase
+    // a previously confirmed wall.
+    constexpr float kWallBeliefContradictoryMissLogOdds = 0.55f;
+    // [High] Positive log-odds threshold for confirming a wall segment.
+    constexpr float kWallBeliefSetThreshold = 1.00f;
+    // [High] Negative log-odds threshold for confirming an opening.
+    constexpr float kWallBeliefClearThreshold = -1.00f;
+    // [Medium] Saturation limit applied to wall-segment log odds to prevent runaway certainty from redundant samples.
+    constexpr float kWallBeliefSaturationMagnitude = 3.50f;
 
     // [High] Residual static trim on top of the motor-model wheel feedforward. Keep this at zero unless the shared
     // motor model still leaves a repeatable low-speed bias after launch assist has already done its job.
@@ -952,6 +984,8 @@ struct SensorSnapshot
     bool rightWallObservation;
     bool leftWallObservationWindowValid;
     bool rightWallObservationWindowValid;
+    bool leftTransitionDetected;
+    bool rightTransitionDetected;
 };
 
 struct DriveTelemetry
@@ -3975,7 +4009,7 @@ static float AverageFiniteObservationValue(float sum, uint8_t count, float fallb
     return (count > 0U) ? (sum / static_cast<float>(count)) : fallbackValue;
 }
 
-static bool BuildMajorityObservationSnapshot(
+static bool BuildEvidenceObservationSnapshot(
     const SensorSnapshot* samples,
     uint8_t sampleCount,
     SensorSnapshot& combinedSnapshot,
@@ -4014,6 +4048,11 @@ static bool BuildMajorityObservationSnapshot(
     uint8_t frontSkewCount = 0U;
     uint8_t planarAccelCount = 0U;
     uint8_t gyroCount = 0U;
+    MazeMap::WallDecisionAccumulator frontEvidence{};
+    MazeMap::WallDecisionAccumulator leftEvidence{};
+    MazeMap::WallDecisionAccumulator rightEvidence{};
+    bool leftTransitionDetected = false;
+    bool rightTransitionDetected = false;
 
     for (uint8_t sampleIndex = 0U; sampleIndex < sampleCount; ++sampleIndex)
     {
@@ -4049,6 +4088,44 @@ static bool BuildMajorityObservationSnapshot(
         if (sample.rightWallObservationWindowValid)
         {
             ++voteSummary.rightWindowValidVotes;
+        }
+
+        frontEvidence.Update(
+            sample.frontWall ?
+                MazeMap::WallSampleClassification::WallHit :
+                MazeMap::WallSampleClassification::WallMiss,
+            Config::kWallMapEvidenceHitWeight,
+            Config::kWallMapEvidenceMissWeight,
+            Config::kWallMapEvidenceUnknownDecay);
+
+        leftEvidence.Update(
+            sample.leftWallObservationWindowValid ?
+                (sample.leftWallObservation ?
+                    MazeMap::WallSampleClassification::WallHit :
+                    MazeMap::WallSampleClassification::WallMiss) :
+                MazeMap::WallSampleClassification::Unknown,
+            Config::kWallMapEvidenceHitWeight,
+            Config::kWallMapEvidenceMissWeight,
+            Config::kWallMapEvidenceUnknownDecay);
+        if (sample.leftTransitionDetected)
+        {
+            leftTransitionDetected = true;
+            leftEvidence.InjectMissImpulse(Config::kWallMapEvidenceTransitionMissWeight);
+        }
+
+        rightEvidence.Update(
+            sample.rightWallObservationWindowValid ?
+                (sample.rightWallObservation ?
+                    MazeMap::WallSampleClassification::WallHit :
+                    MazeMap::WallSampleClassification::WallMiss) :
+                MazeMap::WallSampleClassification::Unknown,
+            Config::kWallMapEvidenceHitWeight,
+            Config::kWallMapEvidenceMissWeight,
+            Config::kWallMapEvidenceUnknownDecay);
+        if (sample.rightTransitionDetected)
+        {
+            rightTransitionDetected = true;
+            rightEvidence.InjectMissImpulse(Config::kWallMapEvidenceTransitionMissWeight);
         }
 
         if (std::isfinite(sample.frontLeftDistanceM))
@@ -4138,18 +4215,26 @@ static bool BuildMajorityObservationSnapshot(
         AverageFiniteObservationValue(planarAccelSum, planarAccelCount, lastSample.planarAccelMps2);
     combinedSnapshot.gyroRadps =
         AverageFiniteObservationValue(gyroSum, gyroCount, lastSample.gyroRadps);
-    combinedSnapshot.frontWall = ObservationVoteWinsMajority(voteSummary.frontWallVotes, sampleCount);
+    const MazeMap::WallSampleClassification frontDecision =
+        frontEvidence.FinalClassification(Config::kWallMapEvidenceCommitThreshold);
+    const MazeMap::WallSampleClassification leftDecision =
+        leftEvidence.FinalClassification(Config::kWallMapEvidenceCommitThreshold);
+    const MazeMap::WallSampleClassification rightDecision =
+        rightEvidence.FinalClassification(Config::kWallMapEvidenceCommitThreshold);
+    combinedSnapshot.frontWall = frontDecision == MazeMap::WallSampleClassification::WallHit;
     combinedSnapshot.frontLeftWall = ObservationVoteWinsMajority(voteSummary.frontLeftWallVotes, sampleCount);
     combinedSnapshot.frontRightWall = ObservationVoteWinsMajority(voteSummary.frontRightWallVotes, sampleCount);
-    combinedSnapshot.frontWallObservationValid = false;
-    combinedSnapshot.frontWallUsesFallbackDetection = ObservationVoteWinsMajority(voteSummary.frontFallbackVotes, sampleCount);
+    combinedSnapshot.frontWallObservationValid = frontDecision != MazeMap::WallSampleClassification::Unknown;
+    combinedSnapshot.frontWallUsesFallbackDetection = combinedSnapshot.frontWallObservationValid;
     combinedSnapshot.frontWallUsesCharacterizationDetection = false;
-    combinedSnapshot.leftWallObservation = ObservationVoteWinsMajority(voteSummary.leftWallVotes, sampleCount);
-    combinedSnapshot.rightWallObservation = ObservationVoteWinsMajority(voteSummary.rightWallVotes, sampleCount);
+    combinedSnapshot.leftWallObservation = leftDecision == MazeMap::WallSampleClassification::WallHit;
+    combinedSnapshot.rightWallObservation = rightDecision == MazeMap::WallSampleClassification::WallHit;
     combinedSnapshot.leftWall = combinedSnapshot.leftWallObservation;
     combinedSnapshot.rightWall = combinedSnapshot.rightWallObservation;
-    combinedSnapshot.leftWallObservationWindowValid = ObservationVoteWinsMajority(voteSummary.leftWindowValidVotes, sampleCount);
-    combinedSnapshot.rightWallObservationWindowValid = ObservationVoteWinsMajority(voteSummary.rightWindowValidVotes, sampleCount);
+    combinedSnapshot.leftWallObservationWindowValid = leftDecision != MazeMap::WallSampleClassification::Unknown;
+    combinedSnapshot.rightWallObservationWindowValid = rightDecision != MazeMap::WallSampleClassification::Unknown;
+    combinedSnapshot.leftTransitionDetected = leftTransitionDetected;
+    combinedSnapshot.rightTransitionDetected = rightTransitionDetected;
     return true;
 }
 
@@ -4177,6 +4262,10 @@ public:
         , _frontRightWallSignalInitialized(false)
         , _sideLeftWallSignalInitialized(false)
         , _sideRightWallSignalInitialized(false)
+        , _sideLeftPreviousSignalRise(0.0f)
+        , _sideRightPreviousSignalRise(0.0f)
+        , _sideLeftPreviousSignalRiseValid(false)
+        , _sideRightPreviousSignalRiseValid(false)
         , _accelBiasInitialized(false)
     {
     }
@@ -4202,6 +4291,10 @@ public:
         _frontRightWallSignalInitialized = false;
         _sideLeftWallSignalInitialized = false;
         _sideRightWallSignalInitialized = false;
+        _sideLeftPreviousSignalRise = 0.0f;
+        _sideRightPreviousSignalRise = 0.0f;
+        _sideLeftPreviousSignalRiseValid = false;
+        _sideRightPreviousSignalRiseValid = false;
         _accelBiasXG = 0.0f;
         _accelBiasYG = 0.0f;
         _accelBiasInitialized = false;
@@ -4254,6 +4347,10 @@ public:
         _sideRightInputAverage.Clear();
         _sideLeftWallSignalInitialized = false;
         _sideRightWallSignalInitialized = false;
+        _sideLeftPreviousSignalRise = 0.0f;
+        _sideRightPreviousSignalRise = 0.0f;
+        _sideLeftPreviousSignalRiseValid = false;
+        _sideRightPreviousSignalRiseValid = false;
     }
 
     SensorSnapshot Capture(bool stationary, const PoseEstimate& pose)
@@ -4331,20 +4428,77 @@ public:
         snapshot.frontWallUsesCharacterizationDetection = false;
         const bool sideLeftWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideLeft);
         const bool sideRightWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideRight);
-        snapshot.leftWallObservationWindowValid = sideLeftWindowValid;
-        snapshot.rightWallObservationWindowValid = sideRightWindowValid;
-        snapshot.leftDistanceValidForControl =
+        float sideLeftSignalRise = 0.0f;
+        float sideLeftLatchRiseThreshold = 0.0f;
+        float sideLeftMissRiseThreshold = 0.0f;
+        const bool sideLeftSignalMetricsValid = TryComputeSideSignalMetrics(
+            WallSensorId::SideLeft,
+            sideLeftInput.differentialLight,
+            sideLeftSignalRise,
+            sideLeftLatchRiseThreshold,
+            sideLeftMissRiseThreshold);
+        float sideRightSignalRise = 0.0f;
+        float sideRightLatchRiseThreshold = 0.0f;
+        float sideRightMissRiseThreshold = 0.0f;
+        const bool sideRightSignalMetricsValid = TryComputeSideSignalMetrics(
+            WallSensorId::SideRight,
+            sideRightInput.differentialLight,
+            sideRightSignalRise,
+            sideRightLatchRiseThreshold,
+            sideRightMissRiseThreshold);
+        const bool sideLeftSignalClassifiable =
+            sideLeftSignalMetricsValid &&
+            ((sideLeftSignalRise >= sideLeftLatchRiseThreshold) ||
+                (sideLeftSignalRise <= sideLeftMissRiseThreshold));
+        const bool sideRightSignalClassifiable =
+            sideRightSignalMetricsValid &&
+            ((sideRightSignalRise >= sideRightLatchRiseThreshold) ||
+                (sideRightSignalRise <= sideRightMissRiseThreshold));
+        const bool sideLeftFallbackValid =
+            std::isfinite(sideLeftInput.fallbackDistanceM) &&
+            sideLeftInput.fallbackDistanceM > 0.0f;
+        const bool sideRightFallbackValid =
+            std::isfinite(sideRightInput.fallbackDistanceM) &&
+            sideRightInput.fallbackDistanceM > 0.0f;
+
+        const bool sideLeftObservationEligible =
             sideLeftWindowValid &&
-            IsCalibratedSideDistanceValidForControl(
-                _wallCalibration,
-                WallSensorId::SideLeft,
-                sideLeftInput.differentialLight);
-        snapshot.rightDistanceValidForControl =
+            (sideLeftSignalClassifiable || sideLeftFallbackValid);
+        const bool sideRightObservationEligible =
             sideRightWindowValid &&
-            IsCalibratedSideDistanceValidForControl(
-                _wallCalibration,
-                WallSensorId::SideRight,
-                sideRightInput.differentialLight);
+            (sideRightSignalClassifiable || sideRightFallbackValid);
+        const bool sideLeftControlRangeValid =
+            sideLeftSignalMetricsValid ?
+            (sideLeftSignalRise >= sideLeftLatchRiseThreshold) :
+            (sideLeftFallbackValid && sideLeftInput.fallbackDistanceM < sideWallOffThresholdM);
+        const bool sideRightControlRangeValid =
+            sideRightSignalMetricsValid ?
+            (sideRightSignalRise >= sideRightLatchRiseThreshold) :
+            (sideRightFallbackValid && sideRightInput.fallbackDistanceM < sideWallOffThresholdM);
+        snapshot.leftTransitionDetected = DetectTransitionFromSignalRise(
+            sideLeftWindowValid,
+            sideLeftSignalMetricsValid,
+            sideLeftSignalRise,
+            sideLeftLatchRiseThreshold * Config::kSideWallTransitionSignalFractionOfLatch,
+            _sideLeftPreviousSignalRise,
+            _sideLeftPreviousSignalRiseValid);
+        snapshot.rightTransitionDetected = DetectTransitionFromSignalRise(
+            sideRightWindowValid,
+            sideRightSignalMetricsValid,
+            sideRightSignalRise,
+            sideRightLatchRiseThreshold * Config::kSideWallTransitionSignalFractionOfLatch,
+            _sideRightPreviousSignalRise,
+            _sideRightPreviousSignalRiseValid);
+        snapshot.leftWallObservationWindowValid = sideLeftObservationEligible;
+        snapshot.rightWallObservationWindowValid = sideRightObservationEligible;
+        snapshot.leftDistanceValidForControl =
+            sideLeftObservationEligible &&
+            !snapshot.leftTransitionDetected &&
+            sideLeftControlRangeValid;
+        snapshot.rightDistanceValidForControl =
+            sideRightObservationEligible &&
+            !snapshot.rightTransitionDetected &&
+            sideRightControlRangeValid;
         snapshot.leftWall = UpdateSideWallState(
             WallSensorId::SideLeft,
             sideLeftInput.differentialLight,
@@ -4370,13 +4524,13 @@ public:
             sideLeftInput.differentialLight,
             sideLeftInput.fallbackDistanceM,
             sideWallOnThresholdM,
-            sideLeftWindowValid);
+            sideLeftObservationEligible);
         snapshot.rightWallObservation = ComputeSideWallObservationHit(
             WallSensorId::SideRight,
             sideRightInput.differentialLight,
             sideRightInput.fallbackDistanceM,
             sideWallOnThresholdM,
-            sideRightWindowValid);
+            sideRightObservationEligible);
         snapshot.frontSkewM = snapshot.frontLeftDistanceM - snapshot.frontRightDistanceM;
         snapshot.corridorErrorM = ComputeCorridorError(snapshot);
 
@@ -4443,6 +4597,10 @@ private:
     bool _frontRightWallSignalInitialized;
     bool _sideLeftWallSignalInitialized;
     bool _sideRightWallSignalInitialized;
+    float _sideLeftPreviousSignalRise;
+    float _sideRightPreviousSignalRise;
+    bool _sideLeftPreviousSignalRiseValid;
+    bool _sideRightPreviousSignalRiseValid;
     bool _accelBiasInitialized;
 
     float ComputeCorridorError(const SensorSnapshot& snapshot) const
@@ -4460,6 +4618,67 @@ private:
             return _wallCalibration.GetExpectedSideWallDistanceM() - snapshot.sideRightDistanceM;
         }
         return 0.0f;
+    }
+
+    bool TryComputeSideSignalMetrics(
+        WallSensorId sensorId,
+        float measuredDifferentialLight,
+        float& signalRise,
+        float& latchRiseThreshold,
+        float& missRiseThreshold) const
+    {
+        signalRise = 0.0f;
+        latchRiseThreshold = 0.0f;
+        missRiseThreshold = 0.0f;
+
+        float offMeasuredThreshold = 0.0f;
+        float signalBaseline = 0.0f;
+        if (!_wallCalibration.TryComputeSideWallMeasuredThresholds(
+                sensorId,
+                Config::kSideWallMeasuredSignalLatchThreshold,
+                Config::kSideWallMeasuredSignalReleaseThreshold,
+                latchRiseThreshold,
+                offMeasuredThreshold,
+                signalBaseline))
+        {
+            return false;
+        }
+
+        signalRise = ComputeSignalRiseAboveBaseline(
+            measuredDifferentialLight,
+            signalBaseline);
+        missRiseThreshold = Config::kWallMapMissSignalFractionOfLatch * latchRiseThreshold;
+        return
+            std::isfinite(signalRise) &&
+            std::isfinite(latchRiseThreshold) &&
+            std::isfinite(missRiseThreshold) &&
+            latchRiseThreshold > 0.0f &&
+            missRiseThreshold >= 0.0f;
+    }
+
+    static bool DetectTransitionFromSignalRise(
+        bool windowValid,
+        bool signalMetricsValid,
+        float signalRise,
+        float transitionThreshold,
+        float& previousSignalRise,
+        bool& previousValid) noexcept
+    {
+        bool transitionDetected = false;
+        const bool currentValid =
+            windowValid &&
+            signalMetricsValid &&
+            std::isfinite(signalRise) &&
+            std::isfinite(transitionThreshold) &&
+            transitionThreshold > 0.0f;
+        if (currentValid && previousValid)
+        {
+            transitionDetected = std::fabs(signalRise - previousSignalRise) >= transitionThreshold;
+        }
+
+        previousSignalRise = currentValid ? signalRise : 0.0f;
+        previousValid = currentValid;
+        return transitionDetected;
     }
 
     static float UpdateChannelFromMeasuredDistance(FilteredIrChannel& channel, float measuredDistanceM)
@@ -9636,6 +9855,7 @@ public:
         , _maze(gMissionPlannerCore.maze)
         , _searchPathFinder(gMissionPlannerCore.searchPathFinder)
         , _speedPathFinder(gMissionPlannerCore.speedPathFinder)
+        , _wallBeliefMap()
         , _sensors(_speedVehicle, gWallDistanceCalibration)
         , _telemetrySensors(_speedVehicle, gWallDistanceCalibration)
         , _drive()
@@ -9694,6 +9914,7 @@ public:
         {
             return false;
         }
+        SeedWallBeliefsFromKnownMaze();
         if (!_telemetrySensors.Begin())
         {
             return Fail("Telemetry sensor init failed");
@@ -10234,6 +10455,7 @@ private:
     MazeMap::Maze& _maze;
     MazeMap::FloodFillPathFinder& _searchPathFinder;
     MazeMap::ManeuverPathFinder& _speedPathFinder;
+    MazeMap::WallBeliefMap _wallBeliefMap;
     SensorSuite _sensors;
     DiagnosticSensorSuite _telemetrySensors;
     DiagnosticLogger _telemetryLogger;
@@ -10345,6 +10567,47 @@ private:
             SearchLimits().maxSpeedMps);
     }
 
+    static MazeMap::WallBeliefConfig BuildWallBeliefConfig()
+    {
+        MazeMap::WallBeliefConfig config{};
+        config.hitLogOdds = Config::kWallBeliefHitLogOdds;
+        config.missLogOdds = Config::kWallBeliefMissLogOdds;
+        config.contradictoryMissLogOdds = Config::kWallBeliefContradictoryMissLogOdds;
+        config.setThreshold = Config::kWallBeliefSetThreshold;
+        config.clearThreshold = Config::kWallBeliefClearThreshold;
+        config.saturationMagnitude = Config::kWallBeliefSaturationMagnitude;
+        return config;
+    }
+
+    void SeedWallBeliefsFromKnownMaze()
+    {
+        _wallBeliefMap.Reset();
+        const MazeMap::WallBeliefConfig beliefConfig = BuildWallBeliefConfig();
+        constexpr MazeMap::Direction kDirections[] = {
+            MazeMap::Up,
+            MazeMap::Down,
+            MazeMap::Left,
+            MazeMap::Right
+        };
+
+        for (uint8_t x = 0U; x < 16U; ++x)
+        {
+            for (uint8_t y = 0U; y < 16U; ++y)
+            {
+                const MazeMap::CellCoordinates cell(x, y);
+                const MazeMap::Cell& knownCell = _maze[cell];
+                for (MazeMap::Direction direction : kDirections)
+                {
+                    const MazeMap::WallState hardState = knownCell.GetWall(direction);
+                    if (hardState != MazeMap::Unknown)
+                    {
+                        _wallBeliefMap.SeedKnownState(cell, direction, hardState, beliefConfig);
+                    }
+                }
+            }
+        }
+    }
+
     void SnapToStartPose()
     {
         _currentCell = MazeMap::CellCoordinates(0, 0);
@@ -10361,6 +10624,7 @@ private:
         _maze.SetWall(cell, MazeMap::Down, MazeMap::Wall);
         _maze.SetWall(cell, MazeMap::Left, MazeMap::Wall);
         _maze.SetWall(cell, MazeMap::Right, MazeMap::Wall);
+        SeedWallBeliefsFromKnownMaze();
     }
 
     bool OpenMissionTextLog()
@@ -10646,7 +10910,7 @@ private:
         }
 
         RollingObservationVoteSummary voteSummary{};
-        if (!BuildMajorityObservationSnapshot(
+        if (!BuildEvidenceObservationSnapshot(
                 samples,
                 Config::kSearchRollingObservationSampleCount,
                 observationSnapshot,
@@ -10665,12 +10929,12 @@ private:
                 Config::kSearchRollingObservationSampleCount,
                 observationSnapshot))
         {
-            ClearFrontWallObservationDecision(observationSnapshot);
             AppendMissionTraceFormatted(
-                "mission_front_curve_fit_unavailable,cell=(%d,%d),abs=%s,origin=stationary",
+                "mission_front_curve_fit_unavailable,cell=(%d,%d),abs=%s,origin=stationary,fallback_valid=%u",
                 observedCell.GetX(),
                 observedCell.GetY(),
-                DirectionName(observedDirection));
+                DirectionName(observedDirection),
+                observationSnapshot.frontWallObservationValid ? 1U : 0U);
         }
 
         AppendMissionTraceFormatted(
@@ -10699,7 +10963,9 @@ private:
         float secondaryDistanceM,
         bool primaryDetected,
         bool secondaryDetected,
-        const SensorSnapshot& snapshot)
+        const SensorSnapshot& snapshot,
+        MazeMap::WallState beliefState,
+        float beliefLogOdds)
     {
         char line[256] = {};
         const bool haveSecondaryDistance = std::isfinite(secondaryDistanceM);
@@ -10708,12 +10974,14 @@ private:
             snprintf(
                 line,
                 sizeof(line),
-                "wall_obs,cell=(%u,%u),rel=%s,abs=%s,state=%s,sensor=%s,mode=%s,primary_hit=%u,secondary_hit=%u,primary_m=%.4f,secondary_m=%.4f",
+                "wall_obs,cell=(%u,%u),rel=%s,abs=%s,obs_state=%s,belief=%s,log_odds=%.3f,sensor=%s,mode=%s,primary_hit=%u,secondary_hit=%u,primary_m=%.4f,secondary_m=%.4f",
                 static_cast<unsigned>(observedCell.GetX()),
                 static_cast<unsigned>(observedCell.GetY()),
                 (relativeDirectionName != nullptr) ? relativeDirectionName : "unknown",
                 DirectionName(absoluteDirection),
                 WallStateName(observedState),
+                WallStateName(beliefState),
+                beliefLogOdds,
                 (sensorSource != nullptr) ? sensorSource : "unknown",
                 (sensorMode != nullptr) ? sensorMode : "unknown",
                 primaryDetected ? 1U : 0U,
@@ -10723,12 +10991,14 @@ private:
             snprintf(
                 line,
                 sizeof(line),
-                "wall_obs,cell=(%u,%u),rel=%s,abs=%s,state=%s,sensor=%s,primary_hit=%u,primary_m=%.4f",
+                "wall_obs,cell=(%u,%u),rel=%s,abs=%s,obs_state=%s,belief=%s,log_odds=%.3f,sensor=%s,primary_hit=%u,primary_m=%.4f",
                 static_cast<unsigned>(observedCell.GetX()),
                 static_cast<unsigned>(observedCell.GetY()),
                 (relativeDirectionName != nullptr) ? relativeDirectionName : "unknown",
                 DirectionName(absoluteDirection),
                 WallStateName(observedState),
+                WallStateName(beliefState),
+                beliefLogOdds,
                 (sensorSource != nullptr) ? sensorSource : "unknown",
                 primaryDetected ? 1U : 0U,
                 primaryDistanceM);
@@ -15157,12 +15427,55 @@ private:
             return true;
         }
 
+        const MazeMap::WallBeliefConfig beliefConfig = BuildWallBeliefConfig();
+        const uint32_t beliefTick = millis();
+        const auto applyBeliefQualifiedObservation =
+            [&](const char* relativeDirectionName,
+                MazeMap::Direction absoluteDirection,
+                MazeMap::WallState observedState,
+                const char* sensorSource,
+                const char* sensorMode,
+                float primaryDistanceM,
+                float secondaryDistanceM,
+                bool primaryDetected,
+                bool secondaryDetected) -> bool
+        {
+            const MazeMap::WallBeliefUpdate beliefUpdate =
+                _wallBeliefMap.ApplyObservation(
+                    observedCell,
+                    absoluteDirection,
+                    (observedState == MazeMap::Wall) ?
+                        MazeMap::WallSampleClassification::WallHit :
+                        MazeMap::WallSampleClassification::WallMiss,
+                    beliefConfig,
+                    beliefTick);
+            if (beliefUpdate.valid && beliefUpdate.hardState != MazeMap::Unknown)
+            {
+                _maze.SetWall(cell, absoluteDirection, beliefUpdate.hardState);
+            }
+
+            return LogWallObservationDecision(
+                observedCell,
+                relativeDirectionName,
+                absoluteDirection,
+                observedState,
+                sensorSource,
+                sensorMode,
+                primaryDistanceM,
+                secondaryDistanceM,
+                primaryDetected,
+                secondaryDetected,
+                snapshot,
+                beliefUpdate.valid ? beliefUpdate.hardState : MazeMap::WallState::Unknown,
+                beliefUpdate.valid ? beliefUpdate.logOdds : 0.0f);
+        };
+
         if (forwardUnknown)
         {
             if (!snapshot.frontWallObservationValid)
             {
                 AppendMissionTraceFormatted(
-                    "mission_front_wall_update_skipped,cell=(%d,%d),abs=%s,reason=front_characterization_unavailable",
+                    "mission_front_wall_update_skipped,cell=(%d,%d),abs=%s,reason=insufficient_evidence",
                     observedCell.GetX(),
                     observedCell.GetY(),
                     DirectionName(forwardDirection));
@@ -15176,9 +15489,7 @@ private:
                 }
                 const char* sensorSource = FrontObservationSourceName(snapshot);
                 const char* sensorMode = FrontObservationModeName(snapshot);
-                _maze.SetWall(cell, forwardDirection, observedState);
-                if (!LogWallObservationDecision(
-                        observedCell,
+                if (!applyBeliefQualifiedObservation(
                         "forward",
                         forwardDirection,
                         observedState,
@@ -15187,8 +15498,7 @@ private:
                         snapshot.frontLeftDistanceM,
                         snapshot.frontRightDistanceM,
                         snapshot.frontLeftWall,
-                        snapshot.frontRightWall,
-                        snapshot))
+                        snapshot.frontRightWall))
                 {
                     return false;
                 }
@@ -15199,9 +15509,7 @@ private:
             if (snapshot.leftWallObservationWindowValid)
             {
                 const MazeMap::WallState observedState = snapshot.leftWallObservation ? MazeMap::Wall : MazeMap::NoWall;
-                _maze.SetWall(cell, leftDirection, observedState);
-                if (!LogWallObservationDecision(
-                        observedCell,
+                if (!applyBeliefQualifiedObservation(
                         "left",
                         leftDirection,
                         observedState,
@@ -15210,11 +15518,19 @@ private:
                         snapshot.sideLeftDistanceM,
                         NAN,
                         snapshot.leftWallObservation,
-                        false,
-                        snapshot))
+                        false))
                 {
                     return false;
                 }
+            }
+            else
+            {
+                AppendMissionTraceFormatted(
+                    "mission_side_wall_update_skipped,cell=(%d,%d),abs=%s,reason=%s",
+                    observedCell.GetX(),
+                    observedCell.GetY(),
+                    DirectionName(leftDirection),
+                    snapshot.leftTransitionDetected ? "transition_ambiguous" : "outside_window_or_ambiguous");
             }
         }
         if (rightUnknown)
@@ -15222,9 +15538,7 @@ private:
             if (snapshot.rightWallObservationWindowValid)
             {
                 const MazeMap::WallState observedState = snapshot.rightWallObservation ? MazeMap::Wall : MazeMap::NoWall;
-                _maze.SetWall(cell, rightDirection, observedState);
-                if (!LogWallObservationDecision(
-                        observedCell,
+                if (!applyBeliefQualifiedObservation(
                         "right",
                         rightDirection,
                         observedState,
@@ -15233,11 +15547,19 @@ private:
                         snapshot.sideRightDistanceM,
                         NAN,
                         snapshot.rightWallObservation,
-                        false,
-                        snapshot))
+                        false))
                 {
                     return false;
                 }
+            }
+            else
+            {
+                AppendMissionTraceFormatted(
+                    "mission_side_wall_update_skipped,cell=(%d,%d),abs=%s,reason=%s",
+                    observedCell.GetX(),
+                    observedCell.GetY(),
+                    DirectionName(rightDirection),
+                    snapshot.rightTransitionDetected ? "transition_ambiguous" : "outside_window_or_ambiguous");
             }
         }
         return true;
@@ -15777,7 +16099,7 @@ private:
 
                 SensorSnapshot majoritySnapshot{};
                 RollingObservationVoteSummary voteSummary{};
-                if (!BuildMajorityObservationSnapshot(
+                if (!BuildEvidenceObservationSnapshot(
                         rollingObservationSamples,
                         Config::kSearchRollingObservationSampleCount,
                         majoritySnapshot,
@@ -15795,12 +16117,12 @@ private:
                         Config::kSearchRollingObservationSampleCount,
                         majoritySnapshot))
                 {
-                    ClearFrontWallObservationDecision(majoritySnapshot);
                     AppendMissionTraceFormatted(
-                        "mission_front_curve_fit_unavailable,cell=(%d,%d),abs=%s,origin=rolling",
+                        "mission_front_curve_fit_unavailable,cell=(%d,%d),abs=%s,origin=rolling,fallback_valid=%u",
                         nextRollingObservationCell.GetX(),
                         nextRollingObservationCell.GetY(),
-                        DirectionName(direction));
+                        DirectionName(direction),
+                        majoritySnapshot.frontWallObservationValid ? 1U : 0U);
                 }
 
                 AppendMissionTraceFormatted(

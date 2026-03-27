@@ -219,6 +219,8 @@
     <ClInclude Include="VehicleState.h" />
     <ClInclude Include="WallContactDetection.h" />
     <ClInclude Include="WallDetectionThresholds.h" />
+    <ClInclude Include="WallBeliefMap.h" />
+    <ClInclude Include="WallObservationPipeline.h" />
     <ClInclude Include="WallSensor.h" />
     <ClInclude Include="WallSensorCalibration.h" />
     <ClInclude Include="WheelMotor.h" />
@@ -240,7 +242,9 @@
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
     <ClCompile Include="MazeLocation.cpp" />
-    <ClCompile Include="MazeMapCore.cpp" />
+    <ClCompile Include="MazeMapCore.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="MazeMask.cpp" />
     <ClCompile Include="Path.cpp" />
     <ClCompile Include="PathFinder.cpp" />
