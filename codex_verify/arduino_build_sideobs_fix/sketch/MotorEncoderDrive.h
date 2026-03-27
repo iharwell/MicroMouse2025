@@ -47,9 +47,10 @@ namespace MazeMap
                 MilliAmpsToAmps(45.9f),
                 4.31f),
             56.0f / 17.0f,
-            // March 22, 2026 straight-audit fit: aux002 speed_idx 0/1 over-reported outbound encoder distance by
-            // 2.93 mm on the 0.72 m north-corridor run, so reduce the shared wheel diameter scale by 0.41%.
-            0.025242f,
+            // March 22, 2026 low-speed straight-audit fit: aux001-aux003 speed_idx 0 still over-reported outbound
+            // encoder distance by about 3.05 mm on the 0.72 m north-corridor run, so trim the shared wheel diameter
+            // down by 0.42% to keep the fixed-distance phases from finishing short.
+            0.025220f,
             4096U
         };
         inline static constexpr MotorEncoderDriveHardwareConfig kLeftHardwareConfig = {

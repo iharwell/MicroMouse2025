@@ -239,6 +239,7 @@ namespace MazeMap
     float Vehicle::GetMaxAngularAcceleration() const { return _peakAngularAcceleration; }
     float Vehicle::GetMass() const { return GetPhysicalModel().massKg; }
     float Vehicle::GetTrackWidth() const { return GetPhysicalModel().trackWidthM; }
+    float Vehicle::GetYawInertia() const { return GetPhysicalModel().yawInertiaKgM2; }
     float Vehicle::GetArcEffectiveTrackWidth(float turningRadiusM) noexcept
     {
         const ArcTrackWidthInterpolation& interpolation = GetPhysicalModel().arcTrackWidthInterpolation;

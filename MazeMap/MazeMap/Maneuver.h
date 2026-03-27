@@ -255,7 +255,7 @@ namespace MazeMap
 	{
 		return static_cast<ManeuverCode>(static_cast<uint8_t>(a) ^ static_cast<uint8_t>(b));
 	}
-	inline constexpr int8_t CodeDegrees(ManeuverCode mc)
+	inline constexpr int16_t CodeDegrees(ManeuverCode mc)
 	{
 		if (mc < 32)
 		{
@@ -264,7 +264,7 @@ namespace MazeMap
 
 		// Unmirrored smooth-turn codes are defined as right-hand turns in the maneuver set.
 		// Runtime yaw uses positive angles for CCW rotation, so right turns must carry a negative sign.
-		const int8_t mult = ((mc & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG) ? static_cast<int8_t>(1) : static_cast<int8_t>(-1);
+		const int16_t mult = ((mc & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG) ? static_cast<int16_t>(1) : static_cast<int16_t>(-1);
 
 		const ManeuverCode normCode = mc & INVERTED_MIRRORED_MANEUVER_FLAG;
 

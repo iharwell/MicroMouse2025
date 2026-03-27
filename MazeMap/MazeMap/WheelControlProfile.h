@@ -9,6 +9,7 @@ namespace MazeMap
         float velocityKpScale = 1.0f;
         float velocityKiScale = 1.0f;
         float integralLimitScale = 1.0f;
+        float accelerationResponseScale = 0.0f;
     };
 
     inline float NormalizeWheelControlScale(float scale) noexcept
@@ -22,6 +23,10 @@ namespace MazeMap
         normalized.velocityKpScale = NormalizeWheelControlScale(profile.velocityKpScale);
         normalized.velocityKiScale = NormalizeWheelControlScale(profile.velocityKiScale);
         normalized.integralLimitScale = NormalizeWheelControlScale(profile.integralLimitScale);
+        normalized.accelerationResponseScale =
+            (std::isfinite(profile.accelerationResponseScale) && (profile.accelerationResponseScale >= 0.0f)) ?
+            profile.accelerationResponseScale :
+            0.0f;
         return normalized;
     }
 

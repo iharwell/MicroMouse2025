@@ -160,14 +160,27 @@
     <ClInclude Include="CellCoordinates.h" />
     <ClInclude Include="CircularBuffer.h" />
     <ClInclude Include="CompactPath.h" />
+    <ClInclude Include="CoreFileExport.h" />
+    <ClInclude Include="CruiseSpeedFloor.h" />
     <ClInclude Include="Defines.h" />
+    <ClInclude Include="DiagnosticCoverage.h" />
+    <ClInclude Include="DiagnosticLogBudget.h" />
+    <ClInclude Include="DiagnosticMotionPlan.h" />
+    <ClInclude Include="DiagonalWallCentering.h" />
     <ClInclude Include="Direction.h" />
     <ClInclude Include="DirectionalLocation.h" />
     <ClInclude Include="DirectionalPathFinder.h" />
+    <ClInclude Include="EncoderStallPolicy.h" />
+    <ClInclude Include="FanRampProfile.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="Fresnel.h" />
+    <ClInclude Include="FrontWallCharacterizationStorage.h" />
+    <ClInclude Include="GyroBiasUpdatePolicy.h" />
     <ClInclude Include="HalfStepPath.h" />
+    <ClInclude Include="ImuSamplingProfile.h" />
+    <ClInclude Include="InPlaceTurnProfile.h" />
     <ClInclude Include="Kinematics.h" />
+    <ClInclude Include="LaunchAssistProfile.h" />
     <ClInclude Include="LSV6DSV16X_IMU.h" />
     <ClInclude Include="Maneuver.h" />
     <ClInclude Include="ManeuverInstance.h" />
@@ -180,18 +193,34 @@
     <ClInclude Include="Maze.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
+    <ClInclude Include="MissionMazeExport.h" />
+    <ClInclude Include="MissionStartPolicy.h" />
+    <ClInclude Include="MotionTargetProjection.h" />
     <ClInclude Include="MotorEncoderDrive.h" />
+    <ClInclude Include="MotorModelUnits.h" />
+    <ClInclude Include="OpenLoopDriveCommand.h" />
     <ClInclude Include="Path.h" />
     <ClInclude Include="PathFinder.h" />
     <ClInclude Include="PathPoint.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="RollingAverageWindow.h" />
+    <ClInclude Include="SearchRunPlanner.h" />
     <ClInclude Include="Sensor.h" />
+    <ClInclude Include="SmoothTurnYawRateController.h" />
+    <ClInclude Include="StartupWaitProfile.h" />
     <ClInclude Include="TeensyLayout.h" />
+    <ClInclude Include="TrackWidthEstimate.h" />
+    <ClInclude Include="TractionLimitSweep.h" />
+    <ClInclude Include="TurnCommandGeometry.h" />
+    <ClInclude Include="TurnWallEdgeTracker.h" />
     <ClInclude Include="UKF.h" />
     <ClInclude Include="Vector2f.h" />
     <ClInclude Include="Vehicle.h" />
     <ClInclude Include="VehicleState.h" />
+    <ClInclude Include="WallContactDetection.h" />
+    <ClInclude Include="WallDetectionThresholds.h" />
     <ClInclude Include="WallSensor.h" />
+    <ClInclude Include="WallSensorCalibration.h" />
     <ClInclude Include="WheelMotor.h" />
   </ItemGroup>
   <ItemGroup>
@@ -211,6 +240,7 @@
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
     <ClCompile Include="MazeLocation.cpp" />
+    <ClCompile Include="MazeMapCore.cpp" />
     <ClCompile Include="MazeMask.cpp" />
     <ClCompile Include="Path.cpp" />
     <ClCompile Include="PathFinder.cpp" />
@@ -225,6 +255,9 @@
     <ClCompile Include="Vehicle.cpp" />
     <ClCompile Include="VehicleState.cpp" />
     <ClCompile Include="WheelMotor.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="MazeMap.ino" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -106,6 +106,101 @@ namespace MazeMap
             median <= high;
     }
 
+    template <size_t MaxSamples>
+    inline bool TryComputeRobustDistanceMatchedSignalBandFromSamples(
+        const std::array<float, MaxSamples>& signalSamples,
+        const std::array<float, MaxSamples>& distanceSamples,
+        uint16_t count,
+        float targetDistanceM,
+        uint16_t selectedSampleCount,
+        uint16_t minimumSelectedCount,
+        float maximumDistanceErrorM,
+        float scaledMadMultiplier,
+        float& median,
+        float& low,
+        float& high)
+    {
+        median = 0.0f;
+        low = 0.0f;
+        high = 0.0f;
+        if (count == 0U ||
+            count > static_cast<uint16_t>(MaxSamples) ||
+            !std::isfinite(targetDistanceM) ||
+            targetDistanceM <= 0.0f ||
+            selectedSampleCount == 0U ||
+            minimumSelectedCount == 0U ||
+            minimumSelectedCount > selectedSampleCount ||
+            !std::isfinite(maximumDistanceErrorM) ||
+            maximumDistanceErrorM < 0.0f ||
+            !std::isfinite(scaledMadMultiplier) ||
+            scaledMadMultiplier < 0.0f)
+        {
+            return false;
+        }
+
+        float selectedSignals[MaxSamples] = {};
+        float selectedErrors[MaxSamples] = {};
+        uint16_t validCount = 0U;
+        for (uint16_t index = 0U; index < count; ++index)
+        {
+            const float signal = signalSamples[index];
+            const float distance = distanceSamples[index];
+            if (!std::isfinite(signal) ||
+                signal < 0.0f ||
+                !std::isfinite(distance) ||
+                distance <= 0.0f)
+            {
+                continue;
+            }
+
+            selectedSignals[validCount] = signal;
+            selectedErrors[validCount] = std::fabs(distance - targetDistanceM);
+            ++validCount;
+        }
+
+        if (validCount < minimumSelectedCount)
+        {
+            return false;
+        }
+
+        for (uint16_t index = 1U; index < validCount; ++index)
+        {
+            const float signal = selectedSignals[index];
+            const float error = selectedErrors[index];
+            uint16_t insertIndex = index;
+            while ((insertIndex > 0U) && (selectedErrors[insertIndex - 1U] > error))
+            {
+                selectedSignals[insertIndex] = selectedSignals[insertIndex - 1U];
+                selectedErrors[insertIndex] = selectedErrors[insertIndex - 1U];
+                --insertIndex;
+            }
+
+            selectedSignals[insertIndex] = signal;
+            selectedErrors[insertIndex] = error;
+        }
+
+        uint16_t retainedCount = (selectedSampleCount < validCount) ? selectedSampleCount : validCount;
+        if (retainedCount < minimumSelectedCount ||
+            selectedErrors[retainedCount - 1U] > maximumDistanceErrorM)
+        {
+            return false;
+        }
+
+        std::array<float, MaxSamples> retainedSignals{};
+        for (uint16_t index = 0U; index < retainedCount; ++index)
+        {
+            retainedSignals[index] = selectedSignals[index];
+        }
+
+        return TryComputeRobustSignalBandFromSamples(
+            retainedSignals,
+            retainedCount,
+            scaledMadMultiplier,
+            median,
+            low,
+            high);
+    }
+
     inline bool TryComputeSignalHighThresholds(
         float calibrationMeasuredValue,
         float latchSignalFraction,

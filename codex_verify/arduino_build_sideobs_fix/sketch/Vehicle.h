@@ -40,14 +40,17 @@ namespace MazeMap
             0.0842f,
             0.1085f,
             0.056f,
-            // March 22, 2026 in-place-turn fit: completed position-audit turns from aux000-aux004 averaged
-            // 85.22 mm effective, with a completed-run range of 84.40-85.89 mm.
-            0.08522f,
-            0.08440f,
-            0.08589f,
-            // March 22, 2026 arc-radius fit: the completed aux004 short-90 pass under-rotated by 11.681 deg at the
-            // 63 mm nominal radius, so use a tighter-arc width there and blend back to the long-90 radius fit.
-            { 0.063f, 0.09795f, 0.153f, 0.08522f }
+            // March 22, 2026 aux001 and aux002 fast in-place-turn fits: the completed higher-speed IP180 audit
+            // passes centered at 85.292 mm effective, with the two completed passes spanning 85.179-85.405 mm.
+            0.085292f,
+            // Physical tire contact patch span measured on the chassis. Effective track width may exceed this due to
+            // scrub dynamics, so these remain informational rather than hard bounds.
+            0.07004f,
+            0.07868f,
+            // March 22, 2026 aux000-aux003 low-speed smooth-turn fits: completed S90SS/S90LS passes centered at
+            // 82.17 mm effective at the 63 mm nominal radius and 82.90 mm at the 153 mm nominal radius after
+            // excluding the obvious late-return outlier that carried -141 mm corridor error on S90LS.
+            { 0.063f, 0.082170f, 0.153f, 0.082900f }
         };
         CircularBuffer<VehicleState, 15> _stateHistory;
         float _peakForwardAcceleration;

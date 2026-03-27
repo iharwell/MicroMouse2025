@@ -224,9 +224,21 @@ namespace Config
     constexpr float kWallTouchContactStandoffM = kRobotFrontWallContactOffsetM;
     // [Low] Minimum clearance maintained against non-target walls during startup calibration motion planning.
     constexpr float kWallCalibrationWallClearanceM = 0.003f;
-    // [Medium] Open-loop drive command used during wall touch-off. Increase only if the robot fails to make contact;
-    // decrease if the wheels spin, the impact is harsher than desired, or contact repeatability gets worse.
-    constexpr float kWallTouchDriveCommand = 0.28f;
+    // [Medium] Open-loop drive command used during the early portion of wall touch-off. Increase only if the robot
+    // fails to reach the wall in time; decrease if the approach is still too harsh before the slow final section.
+    constexpr float kWallTouchDriveCommand = 0.22f;
+    // [Medium] Reduced open-loop drive command used over the last few centimeters of a predicted wall-touch approach.
+    // Lower it if impact still carries through without latching; raise it if the robot hesitates and never finishes.
+    constexpr float kWallTouchFinalApproachDriveCommand = 0.09f;
+    // [Medium] Distance ahead of the predicted first-contact window where wall touch-off should drop into the slower
+    // final approach command so contact happens at a speed the encoders and velocity watchdog can actually observe.
+    constexpr float kWallTouchFinalApproachWindowM = 0.060f;
+    // [Medium] Maximum encoder-observed wheel speed allowed during the wall-touch approach. Keep this low enough that
+    // a real strike shows up as a velocity collapse instead of hiding behind wheelspin or rebound.
+    constexpr float kWallTouchMaxApproachEncoderSpeedMps = 0.25f;
+    // [Medium] Maximum encoder-observed wheel speed allowed once the robot is already in the wall-touch seating/skid
+    // phase. This remains looser than the approach cap because the chassis is already against the wall.
+    constexpr float kWallTouchMaxSeatEncoderSpeedMps = 0.40f;
     // [Medium] Minimum approach distance before wall contact is allowed to latch. Increase if the robot sometimes latches
     // before reaching the wall; decrease if the touch-off starts too close to the wall in practice.
     constexpr float kWallTouchMinApproachDistanceM = 0.030f;
@@ -244,22 +256,22 @@ namespace Config
     constexpr uint16_t kWallTouchProgressStallWindowMs = 150U;
     // [High] Peak open-loop drive command used while forcing the chassis to seat on the wall after encoder stall is
     // detected. This intentionally allows full drive so the wall-touch can scrub into square on this chassis.
-    constexpr float kWallTouchSeatRampMaxDriveCommand = 1.0f;
+    constexpr float kWallTouchSeatRampMaxDriveCommand = 0.72f;
     // [Medium] Ramp time from the normal wall-touch drive command up to the seating command ceiling after encoder stall.
-    constexpr uint16_t kWallTouchSeatRampMs = 350U;
+    constexpr uint16_t kWallTouchSeatRampMs = 450U;
     // [High] Minimum wall-touch seating command that must be reached before resumed encoder motion is accepted as the
     // tires breaking free into the wall-scrub phase. This keeps a perfectly square hit from releasing on a soft bounce.
-    constexpr float kWallTouchSeatReleaseMinDriveCommand = 0.80f;
+    constexpr float kWallTouchSeatReleaseMinDriveCommand = 0.58f;
     constexpr float kWallTouchSeatReleaseDistanceM = 0.003f;
     constexpr uint16_t kWallTouchSeatReleaseMinSkidMs = 100U;
     // [High] Half-period for the wall-touch seat wiggle once the push is strong enough to try to break the tires free.
     constexpr uint16_t kWallTouchSeatWiggleHalfPeriodMs = 120U;
     // [High] Differential-drive fraction applied during the wall-touch seat wiggle. The wiggle stays forward-driving;
     // this only biases one side harder than the other to help the chassis scrub square on the wall.
-    constexpr float kWallTouchSeatWiggleTurnFraction = 0.20f;
+    constexpr float kWallTouchSeatWiggleTurnFraction = 0.12f;
     // [High] Minimum fraction of the requested forward seating command that must be retained on both wheels while
     // yaw-wiggling. This keeps the wiggle from unloading one side enough to look like a back-off.
-    constexpr float kWallTouchSeatWiggleRetainedForwardFraction = 0.90f;
+    constexpr float kWallTouchSeatWiggleRetainedForwardFraction = 0.95f;
     // [Low] Base maximum travel allowed while searching for a wall during touch-off. Nearby one-cell touches clamp to
     // this clear-span budget, while longer known-wall moves expand from the geometry-predicted travel plus slack.
     const float kWallTouchBaseMaxApproachDistanceM = kCellClearSpanM;
@@ -316,7 +328,7 @@ namespace Config
     constexpr float kSearchDecelMps2 = 0.30f;
     // [High] Executed in-place turn speed cap during search and homing. Raise it for faster alignment when turns are
     // clean; lower it if mapping turns overshoot, chatter, or scrub the tires.
-    constexpr float kSearchTurnMaxOmegaRadps = 6.5f;
+    constexpr float kSearchTurnMaxOmegaRadps = 8.5f;
     // [High] Executed in-place turn acceleration during search and homing. Raise it for snappier turn entry; lower it
     // if the robot jerks into turns or becomes harder to stop on heading.
     constexpr float kSearchTurnAccelRadps2 = 30.0f;
@@ -360,6 +372,9 @@ namespace Config
     constexpr float kSideWallMeasuredSignalReleaseThreshold = 0.07f;
     // [High] Only trust side-wall detections while the receiver is aimed at the center third of a wall segment.
     constexpr float kSideWallSegmentCenterFraction = (1.0f / 3.0f);
+    // [High] Reset side-wall temporal state once the side receivers are one-quarter of the way into a new cell so
+    // the center-third observation window is measured without carry-over from the previous cell.
+    constexpr float kSideWallStateResetCellEntryFraction = 0.25f;
     // WARNING: Search-mode mapping observation on cautious straights is a single constant-velocity traversal.
     // Do not introduce parallel mapping traversal mechanisms, extra observation passes, stop-and-peek detours, or any
     // other motion-shape changes here. If mapping quality needs work, change only the observation timing, target
@@ -389,7 +404,7 @@ namespace Config
 
     // [High] Static wheel feedforward used to break stiction. Increase if low-speed commands do not move the robot;
     // decrease if the robot twitches or creeps around zero command.
-    constexpr float kWheelStaticFeedforward = 0.14f;
+    constexpr float kWheelStaticFeedforward = 0.11f;
     // [High] Minimum motor command used only on the first control update of a move from rest. Raise it if launches still
     // stall against static friction; decrease it if the robot kicks too hard when starting a move.
     constexpr float kWheelRestLaunchDriveCommand = 0.30f;
@@ -407,7 +422,7 @@ namespace Config
     constexpr float kWheelRestLaunchDriveThreshold = 0.05f;
     // [High] Velocity feedforward slope. Increase if steady cruise speed falls short with little feedback action;
     // decrease if the robot runs fast before the feedback loop has time to correct.
-    constexpr float kWheelVelocityFeedforward = 1.05f;
+    constexpr float kWheelVelocityFeedforward = 1.10f;
     // [High] Wheel-speed proportional gain. Increase for tighter speed tracking; decrease if motor commands chatter
     // or the chassis oscillates in speed on straight segments.
     constexpr float kWheelVelocityKp = 1.10f;
@@ -734,6 +749,12 @@ namespace AuxMeasurementConfig
     // [Medium] Corner-entry speed caps used by the position-accuracy audit.
     constexpr uint8_t kPositionAuditCornerSpeedCount = 3U;
     constexpr float kPositionAuditCornerSpeedsMps[kPositionAuditCornerSpeedCount] = { 0.30f, 0.55f, 0.80f };
+    // Measurement runs must not inherit the mapping/search turn-rate ceiling. Keep this effectively unbounded so the
+    // smooth-turn audit can ask for whatever angular command the maneuver-tracking law requires.
+    constexpr float kPositionAuditCornerMaxOmegaRadps = 1000.0f;
+    // [Medium] The fixed-fixture smooth-turn audit is intended to characterize high-speed cornering, so it runs with
+    // the mission fan profile enabled through the entire phase, including the mirrored return path.
+    constexpr bool kPositionAuditSmoothTurnFanEnabled = true;
     // [Medium] Shared linear limits used by the position-accuracy audit straight and corner trials.
     constexpr float kPositionAuditAccelMps2 = 1.00f;
     constexpr float kPositionAuditDecelMps2 = 1.20f;
@@ -762,10 +783,6 @@ namespace AuxMeasurementConfig
     constexpr uint8_t kPositionAuditPhase3PostTurnHalfSteps = 6U;
     // [Medium] Short settle used at the mission start pose and between anchored audit phases.
     constexpr uint16_t kPositionAuditStartSettleMs = 150U;
-    // [Medium] Raw stationary gyro-bias averaging window captured at the start of the position audit for comparison
-    // against the normal IMU runtime calibration.
-    constexpr uint16_t kPositionAuditGyroBiasAverageWindowMs = 5000U;
-    constexpr uint8_t kPositionAuditGyroBiasAverageSampleIntervalMs = 2U;
     // [Medium] SD flush cadence during auxiliary capture. Decrease it if you want less risk of losing data on power
     // interruption; increase it if flush overhead becomes the limiting factor.
     constexpr uint32_t kLogFlushPeriodMs = 250U;
@@ -814,6 +831,8 @@ struct SensorSnapshot
     bool frontWallUsesFallbackDetection;
     bool leftWall;
     bool rightWall;
+    bool leftDistanceValidForControl;
+    bool rightDistanceValidForControl;
     bool leftWallObservation;
     bool rightWallObservation;
     bool leftWallObservationWindowValid;
@@ -923,6 +942,8 @@ struct DiagnosticSensorSnapshot
     bool frontWall = false;
     bool leftWall = false;
     bool rightWall = false;
+    bool leftDistanceValidForControl = false;
+    bool rightDistanceValidForControl = false;
     float gyroBiasRadps = 0.0f;
     float gyroRawRadps = 0.0f;
     float gyroRadps = 0.0f;
@@ -1023,159 +1044,163 @@ struct AveragedWallSensorInputWindow
 };
 
 #if defined(ARDUINO_TEENSY41)
-#line 1024 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1045 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool ConfigureLoopMatchedBackLeftImu( MazeMap::Vehicle::ImuBackLeft& imu, unsigned long controlPeriodUs, bool enableAccel);
-#line 1052 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1073 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static uint8_t ReadDrivenLowPinWithPullup(uint8_t pin);
-#line 1083 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1104 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static MazeMap::EncoderCountPair CaptureDriveEncoderCounts();
-#line 1093 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1114 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool HaveDriveEncodersMovedSince(const MazeMap::EncoderCountPair& startCounts);
-#line 1098 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1119 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static StationaryImuCalibrationResult WaitForImuCalibrationSettle( const MazeMap::EncoderCountPair& startCounts, unsigned long settleMs);
-#line 1145 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1166 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample( MazeMap::Vehicle::ImuBackLeft& imu, uint16_t sampleCount, const MazeMap::EncoderCountPair& startCounts, AveragedBackLeftImuSample& averagedSample);
-#line 1284 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1305 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void PrintHexByte(uint8_t value);
-#line 1294 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1315 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static const char * WallSensorIdName(WallSensorId sensorId);
-#line 1311 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1332 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static const char * CalibrationWallName(CalibrationWall wall);
-#line 1328 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1349 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static const char * WallTouchOutcomeName(WallTouchOutcome outcome);
-#line 1341 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1362 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static const char * DirectionName(MazeMap::Direction direction);
-#line 1366 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1387 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static const char * WallStateName(MazeMap::WallState state);
-#line 1380 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1401 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsFrontWallSensor(WallSensorId sensorId);
-#line 1385 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1406 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static MazeMap::WallSensorCalibrationMode WallSensorCalibrationModeFor(WallSensorId sensorId);
-#line 1392 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1413 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static const char * WallSensorCalibrationMeasurementName(WallSensorId sensorId);
-#line 2278 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2299 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float ComputeDiagonalWallCenterOmegaRadps( const WallDistanceCalibration& wallCalibration, float leftMeasuredSignal, float rightMeasuredSignal);
-#line 2306 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2327 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryComputeSideWallSignalDistanceM( const WallDistanceCalibration& wallCalibration, WallSensorId sensorId, float measuredSignal, float& distanceM);
-#line 2329 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2350 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+static float ComputeSignalRiseAboveBaselineValue( float measuredDifferentialLight, float signalBaseline);
+#line 2366 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+static bool IsCalibratedSideDistanceValidForControl( const WallDistanceCalibration& wallCalibration, WallSensorId sensorId, float measuredDifferentialLight);
+#line 2389 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryComputeStraightWallCenterErrorM( const WallDistanceCalibration& wallCalibration, float leftMeasuredSignal, bool leftWall, float rightMeasuredSignal, bool rightWall, float& corridorErrorM);
-#line 2396 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2456 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float SignF(float value);
-#line 2401 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2461 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float WrapAngleRad(float angle);
-#line 2406 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2466 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float AngleErrorRad(float target, float measured);
-#line 2419 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2479 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float DirectionToYawRad(MazeMap::Direction direction);
-#line 2449 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2509 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float HeadingErrorRad(const MazeMap::Vectorf<2>& targetHeading, const MazeMap::Vectorf<2>& measuredHeading);
-#line 2459 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2519 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static uint16_t FanPwmCode(float dutyCycle);
-#line 2471 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2531 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void WriteFanDutyCycle(float dutyCycle);
-#line 2480 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2540 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void RampFanDutyCycle(float targetDutyCycle);
-#line 2517 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2577 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void SetMissionLevelFanEnabled(bool enabled);
-#line 2528 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2588 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float ReachableSpeedWithBoundary(float boundarySpeed, float distance, float accel);
-#line 2562 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2622 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryDistanceToWestWall(const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& distanceM);
-#line 2585 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2645 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryDistanceToEastWall(const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& distanceM);
-#line 2608 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2668 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryDistanceToSouthWall(const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& distanceM);
-#line 2631 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2691 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryComputeEffectiveTurnRadiusM( float leftDistanceM, float rightDistanceM, float yawChangeRad, float& turnRadiusM);
-#line 2650 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2710 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryGetCellCenterMeters(const MazeMap::CellCoordinates& cell, float& xMeters, float& yMeters);
-#line 2656 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2716 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryGetCellWallFaceCoordinateM( const MazeMap::CellCoordinates& cell, MazeMap::Direction wallDirection, float& coordinateM);
-#line 2683 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2743 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryComputeWallTouchTargetCoordinateForCellWall( const MazeMap::CellCoordinates& cell, MazeMap::Direction wallDirection, float& targetCoordinateM, CalibrationWall& calibrationWall);
-#line 2719 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2779 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryComputePoseAxisFromObservedWall( const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float measuredDistanceM, const MazeMap::CellCoordinates& cell, MazeMap::Direction wallDirection, float& coordinateM);
-#line 2767 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2827 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static uint32_t WallSensorAmbientSettleTimeUs(WallSensorId sensorId);
-#line 2772 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2832 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static uint32_t WallSensorLitSettleTimeUs(WallSensorId sensorId);
-#line 2777 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2837 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static uint32_t WallSensorLedCalibrationHalfPeriodUs(WallSensorId sensorId);
-#line 2782 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2842 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float WallSensorMeasuredValueForCalibration(WallSensorId sensorId, const RawWallSensorSample& sample);
-#line 2787 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2847 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static WallSensorCalibrationInput BuildWallSensorCalibrationInput(WallSensorId sensorId, const RawWallSensorSample& sample);
-#line 2798 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2858 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static RawWallSensorSample SampleWallSensorRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor);
-#line 2814 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2874 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void SampleWallSensorPairRaw( WallSensorId firstSensorId, const MazeMap::WallSensor& firstSensor, WallSensorId secondSensorId, const MazeMap::WallSensor& secondSensor, RawWallSensorSample& firstSample, RawWallSensorSample& secondSample);
-#line 2841 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2901 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static WallSensorCalibrationInput SampleWallCalibrationInputRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor);
-#line 2846 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2906 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void SampleWallCalibrationInputRawPair( WallSensorId firstSensorId, const MazeMap::WallSensor& firstSensor, WallSensorId secondSensorId, const MazeMap::WallSensor& secondSensor, WallSensorCalibrationInput& firstInput, WallSensorCalibrationInput& secondInput);
-#line 2861 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2921 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static WallSensorCalibrationCapture SampleWallCalibrationCaptureAverageRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor);
-#line 2886 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 2946 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void SampleWallCalibrationCaptureAverageRawPair( WallSensorId firstSensorId, const MazeMap::WallSensor& firstSensor, WallSensorId secondSensorId, const MazeMap::WallSensor& secondSensor, WallSensorCalibrationCapture& firstCapture, WallSensorCalibrationCapture& secondCapture);
-#line 2940 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3000 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool HysteresisWall(bool currentState, float distanceM, float onThresholdM, float offThresholdM);
-#line 2949 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3009 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsApproximatelyDiagonalHeadingUnit(const MazeMap::Vectorf<2>& headingUnit);
-#line 2956 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3016 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static MazeMap::ManeuverCode RelativeToInPlaceCode(MazeMap::RelativeDirection rel);
-#line 2979 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3039 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsStraightCode(MazeMap::ManeuverCode code);
-#line 2984 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3044 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void TrimAsciiWhitespace(char* text);
-#line 3010 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3070 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void NormalizeToken(char* text);
-#line 3024 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3084 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryParseBaseManeuverCodeName(const char* token, MazeMap::ManeuverCode& code);
-#line 3083 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3143 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryParseManeuverCodeToken(const char* token, MazeMap::ManeuverCode& code);
-#line 3125 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3185 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static void FormatManeuverCodeName(MazeMap::ManeuverCode code, char* buffer, size_t bufferSize);
-#line 3175 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3235 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float ReadBackLeftGyroZRadpsRaw(MazeMap::Vehicle& vehicle);
-#line 3186 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3246 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static float EstimateMissionGyroBiasRadps(MazeMap::Vehicle& vehicle);
-#line 3202 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
-static bool TryAverageRawGyroBiasRadpsOverWindow( MazeMap::Vehicle& vehicle, unsigned long durationMs, unsigned long sampleIntervalMs, float& averageRadps, unsigned long& sampleCount);
-#line 3312 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3336 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool TryComputeSideWallAimCoordinateM( const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& alongWallCoordinateM);
-#line 3394 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 3418 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsSideWallDetectionWindowValid( const PoseEstimate& pose, const MazeMap::WallSensor& sensor);
-#line 4095 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 4143 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static MazeMap::WheelControlProfile BuildNominalWheelControlProfile();
-#line 4104 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 4152 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(float maxAngularSpeedRadps, float angularAccelRadps2);
-#line 4116 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 4164 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MazeMap::Vehicle& vehicle);
-#line 4968 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 4171 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+static MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MotionLimits& limits);
+#line 5035 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool SelectSequentialCsvFileName( char* buffer, size_t bufferSize, const char* explicitFileName, const char* teensyFormat, const char* hostFallback);
-#line 5468 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5535 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsPinPairStrapped(uint8_t pinA, uint8_t pinB);
-#line 5493 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5560 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsPrimaryDiagnosticModeRequested();
-#line 5498 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5565 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsManeuverTestModeRequested();
-#line 5503 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5570 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsAuxiliaryMeasurementModeRequested();
-#line 5508 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5575 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsInterRunServiceJumperInstalled();
-#line 5513 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5580 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool IsWallSensorLedCalibrationModeRequested();
-#line 5518 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5585 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool ResetStartupTrace(const char* firstLine);
-#line 5545 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5612 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool AppendStartupTrace(const char* line);
-#line 5569 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 5636 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static const char * AuxMeasurementRoutineName(AuxMeasurementConfig::Routine routine);
-#line 14779 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 15171 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 void setup();
-#line 14837 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 15229 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 void loop();
-#line 1024 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
+#line 1045 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\MazeMap.ino"
 static bool ConfigureLoopMatchedBackLeftImu(
     MazeMap::Vehicle::ImuBackLeft& imu,
     unsigned long controlPeriodUs,
@@ -2481,6 +2506,45 @@ static bool TryComputeSideWallSignalDistanceM(
         distanceM);
 }
 
+static float ComputeSignalRiseAboveBaselineValue(
+    float measuredDifferentialLight,
+    float signalBaseline)
+{
+    // Exclusively for the purpose of centering.
+    if (!std::isfinite(measuredDifferentialLight) ||
+        !std::isfinite(signalBaseline))
+    {
+        return 0.0f;
+    }
+
+    return (measuredDifferentialLight > signalBaseline) ?
+        (measuredDifferentialLight - signalBaseline) :
+        0.0f;
+}
+
+static bool IsCalibratedSideDistanceValidForControl(
+    const WallDistanceCalibration& wallCalibration,
+    WallSensorId sensorId,
+    float measuredDifferentialLight)
+{
+    // Exclusively for the purpose of deciding whether a side distance estimate is trustworthy for control.
+    float onMeasuredThreshold = 0.0f;
+    float offMeasuredThreshold = 0.0f;
+    float signalBaseline = 0.0f;
+    if (!wallCalibration.TryComputeSideWallMeasuredThresholds(
+            sensorId,
+            Config::kSideWallMeasuredSignalLatchThreshold,
+            Config::kSideWallMeasuredSignalReleaseThreshold,
+            onMeasuredThreshold,
+            offMeasuredThreshold,
+            signalBaseline))
+    {
+        return false;
+    }
+
+    return ComputeSignalRiseAboveBaselineValue(measuredDifferentialLight, signalBaseline) >= onMeasuredThreshold;
+}
+
 static bool TryComputeStraightWallCenterErrorM(
     const WallDistanceCalibration& wallCalibration,
     float leftMeasuredSignal,
@@ -3354,42 +3418,6 @@ static float EstimateMissionGyroBiasRadps(MazeMap::Vehicle& vehicle)
     return accumulatedRadps / static_cast<float>(requiredSamples);
 }
 
-static bool TryAverageRawGyroBiasRadpsOverWindow(
-    MazeMap::Vehicle& vehicle,
-    unsigned long durationMs,
-    unsigned long sampleIntervalMs,
-    float& averageRadps,
-    unsigned long& sampleCount)
-{
-    averageRadps = 0.0f;
-    sampleCount = 0UL;
-    if (durationMs == 0UL || sampleIntervalMs == 0UL)
-    {
-        return false;
-    }
-
-    const unsigned long requiredSamples =
-        (std::max)(1UL, (durationMs + sampleIntervalMs - 1UL) / sampleIntervalMs);
-    double accumulatedRadps = 0.0;
-    for (unsigned long i = 0UL; i < requiredSamples; ++i)
-    {
-        accumulatedRadps += static_cast<double>(ReadBackLeftGyroZRadpsRaw(vehicle));
-        ++sampleCount;
-        if ((i + 1UL) < requiredSamples)
-        {
-            delay(sampleIntervalMs);
-        }
-    }
-
-    if (sampleCount == 0UL)
-    {
-        return false;
-    }
-
-    averageRadps = static_cast<float>(accumulatedRadps / static_cast<double>(sampleCount));
-    return true;
-}
-
 static bool CalibrateStationaryBackLeftGyroBias(
     MazeMap::Vehicle& vehicle,
     unsigned long controlPeriodUs,
@@ -3835,6 +3863,18 @@ public:
             Config::kMissionRuntimeAccelFilterFreq);
     }
 
+    void ResetSideWallMemory() noexcept
+    {
+        _sideLeft = {};
+        _sideRight = {};
+        _sideLeftWallSignalFiltered = 0.0f;
+        _sideRightWallSignalFiltered = 0.0f;
+        _sideLeftInputAverage.Clear();
+        _sideRightInputAverage.Clear();
+        _sideLeftWallSignalInitialized = false;
+        _sideRightWallSignalInitialized = false;
+    }
+
     SensorSnapshot Capture(bool stationary, const PoseEstimate& pose)
     {
         SensorSnapshot snapshot{};
@@ -3908,6 +3948,18 @@ public:
         const bool sideRightWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideRight);
         snapshot.leftWallObservationWindowValid = sideLeftWindowValid;
         snapshot.rightWallObservationWindowValid = sideRightWindowValid;
+        snapshot.leftDistanceValidForControl =
+            sideLeftWindowValid &&
+            IsCalibratedSideDistanceValidForControl(
+                _wallCalibration,
+                WallSensorId::SideLeft,
+                sideLeftInput.differentialLight);
+        snapshot.rightDistanceValidForControl =
+            sideRightWindowValid &&
+            IsCalibratedSideDistanceValidForControl(
+                _wallCalibration,
+                WallSensorId::SideRight,
+                sideRightInput.differentialLight);
         snapshot.leftWall = UpdateSideWallState(
             WallSensorId::SideLeft,
             sideLeftInput.differentialLight,
@@ -4010,15 +4062,15 @@ private:
 
     float ComputeCorridorError(const SensorSnapshot& snapshot) const
     {
-        if (snapshot.leftWall && snapshot.rightWall)
+        if (snapshot.leftDistanceValidForControl && snapshot.rightDistanceValidForControl)
         {
             return 0.5f * (snapshot.sideLeftDistanceM - snapshot.sideRightDistanceM);
         }
-        if (snapshot.leftWall)
+        if (snapshot.leftDistanceValidForControl)
         {
             return snapshot.sideLeftDistanceM - _wallCalibration.GetExpectedSideWallDistanceM();
         }
-        if (snapshot.rightWall)
+        if (snapshot.rightDistanceValidForControl)
         {
             return _wallCalibration.GetExpectedSideWallDistanceM() - snapshot.sideRightDistanceM;
         }
@@ -4273,6 +4325,13 @@ static MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MazeMap::
     return BuildSharedInPlaceTurnProfile(
         vehicle.GetMaxRotationalVelocity(),
         vehicle.GetMaxAngularAcceleration());
+}
+
+static MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MotionLimits& limits)
+{
+    return BuildSharedInPlaceTurnProfile(
+        limits.maxAngularSpeedRadps,
+        limits.angularAccelRadps2);
 }
 
 class DriveBase
@@ -4790,6 +4849,18 @@ public:
             (std::min)(snapshot.frontLeft.distanceM, snapshot.frontRight.distanceM));
         const bool sideLeftWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideLeft);
         const bool sideRightWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideRight);
+        snapshot.leftDistanceValidForControl =
+            sideLeftWindowValid &&
+            IsCalibratedSideDistanceValidForControl(
+                _wallCalibration,
+                WallSensorId::SideLeft,
+                sideLeftInput.differentialLight);
+        snapshot.rightDistanceValidForControl =
+            sideRightWindowValid &&
+            IsCalibratedSideDistanceValidForControl(
+                _wallCalibration,
+                WallSensorId::SideRight,
+                sideRightInput.differentialLight);
         snapshot.leftWall = UpdateSideWallState(
             WallSensorId::SideLeft,
             sideLeftInput.differentialLight,
@@ -4890,15 +4961,15 @@ private:
 
     float ComputeCorridorError(const DiagnosticSensorSnapshot& snapshot) const
     {
-        if (snapshot.leftWall && snapshot.rightWall)
+        if (snapshot.leftDistanceValidForControl && snapshot.rightDistanceValidForControl)
         {
             return 0.5f * (snapshot.sideLeft.distanceM - snapshot.sideRight.distanceM);
         }
-        if (snapshot.leftWall)
+        if (snapshot.leftDistanceValidForControl)
         {
             return snapshot.sideLeft.distanceM - _wallCalibration.GetExpectedSideWallDistanceM();
         }
-        if (snapshot.rightWall)
+        if (snapshot.rightDistanceValidForControl)
         {
             return _wallCalibration.GetExpectedSideWallDistanceM() - snapshot.sideRight.distanceM;
         }
@@ -8094,6 +8165,8 @@ private:
         const unsigned long timeoutMs = millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
+        bool stallLogged = false;
+        bool durationLogged = false;
 
         while (true)
         {
@@ -8107,6 +8180,7 @@ private:
 
             const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
             const float remainingM = (std::max)(0.0f, distanceM - traveledM);
+            const bool stoppingAtEndpoint = exitSpeed <= 0.05f;
             if ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeed) <= Config::kSpeedToleranceMps))
             {
                 _drive.Brake();
@@ -8116,14 +8190,34 @@ private:
                 }
                 break;
             }
-            if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
+            const unsigned long nowMs = millis();
+            if (!stallLogged && translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, nowMs))
             {
-                _drive.Brake();
-                return Fail("Maneuver straight encoder progress stalled");
+                stallLogged = true;
+                char line[196] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "phase=%s;mode=straight;reason=encoder_stall;traveled_m=%.4f;remaining_m=%.4f;cmd_v_mps=%.4f",
+                    phaseName,
+                    traveledM,
+                    remainingM,
+                    commandedSpeedMps);
+                (void)_telemetryLogger.WriteEvent("motion_watchdog", line);
             }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
+            if (!durationLogged && static_cast<long>(timeoutMs - nowMs) <= 0)
             {
-                return Fail("Maneuver straight profile timed out");
+                durationLogged = true;
+                char line[196] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "phase=%s;mode=straight;reason=elapsed_budget_exceeded;traveled_m=%.4f;remaining_m=%.4f;cmd_v_mps=%.4f",
+                    phaseName,
+                    traveledM,
+                    remainingM,
+                    commandedSpeedMps);
+                (void)_telemetryLogger.WriteEvent("motion_watchdog", line);
             }
 
             const float accelLimitedSpeedMps = (std::min)(cruiseSpeed, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
@@ -8143,21 +8237,32 @@ private:
                 else
                 {
                     float signalCorridorErrorM = 0.0f;
+                    const bool useLeftWall =
+                        IsCalibratedSideDistanceValidForControl(
+                            gWallDistanceCalibration,
+                            WallSensorId::SideLeft,
+                            snapshot.sideLeft.differentialLight);
+                    const bool useRightWall =
+                        IsCalibratedSideDistanceValidForControl(
+                            gWallDistanceCalibration,
+                            WallSensorId::SideRight,
+                            snapshot.sideRight.differentialLight);
                     if (TryComputeStraightWallCenterErrorM(
                             gWallDistanceCalibration,
                             snapshot.sideLeft.differentialLight,
-                            snapshot.leftWall,
+                            useLeftWall,
                             snapshot.sideRight.differentialLight,
-                            snapshot.rightWall,
+                            useRightWall,
                             signalCorridorErrorM))
                     {
                         wallOmegaRadps += Config::kWallCenterGain * signalCorridorErrorM;
                     }
-                    else
-                    {
-                        wallOmegaRadps += Config::kWallCenterGain * snapshot.corridorErrorM;
-                    }
-                    if (snapshot.frontWall && remainingM < 0.07f)
+                    if (stoppingAtEndpoint &&
+                        std::isfinite(snapshot.frontLeftDistanceM) &&
+                        std::isfinite(snapshot.frontRightDistanceM) &&
+                        snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+                        snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+                        remainingM < 0.07f)
                     {
                         wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
                     }
@@ -8180,16 +8285,16 @@ private:
 
     bool ExecuteTurnProfile(const char* phaseName, float angleRad, const MotionLimits& limits)
     {
-        (void)limits;
         if (!StartPhase(phaseName))
         {
             return false;
         }
 
         const float targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
-        const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(_vehicle);
+        const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(limits);
         float commandedOmegaRadps = 0.0f;
         const unsigned long timeoutMs = millis() + 2500UL;
+        bool durationLogged = false;
 
         while (true)
         {
@@ -8211,9 +8316,18 @@ private:
                 }
                 break;
             }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
+            if (!durationLogged && static_cast<long>(timeoutMs - millis()) <= 0)
             {
-                return Fail("Maneuver turn profile timed out");
+                durationLogged = true;
+                char line[160] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "phase=%s;mode=turn;reason=elapsed_budget_exceeded;yaw_err_deg=%.2f;w_radps=%.4f",
+                    phaseName,
+                    RAD_TO_DEG * errorRad,
+                    _drive.GetPose().angularSpeedRadps);
+                (void)_telemetryLogger.WriteEvent("motion_watchdog", line);
             }
 
             float angularCommandRadps = 0.0f;
@@ -8259,6 +8373,8 @@ private:
         const unsigned long timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceM));
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
+        bool stallLogged = false;
+        bool durationLogged = false;
 
         while (true)
         {
@@ -8281,14 +8397,34 @@ private:
                 }
                 break;
             }
-            if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
+            const unsigned long nowMs = millis();
+            if (!stallLogged && translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, nowMs))
             {
-                _drive.Brake();
-                return Fail("Maneuver arc encoder progress stalled");
+                stallLogged = true;
+                char line[196] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "phase=%s;mode=arc;reason=encoder_stall;traveled_m=%.4f;remaining_m=%.4f;cmd_v_mps=%.4f",
+                    phaseName,
+                    traveledM,
+                    remainingM,
+                    commandedSpeedMps);
+                (void)_telemetryLogger.WriteEvent("motion_watchdog", line);
             }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
+            if (!durationLogged && static_cast<long>(timeoutMs - nowMs) <= 0)
             {
-                return Fail("Maneuver arc profile timed out");
+                durationLogged = true;
+                char line[196] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "phase=%s;mode=arc;reason=elapsed_budget_exceeded;traveled_m=%.4f;remaining_m=%.4f;cmd_v_mps=%.4f",
+                    phaseName,
+                    traveledM,
+                    remainingM,
+                    commandedSpeedMps);
+                (void)_telemetryLogger.WriteEvent("motion_watchdog", line);
             }
 
             const float accelLimitedSpeedMps = (std::min)(cruiseSpeed, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
@@ -8342,10 +8478,11 @@ private:
 
         const float startDistanceM = _drive.GetAverageDistanceMeters();
         const float startYawRad = _drive.GetPose().yawRad;
-        const bool stoppingAtEndpoint = exitSpeed <= 0.05f;
         const unsigned long timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * profile.totalDistance));
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
+        bool stallLogged = false;
+        bool durationLogged = false;
 
         while (true)
         {
@@ -8361,24 +8498,40 @@ private:
             const float remainingM = (std::max)(0.0f, profile.totalDistance - traveledM);
             if (remainingM <= Config::kDistanceToleranceM)
             {
-                if (stoppingAtEndpoint)
-                {
-                    _drive.Brake();
-                }
                 if (!LogSample(false, timestampUs, dtSeconds, snapshot))
                 {
                     return false;
                 }
                 break;
             }
-            if (translationWatchdog.Stalled(traveledM, maneuverSpeedMps, remainingM, millis()))
+            const unsigned long nowMs = millis();
+            if (!stallLogged && translationWatchdog.Stalled(traveledM, maneuverSpeedMps, remainingM, nowMs))
             {
-                _drive.Brake();
-                return Fail("Maneuver smooth turn encoder progress stalled");
+                stallLogged = true;
+                char line[196] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "phase=%s;mode=smooth_turn;reason=encoder_stall;traveled_m=%.4f;remaining_m=%.4f;cmd_v_mps=%.4f",
+                    phaseName,
+                    traveledM,
+                    remainingM,
+                    maneuverSpeedMps);
+                (void)_telemetryLogger.WriteEvent("motion_watchdog", line);
             }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
+            if (!durationLogged && static_cast<long>(timeoutMs - nowMs) <= 0)
             {
-                return Fail("Maneuver smooth turn profile timed out");
+                durationLogged = true;
+                char line[196] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "phase=%s;mode=smooth_turn;reason=elapsed_budget_exceeded;traveled_m=%.4f;remaining_m=%.4f;cmd_v_mps=%.4f",
+                    phaseName,
+                    traveledM,
+                    remainingM,
+                    maneuverSpeedMps);
+                (void)_telemetryLogger.WriteEvent("motion_watchdog", line);
             }
 
             float yawOffsetRad = 0.0f;
@@ -8663,18 +8816,6 @@ public:
             return Fail("Telemetry sensor init failed");
         }
 
-        float positionAuditGyroBiasAverageRadps = 0.0f;
-        unsigned long positionAuditGyroBiasAverageSamples = 0UL;
-        if (!TryAverageRawGyroBiasRadpsOverWindow(
-                _speedVehicle,
-                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageWindowMs),
-                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageSampleIntervalMs),
-                positionAuditGyroBiasAverageRadps,
-                positionAuditGyroBiasAverageSamples))
-        {
-            return Fail("Unable to average position audit gyro bias");
-        }
-
         char fileName[32] = {};
         if (!SelectSequentialCsvFileName(fileName, sizeof(fileName), nullptr, "aux%03u.csv", "position_accuracy_audit.csv"))
         {
@@ -8687,38 +8828,6 @@ public:
 
         _telemetryLoggingEnabled = true;
         AppendStartupTrace("position_accuracy_audit:telemetry_logger_opened");
-        if (!_telemetryLogger.WriteMetadataUnsigned(
-                "position_audit_gyro_bias_average_window_ms",
-                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageWindowMs)))
-        {
-            return Fail("Unable to write position audit gyro bias metadata");
-        }
-        if (!_telemetryLogger.WriteMetadataUnsigned(
-                "position_audit_gyro_bias_average_interval_ms",
-                static_cast<unsigned long>(AuxMeasurementConfig::kPositionAuditGyroBiasAverageSampleIntervalMs)))
-        {
-            return Fail("Unable to write position audit gyro bias metadata");
-        }
-        if (!_telemetryLogger.WriteMetadataUnsigned(
-                "position_audit_gyro_bias_average_samples",
-                positionAuditGyroBiasAverageSamples))
-        {
-            return Fail("Unable to write position audit gyro bias metadata");
-        }
-        if (!_telemetryLogger.WriteMetadataValueFloat(
-                "position_audit_gyro_bias_average_radps",
-                positionAuditGyroBiasAverageRadps,
-                6))
-        {
-            return Fail("Unable to write position audit gyro bias metadata");
-        }
-        if (!_telemetryLogger.WriteMetadataValueFloat(
-                "position_audit_gyro_bias_delta_vs_mission_radps",
-                positionAuditGyroBiasAverageRadps - _telemetrySensors.GetGyroBiasRadps(),
-                6))
-        {
-            return Fail("Unable to write position audit gyro bias metadata");
-        }
         if (!LogWallCalibrationMetadata())
         {
             return false;
@@ -8879,6 +8988,7 @@ public:
         AppendStartupTrace("position_accuracy_audit:run_entered");
         const bool ok = RunPositionAccuracyAuditPasses();
 
+        SetRacingFanEnabled(false);
         _drive.Brake();
         _telemetryLogger.Flush();
         _telemetryLoggingEnabled = false;
@@ -9172,14 +9282,14 @@ private:
         WriteFanDutyCycle(0.0f);
     }
 
-    static MotionLimits SearchLimits()
+    MotionLimits SearchLimits() const
     {
         MotionLimits limits{};
         limits.maxSpeedMps = Config::kSearchMaxSpeedMps;
-        limits.accelMps2 = Config::kSearchAccelMps2;
-        limits.decelMps2 = Config::kSearchDecelMps2;
-        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
-        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
+        limits.accelMps2 = _speedVehicle.GetMaxForwardAcceleration();
+        limits.decelMps2 = _speedVehicle.GetMaxForwardAcceleration();
+        limits.maxAngularSpeedRadps = _speedVehicle.GetMaxRotationalVelocity();
+        limits.angularAccelRadps2 = _speedVehicle.GetMaxAngularAcceleration();
         return limits;
     }
 
@@ -9741,12 +9851,6 @@ private:
         }
         if (!_telemetryLogger.WriteEvent(
                 "summary",
-                "position_audit_gyro_bias_average_radps is a 5 s raw stationary average; compare it against mission_gyro_bias_estimate_radps and position_audit_gyro_bias_delta_vs_mission_radps to judge startup gyro-bias repeatability."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (!_telemetryLogger.WriteEvent(
-                "summary",
                 "Phase 1 runs S8, centers in the north corner, turns in place to face down, and runs S8 back to start."))
         {
             return Fail("Unable to write position accuracy audit summary");
@@ -9760,6 +9864,13 @@ private:
         if (!_telemetryLogger.WriteEvent(
                 "summary",
                 "Phase 3 reseats at start, runs S6 + S90LS + S6, recenters at the east end, and returns on the reversed maneuver path."))
+        {
+            return Fail("Unable to write position accuracy audit summary");
+        }
+        if (AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled &&
+            !_telemetryLogger.WriteEvent(
+                "summary",
+                "Smooth-turn phases run with the mission fan enabled; the existing 2 s ramp to 80% completes before motion begins so high-speed S90 data reflects the intended downforce state."))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
@@ -9783,6 +9894,18 @@ private:
             AuxMeasurementConfig::kPositionAuditAccelMps2,
             AuxMeasurementConfig::kPositionAuditDecelMps2,
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditStartSettleMs));
+        if (!_telemetryLogger.WriteEvent("position_audit", line))
+        {
+            return Fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "smooth_turn_fan_enabled,%u;kRacingFanDutyCycle,%.6f;kRacingFanRampMs,%u",
+            AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled ? 1U : 0U,
+            Config::kRacingFanDutyCycle,
+            static_cast<unsigned>(Config::kRacingFanRampMs));
         if (!_telemetryLogger.WriteEvent("position_audit", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
@@ -9892,14 +10015,18 @@ private:
         return limits;
     }
 
+    MotionLimits PositionAccuracyAuditTurnLimits() const
+    {
+        MotionLimits limits = PositionAccuracyAuditStraightLimits(0.0f);
+        limits.maxSpeedMps = 0.0f;
+        return limits;
+    }
+
     MotionLimits PositionAccuracyAuditCornerLimits(float cruiseSpeedMps, float nominalRadiusM) const
     {
         MotionLimits limits = PositionAccuracyAuditStraightLimits(cruiseSpeedMps);
-        if (nominalRadiusM > 0.0f)
-        {
-            const float requiredOmegaRadps = cruiseSpeedMps / nominalRadiusM;
-            limits.maxAngularSpeedRadps = (std::max)(limits.maxAngularSpeedRadps, 1.30f * requiredOmegaRadps);
-        }
+        (void)nominalRadiusM;
+        limits.maxAngularSpeedRadps = AuxMeasurementConfig::kPositionAuditCornerMaxOmegaRadps;
         return limits;
     }
 
@@ -10330,7 +10457,7 @@ private:
         float cruiseSpeedMps)
     {
         const MotionLimits limits = PositionAccuracyAuditStraightLimits(cruiseSpeedMps);
-        const MotionLimits touchLimits = StartupWallCalibrationLimits();
+        const MotionLimits turnLimits = PositionAccuracyAuditTurnLimits();
         const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
         const MazeMap::Vectorf<2> northHeading = DirectionToUnitVector(MazeMap::Up);
         const MazeMap::Vectorf<2> southHeading = DirectionToUnitVector(MazeMap::Down);
@@ -10394,7 +10521,7 @@ private:
         {
             return false;
         }
-        if (!RotateCalibrationTo(MazeMap::Down, touchLimits))
+        if (!RotateCalibrationTo(MazeMap::Down, turnLimits))
         {
             return false;
         }
@@ -10448,7 +10575,7 @@ private:
             return Fail("Position audit in-place turn direction is invalid");
         }
 
-        const MotionLimits touchLimits = StartupWallCalibrationLimits();
+        const MotionLimits turnLimits = PositionAccuracyAuditTurnLimits();
         char phaseName[64] = {};
 
         snprintf(phaseName, sizeof(phaseName), "position_ip_turn_%u_start", static_cast<unsigned>(turnIndex));
@@ -10470,7 +10597,7 @@ private:
         {
             return false;
         }
-        if (!ExecuteTurnProfile(angleRad, touchLimits))
+        if (!ExecuteTurnProfile(angleRad, turnLimits))
         {
             return false;
         }
@@ -10557,7 +10684,7 @@ private:
         const float nominalRadiusM = MazeMap::ManeuverSet::GetSet()[code].GetNominalTurnRadiusInCells() * Config::kCellSizeM;
         const MotionLimits straightLimits = PositionAccuracyAuditStraightLimits(requestedCruiseSpeedMps);
         const MotionLimits cornerLimits = PositionAccuracyAuditCornerLimits(requestedCruiseSpeedMps, nominalRadiusM);
-        const MotionLimits calibrationLimits = StartupWallCalibrationLimits();
+        const MotionLimits calibrationLimits = PositionAccuracyAuditTurnLimits();
         const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
         const float turnCruiseSpeedMps = ManeuverSpeedLimit(code, cornerLimits);
         if (!(turnCruiseSpeedMps > 0.0f))
@@ -10586,16 +10713,24 @@ private:
         const bool hasSmoothTurnProfile = TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile);
         char phaseName[64] = {};
 
-        snprintf(
-            phaseName,
-            sizeof(phaseName),
-            "position_turn_%u_%u_start",
-            static_cast<unsigned>(codeIndex),
-            static_cast<unsigned>(speedIndex));
-        if (!HoldPosition(AuxMeasurementConfig::kPositionAuditStartSettleMs, phaseName))
+        if (AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled)
         {
-            return false;
+            SetRacingFanEnabled(true);
         }
+
+        bool ok = false;
+        do
+        {
+            snprintf(
+                phaseName,
+                sizeof(phaseName),
+                "position_turn_%u_%u_start",
+                static_cast<unsigned>(codeIndex),
+                static_cast<unsigned>(speedIndex));
+            if (!HoldPosition(AuxMeasurementConfig::kPositionAuditStartSettleMs, phaseName))
+            {
+                break;
+            }
 
         snprintf(
             phaseName,
@@ -10605,7 +10740,7 @@ private:
             static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
-            return false;
+            break;
         }
         if (!ExecuteStraightProfile(
                 launchDistanceM,
@@ -10617,7 +10752,7 @@ private:
                 &northHeading,
                 &launchPosition))
         {
-            return false;
+            break;
         }
 
         const DriveTelemetry arcStartTelemetry = _drive.GetTelemetry();
@@ -10630,9 +10765,9 @@ private:
             static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
-            return false;
+            break;
         }
-        const float maneuverExitSpeedMps = (postStraightDistanceM > 0.0f) ? turnCruiseSpeedMps : 0.0f;
+        const float maneuverExitSpeedMps = turnCruiseSpeedMps;
         if (hasSmoothTurnProfile)
         {
             if (!ExecuteSmoothTurnProfile(
@@ -10642,7 +10777,7 @@ private:
                     turnCruiseSpeedMps,
                     cornerLimits))
             {
-                return false;
+                break;
             }
         }
         else if (!ExecuteArcProfile(
@@ -10653,7 +10788,7 @@ private:
                 turnCruiseSpeedMps,
                 cornerLimits))
         {
-            return false;
+            break;
         }
         const DriveTelemetry arcEndTelemetry = _drive.GetTelemetry();
         const float arcEndYawRad = _drive.GetPose().yawRad;
@@ -10671,7 +10806,7 @@ private:
                 static_cast<unsigned>(speedIndex));
             if (!BeginTelemetryPhase(phaseName))
             {
-                return false;
+                break;
             }
             if (!ExecuteStraightProfile(
                     postStraightDistanceM,
@@ -10683,7 +10818,7 @@ private:
                     &finalHeading,
                     &finalPosition))
             {
-                return false;
+                break;
             }
         }
 
@@ -10699,12 +10834,12 @@ private:
             static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
-            return false;
+            break;
         }
         float eastTouchCorrectionM = 0.0f;
         if (!TouchWallAndSetKnownWallCoordinate(MazeMap::Right, CalibrationWall::East, geometry.eastWallTouchXM, &eastTouchCorrectionM))
         {
-            return false;
+            break;
         }
 
         if (!WritePositionSmoothTurnAuditResult(
@@ -10719,7 +10854,7 @@ private:
                 yawChangeRad,
                 yawErrorDeg))
         {
-            return false;
+            break;
         }
 
         snprintf(
@@ -10730,11 +10865,11 @@ private:
             static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
-            return false;
+            break;
         }
         if (!DriveCalibrationPoseToKnownX(finalTargetXM, centeringLimits))
         {
-            return false;
+            break;
         }
 
         snprintf(
@@ -10745,15 +10880,15 @@ private:
             static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
-            return false;
+            break;
         }
         if (!RotateCalibrationTo(MazeMap::Left, calibrationLimits))
         {
-            return false;
+            break;
         }
         if (!HoldPosition(AuxMeasurementConfig::kPositionAuditStartSettleMs))
         {
-            return false;
+            break;
         }
         snprintf(
             phaseName,
@@ -10763,15 +10898,24 @@ private:
             static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
         {
-            return false;
+            break;
         }
 
-        _currentDirectionalLocation = returnStart;
-        _currentDirection = _currentDirectionalLocation.GetDirection();
-        _currentCell = static_cast<MazeMap::CellCoordinates>(_currentDirectionalLocation.GetLocation());
-        MazeMap::ManeuverQueue queue(reversePath, _currentDirectionalLocation);
-        ApplyAsymmetricQueueLimits(queue, cornerLimits, 0.0f, 0.0f);
-        return ExecuteQueuedManeuvers(queue, cornerLimits, false);
+            _currentDirectionalLocation = returnStart;
+            _currentDirection = _currentDirectionalLocation.GetDirection();
+            _currentCell = static_cast<MazeMap::CellCoordinates>(_currentDirectionalLocation.GetLocation());
+            MazeMap::ManeuverQueue queue(reversePath, _currentDirectionalLocation);
+            queue.ComputeSpeeds(_speedVehicle, 0.0f, 0.0f);
+            ApplyAsymmetricQueueLimits(queue, cornerLimits, 0.0f, 0.0f);
+            ok = ExecuteQueuedManeuvers(queue, cornerLimits, false);
+        }
+        while (false);
+
+        if (AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled)
+        {
+            SetRacingFanEnabled(false);
+        }
+        return ok;
     }
 
     bool RunPositionAccuracyAuditPasses()
@@ -11070,6 +11214,78 @@ private:
             (std::fabs(current.rightDistanceM - reference.rightDistanceM) >= minimumPerWheelDistanceDeltaM);
     }
 
+    static float ComputeWallTouchApproachDriveCommand(
+        float traveledDistanceM,
+        float minLatchTravelM)
+    {
+        if (!std::isfinite(traveledDistanceM) || !std::isfinite(minLatchTravelM))
+        {
+            return Config::kWallTouchFinalApproachDriveCommand;
+        }
+
+        const float effectiveFinalApproachWindowM =
+            (std::clamp)(Config::kWallTouchFinalApproachWindowM, 0.0f, 0.5f * minLatchTravelM);
+        const float remainingToLatchM = minLatchTravelM - traveledDistanceM;
+        if ((effectiveFinalApproachWindowM > 0.0f) &&
+            (remainingToLatchM <= effectiveFinalApproachWindowM))
+        {
+            return Config::kWallTouchFinalApproachDriveCommand;
+        }
+
+        return Config::kWallTouchDriveCommand;
+    }
+
+    static bool ShouldBrakeWallTouchApproachForEncoderSpeed(const DriveTelemetry& telemetry)
+    {
+        const float encoderSpeedMps = MazeMap::ComputeAverageEncoderAbsSpeedMps(
+            telemetry.leftVelocityMps,
+            telemetry.rightVelocityMps);
+        return std::isfinite(encoderSpeedMps) &&
+            (encoderSpeedMps >= Config::kWallTouchMaxApproachEncoderSpeedMps);
+    }
+
+    static float LimitWallTouchApproachDriveCommandByEncoderSpeed(
+        float requestedDriveCommand,
+        const DriveTelemetry& telemetry)
+    {
+        if (!std::isfinite(requestedDriveCommand))
+        {
+            return Config::kWallTouchFinalApproachDriveCommand;
+        }
+
+        const float encoderSpeedMps = MazeMap::ComputeAverageEncoderAbsSpeedMps(
+            telemetry.leftVelocityMps,
+            telemetry.rightVelocityMps);
+        if (!(std::isfinite(encoderSpeedMps) && (encoderSpeedMps > 0.0f)))
+        {
+            return requestedDriveCommand;
+        }
+
+        const float scale = Config::kWallTouchMaxApproachEncoderSpeedMps / encoderSpeedMps;
+        return requestedDriveCommand * (std::clamp)(scale, 0.0f, 1.0f);
+    }
+
+    static float LimitWallTouchSeatDriveCommandByEncoderSpeed(
+        float requestedDriveCommand,
+        const DriveTelemetry& telemetry)
+    {
+        if (!std::isfinite(requestedDriveCommand))
+        {
+            return Config::kWallTouchFinalApproachDriveCommand;
+        }
+
+        const float encoderSpeedMps = MazeMap::ComputeAverageEncoderAbsSpeedMps(
+            telemetry.leftVelocityMps,
+            telemetry.rightVelocityMps);
+        if (!(std::isfinite(encoderSpeedMps) && (encoderSpeedMps > Config::kWallTouchMaxSeatEncoderSpeedMps)))
+        {
+            return requestedDriveCommand;
+        }
+
+        const float scale = Config::kWallTouchMaxSeatEncoderSpeedMps / encoderSpeedMps;
+        return requestedDriveCommand * (std::clamp)(scale, 0.0f, 1.0f);
+    }
+
     bool ExecuteWallTouchOff(
         float targetYawRad,
         float minLatchTravelM,
@@ -11090,6 +11306,7 @@ private:
         const float motionEpsilonM = Config::kWallTouchProgressStallDistanceM;
         DriveTelemetry lastMotionTelemetry = _drive.GetTelemetry();
         unsigned long lastMotionMs = touchStartMs;
+        float approachDriveCommand = Config::kWallTouchDriveCommand;
         (void)targetYawRad;
         const auto finishWallTouch = [this](const char* timeoutMessage) -> bool
         {
@@ -11127,12 +11344,20 @@ private:
                 return Fail("Wall touch-off exceeded max travel");
             }
 
-            CommandOpenLoop(MazeMap::MakeSymmetricOpenLoopDriveCommand(Config::kWallTouchDriveCommand));
-
             const unsigned long nowMs = millis();
             const unsigned long elapsedMs = nowMs - touchStartMs;
             const PoseEstimate& pose = _drive.GetPose();
             const DriveTelemetry telemetry = _drive.GetTelemetry();
+            approachDriveCommand = ComputeWallTouchApproachDriveCommand(traveledDistanceM, clampedMinLatchTravelM);
+            if (ShouldBrakeWallTouchApproachForEncoderSpeed(telemetry))
+            {
+                _drive.Brake();
+            }
+            else
+            {
+                approachDriveCommand = LimitWallTouchApproachDriveCommandByEncoderSpeed(approachDriveCommand, telemetry);
+                CommandOpenLoopRaw(MazeMap::MakeSymmetricOpenLoopDriveCommand(approachDriveCommand));
+            }
             if (MazeMap::IsWallTouchContactSample(
                     traveledDistanceM,
                     pose.linearSpeedMps,
@@ -11244,11 +11469,13 @@ private:
 
                 const unsigned long seatNowMs = millis();
                 const unsigned long seatElapsedMs = seatNowMs - seatStartMs;
-                const float seatDriveCommand = MazeMap::ComputeLaunchAssistDriveFloor(
-                    Config::kWallTouchDriveCommand,
+                const DriveTelemetry seatTelemetryBeforeCommand = _drive.GetTelemetry();
+                float seatDriveCommand = MazeMap::ComputeLaunchAssistDriveFloor(
+                    approachDriveCommand,
                     Config::kWallTouchSeatRampMaxDriveCommand,
                     seatElapsedMs,
                     Config::kWallTouchSeatRampMs);
+                seatDriveCommand = LimitWallTouchSeatDriveCommandByEncoderSpeed(seatDriveCommand, seatTelemetryBeforeCommand);
                 const MazeMap::OpenLoopDriveCommand seatCommand =
                     (seatDriveCommand >= Config::kWallTouchSeatReleaseMinDriveCommand) ?
                     MazeMap::ComputeOpenLoopYawWiggleCommand(
@@ -11258,7 +11485,7 @@ private:
                         Config::kWallTouchSeatWiggleTurnFraction,
                         Config::kWallTouchSeatWiggleRetainedForwardFraction) :
                     MazeMap::MakeSymmetricOpenLoopDriveCommand(seatDriveCommand);
-                CommandOpenLoop(seatCommand);
+                CommandOpenLoopRaw(seatCommand);
 
                 const DriveTelemetry seatTelemetry = _drive.GetTelemetry();
                 const PoseEstimate& seatPose = _drive.GetPose();
@@ -12610,6 +12837,54 @@ private:
         }
     }
 
+    bool HoldZeroVelocityUntilDriveSettles(const char* timeoutMessage, uint16_t stationaryHoldMs = Config::kMotionSettleHoldMs, uint16_t timeoutMs = Config::kMotionSettleTimeoutMs)
+    {
+        if (timeoutMs > 0U && timeoutMessage == nullptr)
+        {
+            timeoutMessage = "Drive settle timed out";
+        }
+
+        const unsigned long startMs = millis();
+        unsigned long stationaryStartMs = 0UL;
+        bool stationaryWindowActive = false;
+        while (true)
+        {
+            float dtSeconds = 0.0f;
+            SensorSnapshot snapshot{};
+            if (!TickControl(false, dtSeconds, snapshot))
+            {
+                return false;
+            }
+            (void)snapshot;
+
+            _drive.CommandVelocity(0.0f, 0.0f, dtSeconds);
+            const bool settled = IsDriveMotionSettled();
+            const unsigned long nowMs = millis();
+            if (!settled)
+            {
+                stationaryWindowActive = false;
+            }
+            else
+            {
+                if (!stationaryWindowActive)
+                {
+                    stationaryStartMs = nowMs;
+                    stationaryWindowActive = true;
+                }
+                if ((nowMs - stationaryStartMs) >= stationaryHoldMs)
+                {
+                    _drive.Brake();
+                    return true;
+                }
+            }
+
+            if ((timeoutMs > 0U) && ((nowMs - startMs) >= timeoutMs))
+            {
+                return Fail(timeoutMessage);
+            }
+        }
+    }
+
     bool WaitForMissionStartupStationaryHold()
     {
         if (!EmitMissionControllerLineOrFail("Waiting for 2 s stationary start"))
@@ -13073,8 +13348,14 @@ private:
     bool ObserveCellFromSnapshot(
         const MazeMap::CellCoordinates& observedCell,
         MazeMap::Direction observedDirection,
-        const SensorSnapshot& snapshot)
+        const SensorSnapshot& snapshot,
+        bool* outForwardWallObservedFromUnknown = nullptr)
     {
+        if (outForwardWallObservedFromUnknown != nullptr)
+        {
+            *outForwardWallObservedFromUnknown = false;
+        }
+
         MazeMap::WallState knownWallState = MazeMap::WallState::Unknown;
         if (MazeMap::TryGetKnownMissionStartWallState(observedCell, MazeMap::Up, knownWallState))
         {
@@ -13099,6 +13380,10 @@ private:
         if (forwardUnknown)
         {
             MazeMap::WallState observedState = snapshot.frontWall ? MazeMap::Wall : MazeMap::NoWall;
+            if ((outForwardWallObservedFromUnknown != nullptr) && (observedState == MazeMap::Wall))
+            {
+                *outForwardWallObservedFromUnknown = true;
+            }
             const char* sensorSource = FrontObservationSourceName(snapshot);
             const char* sensorMode = snapshot.frontWallUsesFallbackDetection ? "fallback" : "differential";
             _maze.SetWall(cell, forwardDirection, observedState);
@@ -13463,7 +13748,9 @@ private:
         MazeMap::CellCoordinates nextRollingObservationCell = startCell;
         float rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount] = {};
         SensorSnapshot rollingObservationSamples[Config::kSearchRollingObservationSampleCount] = {};
+        float rollingObservationSideResetTriggerTravelM = 0.0f;
         uint8_t rollingObservationNextSampleIndex = 0U;
+        bool rollingObservationSideResetPending = false;
         bool rollingObservationPlanInitialized = false;
         if (observeWhileRolling)
         {
@@ -13479,6 +13766,8 @@ private:
         {
             rollingObservationNextSampleIndex = 0U;
             rollingObservationPlanInitialized = false;
+            rollingObservationSideResetTriggerTravelM = 0.0f;
+            rollingObservationSideResetPending = false;
             memset(rollingObservationTriggerTravelM, 0, sizeof(rollingObservationTriggerTravelM));
             memset(rollingObservationSamples, 0, sizeof(rollingObservationSamples));
         };
@@ -13546,6 +13835,47 @@ private:
                 rollingObservationTriggerTravelM[sampleIndex] = triggerTravelM;
             }
 
+            float targetResetXMeters = 0.0f;
+            float targetResetYMeters = 0.0f;
+            if (!MazeMap::TryComputeSideWallTravelFractionPoseM(
+                    nextRollingObservationCell,
+                    direction,
+                    Config::kCellSizeM,
+                    sideSensorForwardOffsetM,
+                    Config::kSideWallStateResetCellEntryFraction,
+                    targetResetXMeters,
+                    targetResetYMeters))
+            {
+                return Fail("Search straight side reset trigger pose is invalid");
+            }
+
+            float resetTriggerTravelM = 0.0f;
+            if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                    startPose.xMeters,
+                    startPose.yMeters,
+                    targetResetXMeters,
+                    targetResetYMeters,
+                    targetHeading.GetX(),
+                    targetHeading.GetY(),
+                    resetTriggerTravelM))
+            {
+                return Fail("Search straight side reset trigger is invalid");
+            }
+            if (resetTriggerTravelM > (rollingObservationTriggerTravelM[0] - Config::kDistanceToleranceM))
+            {
+                AppendMissionTraceFormatted(
+                    "mission_side_reset_trigger_recovered,cell=(%d,%d),abs=%s,raw_m=%.4f,first_sample_m=%.4f",
+                    nextRollingObservationCell.GetX(),
+                    nextRollingObservationCell.GetY(),
+                    DirectionName(direction),
+                    resetTriggerTravelM,
+                    rollingObservationTriggerTravelM[0]);
+                resetTriggerTravelM = (std::max)(0.0f, rollingObservationTriggerTravelM[0] - Config::kDistanceToleranceM);
+            }
+
+            rollingObservationSideResetTriggerTravelM = resetTriggerTravelM;
+            rollingObservationSideResetPending = true;
+
             rollingObservationPlanInitialized = true;
             return true;
         };
@@ -13590,6 +13920,7 @@ private:
                 distanceToBoundaryTouchM);
         };
 
+        bool rollingObservationStoppedOnNewForwardWall = false;
         const auto tryObserveRollingCells = [&](float projectedTravelM, const SensorSnapshot& liveSnapshot) -> bool
         {
             if (!observeWhileRolling)
@@ -13602,6 +13933,21 @@ private:
                 if (!initializeRollingObservationPlan())
                 {
                     return false;
+                }
+
+                if (rollingObservationSideResetPending &&
+                    (projectedTravelM + Config::kDistanceToleranceM) >= rollingObservationSideResetTriggerTravelM)
+                {
+                    _sensors.ResetSideWallMemory();
+                    rollingObservationSideResetPending = false;
+                    AppendMissionTraceFormatted(
+                        "mission_side_reset,cell=(%d,%d),abs=%s,travel_m=%.4f,trigger_m=%.4f",
+                        nextRollingObservationCell.GetX(),
+                        nextRollingObservationCell.GetY(),
+                        DirectionName(direction),
+                        projectedTravelM,
+                        rollingObservationSideResetTriggerTravelM);
+                    break;
                 }
 
                 while (rollingObservationNextSampleIndex < Config::kSearchRollingObservationSampleCount &&
@@ -13641,9 +13987,38 @@ private:
                     static_cast<unsigned>(voteSummary.leftWallVotes),
                     static_cast<unsigned>(voteSummary.rightWindowValidVotes),
                     static_cast<unsigned>(voteSummary.rightWallVotes));
-                if (!ObserveCellFromSnapshot(nextRollingObservationCell, direction, majoritySnapshot))
+                bool forwardWallObservedFromUnknown = false;
+                if (!ObserveCellFromSnapshot(
+                        nextRollingObservationCell,
+                        direction,
+                        majoritySnapshot,
+                        &forwardWallObservedFromUnknown))
                 {
                     return false;
+                }
+
+                if (forwardWallObservedFromUnknown)
+                {
+                    _drive.Brake();
+                    if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+                    {
+                        return false;
+                    }
+
+                    _currentCell = nextRollingObservationCell;
+                    _currentDirection = direction;
+                    _currentDirectionalLocation = MazeMap::DirectionalLocation(
+                        MazeMap::MazeLocation::CellCenter(_currentCell),
+                        _currentDirection);
+                    rollingObservationStoppedOnNewForwardWall = true;
+                    AppendMissionTraceFormatted(
+                        "mission_observation_brake,cell=(%d,%d),abs=%s,travel_m=%.4f,front_votes=%u",
+                        _currentCell.GetX(),
+                        _currentCell.GetY(),
+                        DirectionName(direction),
+                        projectedTravelM,
+                        static_cast<unsigned>(voteSummary.frontWallVotes));
+                    return true;
                 }
 
                 ++rollingObservationCount;
@@ -13660,12 +14035,12 @@ private:
         const MotionLimits searchLimits = SearchLimits();
         const float startDistanceM = _drive.GetAverageDistanceMeters();
         float commandedSpeedMps = (std::max)(entrySpeedMps, 0.0f);
-        const unsigned long expectedCompletionDeadlineMs = millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceToTargetM));
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
+        const unsigned long expectedCompletionDeadlineMs =
+            millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceToTargetM));
         bool stallLogged = false;
         bool durationLogged = false;
-
         while (true)
         {
             float dtSeconds = 0.0f;
@@ -13832,6 +14207,10 @@ private:
             {
                 return false;
             }
+            if (rollingObservationStoppedOnNewForwardWall)
+            {
+                return true;
+            }
 
             const bool stoppingAtEndpoint = exitSpeedMps <= 0.05f;
             const bool terminalReached =
@@ -13845,14 +14224,14 @@ private:
             }
 
             const unsigned long nowMs = millis();
-            if (!stallLogged && translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, nowMs))
+            if (!stallLogged && translationWatchdog.Stalled(projectedTravelM, commandedSpeedMps, remainingM, nowMs))
             {
                 stallLogged = true;
                 AppendMissionTraceFormatted(
                     "mission_motion_watchdog,mode=search_straight,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
                     _currentCell.GetX(),
                     _currentCell.GetY(),
-                    traveledM,
+                    projectedTravelM,
                     remainingM,
                     commandedSpeedMps);
             }
@@ -13863,7 +14242,7 @@ private:
                     "mission_motion_watchdog,mode=search_straight,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
                     _currentCell.GetX(),
                     _currentCell.GetY(),
-                    traveledM,
+                    projectedTravelM,
                     remainingM,
                     commandedSpeedMps);
             }
@@ -13874,21 +14253,25 @@ private:
 
             float wallOmegaRadps = 0.0f;
             float signalCorridorErrorM = 0.0f;
+            bool useLeftWall = false;
+            bool useRightWall = false;
+            ResolveMapQualifiedSideWalls(snapshot, useLeftWall, useRightWall);
             if (TryComputeStraightWallCenterErrorM(
                     gWallDistanceCalibration,
                     snapshot.sideLeftDifferentialLight,
-                    snapshot.leftWall,
+                    useLeftWall,
                     snapshot.sideRightDifferentialLight,
-                    snapshot.rightWall,
+                    useRightWall,
                     signalCorridorErrorM))
             {
                 wallOmegaRadps += Config::kWallCenterGain * signalCorridorErrorM;
             }
-            else
-            {
-                wallOmegaRadps += Config::kWallCenterGain * snapshot.corridorErrorM;
-            }
-            if (snapshot.frontWall && remainingM < 0.07f)
+            if (stoppingAtEndpoint &&
+                std::isfinite(snapshot.frontLeftDistanceM) &&
+                std::isfinite(snapshot.frontRightDistanceM) &&
+                snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+                snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+                remainingM < 0.07f)
             {
                 wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
             }
@@ -14073,6 +14456,26 @@ private:
         return observeFinalCell ? ObserveCurrentCell() : true;
     }
 
+    void ResolveMapQualifiedSideWalls(const SensorSnapshot& snapshot, bool& useLeftWall, bool& useRightWall) const
+    {
+        // Exclusively for the purpose of centering.
+        const MazeMap::Cell& currentCell = _maze.Index(_currentCell);
+        const MazeMap::WallState leftWallState = currentCell.GetWall(_currentDirection + MazeMap::Left90);
+        const MazeMap::WallState rightWallState = currentCell.GetWall(_currentDirection + MazeMap::Right90);
+        useLeftWall =
+            (leftWallState == MazeMap::Wall) &&
+            IsCalibratedSideDistanceValidForControl(
+                gWallDistanceCalibration,
+                WallSensorId::SideLeft,
+                snapshot.sideLeftDifferentialLight);
+        useRightWall =
+            (rightWallState == MazeMap::Wall) &&
+            IsCalibratedSideDistanceValidForControl(
+                gWallDistanceCalibration,
+                WallSensorId::SideRight,
+                snapshot.sideRightDifferentialLight);
+    }
+
     bool TryComputeWallGroundedCorridorCoordinateM(const SensorSnapshot& snapshot, float& coordinateM, bool& correctsXAxis) const
     {
         coordinateM = 0.0f;
@@ -14097,8 +14500,11 @@ private:
         float rightCoordinateM = 0.0f;
         bool haveLeftCoordinate = false;
         bool haveRightCoordinate = false;
+        bool useLeftWall = false;
+        bool useRightWall = false;
+        ResolveMapQualifiedSideWalls(snapshot, useLeftWall, useRightWall);
 
-        if (snapshot.leftWall)
+        if (useLeftWall)
         {
             haveLeftCoordinate = TryComputePoseAxisFromObservedWall(
                 _drive.GetPose(),
@@ -14109,7 +14515,7 @@ private:
                 leftCoordinateM);
         }
 
-        if (snapshot.rightWall)
+        if (useRightWall)
         {
             haveRightCoordinate = TryComputePoseAxisFromObservedWall(
                 _drive.GetPose(),
@@ -14235,7 +14641,7 @@ private:
         float rightCoordinateM = 0.0f;
         bool haveLeftCoordinate =
             edgeTracker.leftWallRose &&
-            snapshot.leftWall &&
+            snapshot.leftDistanceValidForControl &&
             (cell.GetWall(leftWallDirection) == MazeMap::Wall) &&
             TryComputePoseAxisFromObservedWall(
                 pose,
@@ -14246,7 +14652,7 @@ private:
                 leftCoordinateM);
         bool haveRightCoordinate =
             edgeTracker.rightWallRose &&
-            snapshot.rightWall &&
+            snapshot.rightDistanceValidForControl &&
             (cell.GetWall(rightWallDirection) == MazeMap::Wall) &&
             TryComputePoseAxisFromObservedWall(
                 pose,
@@ -14497,21 +14903,25 @@ private:
                 else
                 {
                     float signalCorridorErrorM = 0.0f;
+                    bool useLeftWall = false;
+                    bool useRightWall = false;
+                    ResolveMapQualifiedSideWalls(snapshot, useLeftWall, useRightWall);
                     if (TryComputeStraightWallCenterErrorM(
                             gWallDistanceCalibration,
                             snapshot.sideLeftDifferentialLight,
-                            snapshot.leftWall,
+                            useLeftWall,
                             snapshot.sideRightDifferentialLight,
-                            snapshot.rightWall,
+                            useRightWall,
                             signalCorridorErrorM))
                     {
                         wallOmegaRadps += Config::kWallCenterGain * signalCorridorErrorM;
                     }
-                    else
-                    {
-                        wallOmegaRadps += Config::kWallCenterGain * snapshot.corridorErrorM;
-                    }
-                    if (snapshot.frontWall && remainingM < 0.07f)
+                    if (stoppingAtEndpoint &&
+                        std::isfinite(snapshot.frontLeftDistanceM) &&
+                        std::isfinite(snapshot.frontRightDistanceM) &&
+                        snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+                        snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+                        remainingM < 0.07f)
                     {
                         wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
                     }
@@ -14539,9 +14949,8 @@ private:
         const MotionLimits& limits,
         MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr)
     {
-        (void)limits;
         const float targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
-        const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(_speedVehicle);
+        const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(limits);
         float commandedOmegaRadps = 0.0f;
         const unsigned long expectedCompletionDeadlineMs = millis() + 2500UL;
         bool durationLogged = false;
@@ -14562,7 +14971,6 @@ private:
             const float errorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
             if (MazeMap::IsInPlaceTurnComplete(errorRad, _drive.GetPose().angularSpeedRadps, turnProfile))
             {
-                _drive.Brake();
                 break;
             }
             if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - millis()) <= 0)
@@ -14590,7 +14998,7 @@ private:
             _drive.CommandVelocity(0.0f, angularCommandRadps, dtSeconds);
         }
 
-        if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+        if (!HoldZeroVelocityUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
         {
             return false;
         }
@@ -14707,7 +15115,6 @@ private:
 
         const float startDistanceM = _drive.GetAverageDistanceMeters();
         const float startYawRad = _drive.GetPose().yawRad;
-        const bool stoppingAtEndpoint = exitSpeed <= 0.05f;
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
         const unsigned long expectedCompletionDeadlineMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * profile.totalDistance));
@@ -14728,10 +15135,6 @@ private:
             const float remainingM = (std::max)(0.0f, profile.totalDistance - traveledM);
             if (remainingM <= Config::kDistanceToleranceM)
             {
-                if (stoppingAtEndpoint)
-                {
-                    _drive.Brake();
-                }
                 break;
             }
 
@@ -14773,13 +15176,6 @@ private:
             _drive.CommandVelocity(maneuverSpeedMps, angularCommandRadps, dtSeconds);
         }
 
-        if (stoppingAtEndpoint)
-        {
-            if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
-            {
-                return false;
-            }
-        }
         return true;
     }
 

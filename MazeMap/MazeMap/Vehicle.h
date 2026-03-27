@@ -24,6 +24,7 @@ namespace MazeMap
         float massKg;
         float widthM;
         float lengthM;
+        float yawInertiaKgM2;
         float frontWallContactOffsetM;
         float trackWidthM;
         float trackWidthPhysicalMinM;
@@ -38,17 +39,21 @@ namespace MazeMap
             0.14f,
             0.0842f,
             0.1085f,
+            // March 22, 2026 aux008 first fast IP180 fit from the clean early acceleration ramp gave an effective
+            // yaw inertia around 6.65e-4 kg*m^2. This is intentionally larger than the bare rectangular body estimate
+            // because it captures the drivetrain and tire-scrub dynamics the turn controller actually has to drive.
+            0.000665f,
             0.056f,
-            // March 22, 2026 aux000 in-place-turn fit: the latest completed position-audit turn points centered
-            // at 86.191 mm effective, with the two completed passes spanning 86.154-86.227 mm.
-            0.086191f,
+            // March 22, 2026 aux008 latest completed fast IP180 audit pass fit 84.635 mm effective track width.
+            0.084635f,
             // Physical tire contact patch span measured on the chassis. Effective track width may exceed this due to
             // scrub dynamics, so these remain informational rather than hard bounds.
             0.07004f,
             0.07868f,
-            // March 22, 2026 aux000 smooth-turn fit: the completed S90SS and S90LS passes implied effective arc
-            // widths of 85.809 mm at the 63 mm nominal radius and 84.519 mm at the 153 mm nominal radius.
-            { 0.063f, 0.085809f, 0.153f, 0.084519f }
+            // March 22, 2026 aux006 short smooth-turn encoder/gyro fit before left-wall contact implied 96.49 mm
+            // effective at the 63 mm nominal radius. The 153 mm point is scaled by the same 1.174285x factor as a
+            // better starting point for the next wide-radius audit pass.
+            { 0.063f, 0.096491f, 0.153f, 0.097348f }
         };
         CircularBuffer<VehicleState, 15> _stateHistory;
         float _peakForwardAcceleration;
@@ -108,6 +113,7 @@ namespace MazeMap
 
         float GetMass() const;
         float GetTrackWidth() const;
+        float GetYawInertia() const;
         static float GetArcEffectiveTrackWidth(float turningRadiusM) noexcept;
         static float GetEffectiveTrackWidthForMotion(float linearSpeedMps, float angularSpeedRadps) noexcept;
         float GetLength() const;

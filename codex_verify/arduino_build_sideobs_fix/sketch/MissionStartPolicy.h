@@ -203,6 +203,57 @@ namespace MazeMap
             targetYM >= 0.0f;
     }
 
+    inline bool TryComputeSideWallTravelFractionPoseM(
+        CellCoordinates cell,
+        Direction heading,
+        float cellSizeM,
+        float sensorForwardOffsetM,
+        float cellEntryFraction,
+        float& targetXM,
+        float& targetYM)
+    {
+        targetXM = 0.0f;
+        targetYM = 0.0f;
+        if (!(std::isfinite(cellSizeM) &&
+            std::isfinite(sensorForwardOffsetM) &&
+            std::isfinite(cellEntryFraction) &&
+            cellSizeM > 0.0f &&
+            sensorForwardOffsetM >= 0.0f &&
+            cellEntryFraction >= 0.0f &&
+            cellEntryFraction <= 1.0f))
+        {
+            return false;
+        }
+
+        const float cellBaseXM = static_cast<float>(cell.GetX()) * cellSizeM;
+        const float cellBaseYM = static_cast<float>(cell.GetY()) * cellSizeM;
+        targetXM = (static_cast<float>(cell.GetX()) + 0.5f) * cellSizeM;
+        targetYM = (static_cast<float>(cell.GetY()) + 0.5f) * cellSizeM;
+        switch (heading)
+        {
+        case Up:
+            targetYM = cellBaseYM + (cellEntryFraction * cellSizeM) - sensorForwardOffsetM;
+            break;
+        case Down:
+            targetYM = cellBaseYM + ((1.0f - cellEntryFraction) * cellSizeM) + sensorForwardOffsetM;
+            break;
+        case Left:
+            targetXM = cellBaseXM + ((1.0f - cellEntryFraction) * cellSizeM) + sensorForwardOffsetM;
+            break;
+        case Right:
+            targetXM = cellBaseXM + (cellEntryFraction * cellSizeM) - sensorForwardOffsetM;
+            break;
+        default:
+            return false;
+        }
+
+        return
+            std::isfinite(targetXM) &&
+            std::isfinite(targetYM) &&
+            targetXM >= 0.0f &&
+            targetYM >= 0.0f;
+    }
+
     inline bool TryComputeSideWallObservationPoseM(
         CellCoordinates cell,
         Direction heading,

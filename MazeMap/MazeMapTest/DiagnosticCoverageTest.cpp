@@ -5,6 +5,7 @@
 #include "..\MazeMap\DiagnosticMotionPlan.h"
 #include "..\MazeMap\EncoderStallPolicy.h"
 #include "..\MazeMap\FanRampProfile.h"
+#include "..\MazeMap\FrontWallCharacterizationStorage.h"
 #include "..\MazeMap\GyroBiasUpdatePolicy.h"
 #include "..\MazeMap\ImuCalibrationPolicy.h"
 #include "..\MazeMap\ImuSamplingProfile.h"
@@ -19,6 +20,7 @@
 #include "..\MazeMap\CruiseSpeedFloor.h"
 #include "..\MazeMap\OpenLoopDriveCommand.h"
 #include "..\MazeMap\RollingAverageWindow.h"
+#include "..\MazeMap\SmoothTurnYawRateController.h"
 #include "..\MazeMap\StartupWaitProfile.h"
 #include "..\MazeMap\TrackWidthEstimate.h"
 #include "..\MazeMap\TractionLimitSweep.h"
@@ -244,14 +246,15 @@ namespace MazeMap
 			const VehiclePhysicalModel& model = Vehicle::GetPhysicalModel();
 			Assert::IsTrue(std::fabs(model.massKg - 0.14f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.lengthM - 0.1085f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.yawInertiaKgM2 - 0.000665f) < 1.0e-9f);
 			Assert::IsTrue(std::fabs(model.frontWallContactOffsetM - 0.056f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthM - 0.085114f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMinM - 0.08440f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMaxM - 0.08589f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.trackWidthM - 0.084635f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMinM - 0.07004f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMaxM - 0.07868f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.tightRadiusM - 0.063f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.tightTrackWidthM - 0.084183f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.tightTrackWidthM - 0.096491f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.wideRadiusM - 0.153f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.wideTrackWidthM - 0.082373f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.wideTrackWidthM - 0.097348f) < 1.0e-6f);
 		}
 
 		TEST_METHOD(MotorEncoderDriveSharedModelMatchesMeasuredDrivetrain)
@@ -265,7 +268,7 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(model.noLoadCurrentA - MilliAmpsToAmps(45.9f)) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.speedConstantRadpsPerVolt - ComputeMotorSpeedConstantRadpsPerVolt(14100.0f, 6.0f, MilliAmpsToAmps(45.9f), 4.31f)) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.gearRatio - (56.0f / 17.0f)) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.wheelDiameterM - 0.025327f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(model.wheelDiameterM - 0.025220f) < 1.0e-6f);
 			Assert::AreEqual(4096U, static_cast<unsigned>(model.pulsesPerRev));
 		}
 
@@ -291,9 +294,8 @@ namespace MazeMap
 		{
 			Vehicle vehicle;
 			const VehiclePhysicalModel& model = Vehicle::GetPhysicalModel();
-			Assert::IsTrue(std::fabs(model.trackWidthM - 0.085114f) < 1.0e-6f);
-			Assert::IsTrue(model.trackWidthPhysicalMinM <= model.trackWidthM);
-			Assert::IsTrue(model.trackWidthM <= model.trackWidthPhysicalMaxM);
+			Assert::IsTrue(std::fabs(model.trackWidthM - 0.084635f) < 1.0e-6f);
+			Assert::IsTrue(model.trackWidthPhysicalMinM < model.trackWidthPhysicalMaxM);
 			Assert::IsTrue(std::fabs(vehicle.GetMaxLateralAcceleration() - 16.5f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(vehicle.GetMaxRotationalVelocity() - 9.0f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(vehicle.GetMaxAngularAcceleration() - 45.0f) < 1.0e-6f);
@@ -301,16 +303,16 @@ namespace MazeMap
 
 		TEST_METHOD(ArcTrackWidthInterpolationClampsAndBlendsByRadius)
 		{
-			Assert::AreEqual(0.084183f, Vehicle::GetArcEffectiveTrackWidth(0.040f), 1.0e-6f);
-			Assert::AreEqual(0.082373f, Vehicle::GetArcEffectiveTrackWidth(0.200f), 1.0e-6f);
-			Assert::AreEqual(0.083278f, Vehicle::GetArcEffectiveTrackWidth(0.108f), 1.0e-5f);
+			Assert::AreEqual(0.096491f, Vehicle::GetArcEffectiveTrackWidth(0.040f), 1.0e-6f);
+			Assert::AreEqual(0.097348f, Vehicle::GetArcEffectiveTrackWidth(0.200f), 1.0e-6f);
+			Assert::AreEqual(0.096920f, Vehicle::GetArcEffectiveTrackWidth(0.108f), 1.0e-5f);
 		}
 
 		TEST_METHOD(ArcTrackWidthInterpolationFallsBackToBaseWidthForStraightAndInPlaceMotion)
 		{
-			Assert::AreEqual(0.085114f, Vehicle::GetEffectiveTrackWidthForMotion(0.0f, 4.0f), 1.0e-6f);
-			Assert::AreEqual(0.085114f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, 0.0f), 1.0e-6f);
-			Assert::AreEqual(0.084183f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, (0.3f / 0.063f)), 1.0e-5f);
+			Assert::AreEqual(0.084635f, Vehicle::GetEffectiveTrackWidthForMotion(0.0f, 4.0f), 1.0e-6f);
+			Assert::AreEqual(0.084635f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, 0.0f), 1.0e-6f);
+			Assert::AreEqual(0.096491f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, (0.3f / 0.063f)), 1.0e-5f);
 		}
 
 		TEST_METHOD(TryComputeEffectiveTrackWidthMUsesEncoderDifferentialOverYaw)
@@ -493,6 +495,8 @@ namespace MazeMap
 
 		TEST_METHOD(CodeDegreesUsesRightTurnSignForUnmirroredSmoothTurns)
 		{
+			Assert::AreEqual(static_cast<int>(-180), static_cast<int>(CodeDegrees(IP180)));
+			Assert::AreEqual(static_cast<int>(180), static_cast<int>(CodeDegrees(IP180_M)));
 			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90SS)));
 			Assert::AreEqual(static_cast<int>(90), static_cast<int>(CodeDegrees(S90SS_M)));
 			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90LS)));
@@ -643,6 +647,35 @@ namespace MazeMap
 			Assert::AreEqual(0.90f, secondHalf.rightDriveCommand, 1.0e-6f);
 		}
 
+		TEST_METHOD(SmoothTurnYawRatePdControllerUsesProportionalTermAndDelayedDerivative)
+		{
+			SmoothTurnYawRateControllerState state{};
+			const float firstCorrection = ComputeSmoothTurnYawRatePdCorrection(4.0f, 3.0f, 0.002f, 0.70f, 0.006f, state);
+			Assert::AreEqual(0.70f, firstCorrection, 1.0e-6f);
+
+			const float secondCorrection = ComputeSmoothTurnYawRatePdCorrection(4.4f, 3.2f, 0.002f, 0.70f, 0.006f, state);
+			Assert::AreEqual(1.44f, secondCorrection, 1.0e-5f);
+		}
+
+		TEST_METHOD(SmoothTurnYawRatePdControllerRejectsInvalidInputAndResetsState)
+		{
+			SmoothTurnYawRateControllerState state{};
+			(void)ComputeSmoothTurnYawRatePdCorrection(3.0f, 2.0f, 0.002f, 0.70f, 0.006f, state);
+
+			const float invalidCorrection = ComputeSmoothTurnYawRatePdCorrection(
+				std::numeric_limits<float>::quiet_NaN(),
+				2.0f,
+				0.002f,
+				0.70f,
+				0.006f,
+				state);
+			Assert::AreEqual(0.0f, invalidCorrection, 1.0e-6f);
+			Assert::IsFalse(state.hasPreviousError);
+
+			const float recoveredCorrection = ComputeSmoothTurnYawRatePdCorrection(2.5f, 2.0f, 0.002f, 0.70f, 0.006f, state);
+			Assert::AreEqual(0.35f, recoveredCorrection, 1.0e-6f);
+		}
+
 		TEST_METHOD(TryComputeLinearWallSignalDistanceThresholdMUsesInverseSquareScaling)
 		{
 			float thresholdDistanceM = 0.0f;
@@ -732,6 +765,52 @@ namespace MazeMap
 			Assert::IsFalse(IsWithinWallSegmentCenterWindowM(0.723477f, 0.180f, 0.012f, 1.0f / 3.0f));
 			Assert::IsFalse(IsWithinWallSegmentCenterWindowM(0.730234f, 0.180f, 0.012f, 1.0f / 3.0f));
 			Assert::IsTrue(IsWithinWallSegmentCenterWindowM(0.810000f, 0.180f, 0.012f, 1.0f / 3.0f));
+		}
+
+		TEST_METHOD(ClassifyFrontCalibrationSpinHeadingFromNorthUsesOpenAndEastKnownWallBuckets)
+		{
+			Assert::AreEqual(
+				static_cast<int>(FrontCalibrationSpinHeadingClass::OpenNorth),
+				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
+					90.0f * DEG_TO_RAD,
+					25.0f * DEG_TO_RAD,
+					30.0f * DEG_TO_RAD,
+					90.0f * DEG_TO_RAD)));
+			Assert::AreEqual(
+				static_cast<int>(FrontCalibrationSpinHeadingClass::Ignore),
+				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
+					63.0f * DEG_TO_RAD,
+					25.0f * DEG_TO_RAD,
+					30.0f * DEG_TO_RAD,
+					90.0f * DEG_TO_RAD)));
+			Assert::AreEqual(
+				static_cast<int>(FrontCalibrationSpinHeadingClass::Wall),
+				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
+					59.0f * DEG_TO_RAD,
+					25.0f * DEG_TO_RAD,
+					30.0f * DEG_TO_RAD,
+					90.0f * DEG_TO_RAD)));
+			Assert::AreEqual(
+				static_cast<int>(FrontCalibrationSpinHeadingClass::Wall),
+				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
+					0.0f * DEG_TO_RAD,
+					25.0f * DEG_TO_RAD,
+					30.0f * DEG_TO_RAD,
+					90.0f * DEG_TO_RAD)));
+			Assert::AreEqual(
+				static_cast<int>(FrontCalibrationSpinHeadingClass::Ignore),
+				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
+					120.0f * DEG_TO_RAD,
+					25.0f * DEG_TO_RAD,
+					30.0f * DEG_TO_RAD,
+					90.0f * DEG_TO_RAD)));
+			Assert::AreEqual(
+				static_cast<int>(FrontCalibrationSpinHeadingClass::Ignore),
+				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
+					225.0f * DEG_TO_RAD,
+					25.0f * DEG_TO_RAD,
+					30.0f * DEG_TO_RAD,
+					90.0f * DEG_TO_RAD)));
 		}
 
 		TEST_METHOD(TryComputeSignedTravelToCellCenterAlongHeadingProjectsObservationRecentering)
@@ -880,6 +959,34 @@ namespace MazeMap
 			Assert::AreEqual(0.63000f, targetYM, 1.0e-6f);
 		}
 
+		TEST_METHOD(FrontWallObservationGeometryPutsLatchCloserThanLegacyElevenCentimeters)
+		{
+			float targetXM = 0.0f;
+			float targetYM = 0.0f;
+			Assert::IsTrue(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 0),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				4U,
+				9U,
+				targetXM,
+				targetYM));
+
+			const float northWallYM = 0.174f;
+			const float frontSensorForwardOffsetM = 0.04223f;
+			const float frontSensorForwardY = 0.99452f;
+			const float frontSensorYM = targetYM + frontSensorForwardOffsetM;
+			const float onDistanceM = (northWallYM - frontSensorYM) / frontSensorForwardY;
+			Assert::AreEqual(0.092537f, onDistanceM, 1.0e-4f);
+			Assert::IsTrue(onDistanceM < 0.110f);
+
+			const float offDistanceM = onDistanceM + 0.020f;
+			Assert::AreEqual(0.112537f, offDistanceM, 1.0e-4f);
+		}
+
 		TEST_METHOD(TryComputeSideWallObservationSamplePoseRejectsInvalidInputs)
 		{
 			float targetXM = 0.0f;
@@ -930,6 +1037,91 @@ namespace MazeMap
 				targetYM));
 		}
 
+		TEST_METHOD(TryComputeSideWallTravelFractionPosePlacesResetBeforeObservationWindow)
+		{
+			float resetXM = 0.0f;
+			float resetYM = 0.0f;
+			Assert::IsTrue(TryComputeSideWallTravelFractionPoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.05026f,
+				0.25f,
+				resetXM,
+				resetYM));
+			Assert::AreEqual(0.09000f, resetXM, 1.0e-6f);
+			Assert::AreEqual(0.17474f, resetYM, 1.0e-5f);
+
+			float sampleXM = 0.0f;
+			float sampleYM = 0.0f;
+			Assert::IsTrue(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				0U,
+				9U,
+				sampleXM,
+				sampleYM));
+			Assert::IsTrue(resetYM < sampleYM);
+
+			Assert::IsTrue(TryComputeSideWallTravelFractionPoseM(
+				CellCoordinates(2, 3),
+				Right,
+				0.180f,
+				0.05026f,
+				0.25f,
+				resetXM,
+				resetYM));
+			Assert::AreEqual(0.35474f, resetXM, 1.0e-5f);
+			Assert::AreEqual(0.63000f, resetYM, 1.0e-6f);
+
+			Assert::IsTrue(TryComputeSideWallObservationSamplePoseM(
+				CellCoordinates(2, 3),
+				Right,
+				0.180f,
+				0.012f,
+				0.05026f,
+				1.0f / 3.0f,
+				0U,
+				9U,
+				sampleXM,
+				sampleYM));
+			Assert::IsTrue(resetXM < sampleXM);
+		}
+
+		TEST_METHOD(TryComputeSideWallTravelFractionPoseRejectsInvalidInputs)
+		{
+			float targetXM = 0.0f;
+			float targetYM = 0.0f;
+			Assert::IsFalse(TryComputeSideWallTravelFractionPoseM(
+				CellCoordinates(0, 1),
+				None,
+				0.180f,
+				0.05026f,
+				0.25f,
+				targetXM,
+				targetYM));
+			Assert::IsFalse(TryComputeSideWallTravelFractionPoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.0f,
+				0.05026f,
+				0.25f,
+				targetXM,
+				targetYM));
+			Assert::IsFalse(TryComputeSideWallTravelFractionPoseM(
+				CellCoordinates(0, 1),
+				Up,
+				0.180f,
+				0.05026f,
+				-0.01f,
+				targetXM,
+				targetYM));
+		}
+
 		TEST_METHOD(TryComputeRobustSignalBandFromSamplesRejectsOutlier)
 		{
 			const std::array<float, 5U> samples = { 1.0f, 1.0f, 1.0f, 1.0f, 10.0f };
@@ -940,6 +1132,37 @@ namespace MazeMap
 			Assert::AreEqual(1.0f, median, 1.0e-6f);
 			Assert::AreEqual(1.0f, low, 1.0e-6f);
 			Assert::AreEqual(1.0f, high, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeRobustDistanceMatchedSignalBandFromSamplesUsesNearestDistanceSubset)
+		{
+			const std::array<float, 12U> signalSamples = {
+				0.002f, 0.003f, 0.004f, 0.020f, 0.021f, 0.022f,
+				0.023f, 0.024f, 0.070f, 0.080f, 0.090f, 0.100f
+			};
+			const std::array<float, 12U> distanceSamples = {
+				0.040f, 0.050f, 0.060f, 0.106f, 0.109f, 0.111f,
+				0.113f, 0.116f, 0.150f, 0.160f, 0.170f, 0.180f
+			};
+			float median = 0.0f;
+			float low = 0.0f;
+			float high = 0.0f;
+			Assert::IsTrue(TryComputeRobustDistanceMatchedSignalBandFromSamples(
+				signalSamples,
+				distanceSamples,
+				12U,
+				0.110f,
+				4U,
+				4U,
+				0.020f,
+				3.0f,
+				median,
+				low,
+				high));
+			Assert::AreEqual(0.0215f, median, 1.0e-6f);
+			Assert::IsTrue(low > 0.0f);
+			Assert::IsTrue(low < median);
+			Assert::IsTrue(high > median);
 		}
 
 		TEST_METHOD(TryComputeSignalRiseThresholdsSupportNormalizedSideWallReferenceThresholds)
@@ -969,6 +1192,237 @@ namespace MazeMap
 			Assert::AreEqual(0.056000f, signalBaseline, 1.0e-6f);
 			Assert::AreEqual(0.012000f, onMeasuredThreshold, 1.0e-6f);
 			Assert::AreEqual(0.008400f, offMeasuredThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryComputeConservativeSignalRiseThresholdsFromCollapsedOpenBandSupportsInPlaceFrontThresholds)
+		{
+			const std::array<float, 9> openSamples{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+			const std::array<float, 9> wallSamples{ 0.030f, 0.030f, 0.030f, 0.030f, 0.030f, 0.030f, 0.030f, 0.030f, 0.030f };
+			float openMedian = 0.0f;
+			float openLow = 0.0f;
+			float openHigh = 0.0f;
+			Assert::IsTrue(TryComputeRobustSignalBandFromSamples(
+				openSamples,
+				static_cast<uint16_t>(openSamples.size()),
+				3.0f,
+				openMedian,
+				openLow,
+				openHigh));
+			float wallMedian = 0.0f;
+			float wallLow = 0.0f;
+			float wallHigh = 0.0f;
+			Assert::IsTrue(TryComputeRobustSignalBandFromSamples(
+				wallSamples,
+				static_cast<uint16_t>(wallSamples.size()),
+				3.0f,
+				wallMedian,
+				wallLow,
+				wallHigh));
+
+			float onMeasuredThreshold = 0.0f;
+			float offMeasuredThreshold = 0.0f;
+			float signalBaseline = 0.0f;
+			Assert::IsTrue(TryComputeConservativeSignalRiseThresholdsFromBands(
+				openLow,
+				openHigh,
+				wallLow,
+				wallHigh,
+				0.22f,
+				0.15f,
+				onMeasuredThreshold,
+				offMeasuredThreshold,
+				signalBaseline));
+			Assert::AreEqual(0.0f, signalBaseline, 1.0e-6f);
+			Assert::AreEqual(0.0066f, onMeasuredThreshold, 1.0e-6f);
+			Assert::AreEqual(0.0045f, offMeasuredThreshold, 1.0e-6f);
+		}
+
+		TEST_METHOD(FinalizeFrontWallCharacterizationStorageProducesValidChecksum)
+		{
+			FrontWallCharacterizationStorage storage{};
+			storage.sampleCount = 3U;
+			storage.distanceStepM = 0.001f;
+			storage.commandedReverseSpeedMps = 0.03f;
+			storage.zeroThresholdDifferentialLight = 0.0005f;
+			storage.terminalDistanceM = 0.015f;
+			storage.distanceM[0] = 0.000f;
+			storage.distanceM[1] = 0.008f;
+			storage.distanceM[2] = 0.015f;
+			storage.frontLeftLitLight[0] = 0.120f;
+			storage.frontLeftLitLight[1] = 0.090f;
+			storage.frontLeftLitLight[2] = 0.000f;
+			storage.frontLeftDifferentialLight[0] = 0.120f;
+			storage.frontLeftDifferentialLight[1] = 0.090f;
+			storage.frontLeftDifferentialLight[2] = 0.000f;
+			storage.frontRightLitLight[0] = 0.140f;
+			storage.frontRightLitLight[1] = 0.110f;
+			storage.frontRightLitLight[2] = 0.000f;
+			storage.frontRightDifferentialLight[0] = 0.140f;
+			storage.frontRightDifferentialLight[1] = 0.110f;
+			storage.frontRightDifferentialLight[2] = 0.000f;
+
+			FinalizeFrontWallCharacterizationStorage(storage);
+			Assert::IsTrue(IsValidFrontWallCharacterizationStorage(storage));
+		}
+
+		TEST_METHOD(IsValidFrontWallCharacterizationStorageRejectsNonMonotonicDistance)
+		{
+			FrontWallCharacterizationStorage storage{};
+			storage.sampleCount = 3U;
+			storage.distanceStepM = 0.001f;
+			storage.commandedReverseSpeedMps = 0.03f;
+			storage.zeroThresholdDifferentialLight = 0.0005f;
+			storage.terminalDistanceM = 0.020f;
+			storage.distanceM[0] = 0.000f;
+			storage.distanceM[1] = 0.010f;
+			storage.distanceM[2] = 0.009f;
+			storage.frontLeftDifferentialLight[0] = 0.120f;
+			storage.frontLeftDifferentialLight[1] = 0.090f;
+			storage.frontLeftDifferentialLight[2] = 0.070f;
+			storage.frontRightDifferentialLight[0] = 0.140f;
+			storage.frontRightDifferentialLight[1] = 0.100f;
+			storage.frontRightDifferentialLight[2] = 0.080f;
+
+			FinalizeFrontWallCharacterizationStorage(storage);
+			Assert::IsFalse(IsValidFrontWallCharacterizationStorage(storage));
+		}
+
+		TEST_METHOD(TrySampleFrontWallCharacterizationDifferentialLightInterpolatesWithinStoredCurve)
+		{
+			FrontWallCharacterizationStorage storage{};
+			storage.sampleCount = 4U;
+			storage.distanceStepM = 0.005f;
+			storage.commandedReverseSpeedMps = 0.03f;
+			storage.zeroThresholdDifferentialLight = 0.0005f;
+			storage.terminalDistanceM = 0.015f;
+			storage.distanceM[0] = 0.000f;
+			storage.distanceM[1] = 0.005f;
+			storage.distanceM[2] = 0.010f;
+			storage.distanceM[3] = 0.015f;
+			storage.frontLeftDifferentialLight[0] = 0.120f;
+			storage.frontLeftDifferentialLight[1] = 0.090f;
+			storage.frontLeftDifferentialLight[2] = 0.040f;
+			storage.frontLeftDifferentialLight[3] = 0.000f;
+			storage.frontRightDifferentialLight[0] = 0.130f;
+			storage.frontRightDifferentialLight[1] = 0.100f;
+			storage.frontRightDifferentialLight[2] = 0.050f;
+			storage.frontRightDifferentialLight[3] = 0.000f;
+			FinalizeFrontWallCharacterizationStorage(storage);
+
+			float differentialLight = 0.0f;
+			Assert::IsTrue(TrySampleFrontWallCharacterizationDifferentialLight(
+				storage,
+				false,
+				0.0075f,
+				differentialLight));
+			Assert::AreEqual(0.065f, differentialLight, 1.0e-6f);
+		}
+
+		TEST_METHOD(TryMatchFrontWallCharacterizationChannelFindsScaledWallTemplate)
+		{
+			FrontWallCharacterizationStorage storage{};
+			storage.sampleCount = 10U;
+			storage.distanceStepM = 0.005f;
+			storage.commandedReverseSpeedMps = 0.03f;
+			storage.zeroThresholdDifferentialLight = 0.0005f;
+			storage.terminalDistanceM = 0.045f;
+			for (uint16_t index = 0U; index < storage.sampleCount; ++index)
+			{
+				storage.distanceM[index] = 0.005f * static_cast<float>(index);
+			}
+			storage.frontLeftDifferentialLight[0] = 0.120f;
+			storage.frontLeftDifferentialLight[1] = 0.105f;
+			storage.frontLeftDifferentialLight[2] = 0.090f;
+			storage.frontLeftDifferentialLight[3] = 0.070f;
+			storage.frontLeftDifferentialLight[4] = 0.050f;
+			storage.frontLeftDifferentialLight[5] = 0.030f;
+			storage.frontLeftDifferentialLight[6] = 0.015f;
+			storage.frontLeftDifferentialLight[7] = 0.004f;
+			storage.frontLeftDifferentialLight[8] = 0.000f;
+			storage.frontLeftDifferentialLight[9] = 0.000f;
+			for (uint16_t index = 0U; index < storage.sampleCount; ++index)
+			{
+				storage.frontRightDifferentialLight[index] = storage.frontLeftDifferentialLight[index];
+			}
+			FinalizeFrontWallCharacterizationStorage(storage);
+
+			const float floorDifferentialLight =
+				EstimateFrontWallCharacterizationChannelFloor(storage, false);
+			const float signalBaseline = 0.010f;
+			const float expectedDistanceM[] = { 0.000f, 0.010f, 0.020f, 0.030f, 0.040f };
+			float measuredDifferentialLight[_countof(expectedDistanceM)] = {};
+			for (size_t index = 0U; index < _countof(expectedDistanceM); ++index)
+			{
+				float templateDifferentialLight = 0.0f;
+				Assert::IsTrue(TrySampleFrontWallCharacterizationDifferentialLight(
+					storage,
+					false,
+					expectedDistanceM[index],
+					templateDifferentialLight));
+				const float templateRise = (std::max)(0.0f, templateDifferentialLight - floorDifferentialLight);
+				measuredDifferentialLight[index] = signalBaseline + (0.50f * templateRise);
+			}
+
+			FrontWallCharacterizationMatch match{};
+			Assert::IsTrue(TryMatchFrontWallCharacterizationChannel(
+				storage,
+				false,
+				measuredDifferentialLight,
+				expectedDistanceM,
+				static_cast<uint16_t>(_countof(expectedDistanceM)),
+				signalBaseline,
+				match));
+			Assert::IsTrue(match.valid);
+			Assert::AreEqual(0.50f, match.scale, 1.0e-3f);
+			Assert::IsTrue(match.normalizedCorrelation > 0.999f);
+			Assert::IsTrue(match.relativeResidual < 1.0e-5f);
+		}
+
+		TEST_METHOD(TryMatchFrontWallCharacterizationChannelKeepsFlatOpenSignalBelowWallThreshold)
+		{
+			FrontWallCharacterizationStorage storage{};
+			storage.sampleCount = 10U;
+			storage.distanceStepM = 0.005f;
+			storage.commandedReverseSpeedMps = 0.03f;
+			storage.zeroThresholdDifferentialLight = 0.0005f;
+			storage.terminalDistanceM = 0.045f;
+			for (uint16_t index = 0U; index < storage.sampleCount; ++index)
+			{
+				storage.distanceM[index] = 0.005f * static_cast<float>(index);
+			}
+			storage.frontLeftDifferentialLight[0] = 0.120f;
+			storage.frontLeftDifferentialLight[1] = 0.105f;
+			storage.frontLeftDifferentialLight[2] = 0.090f;
+			storage.frontLeftDifferentialLight[3] = 0.070f;
+			storage.frontLeftDifferentialLight[4] = 0.050f;
+			storage.frontLeftDifferentialLight[5] = 0.030f;
+			storage.frontLeftDifferentialLight[6] = 0.015f;
+			storage.frontLeftDifferentialLight[7] = 0.004f;
+			storage.frontLeftDifferentialLight[8] = 0.000f;
+			storage.frontLeftDifferentialLight[9] = 0.000f;
+			for (uint16_t index = 0U; index < storage.sampleCount; ++index)
+			{
+				storage.frontRightDifferentialLight[index] = storage.frontLeftDifferentialLight[index];
+			}
+			FinalizeFrontWallCharacterizationStorage(storage);
+
+			const float signalBaseline = 0.010f;
+			const float expectedDistanceM[] = { 0.000f, 0.010f, 0.020f, 0.030f, 0.040f };
+			const float measuredDifferentialLight[] = { signalBaseline, signalBaseline, signalBaseline, signalBaseline, signalBaseline };
+
+			FrontWallCharacterizationMatch match{};
+			Assert::IsTrue(TryMatchFrontWallCharacterizationChannel(
+				storage,
+				false,
+				measuredDifferentialLight,
+				expectedDistanceM,
+				static_cast<uint16_t>(_countof(expectedDistanceM)),
+				signalBaseline,
+				match));
+			Assert::IsTrue(match.valid);
+			Assert::AreEqual(0.0f, match.scale, 1.0e-6f);
+			Assert::AreEqual(0.0f, match.normalizedCorrelation, 1.0e-6f);
+			Assert::AreEqual(0.0f, match.relativeResidual, 1.0e-6f);
 		}
 
 		TEST_METHOD(TryScaleSignalHighThresholdsPreservesThresholdOrdering)
@@ -1128,10 +1582,30 @@ namespace MazeMap
 
 		TEST_METHOD(ShouldReleaseWallTouchSeatRequiresMinimumSkidDuration)
 		{
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 99UL, 100UL, true));
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(0.79f, 0.80f, 150UL, 100UL, true));
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, false));
-			Assert::IsTrue(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 100UL, 100UL, true));
+			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 99UL, 100UL, true, true, true, true));
+			Assert::IsFalse(ShouldReleaseWallTouchSeat(0.79f, 0.80f, 150UL, 100UL, true, true, true, true));
+			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, false, true, true, true));
+			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, true, false, true, true));
+			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, true, true, true, false));
+			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, true, true, false, true));
+			Assert::IsTrue(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 100UL, 100UL, true, true, true, true));
+		}
+
+		TEST_METHOD(IsWallTouchSeatAsymmetricReleaseCueRequiresOppositeBiasAndSmallAdvance)
+		{
+			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(false, false, true, true, 0.002f, 0.010f));
+			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(true, true, true, true, 0.002f, 0.010f));
+			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(true, true, false, false, 0.002f, 0.010f));
+			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(true, true, false, true, 0.012f, 0.010f));
+			Assert::IsTrue(IsWallTouchSeatAsymmetricReleaseCue(true, true, false, true, 0.002f, 0.010f));
+		}
+
+		TEST_METHOD(HasWallTouchSeatQualifiedBiasPhaseRequiresFullBiasDuration)
+		{
+			Assert::IsFalse(HasWallTouchSeatQualifiedBiasPhase(99UL, 100UL));
+			Assert::IsFalse(HasWallTouchSeatQualifiedBiasPhase(150UL, 0UL));
+			Assert::IsTrue(HasWallTouchSeatQualifiedBiasPhase(100UL, 100UL));
+			Assert::IsTrue(HasWallTouchSeatQualifiedBiasPhase(180UL, 100UL));
 		}
 
 		TEST_METHOD(ComputeAverageEncoderAbsSpeedMpsUsesWheelMagnitudes)

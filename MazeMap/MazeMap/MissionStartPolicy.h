@@ -11,6 +11,43 @@
 
 namespace MazeMap
 {
+    enum class FrontCalibrationSpinHeadingClass : uint8_t
+    {
+        Ignore = 0U,
+        OpenNorth = 1U,
+        Wall = 2U,
+    };
+
+    inline FrontCalibrationSpinHeadingClass ClassifyFrontCalibrationSpinHeadingFromNorth(
+        float yawRad,
+        float northOpenHalfWidthRad,
+        float wallMinEastOfNorthRad,
+        float wallMaxEastOfNorthRad)
+    {
+        if (!std::isfinite(yawRad) ||
+            !std::isfinite(northOpenHalfWidthRad) ||
+            !std::isfinite(wallMinEastOfNorthRad) ||
+            !std::isfinite(wallMaxEastOfNorthRad) ||
+            northOpenHalfWidthRad < 0.0f ||
+            wallMinEastOfNorthRad < northOpenHalfWidthRad ||
+            wallMaxEastOfNorthRad < wallMinEastOfNorthRad)
+        {
+            return FrontCalibrationSpinHeadingClass::Ignore;
+        }
+
+        const float eastOfNorthRad = std::remainder((0.5f * PI) - yawRad, TWO_PI);
+        if (std::fabs(eastOfNorthRad) <= northOpenHalfWidthRad)
+        {
+            return FrontCalibrationSpinHeadingClass::OpenNorth;
+        }
+
+        if (eastOfNorthRad < wallMinEastOfNorthRad || eastOfNorthRad > wallMaxEastOfNorthRad)
+        {
+            return FrontCalibrationSpinHeadingClass::Ignore;
+        }
+        return FrontCalibrationSpinHeadingClass::Wall;
+    }
+
     inline float ComputeCellWallFaceInsetM(float wallThicknessM)
     {
         if (!std::isfinite(wallThicknessM) || wallThicknessM < 0.0f)
@@ -190,6 +227,57 @@ namespace MazeMap
             break;
         case Right:
             targetXM = alongWallCoordinateM - sensorForwardOffsetM;
+            break;
+        default:
+            return false;
+        }
+
+        return
+            std::isfinite(targetXM) &&
+            std::isfinite(targetYM) &&
+            targetXM >= 0.0f &&
+            targetYM >= 0.0f;
+    }
+
+    inline bool TryComputeSideWallTravelFractionPoseM(
+        CellCoordinates cell,
+        Direction heading,
+        float cellSizeM,
+        float sensorForwardOffsetM,
+        float cellEntryFraction,
+        float& targetXM,
+        float& targetYM)
+    {
+        targetXM = 0.0f;
+        targetYM = 0.0f;
+        if (!(std::isfinite(cellSizeM) &&
+            std::isfinite(sensorForwardOffsetM) &&
+            std::isfinite(cellEntryFraction) &&
+            cellSizeM > 0.0f &&
+            sensorForwardOffsetM >= 0.0f &&
+            cellEntryFraction >= 0.0f &&
+            cellEntryFraction <= 1.0f))
+        {
+            return false;
+        }
+
+        const float cellBaseXM = static_cast<float>(cell.GetX()) * cellSizeM;
+        const float cellBaseYM = static_cast<float>(cell.GetY()) * cellSizeM;
+        targetXM = (static_cast<float>(cell.GetX()) + 0.5f) * cellSizeM;
+        targetYM = (static_cast<float>(cell.GetY()) + 0.5f) * cellSizeM;
+        switch (heading)
+        {
+        case Up:
+            targetYM = cellBaseYM + (cellEntryFraction * cellSizeM) - sensorForwardOffsetM;
+            break;
+        case Down:
+            targetYM = cellBaseYM + ((1.0f - cellEntryFraction) * cellSizeM) + sensorForwardOffsetM;
+            break;
+        case Left:
+            targetXM = cellBaseXM + ((1.0f - cellEntryFraction) * cellSizeM) + sensorForwardOffsetM;
+            break;
+        case Right:
+            targetXM = cellBaseXM + (cellEntryFraction * cellSizeM) - sensorForwardOffsetM;
             break;
         default:
             return false;
@@ -712,18 +800,51 @@ namespace MazeMap
             (std::fabs(rightWheelSpeedMps) <= maxAbsLinearSpeedMps);
     }
 
+    inline bool IsWallTouchSeatAsymmetricReleaseCue(
+        bool sawPinnedBiasPhase,
+        bool pinnedBiasRight,
+        bool releaseBiasRight,
+        bool releaseMotionDetected,
+        float releaseBodyAdvanceM,
+        float maxAllowedBodyAdvanceM)
+    {
+        return
+            sawPinnedBiasPhase &&
+            releaseMotionDetected &&
+            (pinnedBiasRight != releaseBiasRight) &&
+            std::isfinite(releaseBodyAdvanceM) &&
+            std::isfinite(maxAllowedBodyAdvanceM) &&
+            (maxAllowedBodyAdvanceM >= 0.0f) &&
+            (releaseBodyAdvanceM <= maxAllowedBodyAdvanceM);
+    }
+
+    inline bool HasWallTouchSeatQualifiedBiasPhase(
+        unsigned long phaseElapsedMs,
+        unsigned long minimumBiasPhaseMs)
+    {
+        return
+            (minimumBiasPhaseMs > 0UL) &&
+            (phaseElapsedMs >= minimumBiasPhaseMs);
+    }
+
     inline bool ShouldReleaseWallTouchSeat(
         float driveCommand,
         float minimumReleaseDriveCommand,
         unsigned long elapsedMs,
         unsigned long minimumSkidMs,
-        bool seatReleaseMotionDetected)
+        bool seatReleaseMotionDetected,
+        bool seatWallConfirmed,
+        bool completedBiasRightPhase,
+        bool completedBiasLeftPhase)
     {
         return
             std::isfinite(driveCommand) &&
             std::isfinite(minimumReleaseDriveCommand) &&
             (driveCommand >= minimumReleaseDriveCommand) &&
             (elapsedMs >= minimumSkidMs) &&
-            seatReleaseMotionDetected;
+            seatReleaseMotionDetected &&
+            seatWallConfirmed &&
+            completedBiasRightPhase &&
+            completedBiasLeftPhase;
     }
 }

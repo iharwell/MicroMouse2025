@@ -126,6 +126,93 @@
     <ClInclude Include="ManeuverQueue.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CoreFileExport.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CruiseSpeedFloor.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticCoverage.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticLogBudget.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticMotionPlan.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagonalWallCentering.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EncoderStallPolicy.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FanRampProfile.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FrontWallCharacterizationStorage.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GyroBiasUpdatePolicy.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ImuSamplingProfile.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="InPlaceTurnProfile.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="LaunchAssistProfile.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MissionMazeExport.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MissionStartPolicy.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MotionTargetProjection.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MotorModelUnits.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OpenLoopDriveCommand.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RollingAverageWindow.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SearchRunPlanner.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SmoothTurnYawRateController.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StartupWaitProfile.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TrackWidthEstimate.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TractionLimitSweep.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TurnCommandGeometry.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TurnWallEdgeTracker.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WallContactDetection.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WallDetectionThresholds.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WallSensorCalibration.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -203,5 +290,13 @@
     <ClCompile Include="VehicleState.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MazeMapCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="MazeMap.ino">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -13,9 +13,9 @@ namespace MazeMap
     inline constexpr DiagnosticSummaryInstruction kDiagnosticSummaryInstructions[] = {
         { "meta", "All active diagnostic tunables are written as # meta lines near the top of this log." },
         { "gyro", "baseline_idle/final_idle -> kGyroBiasSamples and kGyroBiasUpdateMaxAbsRateRadps. Use stationary gyro_raw_radps drift and bias convergence." },
-        { "kickoff_ff", "kickoff_* -> kWheelStaticFeedforward and kWheelRestLaunchDriveCommand. Use moved/max_speed_mps for breakaway." },
+        { "kickoff_ff", "kickoff_* -> motor-model speed/force wheel FF, kWheelStaticFeedforward residual trim, and kWheelRestLaunchDriveCommand." },
         { "kickoff_thresholds", "kickoff_* -> kWheelRestLaunchSpeedThresholdMps, kWheelRestLaunchDriveThreshold, kWheelRestLaunchMaxDriveCommand, and kWheelRestLaunchRampMs." },
-        { "forward", "forward_* -> kWheelVelocityFeedforward, kWheelVelocityKp, kWheelVelocityKi, kWheelIntegralLimit. Use hold_avg_speed_mps/carried/travel_limited." },
+        { "forward", "forward_* -> motor-model speed/force wheel FF, residual kWheelVelocityFeedforward, kWheelVelocityKp, kWheelVelocityKi, and kWheelIntegralLimit." },
         { "diag_feedback", "closed-loop diag phases also use kDiagnosticWheelVelocityKpScale, kDiagnosticWheelVelocityKiScale, and kDiagnosticWheelIntegralLimitScale." },
         { "turn", "turn_* -> kTurnHeadingKp, kTurnYawD, kAngleToleranceRad, and kAngularSpeedToleranceRadps. Use turn_result peak/final yaw error." },
         { "straight", "straight_* -> kStraightHeadingKp, kStraightYawD, kDistanceToleranceM, and kSpeedToleranceMps. Use straight_result heading and stop error." },
