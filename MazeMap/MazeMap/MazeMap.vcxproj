@@ -240,7 +240,6 @@
     <ClInclude Include="Vector2f.h" />
     <ClInclude Include="Vehicle.h" />
     <ClInclude Include="VehicleState.h" />
-    <ClInclude Include="WallContactDetection.h" />
     <ClInclude Include="WallDetectionThresholds.h" />
     <ClInclude Include="WallBeliefMap.h" />
     <ClInclude Include="WallObservationPipeline.h" />

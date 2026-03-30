@@ -4982,99 +4982,15 @@ private:
         return ExecuteQueuedManeuvers(queue, FinalLimits(), snapToExpectedLocation);
     }
 
-    bool SnapPoseCoordinateOnConfirmedWallContact(CalibrationWall touchWall, float targetCoordinateM)
-    {
-        if (!(std::isfinite(targetCoordinateM) && targetCoordinateM >= 0.0f))
-        {
-            return Fail("Front wall contact snap coordinate is invalid");
-        }
-
-        const PoseEstimate& pose = _drive.GetPose();
-        float xMeters = pose.xMeters;
-        float yMeters = pose.yMeters;
-        switch (touchWall)
-        {
-        case CalibrationWall::West:
-        case CalibrationWall::East:
-            xMeters = targetCoordinateM;
-            break;
-        case CalibrationWall::South:
-        case CalibrationWall::North:
-            yMeters = targetCoordinateM;
-            break;
-        default:
-            return Fail("Front wall contact snap wall is invalid");
-        }
-
-        _drive.SetPose(xMeters, yMeters, pose.yawRad);
-        _lastControlMicros = micros();
-        AppendMissionTraceFormatted(
-            "mission_front_touch_snap,cell=(%d,%d),wall=%s,target=%.4f,x=%.4f,y=%.4f,yaw_deg=%.2f",
-            _currentCell.GetX(),
-            _currentCell.GetY(),
-            CalibrationWallName(touchWall),
-            targetCoordinateM,
-            xMeters,
-            yMeters,
-            RAD_TO_DEG_F * pose.yawRad);
-        return true;
-    }
-
-    bool BackOffToCurrentCellCenterAlongCurrentHeading(const char* traceEventName)
-    {
-        float centerXMeters = 0.0f;
-        float centerYMeters = 0.0f;
-        if (!TryGetCellCenterMeters(_currentCell, centerXMeters, centerYMeters))
-        {
-            return Fail("Unable to compute current cell center for front-wall backoff");
-        }
-
-        const PoseEstimate& pose = _drive.GetPose();
-        const MazeMap::Vectorf<2> targetHeading = pose.headingUnit;
-        const MazeMap::Vectorf<2> targetPosition(centerXMeters, centerYMeters);
-        float reverseDistanceM = 0.0f;
-        if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-                pose.xMeters,
-                pose.yMeters,
-                centerXMeters,
-                centerYMeters,
-                -targetHeading.GetX(),
-                -targetHeading.GetY(),
-                reverseDistanceM))
-        {
-            return Fail("Front-wall backoff target projection is invalid");
-        }
-
-        reverseDistanceM = (std::max)(0.0f, reverseDistanceM);
-        AppendMissionTraceFormatted(
-            "%s,cell=(%d,%d),distance_m=%.4f,target_x=%.4f,target_y=%.4f",
-            (traceEventName != nullptr) ? traceEventName : "mission_backoff_to_cell_center",
-            _currentCell.GetX(),
-            _currentCell.GetY(),
-            reverseDistanceM,
-            centerXMeters,
-            centerYMeters);
-        if (reverseDistanceM <= Config::kDistanceToleranceM)
-        {
-            return HoldPosition(Config::kMotionSettleHoldMs);
-        }
-
-        return ExecuteReverseStraightProfile(
-            reverseDistanceM,
-            SearchLimits(),
-            &targetHeading,
-            &targetPosition);
-    }
-
     bool ObserveCellFromSnapshot(
         const MazeMap::CellCoordinates& observedCell,
         MazeMap::Direction observedDirection,
         const SensorSnapshot& snapshot,
-        bool* outForwardWallObservedFromUnknown = nullptr)
+        bool* outForwardWallCommittedFromUnknown = nullptr)
     {
-        if (outForwardWallObservedFromUnknown != nullptr)
+        if (outForwardWallCommittedFromUnknown != nullptr)
         {
-            *outForwardWallObservedFromUnknown = false;
+            *outForwardWallCommittedFromUnknown = false;
         }
 
         MazeMap::WallState knownWallState = MazeMap::WallState::Unknown;
@@ -5109,7 +5025,8 @@ private:
                 float primaryDistanceM,
                 float secondaryDistanceM,
                 bool primaryDetected,
-                bool secondaryDetected) -> bool
+                bool secondaryDetected,
+                MazeMap::WallBeliefUpdate* outBeliefUpdate = nullptr) -> bool
         {
             const MazeMap::WallBeliefUpdate beliefUpdate =
                 _wallBeliefMap.ApplyObservation(
@@ -5123,6 +5040,10 @@ private:
             if (beliefUpdate.valid && beliefUpdate.hardState != MazeMap::Unknown)
             {
                 _maze.SetWall(cell, absoluteDirection, beliefUpdate.hardState);
+            }
+            if (outBeliefUpdate != nullptr)
+            {
+                *outBeliefUpdate = beliefUpdate;
             }
 
             return LogWallObservationDecision(
@@ -5154,12 +5075,9 @@ private:
             else
             {
                 MazeMap::WallState observedState = snapshot.frontWall ? MazeMap::Wall : MazeMap::NoWall;
-                if ((outForwardWallObservedFromUnknown != nullptr) && (observedState == MazeMap::Wall))
-                {
-                    *outForwardWallObservedFromUnknown = true;
-                }
                 const char* sensorSource = FrontObservationSourceName(snapshot);
                 const char* sensorMode = FrontObservationModeName(snapshot);
+                MazeMap::WallBeliefUpdate forwardBeliefUpdate{};
                 if (!applyBeliefQualifiedObservation(
                         "forward",
                         forwardDirection,
@@ -5169,9 +5087,17 @@ private:
                         snapshot.frontLeftDistanceM,
                         snapshot.frontRightDistanceM,
                         snapshot.frontLeftWall,
-                        snapshot.frontRightWall))
+                        snapshot.frontRightWall,
+                        &forwardBeliefUpdate))
                 {
                     return false;
+                }
+                if (outForwardWallCommittedFromUnknown != nullptr &&
+                    observedState == MazeMap::Wall &&
+                    forwardBeliefUpdate.valid &&
+                    forwardBeliefUpdate.hardState == MazeMap::Wall)
+                {
+                    *outForwardWallCommittedFromUnknown = true;
                 }
             }
         }
@@ -5255,6 +5181,57 @@ private:
         }
         _drive.Brake();
         return ObserveCurrentCellFromSnapshot(snapshot);
+    }
+
+    bool HandleSearchWallMapUpdateStop(
+        const MazeMap::CellCoordinates& observedCell,
+        MazeMap::Direction observedDirection,
+        float projectedTravelM,
+        uint16_t frontVoteCount,
+        bool* outStoppedForReplan = nullptr)
+    {
+        if (outStoppedForReplan != nullptr)
+        {
+            *outStoppedForReplan = false;
+        }
+
+        _currentCell = observedCell;
+        _currentDirection = observedDirection;
+
+        _drive.Brake();
+
+        MazeMap::Path<PATH_SIZE> replannedPath;
+        _searchPathFinder.PathToNearestUnknown(_currentCell, _currentDirection, replannedPath);
+        const MazeMap::SearchReplanResponse replan = MazeMap::PlanSearchReplanResponse(replannedPath, _currentDirection);
+        AppendMissionTraceFormatted(
+            "mission_observation_replan,cell=(%d,%d),abs=%s,travel_m=%.4f,front_votes=%u,path_size=%u,next_abs=%s,requires_turn=%u",
+            _currentCell.GetX(),
+            _currentCell.GetY(),
+            DirectionName(_currentDirection),
+            projectedTravelM,
+            static_cast<unsigned>(frontVoteCount),
+            static_cast<unsigned>(replannedPath.GetSize()),
+            DirectionName(replan.nextDirection),
+            replan.requiresTurn ? 1U : 0U);
+
+        if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+        {
+            return false;
+        }
+
+        if (replan.requiresTurn && !OrientTo(replan.nextDirection, SearchLimits()))
+        {
+            return false;
+        }
+
+        _currentDirectionalLocation = MazeMap::DirectionalLocation(
+            MazeMap::MazeLocation::CellCenter(_currentCell),
+            _currentDirection);
+        if (outStoppedForReplan != nullptr)
+        {
+            *outStoppedForReplan = true;
+        }
+        return true;
     }
 
     bool ExploreFullMaze()
@@ -5469,12 +5446,12 @@ private:
         float exitSpeedMps,
         bool snapAtEnd,
         bool observeWhileRolling = false,
-        bool* outInterruptedByBoundaryImpact = nullptr)
+        bool* outStoppedForReplan = nullptr)
     {
         (void)snapAtEnd;
-        if (outInterruptedByBoundaryImpact != nullptr)
+        if (outStoppedForReplan != nullptr)
         {
-            *outInterruptedByBoundaryImpact = false;
+            *outStoppedForReplan = false;
         }
 
         if (cellCount == 0U)
@@ -5512,19 +5489,6 @@ private:
             return Fail("Search straight target fell behind the current pose");
         }
 
-        struct BoundaryImpactWatch
-        {
-            bool armed = false;
-            float peakEncoderSpeedMps = 0.0f;
-            float baselinePlanarAccelMps2 = 0.0f;
-            bool baselinePlanarAccelValid = false;
-            bool motionEstablished = false;
-            unsigned long motionEstablishedMs = 0UL;
-        };
-
-        BoundaryImpactWatch boundaryImpactWatch{};
-        MazeMap::CellCoordinates nextBoundaryCell = startCell;
-        uint16_t unresolvedBoundaryCount = cellCount;
         const float sideSensorForwardOffsetM =
             (std::max)(_speedVehicle.SideLeft.GetPosition().GetX(), _speedVehicle.SideRight.GetPosition().GetX());
         uint16_t rollingObservationCount = 0U;
@@ -5541,11 +5505,6 @@ private:
         {
             nextRollingObservationCell = nextRollingObservationCell >> direction;
         }
-
-        const auto resetBoundaryImpactWatch = [&boundaryImpactWatch]()
-        {
-            boundaryImpactWatch = BoundaryImpactWatch{};
-        };
 
         const auto resetRollingObservationPlan = [&]()
         {
@@ -5670,47 +5629,7 @@ private:
             return true;
         };
 
-        const auto tryComputeDistanceToBoundaryTouch = [&](
-                                                      const MazeMap::CellCoordinates& boundaryCell,
-                                                      const PoseEstimate& poseEstimate,
-                                                      float& distanceToBoundaryTouchM,
-                                                      float& targetCoordinateM,
-                                                      CalibrationWall& touchWall) -> bool
-        {
-            distanceToBoundaryTouchM = 0.0f;
-            targetCoordinateM = 0.0f;
-            if (!TryComputeWallTouchTargetCoordinateForCellWall(boundaryCell, direction, targetCoordinateM, touchWall))
-            {
-                return false;
-            }
-
-            float targetXM = poseEstimate.xMeters;
-            float targetYM = poseEstimate.yMeters;
-            switch (touchWall)
-            {
-            case CalibrationWall::West:
-            case CalibrationWall::East:
-                targetXM = targetCoordinateM;
-                break;
-            case CalibrationWall::South:
-            case CalibrationWall::North:
-                targetYM = targetCoordinateM;
-                break;
-            default:
-                return false;
-            }
-
-            return MazeMap::TryComputeProjectedDistanceToTargetM(
-                poseEstimate.xMeters,
-                poseEstimate.yMeters,
-                targetXM,
-                targetYM,
-                targetHeading.GetX(),
-                targetHeading.GetY(),
-                distanceToBoundaryTouchM);
-        };
-
-        bool rollingObservationStoppedOnNewForwardWall = false;
+        bool rollingObservationStoppedForReplan = false;
         const auto tryObserveRollingCells = [&](float projectedTravelM, const PoseEstimate& livePose, const SensorSnapshot& liveSnapshot) -> bool
         {
             if (!observeWhileRolling)
@@ -5810,41 +5729,28 @@ private:
                     static_cast<unsigned>(voteSummary.leftWallVotes),
                     static_cast<unsigned>(voteSummary.rightWindowValidVotes),
                     static_cast<unsigned>(voteSummary.rightWallVotes));
-                bool forwardWallObservedFromUnknown = false;
+                bool forwardWallCommittedFromUnknown = false;
                 if (!ObserveCellFromSnapshot(
                         nextRollingObservationCell,
                         direction,
                         majoritySnapshot,
-                        &forwardWallObservedFromUnknown))
+                        &forwardWallCommittedFromUnknown))
                 {
                     return false;
                 }
 
-                if (forwardWallObservedFromUnknown)
+                if (forwardWallCommittedFromUnknown)
                 {
-                    _drive.Brake();
-                    if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+                    if (!HandleSearchWallMapUpdateStop(
+                            nextRollingObservationCell,
+                            direction,
+                            projectedTravelM,
+                            voteSummary.frontWallVotes,
+                            outStoppedForReplan))
                     {
                         return false;
                     }
-
-                    _currentCell = nextRollingObservationCell;
-                    _currentDirection = direction;
-                    if (!BackOffToCurrentCellCenterAlongCurrentHeading("mission_observation_backoff"))
-                    {
-                        return false;
-                    }
-                    _currentDirectionalLocation = MazeMap::DirectionalLocation(
-                        MazeMap::MazeLocation::CellCenter(_currentCell),
-                        _currentDirection);
-                    rollingObservationStoppedOnNewForwardWall = true;
-                    AppendMissionTraceFormatted(
-                        "mission_observation_brake,cell=(%d,%d),abs=%s,travel_m=%.4f,front_votes=%u",
-                        _currentCell.GetX(),
-                        _currentCell.GetY(),
-                        DirectionName(direction),
-                        projectedTravelM,
-                        static_cast<unsigned>(voteSummary.frontWallVotes));
+                    rollingObservationStoppedForReplan = true;
                     return true;
                 }
 
@@ -5860,7 +5766,6 @@ private:
         };
 
         const MotionLimits searchLimits = SearchLimits();
-        const float startDistanceM = _drive.GetAverageDistanceMeters();
         float commandedSpeedMps = (std::max)(entrySpeedMps, 0.0f);
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
@@ -5881,12 +5786,6 @@ private:
             }
 
             const PoseEstimate& livePose = _drive.GetPose();
-            const DriveTelemetry telemetry = _drive.GetTelemetry();
-            const float encoderSpeedMps = MazeMap::ComputeAverageEncoderAbsSpeedMps(
-                telemetry.leftVelocityMps,
-                telemetry.rightVelocityMps);
-            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-
             float projectedRemainingM = 0.0f;
             if (!MazeMap::TryComputeProjectedDistanceToTargetM(
                     livePose.xMeters,
@@ -5902,144 +5801,11 @@ private:
             const float remainingM = (std::max)(0.0f, projectedRemainingM);
             const float projectedTravelM = (std::clamp)(distanceToTargetM - projectedRemainingM, 0.0f, distanceToTargetM);
 
-            if constexpr (Config::kEnableMissionBoundaryImpactWallDetection)
-            {
-                if (unresolvedBoundaryCount > 0U)
-                {
-                    float distanceToBoundaryTouchM = 0.0f;
-                    float boundaryTargetCoordinateM = 0.0f;
-                    CalibrationWall boundaryTouchWall = CalibrationWall::North;
-                    if (!tryComputeDistanceToBoundaryTouch(
-                            nextBoundaryCell,
-                            livePose,
-                            distanceToBoundaryTouchM,
-                            boundaryTargetCoordinateM,
-                            boundaryTouchWall))
-                    {
-                        AppendMissionTraceFormatted(
-                            "mission_boundary_watch_disable,cell=(%d,%d),abs=%s,reason=target_unavailable",
-                            nextBoundaryCell.GetX(),
-                            nextBoundaryCell.GetY(),
-                            DirectionName(direction));
-                        unresolvedBoundaryCount = 0U;
-                        resetBoundaryImpactWatch();
-                    }
-                    else
-                    {
-                        if (!boundaryImpactWatch.armed &&
-                            MazeMap::ShouldArmBoundaryImpactWatch(
-                                distanceToBoundaryTouchM,
-                                Config::kSearchBoundaryImpactArmDistanceM))
-                        {
-                            boundaryImpactWatch.armed = true;
-                            boundaryImpactWatch.baselinePlanarAccelMps2 = snapshot.planarAccelMps2;
-                            boundaryImpactWatch.baselinePlanarAccelValid = true;
-                            AppendMissionTraceFormatted(
-                                "mission_boundary_watch_arm,cell=(%d,%d),abs=%s,target=%.4f,distance_to_touch_m=%.4f",
-                                nextBoundaryCell.GetX(),
-                                nextBoundaryCell.GetY(),
-                                DirectionName(direction),
-                                boundaryTargetCoordinateM,
-                                distanceToBoundaryTouchM);
-                        }
-                        if (boundaryImpactWatch.armed)
-                        {
-                            boundaryImpactWatch.peakEncoderSpeedMps =
-                                (std::max)(boundaryImpactWatch.peakEncoderSpeedMps, encoderSpeedMps);
-                            if (!boundaryImpactWatch.motionEstablished &&
-                                MazeMap::IsWallTapMotionEstablished(
-                                    boundaryImpactWatch.peakEncoderSpeedMps,
-                                    traveledM,
-                                    Config::kFrontWallTapMinimumMotionSpeedMps,
-                                    Config::kFrontWallTapMinimumMotionDistanceM))
-                            {
-                                boundaryImpactWatch.motionEstablished = true;
-                                boundaryImpactWatch.motionEstablishedMs = millis();
-                            }
-
-                            const bool encoderImpactDetected =
-                                boundaryImpactWatch.motionEstablished &&
-                                MazeMap::HasSharpEncoderVelocityDecline(
-                                    boundaryImpactWatch.peakEncoderSpeedMps,
-                                    encoderSpeedMps,
-                                    Config::kFrontWallTapMinimumPeakEncoderSpeedMps,
-                                    Config::kFrontWallTapMaximumCurrentPeakRatio,
-                                    Config::kFrontWallTapMinimumEncoderDropMps);
-                            const bool accelImpactDetected =
-                                boundaryImpactWatch.motionEstablished &&
-                                ((millis() - boundaryImpactWatch.motionEstablishedMs) >= Config::kFrontWallTapAccelArmDelayMs) &&
-                                MazeMap::HasPlanarAccelContactSpike(
-                                    boundaryImpactWatch.baselinePlanarAccelMps2,
-                                    snapshot.planarAccelMps2,
-                                    Config::kFrontWallTapPlanarAccelSpikeMps2);
-                            if (encoderImpactDetected || accelImpactDetected)
-                            {
-                                _drive.Brake();
-                                if (!HoldBrakedUntilDriveSettles(
-                                        nullptr,
-                                        Config::kMotionSettleHoldMs,
-                                        0U))
-                                {
-                                    return false;
-                                }
-
-                                _maze.SetWall(_maze[nextBoundaryCell], direction, MazeMap::Wall);
-                                _currentCell = nextBoundaryCell;
-                                _currentDirection = direction;
-                                _currentDirectionalLocation = MazeMap::DirectionalLocation(
-                                    MazeMap::MazeLocation::CellCenter(_currentCell),
-                                    _currentDirection);
-                                AppendMissionTraceFormatted(
-                                    "mission_boundary_impact,cell=(%d,%d),abs=%s,target=%.4f,enc_v_mps=%.4f,peak_enc_v_mps=%.4f,planar_accel_mps2=%.4f",
-                                    _currentCell.GetX(),
-                                    _currentCell.GetY(),
-                                    DirectionName(direction),
-                                    boundaryTargetCoordinateM,
-                                    encoderSpeedMps,
-                                    boundaryImpactWatch.peakEncoderSpeedMps,
-                                    snapshot.planarAccelMps2);
-                                if (!SnapPoseCoordinateOnConfirmedWallContact(boundaryTouchWall, boundaryTargetCoordinateM))
-                                {
-                                    return false;
-                                }
-                                if (!BackOffToCurrentCellCenterAlongCurrentHeading("mission_front_touch_backoff"))
-                                {
-                                    return false;
-                                }
-
-                                if (outInterruptedByBoundaryImpact != nullptr)
-                                {
-                                    *outInterruptedByBoundaryImpact = true;
-                                }
-                                return true;
-                            }
-                        }
-
-                        if (MazeMap::HasClearedBoundaryWithoutImpact(
-                                distanceToBoundaryTouchM,
-                                Config::kSearchBoundaryOpenConfirmMarginM))
-                        {
-                            _maze.SetWall(_maze[nextBoundaryCell], direction, MazeMap::NoWall);
-                            AppendMissionTraceFormatted(
-                                "mission_boundary_clear,cell=(%d,%d),abs=%s,target=%.4f,distance_to_touch_m=%.4f",
-                                nextBoundaryCell.GetX(),
-                                nextBoundaryCell.GetY(),
-                                DirectionName(direction),
-                                boundaryTargetCoordinateM,
-                                distanceToBoundaryTouchM);
-                            nextBoundaryCell = nextBoundaryCell >> direction;
-                            --unresolvedBoundaryCount;
-                            resetBoundaryImpactWatch();
-                        }
-                    }
-                }
-            }
-
             if (!tryObserveRollingCells(projectedTravelM, livePose, snapshot))
             {
                 return false;
             }
-            if (rollingObservationStoppedOnNewForwardWall)
+            if (rollingObservationStoppedForReplan)
             {
                 return true;
             }
@@ -6157,7 +5923,6 @@ private:
             if (plan.fullSpeedCellCount > 0U)
             {
                 const float exitSpeedMps = (plan.cautiousCellCount > 0U) ? cautiousCruiseSpeedMps : 0.0f;
-                bool interruptedByBoundaryImpact = false;
                 if (!ExecuteSearchStraightCells(
                     plan.direction,
                     plan.fullSpeedCellCount,
@@ -6165,14 +5930,9 @@ private:
                     searchLimits.maxSpeedMps,
                     exitSpeedMps,
                     plan.cautiousCellCount == 0U,
-                    false,
-                    &interruptedByBoundaryImpact))
+                    false))
                 {
                     return false;
-                }
-                if (interruptedByBoundaryImpact)
-                {
-                    return ObserveCurrentCell();
                 }
                 rollingEntrySpeedMps = exitSpeedMps;
             }
@@ -6182,22 +5942,15 @@ private:
                 if (!observeFinalCell)
                 {
                     const float cautiousEntrySpeedMps = (plan.fullSpeedCellCount > 0U) ? cautiousCruiseSpeedMps : 0.0f;
-                    bool interruptedByBoundaryImpact = false;
                     if (!ExecuteSearchStraightCells(
                             plan.direction,
                             plan.cautiousCellCount,
                             cautiousEntrySpeedMps,
                             cautiousCruiseSpeedMps,
                             0.0f,
-                            true,
-                            false,
-                            &interruptedByBoundaryImpact))
+                            true))
                     {
                         return false;
-                    }
-                    if (interruptedByBoundaryImpact)
-                    {
-                        return ObserveCurrentCell();
                     }
                     pathIndex = static_cast<uint16_t>(plan.segmentEndIndex + 1U);
                     continue;
@@ -6206,7 +5959,7 @@ private:
                 float cautiousEntrySpeedMps = (plan.fullSpeedCellCount > 0U) ? rollingEntrySpeedMps : 0.0f;
                 while (true)
                 {
-                    bool interruptedByBoundaryImpact = false;
+                    bool stoppedForReplan = false;
                     if (!ExecuteSearchStraightCells(
                             plan.direction,
                             1U,
@@ -6215,13 +5968,13 @@ private:
                             cautiousCruiseSpeedMps,
                             false,
                             true,
-                            &interruptedByBoundaryImpact))
+                            &stoppedForReplan))
                     {
                         return false;
                     }
-                    if (interruptedByBoundaryImpact)
+                    if (stoppedForReplan)
                     {
-                        return ObserveCurrentCell();
+                        return true;
                     }
 
                     cautiousEntrySpeedMps = cautiousCruiseSpeedMps;
@@ -6256,7 +6009,6 @@ private:
                     if (nextPlan.fullSpeedCellCount > 0U)
                     {
                         const float exitSpeedMps = (nextPlan.cautiousCellCount > 0U) ? cautiousCruiseSpeedMps : 0.0f;
-                        bool interruptedDuringFullSpeed = false;
                         if (!ExecuteSearchStraightCells(
                                 plan.direction,
                                 nextPlan.fullSpeedCellCount,
@@ -6264,16 +6016,10 @@ private:
                                 searchLimits.maxSpeedMps,
                                 exitSpeedMps,
                                 nextPlan.cautiousCellCount == 0U,
-                                false,
-                                &interruptedDuringFullSpeed))
+                                false))
                         {
                             return false;
                         }
-                        if (interruptedDuringFullSpeed)
-                        {
-                            return ObserveCurrentCell();
-                        }
-
                         if (nextPlan.cautiousCellCount == 0U)
                         {
                             return observeFinalCell ? ObserveCurrentCell() : true;

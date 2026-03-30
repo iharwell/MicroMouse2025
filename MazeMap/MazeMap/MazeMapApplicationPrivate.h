@@ -46,7 +46,6 @@
 #include "TractionLimitSweep.h"
 #include "WallBeliefMap.h"
 #include "WallDetectionThresholds.h"
-#include "WallContactDetection.h"
 #include "WallObservationPipeline.h"
 #include "WheelControlProfile.h"
 

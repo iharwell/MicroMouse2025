@@ -246,9 +246,6 @@
     <ClInclude Include="TurnWallEdgeTracker.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="WallContactDetection.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="WallDetectionThresholds.h">
       <Filter>Source Files</Filter>
     </ClInclude>

@@ -6,6 +6,16 @@
 
 namespace MazeMap
 {
+    inline float ComputeAverageEncoderAbsSpeedMps(float leftVelocityMps, float rightVelocityMps)
+    {
+        if (!std::isfinite(leftVelocityMps) || !std::isfinite(rightVelocityMps))
+        {
+            return 0.0f;
+        }
+
+        return 0.5f * (std::fabs(leftVelocityMps) + std::fabs(rightVelocityMps));
+    }
+
     inline bool IsEncoderProgressWatchdogArmed(
         float commandedSpeedMps,
         float remainingM,

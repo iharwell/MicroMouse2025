@@ -269,23 +269,7 @@ namespace Config
     // [Low] Base maximum travel allowed while searching for a wall during touch-off. Nearby one-cell touches clamp to
     // this clear-span budget, while longer known-wall moves expand from the geometry-predicted travel plus slack.
     const float kWallTouchBaseMaxApproachDistanceM = kCellClearSpanM;
-    // [Medium] Mission boundary-impact wall discovery is currently disabled. These thresholds are retained only so the
-    // contact detector can be re-enabled later without re-deriving them.
-    constexpr bool kEnableMissionBoundaryImpactWallDetection = false;
-    constexpr float kFrontWallTapMinimumMotionSpeedMps = 0.018f;
-    constexpr float kFrontWallTapMinimumMotionDistanceM = 0.003f;
-    // [Medium] Contact is recognized primarily as a sharp encoder-speed collapse after motion is established. Keep the
-    // minimum peak low enough for short taps, but require a meaningful absolute drop and ratio collapse to reject noise.
-    constexpr float kFrontWallTapMinimumPeakEncoderSpeedMps = 0.020f;
-    constexpr float kFrontWallTapMaximumCurrentPeakRatio = 0.45f;
-    constexpr float kFrontWallTapMinimumEncoderDropMps = 0.0075f;
-    // [Medium] The mission contact tap uses planar-acceleration spikes as secondary evidence. Run the mission accel LPF2
-    // at ODR/20 (~50 Hz at the 1 kHz mission loop) instead of ODR/400 (~2.5 Hz), which is too slow for impact events.
     constexpr auto kMissionRuntimeAccelFilterFreq = MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_020;
-    constexpr uint16_t kFrontWallTapAccelArmDelayMs = 40U;
-    constexpr float kFrontWallTapPlanarAccelSpikeMps2 = 0.375f;
-    constexpr float kSearchBoundaryImpactArmDistanceM = 0.020f;
-    constexpr float kSearchBoundaryOpenConfirmMarginM = 0.010f;
     // [Low] Minimum south-wall clearance required before the startup routine may rotate back to the mission heading.
     // Increase only if chassis geometry changes and the rear still clips the wall during that recovery turn.
     constexpr float kMissionStartTurnClearanceM = 0.026f;

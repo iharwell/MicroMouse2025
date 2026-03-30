@@ -20,6 +20,7 @@
 #include "..\MazeMap\CruiseSpeedFloor.h"
 #include "..\MazeMap\OpenLoopDriveCommand.h"
 #include "..\MazeMap\RollingAverageWindow.h"
+#include "..\MazeMap\SearchRunPlanner.h"
 #include "..\MazeMap\SmoothTurnYawRateController.h"
 #include "..\MazeMap\StartupWaitProfile.h"
 #include "..\MazeMap\TrackWidthEstimate.h"
@@ -28,7 +29,6 @@
 #include "..\MazeMap\TurnWallEdgeTracker.h"
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\DiagonalWallCentering.h"
-#include "..\MazeMap\WallContactDetection.h"
 #include "..\MazeMap\WallDetectionThresholds.h"
 #include "..\MazeMap\WheelControlProfile.h"
 #include "..\MazeMap\ManeuverSet.h"
@@ -1614,47 +1614,45 @@ namespace MazeMap
 			Assert::AreEqual(0.0f, ComputeAverageEncoderAbsSpeedMps(NAN, 0.040f), 1.0e-6f);
 		}
 
-		TEST_METHOD(IsWallTapMotionEstablishedAcceptsSpeedOrDistance)
+		TEST_METHOD(PlanSearchReplanResponseRequiresValidNextStep)
 		{
-			Assert::IsTrue(IsWallTapMotionEstablished(0.020f, 0.001f, 0.018f, 0.003f));
-			Assert::IsTrue(IsWallTapMotionEstablished(0.010f, 0.003f, 0.018f, 0.003f));
-			Assert::IsFalse(IsWallTapMotionEstablished(0.010f, 0.002f, 0.018f, 0.003f));
+			Path<PATH_SIZE> path;
+			Assert::IsTrue(path.push_back(CellCoordinates(2, 3)));
+
+			const SearchReplanResponse singlePoint = PlanSearchReplanResponse(path, Direction::Up);
+			Assert::IsFalse(singlePoint.hasPath);
+			Assert::IsFalse(singlePoint.requiresTurn);
+			Assert::AreEqual(static_cast<int>(Direction::None), static_cast<int>(singlePoint.nextDirection));
+
+			Assert::IsTrue(path.push_back(CellCoordinates(2, 3)));
+			const SearchReplanResponse duplicatePoint = PlanSearchReplanResponse(path, Direction::Up);
+			Assert::IsFalse(duplicatePoint.hasPath);
+			Assert::IsFalse(duplicatePoint.requiresTurn);
+			Assert::AreEqual(static_cast<int>(Direction::None), static_cast<int>(duplicatePoint.nextDirection));
 		}
 
-		TEST_METHOD(HasSharpEncoderVelocityDeclineRequiresPeakRatioAndDrop)
+		TEST_METHOD(PlanSearchReplanResponseReportsTurnRequirement)
 		{
-			Assert::IsTrue(HasSharpEncoderVelocityDecline(0.050f, 0.018f, 0.020f, 0.45f, 0.015f));
-			Assert::IsFalse(HasSharpEncoderVelocityDecline(0.050f, 0.026f, 0.020f, 0.45f, 0.015f));
-			Assert::IsFalse(HasSharpEncoderVelocityDecline(0.030f, 0.020f, 0.040f, 0.45f, 0.015f));
+			Path<PATH_SIZE> path;
+			Assert::IsTrue(path.push_back(CellCoordinates(4, 5)));
+			Assert::IsTrue(path.push_back(CellCoordinates(5, 5)));
+
+			const SearchReplanResponse response = PlanSearchReplanResponse(path, Direction::Up);
+			Assert::IsTrue(response.hasPath);
+			Assert::IsTrue(response.requiresTurn);
+			Assert::AreEqual(static_cast<int>(Direction::Right), static_cast<int>(response.nextDirection));
 		}
 
-		TEST_METHOD(HasPlanarAccelContactSpikeUsesRiseAboveBaseline)
+		TEST_METHOD(PlanSearchReplanResponseRecognizesAlignedContinuation)
 		{
-			Assert::IsTrue(HasPlanarAccelContactSpike(0.050f, 0.900f, 0.750f));
-			Assert::IsFalse(HasPlanarAccelContactSpike(0.200f, 0.850f, 0.750f));
-		}
+			Path<PATH_SIZE> path;
+			Assert::IsTrue(path.push_back(CellCoordinates(7, 7)));
+			Assert::IsTrue(path.push_back(CellCoordinates(7, 8)));
 
-		TEST_METHOD(ShouldArmBoundaryImpactWatchUsesApproachWindow)
-		{
-			Assert::IsTrue(ShouldArmBoundaryImpactWatch(0.030f, 0.040f));
-			Assert::IsTrue(ShouldArmBoundaryImpactWatch(-0.005f, 0.040f));
-			Assert::IsFalse(ShouldArmBoundaryImpactWatch(0.050f, 0.040f));
-			Assert::IsFalse(ShouldArmBoundaryImpactWatch(0.030f, 0.0f));
-		}
-
-		TEST_METHOD(HasClearedBoundaryWithoutImpactRequiresPastTouchTarget)
-		{
-			Assert::IsTrue(HasClearedBoundaryWithoutImpact(-0.010f, 0.010f));
-			Assert::IsFalse(HasClearedBoundaryWithoutImpact(-0.005f, 0.010f));
-			Assert::IsFalse(HasClearedBoundaryWithoutImpact(0.000f, 0.010f));
-			Assert::IsFalse(HasClearedBoundaryWithoutImpact(-0.010f, -0.001f));
-		}
-
-		TEST_METHOD(ShouldRetryWallTapAfterNoMotionWaitsForTimeoutAndMissingMotion)
-		{
-			Assert::IsFalse(ShouldRetryWallTapAfterNoMotion(119UL, 0.000f, 0.000f, 120UL, 0.018f, 0.003f));
-			Assert::IsTrue(ShouldRetryWallTapAfterNoMotion(120UL, 0.010f, 0.002f, 120UL, 0.018f, 0.003f));
-			Assert::IsFalse(ShouldRetryWallTapAfterNoMotion(120UL, 0.020f, 0.002f, 120UL, 0.018f, 0.003f));
+			const SearchReplanResponse response = PlanSearchReplanResponse(path, Direction::Up);
+			Assert::IsTrue(response.hasPath);
+			Assert::IsFalse(response.requiresTurn);
+			Assert::AreEqual(static_cast<int>(Direction::Up), static_cast<int>(response.nextDirection));
 		}
 
 		TEST_METHOD(ComputeFanRampDutyCycleInterpolatesAndClampsInputs)

@@ -21,6 +21,34 @@ namespace MazeMap
         }
     };
 
+    struct SearchReplanResponse
+    {
+        Direction nextDirection = Direction::None;
+        bool hasPath = false;
+        bool requiresTurn = false;
+    };
+
+    template<int Size>
+    MAZEMAP_INLINE SearchReplanResponse PlanSearchReplanResponse(const Path<Size>& path, Direction currentDirection)
+    {
+        SearchReplanResponse response{};
+        if (path.GetSize() < 2U)
+        {
+            return response;
+        }
+
+        const Direction nextDirection = path[0].DirectionTo(path[1]);
+        if (nextDirection == Direction::None)
+        {
+            return response;
+        }
+
+        response.nextDirection = nextDirection;
+        response.hasPath = true;
+        response.requiresTurn = nextDirection != currentDirection;
+        return response;
+    }
+
     template<int Size>
     MAZEMAP_INLINE SearchStraightPlan PlanSearchStraightSegment(const Maze& maze, const Path<Size>& path, uint16_t startIndex)
     {
