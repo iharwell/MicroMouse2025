@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 #include "Templates.h"
+#include "..\MazeMap\MouseUkf.h"
 #include "..\MazeMap\WallBeliefMap.h"
 #include "..\MazeMap\WallObservationPipeline.h"
 #include "..\MazeMap\WallSensor.h"
@@ -120,6 +121,150 @@ namespace MazeMap
 			Assert::AreEqual(static_cast<int>(WallState::Wall), static_cast<int>(update.hardState));
 			Assert::IsTrue(update.contradictionCount >= 1U);
 			Assert::IsTrue(update.logOdds < config.setThreshold);
+		}
+
+		TEST_METHOD(WallSensorPreprocessorClassifiesWallPostAndOpenObservations)
+		{
+			WallSensor sensor = MakeTestWallSensor();
+			WallSensorPreprocessor preprocessor;
+
+			WallPreprocessorInput wallInput{};
+			wallInput.ledOffLevel = 0.1f;
+			wallInput.ledOnLevel = 10.1f;
+			wallInput.supportSpanM = 0.06f;
+			const WallObs wallObservation = preprocessor.process(sensor, wallInput);
+			Assert::IsTrue(wallObservation.valid);
+			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(wallObservation.cls));
+
+			WallPreprocessorInput postInput = wallInput;
+			postInput.supportSpanM = 0.01f;
+			const WallObs postObservation = preprocessor.process(sensor, postInput);
+			Assert::IsTrue(postObservation.valid);
+			Assert::AreEqual(static_cast<int>(ObsClass::PostLike), static_cast<int>(postObservation.cls));
+
+			WallPreprocessorInput openInput{};
+			openInput.ledOffLevel = 0.1f;
+			openInput.ledOnLevel = 6.1f;
+			openInput.supportSpanM = 0.06f;
+			const WallObs openObservation = preprocessor.process(sensor, openInput);
+			Assert::IsTrue(openObservation.valid);
+			Assert::AreEqual(static_cast<int>(ObsClass::OpenLike), static_cast<int>(openObservation.cls));
+		}
+
+		TEST_METHOD(WallGeometryModelRespectsSensorExtrinsicsForFrontWallPrediction)
+		{
+			Maze maze;
+			maze.SetWall(maze(0, 0), Direction::Right, WallState::Wall);
+
+			LocalMapView map{};
+			map.maze = &maze;
+			map.radiusCells = 1U;
+
+			WallGeometryModel geometry;
+			PlantParams params = PlantParams::Default();
+
+			VehicleState::StateVector state = VehicleState::StateVector::Zero();
+			state(VehicleState::kPx) = 0.09f;
+			state(VehicleState::kPy) = 0.09f;
+			state(VehicleState::kPsi) = 0.0f;
+
+			GeometryPrediction baseline = geometry.predictRay(state, params.frontLeftSensor, map);
+			Assert::IsTrue(baseline.hit);
+			Assert::AreEqual(static_cast<int>(GeometryHitType::WallFace), static_cast<int>(baseline.type));
+
+			SensorExtrinsics rotatedSensor = params.frontLeftSensor;
+			rotatedSensor.yawOffsetRad += 0.35f;
+			GeometryPrediction rotated = geometry.predictRay(state, rotatedSensor, map);
+			Assert::IsTrue(rotated.rangeM > baseline.rangeM);
+		}
+
+		TEST_METHOD(WallGeometryModelCanIdentifyPostHits)
+		{
+			Maze maze;
+			LocalMapView map{};
+			map.maze = &maze;
+			map.radiusCells = 1U;
+
+			WallGeometryModel geometry;
+			SensorExtrinsics sensor{};
+			sensor.positionBodyM = Vectorf<2>(0.0f, 0.0f);
+			sensor.directionBody = Vectorf<2>(1.0f, 0.0f);
+			sensor.yawOffsetRad = PI_F / 4.0f;
+
+			VehicleState::StateVector state = VehicleState::StateVector::Zero();
+			state(VehicleState::kPx) = 0.09f;
+			state(VehicleState::kPy) = 0.09f;
+			state(VehicleState::kPsi) = 0.0f;
+
+			const GeometryPrediction prediction = geometry.predictRay(state, sensor, map);
+			Assert::IsTrue(prediction.hit);
+			Assert::AreEqual(static_cast<int>(GeometryHitType::Post), static_cast<int>(prediction.type));
+		}
+
+		TEST_METHOD(MapEvidenceUpdaterPostLikeObservationDoesNotForceWall)
+		{
+			MapEvidenceUpdater updater;
+			MapEvidenceUpdaterConfig config{};
+
+			WallObs observation{};
+			observation.valid = true;
+			observation.confidence = 0.9f;
+			observation.cls = ObsClass::PostLike;
+			observation.rho = 0.05f;
+
+			GeometryPrediction bestFit{};
+			bestFit.hit = true;
+			bestFit.type = GeometryHitType::Post;
+
+			const bool changed = updater.Apply(
+				CellCoordinates(1U, 1U),
+				Direction::Right,
+				observation,
+				bestFit,
+				config,
+				false);
+
+			Assert::IsFalse(changed);
+			Assert::AreEqual(static_cast<int>(WallState::Unknown), static_cast<int>(updater.Get(CellCoordinates(1U, 1U), Direction::Right).state));
+		}
+
+		TEST_METHOD(MapEvidenceUpdaterCommitsWallAndOpenEvidence)
+		{
+			MapEvidenceUpdater updater;
+			MapEvidenceUpdaterConfig config{};
+
+			WallObs wallObservation{};
+			wallObservation.valid = true;
+			wallObservation.confidence = 0.9f;
+			wallObservation.cls = ObsClass::WallLike;
+
+			GeometryPrediction wallFit{};
+			wallFit.hit = true;
+			wallFit.type = GeometryHitType::WallFace;
+			wallFit.cell = CellCoordinates(3U, 3U);
+			wallFit.edge = Direction::Up;
+
+			for (int i = 0; i < 3; ++i)
+			{
+				Assert::IsTrue(updater.Apply(CellCoordinates(3U, 3U), Direction::Up, wallObservation, wallFit, config, false));
+			}
+			Assert::AreEqual(static_cast<int>(WallState::Wall), static_cast<int>(updater.Get(CellCoordinates(3U, 3U), Direction::Up).state));
+
+			MapEvidenceUpdater openUpdater;
+			WallObs openObservation{};
+			openObservation.valid = true;
+			openObservation.confidence = 0.9f;
+			openObservation.cls = ObsClass::OpenLike;
+
+			GeometryPrediction openFit{};
+			openFit.hit = false;
+			openFit.type = GeometryHitType::None;
+
+			for (int i = 0; i < 3; ++i)
+			{
+				Assert::IsTrue(openUpdater.Apply(CellCoordinates(5U, 5U), Direction::Right, openObservation, openFit, config, false));
+			}
+			Assert::AreEqual(static_cast<int>(WallState::NoWall), static_cast<int>(openUpdater.Get(CellCoordinates(5U, 5U), Direction::Right).state));
 		}
 
 	};

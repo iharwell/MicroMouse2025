@@ -73,6 +73,11 @@ namespace MazeMap
             return kPhysicalModel;
         }
 
+        static SensorExtrinsics GetFrontLeftSensorExtrinsics() noexcept;
+        static SensorExtrinsics GetFrontRightSensorExtrinsics() noexcept;
+        static SensorExtrinsics GetSideLeftSensorExtrinsics() noexcept;
+        static SensorExtrinsics GetSideRightSensorExtrinsics() noexcept;
+
         const VehicleState& GetVehicleState();
         const VehicleState& GetVehicleState() const;
 

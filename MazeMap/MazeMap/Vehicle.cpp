@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Vehicle.h"
+#include "MouseUkf.h"
 #include <array>
 #include "math.h"
 
@@ -46,38 +47,47 @@ namespace
     MazeMap::WallSensor MakeWallSensor(
         uint8_t wallSensorInPin,
         uint8_t ledOutPin,
-        float x,
-        float y,
-        float dx,
-        float dy)
+        const MazeMap::SensorExtrinsics& extrinsics)
     {
         return MazeMap::WallSensor(
             wallSensorInPin,
             ledOutPin,
-            MazeMap::Vectorf<2>(x, y),
-            MazeMap::Vectorf<2>(dx, dy),
+            extrinsics.positionBodyM,
+            extrinsics.directionBody,
             GetDefaultWallSensorAdcToLightTable(),
             GetDefaultWallSensorDistanceModel());
     }
 
     MazeMap::WallSensor MakeFrontLeftWallSensor()
     {
-        return MakeWallSensor(kFrontLeftWallSensorPin, kFrontLeftWallSensorLedPin, 0.04223f, 0.03465f, 0.99452f, 0.10453f);
+        return MakeWallSensor(
+            kFrontLeftWallSensorPin,
+            kFrontLeftWallSensorLedPin,
+            MazeMap::Vehicle::GetFrontLeftSensorExtrinsics());
     }
 
     MazeMap::WallSensor MakeFrontRightWallSensor()
     {
-        return MakeWallSensor(kFrontRightWallSensorPin, kFrontRightWallSensorLedPin, 0.04223f, -0.03459f, 0.99452f, -0.10453f);
+        return MakeWallSensor(
+            kFrontRightWallSensorPin,
+            kFrontRightWallSensorLedPin,
+            MazeMap::Vehicle::GetFrontRightSensorExtrinsics());
     }
 
     MazeMap::WallSensor MakeSideLeftWallSensor()
     {
-        return MakeWallSensor(kSideLeftWallSensorPin, kSideLeftWallSensorLedPin, 0.05026f, 0.02918f, 0.0f, 1.0f);
+        return MakeWallSensor(
+            kSideLeftWallSensorPin,
+            kSideLeftWallSensorLedPin,
+            MazeMap::Vehicle::GetSideLeftSensorExtrinsics());
     }
 
     MazeMap::WallSensor MakeSideRightWallSensor()
     {
-        return MakeWallSensor(kSideRightWallSensorPin, kSideRightWallSensorLedPin, 0.05026f, -0.02772f, 0.0f, -1.0f);
+        return MakeWallSensor(
+            kSideRightWallSensorPin,
+            kSideRightWallSensorLedPin,
+            MazeMap::Vehicle::GetSideRightSensorExtrinsics());
     }
 }
 
@@ -99,11 +109,51 @@ namespace MazeMap
     }
 
     const VehicleState& Vehicle::GetVehicleState() const { return _stateHistory.GetLatest(); }
+    SensorExtrinsics Vehicle::GetFrontLeftSensorExtrinsics() noexcept
+    {
+        return {
+            Vectorf<2>(0.04223f, 0.03465f),
+            Vectorf<2>(0.99452f, 0.10453f),
+            std::atan2(0.10453f, 0.99452f)
+        };
+    }
+    SensorExtrinsics Vehicle::GetFrontRightSensorExtrinsics() noexcept
+    {
+        return {
+            Vectorf<2>(0.04223f, -0.03459f),
+            Vectorf<2>(0.99452f, -0.10453f),
+            std::atan2(-0.10453f, 0.99452f)
+        };
+    }
+    SensorExtrinsics Vehicle::GetSideLeftSensorExtrinsics() noexcept
+    {
+        return {
+            Vectorf<2>(0.05026f, 0.02918f),
+            Vectorf<2>(0.0f, 1.0f),
+            0.5f * PI_F
+        };
+    }
+    SensorExtrinsics Vehicle::GetSideRightSensorExtrinsics() noexcept
+    {
+        return {
+            Vectorf<2>(0.05026f, -0.02772f),
+            Vectorf<2>(0.0f, -1.0f),
+            -0.5f * PI_F
+        };
+    }
     void Vehicle::ProgressVehicleState(const VehicleState& previousState, VehicleState& projectedState, float timeDelta)
     {
+        PlantModel plantModel;
+        const PlantParams params = PlantParams::Default();
         projectedState.SetTime(previousState.GetTime() + timeDelta);
-
-
+        projectedState.SetControlInput(previousState.GetControlInput());
+        projectedState.SetStateVector(
+            plantModel.integrateMidpoint(
+                previousState.GetStateVector(),
+                previousState.GetControlInput(),
+                timeDelta,
+                params));
+        projectedState.SetSqrtCovariance(previousState.GetSqrtCovariance());
     }
 
     float Vehicle::GetStraightLineCost(float distance, float initialVelocity, float finalVelocity)

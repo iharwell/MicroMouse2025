@@ -27,6 +27,7 @@
 #include "MissionStartPolicy.h"
 #include "MissionMazeExport.h"
 #include "MotorModelUnits.h"
+#include "MouseUkf.h"
 #include "OpenLoopDriveCommand.h"
 #include "RollingAverageWindow.h"
 #include "SmoothTurnYawRateController.h"
@@ -68,6 +69,7 @@ static bool BuildEvidenceObservationSnapshot(
     uint8_t sampleCount,
     SensorSnapshot& combinedSnapshot,
     RollingObservationVoteSummary& voteSummary);
+static bool AppendStartupTrace(const char* line);
 
 namespace MazeMap
 {
@@ -968,6 +970,8 @@ struct SensorSnapshot
     float sideRightDifferentialLight;
     float corridorErrorM;
     float frontSkewM;
+    float accelBodyXMps2;
+    float accelBodyYMps2;
     float planarAccelMps2;
     float gyroRadps;
     bool frontWall;
@@ -1088,6 +1092,8 @@ struct DiagnosticSensorSnapshot
     ImuTelemetry imuBackLeft;
     float corridorErrorM = 0.0f;
     float frontSkewM = 0.0f;
+    float accelBodyXMps2 = 0.0f;
+    float accelBodyYMps2 = 0.0f;
     bool frontWall = false;
     bool leftWall = false;
     bool rightWall = false;
@@ -2811,6 +2817,7 @@ static float HeadingErrorRad(const MazeMap::Vectorf<2>& targetHeading, const Maz
 
 static constexpr float kStandardGravityMps2 = 9.80665f;
 static constexpr unsigned long kFanRampStepMs = 20UL;
+static float gMissionFanDutyCycle = 0.0f;
 
 static uint16_t FanPwmCode(float dutyCycle)
 {
@@ -2826,11 +2833,17 @@ static uint16_t FanPwmCode(float dutyCycle)
 
 static void WriteFanDutyCycle(float dutyCycle)
 {
+    gMissionFanDutyCycle = (std::clamp)(dutyCycle, 0.0f, 1.0f);
 #if defined(ARDUINO_TEENSY41)
     analogWrite(Pins::Fan_CTRL, FanPwmCode(dutyCycle));
 #else
     (void)dutyCycle;
 #endif
+}
+
+static float GetMissionFanDutyCycle()
+{
+    return gMissionFanDutyCycle;
 }
 
 static void RampFanDutyCycle(float targetDutyCycle)
@@ -4551,8 +4564,12 @@ public:
         }
         const float accelDeltaXG = accelXG - _accelBiasXG;
         const float accelDeltaYG = accelYG - _accelBiasYG;
+        snapshot.accelBodyXMps2 = kStandardGravityMps2 * accelDeltaXG;
+        snapshot.accelBodyYMps2 = kStandardGravityMps2 * accelDeltaYG;
         snapshot.planarAccelMps2 = kStandardGravityMps2 * std::sqrt((accelDeltaXG * accelDeltaXG) + (accelDeltaYG * accelDeltaYG));
 #else
+        snapshot.accelBodyXMps2 = 0.0f;
+        snapshot.accelBodyYMps2 = 0.0f;
         snapshot.planarAccelMps2 = 0.0f;
 #endif
 
@@ -4960,9 +4977,8 @@ public:
     DriveBase()
         : _leftMotor(MazeMap::MotorEncoderDrive::CreateDefaultLeftDrive())
         , _rightMotor(MazeMap::MotorEncoderDrive::CreateDefaultRightDrive())
-        , _pose{}
-        , _lastLeftDistanceM(0.0f)
-        , _lastRightDistanceM(0.0f)
+        , _ukf(MazeMap::PlantParams::Default())
+        , _poseCache{}
         , _leftIntegral(0.0f)
         , _rightIntegral(0.0f)
         , _lastLinearCommandMps(0.0f)
@@ -4977,9 +4993,7 @@ public:
         const bool rightOk = _rightMotor.begin();
         _leftMotor.resetEncoderDistanceMeters();
         _rightMotor.resetEncoderDistanceMeters();
-        _lastLeftDistanceM = _leftMotor.getEncoderDistanceMeters();
-        _lastRightDistanceM = _rightMotor.getEncoderDistanceMeters();
-        _pose = PoseEstimate{ 0.0f, 0.0f, DirectionToUnitVector(MazeMap::Up), DirectionToYawRad(MazeMap::Up), 0.0f, 0.0f };
+        ResetPoseEstimate(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
         ResetControllers();
         Brake();
         return leftOk && rightOk;
@@ -5007,26 +5021,16 @@ public:
 
     void SnapTo(MazeMap::DirectionalLocation logical)
     {
-        logical.GetLocation().GetPhysicalLocation(Config::kCellSizeM, _pose.xMeters, _pose.yMeters);
-        _pose.headingUnit = DirectionToUnitVector(logical.GetDirection());
-        _pose.yawRad = DirectionToYawRad(logical.GetDirection());
-        _pose.linearSpeedMps = 0.0f;
-        _pose.angularSpeedRadps = 0.0f;
-        _lastLeftDistanceM = _leftMotor.getEncoderDistanceMeters();
-        _lastRightDistanceM = _rightMotor.getEncoderDistanceMeters();
+        float xMeters = 0.0f;
+        float yMeters = 0.0f;
+        logical.GetLocation().GetPhysicalLocation(Config::kCellSizeM, xMeters, yMeters);
+        ResetPoseEstimate(xMeters, yMeters, DirectionToYawRad(logical.GetDirection()));
         ResetControllers();
     }
 
     void SetPose(float xMeters, float yMeters, float yawRad)
     {
-        _pose.xMeters = xMeters;
-        _pose.yMeters = yMeters;
-        _pose.yawRad = WrapAngleRad(yawRad);
-        _pose.headingUnit = HeadingUnitFromYawRad(_pose.yawRad);
-        _pose.linearSpeedMps = 0.0f;
-        _pose.angularSpeedRadps = 0.0f;
-        _lastLeftDistanceM = _leftMotor.getEncoderDistanceMeters();
-        _lastRightDistanceM = _rightMotor.getEncoderDistanceMeters();
+        ResetPoseEstimate(xMeters, yMeters, yawRad);
         ResetControllers();
     }
 
@@ -5034,7 +5038,7 @@ public:
     {
         if (std::isfinite(xMeters))
         {
-            _pose.xMeters = xMeters;
+            SetEstimatorCoordinate(MazeMap::VehicleState::kPx, xMeters);
         }
     }
 
@@ -5042,32 +5046,24 @@ public:
     {
         if (std::isfinite(yMeters))
         {
-            _pose.yMeters = yMeters;
+            SetEstimatorCoordinate(MazeMap::VehicleState::kPy, yMeters);
         }
     }
 
-    void UpdateOdometry(float dtSeconds, float gyroRadps)
+    void UpdateOdometry(
+        float dtSeconds,
+        const SensorSnapshot& snapshot,
+        const MazeMap::Maze* map = nullptr)
     {
-        const float leftDistanceM = _leftMotor.getEncoderDistanceMeters();
-        const float rightDistanceM = _rightMotor.getEncoderDistanceMeters();
-        const float leftDeltaM = leftDistanceM - _lastLeftDistanceM;
-        const float rightDeltaM = rightDistanceM - _lastRightDistanceM;
-        _lastLeftDistanceM = leftDistanceM;
-        _lastRightDistanceM = rightDistanceM;
+        UpdatePoseEstimate(dtSeconds, snapshot, map);
+    }
 
-        const float centerDeltaM = 0.5f * (leftDeltaM + rightDeltaM);
-        const float measuredLinearSpeedMps = (dtSeconds > 0.0f) ? (centerDeltaM / dtSeconds) : 0.0f;
-        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(measuredLinearSpeedMps, gyroRadps);
-        const float encoderYawDeltaRad =
-            (effectiveTrackWidthM > 0.0f) ? ((rightDeltaM - leftDeltaM) / effectiveTrackWidthM) : 0.0f;
-        const float predictedYawRad = _pose.yawRad + (gyroRadps * dtSeconds);
-        const float encoderYawRad = _pose.yawRad + encoderYawDeltaRad;
-        _pose.yawRad = WrapAngleRad((0.98f * predictedYawRad) + (0.02f * encoderYawRad));
-        _pose.headingUnit = HeadingUnitFromYawRad(_pose.yawRad);
-        _pose.xMeters += centerDeltaM * _pose.headingUnit.GetX();
-        _pose.yMeters += centerDeltaM * _pose.headingUnit.GetY();
-        _pose.linearSpeedMps = measuredLinearSpeedMps;
-        _pose.angularSpeedRadps = gyroRadps;
+    void UpdateOdometry(
+        float dtSeconds,
+        const DiagnosticSensorSnapshot& snapshot,
+        const MazeMap::Maze* map = nullptr)
+    {
+        UpdatePoseEstimate(dtSeconds, snapshot, map);
     }
 
     void CommandVelocity(float linearSpeedMps, float angularSpeedRadps, float dtSeconds)
@@ -5214,7 +5210,7 @@ public:
 
     const PoseEstimate& GetPose() const
     {
-        return _pose;
+        return _poseCache;
     }
 
     float GetLastLinearCommandMps() const
@@ -5242,6 +5238,267 @@ public:
     }
 
 private:
+    static MazeMap::VehicleState::StateMatrix BuildEstimatorCovariance()
+    {
+        MazeMap::VehicleState::StateMatrix covariance =
+            MazeMap::VehicleState::StateMatrix::Identity() * 1.0e-3f;
+        covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL) = 0.25f;
+        covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR) = 0.25f;
+        return covariance;
+    }
+
+    void ResetPoseEstimate(float xMeters, float yMeters, float yawRad)
+    {
+        MazeMap::VehicleState::StateVector state = MazeMap::VehicleState::StateVector::Zero();
+        state(MazeMap::VehicleState::kPx) = std::isfinite(xMeters) ? xMeters : 0.0f;
+        state(MazeMap::VehicleState::kPy) = std::isfinite(yMeters) ? yMeters : 0.0f;
+        state(MazeMap::VehicleState::kPsi) = WrapAngleRad(yawRad);
+        (void)_ukf.reset(state, BuildEstimatorCovariance());
+        SyncPoseEstimate();
+    }
+
+    void SetEstimatorCoordinate(int stateIndex, float coordinateM)
+    {
+        MazeMap::VehicleState::StateVector state = _ukf.ukf().state();
+        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
+        state(stateIndex) = coordinateM;
+        MazeMap::VehicleState::NormalizeStateVector(state);
+        (void)_ukf.ukf().setState(state, covariance);
+        SyncPoseEstimate();
+    }
+
+    void SyncPoseEstimate()
+    {
+        const MazeMap::VehicleState::StateVector& state = _ukf.ukf().state();
+        _poseCache.xMeters = state(MazeMap::VehicleState::kPx);
+        _poseCache.yMeters = state(MazeMap::VehicleState::kPy);
+        _poseCache.yawRad = WrapAngleRad(state(MazeMap::VehicleState::kPsi));
+        _poseCache.headingUnit = HeadingUnitFromYawRad(_poseCache.yawRad);
+        _poseCache.linearSpeedMps = state(MazeMap::VehicleState::kU);
+        _poseCache.angularSpeedRadps = state(MazeMap::VehicleState::kR);
+    }
+
+    MazeMap::LocalMapView BuildUkfMapView(const MazeMap::Maze* map) const
+    {
+        MazeMap::LocalMapView view{};
+        if (map == nullptr)
+        {
+            return view;
+        }
+
+        view.maze = map;
+        view.cellSizeM = Config::kCellSizeM;
+        view.wallThicknessM = Config::kMazeWallThicknessM;
+        view.postHalfWidthM = 0.5f * Config::kMazeWallThicknessM;
+        view.noHitRangeM = _ukf.ukf().params().noHitRangeM;
+        view.freezeMapMutation = true;
+        return view;
+    }
+
+    static bool IsFinitePositive(float value) noexcept
+    {
+        return std::isfinite(value) && (value > 0.0f);
+    }
+
+    static float ClampMeasuredRange(float value, float maxRangeM) noexcept
+    {
+        return (std::clamp)(value, 0.01f, maxRangeM);
+    }
+
+    static MazeMap::ImuMergedObs BuildUkfImuObservation(const SensorSnapshot& snapshot) noexcept
+    {
+        MazeMap::ImuMergedObs observation{};
+        if (!std::isfinite(snapshot.gyroRadps) ||
+            !std::isfinite(snapshot.accelBodyXMps2) ||
+            !std::isfinite(snapshot.accelBodyYMps2))
+        {
+            return observation;
+        }
+
+        observation.valid = true;
+        observation.yawRateRadps = snapshot.gyroRadps;
+        observation.accelXComMps2 = snapshot.accelBodyXMps2;
+        observation.accelYComMps2 = snapshot.accelBodyYMps2;
+        return observation;
+    }
+
+    static MazeMap::ImuMergedObs BuildUkfImuObservation(const DiagnosticSensorSnapshot& snapshot) noexcept
+    {
+        MazeMap::ImuMergedObs observation{};
+        if (!std::isfinite(snapshot.gyroRadps) ||
+            !std::isfinite(snapshot.accelBodyXMps2) ||
+            !std::isfinite(snapshot.accelBodyYMps2))
+        {
+            return observation;
+        }
+
+        observation.valid = true;
+        observation.yawRateRadps = snapshot.gyroRadps;
+        observation.accelXComMps2 = snapshot.accelBodyXMps2;
+        observation.accelYComMps2 = snapshot.accelBodyYMps2;
+        return observation;
+    }
+
+    static void BuildUkfFrontPairObservations(
+        const SensorSnapshot& snapshot,
+        float maxRangeM,
+        MazeMap::WallObs& left,
+        MazeMap::WallObs& right) noexcept
+    {
+        left = MazeMap::WallObs{};
+        right = MazeMap::WallObs{};
+        if (!snapshot.frontWallObservationValid ||
+            !snapshot.frontWall ||
+            !IsFinitePositive(snapshot.frontLeftDistanceM) ||
+            !IsFinitePositive(snapshot.frontRightDistanceM))
+        {
+            return;
+        }
+
+        const float confidence =
+            snapshot.frontWallUsesCharacterizationDetection ? 0.90f :
+            (snapshot.frontWallUsesFallbackDetection ? 0.60f : 0.80f);
+        left.valid = true;
+        left.rho = ClampMeasuredRange(snapshot.frontLeftDistanceM, maxRangeM);
+        left.confidence = confidence;
+        left.cls = MazeMap::ObsClass::WallLike;
+        right.valid = true;
+        right.rho = ClampMeasuredRange(snapshot.frontRightDistanceM, maxRangeM);
+        right.confidence = confidence;
+        right.cls = MazeMap::ObsClass::WallLike;
+    }
+
+    static void BuildUkfFrontPairObservations(
+        const DiagnosticSensorSnapshot& snapshot,
+        float maxRangeM,
+        MazeMap::WallObs& left,
+        MazeMap::WallObs& right) noexcept
+    {
+        left = MazeMap::WallObs{};
+        right = MazeMap::WallObs{};
+        if (!snapshot.frontWall ||
+            !IsFinitePositive(snapshot.frontLeft.distanceM) ||
+            !IsFinitePositive(snapshot.frontRight.distanceM))
+        {
+            return;
+        }
+
+        left.valid = true;
+        left.rho = ClampMeasuredRange(snapshot.frontLeft.distanceM, maxRangeM);
+        left.confidence = 0.80f;
+        left.cls = MazeMap::ObsClass::WallLike;
+        right.valid = true;
+        right.rho = ClampMeasuredRange(snapshot.frontRight.distanceM, maxRangeM);
+        right.confidence = 0.80f;
+        right.cls = MazeMap::ObsClass::WallLike;
+    }
+
+    static MazeMap::WallObs BuildUkfLeftSideObservation(const SensorSnapshot& snapshot, float maxRangeM) noexcept
+    {
+        MazeMap::WallObs observation{};
+        if (!snapshot.leftDistanceValidForControl ||
+            snapshot.leftTransitionDetected ||
+            !snapshot.leftWallObservation ||
+            !IsFinitePositive(snapshot.sideLeftDistanceM))
+        {
+            return observation;
+        }
+
+        observation.valid = true;
+        observation.rho = ClampMeasuredRange(snapshot.sideLeftDistanceM, maxRangeM);
+        observation.confidence = 0.80f;
+        observation.cls = MazeMap::ObsClass::WallLike;
+        return observation;
+    }
+
+    static MazeMap::WallObs BuildUkfRightSideObservation(const SensorSnapshot& snapshot, float maxRangeM) noexcept
+    {
+        MazeMap::WallObs observation{};
+        if (!snapshot.rightDistanceValidForControl ||
+            snapshot.rightTransitionDetected ||
+            !snapshot.rightWallObservation ||
+            !IsFinitePositive(snapshot.sideRightDistanceM))
+        {
+            return observation;
+        }
+
+        observation.valid = true;
+        observation.rho = ClampMeasuredRange(snapshot.sideRightDistanceM, maxRangeM);
+        observation.confidence = 0.80f;
+        observation.cls = MazeMap::ObsClass::WallLike;
+        return observation;
+    }
+
+    static MazeMap::WallObs BuildUkfLeftSideObservation(const DiagnosticSensorSnapshot& snapshot, float maxRangeM) noexcept
+    {
+        MazeMap::WallObs observation{};
+        if (!snapshot.leftDistanceValidForControl ||
+            !snapshot.leftWall ||
+            !IsFinitePositive(snapshot.sideLeft.distanceM))
+        {
+            return observation;
+        }
+
+        observation.valid = true;
+        observation.rho = ClampMeasuredRange(snapshot.sideLeft.distanceM, maxRangeM);
+        observation.confidence = 0.80f;
+        observation.cls = MazeMap::ObsClass::WallLike;
+        return observation;
+    }
+
+    static MazeMap::WallObs BuildUkfRightSideObservation(const DiagnosticSensorSnapshot& snapshot, float maxRangeM) noexcept
+    {
+        MazeMap::WallObs observation{};
+        if (!snapshot.rightDistanceValidForControl ||
+            !snapshot.rightWall ||
+            !IsFinitePositive(snapshot.sideRight.distanceM))
+        {
+            return observation;
+        }
+
+        observation.valid = true;
+        observation.rho = ClampMeasuredRange(snapshot.sideRight.distanceM, maxRangeM);
+        observation.confidence = 0.80f;
+        observation.cls = MazeMap::ObsClass::WallLike;
+        return observation;
+    }
+
+    template <typename TSnapshot>
+    void UpdatePoseEstimate(float dtSeconds, const TSnapshot& snapshot, const MazeMap::Maze* map)
+    {
+        const MazeMap::PlantParams& params = _ukf.ukf().params();
+        (void)map;
+        MazeMap::ControlInput control{};
+        control.leftMotorCommand = _leftMotor.getDriveCommand();
+        control.rightMotorCommand = _rightMotor.getDriveCommand();
+        control.fanDutyCycle = GetMissionFanDutyCycle();
+
+        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
+        {
+            if (!_ukf.predict(dtSeconds, control))
+            {
+                AppendStartupTrace("pose_ukf_predict_rejected");
+            }
+        }
+
+        MazeMap::EncoderObs encoderObservation{};
+        encoderObservation.totalLeftCounts = _leftMotor.getEncoderCount();
+        encoderObservation.totalRightCounts = _rightMotor.getEncoderCount();
+        if ((params.wheelRadiusM > 0.0f) && std::isfinite(params.wheelRadiusM))
+        {
+            encoderObservation.omegaLeftRadps = _leftMotor.getEncoderVelocityMetersPerSecond() / params.wheelRadiusM;
+            encoderObservation.omegaRightRadps = _rightMotor.getEncoderVelocityMetersPerSecond() / params.wheelRadiusM;
+        }
+        (void)_ukf.updateEncoderPair(encoderObservation, dtSeconds);
+
+        if (std::isfinite(snapshot.gyroRadps))
+        {
+            (void)_ukf.ukf().updateYawRate(snapshot.gyroRadps);
+        }
+
+        SyncPoseEstimate();
+    }
+
     void SetOpenLoopRaw(float leftDriveCommand, float rightDriveCommand)
     {
         _leftMotor.setDriveCommand((std::clamp)(leftDriveCommand, -1.0f, 1.0f));
@@ -5249,9 +5506,8 @@ private:
     }
     MazeMap::MotorEncoderDrive _leftMotor;
     MazeMap::MotorEncoderDrive _rightMotor;
-    PoseEstimate _pose;
-    float _lastLeftDistanceM;
-    float _lastRightDistanceM;
+    MazeMap::MouseUkfFacade _ukf;
+    PoseEstimate _poseCache;
     float _leftIntegral;
     float _rightIntegral;
     float _lastLinearCommandMps;
@@ -5626,6 +5882,8 @@ public:
             _accelBiasXG = (0.998f * _accelBiasXG) + (0.002f * accelXG);
             _accelBiasYG = (0.998f * _accelBiasYG) + (0.002f * accelYG);
         }
+        snapshot.accelBodyXMps2 = kStandardGravityMps2 * (accelXG - _accelBiasXG);
+        snapshot.accelBodyYMps2 = kStandardGravityMps2 * (accelYG - _accelBiasYG);
         snapshot.gyroRawRadps = blGyroZRadps;
         if (stationary && MazeMap::ShouldUpdateGyroBiasFromStationarySample(snapshot.gyroRawRadps, Config::kGyroBiasUpdateMaxAbsRateRadps))
         {
@@ -7113,7 +7371,7 @@ private:
 
             const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(false, _drive.GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, sensorSnapshot.gyroRadps);
+            _drive.UpdateOdometry(dtSeconds, sensorSnapshot);
             if (!tighteningTurn)
             {
                 commandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * dtSeconds;
@@ -7281,7 +7539,7 @@ private:
             _drive.Brake();
             const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(stationary, _drive.GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, sensorSnapshot.gyroRadps);
+            _drive.UpdateOdometry(dtSeconds, sensorSnapshot);
             const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
             const float planarAccelMps2 = _sensors.GetPlanarAccelMps2(sensorSnapshot);
             if (!_logger.LogSample(
@@ -7489,7 +7747,7 @@ private:
             (void)timestampUs;
             const DiagnosticSensorSnapshot snapshot = _sensors.Capture(true, _drive.GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
+            _drive.UpdateOdometry(dtSeconds, snapshot);
             _drive.Brake();
         }
 
@@ -7528,7 +7786,7 @@ private:
 
             const DiagnosticSensorSnapshot snapshot = _sensors.Capture(false, _drive.GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
+            _drive.UpdateOdometry(dtSeconds, snapshot);
 
             const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
             if ((storage.sampleCount < MazeMap::kFrontWallCharacterizationMaxStoredSamples) &&
@@ -8263,7 +8521,7 @@ private:
         _lastControlMicros = timestampUs;
 
         snapshot = _sensors.Capture(stationary, _drive.GetPose());
-        _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
+        _drive.UpdateOdometry(dtSeconds, snapshot);
 
         if (!IsWithinBoundary())
         {
@@ -9117,7 +9375,7 @@ private:
         dtSeconds = static_cast<float>(timestampUs - _lastControlMicros) * 1.0e-6f;
         _lastControlMicros = timestampUs;
         snapshot = _sensors.Capture(stationary, _drive.GetPose());
-        _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
+        _drive.UpdateOdometry(dtSeconds, snapshot);
         return true;
     }
 
@@ -14799,7 +15057,7 @@ private:
         dtSeconds = static_cast<float>(now - _lastControlMicros) * 1.0e-6f;
         _lastControlMicros = now;
         snapshot = _sensors.Capture(stationary, _drive.GetPose());
-        _drive.UpdateOdometry(dtSeconds, snapshot.gyroRadps);
+        _drive.UpdateOdometry(dtSeconds, snapshot, &_maze);
         return LogTelemetrySample(stationary, now, static_cast<uint32_t>(dtSeconds * 1.0e6f));
     }
 
