@@ -1,0 +1,8 @@
+#line 1 "C:\\Users\\thene\\source\\repos\\MicroMouse2025\\MazeMap\\MazeMap\\src\\Eigen\\Dense.h"
+#include "Core"
+#include "LU"
+#include "Cholesky"
+#include "QR"
+#include "SVD"
+#include "Geometry"
+#include "Eigenvalues"

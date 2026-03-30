@@ -46,6 +46,7 @@ namespace MazeMap
 
 	void ManeuverSet::SortByCost(const Vehicle& vehicle, float cellSize)
 	{
+		(void)cellSize;
 		float costs[SETSIZE];
 #ifdef _WINDOWS
 		ManeuverCode codes[SETSIZE];

@@ -62,6 +62,8 @@ std::wstring CodeString(MazeMap::ManeuverCode code)
 	case MazeMap::S90ELD_M: return std::wstring(L"S90ELD_M");
 	case MazeMap::S180ELS_M: return std::wstring(L"S180ELS_M");
 	}
+
+	return std::wstring(L"UNKNOWN");
 }
 namespace MazeMap
 {
@@ -683,7 +685,7 @@ namespace MazeMap
 				{
 					RelativeDirectionalDistance rdd = man.GetStep(j);
 					result = result.Turn(rdd.GetDirection());
-					for (size_t k = 0; k < rdd.GetDistance(); k++)
+					for (uint8_t k = 0; k < rdd.GetDistance(); k++)
 					{
 						result = result.MoveForward(1);
 					}
@@ -717,7 +719,7 @@ namespace MazeMap
 				{
 					RelativeDirectionalDistance rdd = man.GetStep(j);
 					result = result.Turn(-rdd.GetDirection());
-					for (size_t k = 0; k < rdd.GetDistance(); k++)
+					for (uint8_t k = 0; k < rdd.GetDistance(); k++)
 					{
 						result = result.MoveForward(1);
 					}

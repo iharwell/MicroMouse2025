@@ -19,6 +19,9 @@ namespace MazeMap
 		{
 		}
 
+		Vectorf(const Vectorf<DIMENSION>&) = default;
+		Vectorf(Vectorf<DIMENSION>&&) = default;
+
 		float& operator[](int index) { return _data[index]; }
 		const float& operator[](int index) const { return _data[index]; }
 
@@ -185,6 +188,8 @@ namespace MazeMap
 			, _y(0.f)
 		{
 		}
+		Vectorf<2>(const Vectorf<2>&) = default;
+		Vectorf<2>(Vectorf<2>&&) = default;
 		Vectorf<2>(float x, float y)
 			: _x(x)
 			, _y(y)

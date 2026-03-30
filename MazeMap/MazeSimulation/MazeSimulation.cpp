@@ -19,7 +19,7 @@ MazeMap::DirectionalPathFinder advancedPathFinder = MazeMap::DirectionalPathFind
 MazeMap::ManeuverPathFinder superAdvancedPathFinder = MazeMap::ManeuverPathFinder(maze, vehicle);
 SimVehicle simVehicle = SimVehicle();
 MazeMap::Path<PATH_SIZE> p = MazeMap::Path<PATH_SIZE>();
-#define PROCESSING_CYCLES 10000
+constexpr int PROCESSING_CYCLES = 10000;
 void MovePath(const MazeMap::HalfStepPath<PATH_SIZE*2>& path)
 {
     int i = 0;
@@ -159,7 +159,7 @@ void MovePath(const MazeMap::ManeuverPath& path)
         {
             const MazeMap::Maneuver& man = ms[path[i]];
 
-            for (size_t j = 0; j < man.GetStepCount(); j++)
+            for (uint8_t j = 0; j < man.GetStepCount(); j++)
             {
                 MazeMap::RelativeDirectionalDistance rdd = man.GetStep(j);
                 if (path[i] & MazeMap::MIRRORED_MANEUVER_FLAG)
@@ -205,7 +205,7 @@ void PostAdvancedWeights()
             MazeMap::MazeLocation loc = MazeMap::MazeLocation::CellCenter(coords);
             MazeMap::Direction dMin = MazeMap::Up;
             float minCost = INFINITY;
-            for (size_t k = 0; k < 8; k++)
+            for (uint8_t k = 0; k < 8; k++)
             {
                 MazeMap::Direction d = MazeMap::OrdinalDirections[k];
                 MazeMap::DirectionalLocation dirLoc(loc, d);
@@ -229,14 +229,15 @@ void runMMSSim();
 int main()
 {
     runMMSSim();
+    return 0;
 }
 void profile()
 {
     MazeMap::Mazes::SetupMazes();
     MazeMap::Maze& apec = MazeMap::Mazes::GetMazeAPEC2016();
-    for (size_t i = 0; i < 16; i++)
+    for (uint8_t i = 0; i < 16; i++)
     {
-        for (size_t j = 0; j < 16; j++)
+        for (uint8_t j = 0; j < 16; j++)
         {
             for (MazeMap::Direction d = MazeMap::Up; d <= MazeMap::Right; d=d<<1)
             {
@@ -313,7 +314,7 @@ void runMMSSim()
 
         path.ConvertToPath(p);
 
-        for (size_t i = 0; i < p.GetSize(); i++)
+        for (uint16_t i = 0; i < p.GetSize(); i++)
         {
             API::setColor(p[i].GetX(), p[i].GetY(), 'y');
         }
@@ -330,7 +331,7 @@ void runMMSSim()
         mpath.ToHalfStepPath(MazeMap::DirectionalLocation(1, 1, MazeMap::Up), path);
         path.ConvertToPath(p);
 
-        for (size_t i = 0; i < p.GetSize(); i++)
+        for (uint16_t i = 0; i < p.GetSize(); i++)
         {
             API::setColor(p[i].GetX(), p[i].GetY(), 'g');
         }
@@ -360,7 +361,7 @@ void runMMSSim()
     {
         std::cout << errorCode << "\n";
     }
-    catch (const std::exception e)
+    catch (const std::exception& e)
     {
         std::cout << e.what() << "\n";
     }

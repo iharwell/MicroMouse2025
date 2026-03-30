@@ -3,8 +3,12 @@
 
 constexpr float AVG_SPD_WEIGHT = 0.3f;
 //#define SMALL_RDD
-#define PATH_SIZE 256
+constexpr int PATH_SIZE = 256;
 constexpr float PI_F = 3.14159265358979323846f;
+constexpr float HALF_PI_F = 0.5f * PI_F;
+constexpr float TWO_PI_F = 2.0f * PI_F;
+constexpr float DEG_TO_RAD_F = PI_F / 180.0f;
+constexpr float RAD_TO_DEG_F = 180.0f / PI_F;
 constexpr float RT2 = 1.414213562f;
 constexpr float HALF_RT2 = 0.707106781f;
 constexpr float WALL_THICKNESS = 0.012f;
@@ -27,6 +31,7 @@ constexpr float MIN_CLEARANCE = 0.012f;
 #else
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -34,10 +39,12 @@ constexpr float MIN_CLEARANCE = 0.012f;
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 #include <istream>
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <thread>
 #include <new>
 
@@ -55,14 +62,8 @@ using std::int64_t;
 using std::uint64_t;
 using std::size_t;
 
-#ifndef HIGH
-#define HIGH 0x1
-#endif
-
-#ifndef LOW
-#define LOW 0x0
-#endif
-
+inline constexpr int HIGH = 0x1;
+inline constexpr int LOW = 0x0;
 #ifndef INPUT
 #define INPUT 0x0
 #endif
@@ -78,82 +79,25 @@ using std::size_t;
 #ifndef INPUT_PULLDOWN
 #define INPUT_PULLDOWN 0x3
 #endif
-
-#ifndef CHANGE
-#define CHANGE 1
-#endif
-
-#ifndef FALLING
-#define FALLING 2
-#endif
-
-#ifndef RISING
-#define RISING 3
-#endif
-
-#ifndef DEFAULT
-#define DEFAULT 1
-#endif
-
-#ifndef EXTERNAL
-#define EXTERNAL 0
-#endif
-
-#ifndef INTERNAL
-#define INTERNAL 2
-#endif
-
-#ifndef INTERNAL1V1
-#define INTERNAL1V1 3
-#endif
-
-#ifndef INTERNAL2V56
-#define INTERNAL2V56 4
-#endif
-
-#ifndef DEC
-#define DEC 10
-#endif
-
-#ifndef HEX
-#define HEX 16
-#endif
-
-#ifndef OCT
-#define OCT 8
-#endif
-
-#ifndef BIN
-#define BIN 2
-#endif
-
-#ifndef LSBFIRST
-#define LSBFIRST 0
-#endif
-
-#ifndef MSBFIRST
-#define MSBFIRST 1
-#endif
-
-#ifndef PI
-#define PI 3.1415926535897932384626433832795
-#endif
-
-#ifndef HALF_PI
-#define HALF_PI 1.5707963267948966192313216916398
-#endif
-
-#ifndef TWO_PI
-#define TWO_PI 6.283185307179586476925286766559
-#endif
-
-#ifndef DEG_TO_RAD
-#define DEG_TO_RAD 0.017453292519943295769236907684886
-#endif
-
-#ifndef RAD_TO_DEG
-#define RAD_TO_DEG 57.295779513082320876798154814105
-#endif
+inline constexpr int CHANGE = 1;
+inline constexpr int FALLING = 2;
+inline constexpr int RISING = 3;
+inline constexpr int DEFAULT = 1;
+inline constexpr int EXTERNAL = 0;
+inline constexpr int INTERNAL = 2;
+inline constexpr int INTERNAL1V1 = 3;
+inline constexpr int INTERNAL2V56 = 4;
+inline constexpr int DEC = 10;
+inline constexpr int HEX = 16;
+inline constexpr int OCT = 8;
+inline constexpr int BIN = 2;
+inline constexpr int LSBFIRST = 0;
+inline constexpr int MSBFIRST = 1;
+inline constexpr double PI = 3.1415926535897932384626433832795;
+inline constexpr double HALF_PI = 1.5707963267948966192313216916398;
+inline constexpr double TWO_PI = 6.283185307179586476925286766559;
+inline constexpr double DEG_TO_RAD = 0.017453292519943295769236907684886;
+inline constexpr double RAD_TO_DEG = 57.295779513082320876798154814105;
 
 #ifndef F_CPU
 #define F_CPU 600000000UL
@@ -179,57 +123,86 @@ using std::size_t;
 #define DMAMEM
 #endif
 
-#ifndef bit
-#define bit(b) (1UL << (b))
-#endif
+template <typename TBit>
+constexpr unsigned long bit(TBit bitIndex) noexcept
+{
+    return 1UL << bitIndex;
+}
 
-#ifndef bitRead
-#define bitRead(value, bitnum) (((value) >> (bitnum)) & 0x1U)
-#endif
+template <typename TValue, typename TBit>
+constexpr unsigned long bitRead(TValue value, TBit bitIndex) noexcept
+{
+    return (static_cast<unsigned long>(value) >> bitIndex) & 0x1UL;
+}
 
-#ifndef bitSet
-#define bitSet(value, bitnum) ((value) |= (1UL << (bitnum)))
-#endif
+template <typename TValue, typename TBit>
+constexpr TValue& bitSet(TValue& value, TBit bitIndex) noexcept
+{
+    value = static_cast<TValue>(value | static_cast<TValue>(1UL << bitIndex));
+    return value;
+}
 
-#ifndef bitClear
-#define bitClear(value, bitnum) ((value) &= ~(1UL << (bitnum)))
-#endif
+template <typename TValue, typename TBit>
+constexpr TValue& bitClear(TValue& value, TBit bitIndex) noexcept
+{
+    value = static_cast<TValue>(value & static_cast<TValue>(~(1UL << bitIndex)));
+    return value;
+}
 
-#ifndef bitWrite
-#define bitWrite(value, bitnum, bitvalue) ((bitvalue) ? bitSet(value, bitnum) : bitClear(value, bitnum))
-#endif
+template <typename TValue, typename TBit>
+constexpr TValue& bitWrite(TValue& value, TBit bitIndex, bool bitValue) noexcept
+{
+    return bitValue ? bitSet(value, bitIndex) : bitClear(value, bitIndex);
+}
 
-#ifndef lowByte
-#define lowByte(w) (static_cast<uint8_t>((w) & 0xFFU))
-#endif
+template <typename TValue>
+constexpr uint8_t lowByte(TValue value) noexcept
+{
+    return static_cast<uint8_t>(value & 0xFFU);
+}
 
-#ifndef highByte
-#define highByte(w) (static_cast<uint8_t>(((w) >> 8) & 0xFFU))
-#endif
+template <typename TValue>
+constexpr uint8_t highByte(TValue value) noexcept
+{
+    return static_cast<uint8_t>((value >> 8) & 0xFFU);
+}
 
-#ifndef sq
-#define sq(x) ((x) * (x))
-#endif
+template <typename TValue>
+constexpr auto sq(TValue value) noexcept
+{
+    return value * value;
+}
 
-#ifndef constrain
-#define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
-#endif
+template <typename TValue>
+constexpr TValue constrain(TValue amount, TValue low, TValue high) noexcept
+{
+    return (amount < low) ? low : ((amount > high) ? high : amount);
+}
 
-#ifndef radians
-#define radians(deg) ((deg) * DEG_TO_RAD)
-#endif
+template <typename TValue>
+constexpr auto radians(TValue degreesValue) noexcept
+{
+    return degreesValue * DEG_TO_RAD;
+}
 
-#ifndef degrees
-#define degrees(rad) ((rad) * RAD_TO_DEG)
-#endif
+template <typename TValue>
+constexpr auto degrees(TValue radiansValue) noexcept
+{
+    return radiansValue * RAD_TO_DEG;
+}
 
-#ifndef noInterrupts
-#define noInterrupts() cli()
-#endif
+inline void cli();
+inline void sei();
 
-#ifndef interrupts
-#define interrupts() sei()
-#endif
+inline void noInterrupts() noexcept
+{
+    cli();
+}
+
+inline void interrupts() noexcept
+{
+    sei();
+}
 
 inline long map(long x, long in_min, long in_max, long out_min, long out_max)
 {
@@ -240,10 +213,144 @@ inline long map(long x, long in_min, long in_max, long out_min, long out_max)
 
 namespace arduino_stub_detail
 {
+    constexpr size_t kHostDigitalPinCapacity = 256U;
+
     inline std::chrono::steady_clock::time_point start_time()
     {
         static const auto t0 = std::chrono::steady_clock::now();
         return t0;
+    }
+
+    struct HostDigitalPinState
+    {
+        uint8_t mode = INPUT;
+        uint8_t outputValue = LOW;
+        int inputValue = LOW;
+        bool hasInputOverride = false;
+    };
+
+    inline auto& host_pin_states()
+    {
+        static std::array<HostDigitalPinState, kHostDigitalPinCapacity> states{};
+        return states;
+    }
+
+    inline auto& host_pin_shorts()
+    {
+        static std::array<std::array<bool, kHostDigitalPinCapacity>, kHostDigitalPinCapacity> shorts{};
+        return shorts;
+    }
+
+    inline bool is_valid_host_pin(uint8_t pin)
+    {
+        return static_cast<size_t>(pin) < kHostDigitalPinCapacity;
+    }
+
+    inline void reset_host_digital_pins()
+    {
+        auto& states = host_pin_states();
+        for (auto& state : states)
+        {
+            state = HostDigitalPinState{};
+        }
+
+        auto& shorts = host_pin_shorts();
+        for (auto& row : shorts)
+        {
+            row.fill(false);
+        }
+    }
+
+    inline void set_host_pin_short(uint8_t pinA, uint8_t pinB, bool connected)
+    {
+        if (!is_valid_host_pin(pinA) || !is_valid_host_pin(pinB))
+        {
+            return;
+        }
+
+        auto& shorts = host_pin_shorts();
+        shorts[pinA][pinB] = connected;
+        shorts[pinB][pinA] = connected;
+    }
+
+    inline void set_host_digital_input(uint8_t pin, int value)
+    {
+        if (!is_valid_host_pin(pin))
+        {
+            return;
+        }
+
+        HostDigitalPinState& state = host_pin_states()[pin];
+        state.inputValue = (value == LOW) ? LOW : HIGH;
+        state.hasInputOverride = true;
+    }
+
+    inline void clear_host_digital_input(uint8_t pin)
+    {
+        if (!is_valid_host_pin(pin))
+        {
+            return;
+        }
+
+        host_pin_states()[pin].hasInputOverride = false;
+    }
+
+    inline int resolve_host_digital_read(uint8_t pin)
+    {
+        if (!is_valid_host_pin(pin))
+        {
+            return LOW;
+        }
+
+        const auto& states = host_pin_states();
+        const HostDigitalPinState& state = states[pin];
+
+        if (state.hasInputOverride)
+        {
+            return state.inputValue;
+        }
+
+        if (state.mode == OUTPUT)
+        {
+            return state.outputValue;
+        }
+
+        int resolved = (state.mode == INPUT_PULLUP) ? HIGH : LOW;
+        const auto& shorts = host_pin_shorts();
+        for (size_t otherPin = 0; otherPin < kHostDigitalPinCapacity; ++otherPin)
+        {
+            if (!shorts[pin][otherPin] || otherPin == static_cast<size_t>(pin))
+            {
+                continue;
+            }
+
+            const HostDigitalPinState& otherState = states[otherPin];
+            int otherValue = LOW;
+            if (otherState.hasInputOverride)
+            {
+                otherValue = otherState.inputValue;
+            }
+            else if (otherState.mode == OUTPUT)
+            {
+                otherValue = otherState.outputValue;
+            }
+            else if (otherState.mode == INPUT_PULLUP)
+            {
+                otherValue = HIGH;
+            }
+            else
+            {
+                otherValue = LOW;
+            }
+
+            if (otherValue == LOW)
+            {
+                return LOW;
+            }
+            resolved = HIGH;
+        }
+
+        return resolved;
     }
 }
 
@@ -319,9 +426,50 @@ inline void yield() {}
 inline void cli() {}
 inline void sei() {}
 
-inline void pinMode(uint8_t, uint8_t) {}
-inline void digitalWrite(uint8_t, uint8_t) {}
-inline int digitalRead(uint8_t) { return LOW; }
+inline void HostResetDigitalPins()
+{
+    arduino_stub_detail::reset_host_digital_pins();
+}
+
+inline void HostSetPinShort(uint8_t pinA, uint8_t pinB, bool connected = true)
+{
+    arduino_stub_detail::set_host_pin_short(pinA, pinB, connected);
+}
+
+inline void HostSetDigitalInput(uint8_t pin, int value)
+{
+    arduino_stub_detail::set_host_digital_input(pin, value);
+}
+
+inline void HostClearDigitalInput(uint8_t pin)
+{
+    arduino_stub_detail::clear_host_digital_input(pin);
+}
+
+inline void pinMode(uint8_t pin, uint8_t mode)
+{
+    if (!arduino_stub_detail::is_valid_host_pin(pin))
+    {
+        return;
+    }
+
+    arduino_stub_detail::host_pin_states()[pin].mode = mode;
+}
+
+inline void digitalWrite(uint8_t pin, uint8_t value)
+{
+    if (!arduino_stub_detail::is_valid_host_pin(pin))
+    {
+        return;
+    }
+
+    arduino_stub_detail::host_pin_states()[pin].outputValue = (value == LOW) ? LOW : HIGH;
+}
+
+inline int digitalRead(uint8_t pin)
+{
+    return arduino_stub_detail::resolve_host_digital_read(pin);
+}
 inline void digitalWriteFast(uint8_t pin, uint8_t value) { digitalWrite(pin, value); }
 inline int digitalReadFast(uint8_t pin) { return digitalRead(pin); }
 
@@ -448,10 +596,78 @@ public:
         write(value.c_str());
     }
 
+    template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
+    void print(T value, int base)
+    {
+        std::ostringstream oss;
+        switch (base)
+        {
+        case HEX:
+            oss << std::uppercase << std::hex << static_cast<unsigned long long>(value);
+            break;
+        case OCT:
+            oss << std::oct << static_cast<unsigned long long>(value);
+            break;
+        case BIN:
+        {
+            const auto unsignedValue = static_cast<unsigned long long>(value);
+            if (unsignedValue == 0ULL)
+            {
+                oss << '0';
+                break;
+            }
+
+            bool wroteBit = false;
+            for (int bit = static_cast<int>(sizeof(unsigned long long) * 8U) - 1; bit >= 0; --bit)
+            {
+                const bool set = ((unsignedValue >> bit) & 0x1ULL) != 0ULL;
+                wroteBit |= set;
+                if (wroteBit)
+                {
+                    oss << (set ? '1' : '0');
+                }
+            }
+            break;
+        }
+        case DEC:
+        default:
+            oss << value;
+            break;
+        }
+
+        write(oss.str().c_str());
+    }
+
+    void print(float value, int digits)
+    {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(digits) << value;
+        write(oss.str().c_str());
+    }
+
+    void print(double value, int digits)
+    {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(digits) << value;
+        write(oss.str().c_str());
+    }
+
     template <typename T>
     void println(const T &value)
     {
         print(value);
+        write("\r\n");
+    }
+
+    void println(float value, int digits)
+    {
+        print(value, digits);
+        write("\r\n");
+    }
+
+    void println(double value, int digits)
+    {
+        print(value, digits);
         write("\r\n");
     }
 

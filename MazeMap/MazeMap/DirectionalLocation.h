@@ -47,6 +47,10 @@ namespace MazeMap
 			}
 			return DirectionalLocation(_loc.GetX() + dx, _loc.GetY() + dy, _dir);
 		}
+		MAZEMAP_INLINE DirectionalLocation MoveForward(uint8_t halfSteps) const
+		{
+			return const_cast<DirectionalLocation*>(this)->MoveForward(halfSteps);
+		}
 
 		EXPORT DirectionalLocation operator>>(uint8_t halfSteps);
 		EXPORT DirectionalLocation operator>>(RelativeDirection relDir);

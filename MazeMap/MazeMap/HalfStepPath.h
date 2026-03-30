@@ -19,12 +19,13 @@ namespace MazeMap
 		static void HalfStepPathFromPath(const Path<_PSIZE>& path, HalfStepPath<SIZE>& hpath)
 		{
 			hpath.clear();
-			if (path.GetSize() == 0)
+			const uint16_t pathSize = path.GetSize();
+			if (pathSize == 0)
 			{
 				return;
 			}
 			hpath.push_back(MazeLocation::CellCenter(path[0]));
-			for (size_t i = 1; i < path.GetSize(); i++)
+			for (uint16_t i = 1; i < pathSize; i++)
 			{
 				MazeLocation loc = hpath.last();
 				MazeLocation between = MazeLocation::Between(path[i - 1], path[i]);
@@ -48,7 +49,7 @@ namespace MazeMap
 				}
 				hpath.push_back(between);
 			}
-			if (path.GetSize() > 1)
+			if (pathSize > 1U)
 			{
 				hpath.push_back(MazeLocation::CellCenter(path.last()));
 			}
@@ -190,9 +191,9 @@ namespace MazeMap
 			}
 			for (size_t i = 1; i < _size; i++)
 			{
-				MazeLocation hstep = _steps[i];
-				CellCoordinates f = hstep.GetFirstConnectedCell();
-				CellCoordinates s = hstep.GetSecondConnectedCell();
+				MazeLocation currentStep = _steps[i];
+				CellCoordinates f = currentStep.GetFirstConnectedCell();
+				CellCoordinates s = currentStep.GetSecondConnectedCell();
 				CellCoordinates l0 = path.last(0);
 				CellCoordinates l1 = path.last(1);
 				if (f != l0 && f!=l1)

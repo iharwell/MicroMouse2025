@@ -772,45 +772,45 @@ namespace MazeMap
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::OpenNorth),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					90.0f * DEG_TO_RAD,
-					25.0f * DEG_TO_RAD,
-					30.0f * DEG_TO_RAD,
-					90.0f * DEG_TO_RAD)));
+					90.0f * DEG_TO_RAD_F,
+					25.0f * DEG_TO_RAD_F,
+					30.0f * DEG_TO_RAD_F,
+					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Ignore),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					63.0f * DEG_TO_RAD,
-					25.0f * DEG_TO_RAD,
-					30.0f * DEG_TO_RAD,
-					90.0f * DEG_TO_RAD)));
+					63.0f * DEG_TO_RAD_F,
+					25.0f * DEG_TO_RAD_F,
+					30.0f * DEG_TO_RAD_F,
+					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Wall),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					59.0f * DEG_TO_RAD,
-					25.0f * DEG_TO_RAD,
-					30.0f * DEG_TO_RAD,
-					90.0f * DEG_TO_RAD)));
+					59.0f * DEG_TO_RAD_F,
+					25.0f * DEG_TO_RAD_F,
+					30.0f * DEG_TO_RAD_F,
+					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Wall),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					0.0f * DEG_TO_RAD,
-					25.0f * DEG_TO_RAD,
-					30.0f * DEG_TO_RAD,
-					90.0f * DEG_TO_RAD)));
+					0.0f * DEG_TO_RAD_F,
+					25.0f * DEG_TO_RAD_F,
+					30.0f * DEG_TO_RAD_F,
+					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Ignore),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					120.0f * DEG_TO_RAD,
-					25.0f * DEG_TO_RAD,
-					30.0f * DEG_TO_RAD,
-					90.0f * DEG_TO_RAD)));
+					120.0f * DEG_TO_RAD_F,
+					25.0f * DEG_TO_RAD_F,
+					30.0f * DEG_TO_RAD_F,
+					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Ignore),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					225.0f * DEG_TO_RAD,
-					25.0f * DEG_TO_RAD,
-					30.0f * DEG_TO_RAD,
-					90.0f * DEG_TO_RAD)));
+					225.0f * DEG_TO_RAD_F,
+					25.0f * DEG_TO_RAD_F,
+					30.0f * DEG_TO_RAD_F,
+					90.0f * DEG_TO_RAD_F)));
 		}
 
 		TEST_METHOD(TryComputeSignedTravelToCellCenterAlongHeadingProjectsObservationRecentering)
@@ -1494,8 +1494,8 @@ namespace MazeMap
 			Assert::IsTrue(TryComputeSignedTurnAngleRad(0.5f * PI_F, 0.0f, angleRad));
 			Assert::AreEqual(-0.5f * PI_F, angleRad, 1.0e-6f);
 
-			Assert::IsTrue(TryComputeSignedTurnAngleRad(179.0f * DEG_TO_RAD, -179.0f * DEG_TO_RAD, angleRad));
-			Assert::AreEqual(static_cast<float>(2.0f * DEG_TO_RAD), angleRad, 1.0e-6f);
+			Assert::IsTrue(TryComputeSignedTurnAngleRad(179.0f * DEG_TO_RAD_F, -179.0f * DEG_TO_RAD_F, angleRad));
+			Assert::AreEqual(2.0f * DEG_TO_RAD_F, angleRad, 1.0e-6f);
 		}
 
 		TEST_METHOD(InPlaceTurnProfileUsesSharedCompletionAndCommandLaw)
@@ -1505,12 +1505,12 @@ namespace MazeMap
 			profile.angularAccelRadps2 = 45.0f;
 			profile.headingKp = 7.5f;
 			profile.yawD = 0.12f;
-			profile.angleToleranceRad = 0.75f * DEG_TO_RAD;
+			profile.angleToleranceRad = 0.75f * DEG_TO_RAD_F;
 			profile.angularSpeedToleranceRadps = 0.10f;
 
-			Assert::IsTrue(IsInPlaceTurnComplete(0.50f * DEG_TO_RAD, 0.08f, profile));
-			Assert::IsFalse(IsInPlaceTurnComplete(1.00f * DEG_TO_RAD, 0.08f, profile));
-			Assert::IsFalse(IsInPlaceTurnComplete(0.50f * DEG_TO_RAD, 0.12f, profile));
+			Assert::IsTrue(IsInPlaceTurnComplete(0.50f * DEG_TO_RAD_F, 0.08f, profile));
+			Assert::IsFalse(IsInPlaceTurnComplete(1.00f * DEG_TO_RAD_F, 0.08f, profile));
+			Assert::IsFalse(IsInPlaceTurnComplete(0.50f * DEG_TO_RAD_F, 0.12f, profile));
 
 			float commandedOmegaRadps = 0.0f;
 			float angularCommandRadps = 0.0f;
@@ -1978,6 +1978,71 @@ namespace MazeMap
 			Assert::IsFalse(IsWallTouchSeatedSample(0.030f, 0.030f, 0.004f, 0.24f, 0.010f, -0.012f, 0.012f, 0.20f, 0.020f));
 			Assert::IsFalse(IsWallTouchSeatedSample(0.030f, 0.030f, 0.004f, 0.08f, 0.028f, -0.004f, 0.012f, 0.20f, 0.020f));
 			Assert::IsFalse(IsWallTouchSeatedSample(0.020f, 0.030f, 0.004f, 0.08f, 0.010f, -0.012f, 0.012f, 0.20f, 0.020f));
+		}
+
+		TEST_METHOD(CountWallTouchContactIndicatorsRequiresTwoIndependentCues)
+		{
+			Assert::AreEqual(0, static_cast<int>(CountWallTouchContactIndicators(false, false, false)));
+			Assert::AreEqual(1, static_cast<int>(CountWallTouchContactIndicators(true, false, false)));
+			Assert::AreEqual(2, static_cast<int>(CountWallTouchContactIndicators(true, true, false)));
+			Assert::AreEqual(3, static_cast<int>(CountWallTouchContactIndicators(true, true, true)));
+		}
+
+		TEST_METHOD(HasWallTouchConfirmedContactRequiresPersistenceAndTwoIndicators)
+		{
+			Assert::IsFalse(HasWallTouchConfirmedContact(11UL, 12UL, 2U));
+			Assert::IsFalse(HasWallTouchConfirmedContact(12UL, 12UL, 1U));
+			Assert::IsFalse(HasWallTouchConfirmedContact(12UL, 0UL, 2U));
+			Assert::IsTrue(HasWallTouchConfirmedContact(12UL, 12UL, 2U));
+			Assert::IsTrue(HasWallTouchConfirmedContact(20UL, 12UL, 3U));
+		}
+
+		TEST_METHOD(ComputeWallTouchSeatWiggleTurnFractionEscalatesAndClamps)
+		{
+			Assert::AreEqual(0.16f, ComputeWallTouchSeatWiggleTurnFraction(0U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
+			Assert::AreEqual(0.20f, ComputeWallTouchSeatWiggleTurnFraction(1U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
+			Assert::AreEqual(0.28f, ComputeWallTouchSeatWiggleTurnFraction(4U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
+			Assert::AreEqual(0.0f, ComputeWallTouchSeatWiggleTurnFraction(1U, std::numeric_limits<float>::quiet_NaN(), 0.04f, 0.28f), 1.0e-6f);
+		}
+
+		TEST_METHOD(ComputeOpenLoopYawDitherCommandBlendsAcrossPolarityReversal)
+		{
+			const OpenLoopDriveCommand initial = ComputeOpenLoopYawDitherCommand(0.50f, 0UL, 80UL, 12UL, 0.20f, 0.85f);
+			Assert::AreEqual(0.425f, initial.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(0.625f, initial.rightDriveCommand, 1.0e-6f);
+
+			const OpenLoopDriveCommand blended = ComputeOpenLoopYawDitherCommand(0.50f, 86UL, 80UL, 12UL, 0.20f, 0.85f);
+			Assert::AreEqual(0.50f, blended.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(0.50f, blended.rightDriveCommand, 1.0e-6f);
+
+			const OpenLoopDriveCommand reversed = ComputeOpenLoopYawDitherCommand(0.50f, 92UL, 80UL, 12UL, 0.20f, 0.85f);
+			Assert::AreEqual(0.625f, reversed.leftDriveCommand, 1.0e-6f);
+			Assert::AreEqual(0.425f, reversed.rightDriveCommand, 1.0e-6f);
+		}
+
+		TEST_METHOD(IsWallTouchSquareCycleGoodRequiresFrontSkewYawAndSignalAgreement)
+		{
+			Assert::IsTrue(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.040f, 0.050f, 0.010f, 0.020f, true));
+			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0030f, 0.0025f, 0.040f, 0.050f, 0.010f, 0.020f, true));
+			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.060f, 0.050f, 0.010f, 0.020f, true));
+			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.040f, 0.050f, 0.030f, 0.020f, true));
+			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.040f, 0.050f, 0.010f, 0.020f, false));
+		}
+
+		TEST_METHOD(HasWallTouchSquareUpSaturatedOnlyFlagsSmallImprovements)
+		{
+			Assert::IsTrue(HasWallTouchSquareUpSaturated(0.0040f, 0.0037f, 0.0005f));
+			Assert::IsFalse(HasWallTouchSquareUpSaturated(0.0040f, 0.0030f, 0.0005f));
+			Assert::IsFalse(HasWallTouchSquareUpSaturated(0.0030f, 0.0040f, 0.0005f));
+		}
+
+		TEST_METHOD(IsWallTouchSquareSuccessEligibleEnforcesContactTimeAndCyclePersistence)
+		{
+			Assert::IsFalse(IsWallTouchSquareSuccessEligible(449UL, 450UL, 3U, 3U, 2U, 2U));
+			Assert::IsFalse(IsWallTouchSquareSuccessEligible(450UL, 450UL, 2U, 3U, 2U, 2U));
+			Assert::IsFalse(IsWallTouchSquareSuccessEligible(450UL, 450UL, 3U, 3U, 1U, 2U));
+			Assert::IsTrue(IsWallTouchSquareSuccessEligible(450UL, 450UL, 3U, 3U, 2U, 2U));
+			Assert::IsTrue(IsWallTouchSquareSuccessEligible(700UL, 450UL, 5U, 3U, 3U, 2U));
 		}
 
 		TEST_METHOD(IsMissionStartupStationarySampleUsesWheelAndYawThresholds)

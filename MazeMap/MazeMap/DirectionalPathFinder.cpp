@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "DirectionalPathFinder.h"
 #include "ManeuverPathFinder.h"
+#include <limits>
 
 namespace MazeMap
 {
@@ -21,7 +22,7 @@ namespace MazeMap
 			{
 				for (size_t k = 0; k < 8; k++)
 				{
-					_data[i][j][k] = INFINITY;
+					_data[i][j][k] = (std::numeric_limits<float>::infinity)();
 				}
 			}
 		}
@@ -47,6 +48,9 @@ namespace MazeMap
 	}
 	void DirectionalPathFinder::HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{
+		(void)start;
+		(void)startDirection;
+		(void)result;
 	}
 	void DirectionalPathFinder::HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{
@@ -98,7 +102,7 @@ namespace MazeMap
 			{
 				for (size_t k = 0; k < 8; k++)
 				{
-					_data[i][j][k] = INFINITY;
+					_data[i][j][k] = (std::numeric_limits<float>::infinity)();
 				}
 			}
 		}
@@ -139,7 +143,7 @@ namespace MazeMap
 		bool first = true;
 		while (Cost(dirLoc.GetLocation(), -dirLoc.GetDirection()) > 0.001)
 		{
-			float minCost = INFINITY;
+			float minCost = (std::numeric_limits<float>::infinity)();
 			Direction minDir = dirLoc.GetDirection();
 			for (uint8_t i = 0; i < 8; ++i)
 			{
@@ -188,7 +192,7 @@ namespace MazeMap
 
 	Direction DirectionalPathFinder::GetAscendDirection(MazeLocation loc, Direction d)
 	{
-		float minCost = INFINITY;
+		float minCost = (std::numeric_limits<float>::infinity)();
 		Direction minDir = d;
 		for (uint8_t i = 0; i < 8; ++i)
 		{
@@ -207,7 +211,7 @@ namespace MazeMap
 	}
 	Direction DirectionalPathFinder::GetDescendDirection(MazeLocation loc, Direction d)
 	{
-		float minCost = INFINITY;
+		float minCost = (std::numeric_limits<float>::infinity)();
 		Direction minDir = d;
 		for (uint8_t i = 0; i < 8; ++i)
 		{

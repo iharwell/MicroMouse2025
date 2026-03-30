@@ -17,7 +17,7 @@ namespace MazeMap
 		Vehicle v = Vehicle();
 		void TestPathContinuity(const Path<PATH_SIZE>& path)
 		{
-			for (size_t i = 1; i < path.GetSize(); i++)
+			for (uint16_t i = 1; i < path.GetSize(); i++)
 			{
 				Direction prevDirection = path[i].DirectionTo(path[i - 1]);
 				Assert::AreEqual(path[i - 1], path[i] >> prevDirection);
@@ -44,9 +44,9 @@ namespace MazeMap
 		DirectionalLocation ExecutePartial(DirectionalLocation start, ManeuverPath& p, int steps)
 		{
 			ManeuverPath tmp = ManeuverPath();
-			for (size_t i = 0; i < steps; i++)
+			for (int i = 0; i < steps; i++)
 			{
-				tmp.push_back(p[i]);
+				tmp.push_back(p[static_cast<uint16_t>(i)]);
 			}
 
 			return tmp.ExecutePath(start);
@@ -54,9 +54,9 @@ namespace MazeMap
 		DirectionalLocation ExecutePartialRoundTrip(DirectionalLocation start, ManeuverPath& p, int steps)
 		{
 			ManeuverPath tmp = ManeuverPath();
-			for (size_t i = 0; i < steps; i++)
+			for (int i = 0; i < steps; i++)
 			{
-				tmp.push_back(p[i]);
+				tmp.push_back(p[static_cast<uint16_t>(i)]);
 			}
 
 			DirectionalLocation end = tmp.ExecutePath(start);
@@ -229,9 +229,9 @@ namespace MazeMap
 			mp.ToHalfStepPath(DirectionalLocation(1, 1, Up), P);
 
 			int len = 1;
-			for (size_t i = 0; i < mp.GetSize(); i++)
+			for (uint16_t i = 0; i < mp.GetSize(); i++)
 			{
-				for (size_t j = 0; j < ms.GetStepCount(mp[i]); j++)
+				for (uint8_t j = 0; j < ms.GetStepCount(mp[i]); j++)
 				{
 					len += ms.GetStep(mp[i], j).GetDistance();
 				}
@@ -279,7 +279,7 @@ namespace MazeMap
 
 			Assert::AreEqual(CellCoordinates(0, 0), P.first());
 
-			for (size_t i = 1; i < P.GetSize(); i++)
+			for (uint16_t i = 1; i < P.GetSize(); i++)
 			{
 				Direction prevDirection = P[i].DirectionTo(P[i - 1]);
 				Assert::AreEqual(P[i - 1], P[i] >> prevDirection);
@@ -327,14 +327,14 @@ namespace MazeMap
 
 			DirectionalLocation current(MazeLocation::CellCenter(CellCoordinates(8, 7)), Right);
 
-			for (size_t i = 0; i < mp.GetSize(); i++)
+			for (uint16_t i = 0; i < mp.GetSize(); i++)
 			{
 				ManeuverCode code = mp[i];
-				for (size_t j = 0; j < ms.GetStepCount(code); j++)
+				for (uint8_t j = 0; j < ms.GetStepCount(code); j++)
 				{
 					auto step = ms.GetStep(code, j);
 					current = current.Turn(step.GetDirection());
-					for (size_t k = 0; k < step.GetDistance(); k++)
+					for (uint8_t k = 0; k < step.GetDistance(); k++)
 					{
 						current = current.MoveForward(1);
 						Assert::IsTrue(m.IsAccessibleLocation(current.GetLocation()));
@@ -358,7 +358,7 @@ namespace MazeMap
 			mpf->ManeuverPathToGoal(CellCoordinates(0, 0), Direction::Up, mp);
 
 			auto start = std::chrono::high_resolution_clock::now();
-			for (size_t i = 0; i < 100; i++)
+			for (int i = 0; i < 100; i++)
 			{
 				mpf->ManeuverPathToGoal(CellCoordinates(0, 0), Direction::Up, mp);
 

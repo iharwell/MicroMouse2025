@@ -13,8 +13,8 @@ namespace MazeMap
 
 	ManeuverPathFinder::ManeuverPathFinder(const Maze& maze, const Vehicle& vehicle)
 		: PathFinder(maze, vehicle)
-		, _data()
 		, _queue()
+		, _data()
 		, _currentBest()
 		, _startingPoint()
 		, _deadEndMask()
@@ -22,10 +22,17 @@ namespace MazeMap
 	}
 	void ManeuverPathFinder::HalfStepPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, HalfStepPath<PATH_SIZE * 2>& result)
 	{
+		(void)start;
+		(void)startDirection;
+		(void)end;
+		(void)result;
 	}
 
 	void ManeuverPathFinder::HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{
+		(void)start;
+		(void)startDirection;
+		(void)result;
 	}
 	void ManeuverPathFinder::ManeuverPathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, ManeuverPath& result)
 	{
@@ -80,18 +87,15 @@ namespace MazeMap
 	{
 		Reset();
 		result.clear();
-		ManeuverPath* p = new ManeuverPath();
-		ManeuverPathToGoal(start, startDirection, *p);
-		_currentBest = p->Cost(GetVehicle(), GetMaze().GetCellDimension() / 100.0f);
-		p->ToHalfStepPath(DirectionalLocation(MazeLocation::CellCenter(start), startDirection), result);
-		delete p;
+		ManeuverPath path;
+		ManeuverPathToGoal(start, startDirection, path);
+		_currentBest = path.Cost(GetVehicle(), GetMaze().GetCellDimension() / 100.0f);
+		path.ToHalfStepPath(DirectionalLocation(MazeLocation::CellCenter(start), startDirection), result);
 	}
 
 	void ManeuverPathFinder::CalculateScores()
 	{
 		ManeuverSet& ms = ManeuverSet::GetSet();
-		const Vehicle& v = GetVehicle();
-		const Maze& m = GetMaze();
 		float cellDim = GetMaze().GetCellDimension() / 100;
 		ms.SortByCost(GetVehicle(), cellDim);
 		_queue.SwapQueues();
@@ -118,7 +122,6 @@ namespace MazeMap
 	void ManeuverPathFinder::DescendGradient(CellCoordinates start, Direction startDirection, ManeuverPath& result)
 	{
 		const ManeuverSet& ms = ManeuverSet::GetSet();
-		const Maze& m = GetMaze();
 		ScoreData currentScore = Score(MazeLocation::CellCenter(start), -startDirection);
 		DirectionalLocation current(MazeLocation::CellCenter(start), startDirection);
 
@@ -140,12 +143,13 @@ namespace MazeMap
 				result.push_back(effectiveCode);
 				const Maneuver& man = ms[effectiveCode];
 #ifdef _WINDOWS
-				if (!man.IsValidMove(current, m, effectiveCode & MIRRORED_MANEUVER_FLAG))
+				const Maze& maze = GetMaze();
+				if (!man.IsValidMove(current, maze, (effectiveCode & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG))
 				{
 					throw std::errc::bad_message;
 				}
 #endif
-				current = man.Move(current, effectiveCode & MIRRORED_MANEUVER_FLAG);
+				current = man.Move(current, (effectiveCode & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG);
 				currentScore = Score(current.GetLocation(), -current.GetDirection());
 			}
 		}
@@ -202,9 +206,7 @@ namespace MazeMap
 	}
 	void ManeuverPathFinder::RadiateLocation(MazeLocation loc)
 	{
-		int TIP45Count = 0;
 		ManeuverSet& ms = ManeuverSet::GetSet();
-		float cellDim = GetMaze().GetCellDimension() / 100;
 		const Vehicle& v = GetVehicle();
 		const Maze& m = GetMaze();
 		for (uint8_t i = 0; i < 8; i++)
@@ -273,15 +275,13 @@ namespace MazeMap
 					{
 						DirectionalLocation current = DirectionalLocation(currentLoc, fromDir);
 						current = man.Move(current, true);
-						ScoreData currentScore = Score(current);
-						if (currentScore.Cost > postManCost)
+						if (Score(current).Cost > postManCost)
 						{
 							UpdateScore(current, ScoreData(man.GetManeuverID() | ManeuverCode::MIRRORED_MANEUVER_FLAG, postManCost));
 						}
 					}
 				}
 
-				ScoreData currentScore = Score(currentLoc, fromDir);
 				float straightCost = v.GetStraightLineCost(distance, entrySpeed, 0.0f);
 				UpdateScore(currentLoc, fromDir, ScoreData(static_cast<ManeuverCode>(straightDistance), fromVal.Cost + straightCost), true);
 				if (diag)

@@ -5,6 +5,7 @@
 #include "HalfStepPath.h"
 #include "ManeuverSet.h"
 #include "ManeuverPath.h"
+#include <limits>
 
 namespace MazeMap
 {
@@ -16,7 +17,7 @@ namespace MazeMap
 		public:
 			MAZEMAP_INLINE ScoreData()
 				: Code(ManeuverCode::MC_NONE)
-				, Cost(INFINITY)
+				, Cost((std::numeric_limits<float>::infinity)())
 			{ }
 			MAZEMAP_INLINE ScoreData(ManeuverCode arrivalCode, float cost)
 				: Code(arrivalCode)

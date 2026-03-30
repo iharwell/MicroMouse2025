@@ -20,7 +20,7 @@ namespace MazeMap
 			double sd = 0.0;
 			double cd = 0.0;
 
-			float inputf = inputValue;
+			float inputf = static_cast<float>(inputValue);
 			float sf = 0.0f;
 			float cf = 0.0f;
 
@@ -37,12 +37,12 @@ namespace MazeMap
 			double sd = 0.0;
 			double cd = 0.0;
 
-			float inputf = inputValue;
+			float inputf = static_cast<float>(inputValue);
 			float sf = 0.0f;
 			float cf = 0.0f;
 
 			fresnel(inputd, cd, sd);
-			fresnelf_test(inputf, cf, sf, extraParam);
+			fresnelf_test(inputf, cf, sf, static_cast<float>(extraParam));
 
 			sError = fabs(sd - sf) / sd;
 			cError = fabs(cd - cf) / cd;
@@ -54,7 +54,7 @@ namespace MazeMap
 			double sd = 0.0;
 			double cd = 0.0;
 
-			float inputf = value;
+			float inputf = static_cast<float>(value);
 			float sf = 0.0f;
 			float cf = 0.0f;
 
@@ -102,15 +102,15 @@ namespace MazeMap
 			float cf = 0.0f;
 
 			auto start = std::chrono::high_resolution_clock::now();
-			for (size_t i = 0; i < 1100000; i++)
+			for (int i = 0; i < 1100000; i++)
 			{
-				for (size_t j = 0; j < 250; j += 5)
+				for (int j = 0; j < 250; j += 5)
 				{
-					fresnelf(0.01f * j, cf, sf);
-					fresnelf(0.01f * (j + 1), cf, sf);
-					fresnelf(0.01f * (j + 2), cf, sf);
-					fresnelf(0.01f * (j + 3), cf, sf);
-					fresnelf(0.01f * (j + 4), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 1), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 2), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 3), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 4), cf, sf);
 				}
 			}
 
@@ -129,15 +129,15 @@ namespace MazeMap
 			float cf = 0.0f;
 
 			auto start = std::chrono::high_resolution_clock::now();
-			for (size_t i = 0; i < 1100000; i++)
+			for (int i = 0; i < 1100000; i++)
 			{
-				for (size_t j = startPoint; j < startPoint + span; j += 5)
+				for (int j = startPoint; j < startPoint + span; j += 5)
 				{
-					fresnelf(0.01f * j, cf, sf);
-					fresnelf(0.01f * (j + 1), cf, sf);
-					fresnelf(0.01f * (j + 2), cf, sf);
-					fresnelf(0.01f * (j + 3), cf, sf);
-					fresnelf(0.01f * (j + 4), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 1), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 2), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 3), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 4), cf, sf);
 				}
 			}
 
@@ -163,7 +163,7 @@ namespace MazeMap
 				double sd = 0.0;
 				double cd = 0.0;
 
-				float inputf = inputd;
+				float inputf = static_cast<float>(inputd);
 				float sf = 0.0f;
 				float cf = 0.0f;
 
@@ -206,15 +206,15 @@ namespace MazeMap
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (size_t i = 0; i < 110000; i++)
+			for (int i = 0; i < 110000; i++)
 			{
-				for (size_t j = 0; j < 250; j+=5)
+				for (int j = 0; j < 250; j += 5)
 				{
-					fresnelf(0.01f * j, cf, sf);
-					fresnelf(0.01f * (j + 1), cf, sf);
-					fresnelf(0.01f * (j + 2), cf, sf);
-					fresnelf(0.01f * (j + 3), cf, sf);
-					fresnelf(0.01f * (j + 4), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 1), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 2), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 3), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 4), cf, sf);
 				}
 			}
 
@@ -237,7 +237,7 @@ namespace MazeMap
 				double sd = 0.0;
 				double cd = 0.0;
 
-				float inputf = inputd;
+				float inputf = static_cast<float>(inputd);
 				float sf = 0.0f;
 				float cf = 0.0f;
 
@@ -273,15 +273,15 @@ namespace MazeMap
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (size_t i = 0; i < 137500; i++)
+			for (int i = 0; i < 137500; i++)
 			{
-				for (size_t j = 250; j < 450; j += 5)
+				for (int j = 250; j < 450; j += 5)
 				{
-					fresnelf(0.01f * j, cf, sf);
-					fresnelf(0.01f * (j + 1), cf, sf);
-					fresnelf(0.01f * (j + 2), cf, sf);
-					fresnelf(0.01f * (j + 3), cf, sf);
-					fresnelf(0.01f * (j + 4), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 1), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 2), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 3), cf, sf);
+					fresnelf(0.01f * static_cast<float>(j + 4), cf, sf);
 				}
 			}
 
@@ -306,7 +306,7 @@ namespace MazeMap
 				double sd = 0.0;
 				double cd = 0.0;
 
-				float inputf = inputd;
+				float inputf = static_cast<float>(inputd);
 				float sf = 0.0f;
 				float cf = 0.0f;
 
@@ -342,15 +342,15 @@ namespace MazeMap
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (size_t i = 0; i < 50000; i++)
+			for (int i = 0; i < 50000; i++)
 			{
-				for (size_t j = 450; j < 1000; j += 5)
+				for (int j = 450; j < 1000; j += 5)
 				{
-					fresnelf(0.1f * j, cf, sf);
-					fresnelf(0.1f * (j + 1), cf, sf);
-					fresnelf(0.1f * (j + 2), cf, sf);
-					fresnelf(0.1f * (j + 3), cf, sf);
-					fresnelf(0.1f * (j + 4), cf, sf);
+					fresnelf(0.1f * static_cast<float>(j), cf, sf);
+					fresnelf(0.1f * static_cast<float>(j + 1), cf, sf);
+					fresnelf(0.1f * static_cast<float>(j + 2), cf, sf);
+					fresnelf(0.1f * static_cast<float>(j + 3), cf, sf);
+					fresnelf(0.1f * static_cast<float>(j + 4), cf, sf);
 				}
 			}
 
@@ -378,18 +378,18 @@ namespace MazeMap
 			while (Testparam < 1.0e-7)
 			{
 
-				for (size_t i = 250; i < 450; i++)
+				for (int i = 250; i < 450; i++)
 				{
 					double inputd = 0.01 * i;
 					double sd = 0.0;
 					double cd = 0.0;
 
-					float inputf = inputd;
+					float inputf = static_cast<float>(inputd);
 					float sf = 0.0f;
 					float cf = 0.0f;
 
 					fresnel(inputd, cd, sd);
-					fresnelf_test(inputf, cf, sf, Testparam);
+					fresnelf_test(inputf, cf, sf, static_cast<float>(Testparam));
 
 					double sdelta = fabs(sd - sf) / sd;
 					double cdelta = fabs(cd - cf) / cd;
@@ -463,7 +463,7 @@ namespace MazeMap
 				double sd = 0.0;
 				double cd = 0.0;
 
-				float inputf = inputd;
+				float inputf = static_cast<float>(inputd);
 				float sf = 0.0f;
 				float cf = 0.0f;
 
@@ -533,9 +533,9 @@ namespace MazeMap
 			bool atLeastOnePass = false;
 			for (int i = startIterations; i <= endIterations; ++i)
 			{
-				GetError(testValue, sErr, cErr, i+0.001);
+				GetError(testValue, sErr, cErr, i + 0.001);
 
-				errorResults[i - startIterations] = fmax(sErr, cErr);
+				errorResults[i - startIterations] = static_cast<float>(fmax(sErr, cErr));
 				if (sErr >= 0.00001 || cErr >= 0.00001)
 				{
 					thresholdReached = true;
@@ -556,11 +556,12 @@ namespace MazeMap
 			double cErr = 0;
 			bool thresholdReached = false;
 			bool atLeastOnePass = false;
-			for (float i = startValue; i <= endValue; i+=delta)
+			for (double i = startValue; i <= endValue; i += delta)
 			{
-				GetError(i, sErr, cErr, iterations +0.001);
+				GetError(i, sErr, cErr, iterations + 0.001);
 
-				errorResults[(i-startValue)/delta + 0.5f] = fmax(sErr, cErr);
+				const size_t errorIndex = static_cast<size_t>(((i - startValue) / delta) + 0.5);
+				errorResults[errorIndex] = static_cast<float>(fmax(sErr, cErr));
 				if (sErr >= 0.0001 || cErr >= 0.0001)
 				{
 					thresholdReached = true;
@@ -583,7 +584,7 @@ namespace MazeMap
 
 			std::vector<float> errors = std::vector<float>(end-start+1);
 			FindThreshold(testVal, start, end, errors);
-			for (size_t i = start; i <= end; i++)
+			for (int i = start; i <= end; i++)
 			{
 				ss << i << "\t" << 100*errors[i - start] << "\n";
 			}
@@ -601,7 +602,7 @@ namespace MazeMap
 			double delta = 0.000005;
 
 			ss << std::fixed << std::setprecision(9);
-			for (size_t i = start; i <= end; i++)
+			for (int i = start; i <= end; i++)
 			{
 				double val = FindThreshold(testStart, testEnd, delta, i);
 
@@ -618,7 +619,7 @@ namespace MazeMap
 			double delta = 0.000001;
 			int iterations = 38;
 
-			std::vector<float> errors = std::vector<float>((int)((endVal - startVal) / delta + 2.5f));
+			std::vector<float> errors = std::vector<float>(static_cast<size_t>(((endVal - startVal) / delta) + 2.5));
 			FindThresholdValue(startVal, endVal, delta, iterations, errors);
 			float maxErrorVal = 0;
 			float maxError = 0;
@@ -639,7 +640,7 @@ namespace MazeMap
 				if (errors[i] > maxError)
 				{
 					maxError = errors[i];
-					maxErrorVal = startVal + i * delta;
+					maxErrorVal = static_cast<float>(startVal + (static_cast<double>(i) * delta));
 				}
 			}
 			ss << "\n" << errors.size();

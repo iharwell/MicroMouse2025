@@ -574,6 +574,7 @@ namespace MazeMap
 
 		virtual MAZEMAP_INLINE float GetVMax(const Vehicle& vehicle) const override
 		{
+			(void)vehicle;
 			return 0.0f;
 		};
 		/*virtual float GetTurnRadius(const Vehicle& vehicle) const override
@@ -589,8 +590,16 @@ namespace MazeMap
 		{
 			return vehicle.GetInPlaceTurnTime(PI_F * _turnRatio);
 		}
-		virtual MAZEMAP_INLINE float GetEntrySpeed(const Vehicle& vehicle) const override { return 0.0f; }
-		virtual MAZEMAP_INLINE float GetExitSpeed(const Vehicle& vehicle)  const override { return 0.0f; }
+		virtual MAZEMAP_INLINE float GetEntrySpeed(const Vehicle& vehicle) const override
+		{
+			(void)vehicle;
+			return 0.0f;
+		}
+		virtual MAZEMAP_INLINE float GetExitSpeed(const Vehicle& vehicle)  const override
+		{
+			(void)vehicle;
+			return 0.0f;
+		}
 		virtual MAZEMAP_INLINE ManeuverCode GetBackwardsManeuverID() const override { return GetManeuverID() | MIRRORED_MANEUVER_FLAG; }
 	};
 
@@ -974,6 +983,7 @@ namespace MazeMap
 		}
 		float GetEntryDistance(const Vehicle& vehicle, float cellSize) const
 		{
+			(void)vehicle;
 			//return (2.5f * cellSize) - (cellSize - vehicle.GetWidth() - WALL_THICKNESS - MIN_CLEARANCE) * 0.5f;
 			return 2.097f * cellSize;
 		}

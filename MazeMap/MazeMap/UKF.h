@@ -1,10 +1,6 @@
 #pragma once
 
-#if defined(ARDUINO)
-#include <Eigen.h>
-#else
-#include "Eigen.h"
-#endif
+#include "MazeMapEigen.h"
 
 #include <cmath>
 #include <limits>

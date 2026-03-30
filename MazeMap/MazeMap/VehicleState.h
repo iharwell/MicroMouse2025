@@ -2,11 +2,7 @@
 
 #include "Defines.h"
 #include "Vector2f.h"
-#if defined(ARDUINO)
-#include <Eigen.h>
-#else
-#include "Eigen.h"
-#endif
+#include "MazeMapEigen.h"
 
 #include <algorithm>
 #include <array>

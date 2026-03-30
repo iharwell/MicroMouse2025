@@ -14,7 +14,7 @@ namespace MazeMap
             return false;
         }
 
-        angleRad = std::remainder(targetYawRad - currentYawRad, TWO_PI);
+        angleRad = std::remainder(targetYawRad - currentYawRad, TWO_PI_F);
         return std::isfinite(angleRad);
     }
 }

@@ -74,6 +74,7 @@ namespace MazeMap
 
 		MAZEMAP_INLINE float GetCost(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
+			(void)cellSize;
 			if (code == MC_NONE)
 			{
 				return 0.0f;
@@ -86,6 +87,7 @@ namespace MazeMap
 		}
 		MAZEMAP_INLINE float GetEntrySpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
+			(void)cellSize;
 			if (code == MC_NONE)
 			{
 				return 0.0f;
@@ -98,6 +100,7 @@ namespace MazeMap
 		}
 		MAZEMAP_INLINE float GetExitSpeed(ManeuverCode code, const Vehicle& vehicle, float cellSize) const
 		{
+			(void)cellSize;
 			if (code == MC_NONE)
 			{
 				return 0.0f;
@@ -145,7 +148,7 @@ namespace MazeMap
 			}
 
 			const Maneuver& man = (*this)[code];
-			return man.Move(start, code & MIRRORED_MANEUVER_FLAG);
+			return man.Move(start, (code & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG);
 		}
 
 		MAZEMAP_INLINE uint8_t DistanceTravelled(ManeuverCode code) const

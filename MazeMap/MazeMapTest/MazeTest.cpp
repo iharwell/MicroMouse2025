@@ -206,9 +206,9 @@ namespace MazeMap
 		{
 			Maze m1 = Mazes::GetMaze1();
 
-			for (size_t i = 0; i < 16; i++)
+			for (uint8_t i = 0; i < 16; i++)
 			{
-				for (size_t j = 0; j < 16; j++)
+				for (uint8_t j = 0; j < 16; j++)
 				{
 					for (Direction d = Direction::Up; d <= Direction::Right; d= d<<1)
 					{
@@ -549,7 +549,7 @@ namespace MazeMap
 
 			Assert::AreEqual(CellCoordinates(0, 0), P.first());
 
-			for (size_t i = 1; i < P.GetSize(); i++)
+			for (uint16_t i = 1; i < P.GetSize(); i++)
 			{
 				Direction prevDirection = P[i].DirectionTo(P[i - 1]);
 				Assert::AreEqual(P[i - 1], P[i] >> prevDirection);

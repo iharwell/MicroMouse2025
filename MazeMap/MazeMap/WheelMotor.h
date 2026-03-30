@@ -8,20 +8,20 @@ namespace MazeMap
 	class EXPORT WheelMotor
 	{
 	private:
-		float _currentOutput;
-		float _desiredOutput;
-		const float _gearRatio;
-		const float _wheelRadius;
-		const float _maxCurrent;
-		const float _torqueConstant;
-		const float _speedConstant;
-		const float _motorMomentOfInertia;
-		const float _wheelMomentOfInertia;
+		float _currentOutput = 0.0f;
+		float _desiredOutput = 0.0f;
+		const float _gearRatio = 0.0f;
+		const float _wheelRadius = 0.0f;
+		const float _maxCurrent = 0.0f;
+		const float _torqueConstant = 0.0f;
+		const float _speedConstant = 0.0f;
+		const float _motorMomentOfInertia = 0.0f;
+		const float _wheelMomentOfInertia = 0.0f;
 
-		const float _lateralOffset;
-		const float _coefficientOfFriction;
+		const float _lateralOffset = 0.0f;
+		const float _coefficientOfFriction = 0.0f;
 
-		float _downforce;
+		float _downforce = 0.0f;
 	public:
 		bool SetOutput(float desiredValue);
 		float GetCurrentOutput() const;

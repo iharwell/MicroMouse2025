@@ -16,6 +16,11 @@ namespace MazeMap
 		const Vehicle& _vehicle;
 	public:
 		PathFinder(const Maze& maze, const Vehicle& vehicle);
+		PathFinder(const PathFinder&) = delete;
+		PathFinder& operator=(const PathFinder&) = delete;
+		PathFinder(PathFinder&&) = delete;
+		PathFinder& operator=(PathFinder&&) = delete;
+		virtual ~PathFinder() = default;
 
 		// Builds a path from the designated start cell to the designated end cell, and stores the result in the provided Path object.
 		virtual void PathFromTo(CellCoordinates start, Direction startDirection, CellCoordinates end, Path<PATH_SIZE>& result);

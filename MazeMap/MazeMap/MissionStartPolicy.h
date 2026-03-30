@@ -35,7 +35,7 @@ namespace MazeMap
             return FrontCalibrationSpinHeadingClass::Ignore;
         }
 
-        const float eastOfNorthRad = std::remainder((0.5f * PI) - yawRad, TWO_PI);
+        const float eastOfNorthRad = std::remainder((HALF_PI_F) - yawRad, TWO_PI_F);
         if (std::fabs(eastOfNorthRad) <= northOpenHalfWidthRad)
         {
             return FrontCalibrationSpinHeadingClass::OpenNorth;
@@ -846,5 +846,112 @@ namespace MazeMap
             seatWallConfirmed &&
             completedBiasRightPhase &&
             completedBiasLeftPhase;
+    }
+
+    inline uint8_t CountWallTouchContactIndicators(
+        bool frontWallIndicator,
+        bool motionCollapseIndicator,
+        bool progressStallIndicator)
+    {
+        uint8_t count = 0U;
+        count += frontWallIndicator ? 1U : 0U;
+        count += motionCollapseIndicator ? 1U : 0U;
+        count += progressStallIndicator ? 1U : 0U;
+        return count;
+    }
+
+    inline bool HasWallTouchConfirmedContact(
+        unsigned long persistenceMs,
+        unsigned long requiredPersistenceMs,
+        uint8_t indicatorCount,
+        uint8_t minimumIndicatorCount = 2U)
+    {
+        return
+            (minimumIndicatorCount > 0U) &&
+            (indicatorCount >= minimumIndicatorCount) &&
+            (requiredPersistenceMs > 0UL) &&
+            (persistenceMs >= requiredPersistenceMs);
+    }
+
+    inline float ComputeWallTouchSeatWiggleTurnFraction(
+        uint8_t completedFullCycles,
+        float initialTurnFraction,
+        float turnFractionStep,
+        float maxTurnFraction)
+    {
+        if (!std::isfinite(initialTurnFraction) ||
+            !std::isfinite(turnFractionStep) ||
+            !std::isfinite(maxTurnFraction) ||
+            initialTurnFraction <= 0.0f ||
+            turnFractionStep < 0.0f ||
+            maxTurnFraction <= 0.0f)
+        {
+            return 0.0f;
+        }
+
+        const float requestedTurnFraction =
+            initialTurnFraction +
+            (turnFractionStep * static_cast<float>(completedFullCycles));
+        return (std::clamp)(requestedTurnFraction, 0.0f, maxTurnFraction);
+    }
+
+    inline bool IsWallTouchSquareCycleGood(
+        float frontSkewMagnitudeM,
+        float maxFrontSkewMagnitudeM,
+        float residualYawRateMagnitudeRadps,
+        float maxResidualYawRateMagnitudeRadps,
+        float netYawChangeMagnitudeRad,
+        float maxNetYawChangeMagnitudeRad,
+        bool frontSignalValid)
+    {
+        return
+            frontSignalValid &&
+            std::isfinite(frontSkewMagnitudeM) &&
+            std::isfinite(maxFrontSkewMagnitudeM) &&
+            std::isfinite(residualYawRateMagnitudeRadps) &&
+            std::isfinite(maxResidualYawRateMagnitudeRadps) &&
+            std::isfinite(netYawChangeMagnitudeRad) &&
+            std::isfinite(maxNetYawChangeMagnitudeRad) &&
+            (maxFrontSkewMagnitudeM >= 0.0f) &&
+            (maxResidualYawRateMagnitudeRadps >= 0.0f) &&
+            (maxNetYawChangeMagnitudeRad >= 0.0f) &&
+            (frontSkewMagnitudeM <= maxFrontSkewMagnitudeM) &&
+            (residualYawRateMagnitudeRadps <= maxResidualYawRateMagnitudeRadps) &&
+            (netYawChangeMagnitudeRad <= maxNetYawChangeMagnitudeRad);
+    }
+
+    inline bool HasWallTouchSquareUpSaturated(
+        float previousFrontSkewMagnitudeM,
+        float currentFrontSkewMagnitudeM,
+        float improvementSaturationThresholdM)
+    {
+        if (!std::isfinite(previousFrontSkewMagnitudeM) ||
+            !std::isfinite(currentFrontSkewMagnitudeM) ||
+            !std::isfinite(improvementSaturationThresholdM) ||
+            improvementSaturationThresholdM < 0.0f)
+        {
+            return false;
+        }
+
+        return
+            previousFrontSkewMagnitudeM >= currentFrontSkewMagnitudeM &&
+            (previousFrontSkewMagnitudeM - currentFrontSkewMagnitudeM) <= improvementSaturationThresholdM;
+    }
+
+    inline bool IsWallTouchSquareSuccessEligible(
+        unsigned long confirmedContactMs,
+        unsigned long minimumConfirmedContactMs,
+        uint8_t completedFullCycles,
+        uint8_t minimumEligibleFullCycles,
+        uint8_t consecutiveGoodFullCycles,
+        uint8_t requiredGoodFullCycles)
+    {
+        return
+            (minimumConfirmedContactMs > 0UL) &&
+            (confirmedContactMs >= minimumConfirmedContactMs) &&
+            (minimumEligibleFullCycles > 0U) &&
+            (completedFullCycles >= minimumEligibleFullCycles) &&
+            (requiredGoodFullCycles > 0U) &&
+            (consecutiveGoodFullCycles >= requiredGoodFullCycles);
     }
 }

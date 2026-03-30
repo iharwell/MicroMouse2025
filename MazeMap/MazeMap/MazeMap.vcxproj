@@ -73,6 +73,7 @@
   <PropertyGroup>
     <OutDir>$(ProjectDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
+    <MazeMapEigenIncludeDir>$(ProjectDir)libraries\Eigen\src</MazeMapEigenIncludeDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ExternalIncludePath>$(ProjectDir)\eigen-5.0.0\Eigen;$(ExternalIncludePath)</ExternalIncludePath>
@@ -81,6 +82,8 @@
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <SDLCheck>true</SDLCheck>
+      <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -99,6 +102,8 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
+      <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -119,6 +124,8 @@
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <SDLCheck>true</SDLCheck>
+      <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_DEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -135,7 +142,9 @@
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
-      <SDLCheck>true</SDLCheck>
+      <SDLCheck>false</SDLCheck>
+      <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>NDEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -191,8 +200,22 @@
     <ClInclude Include="MaskQueue.h" />
     <ClInclude Include="Matrixf.h" />
     <ClInclude Include="Maze.h" />
+    <ClInclude Include="MazeMapApplication.h" />
+    <ClInclude Include="MazeMapApplicationMode.h" />
+    <ClInclude Include="MazeMapApplicationPrivate.h" />
+    <ClInclude Include="MazeMapApplicationRuntime.h" />
+    <ClInclude Include="MazeMapControllerRegistry.h" />
+    <ClInclude Include="MazeMapRuntimeCsvLog.h" />
+    <ClInclude Include="MazeMapRuntimeCore.h" />
+    <ClInclude Include="MazeMapRuntimeDrive.h" />
+    <ClInclude Include="MazeMapRuntimeInfrastructure.h" />
+    <ClInclude Include="MazeMapRuntimeSignalHelpers.h" />
+    <ClInclude Include="MazeMapRuntimeSensors.h" />
+    <ClInclude Include="MazeMapSharedRuntime.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
+    <ClInclude Include="MazeMapMissionModeHost.h" />
+    <ClInclude Include="MazeMapMissionModes.h" />
     <ClInclude Include="MissionMazeExport.h" />
     <ClInclude Include="MissionStartPolicy.h" />
     <ClInclude Include="MotionTargetProjection.h" />
@@ -241,6 +264,24 @@
     <ClCompile Include="ManeuverSet.cpp" />
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
+    <ClCompile Include="MazeMapApplicationEntry.cpp" />
+    <ClCompile Include="MazeMapApplication.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MazeMapStandaloneModes.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MazeMapRuntimeCsvLog.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MazeMapMissionController.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MazeMapMissionModes.cpp" />
+    <ClCompile Include="MazeMapSharedRuntime.cpp" />
+    <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="MazeLocation.cpp" />
     <ClCompile Include="MazeMapCore.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>

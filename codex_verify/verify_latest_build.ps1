@@ -80,6 +80,7 @@ $vsDevCmd = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Too
 $vstest = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe'
 
 $sketchDir = Join-Path $repoRoot 'MazeMap\MazeMap'
+$sketchLibrariesDir = Join-Path $sketchDir 'libraries'
 $solutionPath = Join-Path $repoRoot 'MazeMap\MazeMap.sln'
 $buildPath = Join-Path $scriptRoot 'arduino_build'
 $firmwareOutputDir = Join-Path $buildPath 'firmware'
@@ -92,6 +93,7 @@ Assert-PathExists -Path $arduinoCli -Description 'Arduino CLI'
 Assert-PathExists -Path $vsDevCmd -Description 'Visual Studio developer command script'
 Assert-PathExists -Path $vstest -Description 'VSTest console'
 Assert-PathExists -Path $sketchDir -Description 'Arduino sketch directory'
+Assert-PathExists -Path $sketchLibrariesDir -Description 'Arduino sketch libraries directory'
 Assert-PathExists -Path $solutionPath -Description 'MazeMap solution'
 
 Push-Location $repoRoot
@@ -103,6 +105,7 @@ try {
         'compile',
         '--clean',
         '--fqbn', $fqbn,
+        '--libraries', $sketchLibrariesDir,
         '--build-path', $buildPath,
         '--output-dir', $firmwareOutputDir,
         $sketchDir

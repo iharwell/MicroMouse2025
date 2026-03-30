@@ -2,6 +2,7 @@
 #include "Vehicle.h"
 #include "MouseUkf.h"
 #include <array>
+#include <limits>
 #include "math.h"
 
 namespace
@@ -205,7 +206,7 @@ namespace MazeMap
         const float speed = GetTurnSpeed(relDir, cellDimensions);
         if (!(speed > 0.0f))
         {
-            return INFINITY;
+            return (std::numeric_limits<float>::infinity)();
         }
 
         float quarterAngles = 0.0f;
@@ -246,6 +247,7 @@ namespace MazeMap
     float Vehicle::GetCompensatedMaxForwardAcceleration(float velocity) { return const_cast<const Vehicle*>(this)->GetCompensatedMaxForwardAcceleration(velocity); }
     float Vehicle::GetCompensatedMaxForwardAcceleration(float velocity) const
     {
+        (void)velocity;
         return GetMaxForwardAcceleration();
     }
     float Vehicle::GetTurnSpeed(float turningRadius) const

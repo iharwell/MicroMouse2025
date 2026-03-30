@@ -45,6 +45,15 @@
     <ClCompile Include="ManeuverTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MazeMapApplicationTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapRuntimeHelperTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapSharedRuntimeTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="RelativeDirectionalDistanceTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

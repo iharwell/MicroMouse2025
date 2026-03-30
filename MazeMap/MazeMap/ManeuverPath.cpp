@@ -276,12 +276,13 @@ namespace MazeMap
 		float cost = 0.0f;
 		ManeuverSet& ms = ManeuverSet::GetSet();
 		ManeuverCode prevCode = MC_NONE;
+		const size_t stepCount = static_cast<size_t>(GetSize());
 
-		for (size_t i = 0; i < GetSize(); i++)
+		for (size_t i = 0; i < stepCount; i++)
 		{
 			ManeuverCode code = _steps[i];
 			ManeuverCode nextCode = MC_NONE;
-			if (i < (GetSize() - 1))
+			if ((i + 1U) < stepCount)
 			{
 				nextCode = _steps[i + 1];
 			}
@@ -332,7 +333,7 @@ namespace MazeMap
 			tmp = ms.Move(_steps[i], current);
 			for (int j = 0; j < ms.GetStepCount(_steps[i]); j++)
 			{
-				RelativeDirectionalDistance rdd = ms.GetStep(_steps[i], j);
+				RelativeDirectionalDistance rdd = ms.GetStep(_steps[i], static_cast<uint8_t>(j));
 				RelativeDirection rd = rdd.GetDirection();
 				uint8_t distance = rdd.GetDistance();
 				current = current >> rd;

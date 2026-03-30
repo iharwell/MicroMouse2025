@@ -679,11 +679,115 @@ namespace MazeMap
             None = 0U,
         };
 
+        enum class ODR_SETTING : uint8_t
+        {
+            DISABLE = 0x00,
+            ODR_0002HZ_LP = 0x01,
+            ODR_0007HZ_HP_N = 0x02,
+            ODR_0015HZ_HP_N_LP = 0x03,
+            ODR_0030HZ_HP_N_LP = 0x04,
+            ODR_0060HZ_HP_N_LP = 0x05,
+            ODR_0120HZ_HP_N_LP = 0x06,
+            ODR_0240HZ_HP_N_LP = 0x07,
+            ODR_0480HZ_HP_N_LP = 0x08,
+            ODR_0960HZ_HP_N_LP = 0x09,
+            ODR_1920HZ_HP_N_LP = 0x0A,
+            ODR_3840HZ_HP_N_LP = 0x0B,
+            ODR_7680HZ_HP_N_LP = 0x0C,
+        };
+
+        enum class HAODR_SELECTION : uint8_t
+        {
+            NATIVE = 0x00,
+            EXACT_1000_2000_4000_8000 = 0x01,
+            EXACT_800_1600_3200_6400 = 0x02,
+        };
+
+        enum class ACCEL_FILTER_FREQ : uint8_t
+        {
+            FRAC_1_002 = 0x00,
+            FRAC_1_004 = 0x10,
+            FRAC_1_010 = 0x30,
+            FRAC_1_020 = 0x50,
+            FRAC_1_045 = 0x70,
+            FRAC_1_100 = 0x90,
+            FRAC_1_200 = 0xB0,
+            FRAC_1_400 = 0xD0,
+            FRAC_1_800 = 0xF0,
+        };
+
+        enum class ACCEL_FULLSCALE : uint8_t
+        {
+            G2 = 0x00,
+            G4 = 0x01,
+            G8 = 0x02,
+            G16 = 0x03,
+        };
+
+        enum class GYRO_LPF1_MODE : uint8_t
+        {
+            CUT_280 = 0x00,
+            CUT_213 = 0x10,
+            CUT_156 = 0x20,
+            CUT_400 = 0x30,
+            CUT_102 = 0x40,
+            CUT_058 = 0x50,
+            CUT_029 = 0x60,
+            CUT_015 = 0x70,
+        };
+
+        enum class ACCEL_MODE : uint8_t
+        {
+            DISABLE = 0x00,
+            HI_PERF = 0x00,
+            HI_ACC = 0x10,
+            ODR_TRIG = 0x30,
+            LP_MODE = 0x50,
+        };
+
+        enum class GYRO_MODE : uint8_t
+        {
+            DISABLE = 0x00,
+            HI_PERF = 0x00,
+            HI_ACC = 0x10,
+            ODR_TRIG = 0x30,
+            SLEEP_MODE = 0x40,
+            LP_MODE = 0x50,
+        };
+
+        enum class GYRO_FULLSCALE_RANGE : uint8_t
+        {
+            DPS0125 = 0x00,
+            DPS0250 = 0x01,
+            DPS0500 = 0x02,
+            DPS1000 = 0x03,
+            DPS2000 = 0x04,
+            DPS4000 = 0x0C,
+        };
+
         enum class SELF_TEST_MODE : uint8_t
         {
             DISABLED = 0x00,
             POSITIVE = 0x01,
             NEGATIVE = 0x02,
+        };
+
+        class StatusReg
+        {
+        public:
+            constexpr explicit StatusReg(uint8_t data = 0U) : data_(data) {}
+
+            constexpr uint8_t Raw() const { return data_; }
+            constexpr bool HasTimestampOverflow() const { return false; }
+            constexpr bool HasOisData() const { return false; }
+            constexpr bool HasEisGyroData() const { return false; }
+            constexpr bool HasAhQvarData() const { return false; }
+            constexpr bool HasTemperatureData() const { return false; }
+            constexpr bool HasGyroData() const { return false; }
+            constexpr bool HasAccelData() const { return false; }
+
+        private:
+            uint8_t data_ = 0U;
         };
 
         struct Axes
@@ -702,16 +806,51 @@ namespace MazeMap
             return true;
         }
 
+        uint8_t ReadWhoAmI() const { return 0U; }
+        uint8_t ReadWhoAmIWithSettings(uint32_t clock_hz, uint8_t data_mode) const
+        {
+            (void)clock_hz;
+            (void)data_mode;
+            return 0U;
+        }
+
         bool IsConnected() const { return false; }
         BeginFailureReason GetLastBeginFailureReason() const { return BeginFailureReason::None; }
         const char* GetLastBeginFailureReasonName() const { return "stub"; }
         uint8_t GetLastWhoAmI() const { return 0U; }
+        void SetAccelMode(ACCEL_MODE mode, ODR_SETTING odr) const
+        {
+            (void)mode;
+            (void)odr;
+        }
+        void ConfigureUiHighAccuracyOdr(HAODR_SELECTION selection, ODR_SETTING accelOdr, ODR_SETTING gyroOdr) const
+        {
+            (void)selection;
+            (void)accelOdr;
+            (void)gyroOdr;
+        }
+        void SetAccelRange(ACCEL_FILTER_FREQ freq, ACCEL_FULLSCALE scale)
+        {
+            (void)freq;
+            accel_scale_ = scale;
+        }
+        void SetGyroMode(GYRO_MODE mode, ODR_SETTING odr) const
+        {
+            (void)mode;
+            (void)odr;
+        }
+        void SetGyroRange(GYRO_LPF1_MODE lpf1, GYRO_FULLSCALE_RANGE range)
+        {
+            (void)lpf1;
+            gyro_scale_ = range;
+        }
         void SetSelfTest(SELF_TEST_MODE gyroMode, SELF_TEST_MODE accelMode) const
         {
             (void)gyroMode;
             (void)accelMode;
         }
 
+        StatusReg ReadStatus() const { return {}; }
         Axes ReadGyro() const { return {}; }
         Axes ReadAccel() const { return {}; }
 
@@ -725,6 +864,52 @@ namespace MazeMap
 
         int16_t ReadTemp() const { return 0; }
         float ReadTempC() const { return 25.0f; }
+        float AccelSensitivityMgPerLsb() const
+        {
+            switch (accel_scale_)
+            {
+            case ACCEL_FULLSCALE::G2:
+                return 0.061f;
+            case ACCEL_FULLSCALE::G4:
+                return 0.122f;
+            case ACCEL_FULLSCALE::G8:
+                return 0.244f;
+            case ACCEL_FULLSCALE::G16:
+            default:
+                return 0.488f;
+            }
+        }
+        float GyroSensitivityMdpsPerLsb() const
+        {
+            switch (gyro_scale_)
+            {
+            case GYRO_FULLSCALE_RANGE::DPS0125:
+                return 4.375f;
+            case GYRO_FULLSCALE_RANGE::DPS0250:
+                return 8.75f;
+            case GYRO_FULLSCALE_RANGE::DPS0500:
+                return 17.5f;
+            case GYRO_FULLSCALE_RANGE::DPS1000:
+                return 35.0f;
+            case GYRO_FULLSCALE_RANGE::DPS2000:
+                return 70.0f;
+            case GYRO_FULLSCALE_RANGE::DPS4000:
+            default:
+                return 140.0f;
+            }
+        }
+        float AccelRawToG(int16_t raw) const
+        {
+            return (static_cast<float>(raw) * AccelSensitivityMgPerLsb()) / 1000.0f;
+        }
+        float GyroRawToDps(int16_t raw) const
+        {
+            return (static_cast<float>(raw) * GyroSensitivityMdpsPerLsb()) / 1000.0f;
+        }
+
+    private:
+        ACCEL_FULLSCALE accel_scale_ = ACCEL_FULLSCALE::G2;
+        GYRO_FULLSCALE_RANGE gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS0125;
     };
 
     template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>

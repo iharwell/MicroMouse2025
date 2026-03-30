@@ -49,6 +49,7 @@ namespace MazeMap
 		, _goalFound(false)
 		, _accessible(false)
 	{
+		(void)cellDimension;
 		for (uint8_t i = 0; i < 16; ++i)
 		{
 			for (uint8_t j = 0; j < 16; j++)
@@ -330,9 +331,9 @@ namespace MazeMap
 		if (IsComplete())
 		{
 
-			for (size_t i = 0; i < 32; i++)
+			for (uint8_t i = 0; i < 32; i++)
 			{
-				for (size_t j = 0; j < 32; j++)
+				for (uint8_t j = 0; j < 32; j++)
 				{
 					MazeLocation loc(i, j);
 					_accessible.SetFlag(loc, IsAccessibleLocation(loc));
@@ -495,9 +496,9 @@ float Maze::GetCellDimension()
 		while (cont)
 		{
 			cont = false;
-			for (size_t i = 0; i < 16; i++)
+			for (uint8_t i = 0; i < 16; i++)
 			{
-				for (size_t j = 0; j < 16; j++)
+				for (uint8_t j = 0; j < 16; j++)
 				{
 					if (i == startLocation.GetX() && j == startLocation.GetY())
 					{

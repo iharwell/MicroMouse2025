@@ -312,7 +312,7 @@ static void ConfigureDigitalOutputLow(uint8_t pin)
     digitalWrite(pin, LOW);
 }
 
-bool SetupHardware()
+inline bool SetupHardware()
 {
     // ADC / PWM global resolution setup.
     analogReadResolution(HardwareConfig::kAdcBits);

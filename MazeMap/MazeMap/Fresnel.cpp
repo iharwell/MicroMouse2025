@@ -389,8 +389,9 @@ namespace MazeMap {
             c = r;
             for (k = 1; k <= ITERATIONS_A; k++)
             {
-                r = -0.5f * r * (4 * k - 3) / k
-                    / (2 * k - 1) / (4 * k + 1) * t2;
+                const float kf = static_cast<float>(k);
+                r = -0.5f * r * ((4.0f * kf) - 3.0f) / kf
+                    / ((2.0f * kf) - 1.0f) / ((4.0f * kf) + 1.0f) * t2;
                 if (c + r == c)
                 {
                     r2 += r;
@@ -398,7 +399,7 @@ namespace MazeMap {
                 else
                 {
                     c = c + r + r2;
-                    r2 = 0;
+                    r2 = 0.0f;
                 }
                 if (fabsf(r) < fabsf(c) * EPSILON_FRESNEL)
                 {
@@ -411,8 +412,9 @@ namespace MazeMap {
             r = s;
             for (k = 1; k <= ITERATIONS_A; k++)
             {
-                r = -0.5f * r * (4 * k - 1) / k
-                    / (2 * k + 1) / (4 * k + 3) * t2;
+                const float kf = static_cast<float>(k);
+                r = -0.5f * r * ((4.0f * kf) - 1.0f) / kf
+                    / ((2.0f * kf) + 1.0f) / ((4.0f * kf) + 3.0f) * t2;
                 s = s + r;
                 if (fabsf(r) < fabsf(s) * EPSILON_FRESNEL)
                 {
@@ -441,8 +443,9 @@ namespace MazeMap {
 
             for (k = m; 0 <= k; k--)
             {
-                f = (2 * k + 3) * f0 / t - f1;
-                if (k == (int)(k / 2) * 2)
+                const float kf = static_cast<float>(k);
+                f = ((2.0f * kf) + 3.0f) * f0 / t - f1;
+                if ((k % 2) == 0)
                 {
                     c = c + f;
                 }
@@ -450,7 +453,7 @@ namespace MazeMap {
                 {
                     s = s + f;
                 }
-                su = su + (2 * k + 1) * f * f;
+                su = su + (((2.0f * kf) + 1.0f) * f * f);
                 f1 = f0;
                 f0 = f;
             }
@@ -468,18 +471,21 @@ namespace MazeMap {
             f = 1.0f;
             for (k = 1; k <= ITERATIONS_B; k++)
             {
-                r = -0.25f * r * (4 * k - 1) * (4 * k - 3) / t2;
+                const float kf = static_cast<float>(k);
+                r = -0.25f * r * ((4.0f * kf) - 1.0f) * ((4.0f * kf) - 3.0f) / t2;
                 f = f + r;
             }
             r = 1.0f / (px * xa);
             g = r;
             for (k = 1; k <= ITERATIONS_C; k++)
             {
-                r = -0.25f * r * (4 * k + 1) * (4 * k - 1) / t2;
+                const float kf = static_cast<float>(k);
+                r = -0.25f * r * ((4.0f * kf) + 1.0f) * ((4.0f * kf) - 1.0f) / t2;
                 g = g + r;
             }
 
-            t0 = t - (int)(t / (2.0f * PI_F)) * 2.0 * PI_F;
+            const float wrappedTurns = static_cast<float>(static_cast<int>(t / (2.0f * PI_F)));
+            t0 = t - (wrappedTurns * 2.0f * PI_F);
             c = 0.5f + (f * sinf(t0) - g * cosf(t0)) / px;
             s = 0.5f - (f * cosf(t0) + g * sinf(t0)) / px;
         }
@@ -576,8 +582,9 @@ namespace MazeMap {
             c = r;
             for (k = 1; k <= ITERATIONS_A; k++)
             {
-                r = -0.5f * r * (4.0f * k - 3.0f) / k
-                    / (2.0f * k - 1.0f) / (4.0f * k + 1.0f) * t2;
+                const float kf = static_cast<float>(k);
+                r = -0.5f * r * ((4.0f * kf) - 3.0f) / kf
+                    / ((2.0f * kf) - 1.0f) / ((4.0f * kf) + 1.0f) * t2;
                 c = c + r;
                 if (fabsf(r) < fabsf(c) * EPSILON_FRESNEL)
                 {
@@ -589,8 +596,9 @@ namespace MazeMap {
             r = s;
             for (k = 1; k <= ITERATIONS_A; k++)
             {
-                r = -0.5f * r * (4.0f * k - 1.0f) / k
-                    / (2.0f * k + 1.0f) / (4.0f * k + 3.0f) * t2;
+                const float kf = static_cast<float>(k);
+                r = -0.5f * r * ((4.0f * kf) - 1.0f) / kf
+                    / ((2.0f * kf) + 1.0f) / ((4.0f * kf) + 3.0f) * t2;
                 s = s + r;
                 if (fabsf(r) < fabsf(s) * EPSILON_FRESNEL)
                 {
@@ -618,8 +626,9 @@ namespace MazeMap {
 
             for (k = m; 0 <= k; k--)
             {
-                f = (2 * k + 3) * f0 / t - f1;
-                if (k == (int)(k / 2) * 2)
+                const float kf = static_cast<float>(k);
+                f = ((2.0f * kf) + 3.0f) * f0 / t - f1;
+                if ((k % 2) == 0)
                 {
                     c = c + f;
                 }
@@ -627,7 +636,7 @@ namespace MazeMap {
                 {
                     s = s + f;
                 }
-                su = su + (2 * k + 1) * f * f;
+                su = su + (((2.0f * kf) + 1.0f) * f * f);
                 f1 = f0;
                 f0 = f;
             }
@@ -645,18 +654,21 @@ namespace MazeMap {
             f = 1.0f;
             for (k = 1; k <= ITERATIONS_B; k++)
             {
-                r = -0.25f * r * (4 * k - 1) * (4 * k - 3) / t2;
+                const float kf = static_cast<float>(k);
+                r = -0.25f * r * ((4.0f * kf) - 1.0f) * ((4.0f * kf) - 3.0f) / t2;
                 f = f + r;
             }
             r = 1.0f / (px * xa);
             g = r;
             for (k = 1; k <= ITERATIONS_C; k++)
             {
-                r = -0.25f * r * (4.0f * k + 1.0f) * (4.0f * k - 1.0f) / t2;
+                const float kf = static_cast<float>(k);
+                r = -0.25f * r * ((4.0f * kf) + 1.0f) * ((4.0f * kf) - 1.0f) / t2;
                 g = g + r;
             }
 
-            t0 = t - (int)(t / (2.0f * PI_F)) * 2.0 * PI_F;
+            const float wrappedTurns = static_cast<float>(static_cast<int>(t / (2.0f * PI_F)));
+            t0 = t - (wrappedTurns * 2.0f * PI_F);
             c = 0.5f + (f * sinf(t0) - g * cosf(t0)) / px;
             s = 0.5f - (f * cosf(t0) + g * sinf(t0)) / px;
         }

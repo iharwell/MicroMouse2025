@@ -23,9 +23,9 @@ namespace MazeMap
 		Matrixf(const float (&data)[ROWS][COLS])
 			: _data()
 		{
-			for (size_t i = 0; i < ROWS; i++)
+			for (uint8_t i = 0; i < ROWS; i++)
 			{
-				for (size_t j = 0; j < COLS; j++)
+				for (uint8_t j = 0; j < COLS; j++)
 				{
 					_data[i][j] = data[i][j];
 				}
