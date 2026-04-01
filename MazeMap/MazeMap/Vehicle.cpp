@@ -109,7 +109,7 @@ namespace MazeMap
     {
     }
 
-    const VehicleState& Vehicle::GetVehicleState() const { return _stateHistory.GetLatest(); }
+    const VehicleState& Vehicle::GetVehicleState() const { return _state; }
     SensorExtrinsics Vehicle::GetFrontLeftSensorExtrinsics() noexcept
     {
         return {

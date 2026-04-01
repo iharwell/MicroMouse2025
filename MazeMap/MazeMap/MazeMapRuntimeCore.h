@@ -1,6 +1,8 @@
 #pragma once
 // Private runtime core definitions shared by MazeMap application subsystems.
 
+#include "Defines.h"
+
 inline bool AppendStartupTrace(const char* line);
 
 #if !defined(ARDUINO_TEENSY41)
@@ -71,7 +73,7 @@ namespace Config
     // [Medium] Maximum absolute raw yaw rate still treated as stationary while adapting the gyro bias estimate. Raise
     // it only if startup bias convergence is clearly too slow; lower it if short settle windows keep pulling motion
     // transients into the bias estimate.
-    constexpr float kGyroBiasUpdateMaxAbsRateRadps = 0.02f;
+    constexpr float kGyroBiasUpdateMaxAbsRateRadps = 0.03f;
     // [Medium] Time to sit still before wall observations. Increase if wall sensors or chassis motion need longer to
     // settle after stopping; decrease if mapping feels sluggish and readings are already stable.
     constexpr uint16_t kObservationSettleMs = 25U;
@@ -80,10 +82,10 @@ namespace Config
     constexpr uint16_t kMissionStartupStationaryHoldMs = 2000U;
     // [Medium] Maximum absolute chassis and wheel speed still counted as stationary for the startup dwell. Increase only
     // if encoder noise keeps resetting the timer; decrease if the robot can still creep while being treated as settled.
-    constexpr float kMissionStartupStationarySpeedThresholdMps = 0.008f;
+    constexpr float kMissionStartupStationarySpeedThresholdMps = 0.01f;
     // [Medium] Maximum absolute yaw rate still counted as stationary for the startup dwell. Keep this close to the gyro
     // bias-adaptation gate unless logs show harmless IMU noise is delaying mission start.
-    constexpr float kMissionStartupStationaryMaxAbsYawRateRadps = 0.02f;
+    constexpr float kMissionStartupStationaryMaxAbsYawRateRadps = 0.03f;
     // [Medium] Stop-to-stop mission and calibration moves should not hand off to the next segment until the chassis is
     // genuinely settled. These thresholds are tighter than the old profile exit tolerances so short moves do not carry
     // residual wheel motion into the next turn or pose snap.
@@ -297,19 +299,19 @@ namespace Config
 
     // [High] Straight-line speed cap during exploration and return-to-start mapping. Raise it to shorten mapping once
     // wall sensing stays reliable at speed; lower it if exploration overshoots cells or loses corridor control.
-    constexpr float kSearchMaxSpeedMps = 0.40f;
+    constexpr float kSearchMaxSpeedMps = 0.50f;
     // [High] Forward acceleration for mapping straights. Raise it to reduce ramp time; lower it if launches cause
     // wheelspin, pitch, or noisy wall readings right after starts.
-    constexpr float kSearchAccelMps2 = 0.30f;
+    constexpr float kSearchAccelMps2 = 2.50f;
     // [High] Braking deceleration for mapping straights. Raise it if the robot overruns cell centers; lower it if
     // stops become unstable or the tires slide when entering observations and turns.
-    constexpr float kSearchDecelMps2 = 0.30f;
+    constexpr float kSearchDecelMps2 = 2.50f;
     // [High] Executed in-place turn speed cap during search and homing. Raise it for faster alignment when turns are
     // clean; lower it if mapping turns overshoot, chatter, or scrub the tires.
     constexpr float kSearchTurnMaxOmegaRadps = 8.5f;
     // [High] Executed in-place turn acceleration during search and homing. Raise it for snappier turn entry; lower it
     // if the robot jerks into turns or becomes harder to stop on heading.
-    constexpr float kSearchTurnAccelRadps2 = 30.0f;
+    constexpr float kSearchTurnAccelRadps2 = 100.0f;
     // [High] Mapping-mode lateral acceleration limit with the fan off. This preserves the old search cornering
     // envelope implied by the search speed cap and executed in-place turn rate cap, without reintroducing a
     // separate smooth-turn command clamp.
@@ -524,7 +526,7 @@ namespace Config
     // the maze solution. Keep this below one degree.
     constexpr float kMappingAngleToleranceRad = 0.50f * DEG_TO_RAD_F;
     // [Medium] Mapping/search in-place turns should also be nearly stopped before they declare completion.
-    constexpr float kMappingAngularSpeedToleranceRadps = 0.07f;
+    constexpr float kMappingAngularSpeedToleranceRadps = 0.03f;
     // [Medium] Smallest encoder distance change treated as real translation progress for the motion watchdog. Increase
     // if encoder quantization or noise causes false progress; decrease if low-speed moves stall without tripping it.
     constexpr float kEncoderProgressEpsilonM = 0.0015f;
@@ -539,353 +541,10 @@ namespace Config
     constexpr unsigned long kEncoderStallStartupGraceMs = 250UL;
 }
 
-static_assert(
-    (Config::kSearchRollingObservationSampleCount % 2U) == 1U,
-    "Search rolling observation majority vote requires an odd sample count.");
-
-namespace DiagnosticConfig
-{
-    // Likelihood tags for the diagnostic-only config:
-    // [High] commonly adjusted to improve data quality or stress level during test sessions.
-    // [Medium] sometimes adjusted as the diagnostic workflow matures.
-    // [Low] usually fixed by wiring, safety limits, or operator workflow.
-
-    // [Low] Dedicated strap pins for the full diagnostic battery mode. Change them only if the wiring harness needs
-    // different spare pins; keep them distinct from the service-jumper and maneuver-test jumpers.
-    constexpr uint8_t kModeSelectPinA = 30U;
-    // [Low] Dedicated strap pins for the full diagnostic battery mode. Change with pin A.
-    constexpr uint8_t kModeSelectPinB = 31U;
-    // [Medium] Diagnostic control/log period. Shorten it only if SD logging, sensor reads, and control math still meet
-    // the deadline; lengthen it if you see dropped samples or write stalls.
-    constexpr unsigned long kControlPeriodUs = 500UL;
-    // [Medium] Initial stationary settle before the diagnostic battery starts. Increase if the robot is still moving
-    // from placement when logging begins; decrease if startup idle time is unnecessary.
-    constexpr uint16_t kStartupSettleMs = 250U;
-    // [Medium] Idle capture window used for baseline noise and bias logging. Increase if you want better stationary
-    // statistics; decrease if the diagnostic routine spends too long collecting idle data.
-    constexpr uint16_t kBaselineHoldMs = 2500U;
-    // [Medium] Pause between diagnostic phases. This is set from measured post-motion settling data so the robot has
-    // time to re-enter a genuinely stationary state before the next maneuver starts.
-    constexpr uint16_t kInterTestHoldMs = 350U;
-    // [Medium] SD flush cadence during diagnostics. Decrease it if you want less data loss risk on power interruption;
-    // increase it if flush overhead limits logging throughput.
-    constexpr uint32_t kLogFlushPeriodMs = 250U;
-    // [Low] Half-width of the allowed diagnostic operating square. Increase only if the test area is larger and you
-    // intentionally want wider trajectories; decrease for a tighter safety fence around the start pose.
-    constexpr float kBoundaryHalfSpanM = 0.34f;
-    // [High] Short straight distance used in the diagnostic battery. Increase for more steady-state straight data;
-    // decrease if you need to stay well inside the safety box or focus on launch/braking behavior.
-    constexpr float kShortStraightDistanceM = 0.18f;
-    // [High] Long straight distance used in the diagnostic battery. Increase if you need more data at higher speed;
-    // decrease if the robot approaches the boundary or cannot complete the profile cleanly.
-    constexpr float kLongStraightDistanceM = 0.27f;
-    // [High] Side length of the diagnostic square-loop test. Increase for more coupled straight/turn data; decrease
-    // if the loop approaches the boundary or you want to isolate turn behavior.
-    constexpr float kSquareLegDistanceM = 0.15f;
-    // [High] Arc length for each half-circle arc test. Increase for longer arc-tracking data; decrease if the circle
-    // grows too large for the available floor space or you want tighter curvature.
-    constexpr float kArcHalfCircleDistanceM = 0.20f;
-    // [High] Cruise speed for conservative diagnostic straights and square loops. Increase once low-speed data is
-    // boring and stable; decrease if you need cleaner low-dynamics identification data.
-    constexpr float kSlowStraightSpeedMps = 0.25f;
-    // [High] Mid-speed cruise used by the diagnostic circle sweep. Increase once the slower circle data is clean;
-    // decrease if the circle comparison already exposes the smooth-turn mismatch you need to correct.
-    constexpr float kCircleMediumSpeedMps = 0.35f;
-    // [High] Cruise speed for the longer diagnostic straight test. Increase to probe higher-speed behavior; decrease
-    // if braking distance, tracking error, or the safety boundary becomes problematic.
-    constexpr float kFastStraightSpeedMps = 0.45f;
-    // [High] Straight-profile acceleration during diagnostics. Increase if you want stronger feedforward/traction data;
-    // decrease if launches spin the tires or make the test less repeatable.
-    constexpr float kStraightAccelMps2 = 1.50f;
-    // [High] Straight-profile braking during diagnostics. Increase if you want more braking data or tighter stops;
-    // decrease if braking becomes noisy, slides the tires, or destabilizes the chassis.
-    constexpr float kStraightDecelMps2 = 1.80f;
-    // [High] Turn-rate limit for diagnostic turn sweeps. Increase to stress higher-yaw-rate behavior; decrease if the
-    // turn data is dominated by overshoot or wheel scrub instead of clean rotational dynamics.
-    constexpr float kTurnMaxOmegaRadps = 9.0f;
-    // [High] Turn acceleration for diagnostic turn sweeps. Increase to excite sharper turn entry/exit dynamics;
-    // decrease if the robot cannot reach those ramps repeatably without slipping.
-    constexpr float kTurnAccelRadps2 = 35.0f;
-    // Diagnostics now reuse the same wheel profile as mission and startup calibration so any turn or straight behavior
-    // seen here matches the controller the robot will use elsewhere.
-    constexpr float kDiagnosticWheelVelocityKpScale = Config::kNominalWheelVelocityKpScale;
-    constexpr float kDiagnosticWheelVelocityKiScale = Config::kNominalWheelVelocityKiScale;
-    constexpr float kDiagnosticWheelIntegralLimitScale = Config::kNominalWheelIntegralLimitScale;
-    // [High] Lowest raw drive command included in the kickoff sweep. Decrease to probe weaker launches; increase if
-    // the robot clearly does not move at very low values and you want a shorter sweep.
-    constexpr float kKickoffSweepMinDriveCommand = 0.15f;
-    // [High] Highest raw drive command included in the kickoff sweep. Increase to probe more aggressive launches;
-    // decrease if the sweep already reaches reliable breakaway or the robot moves too far per sample.
-    constexpr float kKickoffSweepMaxDriveCommand = 0.70f;
-    // [Medium] Step size between kickoff sweep commands. Decrease for finer resolution; increase for a faster sweep.
-    constexpr float kKickoffSweepStepDriveCommand = 0.05f;
-    // [High] Pulse length for each kickoff sample. Increase if static friction needs a longer shove to reveal the
-    // threshold; decrease if the robot moves too far before the recovery segment.
-    constexpr uint16_t kKickoffSweepPulseMs = 120U;
-    // [Medium] Minimum distance that counts as "moved" during the kickoff sweep. Increase if encoder noise causes false
-    // positives; decrease if real breakaway moves are being missed.
-    constexpr float kKickoffSweepMoveThresholdM = 0.004f;
-    // [Medium] Minimum peak speed that counts as "moved" during the kickoff sweep. Increase if noise spikes look like
-    // launches; decrease if the robot creeps but does not cross the distance threshold.
-    constexpr float kKickoffSweepMoveThresholdMps = 0.03f;
-    // [High] Raw kickoff command used ahead of each forward-hold sample. Raise it if the forward sweep still stalls at
-    // the start; lower it if the kickoff itself dominates the measurement too much.
-    constexpr float kForwardSweepKickoffDriveCommand = 0.35f;
-    // [Medium] Kickoff pulse length used before each forward-hold sample. Increase if the robot needs more time to
-    // break away; decrease if the kickoff contributes too much of the measured travel.
-    constexpr uint16_t kForwardSweepKickoffMs = 80U;
-    // [High] Lowest raw hold command included in the forward sweep. Decrease to probe weaker sustaining commands;
-    // increase if very low commands are obviously useless.
-    constexpr float kForwardSweepMinDriveCommand = 0.10f;
-    // [High] Highest raw hold command included in the forward sweep. Increase to extend the command-to-speed map;
-    // decrease if the sweep gets too aggressive for the available space.
-    constexpr float kForwardSweepMaxDriveCommand = 0.40f;
-    // [Medium] Step size between forward sweep commands. Decrease for finer resolution; increase for a shorter test.
-    constexpr float kForwardSweepStepDriveCommand = 0.05f;
-    // [High] Hold time for each forward sweep sample after the kickoff pulse. Increase for better steady-speed data;
-    // decrease if the robot travels too far before the recovery segment.
-    constexpr uint16_t kForwardSweepHoldMs = 220U;
-    // [Medium] Average hold speed that counts as "carried" during the forward sweep. Increase if tiny creeping speeds
-    // are not useful; decrease if the desired sustaining command is very gentle.
-    constexpr float kForwardSweepCarryThresholdMps = 0.05f;
-    // [Medium] Distance accumulated during the hold segment that counts as a meaningful carry. Increase to ignore tiny
-    // nudges; decrease if low-speed sustained motion is the target.
-    constexpr float kForwardSweepCarryThresholdM = 0.010f;
-    // [Medium] Brake-and-settle window after each characterization sample. This now tracks the measured diagnostic
-    // settling time instead of the earlier optimistic estimate.
-    constexpr uint16_t kCharacterizationSettleMs = 350U;
-    // [Medium] Distance reserve kept inside the diagnostic boundary while open-loop characterization probes are still
-    // driving. Increase if probes still reach the edge before braking; decrease only if the sweep no longer reaches
-    // useful speeds in the available space.
-    constexpr float kCharacterizationBoundaryReserveM = 0.14f;
-    // [Medium] Recovery cruise speed used to bring the robot back to the start between characterization samples after
-    // a turnaround. Increase if recovery legs are too slow; decrease if the recovery path overshoots or turns get
-    // sloppy between samples.
-    constexpr float kCharacterizationRecoverySpeedMps = 0.18f;
-}
-
-namespace AuxMeasurementConfig
-{
-    enum class Routine : uint8_t
-    {
-        FanStaticSurvey = 0U,
-        TurningTractionSweep = 1U,
-        CorridorRepeatabilitySweep = 2U,
-        PositionAccuracyAudit = 3U,
-    };
-
-    // Likelihood tags for the auxiliary one-off measurement mode:
-    // [High] commonly adjusted when instrumenting a new internal measurement routine.
-    // [Medium] sometimes adjusted to trade logging density against run time.
-    // [Low] usually fixed by spare-pin availability and operator workflow.
-
-    // [Low] Short pins 28 and 29 at startup to enter auxiliary measurement mode. These pins are selector-only; they
-    // are not sampled as measurement inputs after boot.
-    constexpr uint8_t kModeSelectPinA = 28U;
-    // [Low] Dedicated strap partner for the auxiliary pin-measurement mode. Change with pin A.
-    constexpr uint8_t kModeSelectPinB = 29U;
-    // [Medium] Selected one-off routine. Change this when you need a different internal measurement script without
-    // disturbing the main characterization battery.
-    constexpr Routine kRoutine = Routine::PositionAccuracyAudit;
-    // [Medium] Control/log period for auxiliary capture. Shorten it only if SD logging still keeps up and the extra
-    // temporal resolution is actually useful.
-    constexpr unsigned long kControlPeriodUs = 1000UL;
-    // [Medium] Initial stationary settle before the first auxiliary phase. Increase if the chassis or fan still rings
-    // after placement; decrease if the idle lead-in is longer than needed.
-    constexpr uint16_t kStartupSettleMs = 500U;
-    // [Medium] Fan-off idle capture at the start of the default auxiliary routine. Increase if you need a stronger
-    // baseline for vibration or bias comparisons.
-    constexpr uint16_t kBaselineHoldMs = 2000U;
-    // [Medium] Fan-on idle capture used by the default auxiliary routine. Increase if you need more statistics on
-    // fan-induced vibration, gyro shift, or wall-sensor noise.
-    constexpr uint16_t kFanHoldMs = 3000U;
-    // [Medium] Fan-off recovery capture after the fan phase. Increase if you want to see how quickly the sensors and
-    // chassis settle back to baseline.
-    constexpr uint16_t kRecoveryHoldMs = 2000U;
-    // [Medium] Direction used by the turning-traction sweep. Flip this only if you specifically want the opposite
-    // circle direction for a one-off asymmetry check.
-    constexpr bool kTurningTractionSweepClockwise = true;
-    // [Medium] Circle radius commanded by the turning-traction sweep. Increase if you need a gentler sweep with more
-    // floor margin; decrease only if you have verified the smaller radius still matches your smooth-turn geometry.
-    constexpr float kTurningTractionSweepRadiusM = 0.180f;
-    // [Medium] Initial speed for the turning-traction sweep. Increase only if the early portion of the sweep is
-    // uninformative and well below any plausible traction threshold.
-    constexpr float kTurningTractionSweepStartSpeedMps = 0.60f;
-    // [Medium] Linear acceleration used to ramp the turning-traction circle. Increase if the sweep takes too long;
-    // decrease if longitudinal acceleration is contaminating the lateral-traction measurement.
-    constexpr float kTurningTractionSweepAccelMps2 = 0.03f;
-    // [Medium] Optional commanded-speed ceiling for the turning-traction sweep. Set to `0` to remove the software
-    // speed limit and let the run continue toward the hardware boundary instead.
-    constexpr float kTurningTractionSweepMaxSpeedMps = 0.0f;
-    // [Medium] Fan-on stationary lead-in before the traction sweep. Keep this at or above the mission fan ramp time so
-    // the circle begins with steady downforce instead of during fan spin-up.
-    constexpr uint16_t kTurningTractionSweepFanSettleMs = 2500U;
-    // [Medium] Open-loop launch window used to preserve the commanded circle radius while the drivetrain breaks static
-    // friction. Increase if the sweep still begins nearly straight; decrease only if the launch segment feels too long.
-    constexpr uint16_t kTurningTractionLaunchMs = 250U;
-    // [Medium] Optional angular-command ceiling for the turning-traction sweep. Set to `0` to remove the software
-    // yaw-rate cap and let actuator saturation, slip detection, and timeout define the limit instead.
-    constexpr float kTurningTractionSweepMaxAngularCommandRadps = 0.0f;
-    // [Medium] Wheel-speed proportional gain scale used only by the turning-traction sweep. Raise it if the robot
-    // still settles into a much wider arc than commanded; lower it if the wheel commands become noisy or oscillatory.
-    constexpr float kTurningTractionWheelVelocityKpScale = DiagnosticConfig::kDiagnosticWheelVelocityKpScale;
-    // [Medium] Wheel-speed integral gain scale used only by the turning-traction sweep. Raise it if steady-state
-    // curvature still stays biased after the proportional term is no longer enough.
-    constexpr float kTurningTractionWheelVelocityKiScale = DiagnosticConfig::kDiagnosticWheelVelocityKiScale;
-    // [Medium] Wheel integrator limit scale used only by the turning-traction sweep. Raise it only if the sweep still
-    // runs out of corrective authority during the sustained circle.
-    constexpr float kTurningTractionWheelIntegralLimitScale = DiagnosticConfig::kDiagnosticWheelIntegralLimitScale;
-    // [Medium] Minimum measured speed required before the sweep is allowed to conclude that straight-line acceleration
-    // has plateaued and it should start tightening the turn instead.
-    constexpr float kTurningTractionPlateauMinSpeedMps = 0.70f;
-    // [Medium] Speed gain required within the plateau window to stay in the speed-ramp stage once the outer wheel is
-    // already near saturation. If the measured speed does not improve by at least this much, the sweep starts
-    // increasing curvature to force a traction breakaway.
-    constexpr float kTurningTractionPlateauDeltaMps = 0.02f;
-    // [Medium] Observation window used to decide whether the sweep has stopped making forward-speed progress after the
-    // outer wheel is already near saturation.
-    constexpr uint16_t kTurningTractionPlateauWindowMs = 2500U;
-    // [Medium] Outer-wheel command magnitude that counts as actuator-limited for the plateau detector.
-    constexpr float kTurningTractionActuatorCeilingCommand = 0.92f;
-    // [Medium] Curvature ramp applied after the speed stage plateaus. Raise it if the tightened-turn stage still takes
-    // too long to reach slip; lower it if the transition becomes too abrupt to interpret cleanly.
-    constexpr float kTurningTractionCurvatureRampMInvPerSec = 2.0f;
-    // [Medium] Minimum speed before the slip detector is allowed to trip. Increase if low-speed sensor noise produces
-    // false positives; decrease only if traction is breaking much earlier than expected.
-    constexpr float kTurningTractionSlipMinSpeedMps = 0.25f;
-    // [Medium] Minimum encoder-derived lateral acceleration before the slip detector is allowed to trip. Increase if
-    // low-g data is noisy; decrease if traction loss begins sooner on low-friction surfaces.
-    constexpr float kTurningTractionSlipMinLatAccelMps2 = 1.00f;
-    // [Medium] Minimum gyro-to-encoder yaw coherence expected while the robot is still gripping. Lower this only if
-    // clean runs show a persistent model mismatch; raise it if slip is being detected too late.
-    constexpr float kTurningTractionSlipYawCoherenceFloor = 0.70f;
-    // [Medium] Minimum planar-acceleration coherence expected while the robot is still gripping. Lower this only if
-    // accel bias/noise clearly depresses clean data; raise it if the sweep overruns after visible sliding starts.
-    constexpr float kTurningTractionSlipPlanarCoherenceFloor = 0.65f;
-    // [Medium] Sustained mismatch time required before the traction detector trips. Increase if brief bumps trigger
-    // false positives; decrease if obvious sliding is taking too long to stop the test.
-    constexpr uint16_t kTurningTractionSlipConfirmMs = 150U;
-    // [Low] Hard stop for the turning-traction sweep. Increase only if the configured acceleration profile can no
-    // longer reach max speed within this window.
-    constexpr uint32_t kTurningTractionSweepTimeoutMs = 90000U;
-    // [Low] Number of cells in the enclosed corridor used by the auxiliary mapping-repeatability sweep. This includes
-    // the start cell.
-    constexpr uint8_t kCorridorRepeatabilityRowCellCount = 5U;
-    // [Medium] Number of speed points exercised by the corridor repeatability sweep.
-    constexpr uint8_t kCorridorRepeatabilitySpeedCount = 4U;
-    // [Medium] Cruise speeds used by the corridor repeatability sweep. Increase upper entries if the run remains
-    // clearly reliable; reduce any entry that obviously overruns the corridor or fails to settle at turn-around.
-    constexpr float kCorridorRepeatabilitySpeedsMps[kCorridorRepeatabilitySpeedCount] = { 0.30f, 0.45f, 0.60f, 0.75f };
-    // [Medium] Acceleration used for the straight corridor sweeps. Keep this high enough that the robot reaches the
-    // test speed within the available corridor length.
-    constexpr float kCorridorRepeatabilityAccelMps2 = 1.00f;
-    // [Medium] Deceleration used for the corridor sweeps and end-of-leg stopping.
-    constexpr float kCorridorRepeatabilityDecelMps2 = 1.20f;
-    // [Medium] Turn-rate ceiling used for the 180-degree turnarounds in the corridor sweep.
-    constexpr float kCorridorRepeatabilityTurnMaxOmegaRadps = Config::kSearchTurnMaxOmegaRadps;
-    // [Medium] Angular acceleration used for the corridor turnarounds.
-    constexpr float kCorridorRepeatabilityTurnAccelRadps2 = Config::kSearchTurnAccelRadps2;
-    // [Medium] Short hold at the calibrated start pose before each speed pass.
-    constexpr uint16_t kCorridorRepeatabilityStartSettleMs = 150U;
-    // [Low] Number of cells in the northbound enclosed corridor used by the position-accuracy audit. This count
-    // includes the start cell and the corner cell at the far end.
-    constexpr uint8_t kPositionAuditNorthCorridorCellCount = 5U;
-    // [Low] Number of cells extending east beyond the corner cell in the position-accuracy audit. With the short 90
-    // ending on the half-step east of the corner, a value of four leaves seven clear half-steps before the east wall.
-    constexpr uint8_t kPositionAuditEastBranchCellCount = 4U;
-    // [Medium] Straight-speed points used by the position-accuracy audit.
-    constexpr uint8_t kPositionAuditStraightSpeedCount = 3U;
-    constexpr float kPositionAuditStraightSpeedsMps[kPositionAuditStraightSpeedCount] = { 0.30f, 0.55f, 0.80f };
-    // [Medium] Corner-entry speed caps used by the position-accuracy audit.
-    constexpr uint8_t kPositionAuditCornerSpeedCount = 3U;
-    constexpr float kPositionAuditCornerSpeedsMps[kPositionAuditCornerSpeedCount] = { 0.30f, 0.55f, 0.80f };
-    // Measurement runs must not inherit the mapping/search turn-rate ceiling. Keep this effectively unbounded so the
-    // smooth-turn audit can ask for whatever angular command the maneuver-tracking law requires.
-    constexpr float kPositionAuditCornerMaxOmegaRadps = 1000.0f;
-    // [Medium] The fixed-fixture smooth-turn audit is intended to characterize high-speed cornering, so it runs with
-    // the mission fan profile enabled through the entire phase, including the mirrored return path.
-    constexpr bool kPositionAuditSmoothTurnFanEnabled = true;
-    // [Medium] Shared linear limits used by the position-accuracy audit straight and corner trials.
-    constexpr float kPositionAuditAccelMps2 = 1.00f;
-    constexpr float kPositionAuditDecelMps2 = 1.20f;
-    // [Medium] In-place turn directions exercised by the position-accuracy audit. Both directions should use the same
-    // shared turn profile, so asymmetry here points at drivetrain or geometry error rather than a separate controller.
-    constexpr uint8_t kPositionAuditInPlaceTurnCount = 2U;
-    constexpr MazeMap::Direction kPositionAuditInPlaceTurnTargets[kPositionAuditInPlaceTurnCount] = {
-        MazeMap::Right,
-        MazeMap::Left,
-    };
-    // [Medium] Smooth-turn maneuvers exercised by the position-accuracy audit. These are the radius-sensitive mapping
-    // turns that most directly expose effective-track-width drift versus nominal maneuver radius.
-    constexpr uint8_t kPositionAuditSmoothTurnCodeCount = 2U;
-    constexpr MazeMap::ManeuverCode kPositionAuditSmoothTurnCodes[kPositionAuditSmoothTurnCodeCount] = {
-        MazeMap::S90SS,
-        MazeMap::S90LS,
-    };
-    // [Low] Phase 1 runs a straight out-and-back from the start-cell center to the corner-cell center.
-    constexpr uint8_t kPositionAuditPhase1ForwardHalfSteps = 8U;
-    // [Low] Phase 2 runs the short smooth 90 on the fixed fixture using the exact half-step launch and runout that
-    // fit the 5-cell north corridor and 4-cell east leg.
-    constexpr uint8_t kPositionAuditPhase2PreTurnHalfSteps = 7U;
-    constexpr uint8_t kPositionAuditPhase2PostTurnHalfSteps = 7U;
-    // [Low] Phase 3 runs the long smooth 90 on the same fixed fixture.
-    constexpr uint8_t kPositionAuditPhase3PreTurnHalfSteps = 6U;
-    constexpr uint8_t kPositionAuditPhase3PostTurnHalfSteps = 6U;
-    // [Medium] Short settle used at the mission start pose and between anchored audit phases.
-    constexpr uint16_t kPositionAuditStartSettleMs = 150U;
-    // [Medium] SD flush cadence during auxiliary capture. Decrease it if you want less risk of losing data on power
-    // interruption; increase it if flush overhead becomes the limiting factor.
-    constexpr uint32_t kLogFlushPeriodMs = 250U;
-}
-
-namespace FrontWallCharacterizationConfig
-{
-    // [Low] Short pins 39 and 40 at startup to enter the persistent front-wall characterization routine. These pins
-    // are selector-only and are not sampled as part of the stored curve.
-    constexpr uint8_t kModeSelectPinA = 39U;
-    constexpr uint8_t kModeSelectPinB = 40U;
-    // [Medium] Control period for the reverse characterization run. Keep this fast enough for smooth wheel control and
-    // fine encoder-based spacing along the captured curve.
-    constexpr unsigned long kControlPeriodUs = 1000UL;
-    // [Medium] Initial settle before the reverse sweep starts. Increase if placement against the wall still rings in
-    // the chassis or if the operator needs more time after letting go.
-    constexpr uint16_t kStartupSettleMs = 400U;
-    // [Medium] Once the SD card is present, wait this long before starting the characterization flow so the operator
-    // can finish installing the card and clear their hands from the robot.
-    constexpr uint16_t kPostSdReadyDelayMs = 15000U;
-    // [Medium] Reverse speed used while backing away from the wall. Keep this slow so the stored curve is dominated by
-    // the front-sensor response rather than drivetrain transients.
-    constexpr float kReverseSpeedMps = 0.08f;
-    // [Medium] Acceleration limit while ramping into the reverse characterization speed.
-    constexpr float kReverseAccelMps2 = 0.20f;
-    // [Medium] Angular-rate limit used by the heading hold during the reverse sweep.
-    constexpr float kMaxAngularCommandRadps = 2.0f;
-    // [Medium] Distance spacing between stored curve samples. Lower for denser templates; raise if EEPROM space is
-    // needed elsewhere.
-    constexpr float kStoredDistanceStepM = 0.001f;
-    // [Medium] Maximum reverse travel allowed while searching for the collapse-to-zero region.
-    constexpr float kMaxReverseTravelM = 0.14f;
-    // [Medium] Differential-light threshold treated as collapsed-to-zero during this dark-room characterization mode.
-    constexpr float kCollapsedDifferentialLightThreshold = 0.0005f;
-    // [Medium] Require the collapsed condition for several consecutive control samples before ending the sweep so a
-    // single noisy read does not truncate the stored curve.
-    constexpr uint8_t kCollapsedConsecutiveSamples = 12U;
-    // [Low] Ignore collapse-to-zero until the robot has backed off by at least this much, so a bad starting placement
-    // or a transient first read cannot terminate the run immediately.
-    constexpr float kMinimumTravelBeforeCollapseCheckM = 0.01f;
-    // [Medium] Post-capture stationary hold before reporting success so the stored endpoint corresponds to a settled
-    // robot state.
-    constexpr uint16_t kPostCaptureSettleMs = 300U;
-    // [Low] EEPROM address used for the persisted front-wall curve. Keep this at zero until other persistent data
-    // needs to coexist in the same Teensy EEPROM region.
-    constexpr int kStorageAddress = 0;
-}
-
-namespace LedCalibrationConfig
-{
-    constexpr uint8_t kModeSelectPinA = 38U;
-    constexpr uint8_t kModeSelectPinB = 39U;
-}
+#include "DiagnosticConfig.h"
+#include "AuxMeasurementConfig.h"
+#include "FrontWallCharacterizationConfig.h"
+#include "LedCalibrationConfig.h"
 
 struct MotionLimits
 {
@@ -924,6 +583,7 @@ struct SensorSnapshot
     float accelBodyYMps2;
     float planarAccelMps2;
     float gyroRadps;
+    bool accelBiasValid;
     bool frontWall;
     bool frontLeftWall;
     bool frontRightWall;
@@ -952,6 +612,39 @@ struct DriveTelemetry
     float rightDistanceM = 0.0f;
     float leftVelocityMps = 0.0f;
     float rightVelocityMps = 0.0f;
+};
+
+struct OpticalObservationTiming
+{
+    uint32_t ledOnCommandUs = 0UL;
+    uint32_t adcOnSampleUs = 0UL;
+    uint32_t ledOffCommandUs = 0UL;
+    uint32_t adcOffSampleUs = 0UL;
+    uint32_t observationReadyUs = 0UL;
+};
+
+struct ImuObservationTiming
+{
+    uint32_t drdyUs = 0UL;
+    uint32_t readStartUs = 0UL;
+    uint32_t readDoneUs = 0UL;
+};
+
+struct ControlCycleTiming
+{
+    uint32_t controlStartUs = 0UL;
+    uint32_t controlEndUs = 0UL;
+    uint32_t pwmLatchUs = 0UL;
+    uint32_t encoderLatchUs = 0UL;
+    uint32_t encoderReadDoneUs = 0UL;
+    uint32_t ukfPredictStartUs = 0UL;
+    uint32_t ukfPredictEndUs = 0UL;
+    uint32_t ukfPredictDurationUs = 0UL;
+    uint32_t ukfUpdateStartUs = 0UL;
+    uint32_t ukfUpdateEndUs = 0UL;
+    uint32_t ukfUpdateDurationUs = 0UL;
+    uint32_t cycleCounterStart = 0UL;
+    uint32_t cycleCounterEnd = 0UL;
 };
 
 struct EncoderProgressWatchdog
@@ -1038,12 +731,17 @@ struct DiagnosticSensorSnapshot
     WallSensorTelemetry frontRight;
     WallSensorTelemetry sideLeft;
     WallSensorTelemetry sideRight;
+    OpticalObservationTiming frontTiming;
+    OpticalObservationTiming leftTiming;
+    OpticalObservationTiming rightTiming;
     ImuTelemetry imuFrontRight;
     ImuTelemetry imuBackLeft;
+    ImuObservationTiming imuTiming;
     float corridorErrorM = 0.0f;
     float frontSkewM = 0.0f;
     float accelBodyXMps2 = 0.0f;
     float accelBodyYMps2 = 0.0f;
+    bool accelBiasValid = false;
     bool frontWall = false;
     bool leftWall = false;
     bool rightWall = false;
@@ -1083,6 +781,7 @@ struct RawWallSensorSample
     float litLight = 0.0f;
     float differentialLight = 0.0f;
     float rawDistanceM = 0.20f;
+    OpticalObservationTiming timing{};
 };
 
 struct WallSensorCalibrationInput
@@ -1092,6 +791,7 @@ struct WallSensorCalibrationInput
     float differentialLight = 0.0f;
     float ambientLight = 0.0f;
     float litLight = 0.0f;
+    OpticalObservationTiming timing{};
 };
 
 struct RobustSignalBand
@@ -1184,6 +884,7 @@ struct AveragedWallSensorInputWindow
         differentialLight.Clear();
         ambientLight.Clear();
         litLight.Clear();
+        latestTiming = {};
     }
 
     WallSensorCalibrationInput Average() const noexcept
@@ -1194,6 +895,7 @@ struct AveragedWallSensorInputWindow
         averaged.differentialLight = differentialLight.Average();
         averaged.ambientLight = ambientLight.Average();
         averaged.litLight = litLight.Average();
+        averaged.timing = latestTiming;
         return averaged;
     }
 
@@ -1204,6 +906,7 @@ struct AveragedWallSensorInputWindow
         differentialLight.Push(input.differentialLight);
         ambientLight.Push(input.ambientLight);
         litLight.Push(input.litLight);
+        latestTiming = input.timing;
         return Average();
     }
 
@@ -1212,6 +915,7 @@ struct AveragedWallSensorInputWindow
     MazeMap::RollingAverageWindow<WindowCycles> differentialLight;
     MazeMap::RollingAverageWindow<WindowCycles> ambientLight;
     MazeMap::RollingAverageWindow<WindowCycles> litLight;
+    OpticalObservationTiming latestTiming{};
 };
 
 #if defined(ARDUINO_TEENSY41)
@@ -3371,21 +3075,305 @@ inline WallSensorCalibrationInput BuildWallSensorCalibrationInput(WallSensorId s
     input.differentialLight = sample.differentialLight;
     input.ambientLight = sample.ambientLight;
     input.litLight = sample.litLight;
+    input.timing = sample.timing;
     return input;
+}
+
+struct AsyncWallSensorPairRead
+{
+    WallSensorId firstSensorId = WallSensorId::FrontLeft;
+    WallSensorId secondSensorId = WallSensorId::FrontRight;
+    const MazeMap::WallSensor* firstSensor = nullptr;
+    const MazeMap::WallSensor* secondSensor = nullptr;
+    RawWallSensorSample firstSample{};
+    RawWallSensorSample secondSample{};
+    uint32_t litReadyUs = 0UL;
+    bool active = false;
+};
+
+enum class AsyncWallSensorSweepStage : uint8_t
+{
+    Front = 0U,
+    Left = 1U,
+    Right = 2U,
+    Complete = 3U
+};
+
+struct AsyncWallSensorSweepRead
+{
+    const MazeMap::WallSensor* frontLeftSensor = nullptr;
+    const MazeMap::WallSensor* frontRightSensor = nullptr;
+    const MazeMap::WallSensor* sideLeftSensor = nullptr;
+    const MazeMap::WallSensor* sideRightSensor = nullptr;
+    RawWallSensorSample frontLeftSample{};
+    RawWallSensorSample frontRightSample{};
+    RawWallSensorSample sideLeftSample{};
+    RawWallSensorSample sideRightSample{};
+    uint32_t nextFrontLeftLedOffCommandUs = 0UL;
+    uint32_t nextFrontRightLedOffCommandUs = 0UL;
+    uint32_t nextSideLeftLedOffCommandUs = 0UL;
+    uint32_t nextSideRightLedOffCommandUs = 0UL;
+    uint32_t latestLedOffUs = 0UL;
+    uint32_t stageReadyUs = 0UL;
+    AsyncWallSensorSweepStage stage = AsyncWallSensorSweepStage::Complete;
+    bool active = false;
+};
+
+inline bool HasAsyncWallSensorPairSettled(const AsyncWallSensorPairRead& read, uint32_t nowUs) noexcept
+{
+    return !read.active || (static_cast<int32_t>(nowUs - read.litReadyUs) >= 0);
+}
+
+inline void StartAsyncWallSensorPairRead(
+    WallSensorId firstSensorId,
+    const MazeMap::WallSensor& firstSensor,
+    WallSensorId secondSensorId,
+    const MazeMap::WallSensor& secondSensor,
+    AsyncWallSensorPairRead& read) noexcept
+{
+    read = AsyncWallSensorPairRead{};
+    read.firstSensorId = firstSensorId;
+    read.secondSensorId = secondSensorId;
+    read.firstSensor = &firstSensor;
+    read.secondSensor = &secondSensor;
+
+    const uint32_t ledOffCommandUs = micros();
+    firstSensor.SetLedEnabled(false);
+    secondSensor.SetLedEnabled(false);
+    read.firstSample.timing.ledOffCommandUs = ledOffCommandUs;
+    read.secondSample.timing.ledOffCommandUs = ledOffCommandUs;
+
+    read.firstSample.ambientLight = firstSensor.ReadLightLevel();
+    read.secondSample.ambientLight = secondSensor.ReadLightLevel();
+    const uint32_t ambientSampleUs = micros();
+    read.firstSample.timing.adcOffSampleUs = ambientSampleUs;
+    read.secondSample.timing.adcOffSampleUs = ambientSampleUs;
+
+    const uint32_t ledOnCommandUs = micros();
+    read.firstSample.timing.ledOnCommandUs = ledOnCommandUs;
+    read.secondSample.timing.ledOnCommandUs = ledOnCommandUs;
+    firstSensor.SetLedEnabled(true);
+    secondSensor.SetLedEnabled(true);
+    read.litReadyUs =
+        ledOnCommandUs +
+        (std::max)(WallSensorLitSettleTimeUs(firstSensorId), WallSensorLitSettleTimeUs(secondSensorId));
+    read.active = true;
+}
+
+inline bool TryCompleteAsyncWallSensorPairRead(AsyncWallSensorPairRead& read) noexcept
+{
+    if (!read.active)
+    {
+        return true;
+    }
+
+    if (!HasAsyncWallSensorPairSettled(read, micros()))
+    {
+        return false;
+    }
+
+    read.firstSample.litLight = read.firstSensor->ReadLightLevel();
+    read.secondSample.litLight = read.secondSensor->ReadLightLevel();
+    const uint32_t litSampleUs = micros();
+    read.firstSample.timing.adcOnSampleUs = litSampleUs;
+    read.secondSample.timing.adcOnSampleUs = litSampleUs;
+
+    read.firstSample.differentialLight =
+        MazeMap::WallSensor::DifferentialLightLevel(read.firstSample.ambientLight, read.firstSample.litLight);
+    read.secondSample.differentialLight =
+        MazeMap::WallSensor::DifferentialLightLevel(read.secondSample.ambientLight, read.secondSample.litLight);
+    read.firstSample.rawDistanceM = read.firstSensor->DistanceFromDifferentialLight(read.firstSample.differentialLight);
+    read.secondSample.rawDistanceM = read.secondSensor->DistanceFromDifferentialLight(read.secondSample.differentialLight);
+
+    read.firstSensor->SetLedEnabled(false);
+    read.secondSensor->SetLedEnabled(false);
+    const uint32_t observationReadyUs = micros();
+    read.firstSample.timing.observationReadyUs = observationReadyUs;
+    read.secondSample.timing.observationReadyUs = observationReadyUs;
+    read.active = false;
+    return true;
+}
+
+inline void CompleteAsyncWallSensorPairRead(AsyncWallSensorPairRead& read) noexcept
+{
+    while (!TryCompleteAsyncWallSensorPairRead(read))
+    {
+        delayMicroseconds(5);
+    }
+}
+
+inline void PrimeAsyncWallSensorDarkSample(
+    uint32_t ledOffCommandUs,
+    const MazeMap::WallSensor& sensor,
+    RawWallSensorSample& sample) noexcept
+{
+    sample = RawWallSensorSample{};
+    sample.timing.ledOffCommandUs = ledOffCommandUs;
+    sample.ambientLight = sensor.ReadLightLevel();
+    sample.timing.adcOffSampleUs = micros();
+}
+
+inline void FinalizeAsyncWallSensorLitSample(
+    const MazeMap::WallSensor& sensor,
+    RawWallSensorSample& sample) noexcept
+{
+    sample.litLight = sensor.ReadLightLevel();
+    sample.timing.adcOnSampleUs = micros();
+    sample.differentialLight = MazeMap::WallSensor::DifferentialLightLevel(sample.ambientLight, sample.litLight);
+    sample.rawDistanceM = sensor.DistanceFromDifferentialLight(sample.differentialLight);
+}
+
+inline void StartAsyncWallSensorSweepRead(
+    const MazeMap::WallSensor& frontLeft,
+    uint32_t frontLeftLedOffCommandUs,
+    const MazeMap::WallSensor& frontRight,
+    uint32_t frontRightLedOffCommandUs,
+    const MazeMap::WallSensor& sideLeft,
+    uint32_t sideLeftLedOffCommandUs,
+    const MazeMap::WallSensor& sideRight,
+    uint32_t sideRightLedOffCommandUs,
+    AsyncWallSensorSweepRead& read) noexcept
+{
+    read = AsyncWallSensorSweepRead{};
+    read.frontLeftSensor = &frontLeft;
+    read.frontRightSensor = &frontRight;
+    read.sideLeftSensor = &sideLeft;
+    read.sideRightSensor = &sideRight;
+    read.nextFrontLeftLedOffCommandUs = frontLeftLedOffCommandUs;
+    read.nextFrontRightLedOffCommandUs = frontRightLedOffCommandUs;
+    read.nextSideLeftLedOffCommandUs = sideLeftLedOffCommandUs;
+    read.nextSideRightLedOffCommandUs = sideRightLedOffCommandUs;
+    read.latestLedOffUs =
+        (std::max)(
+            (std::max)(frontLeftLedOffCommandUs, frontRightLedOffCommandUs),
+            (std::max)(sideLeftLedOffCommandUs, sideRightLedOffCommandUs));
+
+    PrimeAsyncWallSensorDarkSample(frontLeftLedOffCommandUs, frontLeft, read.frontLeftSample);
+    PrimeAsyncWallSensorDarkSample(frontRightLedOffCommandUs, frontRight, read.frontRightSample);
+    PrimeAsyncWallSensorDarkSample(sideLeftLedOffCommandUs, sideLeft, read.sideLeftSample);
+    PrimeAsyncWallSensorDarkSample(sideRightLedOffCommandUs, sideRight, read.sideRightSample);
+
+    const uint32_t frontLedOnCommandUs = micros();
+    read.frontLeftSample.timing.ledOnCommandUs = frontLedOnCommandUs;
+    read.frontRightSample.timing.ledOnCommandUs = frontLedOnCommandUs;
+    frontLeft.SetLedEnabled(true);
+    frontRight.SetLedEnabled(true);
+    read.stageReadyUs =
+        frontLedOnCommandUs +
+        (std::max)(
+            WallSensorLitSettleTimeUs(WallSensorId::FrontLeft),
+            WallSensorLitSettleTimeUs(WallSensorId::FrontRight));
+    read.stage = AsyncWallSensorSweepStage::Front;
+    read.active = true;
+}
+
+inline bool ServiceAsyncWallSensorSweepRead(AsyncWallSensorSweepRead& read) noexcept
+{
+    while (read.active)
+    {
+        const uint32_t nowUs = micros();
+        if (static_cast<int32_t>(nowUs - read.stageReadyUs) < 0)
+        {
+            return false;
+        }
+
+        switch (read.stage)
+        {
+        case AsyncWallSensorSweepStage::Front:
+        {
+            FinalizeAsyncWallSensorLitSample(*read.frontLeftSensor, read.frontLeftSample);
+            FinalizeAsyncWallSensorLitSample(*read.frontRightSensor, read.frontRightSample);
+            const uint32_t ledOffCommandUs = micros();
+            read.frontLeftSensor->SetLedEnabled(false);
+            read.frontRightSensor->SetLedEnabled(false);
+            read.frontLeftSample.timing.observationReadyUs = ledOffCommandUs;
+            read.frontRightSample.timing.observationReadyUs = ledOffCommandUs;
+            read.nextFrontLeftLedOffCommandUs = ledOffCommandUs;
+            read.nextFrontRightLedOffCommandUs = ledOffCommandUs;
+            read.latestLedOffUs = ledOffCommandUs;
+
+            const uint32_t leftLedOnCommandUs = micros();
+            read.sideLeftSample.timing.ledOnCommandUs = leftLedOnCommandUs;
+            read.sideLeftSensor->SetLedEnabled(true);
+            read.stageReadyUs = leftLedOnCommandUs + WallSensorLitSettleTimeUs(WallSensorId::SideLeft);
+            read.stage = AsyncWallSensorSweepStage::Left;
+            break;
+        }
+
+        case AsyncWallSensorSweepStage::Left:
+        {
+            FinalizeAsyncWallSensorLitSample(*read.sideLeftSensor, read.sideLeftSample);
+            const uint32_t ledOffCommandUs = micros();
+            read.sideLeftSensor->SetLedEnabled(false);
+            read.sideLeftSample.timing.observationReadyUs = ledOffCommandUs;
+            read.nextSideLeftLedOffCommandUs = ledOffCommandUs;
+            read.latestLedOffUs = ledOffCommandUs;
+
+            const uint32_t rightLedOnCommandUs = micros();
+            read.sideRightSample.timing.ledOnCommandUs = rightLedOnCommandUs;
+            read.sideRightSensor->SetLedEnabled(true);
+            read.stageReadyUs = rightLedOnCommandUs + WallSensorLitSettleTimeUs(WallSensorId::SideRight);
+            read.stage = AsyncWallSensorSweepStage::Right;
+            break;
+        }
+
+        case AsyncWallSensorSweepStage::Right:
+        {
+            FinalizeAsyncWallSensorLitSample(*read.sideRightSensor, read.sideRightSample);
+            const uint32_t ledOffCommandUs = micros();
+            read.sideRightSensor->SetLedEnabled(false);
+            read.sideRightSample.timing.observationReadyUs = ledOffCommandUs;
+            read.nextSideRightLedOffCommandUs = ledOffCommandUs;
+            read.latestLedOffUs = ledOffCommandUs;
+            read.stage = AsyncWallSensorSweepStage::Complete;
+            read.active = false;
+            return true;
+        }
+
+        case AsyncWallSensorSweepStage::Complete:
+        default:
+            read.active = false;
+            return true;
+        }
+    }
+
+    return true;
+}
+
+inline void CompleteAsyncWallSensorSweepRead(AsyncWallSensorSweepRead& read) noexcept
+{
+    while (!ServiceAsyncWallSensorSweepRead(read))
+    {
+        delayMicroseconds(5);
+    }
+}
+
+inline uint32_t NextAsyncWallSensorSweepAmbientReadyUs(const AsyncWallSensorSweepRead& read) noexcept
+{
+    return
+        read.latestLedOffUs +
+        (std::max)(
+            WallSensorAmbientSettleTimeUs(WallSensorId::FrontLeft),
+            WallSensorAmbientSettleTimeUs(WallSensorId::FrontRight));
 }
 
 inline RawWallSensorSample SampleWallSensorRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor)
 {
     RawWallSensorSample sample{};
+    sample.timing.ledOffCommandUs = micros();
     sensor.SetLedEnabled(false);
     delayMicroseconds(WallSensorAmbientSettleTimeUs(sensorId));
+    sample.timing.adcOffSampleUs = micros();
     sample.ambientLight = sensor.ReadLightLevel();
 
+    sample.timing.ledOnCommandUs = micros();
     sensor.SetLedEnabled(true);
     delayMicroseconds(WallSensorLitSettleTimeUs(sensorId));
+    sample.timing.adcOnSampleUs = micros();
     sample.litLight = sensor.ReadLightLevel();
     sample.differentialLight = MazeMap::WallSensor::DifferentialLightLevel(sample.ambientLight, sample.litLight);
     sample.rawDistanceM = sensor.DistanceFromDifferentialLight(sample.differentialLight);
+    sample.timing.observationReadyUs = micros();
     sensor.SetLedEnabled(false);
     return sample;
 }
@@ -3400,10 +3388,16 @@ inline void SampleWallSensorPairRaw(
 {
     firstSensor.SetLedEnabled(false);
     secondSensor.SetLedEnabled(false);
+    firstSample.timing.ledOffCommandUs = micros();
+    secondSample.timing.ledOffCommandUs = firstSample.timing.ledOffCommandUs;
     delayMicroseconds((std::max)(WallSensorAmbientSettleTimeUs(firstSensorId), WallSensorAmbientSettleTimeUs(secondSensorId)));
     firstSample.ambientLight = firstSensor.ReadLightLevel();
     secondSample.ambientLight = secondSensor.ReadLightLevel();
+    firstSample.timing.adcOffSampleUs = micros();
+    secondSample.timing.adcOffSampleUs = firstSample.timing.adcOffSampleUs;
 
+    firstSample.timing.ledOnCommandUs = micros();
+    secondSample.timing.ledOnCommandUs = firstSample.timing.ledOnCommandUs;
     firstSensor.SetLedEnabled(true);
     secondSensor.SetLedEnabled(true);
     delayMicroseconds((std::max)(WallSensorLitSettleTimeUs(firstSensorId), WallSensorLitSettleTimeUs(secondSensorId)));
@@ -3413,6 +3407,10 @@ inline void SampleWallSensorPairRaw(
     secondSample.litLight = secondSensor.ReadLightLevel();
     secondSample.differentialLight = MazeMap::WallSensor::DifferentialLightLevel(secondSample.ambientLight, secondSample.litLight);
     secondSample.rawDistanceM = secondSensor.DistanceFromDifferentialLight(secondSample.differentialLight);
+    firstSample.timing.adcOnSampleUs = micros();
+    secondSample.timing.adcOnSampleUs = firstSample.timing.adcOnSampleUs;
+    firstSample.timing.observationReadyUs = micros();
+    secondSample.timing.observationReadyUs = firstSample.timing.observationReadyUs;
     firstSensor.SetLedEnabled(false);
     secondSensor.SetLedEnabled(false);
 }
@@ -3781,10 +3779,22 @@ inline bool CalibrateStationaryBackLeftGyroBias(
     unsigned long controlPeriodUs,
     bool enableAccelRuntime,
     float& gyroBiasRadps,
+    float* accelBiasXG = nullptr,
+    float* accelBiasYG = nullptr,
+    bool* accelBiasInitialized = nullptr,
     MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
         MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
 {
+    if (accelBiasInitialized != nullptr)
+    {
+        *accelBiasInitialized = false;
+    }
+
 #if defined(ARDUINO_TEENSY41)
+    const bool captureAccelBias =
+        enableAccelRuntime &&
+        (accelBiasXG != nullptr) &&
+        (accelBiasYG != nullptr);
     while (true)
     {
         const MazeMap::EncoderCountPair startCounts = CaptureDriveEncoderCounts();
@@ -3811,6 +3821,8 @@ inline bool CalibrateStationaryBackLeftGyroBias(
             static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs));
         const unsigned long measurementStartMs = millis();
         double accumulatedRadps = 0.0;
+        double accumulatedAccelXG = 0.0;
+        double accumulatedAccelYG = 0.0;
         unsigned long collectedSamples = 0UL;
         while ((collectedSamples < requiredSamples) ||
             ((millis() - measurementStartMs) < static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs)))
@@ -3823,6 +3835,12 @@ inline bool CalibrateStationaryBackLeftGyroBias(
                 break;
             }
 
+            if (captureAccelBias)
+            {
+                const MazeMap::Vehicle::ImuBackLeft::Axes accel = vehicle.IMU_BL.ReadAccel();
+                accumulatedAccelXG += static_cast<double>(vehicle.IMU_BL.AccelRawToG(accel.x));
+                accumulatedAccelYG += static_cast<double>(vehicle.IMU_BL.AccelRawToG(accel.y));
+            }
             accumulatedRadps += static_cast<double>(ReadBackLeftGyroZRadpsRaw(vehicle));
             ++collectedSamples;
             delay(kImuCalibrationSampleIntervalMs);
@@ -3840,11 +3858,23 @@ inline bool CalibrateStationaryBackLeftGyroBias(
         }
 
         gyroBiasRadps = static_cast<float>(accumulatedRadps / static_cast<double>(collectedSamples));
+        if (captureAccelBias)
+        {
+            *accelBiasXG = static_cast<float>(accumulatedAccelXG / static_cast<double>(collectedSamples));
+            *accelBiasYG = static_cast<float>(accumulatedAccelYG / static_cast<double>(collectedSamples));
+        }
+        if (accelBiasInitialized != nullptr)
+        {
+            *accelBiasInitialized = captureAccelBias;
+        }
         return true;
     }
 #else
     (void)controlPeriodUs;
     (void)enableAccelRuntime;
+    (void)accelBiasXG;
+    (void)accelBiasYG;
+    (void)accelBiasInitialized;
     (void)accelFilterFreq;
     gyroBiasRadps = EstimateMissionGyroBiasRadps(vehicle);
     return true;

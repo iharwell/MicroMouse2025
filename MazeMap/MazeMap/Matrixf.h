@@ -1,9 +1,16 @@
 #pragma once
 #include "Defines.h"
+#include "MazeMapEigen.h"
 #include "Vector2f.h"
 #include <cmath>
 namespace MazeMap
 {
+	// Use Eigen implementation.
+	template<int ROWS, int COLS>
+	using Matrixf = Eigen::Matrix<float,ROWS,COLS>;
+	template<int DIMENSION>
+	using Vectorf = Eigen::Vector<float, DIMENSION>;
+	/*
 	template<int ROWS, int COLS>
 	class Matrixf
 	{
@@ -140,7 +147,7 @@ namespace MazeMap
 				}
 			}
 		}
-	};
+	};*/
 }
 
 

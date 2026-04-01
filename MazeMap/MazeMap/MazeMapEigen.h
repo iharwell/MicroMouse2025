@@ -3,5 +3,5 @@
 #if defined(ARDUINO)
 #include <Eigen.h>
 #else
-#include "libraries/Eigen/src/MazeMapEigenVendor.h"
+#include <Eigen>
 #endif

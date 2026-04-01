@@ -1,5 +1,4 @@
 #include "MazeMapApplicationPrivate.h"
-#include "MazeMapControllerRegistry.h"
 #include "MazeMapSharedRuntime.h"
 
 using MazeMapApp::Internal::GetSharedRobotRuntime;
@@ -138,7 +137,7 @@ public:
         {
             return Fail("Telemetry sensor init failed");
         }
-        if (!_telemetryLogger.Begin(_telemetrySensors, "maneuver_test.csv", Config::kControlPeriodUs, "maneuver_test"))
+        if (!_telemetryLogger.Begin(_telemetrySensors, "maneuver_test.mmlog", Config::kControlPeriodUs, "maneuver_test"))
         {
             AppendStartupTrace("maneuver_test:telemetry_logger_open_failed");
             Serial.println("Maneuver test telemetry log unavailable; continuing without telemetry file");
@@ -222,12 +221,12 @@ public:
         }
 
         char fileName[32] = {};
-        if (!MazeMapApp::Internal::Runtime::SelectSequentialCsvFileName(
+        if (!MazeMapApp::Internal::Runtime::SelectSequentialRuntimeFileName(
                 fileName,
                 sizeof(fileName),
                 nullptr,
-                "aux%03u.csv",
-                "corridor_repeatability.csv"))
+                "aux%03u.mmlog",
+                "corridor_repeatability.mmlog"))
         {
             return Fail("Unable to choose corridor repeatability log file");
         }
@@ -283,12 +282,12 @@ public:
         }
 
         char fileName[32] = {};
-        if (!MazeMapApp::Internal::Runtime::SelectSequentialCsvFileName(
+        if (!MazeMapApp::Internal::Runtime::SelectSequentialRuntimeFileName(
                 fileName,
                 sizeof(fileName),
                 nullptr,
-                "aux%03u.csv",
-                "position_accuracy_audit.csv"))
+                "aux%03u.mmlog",
+                "position_accuracy_audit.mmlog"))
         {
             return Fail("Unable to choose position accuracy audit log file");
         }
@@ -1436,8 +1435,8 @@ private:
             "accel_mps2,%.6f;decel_mps2,%.6f;turn_max_omega_radps,%.6f;turn_accel_radps2,%.6f",
             AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2,
             AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2,
-            AuxMeasurementConfig::kCorridorRepeatabilityTurnMaxOmegaRadps,
-            AuxMeasurementConfig::kCorridorRepeatabilityTurnAccelRadps2);
+            Config::kSearchTurnMaxOmegaRadps,
+            Config::kSearchTurnAccelRadps2);
         if (!_telemetryLogger.WriteEvent("corridor_repeatability", line))
         {
             return Fail("Unable to write corridor repeatability metadata");
@@ -1641,8 +1640,8 @@ private:
         limits.maxSpeedMps = (std::max)(0.0f, cruiseSpeedMps);
         limits.accelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2;
         limits.decelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2;
-        limits.maxAngularSpeedRadps = AuxMeasurementConfig::kCorridorRepeatabilityTurnMaxOmegaRadps;
-        limits.angularAccelRadps2 = AuxMeasurementConfig::kCorridorRepeatabilityTurnAccelRadps2;
+        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
+        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
         return limits;
     }
 
@@ -4423,7 +4422,17 @@ private:
             return true;
         }
 
-        const DiagnosticSensorSnapshot telemetrySnapshot = _telemetrySensors.Capture(stationary, _drive.GetPose());
+        const DiagnosticSensorSnapshot telemetrySnapshot = _telemetrySensors.Capture(
+            stationary,
+            _drive.GetPose(),
+            [](DiagnosticSensorSnapshot&, auto&&, auto&& captureImu) noexcept
+            {
+                captureImu();
+            },
+            [this]() noexcept
+            {
+                _telemetryLogger.Flush();
+            });
         const DriveTelemetry telemetry = _drive.GetTelemetry();
         if (_telemetryLogger.LogSample(stationary, timestampUs, dtUs, _drive.GetPose(), _drive, telemetry, telemetrySnapshot))
         {
@@ -4463,14 +4472,40 @@ private:
     {
         while ((micros() - _lastControlMicros) < Config::kControlPeriodUs)
         {
+            _telemetryLogger.Service();
             delayMicroseconds(50);
         }
 
         const unsigned long now = micros();
         dtSeconds = static_cast<float>(now - _lastControlMicros) * 1.0e-6f;
         _lastControlMicros = now;
-        snapshot = _sensors.Capture(stationary, _drive.GetPose());
-        _drive.UpdateOdometry(dtSeconds, snapshot, &_maze);
+        snapshot = _sensors.Capture(
+            stationary,
+            _drive.GetPose(),
+            [this, dtSeconds](SensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
+            {
+                _drive.UpdateOdometry(
+                    dtSeconds,
+                    captureSnapshot,
+                    &_maze,
+                    nullptr,
+                    [&serviceWallRead]() noexcept
+                    {
+                        serviceWallRead();
+                    },
+                    [&captureImu]() noexcept
+                    {
+                        captureImu();
+                    });
+            },
+            [this]() noexcept
+            {
+                _telemetryLogger.Flush();
+            });
+        if (_drive.HasEstimatorFault())
+        {
+            return Fail(_drive.GetEstimatorFaultReason());
+        }
         return LogTelemetrySample(stationary, now, static_cast<uint32_t>(dtSeconds * 1.0e6f));
     }
 
@@ -4497,14 +4532,19 @@ private:
         return true;
     }
 
-    bool IsDriveMotionSettled() const
+    bool IsDriveMotionSettled(
+        const DriveTelemetry& stationaryReferenceTelemetry,
+        unsigned long stationaryReferenceMs,
+        const DriveTelemetry& telemetry,
+        const SensorSnapshot& snapshot,
+        unsigned long nowMs) const
     {
-        const DriveTelemetry telemetry = _drive.GetTelemetry();
-        return MazeMap::IsMissionStartupStationarySample(
-            _drive.GetPose().linearSpeedMps,
-            _drive.GetPose().angularSpeedRadps,
-            telemetry.leftVelocityMps,
-            telemetry.rightVelocityMps,
+        const unsigned long elapsedMs = nowMs - stationaryReferenceMs;
+        return MazeMap::IsMissionStartupStationaryFromEncoderWindow(
+            telemetry.leftDistanceM - stationaryReferenceTelemetry.leftDistanceM,
+            telemetry.rightDistanceM - stationaryReferenceTelemetry.rightDistanceM,
+            static_cast<float>(elapsedMs) * 1.0e-3f,
+            snapshot.gyroRadps,
             Config::kMotionSettleSpeedThresholdMps,
             Config::kMotionSettleAngularSpeedThresholdRadps);
     }
@@ -4519,6 +4559,7 @@ private:
         const unsigned long startMs = millis();
         unsigned long stationaryStartMs = 0UL;
         bool stationaryWindowActive = false;
+        DriveTelemetry stationaryStartTelemetry{};
         _drive.Brake();
         while (true)
         {
@@ -4528,22 +4569,28 @@ private:
             {
                 return false;
             }
-            (void)snapshot;
 
             _drive.Brake();
-            const bool settled = IsDriveMotionSettled();
             const unsigned long nowMs = millis();
-            if (!settled)
+            const DriveTelemetry telemetry = _drive.GetTelemetry();
+            if (!stationaryWindowActive)
             {
-                stationaryWindowActive = false;
+                stationaryStartMs = nowMs;
+                stationaryStartTelemetry = telemetry;
+                stationaryWindowActive = true;
+            }
+            else if (!IsDriveMotionSettled(
+                stationaryStartTelemetry,
+                stationaryStartMs,
+                telemetry,
+                snapshot,
+                nowMs))
+            {
+                stationaryStartMs = nowMs;
+                stationaryStartTelemetry = telemetry;
             }
             else
             {
-                if (!stationaryWindowActive)
-                {
-                    stationaryStartMs = nowMs;
-                    stationaryWindowActive = true;
-                }
                 if ((nowMs - stationaryStartMs) >= stationaryHoldMs)
                 {
                     return true;
@@ -4567,6 +4614,7 @@ private:
         const unsigned long startMs = millis();
         unsigned long stationaryStartMs = 0UL;
         bool stationaryWindowActive = false;
+        DriveTelemetry stationaryStartTelemetry{};
         while (true)
         {
             float dtSeconds = 0.0f;
@@ -4575,22 +4623,28 @@ private:
             {
                 return false;
             }
-            (void)snapshot;
 
             _drive.CommandVelocity(0.0f, 0.0f, dtSeconds);
-            const bool settled = IsDriveMotionSettled();
             const unsigned long nowMs = millis();
-            if (!settled)
+            const DriveTelemetry telemetry = _drive.GetTelemetry();
+            if (!stationaryWindowActive)
             {
-                stationaryWindowActive = false;
+                stationaryStartMs = nowMs;
+                stationaryStartTelemetry = telemetry;
+                stationaryWindowActive = true;
+            }
+            else if (!IsDriveMotionSettled(
+                stationaryStartTelemetry,
+                stationaryStartMs,
+                telemetry,
+                snapshot,
+                nowMs))
+            {
+                stationaryStartMs = nowMs;
+                stationaryStartTelemetry = telemetry;
             }
             else
             {
-                if (!stationaryWindowActive)
-                {
-                    stationaryStartMs = nowMs;
-                    stationaryWindowActive = true;
-                }
                 if ((nowMs - stationaryStartMs) >= stationaryHoldMs)
                 {
                     _drive.Brake();
@@ -4615,6 +4669,8 @@ private:
 
         unsigned long stationaryStartMs = 0UL;
         bool stationaryWindowActive = false;
+        unsigned long lastResetTraceMs = 0UL;
+        DriveTelemetry stationaryStartTelemetry{};
         while (true)
         {
             float dtSeconds = 0.0f;
@@ -4623,29 +4679,43 @@ private:
             {
                 return false;
             }
-            (void)snapshot;
 
             const DriveTelemetry telemetry = _drive.GetTelemetry();
-            const bool stationary = MazeMap::IsMissionStartupStationarySample(
-                _drive.GetPose().linearSpeedMps,
-                _drive.GetPose().angularSpeedRadps,
-                telemetry.leftVelocityMps,
-                telemetry.rightVelocityMps,
-                Config::kMissionStartupStationarySpeedThresholdMps,
-                Config::kMissionStartupStationaryMaxAbsYawRateRadps);
-
             _drive.Brake();
-            if (!stationary)
-            {
-                stationaryWindowActive = false;
-                continue;
-            }
-
             const unsigned long nowMs = millis();
             if (!stationaryWindowActive)
             {
                 stationaryStartMs = nowMs;
+                stationaryStartTelemetry = telemetry;
                 stationaryWindowActive = true;
+                continue;
+            }
+
+            const bool stationary = MazeMap::IsMissionStartupStationaryFromEncoderWindow(
+                telemetry.leftDistanceM - stationaryStartTelemetry.leftDistanceM,
+                telemetry.rightDistanceM - stationaryStartTelemetry.rightDistanceM,
+                static_cast<float>(nowMs - stationaryStartMs) * 1.0e-3f,
+                snapshot.gyroRadps,
+                Config::kMissionStartupStationarySpeedThresholdMps,
+                Config::kMissionStartupStationaryMaxAbsYawRateRadps);
+            if (!stationary)
+            {
+                if ((nowMs - lastResetTraceMs) >= 1000UL)
+                {
+                    char traceLine[160];
+                    snprintf(
+                        traceLine,
+                        sizeof(traceLine),
+                        "startup_stationary_hold:reset,left_dm=%.5f,right_dm=%.5f,gyro=%.5f",
+                        telemetry.leftDistanceM - stationaryStartTelemetry.leftDistanceM,
+                        telemetry.rightDistanceM - stationaryStartTelemetry.rightDistanceM,
+                        snapshot.gyroRadps);
+                    AppendStartupTrace(traceLine);
+                    lastResetTraceMs = nowMs;
+                }
+                stationaryStartMs = nowMs;
+                stationaryStartTelemetry = telemetry;
+                continue;
             }
 
             if ((nowMs - stationaryStartMs) >= Config::kMissionStartupStationaryHoldMs)
@@ -4686,8 +4756,6 @@ private:
             {
                 return false;
             }
-            (void)snapshot;
-
             const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
             float remainingM = (std::max)(0.0f, distanceM - traveledM);
             if (targetPositionOverride != nullptr)
@@ -4714,10 +4782,10 @@ private:
                     remainingM = (std::max)(0.0f, projectedRemainingM);
                 }
             }
-            if ((remainingM <= Config::kDistanceToleranceM) && IsDriveMotionSettled())
+            if (remainingM <= Config::kDistanceToleranceM)
             {
                 _drive.Brake();
-                return HoldPosition(Config::kMotionSettleHoldMs);
+                return HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U);
             }
             if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
             {
@@ -5811,10 +5879,18 @@ private:
             }
 
             const bool stoppingAtEndpoint = exitSpeedMps <= 0.05f;
+            if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
+            {
+                _drive.Brake();
+                if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+                {
+                    return false;
+                }
+                break;
+            }
             const bool terminalReached =
-                stoppingAtEndpoint ?
-                ((remainingM <= Config::kDistanceToleranceM) && IsDriveMotionSettled()) :
-                ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeedMps) <= Config::kSpeedToleranceMps));
+                (remainingM <= Config::kDistanceToleranceM) &&
+                (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeedMps) <= Config::kSpeedToleranceMps);
             if (terminalReached)
             {
                 _drive.Brake();
@@ -6548,10 +6624,18 @@ private:
                 remainingM = (std::max)(0.0f, projectedRemainingM);
             }
             const bool stoppingAtEndpoint = exitSpeed <= 0.05f;
+            if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
+            {
+                _drive.Brake();
+                if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+                {
+                    return false;
+                }
+                break;
+            }
             const bool terminalReached =
-                stoppingAtEndpoint ?
-                ((remainingM <= Config::kDistanceToleranceM) && IsDriveMotionSettled()) :
-                ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeed) <= Config::kSpeedToleranceMps));
+                (remainingM <= Config::kDistanceToleranceM) &&
+                (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeed) <= Config::kSpeedToleranceMps);
             if (terminalReached)
             {
                 _drive.Brake();
@@ -6737,10 +6821,18 @@ private:
             const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
             const float remainingM = (std::max)(0.0f, distanceM - traveledM);
             const bool stoppingAtEndpoint = exitSpeed <= 0.05f;
+            if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
+            {
+                _drive.Brake();
+                if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+                {
+                    return false;
+                }
+                break;
+            }
             const bool terminalReached =
-                stoppingAtEndpoint ?
-                ((remainingM <= Config::kDistanceToleranceM) && IsDriveMotionSettled()) :
-                ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeed) <= Config::kSpeedToleranceMps));
+                (remainingM <= Config::kDistanceToleranceM) &&
+                (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeed) <= Config::kSpeedToleranceMps);
             if (terminalReached)
             {
                 _drive.Brake();

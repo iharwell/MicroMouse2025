@@ -1729,6 +1729,14 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(750UL)) < 1.0e-6f);
 		}
 
+		TEST_METHOD(UiImuAccelLpf2CutoffMatchesConfiguredFraction)
+		{
+			using AccelFilterFreq = MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ;
+			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL, AccelFilterFreq::FRAC_1_020) - 100.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL, AccelFilterFreq::FRAC_1_400) - 5.0f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(GetUiAccelLpf2CutoffHzForControlPeriodUs(500UL, AccelFilterFreq::FRAC_1_002)) < 1.0e-6f);
+		}
+
 		TEST_METHOD(UiImuGyroCut213ReferenceMatchesDatasheetTables)
 		{
 			Assert::IsTrue(std::fabs(GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(1000UL) - 195.0f) < 1.0e-6f);
@@ -2060,6 +2068,39 @@ namespace MazeMap
 				0.008f,
 				0.020f));
 			Assert::IsFalse(IsMissionStartupStationarySample(0.001f, 0.010f, 0.003f, -0.004f, 0.0f, 0.020f));
+		}
+
+		TEST_METHOD(IsMissionStartupStationaryFromSensorsUsesEncoderAverageInsteadOfPose)
+		{
+			Assert::IsTrue(IsMissionStartupStationaryFromSensors(0.003f, -0.004f, 0.010f, 0.008f, 0.020f));
+			Assert::IsFalse(IsMissionStartupStationaryFromSensors(0.012f, 0.010f, 0.010f, 0.008f, 0.020f));
+			Assert::IsFalse(IsMissionStartupStationaryFromSensors(0.003f, -0.004f, 0.021f, 0.008f, 0.020f));
+			Assert::IsFalse(IsMissionStartupStationaryFromSensors(
+				std::numeric_limits<float>::quiet_NaN(),
+				-0.004f,
+				0.010f,
+				0.008f,
+				0.020f));
+		}
+
+		TEST_METHOD(IsMissionStartupStationaryFromEncoderWindowUsesEncoderTravelInsteadOfVelocityNoise)
+		{
+			Assert::IsTrue(IsMissionStartupStationaryFromEncoderWindow(0.0f, 0.0f, 0.250f, 0.010f, 0.008f, 0.020f));
+			Assert::IsTrue(IsMissionStartupStationaryFromEncoderWindow(0.0005f, -0.0005f, 0.250f, 0.010f, 0.008f, 0.020f));
+			Assert::IsFalse(IsMissionStartupStationaryFromEncoderWindow(0.0035f, 0.0035f, 0.250f, 0.010f, 0.008f, 0.020f));
+			Assert::IsFalse(IsMissionStartupStationaryFromEncoderWindow(0.0f, 0.0f, 0.250f, 0.021f, 0.008f, 0.020f));
+		}
+
+		TEST_METHOD(IsMissionStartupStationaryFromEncoderWindowRejectsInvalidInputs)
+		{
+			Assert::IsFalse(IsMissionStartupStationaryFromEncoderWindow(
+				std::numeric_limits<float>::quiet_NaN(),
+				0.0f,
+				0.250f,
+				0.010f,
+				0.008f,
+				0.020f));
+			Assert::IsFalse(IsMissionStartupStationaryFromEncoderWindow(0.0f, 0.0f, 0.0f, 0.010f, 0.008f, 0.020f));
 		}
 
 		TEST_METHOD(ComputeTurningTractionMetricsMatchesEncoderCircleKinematics)

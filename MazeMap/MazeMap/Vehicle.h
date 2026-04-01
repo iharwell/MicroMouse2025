@@ -55,7 +55,7 @@ namespace MazeMap
             // better starting point for the next wide-radius audit pass.
             { 0.063f, 0.096491f, 0.153f, 0.097348f }
         };
-        CircularBuffer<VehicleState, 15> _stateHistory;
+        VehicleState _state;
         float _peakForwardAcceleration;
         float _peakLateralAcceleration;
         float _peakRotationalVelocity;

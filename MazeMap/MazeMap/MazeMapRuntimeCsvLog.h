@@ -35,7 +35,7 @@ namespace MazeMapApp::Internal::Runtime
 
     private:
         MazeMap::CoreFileExport _file;
-        char _fileName[24];
+        char _fileName[64];
         unsigned long _lastFlushMs;
     };
 }

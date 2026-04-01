@@ -134,21 +134,142 @@ public:
     void UpdateOdometry(
         float dtSeconds,
         const SensorSnapshot& snapshot,
-        const MazeMap::Maze* map = nullptr)
+        const MazeMap::Maze* map = nullptr,
+        ControlCycleTiming* timing = nullptr)
     {
-        UpdatePoseEstimate(dtSeconds, snapshot, map);
+        UpdatePoseEstimate(
+            dtSeconds,
+            snapshot,
+            map,
+            timing,
+            MazeMap::NoopUkfLoopHook{},
+            []() noexcept {});
+    }
+
+    template <typename LoopHook, typename BeforeYawUpdate>
+    void UpdateOdometry(
+        float dtSeconds,
+        const SensorSnapshot& snapshot,
+        const MazeMap::Maze* map,
+        ControlCycleTiming* timing,
+        LoopHook&& loopHook,
+        BeforeYawUpdate&& beforeYawUpdate)
+    {
+        UpdatePoseEstimate(dtSeconds, snapshot, map, timing, loopHook, beforeYawUpdate);
     }
 
     void UpdateOdometry(
         float dtSeconds,
         const DiagnosticSensorSnapshot& snapshot,
-        const MazeMap::Maze* map = nullptr)
+        const MazeMap::Maze* map = nullptr,
+        ControlCycleTiming* timing = nullptr)
     {
-        UpdatePoseEstimate(dtSeconds, snapshot, map);
+        UpdatePoseEstimate(
+            dtSeconds,
+            snapshot,
+            map,
+            timing,
+            MazeMap::NoopUkfLoopHook{},
+            []() noexcept {});
+    }
+
+    template <typename LoopHook, typename BeforeYawUpdate>
+    void UpdateOdometry(
+        float dtSeconds,
+        const DiagnosticSensorSnapshot& snapshot,
+        const MazeMap::Maze* map,
+        ControlCycleTiming* timing,
+        LoopHook&& loopHook,
+        BeforeYawUpdate&& beforeYawUpdate)
+    {
+        UpdatePoseEstimate(dtSeconds, snapshot, map, timing, loopHook, beforeYawUpdate);
+    }
+
+    struct MeasuredKinematics
+    {
+        float leftVelocityMps = 0.0f;
+        float rightVelocityMps = 0.0f;
+        float linearSpeedMps = 0.0f;
+        float angularSpeedRadps = 0.0f;
+    };
+
+    MeasuredKinematics GetMeasuredKinematics(
+        float measuredYawRateRadps = std::numeric_limits<float>::quiet_NaN()) const
+    {
+        MeasuredKinematics kinematics{};
+        const MazeMap::PlantParams& params = _ukf.ukf().params();
+        kinematics.leftVelocityMps = _leftMotor.getEncoderVelocityMetersPerSecond();
+        kinematics.rightVelocityMps = _rightMotor.getEncoderVelocityMetersPerSecond();
+        kinematics.linearSpeedMps = 0.5f * (kinematics.leftVelocityMps + kinematics.rightVelocityMps);
+        float trackWidthM = params.trackWidthM;
+        if (!(trackWidthM > 0.0f) || !std::isfinite(trackWidthM))
+        {
+            trackWidthM = MazeMap::Vehicle::GetPhysicalModel().trackWidthM;
+        }
+
+        const float fallbackYawRateRadps =
+            ((trackWidthM > 0.0f) && std::isfinite(trackWidthM)) ?
+            ((kinematics.rightVelocityMps - kinematics.leftVelocityMps) / trackWidthM) :
+            0.0f;
+        kinematics.angularSpeedRadps =
+            std::isfinite(measuredYawRateRadps) ?
+            measuredYawRateRadps :
+            fallbackYawRateRadps;
+        return kinematics;
+    }
+
+    void ProjectMeasuredKinematics(float dtSeconds, float measuredYawRateRadps = std::numeric_limits<float>::quiet_NaN())
+    {
+        if (_estimatorFaulted)
+        {
+            return;
+        }
+
+        MazeMap::VehicleState::StateVector state = _ukf.ukf().state();
+        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
+        const MazeMap::PlantParams& params = _ukf.ukf().params();
+        if (!(params.wheelRadiusM > 0.0f) || !std::isfinite(params.wheelRadiusM))
+        {
+            SyncPoseEstimate();
+            return;
+        }
+
+        const MeasuredKinematics measured = GetMeasuredKinematics(measuredYawRateRadps);
+
+        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
+        {
+            const float midYawRad =
+                WrapAngleRad(state(MazeMap::VehicleState::kPsi) + (0.5f * measured.angularSpeedRadps * dtSeconds));
+            state(MazeMap::VehicleState::kPx) += measured.linearSpeedMps * std::cos(midYawRad) * dtSeconds;
+            state(MazeMap::VehicleState::kPy) += measured.linearSpeedMps * std::sin(midYawRad) * dtSeconds;
+            state(MazeMap::VehicleState::kPsi) =
+                WrapAngleRad(state(MazeMap::VehicleState::kPsi) + (measured.angularSpeedRadps * dtSeconds));
+        }
+
+        state(MazeMap::VehicleState::kU) = measured.linearSpeedMps;
+        state(MazeMap::VehicleState::kV) = 0.0f;
+        state(MazeMap::VehicleState::kR) = measured.angularSpeedRadps;
+        state(MazeMap::VehicleState::kOmegaL) = measured.leftVelocityMps / params.wheelRadiusM;
+        state(MazeMap::VehicleState::kOmegaR) = measured.rightVelocityMps / params.wheelRadiusM;
+        state(MazeMap::VehicleState::kKappaL) = 0.0f;
+        state(MazeMap::VehicleState::kKappaR) = 0.0f;
+        state(MazeMap::VehicleState::kAlphaFL) = 0.0f;
+        state(MazeMap::VehicleState::kAlphaFR) = 0.0f;
+        state(MazeMap::VehicleState::kAlphaRL) = 0.0f;
+        state(MazeMap::VehicleState::kAlphaRR) = 0.0f;
+        MazeMap::VehicleState::NormalizeStateVector(state);
+        (void)_ukf.ukf().setState(state, covariance);
+        SyncPoseEstimate();
     }
 
     void CommandVelocity(float linearSpeedMps, float angularSpeedRadps, float dtSeconds)
     {
+        if (_estimatorFaulted)
+        {
+            Brake();
+            return;
+        }
+
         const float previousLinearCommandMps = _lastLinearCommandMps;
         const float previousAngularCommandRadps = _lastAngularCommandRadps;
         _lastLinearCommandMps = linearSpeedMps;
@@ -234,6 +355,12 @@ public:
 
     void CommandOpenLoop(float leftDriveCommand, float rightDriveCommand)
     {
+        if (_estimatorFaulted)
+        {
+            Brake();
+            return;
+        }
+
         const float leftMeasuredMps = _leftMotor.getEncoderVelocityMetersPerSecond();
         const float rightMeasuredMps = _rightMotor.getEncoderVelocityMetersPerSecond();
         const unsigned long nowMs = millis();
@@ -262,6 +389,12 @@ public:
 
     void CommandOpenLoopRaw(float leftDriveCommand, float rightDriveCommand)
     {
+        if (_estimatorFaulted)
+        {
+            Brake();
+            return;
+        }
+
         _lastLinearCommandMps = 0.0f;
         _lastAngularCommandRadps = 0.0f;
         ResetLaunchAssist();
@@ -292,6 +425,16 @@ public:
     const PoseEstimate& GetPose() const
     {
         return _poseCache;
+    }
+
+    bool HasEstimatorFault() const noexcept
+    {
+        return _estimatorFaulted;
+    }
+
+    const char* GetEstimatorFaultReason() const noexcept
+    {
+        return (_estimatorFaultReason[0] != '\0') ? _estimatorFaultReason : "ukf_failure";
     }
 
     float GetLastLinearCommandMps() const
@@ -334,6 +477,7 @@ private:
         state(MazeMap::VehicleState::kPx) = std::isfinite(xMeters) ? xMeters : 0.0f;
         state(MazeMap::VehicleState::kPy) = std::isfinite(yMeters) ? yMeters : 0.0f;
         state(MazeMap::VehicleState::kPsi) = WrapAngleRad(yawRad);
+        ClearEstimatorFault();
         (void)_ukf.reset(state, BuildEstimatorCovariance());
         SyncPoseEstimate();
     }
@@ -386,10 +530,37 @@ private:
         return (std::clamp)(value, 0.01f, maxRangeM);
     }
 
+    void ClearEstimatorFault() noexcept
+    {
+        _estimatorFaulted = false;
+        _estimatorFaultReason[0] = '\0';
+    }
+
+    void TriggerEstimatorFault(const char* reason) noexcept
+    {
+        Brake();
+        if (_estimatorFaulted)
+        {
+            return;
+        }
+
+        _estimatorFaulted = true;
+        std::snprintf(
+            _estimatorFaultReason,
+            sizeof(_estimatorFaultReason),
+            "%s",
+            (reason != nullptr && reason[0] != '\0') ? reason : "ukf_failure");
+
+        char traceLine[96] = {};
+        std::snprintf(traceLine, sizeof(traceLine), "ukf_fault:%s", _estimatorFaultReason);
+        AppendStartupTrace(traceLine);
+    }
+
     static MazeMap::ImuMergedObs BuildUkfImuObservation(const SensorSnapshot& snapshot) noexcept
     {
         MazeMap::ImuMergedObs observation{};
-        if (!std::isfinite(snapshot.gyroRadps) ||
+        if (!snapshot.accelBiasValid ||
+            !std::isfinite(snapshot.gyroRadps) ||
             !std::isfinite(snapshot.accelBodyXMps2) ||
             !std::isfinite(snapshot.accelBodyYMps2))
         {
@@ -406,7 +577,8 @@ private:
     static MazeMap::ImuMergedObs BuildUkfImuObservation(const DiagnosticSensorSnapshot& snapshot) noexcept
     {
         MazeMap::ImuMergedObs observation{};
-        if (!std::isfinite(snapshot.gyroRadps) ||
+        if (!snapshot.accelBiasValid ||
+            !std::isfinite(snapshot.gyroRadps) ||
             !std::isfinite(snapshot.accelBodyXMps2) ||
             !std::isfinite(snapshot.accelBodyYMps2))
         {
@@ -545,8 +717,36 @@ private:
     }
 
     template <typename TSnapshot>
-    void UpdatePoseEstimate(float dtSeconds, const TSnapshot& snapshot, const MazeMap::Maze* map)
+    void UpdatePoseEstimate(
+        float dtSeconds,
+        const TSnapshot& snapshot,
+        const MazeMap::Maze* map,
+        ControlCycleTiming* timing)
     {
+        UpdatePoseEstimate(
+            dtSeconds,
+            snapshot,
+            map,
+            timing,
+            MazeMap::NoopUkfLoopHook{},
+            []() noexcept {});
+    }
+
+    template <typename TSnapshot, typename LoopHook, typename BeforeYawUpdate>
+    void UpdatePoseEstimate(
+        float dtSeconds,
+        const TSnapshot& snapshot,
+        const MazeMap::Maze* map,
+        ControlCycleTiming* timing,
+        LoopHook&& loopHook,
+        BeforeYawUpdate&& beforeYawUpdate)
+    {
+        if (_estimatorFaulted)
+        {
+            SyncPoseEstimate();
+            return;
+        }
+
         const MazeMap::PlantParams& params = _ukf.ukf().params();
         (void)map;
         MazeMap::ControlInput control{};
@@ -554,12 +754,31 @@ private:
         control.rightMotorCommand = _rightMotor.getDriveCommand();
         control.fanDutyCycle = GetMissionFanDutyCycle();
 
+        if (timing != nullptr)
+        {
+            timing->ukfPredictStartUs = micros();
+        }
         if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
         {
-            if (!_ukf.predict(dtSeconds, control))
+            if (!_ukf.predict(dtSeconds, control, loopHook))
             {
-                AppendStartupTrace("pose_ukf_predict_rejected");
+                TriggerEstimatorFault("predict_failed");
+                if (timing != nullptr)
+                {
+                    timing->ukfPredictEndUs = micros();
+                    timing->ukfPredictDurationUs = timing->ukfPredictEndUs - timing->ukfPredictStartUs;
+                    timing->ukfUpdateStartUs = timing->ukfPredictEndUs;
+                    timing->ukfUpdateEndUs = timing->ukfPredictEndUs;
+                    timing->ukfUpdateDurationUs = 0U;
+                }
+                return;
             }
+        }
+        if (timing != nullptr)
+        {
+            timing->ukfPredictEndUs = micros();
+            timing->ukfPredictDurationUs = timing->ukfPredictEndUs - timing->ukfPredictStartUs;
+            timing->ukfUpdateStartUs = micros();
         }
 
         MazeMap::EncoderObs encoderObservation{};
@@ -570,11 +789,28 @@ private:
             encoderObservation.omegaLeftRadps = _leftMotor.getEncoderVelocityMetersPerSecond() / params.wheelRadiusM;
             encoderObservation.omegaRightRadps = _rightMotor.getEncoderVelocityMetersPerSecond() / params.wheelRadiusM;
         }
-        (void)_ukf.updateEncoderPair(encoderObservation, dtSeconds);
+        (void)_ukf.updateEncoderPair(encoderObservation, dtSeconds, loopHook);
+
+        beforeYawUpdate();
 
         if (std::isfinite(snapshot.gyroRadps))
         {
-            (void)_ukf.ukf().updateYawRate(snapshot.gyroRadps);
+            const MazeMap::MeasurementUpdateResult yawUpdate = _ukf.updateYawRate(snapshot.gyroRadps, loopHook);
+            if (!yawUpdate.accepted)
+            {
+                TriggerEstimatorFault("yaw_update_failed");
+                if (timing != nullptr)
+                {
+                    timing->ukfUpdateEndUs = micros();
+                    timing->ukfUpdateDurationUs = timing->ukfUpdateEndUs - timing->ukfUpdateStartUs;
+                }
+                return;
+            }
+        }
+        if (timing != nullptr)
+        {
+            timing->ukfUpdateEndUs = micros();
+            timing->ukfUpdateDurationUs = timing->ukfUpdateEndUs - timing->ukfUpdateStartUs;
         }
 
         SyncPoseEstimate();
@@ -603,6 +839,8 @@ private:
     };
     WheelLaunchAssistState _leftLaunchAssist;
     WheelLaunchAssistState _rightLaunchAssist;
+    bool _estimatorFaulted = false;
+    char _estimatorFaultReason[64] = {};
 
     float ModelDriveFeedforwardForTargetMotion(
         const MazeMap::MotorEncoderDrive& motor,

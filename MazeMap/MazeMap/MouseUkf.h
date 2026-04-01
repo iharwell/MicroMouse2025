@@ -15,7 +15,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-
 namespace MazeMap
 {
     enum class GeometryHitType : uint8_t
@@ -29,6 +28,12 @@ namespace MazeMap
     {
         float vx = 0.0f;
         float vy = 0.0f;
+    };
+
+    struct HeadingUnitVector
+    {
+        float x = 1.0f;
+        float y = 0.0f;
     };
 
     struct WheelKinematics
@@ -142,6 +147,7 @@ namespace MazeMap
         float mazeWallThicknessM = WALL_THICKNESS;
         float noHitRangeM = 0.30f;
         float postHalfWidthM = 0.5f * WALL_THICKNESS;
+        std::array<Vectorf<2>, 4> contactPositionsBodyM{};
 
         SensorExtrinsics frontLeftSensor{};
         SensorExtrinsics frontRightSensor{};
@@ -169,42 +175,35 @@ namespace MazeMap
             params.frontLeftSensor = {
                 Vectorf<2>(0.04223f, 0.03465f),
                 Vectorf<2>(0.99452f, 0.10453f),
-                std::atan2(0.10453f, 0.99452f)
+                0.0f
             };
             params.frontRightSensor = {
                 Vectorf<2>(0.04223f, -0.03459f),
                 Vectorf<2>(0.99452f, -0.10453f),
-                std::atan2(-0.10453f, 0.99452f)
+                0.0f
             };
             params.sideLeftSensor = {
                 Vectorf<2>(0.05026f, 0.02918f),
                 Vectorf<2>(0.0f, 1.0f),
-                0.5f * PI_F
+                0.0f
             };
             params.sideRightSensor = {
                 Vectorf<2>(0.05026f, -0.02772f),
                 Vectorf<2>(0.0f, -1.0f),
-                -0.5f * PI_F
+                0.0f
             };
+            const float halfWheelBaseM = 0.5f * params.wheelBaseM;
+            const float halfTrackWidthM = 0.5f * params.trackWidthM;
+            params.contactPositionsBodyM[0] = Vectorf<2>(halfWheelBaseM, halfTrackWidthM);
+            params.contactPositionsBodyM[1] = Vectorf<2>(halfWheelBaseM, -halfTrackWidthM);
+            params.contactPositionsBodyM[2] = Vectorf<2>(-halfWheelBaseM, halfTrackWidthM);
+            params.contactPositionsBodyM[3] = Vectorf<2>(-halfWheelBaseM, -halfTrackWidthM);
             return params;
         }
 
         Vectorf<2> ContactPosition(uint8_t index) const noexcept
         {
-            const float halfWheelBaseM = 0.5f * wheelBaseM;
-            const float halfTrackWidthM = 0.5f * trackWidthM;
-            switch (index)
-            {
-            case 0:
-                return Vectorf<2>(halfWheelBaseM, halfTrackWidthM);
-            case 1:
-                return Vectorf<2>(halfWheelBaseM, -halfTrackWidthM);
-            case 2:
-                return Vectorf<2>(-halfWheelBaseM, halfTrackWidthM);
-            case 3:
-            default:
-                return Vectorf<2>(-halfWheelBaseM, -halfTrackWidthM);
-            }
+            return contactPositionsBodyM[(index < contactPositionsBodyM.size()) ? index : (contactPositionsBodyM.size() - 1U)];
         }
 
         float StaticWheelLoadN(float fanDutyCycle) const noexcept
@@ -215,6 +214,96 @@ namespace MazeMap
             return 0.25f * totalNormalForceN;
         }
     };
+
+    inline constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.0018f;
+    inline constexpr float kGeneralEncoderYawRateSigmaRadps = 0.051f;
+    inline constexpr float kStationaryEncoderVelocitySigmaMps = 1.76e-6f;
+    inline constexpr float kEncoderPairNisThreshold = 13.81551f;
+    inline constexpr float kImuYawRateSigmaRadps = 0.0013f;
+    inline constexpr float kImuAccelSigmaMps2 = 0.014f;
+
+    inline Eigen::Matrix<float, 2, 2> ComputeGeneralEncoderPairCovarianceRadps(
+        const PlantParams& params) noexcept
+    {
+        Eigen::Matrix<float, 2, 2> covariance = Eigen::Matrix<float, 2, 2>::Zero();
+        if (!(params.wheelRadiusM > 0.0f) || !std::isfinite(params.wheelRadiusM))
+        {
+            covariance(0, 0) = 1.0f;
+            covariance(1, 1) = 1.0f;
+            return covariance;
+        }
+
+        const float trackWidthM =
+            (params.trackWidthM > 0.0f && std::isfinite(params.trackWidthM)) ?
+            params.trackWidthM :
+            MazeMap::Vehicle::GetPhysicalModel().trackWidthM;
+        const float halfTrackWidthM = 0.5f * trackWidthM;
+        const float varianceUMps2 = kGeneralEncoderLinearSpeedSigmaMps * kGeneralEncoderLinearSpeedSigmaMps;
+        const float varianceYawRateRadps2 = kGeneralEncoderYawRateSigmaRadps * kGeneralEncoderYawRateSigmaRadps;
+        const float varianceWheelLinearMps2 =
+            varianceUMps2 + ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2);
+        const float covarianceWheelLinearMps2 =
+            varianceUMps2 - ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2);
+        const float invWheelRadius2 = 1.0f / (params.wheelRadiusM * params.wheelRadiusM);
+        covariance(0, 0) = varianceWheelLinearMps2 * invWheelRadius2;
+        covariance(1, 1) = varianceWheelLinearMps2 * invWheelRadius2;
+        covariance(0, 1) = covarianceWheelLinearMps2 * invWheelRadius2;
+        covariance(1, 0) = covariance(0, 1);
+        return covariance;
+    }
+
+    inline Eigen::Matrix<float, 2, 2> ComputeGeneralEncoderPairSqrtNoise(
+        const PlantParams& params) noexcept
+    {
+        const Eigen::Matrix<float, 2, 2> covariance = ComputeGeneralEncoderPairCovarianceRadps(params);
+        const Eigen::LLT<Eigen::Matrix<float, 2, 2>> llt(covariance);
+        if (llt.info() == Eigen::Success)
+        {
+            return llt.matrixL();
+        }
+
+        Eigen::Matrix<float, 2, 2> fallback = Eigen::Matrix<float, 2, 2>::Zero();
+        const float fallbackSigmaRadps = 1.0f;
+        fallback(0, 0) = fallbackSigmaRadps;
+        fallback(1, 1) = fallbackSigmaRadps;
+        return fallback;
+    }
+
+    inline float ComputeStationaryEncoderOmegaSigmaRadps(const PlantParams& params) noexcept
+    {
+        if (!(params.wheelRadiusM > 0.0f) || !std::isfinite(params.wheelRadiusM))
+        {
+            return 1.0f;
+        }
+
+        return kStationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
+    }
+
+    inline Eigen::Matrix<float, 2, 2> ComputeEncoderPairSqrtNoise(
+        const EncoderObs& observation,
+        const PlantParams& params) noexcept
+    {
+        if ((observation.omegaLeftRadps == 0.0f) && (observation.omegaRightRadps == 0.0f))
+        {
+            Eigen::Matrix<float, 2, 2> sqrtNoise = Eigen::Matrix<float, 2, 2>::Zero();
+            const float sigmaRadps = ComputeStationaryEncoderOmegaSigmaRadps(params);
+            sqrtNoise(0, 0) = sigmaRadps;
+            sqrtNoise(1, 1) = sigmaRadps;
+            return sqrtNoise;
+        }
+
+        return ComputeGeneralEncoderPairSqrtNoise(params);
+    }
+
+    inline float ComputeEncoderPairNisThreshold(const EncoderObs& observation) noexcept
+    {
+        if ((observation.omegaLeftRadps == 0.0f) && (observation.omegaRightRadps == 0.0f))
+        {
+            return std::numeric_limits<float>::infinity();
+        }
+
+        return kEncoderPairNisThreshold;
+    }
 
     struct PrimitiveDefinition
     {
@@ -339,6 +428,37 @@ namespace MazeMap
         GeometryPrediction rightPrediction{};
     };
 
+    inline HeadingUnitVector HeadingUnitFromYaw(float yaw) noexcept
+    {
+        HeadingUnitVector heading{};
+        heading.x = cosf(yaw);
+        heading.y = sinf(yaw);
+        return heading;
+    }
+
+    inline Vectorf<2> RotateBodyVectorToWorld(const Vectorf<2>& vectorBody, const HeadingUnitVector& heading) noexcept
+    {
+        return Vectorf<2>(
+            (heading.x * vectorBody.GetX()) - (heading.y * vectorBody.GetY()),
+            (heading.y * vectorBody.GetX()) + (heading.x * vectorBody.GetY()));
+    }
+
+    inline Vectorf<2> ResolveSensorDirectionBody(const SensorExtrinsics& sensor) noexcept
+    {
+        if (std::fabs(sensor.yawOffsetRad) <= 1.0e-6f)
+        {
+            return sensor.directionBody;
+        }
+
+        const HeadingUnitVector offsetHeading = HeadingUnitFromYaw(sensor.yawOffsetRad);
+        return RotateBodyVectorToWorld(sensor.directionBody, offsetHeading);
+    }
+
+    inline float FastAngleErrorRad(float targetAngleRad, float currentAngleRad) noexcept
+    {
+        return VehicleState::NormalizeAngle(targetAngleRad - currentAngleRad);
+    }
+
     class PlantModel
     {
     public:
@@ -351,6 +471,10 @@ namespace MazeMap
 
         WheelKinematics wheelKinematics(const StateVector& state, const PlantParams& params) const noexcept;
         SlipTargets slipTargets(const StateVector& state, const PlantParams& params) const noexcept;
+        SlipTargets slipTargets(
+            const StateVector& state,
+            const WheelKinematics& kinematics,
+            const PlantParams& params) const noexcept;
         ContactForces tireForces(const StateVector& state, const PlantParams& params) const noexcept;
         ContactForces tireForces(
             const StateVector& state,
@@ -566,8 +690,20 @@ namespace MazeMap
     class WallGeometryModel
     {
     public:
+        struct GeometryStateFrame
+        {
+            Vectorf<2> positionWorldM{};
+            HeadingUnitVector heading{};
+            CellCoordinates centerCell{};
+        };
+
         GeometryPrediction predictRay(
             const VehicleState::StateVector& state,
+            const SensorExtrinsics& sensorExtrinsics,
+            const LocalMapView& map) const noexcept;
+
+        GeometryPrediction predictRay(
+            const GeometryStateFrame& frame,
             const SensorExtrinsics& sensorExtrinsics,
             const LocalMapView& map) const noexcept;
 
@@ -575,9 +711,21 @@ namespace MazeMap
             const VehicleState::StateVector& state,
             const SensorExtrinsics& sensorExtrinsics) const noexcept;
 
+        Vectorf<2> sensorOriginWorld(
+            const GeometryStateFrame& frame,
+            const SensorExtrinsics& sensorExtrinsics) const noexcept;
+
         Vectorf<2> sensorDirectionWorld(
             const VehicleState::StateVector& state,
             const SensorExtrinsics& sensorExtrinsics) const noexcept;
+
+        Vectorf<2> sensorDirectionWorld(
+            const GeometryStateFrame& frame,
+            const SensorExtrinsics& sensorExtrinsics) const noexcept;
+
+        GeometryStateFrame buildStateFrame(
+            const VehicleState::StateVector& state,
+            const LocalMapView& map) const noexcept;
 
     private:
         static CellCoordinates worldToCell(float xMeters, float yMeters, float cellSizeM) noexcept;
@@ -685,8 +833,16 @@ namespace MazeMap
         }
 
         bool predict(float dt, const ControlInput& control) noexcept;
+        template <typename LoopHook>
+        bool predict(float dt, const ControlInput& control, LoopHook&& loopHook) noexcept;
+
         MeasurementUpdateResult updateEncoderPair(const EncoderObs& observation, float dt) noexcept;
+        template <typename LoopHook>
+        MeasurementUpdateResult updateEncoderPair(const EncoderObs& observation, float dt, LoopHook&& loopHook) noexcept;
+
         MeasurementUpdateResult updateYawRate(float yawRateRadps) noexcept;
+        template <typename LoopHook>
+        MeasurementUpdateResult updateYawRate(float yawRateRadps, LoopHook&& loopHook) noexcept;
         MeasurementUpdateResult updateImuMerged(const ImuMergedObs& observation) noexcept;
         FrontPairUpdateResult updateFrontPair(
             const WallObs& left,
@@ -698,7 +854,14 @@ namespace MazeMap
             const LocalMapView& map) noexcept;
 
     private:
+        static bool HasExactZeroWheelObservation(const EncoderObs& observation) noexcept;
         static float wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept;
+        bool controlCommandsAreEffectivelyZero() const noexcept;
+        void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
+        void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
+        Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
+            const StateVector& sigmaPoint,
+            const LocalMapView& map) const noexcept;
         float wallPredictionForSensor(
             const StateVector& sigmaPoint,
             const SensorExtrinsics& sensor,
@@ -711,6 +874,7 @@ namespace MazeMap
         ControlInput _lastControl;
         EncoderObs _lastEncoderObs;
         bool _haveEncoderReference;
+        StateMatrix _sqrtProcessNoiseDensity;
         Eigen::Matrix<float, 2, 2> _sqrtEncoderNoise;
         Eigen::Matrix<float, 3, 3> _sqrtImuNoise;
         Eigen::Matrix<float, 2, 2> _sqrtFrontNoise;
@@ -732,9 +896,32 @@ namespace MazeMap
             return _core.predict(dt, control);
         }
 
+        template <typename LoopHook>
+        bool predict(float dt, const ControlInput& control, LoopHook&& loopHook) noexcept
+        {
+            return _core.predict(dt, control, loopHook);
+        }
+
         MeasurementUpdateResult updateEncoderPair(const EncoderObs& observation, float dt) noexcept
         {
             return _core.updateEncoderPair(observation, dt);
+        }
+
+        template <typename LoopHook>
+        MeasurementUpdateResult updateEncoderPair(const EncoderObs& observation, float dt, LoopHook&& loopHook) noexcept
+        {
+            return _core.updateEncoderPair(observation, dt, loopHook);
+        }
+
+        MeasurementUpdateResult updateYawRate(float yawRateRadps) noexcept
+        {
+            return _core.updateYawRate(yawRateRadps);
+        }
+
+        template <typename LoopHook>
+        MeasurementUpdateResult updateYawRate(float yawRateRadps, LoopHook&& loopHook) noexcept
+        {
+            return _core.updateYawRate(yawRateRadps, loopHook);
         }
 
         MeasurementUpdateResult updateImuMerged(const ImuMergedObs& observation) noexcept
@@ -796,7 +983,7 @@ namespace MazeMap
         }
 
         const WheelKinematics kinematics = wheelKinematics(state, params);
-        const SlipTargets targets = slipTargets(state, params);
+        const SlipTargets targets = slipTargets(state, kinematics, params);
         const ContactForces forces = tireForces(state, control, params);
 
         const float u = state(VehicleState::kU);
@@ -819,9 +1006,10 @@ namespace MazeMap
         const float tauMotorRight = driveTorqueFromCommand(control.rightMotorCommand, omegaRight, params);
         const float tauFrictionLeft = driveFrictionTorque(omegaLeft, params);
         const float tauFrictionRight = driveFrictionTorque(omegaRight, params);
+        const HeadingUnitVector heading = HeadingUnitFromYaw(psi);
 
-        derivatives.stateDot(VehicleState::kPx) = (u * std::cos(psi)) - (v * std::sin(psi));
-        derivatives.stateDot(VehicleState::kPy) = (u * std::sin(psi)) + (v * std::cos(psi));
+        derivatives.stateDot(VehicleState::kPx) = (u * heading.x) - (v * heading.y);
+        derivatives.stateDot(VehicleState::kPy) = (u * heading.y) + (v * heading.x);
         derivatives.stateDot(VehicleState::kPsi) = r;
         derivatives.stateDot(VehicleState::kU) = (r * v) + (forces.SumFx() / params.massKg);
         derivatives.stateDot(VehicleState::kV) = (-r * u) + (forces.SumFy() / params.massKg);
@@ -841,16 +1029,16 @@ namespace MazeMap
             (std::max)(targets.tauKappaRightS, 1.0e-4f);
 
         derivatives.stateDot(VehicleState::kAlphaFL) =
-            VehicleState::NormalizeAngle(targets.alpha[0] - state(VehicleState::kAlphaFL)) /
+            FastAngleErrorRad(targets.alpha[0], state(VehicleState::kAlphaFL)) /
             (std::max)(targets.tauAlphaS[0], 1.0e-4f);
         derivatives.stateDot(VehicleState::kAlphaFR) =
-            VehicleState::NormalizeAngle(targets.alpha[1] - state(VehicleState::kAlphaFR)) /
+            FastAngleErrorRad(targets.alpha[1], state(VehicleState::kAlphaFR)) /
             (std::max)(targets.tauAlphaS[1], 1.0e-4f);
         derivatives.stateDot(VehicleState::kAlphaRL) =
-            VehicleState::NormalizeAngle(targets.alpha[2] - state(VehicleState::kAlphaRL)) /
+            FastAngleErrorRad(targets.alpha[2], state(VehicleState::kAlphaRL)) /
             (std::max)(targets.tauAlphaS[2], 1.0e-4f);
         derivatives.stateDot(VehicleState::kAlphaRR) =
-            VehicleState::NormalizeAngle(targets.alpha[3] - state(VehicleState::kAlphaRR)) /
+            FastAngleErrorRad(targets.alpha[3], state(VehicleState::kAlphaRR)) /
             (std::max)(targets.tauAlphaS[3], 1.0e-4f);
 
         derivatives.contactForces = forces;
@@ -884,8 +1072,15 @@ namespace MazeMap
 
     inline SlipTargets PlantModel::slipTargets(const StateVector& state, const PlantParams& params) const noexcept
     {
+        return slipTargets(state, wheelKinematics(state, params), params);
+    }
+
+    inline SlipTargets PlantModel::slipTargets(
+        const StateVector& state,
+        const WheelKinematics& kinematics,
+        const PlantParams& params) const noexcept
+    {
         SlipTargets targets{};
-        const WheelKinematics kinematics = wheelKinematics(state, params);
         const float velocityEpsilonMps = (std::max)(params.velocityEpsilonMps, 1.0e-3f);
         const float wheelCircumferentialLeft = params.wheelRadiusM * state(VehicleState::kOmegaL);
         const float wheelCircumferentialRight = params.wheelRadiusM * state(VehicleState::kOmegaR);
@@ -901,7 +1096,7 @@ namespace MazeMap
         {
             const ContactKinematics& contact = kinematics.contacts[contactIndex];
             targets.alpha[contactIndex] =
-                std::atan2(-contact.vy, (std::max)(std::fabs(contact.vx), velocityEpsilonMps));
+                atan2f(-contact.vy, (std::max)(std::fabs(contact.vx), velocityEpsilonMps));
             const float relaxationLengthM =
                 (contactIndex < 2U) ? params.relaxationLengthAlphaFrontM : params.relaxationLengthAlphaRearM;
             targets.tauAlphaS[contactIndex] =
@@ -946,7 +1141,7 @@ namespace MazeMap
                 (contactIndex < 2U) ? params.corneringStiffnessFrontNPerRad : params.corneringStiffnessRearNPerRad;
             const float fx0 = params.longitudinalStiffnessN * kappa;
             const float fy0 = -corneringStiffness * std::tan(alpha);
-            const float requestedForceMagnitudeN = std::sqrt((fx0 * fx0) + (fy0 * fy0));
+            const float requestedForceMagnitudeN = MazeMap::Math::Sqrtf((fx0 * fx0) + (fy0 * fy0));
             const float lambda =
                 (mu * staticWheelLoadN) /
                 ((2.0f * requestedForceMagnitudeN) + (std::max)(params.forceEpsilonN, 1.0e-5f));
@@ -1024,24 +1219,39 @@ namespace MazeMap
         const VehicleState::StateVector& state,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
-        const float yaw = state(VehicleState::kPsi);
-        const float c = std::cos(yaw);
-        const float s = std::sin(yaw);
-        const float x = state(VehicleState::kPx) +
-            (c * sensorExtrinsics.positionBodyM.GetX()) -
-            (s * sensorExtrinsics.positionBodyM.GetY());
-        const float y = state(VehicleState::kPy) +
-            (s * sensorExtrinsics.positionBodyM.GetX()) +
-            (c * sensorExtrinsics.positionBodyM.GetY());
-        return Vectorf<2>(x, y);
+        return sensorOriginWorld(buildStateFrame(state, LocalMapView{}), sensorExtrinsics);
+    }
+
+    inline Vectorf<2> WallGeometryModel::sensorOriginWorld(
+        const GeometryStateFrame& frame,
+        const SensorExtrinsics& sensorExtrinsics) const noexcept
+    {
+        return frame.positionWorldM + RotateBodyVectorToWorld(sensorExtrinsics.positionBodyM, frame.heading);
     }
 
     inline Vectorf<2> WallGeometryModel::sensorDirectionWorld(
         const VehicleState::StateVector& state,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
-        const float yaw = state(VehicleState::kPsi) + sensorExtrinsics.yawOffsetRad;
-        return Vectorf<2>(std::cos(yaw), std::sin(yaw));
+        return sensorDirectionWorld(buildStateFrame(state, LocalMapView{}), sensorExtrinsics);
+    }
+
+    inline Vectorf<2> WallGeometryModel::sensorDirectionWorld(
+        const GeometryStateFrame& frame,
+        const SensorExtrinsics& sensorExtrinsics) const noexcept
+    {
+        return RotateBodyVectorToWorld(ResolveSensorDirectionBody(sensorExtrinsics), frame.heading);
+    }
+
+    inline WallGeometryModel::GeometryStateFrame WallGeometryModel::buildStateFrame(
+        const VehicleState::StateVector& state,
+        const LocalMapView& map) const noexcept
+    {
+        GeometryStateFrame frame{};
+        frame.positionWorldM = Vectorf<2>(state(VehicleState::kPx), state(VehicleState::kPy));
+        frame.heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
+        frame.centerCell = worldToCell(frame.positionWorldM.GetX(), frame.positionWorldM.GetY(), map.cellSizeM);
+        return frame;
     }
 
     inline CellCoordinates WallGeometryModel::worldToCell(float xMeters, float yMeters, float cellSizeM) noexcept
@@ -1169,6 +1379,14 @@ namespace MazeMap
         const SensorExtrinsics& sensorExtrinsics,
         const LocalMapView& map) const noexcept
     {
+        return predictRay(buildStateFrame(state, map), sensorExtrinsics, map);
+    }
+
+    inline GeometryPrediction WallGeometryModel::predictRay(
+        const GeometryStateFrame& frame,
+        const SensorExtrinsics& sensorExtrinsics,
+        const LocalMapView& map) const noexcept
+    {
         GeometryPrediction best{};
         best.rangeM = map.noHitRangeM;
         if (!map.IsValid())
@@ -1176,9 +1394,9 @@ namespace MazeMap
             return best;
         }
 
-        const Vectorf<2> rayOrigin = sensorOriginWorld(state, sensorExtrinsics);
-        const Vectorf<2> rayDirection = sensorDirectionWorld(state, sensorExtrinsics);
-        const CellCoordinates centerCell = worldToCell(state(VehicleState::kPx), state(VehicleState::kPy), map.cellSizeM);
+        const Vectorf<2> rayOrigin = sensorOriginWorld(frame, sensorExtrinsics);
+        const Vectorf<2> rayDirection = sensorDirectionWorld(frame, sensorExtrinsics);
+        const CellCoordinates centerCell = frame.centerCell;
 
         const int minX = (std::max)(0, static_cast<int>(centerCell.GetX()) - static_cast<int>(map.radiusCells));
         const int maxX = (std::min)(15, static_cast<int>(centerCell.GetX()) + static_cast<int>(map.radiusCells));
@@ -1358,6 +1576,7 @@ namespace MazeMap
         , _lastControl()
         , _lastEncoderObs()
         , _haveEncoderReference(false)
+        , _sqrtProcessNoiseDensity(StateMatrix::Zero())
         , _sqrtEncoderNoise(Eigen::Matrix<float, 2, 2>::Identity())
         , _sqrtImuNoise(Eigen::Matrix<float, 3, 3>::Identity())
         , _sqrtFrontNoise(Eigen::Matrix<float, 2, 2>::Identity())
@@ -1373,9 +1592,9 @@ namespace MazeMap
 
         StateMatrix processNoise = StateMatrix::Zero();
         processNoise.diagonal() <<
-            1.0e-6f,
-            1.0e-6f,
-            1.0e-5f,
+            0.0f,
+            0.0f,
+            0.0f,
             3.0e-4f,
             3.0e-4f,
             6.0e-4f,
@@ -1387,13 +1606,14 @@ namespace MazeMap
             8.0e-3f,
             8.0e-3f,
             8.0e-3f;
-        _filter.setProcessNoise(processNoise);
+        _sqrtProcessNoiseDensity = StateMatrix::Zero();
+        _sqrtProcessNoiseDensity.diagonal() = processNoise.diagonal().cwiseSqrt();
+        _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
 
-        _sqrtEncoderNoise(0, 0) = 1.0f;
-        _sqrtEncoderNoise(1, 1) = 1.0f;
-        _sqrtImuNoise(0, 0) = 0.08f;
-        _sqrtImuNoise(1, 1) = 0.45f;
-        _sqrtImuNoise(2, 2) = 0.45f;
+        _sqrtEncoderNoise = ComputeGeneralEncoderPairSqrtNoise(_params);
+        _sqrtImuNoise(0, 0) = kImuYawRateSigmaRadps;
+        _sqrtImuNoise(1, 1) = kImuAccelSigmaMps2;
+        _sqrtImuNoise(2, 2) = kImuAccelSigmaMps2;
         _sqrtFrontNoise(0, 0) = 0.010f;
         _sqrtFrontNoise(1, 1) = 0.010f;
         _sqrtSideNoise(0, 0) = 0.012f;
@@ -1401,7 +1621,19 @@ namespace MazeMap
 
     inline bool SrUkfCore::predict(float dt, const ControlInput& control) noexcept
     {
+        return predict(dt, control, MazeMap::NoopUkfLoopHook{});
+    }
+
+    template <typename LoopHook>
+    inline bool SrUkfCore::predict(float dt, const ControlInput& control, LoopHook&& loopHook) noexcept
+    {
         _lastControl = control;
+        if (!(std::isfinite(dt) && (dt > 0.0f)))
+        {
+            return true;
+        }
+
+        _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity * MazeMap::Math::Sqrtf(dt));
         Eigen::Matrix<float, 3, 1> controlVector;
         controlVector << control.leftMotorCommand, control.rightMotorCommand, control.fanDutyCycle;
         return _filter.Predict(
@@ -1410,10 +1642,20 @@ namespace MazeMap
             [this, &control](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
             {
                 return _plantModel.integrateMidpoint(sigmaPoint, control, sigmaDt, _params);
-            });
+            },
+            loopHook);
     }
 
     inline MeasurementUpdateResult SrUkfCore::updateEncoderPair(const EncoderObs& observation, float dt) noexcept
+    {
+        return updateEncoderPair(observation, dt, MazeMap::NoopUkfLoopHook{});
+    }
+
+    template <typename LoopHook>
+    inline MeasurementUpdateResult SrUkfCore::updateEncoderPair(
+        const EncoderObs& observation,
+        float dt,
+        LoopHook&& loopHook) noexcept
     {
         MeasurementUpdateResult result{};
         result.attempted = true;
@@ -1439,16 +1681,35 @@ namespace MazeMap
 
         Eigen::Matrix<float, 2, 1> z;
         z << measured.omegaLeftRadps, measured.omegaRightRadps;
+        if (HasExactZeroWheelObservation(measured))
+        {
+            const float stationarySigmaRadps = ComputeStationaryEncoderOmegaSigmaRadps(_params);
+            applyWheelRateConstraint(measured, stationarySigmaRadps * stationarySigmaRadps);
+            result.accepted = true;
+            result.nis = 0.0f;
+            return result;
+        }
+
+        const Eigen::Matrix<float, 2, 2> sqrtEncoderNoise = ComputeEncoderPairSqrtNoise(measured, _params);
         result.accepted = _filter.Update<2>(
             z,
-            _sqrtEncoderNoise,
-            13.81551f,
+            sqrtEncoderNoise,
+            ComputeEncoderPairNisThreshold(measured),
             [](const StateVector& sigmaPoint) noexcept
             {
                 Eigen::Matrix<float, 2, 1> prediction;
                 prediction << sigmaPoint(VehicleState::kOmegaL), sigmaPoint(VehicleState::kOmegaR);
                 return prediction;
-            });
+            },
+            loopHook);
+        if (result.accepted)
+        {
+            StateVector anchoredState = _filter.state();
+            anchoredState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
+            anchoredState(VehicleState::kOmegaR) = measured.omegaRightRadps;
+            VehicleState::NormalizeStateVector(anchoredState);
+            _filter.setState(anchoredState, _filter.covariance());
+        }
         result.nis = _filter.lastNis();
         return result;
     }
@@ -1484,6 +1745,12 @@ namespace MazeMap
 
     inline MeasurementUpdateResult SrUkfCore::updateYawRate(float yawRateRadps) noexcept
     {
+        return updateYawRate(yawRateRadps, MazeMap::NoopUkfLoopHook{});
+    }
+
+    template <typename LoopHook>
+    inline MeasurementUpdateResult SrUkfCore::updateYawRate(float yawRateRadps, LoopHook&& loopHook) noexcept
+    {
         MeasurementUpdateResult result{};
         result.attempted = std::isfinite(yawRateRadps);
         if (!result.attempted)
@@ -1498,15 +1765,119 @@ namespace MazeMap
         result.accepted = _filter.Update<1>(
             z,
             sqrtNoise,
-            6.63490f,
+            std::numeric_limits<float>::infinity(),
             [](const StateVector& sigmaPoint) noexcept
             {
                 Eigen::Matrix<float, 1, 1> prediction;
                 prediction << sigmaPoint(VehicleState::kR);
                 return prediction;
-            });
+            },
+            loopHook);
+        if (result.accepted)
+        {
+            StateVector anchoredState = _filter.state();
+            anchoredState(VehicleState::kR) = yawRateRadps;
+            VehicleState::NormalizeStateVector(anchoredState);
+            _filter.setState(anchoredState, _filter.covariance());
+            if (controlCommandsAreEffectivelyZero() &&
+                HasExactZeroWheelObservation(_lastEncoderObs) &&
+                (std::fabs(yawRateRadps) <= (4.0f * kImuYawRateSigmaRadps)))
+            {
+                applyStationaryZeroMotionConstraint(yawRateRadps);
+            }
+        }
         result.nis = _filter.lastNis();
         return result;
+    }
+
+    inline bool SrUkfCore::HasExactZeroWheelObservation(const EncoderObs& observation) noexcept
+    {
+        return (observation.omegaLeftRadps == 0.0f) && (observation.omegaRightRadps == 0.0f);
+    }
+
+    inline bool SrUkfCore::controlCommandsAreEffectivelyZero() const noexcept
+    {
+        return
+            (std::fabs(_lastControl.leftMotorCommand) <= 1.0e-6f) &&
+            (std::fabs(_lastControl.rightMotorCommand) <= 1.0e-6f);
+    }
+
+    inline void SrUkfCore::applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept
+    {
+        StateVector anchoredState = _filter.state();
+        anchoredState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
+        anchoredState(VehicleState::kOmegaR) = measured.omegaRightRadps;
+        VehicleState::NormalizeStateVector(anchoredState);
+
+        StateMatrix anchoredCovariance = _filter.covariance();
+        anchoredCovariance.row(VehicleState::kOmegaL).setZero();
+        anchoredCovariance.col(VehicleState::kOmegaL).setZero();
+        anchoredCovariance.row(VehicleState::kOmegaR).setZero();
+        anchoredCovariance.col(VehicleState::kOmegaR).setZero();
+        const float constrainedVariance = (std::max)(wheelVarianceRadps2, 1.0e-12f);
+        anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
+        anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;
+        _filter.setState(anchoredState, anchoredCovariance);
+    }
+
+    inline void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
+    {
+        StateVector anchoredState = _filter.state();
+        anchoredState(VehicleState::kU) = 0.0f;
+        anchoredState(VehicleState::kV) = 0.0f;
+        anchoredState(VehicleState::kR) = yawRateRadps;
+        anchoredState(VehicleState::kOmegaL) = 0.0f;
+        anchoredState(VehicleState::kOmegaR) = 0.0f;
+        anchoredState(VehicleState::kKappaL) = 0.0f;
+        anchoredState(VehicleState::kKappaR) = 0.0f;
+        anchoredState(VehicleState::kAlphaFL) = 0.0f;
+        anchoredState(VehicleState::kAlphaFR) = 0.0f;
+        anchoredState(VehicleState::kAlphaRL) = 0.0f;
+        anchoredState(VehicleState::kAlphaRR) = 0.0f;
+        VehicleState::NormalizeStateVector(anchoredState);
+
+        StateMatrix anchoredCovariance = _filter.covariance();
+        const float wheelVarianceRadps2 =
+            (std::max)(ComputeStationaryEncoderOmegaSigmaRadps(_params) * ComputeStationaryEncoderOmegaSigmaRadps(_params), 1.0e-12f);
+        const float linearVarianceMps2 =
+            (std::max)(kStationaryEncoderVelocitySigmaMps * kStationaryEncoderVelocitySigmaMps, 1.0e-12f);
+        const float yawVarianceRadps2 =
+            (std::max)(kImuYawRateSigmaRadps * kImuYawRateSigmaRadps, 1.0e-12f);
+        const float slipRatioVariance = 1.0e-6f;
+        const float slipAngleVarianceRad2 = 1.0e-6f;
+
+        const std::array<int, 10> constrainedIndices = {
+            VehicleState::kU,
+            VehicleState::kV,
+            VehicleState::kR,
+            VehicleState::kOmegaL,
+            VehicleState::kOmegaR,
+            VehicleState::kKappaL,
+            VehicleState::kKappaR,
+            VehicleState::kAlphaFL,
+            VehicleState::kAlphaFR,
+            VehicleState::kAlphaRL
+        };
+        for (const int index : constrainedIndices)
+        {
+            anchoredCovariance.row(index).setZero();
+            anchoredCovariance.col(index).setZero();
+        }
+        anchoredCovariance.row(VehicleState::kAlphaRR).setZero();
+        anchoredCovariance.col(VehicleState::kAlphaRR).setZero();
+
+        anchoredCovariance(VehicleState::kU, VehicleState::kU) = linearVarianceMps2;
+        anchoredCovariance(VehicleState::kV, VehicleState::kV) = linearVarianceMps2;
+        anchoredCovariance(VehicleState::kR, VehicleState::kR) = yawVarianceRadps2;
+        anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = wheelVarianceRadps2;
+        anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = wheelVarianceRadps2;
+        anchoredCovariance(VehicleState::kKappaL, VehicleState::kKappaL) = slipRatioVariance;
+        anchoredCovariance(VehicleState::kKappaR, VehicleState::kKappaR) = slipRatioVariance;
+        anchoredCovariance(VehicleState::kAlphaFL, VehicleState::kAlphaFL) = slipAngleVarianceRad2;
+        anchoredCovariance(VehicleState::kAlphaFR, VehicleState::kAlphaFR) = slipAngleVarianceRad2;
+        anchoredCovariance(VehicleState::kAlphaRL, VehicleState::kAlphaRL) = slipAngleVarianceRad2;
+        anchoredCovariance(VehicleState::kAlphaRR, VehicleState::kAlphaRR) = slipAngleVarianceRad2;
+        _filter.setState(anchoredState, anchoredCovariance);
     }
 
     inline float SrUkfCore::wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept
@@ -1520,8 +1891,22 @@ namespace MazeMap
         const SensorExtrinsics& sensor,
         const LocalMapView& map) const noexcept
     {
-        const GeometryPrediction prediction = _geometryModel.predictRay(sigmaPoint, sensor, map);
+        const WallGeometryModel::GeometryStateFrame frame = _geometryModel.buildStateFrame(sigmaPoint, map);
+        const GeometryPrediction prediction = _geometryModel.predictRay(frame, sensor, map);
         return prediction.hit ? prediction.rangeM : map.noHitRangeM;
+    }
+
+    inline Eigen::Matrix<float, 2, 1> SrUkfCore::frontPairPredictionForState(
+        const StateVector& sigmaPoint,
+        const LocalMapView& map) const noexcept
+    {
+        Eigen::Matrix<float, 2, 1> prediction{};
+        const WallGeometryModel::GeometryStateFrame frame = _geometryModel.buildStateFrame(sigmaPoint, map);
+        const GeometryPrediction leftPrediction = _geometryModel.predictRay(frame, _params.frontLeftSensor, map);
+        const GeometryPrediction rightPrediction = _geometryModel.predictRay(frame, _params.frontRightSensor, map);
+        prediction(0) = leftPrediction.hit ? leftPrediction.rangeM : map.noHitRangeM;
+        prediction(1) = rightPrediction.hit ? rightPrediction.rangeM : map.noHitRangeM;
+        return prediction;
     }
 
     inline FrontPairUpdateResult SrUkfCore::updateFrontPair(
@@ -1550,10 +1935,7 @@ namespace MazeMap
             9.21034f,
             [this, &map](const StateVector& sigmaPoint) noexcept
             {
-                Eigen::Matrix<float, 2, 1> prediction;
-                prediction(0) = wallPredictionForSensor(sigmaPoint, _params.frontLeftSensor, map);
-                prediction(1) = wallPredictionForSensor(sigmaPoint, _params.frontRightSensor, map);
-                return prediction;
+                return frontPairPredictionForState(sigmaPoint, map);
             });
         result.filter.nis = _filter.lastNis();
         return result;
@@ -1604,9 +1986,10 @@ namespace MazeMap
         const SensorExtrinsics& sensor,
         const VehicleState::StateVector& state) noexcept
     {
-        const float yaw = state(VehicleState::kPsi) + sensor.yawOffsetRad;
-        const float x = std::cos(yaw);
-        const float y = std::sin(yaw);
+        const HeadingUnitVector heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
+        const Vectorf<2> directionWorld = RotateBodyVectorToWorld(ResolveSensorDirectionBody(sensor), heading);
+        const float x = directionWorld.GetX();
+        const float y = directionWorld.GetY();
         if (std::fabs(x) >= std::fabs(y))
         {
             return (x >= 0.0f) ? Direction::Right : Direction::Left;
@@ -1619,17 +2002,12 @@ namespace MazeMap
         const VehicleState::StateVector& state,
         float cellSizeM) noexcept
     {
-        const float yaw = state(VehicleState::kPsi);
-        const float c = std::cos(yaw);
-        const float s = std::sin(yaw);
-        const float x =
-            state(VehicleState::kPx) +
-            (c * sensor.positionBodyM.GetX()) -
-            (s * sensor.positionBodyM.GetY());
-        const float y =
-            state(VehicleState::kPy) +
-            (s * sensor.positionBodyM.GetX()) +
-            (c * sensor.positionBodyM.GetY());
+        const HeadingUnitVector heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
+        const Vectorf<2> sensorPositionWorld =
+            Vectorf<2>(state(VehicleState::kPx), state(VehicleState::kPy)) +
+            RotateBodyVectorToWorld(sensor.positionBodyM, heading);
+        const float x = sensorPositionWorld.GetX();
+        const float y = sensorPositionWorld.GetY();
         const float safeCellSize = (cellSizeM > 0.0f) ? cellSizeM : 0.18f;
         int cellX = static_cast<int>(std::floor(x / safeCellSize));
         int cellY = static_cast<int>(std::floor(y / safeCellSize));

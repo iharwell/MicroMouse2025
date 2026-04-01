@@ -122,31 +122,41 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(propagated(VehicleState::kKappaR)) < std::fabs(propagatedTargets.kappaRight));
         }
 
-        TEST_METHOD(SrUkfCoreAcceptsMandatoryZeroDeltaEncoderUpdates)
+        TEST_METHOD(ComputeEncoderPairSqrtNoise_UsesGeneralSigmaMappingForNonZeroReadings)
         {
-            SrUkfCore core;
-            ControlInput control;
-            control.leftMotorCommand = 0.0f;
-            control.rightMotorCommand = 0.0f;
-            control.fanDutyCycle = 0.80f;
+            const PlantParams params = PlantParams::Default();
+            EncoderObs observation{};
+            observation.omegaLeftRadps = 1.0f;
+            observation.omegaRightRadps = 1.0f;
 
-            Assert::IsTrue(core.predict(0.0005f, control));
+            const Eigen::Matrix<float, 2, 2> sqrtNoise = ComputeEncoderPairSqrtNoise(observation, params);
+            const Eigen::Matrix<float, 2, 2> covariance = sqrtNoise * sqrtNoise.transpose();
+            const float halfTrackWidthM = 0.5f * params.trackWidthM;
+            const float varianceUMps2 = 0.0018f * 0.0018f;
+            const float varianceYawRateRadps2 = 0.051f * 0.051f;
+            const float invWheelRadius2 = 1.0f / (params.wheelRadiusM * params.wheelRadiusM);
+            const float expectedVarianceRadps2 =
+                (varianceUMps2 + ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2)) * invWheelRadius2;
+            const float expectedCovarianceRadps2 =
+                (varianceUMps2 - ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2)) * invWheelRadius2;
 
-            EncoderObs firstObservation{};
-            firstObservation.totalLeftCounts = 1000;
-            firstObservation.totalRightCounts = 1000;
-            firstObservation.omegaLeftRadps = 0.0f;
-            firstObservation.omegaRightRadps = 0.0f;
-            const MeasurementUpdateResult firstUpdate = core.updateEncoderPair(firstObservation, 0.0005f);
-            Assert::IsTrue(firstUpdate.attempted);
-            Assert::IsTrue(firstUpdate.accepted);
+            Assert::AreEqual(expectedVarianceRadps2, covariance(0, 0), 1.0e-5f);
+            Assert::AreEqual(expectedVarianceRadps2, covariance(1, 1), 1.0e-5f);
+            Assert::AreEqual(expectedCovarianceRadps2, covariance(0, 1), 1.0e-5f);
+            Assert::AreEqual(expectedCovarianceRadps2, covariance(1, 0), 1.0e-5f);
+        }
 
-            EncoderObs secondObservation = firstObservation;
-            const MeasurementUpdateResult secondUpdate = core.updateEncoderPair(secondObservation, 0.0005f);
-            Assert::IsTrue(secondUpdate.attempted);
-            Assert::IsTrue(secondUpdate.accepted);
-            Assert::AreEqual(0.0f, core.state()(VehicleState::kOmegaL), 2.0f);
-            Assert::AreEqual(0.0f, core.state()(VehicleState::kOmegaR), 2.0f);
+        TEST_METHOD(ComputeStationaryEncoderOmegaSigmaRadps_UsesRequestedZeroSpeedSigma)
+        {
+            const PlantParams params = PlantParams::Default();
+            const float expectedSigmaRadps = 1.76e-6f / params.wheelRadiusM;
+            Assert::AreEqual(expectedSigmaRadps, ComputeStationaryEncoderOmegaSigmaRadps(params), 1.0e-9f);
+        }
+
+        TEST_METHOD(ConfiguredGeneralImuSigmasMatchInitialEstimates)
+        {
+            Assert::AreEqual(0.0013f, kImuYawRateSigmaRadps, 1.0e-9f);
+            Assert::AreEqual(0.014f, kImuAccelSigmaMps2, 1.0e-9f);
         }
 
         TEST_METHOD(SrUkfCoreRejectsInvalidMergedImuUpdate)
@@ -161,6 +171,83 @@ namespace MazeMap
             const MeasurementUpdateResult result = core.updateImuMerged(observation);
             Assert::IsFalse(result.attempted);
             Assert::IsFalse(result.accepted);
+        }
+
+        TEST_METHOD(SquareRootUkfSymmetrizesAsymmetricCovarianceInputs)
+        {
+            UKF<4, 2, 2> filter;
+
+            FilterState initialState;
+            initialState << 0.2f, -0.1f, 0.4f, -0.3f;
+            FilterCovariance initialCovariance = FilterCovariance::Identity() * 0.1f;
+            initialCovariance(0, 1) = 0.03f;
+            initialCovariance(1, 0) = -0.01f;
+            initialCovariance(2, 3) = 0.02f;
+            initialCovariance(3, 2) = -0.015f;
+            filter.setState(initialState, initialCovariance);
+
+            FilterCovariance processNoise = FilterCovariance::Zero();
+            processNoise(0, 0) = 1.0e-4f;
+            processNoise(1, 1) = 2.0e-4f;
+            processNoise(2, 2) = 3.0e-4f;
+            processNoise(3, 3) = 4.0e-4f;
+            processNoise(0, 2) = 5.0e-5f;
+            processNoise(2, 0) = -2.0e-5f;
+            filter.setProcessNoise(processNoise);
+
+            FilterControl control;
+            control << 0.1f, -0.08f;
+
+            const bool predictOk = filter.Predict(
+                0.002f,
+                control,
+                [](const FilterState& sigmaPoint, const FilterControl& sigmaControl, float sigmaDt) noexcept
+                {
+                    FilterState predicted = sigmaPoint;
+                    predicted(0) += sigmaDt * sigmaPoint(2);
+                    predicted(1) += sigmaDt * sigmaPoint(3);
+                    predicted(2) += sigmaDt * sigmaControl(0);
+                    predicted(3) += sigmaDt * sigmaControl(1);
+                    return predicted;
+                });
+
+            Assert::IsTrue(predictOk);
+            const FilterCovariance covariance = filter.covariance();
+            const FilterCovariance asymmetry = covariance - covariance.transpose();
+            Assert::IsTrue(asymmetry.cwiseAbs().maxCoeff() <= 1.0e-6f);
+
+            const Eigen::LLT<FilterCovariance> llt(covariance);
+            Assert::IsTrue(llt.info() == Eigen::Success);
+        }
+
+        TEST_METHOD(SrUkfCoreDoesNotDriftUnderRepeatedZeroMotionMeasurements)
+        {
+            SrUkfCore core;
+            ControlInput control{};
+            EncoderObs encoder{};
+            constexpr float dt = 0.0005f;
+
+            for (int step = 0; step < 2000; ++step)
+            {
+                Assert::IsTrue(core.predict(dt, control));
+
+                const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
+                Assert::IsTrue(encoderResult.attempted);
+                Assert::IsTrue(encoderResult.accepted);
+
+                const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
+                Assert::IsTrue(yawResult.attempted);
+                Assert::IsTrue(yawResult.accepted);
+            }
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kPy)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kR)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-4f);
         }
     };
 }

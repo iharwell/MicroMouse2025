@@ -107,7 +107,36 @@ namespace MazeMap
 			Assert::AreEqual(dirLoc, result, message.c_str());
 		}
 
+		void ExpressDemands(const Maneuver& man, const Vehicle& vehicle)
+		{
+			SmoothTurnExecutionProfile profile;
+			float vel = man.GetVMax(vehicle);
+			man.TryGetSmoothTurnExecutionProfile(profile);
+			profile = ScaleSmoothTurnExecutionProfile(profile, 0.18f);
+			float omegaMax = vel / profile.radius;
+			float turnInTime = profile.turnInDistance / vel;
+			float alpha = omegaMax / turnInTime;
+			
+			std::stringstream ss = std::stringstream();
+			ss << "Vel: " << vel << "\t";
+			ss << "Omega: " << omegaMax << "\t";
+			ss << "Alpha: " << alpha << "\n";
 
+			Logger::WriteMessage(ss.str().c_str());
+		}
+
+		TEST_METHOD(DemandsCheck)
+		{
+			Vehicle vehicle = Vehicle();
+			ExpressDemands(ms[MazeMap::S45SS], vehicle);
+			ExpressDemands(ms[MazeMap::S45SD], vehicle);
+			ExpressDemands(ms[MazeMap::S45LS], vehicle);
+			ExpressDemands(ms[MazeMap::S45LD], vehicle);
+			ExpressDemands(ms[MazeMap::S90SS], vehicle);
+			ExpressDemands(ms[MazeMap::S90SD], vehicle);
+			ExpressDemands(ms[MazeMap::S90LS], vehicle);
+
+		}
 		float StraightDistanceMeters(ManeuverCode code)
 		{
 			return static_cast<float>(static_cast<uint8_t>(code)) * 0.5f * Maze::GetCellDimension() / 100.0f;

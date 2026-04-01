@@ -100,22 +100,12 @@ namespace MazeMap
         const StateVector& GetStateVector() const noexcept { return _state; }
         StateVector& MutableStateVector() noexcept { return _state; }
 
-        void SetStateVector(const StateVector& state) noexcept
-        {
-            _state = state;
-            NormalizeStateVector(_state);
-        }
+        void SetStateVector(const StateVector& state) noexcept { _state = state; NormalizeStateVector(_state); }
 
         const StateMatrix& GetSqrtCovariance() const noexcept { return _sqrtCovariance; }
-        void SetSqrtCovariance(const StateMatrix& sqrtCovariance) noexcept
-        {
-            _sqrtCovariance = sqrtCovariance;
-        }
+        void SetSqrtCovariance(const StateMatrix& sqrtCovariance) noexcept { _sqrtCovariance = sqrtCovariance; }
 
-        StateMatrix GetCovariance() const noexcept
-        {
-            return _sqrtCovariance * _sqrtCovariance.transpose();
-        }
+        StateMatrix GetCovariance() const noexcept { return _sqrtCovariance * _sqrtCovariance.transpose(); }
 
         void SetCovariance(const StateMatrix& covariance) noexcept
         {
@@ -128,227 +118,93 @@ namespace MazeMap
             }
         }
 
-        void SetPosition(const Vectorf<2>& position) noexcept
-        {
-            _state(kPx) = position.GetX();
-            _state(kPy) = position.GetY();
-        }
+        void SetPosition(const Vectorf<2>& position) noexcept { _state(kPx) = position.GetX(); _state(kPy) = position.GetY(); }
 
-        Vectorf<2> GetPosition() const noexcept
-        {
-            return Vectorf<2>(_state(kPx), _state(kPy));
-        }
+        Vectorf<2> GetPosition() const noexcept { return Vectorf<2>(_state(kPx), _state(kPy)); }
 
-        Vectorf<2> GetPosition() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetPosition();
-        }
+        Vectorf<2> GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
 
-        void SetVelocity(float velocity) noexcept
-        {
-            _state(kU) = velocity;
-        }
+        void SetVelocity(float velocity) noexcept { _state(kU) = velocity; }
 
-        float GetVelocity() const noexcept
-        {
-            return _state(kU);
-        }
+        float GetVelocity() const noexcept { return _state(kU); }
 
-        float GetVelocity() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetVelocity();
-        }
+        float GetVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetVelocity(); }
 
-        void SetLateralVelocity(float velocity) noexcept
-        {
-            _state(kV) = velocity;
-        }
+        void SetLateralVelocity(float velocity) noexcept { _state(kV) = velocity; }
 
-        float GetLateralVelocity() const noexcept
-        {
-            return _state(kV);
-        }
+        float GetLateralVelocity() const noexcept { return _state(kV); }
 
-        float GetLateralVelocity() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetLateralVelocity();
-        }
+        float GetLateralVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetLateralVelocity(); }
 
-        void SetOrientation(const float& orientation) noexcept
-        {
-            _state(kPsi) = orientation;
-            NormalizeStateVector(_state);
-        }
+        void SetOrientation(const float& orientation) noexcept { _state(kPsi) = orientation; NormalizeStateVector(_state); }
 
-        float GetOrientation() const noexcept
-        {
-            return _state(kPsi);
-        }
+        float GetOrientation() const noexcept { return _state(kPsi); }
 
-        float GetOrientation() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetOrientation();
-        }
+        float GetOrientation() noexcept { return const_cast<const VehicleState*>(this)->GetOrientation(); }
 
-        void SetRotationalVelocity(float rotationalVelocity) noexcept
-        {
-            _state(kR) = rotationalVelocity;
-        }
+        void SetRotationalVelocity(float rotationalVelocity) noexcept { _state(kR) = rotationalVelocity; }
 
-        float GetRotationalVelocity() const noexcept
-        {
-            return _state(kR);
-        }
+        float GetRotationalVelocity() const noexcept { return _state(kR); }
 
-        float GetRotationalVelocity() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetRotationalVelocity();
-        }
+        float GetRotationalVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocity(); }
 
-        void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept
-        {
-            _state(kOmegaL) = wheelSpeedRadps;
-        }
+        void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept { _state(kOmegaL) = wheelSpeedRadps; }
 
-        float GetWheelSpeedLeft() const noexcept
-        {
-            return _state(kOmegaL);
-        }
+        float GetWheelSpeedLeft() const noexcept { return _state(kOmegaL); }
 
-        void SetWheelSpeedRight(float wheelSpeedRadps) noexcept
-        {
-            _state(kOmegaR) = wheelSpeedRadps;
-        }
+        void SetWheelSpeedRight(float wheelSpeedRadps) noexcept { _state(kOmegaR) = wheelSpeedRadps; }
 
-        float GetWheelSpeedRight() const noexcept
-        {
-            return _state(kOmegaR);
-        }
+        float GetWheelSpeedRight() const noexcept { return _state(kOmegaR); }
 
-        void SetSlipRatioLeft(float value) noexcept
-        {
-            _state(kKappaL) = value;
-        }
+        void SetSlipRatioLeft(float value) noexcept { _state(kKappaL) = value; }
 
-        float GetSlipRatioLeft() const noexcept
-        {
-            return _state(kKappaL);
-        }
+        float GetSlipRatioLeft() const noexcept { return _state(kKappaL); }
 
-        void SetSlipRatioRight(float value) noexcept
-        {
-            _state(kKappaR) = value;
-        }
+        void SetSlipRatioRight(float value) noexcept { _state(kKappaR) = value; }
 
-        float GetSlipRatioRight() const noexcept
-        {
-            return _state(kKappaR);
-        }
+        float GetSlipRatioRight() const noexcept { return _state(kKappaR); }
 
-        void SetSlipAngleFrontLeft(float value) noexcept
-        {
-            _state(kAlphaFL) = NormalizeAngle(value);
-        }
+        void SetSlipAngleFrontLeft(float value) noexcept { _state(kAlphaFL) = NormalizeAngle(value); }
 
-        float GetSlipAngleFrontLeft() const noexcept
-        {
-            return _state(kAlphaFL);
-        }
+        float GetSlipAngleFrontLeft() const noexcept { return _state(kAlphaFL); }
 
-        void SetSlipAngleFrontRight(float value) noexcept
-        {
-            _state(kAlphaFR) = NormalizeAngle(value);
-        }
+        void SetSlipAngleFrontRight(float value) noexcept { _state(kAlphaFR) = NormalizeAngle(value); }
 
-        float GetSlipAngleFrontRight() const noexcept
-        {
-            return _state(kAlphaFR);
-        }
+        float GetSlipAngleFrontRight() const noexcept { return _state(kAlphaFR); }
 
-        void SetSlipAngleRearLeft(float value) noexcept
-        {
-            _state(kAlphaRL) = NormalizeAngle(value);
-        }
+        void SetSlipAngleRearLeft(float value) noexcept { _state(kAlphaRL) = NormalizeAngle(value); }
 
-        float GetSlipAngleRearLeft() const noexcept
-        {
-            return _state(kAlphaRL);
-        }
+        float GetSlipAngleRearLeft() const noexcept { return _state(kAlphaRL); }
 
-        void SetSlipAngleRearRight(float value) noexcept
-        {
-            _state(kAlphaRR) = NormalizeAngle(value);
-        }
+        void SetSlipAngleRearRight(float value) noexcept { _state(kAlphaRR) = NormalizeAngle(value); }
 
-        float GetSlipAngleRearRight() const noexcept
-        {
-            return _state(kAlphaRR);
-        }
+        float GetSlipAngleRearRight() const noexcept { return _state(kAlphaRR); }
 
-        void SetTime(float time) noexcept
-        {
-            _time = time;
-        }
+        void SetTime(float time) noexcept { _time = time; }
 
-        float GetTime() const noexcept
-        {
-            return _time;
-        }
+        float GetTime() const noexcept { return _time; }
 
-        float GetTime() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetTime();
-        }
+        float GetTime() noexcept { return const_cast<const VehicleState*>(this)->GetTime(); }
 
-        void SetMotorDriveL(float motorDriveL) noexcept
-        {
-            _control.leftMotorCommand = motorDriveL;
-        }
+        void SetMotorDriveL(float motorDriveL) noexcept { _control.leftMotorCommand = motorDriveL; }
 
-        float GetMotorDriveL() const noexcept
-        {
-            return _control.leftMotorCommand;
-        }
+        float GetMotorDriveL() const noexcept { return _control.leftMotorCommand; }
 
-        float GetMotorDriveL() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetMotorDriveL();
-        }
+        float GetMotorDriveL() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveL(); }
 
-        void SetMotorDriveR(float motorDriveR) noexcept
-        {
-            _control.rightMotorCommand = motorDriveR;
-        }
+        void SetMotorDriveR(float motorDriveR) noexcept { _control.rightMotorCommand = motorDriveR; }
 
-        float GetMotorDriveR() const noexcept
-        {
-            return _control.rightMotorCommand;
-        }
+        float GetMotorDriveR() const noexcept { return _control.rightMotorCommand; }
 
-        float GetMotorDriveR() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetMotorDriveR();
-        }
+        float GetMotorDriveR() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveR(); }
 
-        void SetFanDutyCycle(float fanDutyCycle) noexcept
-        {
-            _control.fanDutyCycle = fanDutyCycle;
-        }
+        void SetFanDutyCycle(float fanDutyCycle) noexcept { _control.fanDutyCycle = fanDutyCycle; }
 
-        float GetFanDutyCycle() const noexcept
-        {
-            return _control.fanDutyCycle;
-        }
+        float GetFanDutyCycle() const noexcept { return _control.fanDutyCycle; }
 
-        const ControlInput& GetControlInput() const noexcept
-        {
-            return _control;
-        }
+        const ControlInput& GetControlInput() const noexcept { return _control; }
 
-        void SetControlInput(const ControlInput& control) noexcept
-        {
-            _control = control;
-        }
+        void SetControlInput(const ControlInput& control) noexcept { _control = control; }
 
         void SetPositionVar(const Vectorf<2>& positionVariance) noexcept
         {
@@ -364,10 +220,7 @@ namespace MazeMap
             return Vectorf<2>(covariance(kPx, kPx), covariance(kPy, kPy));
         }
 
-        Vectorf<2> GetPositionVar() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetPositionVar();
-        }
+        Vectorf<2> GetPositionVar() noexcept { return const_cast<const VehicleState*>(this)->GetPositionVar(); }
 
         void SetVelocityVar(float velocityVariance) noexcept
         {
@@ -376,15 +229,9 @@ namespace MazeMap
             SetCovariance(covariance);
         }
 
-        float GetVelocityVar() const noexcept
-        {
-            return GetCovariance()(kU, kU);
-        }
+        float GetVelocityVar() const noexcept { return GetCovariance()(kU, kU); }
 
-        float GetVelocityVar() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetVelocityVar();
-        }
+        float GetVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetVelocityVar(); }
 
         void SetOrientationVar(const float& orientationVariance) noexcept
         {
@@ -393,15 +240,9 @@ namespace MazeMap
             SetCovariance(covariance);
         }
 
-        float GetOrientationVar() const noexcept
-        {
-            return GetCovariance()(kPsi, kPsi);
-        }
+        float GetOrientationVar() const noexcept { return GetCovariance()(kPsi, kPsi); }
 
-        float GetOrientationVar() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetOrientationVar();
-        }
+        float GetOrientationVar() noexcept { return const_cast<const VehicleState*>(this)->GetOrientationVar(); }
 
         void SetRotationalVelocityVar(float rotationalVelocityVariance) noexcept
         {
@@ -410,15 +251,9 @@ namespace MazeMap
             SetCovariance(covariance);
         }
 
-        float GetRotationalVelocityVar() const noexcept
-        {
-            return GetCovariance()(kR, kR);
-        }
+        float GetRotationalVelocityVar() const noexcept { return GetCovariance()(kR, kR); }
 
-        float GetRotationalVelocityVar() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetRotationalVelocityVar();
-        }
+        float GetRotationalVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocityVar(); }
 
         void SetMotorDriveLVar(float motorDriveLVariance) noexcept
         {
@@ -427,15 +262,9 @@ namespace MazeMap
             SetCovariance(covariance);
         }
 
-        float GetMotorDriveLVar() const noexcept
-        {
-            return GetCovariance()(kOmegaL, kOmegaL);
-        }
+        float GetMotorDriveLVar() const noexcept { return GetCovariance()(kOmegaL, kOmegaL); }
 
-        float GetMotorDriveLVar() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetMotorDriveLVar();
-        }
+        float GetMotorDriveLVar() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveLVar(); }
 
         void SetMotorDriveRVar(float motorDriveRVariance) noexcept
         {
@@ -444,15 +273,9 @@ namespace MazeMap
             SetCovariance(covariance);
         }
 
-        float GetMotorDriveRVar() const noexcept
-        {
-            return GetCovariance()(kOmegaR, kOmegaR);
-        }
+        float GetMotorDriveRVar() const noexcept { return GetCovariance()(kOmegaR, kOmegaR); }
 
-        float GetMotorDriveRVar() noexcept
-        {
-            return const_cast<const VehicleState*>(this)->GetMotorDriveRVar();
-        }
+        float GetMotorDriveRVar() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveRVar(); }
 
         static float NormalizeAngle(float angleRad) noexcept
         {
@@ -463,11 +286,11 @@ namespace MazeMap
 
             while (angleRad > PI_F)
             {
-                angleRad -= 2.0f * PI_F;
+                angleRad -= TWO_PI_F;
             }
             while (angleRad < -PI_F)
             {
-                angleRad += 2.0f * PI_F;
+                angleRad += TWO_PI_F;
             }
             return angleRad;
         }

@@ -36,11 +36,43 @@ namespace MazeMap
         return GetUiImuSampleRateHz(SelectUiImuSamplingProfile(controlPeriodUs));
     }
 
+    template <typename TAccelFilterFreq>
+    constexpr float GetUiAccelLpf2CutoffHzForControlPeriodUs(unsigned long controlPeriodUs, TAccelFilterFreq filterFreq)
+    {
+        const unsigned long sampleRateHz = GetUiImuSampleRateHzForControlPeriodUs(controlPeriodUs);
+        if (sampleRateHz == 0UL)
+        {
+            return 0.0f;
+        }
+
+        switch (static_cast<uint8_t>(filterFreq) & 0xF0U)
+        {
+        case 0x10U:
+            return static_cast<float>(sampleRateHz) / 4.0f;
+        case 0x30U:
+            return static_cast<float>(sampleRateHz) / 10.0f;
+        case 0x50U:
+            return static_cast<float>(sampleRateHz) / 20.0f;
+        case 0x70U:
+            return static_cast<float>(sampleRateHz) / 45.0f;
+        case 0x90U:
+            return static_cast<float>(sampleRateHz) / 100.0f;
+        case 0xB0U:
+            return static_cast<float>(sampleRateHz) / 200.0f;
+        case 0xD0U:
+            return static_cast<float>(sampleRateHz) / 400.0f;
+        case 0xF0U:
+            return static_cast<float>(sampleRateHz) / 800.0f;
+        case 0x00U:
+        default:
+            return 0.0f;
+        }
+    }
+
     // AN5763 Table 17: FRAC_1_400 selects LPF2 bandwidth = ODR / 400.
     constexpr float GetUiAccelLpf2CutoffHzForControlPeriodUs(unsigned long controlPeriodUs)
     {
-        const unsigned long sampleRateHz = GetUiImuSampleRateHzForControlPeriodUs(controlPeriodUs);
-        return (sampleRateHz > 0UL) ? (static_cast<float>(sampleRateHz) / 400.0f) : 0.0f;
+        return GetUiAccelLpf2CutoffHzForControlPeriodUs(controlPeriodUs, static_cast<uint8_t>(0xD0U));
     }
 
     // AN5763 Table 21: CUT_213 resolves to 195 Hz at 960 Hz ODR and 210 Hz at 1920 Hz ODR.

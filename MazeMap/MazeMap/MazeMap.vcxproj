@@ -78,12 +78,15 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ExternalIncludePath>$(ProjectDir)\eigen-5.0.0\Eigen;$(ExternalIncludePath)</ExternalIncludePath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Eigen;$(IncludePath)</IncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory);$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -103,7 +106,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory);$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -125,7 +128,7 @@
       <WarningLevel>EnableAllWarnings</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory);$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_DEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -144,7 +147,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <SDLCheck>false</SDLCheck>
       <DisableSpecificWarnings>4061;4251;4464;4514;4574;4625;4626;4668;4710;4711;4820;5026;5027;5031;5039;5045;5220;5266;4324;4365;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildProjectDirectory);$(MazeMapEigenIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>NDEBUG;MAZEMAP_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -165,13 +168,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="AuxMeasurementConfig.h" />
     <ClInclude Include="Cell.h" />
     <ClInclude Include="CellCoordinates.h" />
     <ClInclude Include="CircularBuffer.h" />
     <ClInclude Include="CompactPath.h" />
+    <ClInclude Include="CoreConfig.h" />
     <ClInclude Include="CoreFileExport.h" />
     <ClInclude Include="CruiseSpeedFloor.h" />
     <ClInclude Include="Defines.h" />
+    <ClInclude Include="DiagnosticConfig.h" />
     <ClInclude Include="DiagnosticCoverage.h" />
     <ClInclude Include="DiagnosticLogBudget.h" />
     <ClInclude Include="DiagnosticMotionPlan.h" />
@@ -183,6 +189,7 @@
     <ClInclude Include="FanRampProfile.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="Fresnel.h" />
+    <ClInclude Include="FrontWallCharacterizationConfig.h" />
     <ClInclude Include="FrontWallCharacterizationStorage.h" />
     <ClInclude Include="GyroBiasUpdatePolicy.h" />
     <ClInclude Include="HalfStepPath.h" />
@@ -190,6 +197,7 @@
     <ClInclude Include="InPlaceTurnProfile.h" />
     <ClInclude Include="Kinematics.h" />
     <ClInclude Include="LaunchAssistProfile.h" />
+    <ClInclude Include="LedCalibrationConfig.h" />
     <ClInclude Include="LSV6DSV16X_IMU.h" />
     <ClInclude Include="Maneuver.h" />
     <ClInclude Include="ManeuverInstance.h" />

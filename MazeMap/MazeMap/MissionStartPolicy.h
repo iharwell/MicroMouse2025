@@ -800,6 +800,57 @@ namespace MazeMap
             (std::fabs(rightWheelSpeedMps) <= maxAbsLinearSpeedMps);
     }
 
+    inline bool IsMissionStartupStationaryFromSensors(
+        float leftWheelSpeedMps,
+        float rightWheelSpeedMps,
+        float measuredYawRateRadps,
+        float maxAbsLinearSpeedMps,
+        float maxAbsAngularSpeedRadps)
+    {
+        if (!std::isfinite(leftWheelSpeedMps) ||
+            !std::isfinite(rightWheelSpeedMps))
+        {
+            return false;
+        }
+
+        const float measuredLinearSpeedMps = 0.5f * (leftWheelSpeedMps + rightWheelSpeedMps);
+        return IsMissionStartupStationarySample(
+            measuredLinearSpeedMps,
+            measuredYawRateRadps,
+            leftWheelSpeedMps,
+            rightWheelSpeedMps,
+            maxAbsLinearSpeedMps,
+            maxAbsAngularSpeedRadps);
+    }
+
+    inline bool IsMissionStartupStationaryFromEncoderWindow(
+        float leftEncoderTravelM,
+        float rightEncoderTravelM,
+        float windowDurationSeconds,
+        float measuredYawRateRadps,
+        float maxAbsLinearSpeedMps,
+        float maxAbsAngularSpeedRadps)
+    {
+        if (!std::isfinite(leftEncoderTravelM) ||
+            !std::isfinite(rightEncoderTravelM) ||
+            !std::isfinite(windowDurationSeconds) ||
+            windowDurationSeconds <= 0.0f)
+        {
+            return false;
+        }
+
+        const float leftWheelSpeedMps = leftEncoderTravelM / windowDurationSeconds;
+        const float rightWheelSpeedMps = rightEncoderTravelM / windowDurationSeconds;
+        const float measuredLinearSpeedMps = 0.5f * (leftWheelSpeedMps + rightWheelSpeedMps);
+        return IsMissionStartupStationarySample(
+            measuredLinearSpeedMps,
+            measuredYawRateRadps,
+            leftWheelSpeedMps,
+            rightWheelSpeedMps,
+            maxAbsLinearSpeedMps,
+            maxAbsAngularSpeedRadps);
+    }
+
     inline bool IsWallTouchSeatAsymmetricReleaseCue(
         bool sawPinnedBiasPhase,
         bool pinnedBiasRight,

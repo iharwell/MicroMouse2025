@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 #include "..\MazeMap\MazeMapRuntimeCsvLog.h"
+#include "..\MazeMap\MazeMapRuntimeMmLog.h"
 #include "..\MazeMap\MazeMapRuntimeSignalHelpers.h"
 
 #include <cstring>
@@ -68,5 +69,34 @@ namespace MazeMapApp
             Assert::IsTrue(SelectSequentialCsvFileName(buffer, sizeof(buffer), nullptr, "diag%03u.csv", "fallback.csv"));
             Assert::IsTrue(std::strcmp(buffer, "fallback.csv") == 0);
         }
+
+        TEST_METHOD(SelectSequentialRuntimeFileName_UsesHostFallbackWhenExplicitNameMissing)
+        {
+            using MazeMapApp::Internal::Runtime::SelectSequentialRuntimeFileName;
+
+            char buffer[32] = {};
+            Assert::IsTrue(SelectSequentialRuntimeFileName(buffer, sizeof(buffer), nullptr, "diag%03u.mmlog", "fallback.mmlog"));
+            Assert::IsTrue(std::strcmp(buffer, "fallback.mmlog") == 0);
+        }
+
+        TEST_METHOD(BuildSiblingRuntimeFileName_ReplacesExtension)
+        {
+            using MazeMapApp::Internal::Runtime::BuildSiblingRuntimeFileName;
+
+            char buffer[64] = {};
+            Assert::IsTrue(BuildSiblingRuntimeFileName(buffer, sizeof(buffer), "open_floor_main.mmlog", ".events.txt"));
+            Assert::IsTrue(std::strcmp(buffer, "open_floor_main.events.txt") == 0);
+        }
+
+        TEST_METHOD(PackTextTagOrHash_UsesTagForShortTextAndHashForLongText)
+        {
+            const uint32_t shortPacked = MazeMapApp::Internal::Runtime::PackTextTagOrHash("imu");
+            Assert::AreEqual(mmlog::TAG4('i', 'm', 'u', '\0'), shortPacked);
+
+            const uint32_t longPacked = MazeMapApp::Internal::Runtime::PackTextTagOrHash("front_pair_stream");
+            Assert::AreNotEqual(0U, longPacked);
+            Assert::AreNotEqual(mmlog::TAG4('f', 'r', 'o', 'n'), longPacked);
+        }
+
     };
 }

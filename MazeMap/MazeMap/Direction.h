@@ -4,6 +4,7 @@
 namespace MazeMap
 {
 	//↑↗→↘↓↙←↖
+	// Absolute directions in the maze frame of reference.
 	enum EXPORT Direction : uint8_t
 	{
 		None = 0x00,
@@ -25,6 +26,7 @@ namespace MazeMap
 		DownRight = Down | Right
 	};
 
+	//Relative directions in the vehicle frame of reference.
 	enum EXPORT RelativeDirection : uint8_t
 	{
 		L135 = 5,
@@ -47,6 +49,8 @@ namespace MazeMap
 
 		NoRelativeDirection = 0
 	};
+
+	//Absolute directions organized by angle.
 	const Direction OrdinalDirections[] =
 	{
 		Direction::Up,
@@ -58,6 +62,8 @@ namespace MazeMap
 		Direction::Left,
 		Direction::UpLeft
 	};
+
+	//Reverse lookup table for moving between absolute and relative directions with vehicle facing absolute Up.
 	const RelativeDirection RelativeDirections[] =
 	{
 		RelativeDirection::NoRelativeDirection,

@@ -2,13 +2,16 @@
 #ifndef VECTORF_H
 #define VECTORF_H
 #include "defines.h"
-
+#include "MazeMapEigen.h"
 #include <stdint.h>
 #include <cmath>
 
 namespace MazeMap
 {
-	template<int DIMENSION>
+
+	// Use Eigen implementation.
+	
+	/*template<int DIMENSION>
 	class Vectorf
 	{
 	private:
@@ -350,12 +353,12 @@ namespace MazeMap
 		{
 			return _x * other._x + _y * other._y;
 		}
-	};
+	};*/
 }
 
-inline MazeMap::Vectorf<2> operator*(float scalar, const MazeMap::Vectorf<2>& vec)
+/*inline MazeMap::Vectorf<2> operator*(float scalar, const MazeMap::Vectorf<2>& vec)
 {
 	return vec * scalar;
-}
+}*/
 #endif
 
