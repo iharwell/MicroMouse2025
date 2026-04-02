@@ -1,9 +1,13 @@
 #include "MazeMapApplicationPrivate.h"
+#include "OpenFloorMainLoggerV2.h"
+#include "OpenFloorTimingLoggerV2.h"
 #include "MazeMapSharedRuntime.h"
 #include "WallSensorLedCalibrationPhase.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
+using MazeMap::App::Internal::Runtime::OpenFloorMainLoggerV2;
+using MazeMap::App::Internal::Runtime::OpenFloorTimingLoggerV2;
 
 class AuxMeasurementController : public IApplicationMode
 {

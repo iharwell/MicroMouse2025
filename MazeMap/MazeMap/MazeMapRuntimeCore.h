@@ -2,6 +2,16 @@
 // Declares shared runtime state, calibration, and sensor-processing utilities used across the MazeMap application runtime.
 
 #include "Defines.h"
+#include "DiagonalWallCentering.h"
+#include "EncoderStallPolicy.h"
+#include "ImuCalibrationPolicy.h"
+#include "Maze.h"
+#include "MissionStartPolicy.h"
+#include "RollingAverageWindow.h"
+#include "Vehicle.h"
+#include "WallDetectionThresholds.h"
+#include "WallObservationPipeline.h"
+#include "WallSensorCalibration.h"
 
 inline bool AppendStartupTrace(const char* line);
 

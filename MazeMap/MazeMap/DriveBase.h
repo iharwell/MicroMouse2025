@@ -1,6 +1,11 @@
 #pragma once
 // Defines the runtime drive controller that owns motor actuation, odometry, and closed-loop wheel control.
+#include "InPlaceTurnProfile.h"
+#include "LaunchAssistProfile.h"
 #include "MazeMapRuntimeCore.h"
+#include "MouseUkf.h"
+#include "OpenLoopDriveCommand.h"
+#include "WheelControlProfile.h"
 
 // Private drive runtime implementation for the MazeMap application runtime.
 inline MazeMap::WheelControlProfile BuildNominalWheelControlProfile()

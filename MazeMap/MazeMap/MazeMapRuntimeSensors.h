@@ -1,5 +1,6 @@
 #pragma once
 // Declares the runtime sensor capture pipelines used for mission control and diagnostic data collection.
+#include "GyroBiasUpdatePolicy.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeSignalHelpers.h"
 class SensorSuite
