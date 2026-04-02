@@ -2,7 +2,7 @@
 #include "Defines.h"
 #include "Maze.h"
 #include "Vehicle.h"
-namespace Config
+namespace MazeMap::Config
 {
     // Supported mission tuning parameters live here. Treat hard-coded literals elsewhere as implementation
     // details unless they are intentionally promoted into this section with documentation.
@@ -505,3 +505,5 @@ namespace Config
     // watchdog can trip. This should cover the launch-assist ramp so high-strung starts do not false-fault.
     constexpr unsigned long kEncoderStallStartupGraceMs = 250UL;
 }
+
+namespace Config = MazeMap::Config;

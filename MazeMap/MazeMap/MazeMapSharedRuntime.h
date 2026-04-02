@@ -1,4 +1,5 @@
 #pragma once
+// Declares the shared runtime object that wires together vehicles, planners, sensors, and drive services for the app.
 
 #include "Defines.h"
 
@@ -17,7 +18,7 @@ namespace MazeMap
     class WallBeliefMap;
 }
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     // Owns the heavyweight runtime infrastructure that should be shared across all startup modes.
     // Mode implementations stay small by borrowing references from this hub instead of allocating
@@ -58,3 +59,4 @@ namespace MazeMapApp::Internal
 
     EXPORT SharedRobotRuntime& GetSharedRobotRuntime();
 }
+

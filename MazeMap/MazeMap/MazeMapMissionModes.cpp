@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "MazeMapMissionModes.h"
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     MissionHostedModeBase::MissionHostedModeBase(IMissionModeHost& host)
         : _host(host)
@@ -73,3 +73,4 @@ namespace MazeMapApp::Internal
         Host().RunPositionAccuracyAuditMode();
     }
 }
+

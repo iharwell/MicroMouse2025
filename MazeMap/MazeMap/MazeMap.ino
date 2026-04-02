@@ -3,7 +3,7 @@
 
 namespace
 {
-    MazeMapApp::Application gApplication;
+    MazeMap::App::Application gApplication;
 }
 
 void setup()
@@ -15,3 +15,4 @@ void loop()
 {
     gApplication.Loop();
 }
+

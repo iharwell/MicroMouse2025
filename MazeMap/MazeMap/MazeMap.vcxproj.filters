@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -6,103 +6,106 @@
       <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
     <Filter Include="Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <UniqueIdentifier>{93995380-89BD-4B04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
     <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <UniqueIdentifier>{67DA6AB6-F800-4C08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Header Files\App">
+      <UniqueIdentifier>{A0E4D0D1-1285-4945-A3FC-4029A0F16B12}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\App\Internal">
+      <UniqueIdentifier>{8BF4D7D0-06F9-4B13-8EA5-3D3FAD87FC8D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\App\Internal\Runtime">
+      <UniqueIdentifier>{2E78370F-BE9E-4D4E-93F8-2DE343B3F7FE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Config">
+      <UniqueIdentifier>{290F74A9-1610-4836-B295-BD775C0E5E64}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\AuxMeasurementConfig">
+      <UniqueIdentifier>{A3B0C7D4-6D11-4EBA-9F66-2E9D9D8B1905}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\DiagnosticConfig">
+      <UniqueIdentifier>{8BC29779-AB5F-4903-BD4F-7A48A30D4907}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\FrontWallCharacterizationConfig">
+      <UniqueIdentifier>{F7A1766C-17D6-4350-B919-C29B6B3894F5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\LedCalibrationConfig">
+      <UniqueIdentifier>{5D1A0D10-83D4-4F5E-9D23-4257F4EAB6AB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Pins">
+      <UniqueIdentifier>{9CF80D74-F175-49D1-8A29-C47AAB579EFA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\HardwareConfig">
+      <UniqueIdentifier>{9F234DA9-47C8-4879-83E4-12062C5AF7A0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\MmLog">
+      <UniqueIdentifier>{5F0128D3-6F47-4D29-B5CD-4D9284A2D4EA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\App">
+      <UniqueIdentifier>{D3E289D9-85F1-4980-BA70-E9136C763E29}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\App\Internal">
+      <UniqueIdentifier>{6A11DDE5-17D7-4C28-BAB3-77B94EE19B21}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\App\Internal\Runtime">
+      <UniqueIdentifier>{0BE00F63-381E-4846-BA85-2CE9D4594B85}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="pch.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Maze.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapApplication.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapApplicationMode.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapApplicationPrivate.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapApplicationRuntime.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapControllerRegistry.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapRuntimeCsvLog.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapRuntimeCore.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapRuntimeDrive.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapRuntimeInfrastructure.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapRuntimeSignalHelpers.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapRuntimeSensors.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMapSharedRuntime.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="AuxMeasurementConfig.h">
+      <Filter>Header Files\AuxMeasurementConfig</Filter>
     </ClInclude>
     <ClInclude Include="Cell.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Defines.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Path.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="CircularBuffer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Sensor.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Vehicle.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="WheelMotor.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="PathPoint.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MazeMask.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="PathFinder.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Direction.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MaskQueue.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="CompactPath.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CellCoordinates.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MazeLocation.h">
+    <ClInclude Include="CircularBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CompactPath.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CoreConfig.h">
+      <Filter>Header Files\Config</Filter>
+    </ClInclude>
+    <ClInclude Include="CoreFileExport.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CruiseSpeedFloor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Defines.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticConfig.h">
+      <Filter>Header Files\DiagnosticConfig</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticCoverage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticLogBudget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticLogger.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticMotionPlan.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagnosticSensorSuite.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="DiagonalWallCentering.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Direction.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="DirectionalLocation.h">
@@ -111,231 +114,312 @@
     <ClInclude Include="DirectionalPathFinder.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Maneuver.h">
+    <ClInclude Include="DriveBase.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="EigenCompat.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="HalfStepPath.h">
+    <ClInclude Include="EncoderStallPolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapMissionModeHost.h">
+    <ClInclude Include="FanRampProfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapMissionModes.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ManeuverSet.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ManeuverPathFinder.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ManeuverPath.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Kinematics.h">
+    <ClInclude Include="framework.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Fresnel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="VehicleState.h">
+    <ClInclude Include="FrontWallCharacterizationConfig.h">
+      <Filter>Header Files\FrontWallCharacterizationConfig</Filter>
+    </ClInclude>
+    <ClInclude Include="FrontWallCharacterizationStorage.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="TeensyLayout.h">
+    <ClInclude Include="FloodFillPathFinder.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GyroBiasUpdatePolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="HardwareConfig.h">
+      <Filter>Header Files\HardwareConfig</Filter>
+    </ClInclude>
+    <ClInclude Include="HalfStepPath.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ImuCalibrationPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ImuSamplingProfile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="InPlaceTurnProfile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Kinematics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="LaunchAssistProfile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="LedCalibrationConfig.h">
+      <Filter>Header Files\LedCalibrationConfig</Filter>
     </ClInclude>
     <ClInclude Include="LSV6DSV16X_IMU.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="UKF.h">
+    <ClInclude Include="Maneuver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ManeuverInstance.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MotorEncoderDrive.h">
+    <ClInclude Include="ManeuverPath.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="WallSensor.h">
+    <ClInclude Include="ManeuverPathFinder.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ManeuverQueue.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="CoreFileExport.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="ManeuverSet.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="CruiseSpeedFloor.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MaskQueue.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DiagnosticCoverage.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MapEvidenceUpdater.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DiagnosticLogBudget.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="Maze.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DiagnosticMotionPlan.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapApplication.h">
+      <Filter>Header Files\App</Filter>
     </ClInclude>
-    <ClInclude Include="DiagonalWallCentering.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapApplicationMode.h">
+      <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="EncoderStallPolicy.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapApplicationPrivate.h">
+      <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="FanRampProfile.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapApplicationRuntime.h">
+      <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="FrontWallCharacterizationStorage.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapControllerRegistry.h">
+      <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="GyroBiasUpdatePolicy.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapRuntimeCsvLog.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
-    <ClInclude Include="ImuSamplingProfile.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapRuntimeCore.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
-    <ClInclude Include="InPlaceTurnProfile.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapRuntimeDrive.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
-    <ClInclude Include="LaunchAssistProfile.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="MazeMapRuntimeInfrastructure.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeMapRuntimeMmLog.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeMapRuntimeSignalHelpers.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeMapRuntimeSensors.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeMapSharedRuntime.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeLocation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeMask.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeMapMissionModeHost.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="MazeMapMissionModes.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="OpenFloorMainLogger.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="OpenFloorMainLoggerV2.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="OpenFloorMeasurementSpec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OpenFloorRunManifestWriter.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="OpenFloorTimingLogger.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="OpenFloorTimingLoggerV2.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="OptionalRuntimeEventLog.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="MissionMazeExport.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MissionStartPolicy.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MmLog.h">
+      <Filter>Header Files\MmLog</Filter>
     </ClInclude>
     <ClInclude Include="MotionTargetProjection.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MotorEncoderDrive.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MotorModelUnits.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MouseUkfFacade.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MouseUkf.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CoreBinaryFileExport.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="OpenLoopDriveCommand.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Path.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PathFinder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PathPoint.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Pins.h">
+      <Filter>Header Files\Pins</Filter>
+    </ClInclude>
+    <ClInclude Include="PlantModel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PrimitiveInverseSolver.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="RollingAverageWindow.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RuntimeBinaryLogFile.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="RuntimeRecordBuilder.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
+    </ClInclude>
+    <ClInclude Include="RuntimeTextBlockBuilder.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="SearchRunPlanner.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Sensor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SensorSuite.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="SmoothTurnYawRateController.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="StartupWaitProfile.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SrUkfCore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TeensyLayout.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TrackWidthEstimate.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TractionLimitSweep.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TurnCommandGeometry.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TurnWallEdgeTracker.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UKF.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Vehicle.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VehicleState.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WallDistanceCalibration.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="WallDetectionThresholds.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="WallSensorCalibration.h">
-      <Filter>Source Files</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WallBeliefMap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WallGeometryModel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WallObservationPipeline.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DiagnosticConfig.h">
+    <ClInclude Include="WallSensor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="AuxMeasurementConfig.h">
+    <ClInclude Include="WallSensorCalibration.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="FrontWallCharacterizationConfig.h">
+    <ClInclude Include="WallSensorLedCalibrationPhase.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="LedCalibrationConfig.h">
+    <ClInclude Include="WallSensorPreprocessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="CoreConfig.h">
+    <ClInclude Include="WheelControlProfile.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="AuxMeasurementLogger.h">
+      <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="dllmain.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="pch.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Maze.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapApplicationEntry.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapApplication.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapStandaloneModes.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapRuntimeCsvLog.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapMissionController.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapMissionModes.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapSharedRuntime.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Cell.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Path.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Vehicle.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="WheelMotor.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="PathPoint.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMask.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="PathFinder.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Direction.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MaskQueue.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="CompactPath.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CellCoordinates.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MazeLocation.cpp">
+    <ClCompile Include="CompactPath.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Direction.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DirectionalLocation.cpp">
@@ -344,28 +428,82 @@
     <ClCompile Include="DirectionalPathFinder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Maneuver.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ManeuverSet.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ManeuverPathFinder.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ManeuverPath.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Kinematics.cpp">
+    <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Fresnel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="VehicleState.cpp">
+    <ClCompile Include="Kinematics.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Maneuver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ManeuverPath.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ManeuverPathFinder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ManeuverSet.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MaskQueue.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Maze.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapApplicationEntry.cpp">
+      <Filter>Source Files\App</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapApplication.cpp">
+      <Filter>Source Files\App</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapStandaloneModes.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapRuntimeCsvLog.cpp">
+      <Filter>Source Files\App\Internal\Runtime</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapMissionController.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapMissionModes.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapSharedRuntime.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
+      <Filter>Source Files\App\Internal\Runtime</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeLocation.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMask.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Path.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PathFinder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PathPoint.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="pch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Vehicle.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="VehicleState.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

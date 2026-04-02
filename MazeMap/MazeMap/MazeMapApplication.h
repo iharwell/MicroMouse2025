@@ -1,6 +1,6 @@
 #pragma once
 
-namespace MazeMapApp
+namespace MazeMap::App
 {
     enum class StartupMode
     {
@@ -64,3 +64,6 @@ namespace MazeMapApp
         void Loop();
     };
 }
+
+namespace MazeMapApp = MazeMap::App;
+

@@ -62,12 +62,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-using MazeMapApp::Internal::IApplicationMode;
-using MazeMapApp::Internal::IMissionModeHost;
-using MazeMapApp::Internal::MissionRunMode;
-using MazeMapApp::Internal::ManeuverFileTestMode;
-using MazeMapApp::Internal::CorridorRepeatabilityMode;
-using MazeMapApp::Internal::PositionAccuracyAuditMode;
+using MazeMap::App::Internal::IApplicationMode;
+using MazeMap::App::Internal::IMissionModeHost;
+using MazeMap::App::Internal::MissionRunMode;
+using MazeMap::App::Internal::ManeuverFileTestMode;
+using MazeMap::App::Internal::CorridorRepeatabilityMode;
+using MazeMap::App::Internal::PositionAccuracyAuditMode;
 
 namespace MazeMap
 {
@@ -81,3 +81,4 @@ namespace MazeMap
 #include "MazeMapRuntimeDrive.h"
 #include "MazeMapRuntimeSensors.h"
 #include "MazeMapRuntimeInfrastructure.h"
+

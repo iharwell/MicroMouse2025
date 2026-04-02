@@ -177,6 +177,8 @@ $firmwareOutputDir = Join-Path $canonicalBuildPath 'firmware'
 $hexPath = Join-Path $firmwareOutputDir 'MazeMap.ino.hex'
 $testDllPath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeMapTest.dll'
 $fqbn = 'teensy:avr:teensy41'
+$teensyBoardOptions = @('opt=o2lto')
+$teensyOptimizationProfile = 'O2 + LTO'
 $runStartedAt = Get-Date
 
 Assert-PathExists -Path $arduinoCli -Description 'Arduino CLI'
@@ -199,10 +201,12 @@ try {
     New-Item -ItemType Directory -Path $firmwareOutputDir -Force | Out-Null
 
     Write-Step 'Compiling the Teensy sketch'
+    Write-Host ("Teensy compile profile: {0} ({1})" -f $teensyOptimizationProfile, ($teensyBoardOptions -join ', ')) -ForegroundColor DarkCyan
     Invoke-External -FilePath $arduinoCli -Arguments @(
         'compile',
         '--clean',
         '--fqbn', $fqbn,
+        '--board-options', ($teensyBoardOptions -join ','),
         '--libraries', $arduinoLibrariesDir,
         '--library', $arduinoEigenLibraryDir,
         '--build-path', $buildPath,

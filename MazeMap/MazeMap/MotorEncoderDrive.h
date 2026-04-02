@@ -99,8 +99,7 @@ namespace MazeMap
             {
                 return -1.0f;
             }
-
-            if (value > 1.0f)
+            else if (value > 1.0f)
             {
                 return 1.0f;
             }
@@ -110,7 +109,13 @@ namespace MazeMap
 
         static float Absf(float value) noexcept
         {
-            return (value < 0.0f) ? -value : value;
+            union {
+                float f;
+                uint32_t i;
+            } u;
+            u.f = value;
+            u.i &= 0x7fff'ffff;
+            return u.f;
         }
 
         static int32_t RoundToInt32(float value) noexcept
@@ -321,28 +326,37 @@ namespace MazeMap
         }
 
         float getResistance() const noexcept { return _resistance; }
+        float getResistance() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getResistance(); }
         void setResistance(float value) noexcept { _resistance = value; }
 
         float getVoltage() const noexcept { return _voltage; }
+        float getVoltage() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getVoltage(); }
         void setVoltage(float value) noexcept { _voltage = value; }
 
         float getTorqueConstant() const noexcept { return _torqueConstant; }
+        float getTorqueConstant() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getTorqueConstant(); }
         void setTorqueConstant(float value) noexcept { _torqueConstant = value; }
 
         float getSpeedConstant() const noexcept { return _speedConstant; }
+        float getSpeedConstant() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getSpeedConstant(); }
         void setSpeedConstant(float value) noexcept { _speedConstant = value; }
 
         float getNoLoadCurrent() const noexcept { return _noLoadCurrent; }
+        float getNoLoadCurrent() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getNoLoadCurrent(); }
         void setNoLoadCurrent(float value) noexcept { _noLoadCurrent = value; }
 
         float getGearRatio() const noexcept { return _gearRatio; }
+        float getGearRatio() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getGearRatio(); }
         void setGearRatio(float value) noexcept { _gearRatio = value; }
 
         float getWheelDiameter() const noexcept { return _wheelDiameter; }
+        float getWheelDiameter() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getWheelDiameter(); }
         void setWheelDiameter(float value) noexcept { _wheelDiameter = value; }
 
         float getWheelRadius() const noexcept { return 0.5f * _wheelDiameter; }
+        float getWheelRadius() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getWheelRadius(); }
         float getWheelCircumference() const noexcept { return PI_F * _wheelDiameter; }
+        float getWheelCircumference() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getWheelCircumference(); }
 
         uint16_t getPulsesPerRev() const noexcept { return _pulsesPerRev; }
         void setPulsesPerRev(uint16_t value) noexcept { _pulsesPerRev = value; }
@@ -386,11 +400,7 @@ namespace MazeMap
 
         float getDistancePerPulse() const noexcept
         {
-            if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || (_pulsesPerRev == 0U))
-            {
-                return 0.0f;
-            }
-
+            assert((_wheelDiameter > 0.0f) && (_gearRatio > 0.0f) && (_pulsesPerRev >= 0U));
             return getWheelCircumference() / (_gearRatio * static_cast<float>(_pulsesPerRev));
         }
 
@@ -402,10 +412,7 @@ namespace MazeMap
         int32_t distanceToPulses(float distanceMeters) const noexcept
         {
             const float distancePerPulse = getDistancePerPulse();
-            if (!(distancePerPulse > 0.0f))
-            {
-                return 0;
-            }
+            assert((distancePerPulse > 0.0f));
 
             return RoundToInt32(distanceMeters / distancePerPulse);
         }
@@ -413,40 +420,28 @@ namespace MazeMap
         float getMotorAngularVelocityAtGroundSpeed(float groundSpeedMetersPerSecond) const noexcept
         {
             const float wheelRadius = getWheelRadius();
-            if (!(wheelRadius > 0.0f) || !(_gearRatio > 0.0f))
-            {
-                return 0.0f;
-            }
+            assert((wheelRadius > 0.0f) && (_gearRatio > 0.0f));
 
             return (groundSpeedMetersPerSecond / wheelRadius) * _gearRatio;
         }
 
         float getGroundSpeedFromMotorAngularVelocity(float motorAngularVelocity) const noexcept
         {
-            if (!(_gearRatio > 0.0f))
-            {
-                return 0.0f;
-            }
+            assert(_gearRatio > 0.0f);
 
             return (motorAngularVelocity / _gearRatio) * getWheelRadius();
         }
 
         float getMotorCurrentForGroundForce(float groundForceNewtons) const noexcept
         {
-            if (!(_torqueConstant > 0.0f) || !(_gearRatio > 0.0f) || !(_wheelDiameter > 0.0f))
-            {
-                return 0.0f;
-            }
+            assert((_torqueConstant > 0.0f) && (_gearRatio > 0.0f) && (_wheelDiameter > 0.0f));
 
             return (groundForceNewtons * getWheelRadius()) / (_torqueConstant * _gearRatio);
         }
 
         float getMotorVoltageForGroundForce(float groundForceNewtons, float groundSpeedMetersPerSecond) const noexcept
         {
-            if (!(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f) || !(_gearRatio > 0.0f) || !(_wheelDiameter > 0.0f))
-            {
-                return 0.0f;
-            }
+            assert((_resistance > 0.0f) && (_speedConstant > 0.0f) && (_torqueConstant > 0.0f) && (_gearRatio > 0.0f) && (_wheelDiameter > 0.0f));
 
             float motorCurrent = getMotorCurrentForGroundForce(groundForceNewtons);
             float noLoadDirection = Signf(groundForceNewtons);
@@ -461,10 +456,7 @@ namespace MazeMap
 
         float getDriveCommandForGroundForce(float groundForceNewtons, float groundSpeedMetersPerSecond) const noexcept
         {
-            if (!(_voltage > 0.0f))
-            {
-                return 0.0f;
-            }
+            assert(_voltage > 0.0f);
 
             return ClampUnit(getMotorVoltageForGroundForce(groundForceNewtons, groundSpeedMetersPerSecond) / _voltage);
         }
@@ -472,10 +464,7 @@ namespace MazeMap
         float getMaxForceAtVelocity(float velocityMetersPerSecond) const noexcept
         {
             const float groundSpeed = Absf(velocityMetersPerSecond);
-            if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || !(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f) || !(_voltage > 0.0f))
-            {
-                return 0.0f;
-            }
+            assert((_wheelDiameter > 0.0f) && (_gearRatio > 0.0f) && (_resistance > 0.0f) && (_speedConstant > 0.0f) && (_torqueConstant > 0.0f) && (_voltage > 0.0f));
 
             const float wheelRadius = getWheelRadius();
             const float motorAngularVelocity = (groundSpeed / wheelRadius) * _gearRatio;
@@ -523,10 +512,7 @@ namespace MazeMap
         void coast() noexcept
         {
             _lastDriveCommand = 0.0f;
-            if (!hasMotorPins())
-            {
-                return;
-            }
+            assert(hasMotorPins());
 
             Platform::DrivePinLow(_motorOutPinA);
             Platform::DrivePinLow(_motorOutPinB);
@@ -535,10 +521,7 @@ namespace MazeMap
         void brake() noexcept
         {
             _lastDriveCommand = 0.0f;
-            if (!hasMotorPins())
-            {
-                return;
-            }
+            assert(hasMotorPins());
 
             Platform::DrivePinHigh(_motorOutPinA);
             Platform::DrivePinHigh(_motorOutPinB);
@@ -548,10 +531,7 @@ namespace MazeMap
         {
             _lastDriveCommand = ClampUnit(driveCommand);
 
-            if (!hasMotorPins())
-            {
-                return;
-            }
+            assert(hasMotorPins());
 
             float hardwareCommand = _invertMotorDirection ? -_lastDriveCommand : _lastDriveCommand;
             if (hardwareCommand > 0.0f)
@@ -595,21 +575,22 @@ namespace MazeMap
 
         int32_t getEncoderCount() const noexcept
         {
-            if (!hasEncoder())
-            {
-                return 0;
-            }
+            assert(hasEncoder());
 
             const int32_t rawCount = Platform::ReadEncoderCount(_encoderChannel);
             return _invertEncoderDirection ? -rawCount : rawCount;
         }
 
+        int32_t consumeEncoderCount() noexcept
+        {
+            const int32_t count = getEncoderCount();
+            setEncoderCount(0);
+            return count;
+        }
+
         void setEncoderCount(int32_t count) noexcept
         {
-            if (!hasEncoder())
-            {
-                return;
-            }
+            assert(hasEncoder());
 
             Platform::WriteEncoderCount(_encoderChannel, _invertEncoderDirection ? -count : count);
             resetEncoderVelocityEstimate();

@@ -4,11 +4,16 @@
 #define MAZE_EXPORT
 #include <stdint.h>
 #include <windows.h>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <iomanip>
 #include <iostream>
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\Maze.h"
 #include "..\MazeMap\PathFinder.h"
 #include "..\MazeMap\DirectionalPathFinder.h"
+#include "..\MazeMap\MouseUkf.h"
 #include "Mazes.h"
 #include "SimVehicle.h"
 #include "../MazeMap/ManeuverPathFinder.h"
@@ -20,6 +25,190 @@ MazeMap::ManeuverPathFinder superAdvancedPathFinder = MazeMap::ManeuverPathFinde
 SimVehicle simVehicle = SimVehicle();
 MazeMap::Path<PATH_SIZE> p = MazeMap::Path<PATH_SIZE>();
 constexpr int PROCESSING_CYCLES = 10000;
+
+namespace
+{
+    constexpr const char* kOpenFloorUkfBenchmarkArg = "--benchmark-open-floor-ukf-stationary";
+    constexpr uint32_t kDefaultOpenFloorUkfBenchmarkIterations = 200000U;
+    constexpr uint32_t kOpenFloorUkfBenchmarkWarmupIterations = 2048U;
+    constexpr float kOpenFloorUkfBenchmarkDtSeconds = 0.001f;
+    constexpr float kOpenFloorUkfBenchmarkStationaryGyroRawRadps = 0.015f;
+
+    MazeMap::VehicleState::StateMatrix BuildOpenFloorBenchmarkCovariance()
+    {
+        MazeMap::VehicleState::StateMatrix covariance =
+            MazeMap::VehicleState::StateMatrix::Identity() * 1.0e-3f;
+        covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL) = 0.25f;
+        covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR) = 0.25f;
+        covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz) = 0.01f;
+        return covariance;
+    }
+
+    void ResetOpenFloorBenchmarkUkf(MazeMap::MouseUkfFacade& ukf)
+    {
+        MazeMap::VehicleState::StateVector state = MazeMap::VehicleState::StateVector::Zero();
+        (void)ukf.reset(state, BuildOpenFloorBenchmarkCovariance());
+    }
+
+    bool ExecuteOpenFloorStationaryMeasurementCycle(
+        MazeMap::MouseUkfFacade& ukf,
+        float dtSeconds,
+        const MazeMap::ControlInput& control,
+        const MazeMap::EncoderObs& encoderObservation,
+        const MazeMap::ImuAccelObs& accelObservation,
+        float rawGyroRadps)
+    {
+        if (!ukf.predict(dtSeconds, control))
+        {
+            return false;
+        }
+
+        const MazeMap::MeasurementUpdateResult encoderUpdate = ukf.updateEncoderPair(encoderObservation, dtSeconds);
+        if (!encoderUpdate.accepted)
+        {
+            return false;
+        }
+
+        const MazeMap::MeasurementUpdateResult yawUpdate = ukf.updateYawRate(rawGyroRadps);
+        if (!yawUpdate.accepted)
+        {
+            return false;
+        }
+
+        const MazeMap::MeasurementUpdateResult accelUpdate = ukf.updatePlanarAccel(accelObservation);
+        if (!accelUpdate.accepted)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    uint32_t ParseBenchmarkIterations(const char* argument)
+    {
+        if (argument == nullptr || argument[0] == '\0')
+        {
+            return kDefaultOpenFloorUkfBenchmarkIterations;
+        }
+
+        char* end = nullptr;
+        const unsigned long parsed = std::strtoul(argument, &end, 10);
+        if (end == argument || *end != '\0' || parsed == 0UL)
+        {
+            return kDefaultOpenFloorUkfBenchmarkIterations;
+        }
+
+        return static_cast<uint32_t>(parsed);
+    }
+
+    bool IsOpenFloorUkfBenchmarkArg(const char* argument)
+    {
+        return argument != nullptr && std::strcmp(argument, kOpenFloorUkfBenchmarkArg) == 0;
+    }
+
+    int RunOpenFloorUkfStationaryBenchmark(uint32_t iterations)
+    {
+        MazeMap::MouseUkfFacade ukf;
+        ResetOpenFloorBenchmarkUkf(ukf);
+
+        const MazeMap::PlantParams& params = ukf.ukf().params();
+        MazeMap::ControlInput control{};
+        control.leftMotorCommand = 0.0f;
+        control.rightMotorCommand = 0.0f;
+        control.fanDutyCycle = 0.80f;
+        control.batteryVoltageV = params.supplyVoltageV;
+
+        MazeMap::EncoderObs encoderObservation{};
+        encoderObservation.totalLeftCounts = 0;
+        encoderObservation.totalRightCounts = 0;
+        encoderObservation.omegaLeftRadps = 0.0f;
+        encoderObservation.omegaRightRadps = 0.0f;
+
+        MazeMap::ImuAccelObs accelObservation{};
+        accelObservation.valid = true;
+        accelObservation.accelBodyXMps2 = 0.0f;
+        accelObservation.accelBodyYMps2 = 0.0f;
+
+        for (uint32_t index = 0U; index < kOpenFloorUkfBenchmarkWarmupIterations; ++index)
+        {
+            if (!ExecuteOpenFloorStationaryMeasurementCycle(
+                    ukf,
+                    kOpenFloorUkfBenchmarkDtSeconds,
+                    control,
+                    encoderObservation,
+                    accelObservation,
+                    kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
+            {
+                std::cerr << "Open-floor UKF warmup failed at iteration " << index << "\n";
+                return 1;
+            }
+            if ((index % (kOpenFloorUkfBenchmarkWarmupIterations / 100)) == 0)
+            {
+                std::cout << index << "\n";
+            }
+        }
+
+        ResetOpenFloorBenchmarkUkf(ukf);
+        const auto start = std::chrono::steady_clock::now();
+        for (uint32_t index = 0U; index < iterations; ++index)
+        {
+            if (!ExecuteOpenFloorStationaryMeasurementCycle(
+                    ukf,
+                    kOpenFloorUkfBenchmarkDtSeconds,
+                    control,
+                    encoderObservation,
+                    accelObservation,
+                    kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
+            {
+                std::cerr << "Open-floor UKF benchmark failed at iteration " << index << "\n";
+                return 1;
+            }
+        }
+        const auto end = std::chrono::steady_clock::now();
+
+        const std::chrono::duration<double, std::milli> elapsedMs = end - start;
+        const double microsecondsPerIteration =
+            (iterations > 0U) ?
+            ((elapsedMs.count() * 1000.0) / static_cast<double>(iterations)) :
+            0.0;
+        const MazeMap::VehicleState::StateVector& state = ukf.ukf().state();
+        const MazeMap::VehicleState::StateMatrix covariance = ukf.ukf().covariance();
+
+        std::cout << std::fixed << std::setprecision(6);
+        std::cout << "Open-floor UKF stationary benchmark\n";
+        std::cout << "  measurement_set: predict + encoder_pair + yaw_rate + planar_accel\n";
+        std::cout << "  iterations: " << iterations << "\n";
+        std::cout << "  dt_seconds: " << kOpenFloorUkfBenchmarkDtSeconds << "\n";
+        std::cout << "  fan_duty: " << control.fanDutyCycle << "\n";
+        std::cout << "  raw_gyro_radps: " << kOpenFloorUkfBenchmarkStationaryGyroRawRadps << "\n";
+        std::cout << "  elapsed_ms: " << elapsedMs.count() << "\n";
+        std::cout << "  us_per_iteration: " << microsecondsPerIteration << "\n";
+        std::cout << "  final_state:"
+            << " px=" << state(MazeMap::VehicleState::kPx)
+            << " py=" << state(MazeMap::VehicleState::kPy)
+            << " psi=" << state(MazeMap::VehicleState::kPsi)
+            << " u=" << state(MazeMap::VehicleState::kU)
+            << " v=" << state(MazeMap::VehicleState::kV)
+            << " r=" << state(MazeMap::VehicleState::kR)
+            << " omega_l=" << state(MazeMap::VehicleState::kOmegaL)
+            << " omega_r=" << state(MazeMap::VehicleState::kOmegaR)
+            << " bgz=" << state(MazeMap::VehicleState::kBgz)
+            << "\n";
+        std::cout << "  covariance_diag:"
+            << " px=" << covariance(MazeMap::VehicleState::kPx, MazeMap::VehicleState::kPx)
+            << " py=" << covariance(MazeMap::VehicleState::kPy, MazeMap::VehicleState::kPy)
+            << " psi=" << covariance(MazeMap::VehicleState::kPsi, MazeMap::VehicleState::kPsi)
+            << " u=" << covariance(MazeMap::VehicleState::kU, MazeMap::VehicleState::kU)
+            << " v=" << covariance(MazeMap::VehicleState::kV, MazeMap::VehicleState::kV)
+            << " r=" << covariance(MazeMap::VehicleState::kR, MazeMap::VehicleState::kR)
+            << " omega_l=" << covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL)
+            << " omega_r=" << covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR)
+            << " bgz=" << covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz)
+            << "\n";
+        return 0;
+    }
+}
+
 void MovePath(const MazeMap::HalfStepPath<PATH_SIZE*2>& path)
 {
     int i = 0;
@@ -226,8 +415,16 @@ void PostAdvancedWeights()
 
 void profile();
 void runMMSSim();
-int main()
+int main(int argc, char* argv[])
 {
+    RunOpenFloorUkfStationaryBenchmark(10000000);
+    return 0;
+    if (argc > 1 && IsOpenFloorUkfBenchmarkArg(argv[1]))
+    {
+        return RunOpenFloorUkfStationaryBenchmark(
+            (argc > 2) ? ParseBenchmarkIterations(argv[2]) : kDefaultOpenFloorUkfBenchmarkIterations);
+    }
+
     runMMSSim();
     return 0;
 }

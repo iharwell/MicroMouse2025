@@ -1,5 +1,6 @@
 #ifndef MANEUVER_H
 #define MANEUVER_H
+// Declares the maneuver catalogue and shared turn-profile helpers used by path execution and motion planning.
 #include "Defines.h"
 #include "MazeLocation.h"
 #include "DirectionalLocation.h"
@@ -263,8 +264,8 @@ namespace MazeMap
 		}
 
 		// Unmirrored smooth-turn codes are defined as right-hand turns in the maneuver set.
-		// Runtime yaw uses positive angles for CCW rotation, so right turns must carry a negative sign.
-		const int16_t mult = ((mc & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG) ? static_cast<int16_t>(1) : static_cast<int16_t>(-1);
+		// Project yaw uses positive angles for clockwise/right rotation.
+		const int16_t mult = ((mc & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG) ? static_cast<int16_t>(-1) : static_cast<int16_t>(1);
 
 		const ManeuverCode normCode = mc & INVERTED_MIRRORED_MANEUVER_FLAG;
 

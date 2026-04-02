@@ -3,7 +3,7 @@
 #include "MazeMapApplicationRuntime.h"
 #include "Defines.h"
 
-namespace MazeMapApp
+namespace MazeMap::App
 {
     void Application::Setup()
     {
@@ -19,3 +19,4 @@ namespace MazeMapApp
         delay(100);
     }
 }
+

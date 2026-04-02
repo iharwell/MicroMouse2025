@@ -35,7 +35,7 @@ namespace MazeMap
             return FrontCalibrationSpinHeadingClass::Ignore;
         }
 
-        const float eastOfNorthRad = std::remainder((HALF_PI_F) - yawRad, TWO_PI_F);
+        const float eastOfNorthRad = std::remainder(yawRad, TWO_PI_F);
         if (std::fabs(eastOfNorthRad) <= northOpenHalfWidthRad)
         {
             return FrontCalibrationSpinHeadingClass::OpenNorth;

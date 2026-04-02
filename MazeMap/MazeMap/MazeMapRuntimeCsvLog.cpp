@@ -1,121 +1,86 @@
 #include "MazeMapRuntimeCsvLog.h"
 
-#include "DiagnosticLogBudget.h"
-
+#include <limits>
 #include <stdio.h>
 
-namespace MazeMapApp::Internal::Runtime
+namespace MazeMap::App::Internal::Runtime
 {
-    bool SelectSequentialCsvFileName(
-        char* buffer,
-        std::size_t bufferSize,
-        const char* explicitFileName,
-        const char* teensyFormat,
-        const char* hostFallback)
-    {
-        if (buffer == nullptr || bufferSize == 0U)
-        {
-            return false;
-        }
-
-        if (explicitFileName != nullptr && explicitFileName[0] != '\0')
-        {
-            snprintf(buffer, bufferSize, "%s", explicitFileName);
-            return true;
-        }
-
-#if defined(ARDUINO_TEENSY41)
-        if (teensyFormat == nullptr || teensyFormat[0] == '\0')
-        {
-            return false;
-        }
-
-        for (uint16_t index = 0U; index < 1000U; ++index)
-        {
-            snprintf(buffer, bufferSize, teensyFormat, static_cast<unsigned>(index));
-            if (!SD.exists(buffer))
-            {
-                return true;
-            }
-        }
-
-        snprintf(buffer, bufferSize, teensyFormat, 999U);
-        return true;
-#else
-        (void)teensyFormat;
-        snprintf(buffer, bufferSize, "%s", (hostFallback != nullptr) ? hostFallback : "measurement_log.csv");
-        return true;
-#endif
-    }
-
-    RuntimeCsvLogFile::RuntimeCsvLogFile() noexcept
-        : _file()
+    RuntimeEventLogFile::RuntimeEventLogFile() noexcept
+        : _log()
+        , _metadata()
         , _fileName{}
         , _lastFlushMs(0UL)
+        , _rowCount(0UL)
+        , _begun(false)
+        , _opened(false)
     {
     }
 
-    bool RuntimeCsvLogFile::Begin(const char* explicitFileName, const char* teensyFormat, const char* hostFallback)
+    bool RuntimeEventLogFile::Begin(const char* explicitFileName, const char* teensyFormat, const char* hostFallback)
     {
-        if (!SelectSequentialCsvFileName(_fileName, sizeof(_fileName), explicitFileName, teensyFormat, hostFallback))
-        {
-            return false;
-        }
-        if (!_file.Open(_fileName))
+        Close();
+        if (!SelectSequentialRuntimeFileName(
+            _fileName,
+            sizeof(_fileName),
+            explicitFileName,
+            teensyFormat,
+            (hostFallback != nullptr) ? hostFallback : "measurement_log.mmlog"))
         {
             return false;
         }
 
+        _metadata.Clear();
         _lastFlushMs = millis();
+        _rowCount = 0UL;
+        _begun = true;
+        _opened = false;
         return true;
     }
 
-    bool RuntimeCsvLogFile::Write(const char* line)
+    bool RuntimeEventLogFile::Write(const char* line)
     {
-        return _file.Write(line);
+        return WriteEvent(micros(), "line", line);
     }
 
-    bool RuntimeCsvLogFile::WriteMetadata(const char* key, const char* value)
+    bool RuntimeEventLogFile::WriteMetadata(const char* key, const char* value)
     {
-        char line[128] = {};
+        char line[192] = {};
         const int length = snprintf(
             line,
             sizeof(line),
-            "# meta,%s,%s\n",
+            "%s=%s",
             (key != nullptr) ? key : "",
             (value != nullptr) ? value : "");
-
         if (length <= 0 || length >= static_cast<int>(sizeof(line)))
         {
             return false;
         }
-        return Write(line);
+        return AppendMetadataLine(line);
     }
 
-    bool RuntimeCsvLogFile::WriteMetadataUnsigned(const char* key, unsigned long value)
+    bool RuntimeEventLogFile::WriteMetadataUnsigned(const char* key, unsigned long value)
     {
-        char line[128] = {};
+        char line[192] = {};
         const int length = snprintf(
             line,
             sizeof(line),
-            "# meta,%s,%lu\n",
+            "%s=%lu",
             (key != nullptr) ? key : "",
             value);
-
         if (length <= 0 || length >= static_cast<int>(sizeof(line)))
         {
             return false;
         }
-        return Write(line);
+        return AppendMetadataLine(line);
     }
 
-    bool RuntimeCsvLogFile::WriteMetadataFloat(const char* key, float value, uint8_t precision)
+    bool RuntimeEventLogFile::WriteMetadataFloat(const char* key, float value, uint8_t precision)
     {
-        char line[128] = {};
+        char line[192] = {};
         const int length = snprintf(
             line,
             sizeof(line),
-            "# meta,%s,%.*f\n",
+            "%s=%.*f",
             (key != nullptr) ? key : "",
             static_cast<int>(precision),
             value);
@@ -123,68 +88,126 @@ namespace MazeMapApp::Internal::Runtime
         {
             return false;
         }
-        return Write(line);
+        return AppendMetadataLine(line);
     }
 
-    bool RuntimeCsvLogFile::WritePhase(unsigned long phaseId, unsigned long timestampUs, const char* name)
+    bool RuntimeEventLogFile::WritePhase(unsigned long phaseId, unsigned long timestampUs, const char* name)
     {
-        char line[160] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "# phase,%lu,%lu,%s\n",
-            phaseId,
-            timestampUs,
-            (name != nullptr) ? name : "");
-
-        if (length <= 0 || length >= static_cast<int>(sizeof(line)))
+        if (!EnsureLogOpen())
         {
             return false;
         }
-        return Write(line);
-    }
 
-    bool RuntimeCsvLogFile::WriteEvent(unsigned long timestampUs, const char* type, const char* message)
-    {
-        char line[MazeMap::kDiagnosticEventLineCapacity] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "# event,%lu,%s,%s\n",
-            timestampUs,
-            (type != nullptr) ? type : "",
-            (message != nullptr) ? message : "");
-
-        if (length <= 0 || length >= static_cast<int>(sizeof(line)))
+        RuntimeRecordBuilder<kEventFieldCount> record;
+        record.U32(static_cast<uint32_t>(_rowCount));
+        record.U32(static_cast<uint32_t>(timestampUs));
+        record.U32(static_cast<uint32_t>(phaseId));
+        record.U32(_log.InternLabel("phase"));
+        record.U32(_log.InternLabel(name));
+        record.U32(std::numeric_limits<uint32_t>::max());
+        if (!_log.AppendRecord(record.Data(), record.Count()))
         {
             return false;
         }
-        return Write(line);
+
+        ++_rowCount;
+        return true;
     }
 
-    void RuntimeCsvLogFile::FlushIfNeeded(bool force, unsigned long flushPeriodMs)
+    bool RuntimeEventLogFile::WriteEvent(unsigned long timestampUs, const char* type, const char* message)
+    {
+        if (!EnsureLogOpen())
+        {
+            return false;
+        }
+
+        RuntimeRecordBuilder<kEventFieldCount> record;
+        record.U32(static_cast<uint32_t>(_rowCount));
+        record.U32(static_cast<uint32_t>(timestampUs));
+        record.U32(0U);
+        record.U32(_log.InternLabel((type != nullptr && type[0] != '\0') ? type : "event"));
+        record.U32(std::numeric_limits<uint32_t>::max());
+        record.U32(_log.InternLabel(message));
+        if (!_log.AppendRecord(record.Data(), record.Count()))
+        {
+            return false;
+        }
+
+        ++_rowCount;
+        return true;
+    }
+
+    void RuntimeEventLogFile::FlushIfNeeded(bool force, unsigned long flushPeriodMs)
     {
         const unsigned long nowMs = millis();
-        if (force || static_cast<unsigned long>(nowMs - _lastFlushMs) >= flushPeriodMs)
+        if (!force && static_cast<unsigned long>(nowMs - _lastFlushMs) < flushPeriodMs)
         {
-            _file.Flush();
-            _lastFlushMs = nowMs;
+            return;
         }
+
+        Flush();
+        _lastFlushMs = nowMs;
     }
 
-    void RuntimeCsvLogFile::Flush()
+    void RuntimeEventLogFile::Flush()
     {
-        _file.Flush();
+        if (_begun && !_opened)
+        {
+            (void)EnsureLogOpen();
+        }
+        if (_opened)
+        {
+            _log.Flush();
+        }
         _lastFlushMs = millis();
     }
 
-    void RuntimeCsvLogFile::Close()
+    void RuntimeEventLogFile::Close()
     {
-        _file.Close();
+        if (_begun && !_opened)
+        {
+            (void)EnsureLogOpen();
+        }
+        if (_opened)
+        {
+            _log.Close();
+        }
+
+        _metadata.Clear();
+        _fileName[0] = '\0';
+        _lastFlushMs = 0UL;
+        _rowCount = 0UL;
+        _begun = false;
+        _opened = false;
     }
 
-    const char* RuntimeCsvLogFile::GetFileName() const noexcept
+    const char* RuntimeEventLogFile::GetFileName() const noexcept
     {
         return _fileName;
     }
+
+    bool RuntimeEventLogFile::EnsureLogOpen()
+    {
+        if (!_begun)
+        {
+            return false;
+        }
+        if (_opened)
+        {
+            return true;
+        }
+
+        _opened = _log.BeginSelected(_fileName, kEventSchema, kEventFieldCount, _metadata.Data(), nullptr);
+        return _opened;
+    }
+
+    bool RuntimeEventLogFile::AppendMetadataLine(const char* line)
+    {
+        if (_opened)
+        {
+            return false;
+        }
+        return _metadata.AppendLine(line);
+    }
 }
+

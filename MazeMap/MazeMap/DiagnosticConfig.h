@@ -1,6 +1,6 @@
 #pragma once
 #include "Defines.h"
-namespace DiagnosticConfig
+namespace MazeMap::DiagnosticConfig
 {
     // Likelihood tags for the diagnostic-only config:
     // [High] commonly adjusted to improve data quality or stress level during test sessions.
@@ -136,3 +136,5 @@ namespace DiagnosticConfig
     // sloppy between samples.
     constexpr float kCharacterizationRecoverySpeedMps = 0.18f;
 }
+
+namespace DiagnosticConfig = MazeMap::DiagnosticConfig;

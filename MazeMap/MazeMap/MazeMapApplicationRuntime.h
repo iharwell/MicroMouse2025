@@ -2,7 +2,8 @@
 
 #include "MazeMapApplicationMode.h"
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     IApplicationMode& ResolveActiveApplicationMode();
 }
+

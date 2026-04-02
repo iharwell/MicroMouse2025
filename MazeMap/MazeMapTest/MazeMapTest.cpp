@@ -154,7 +154,7 @@ namespace MazeMap
 		TEST_METHOD(WallGeometryModelRespectsSensorExtrinsicsForFrontWallPrediction)
 		{
 			Maze maze;
-			maze.SetWall(maze(0, 0), Direction::Right, WallState::Wall);
+			maze.SetWall(maze(0, 0), Direction::Up, WallState::Wall);
 
 			LocalMapView map{};
 			map.maze = &maze;
@@ -188,7 +188,7 @@ namespace MazeMap
 			WallGeometryModel geometry;
 			SensorExtrinsics sensor{};
 			sensor.positionBodyM = Eigen::Vector2f(0.0f, 0.0f);
-			sensor.directionBody = Eigen::Vector2f(1.0f, 0.0f);
+			sensor.directionBody = Eigen::Vector2f(0.0f, 1.0f);
 			sensor.yawOffsetRad = PI_F / 4.0f;
 
 			VehicleState::StateVector state = VehicleState::StateVector::Zero();

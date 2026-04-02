@@ -27,13 +27,16 @@ namespace MazeMap
     struct SensorExtrinsics
     {
         Eigen::Vector2f positionBodyM = Eigen::Vector2f::Zero();
-        Eigen::Vector2f directionBody = Eigen::Vector2f(1.0f, 0.0f);
+        // Body frame is +X right, +Y forward, so an unconfigured sensor faces forward.
+        Eigen::Vector2f directionBody = Eigen::Vector2f(0.0f, 1.0f);
         float yawOffsetRad = 0.0f;
     };
 
     struct ImuExtrinsics
     {
         Eigen::Vector2f positionBodyM = Eigen::Vector2f::Zero();
+        // Accelerometer samples are mapped into the project body frame:
+        // +X right, +Y forward.
         Eigen::Matrix2f accelBodyFromImu = Eigen::Matrix2f::Identity();
         float gyroZSign = 1.0f;
     };
@@ -58,6 +61,7 @@ namespace MazeMap
     {
         bool valid = false;
         float gyroZRadps = 0.0f;
+        // Project body-frame acceleration: +X right, +Y forward.
         float accelBodyXMps2 = 0.0f;
         float accelBodyYMps2 = 0.0f;
     };
@@ -67,6 +71,7 @@ namespace MazeMap
     struct ImuAccelObs
     {
         bool valid = false;
+        // Project body-frame acceleration: +X right, +Y forward.
         float accelBodyXMps2 = 0.0f;
         float accelBodyYMps2 = 0.0f;
     };
@@ -83,6 +88,8 @@ namespace MazeMap
     {
     public:
         static constexpr int kDimension = 9;
+        // World pose uses +X right and +Y forward.
+        // Body velocity uses kV = body-right speed, kU = body-forward speed, and kR = clockwise yaw rate.
 
         enum Index : int
         {
@@ -114,7 +121,7 @@ namespace MazeMap
         void SetStateVector(const StateVector& state) noexcept
         {
             _state = state;
-            NormalizeStateVector(_state);
+            _state(kPsi) = NormalizeAngle(_state(kPsi));
         }
 
         const StateMatrix& GetSqrtCovariance() const noexcept { return _sqrtCovariance; }
@@ -125,25 +132,24 @@ namespace MazeMap
         void SetCovariance(const StateMatrix& covariance) noexcept
         {
             Eigen::LLT<StateMatrix> llt;
+            llt.compute(covariance);
+            if (llt.info() == Eigen::Success)
+            {
+                _sqrtCovariance = llt.matrixL();
+                return;
+            }
             const StateMatrix symmetric = 0.5f * (covariance + covariance.transpose());
             llt.compute(symmetric);
             if (llt.info() == Eigen::Success)
             {
                 _sqrtCovariance = llt.matrixL();
+                return;
             }
         }
 
-        void SetPosition(const Eigen::Vector2f& position) noexcept
-        {
-            _state(kPx) = position.x();
-            _state(kPy) = position.y();
-        }
+        void SetPosition(const Eigen::Vector2f& position) noexcept { _state(kPx) = position.x(); _state(kPy) = position.y(); }
 
-        Eigen::Vector2f GetPosition() const noexcept
-        {
-            return Eigen::Vector2f(_state(kPx), _state(kPy));
-        }
-
+        Eigen::Vector2f GetPosition() const noexcept { return Eigen::Vector2f(_state(kPx), _state(kPy)); }
         Eigen::Vector2f GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
 
         void SetVelocity(float velocity) noexcept { _state(kU) = velocity; }
@@ -156,8 +162,7 @@ namespace MazeMap
 
         void SetOrientation(float orientation) noexcept
         {
-            _state(kPsi) = orientation;
-            NormalizeStateVector(_state);
+            _state(kPsi) = NormalizeAngle(orientation);
         }
 
         float GetOrientation() const noexcept { return _state(kPsi); }

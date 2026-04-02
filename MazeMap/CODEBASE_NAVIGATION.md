@@ -1,0 +1,164 @@
+# MazeMap Codebase Navigation
+
+This document is a navigation index for the first-party source tree under `MazeMap`, `MazeSimulation`, and `MazeMapTest`.
+
+- `MazeMap` contains the production maze, motion, runtime, and hardware-integration code.
+- `MazeSimulation` contains the desktop simulation harness and simulator-side helpers.
+- `MazeMapTest` contains unit and regression coverage for the production library.
+- Wrapper headers such as `MazeMapRuntimeDrive.h` exist for compatibility; prefer the class-named header when one is available.
+
+## MazeMap Library
+
+- `AuxMeasurementConfig.h`: configuration enums and thresholds for auxiliary runtime measurement routines.
+- `AuxMeasurementLogger.h`: class-named entry header for auxiliary measurement logging defined in the runtime infrastructure layer.
+- `Cell.h` / `Cell.cpp`: represent one maze cell, including wall state storage and serialization helpers.
+- `CellCoordinates.h` / `CellCoordinates.cpp`: represent maze-grid coordinates and directional movement helpers.
+- `CircularBuffer.h`: generic circular-buffer utilities, including timestamped buffer entries.
+- `CompactPath.h` / `CompactPath.cpp`: compact path container used when a path needs lighter-weight storage than the full `Path` type.
+- `CoreConfig.h`: central application/runtime configuration constants.
+- `CoreBinaryFileExport.h`: class-named entry header for the runtime binary file writer defined in the MMLOG runtime layer.
+- `CoreFileExport.h`: generic binary/text file-export helper for MazeMap runtime outputs.
+- `CruiseSpeedFloor.h`: cruise-speed floor policy used when motion planning must enforce a minimum speed.
+- `Defines.h`: platform shims, Arduino/host compatibility types, and low-level utility definitions shared across the codebase.
+- `DiagnosticConfig.h`: configuration constants for diagnostic and audit workflows.
+- `DiagnosticCoverage.h`: diagnostic coverage instructions and result-shaping helpers.
+- `DiagnosticLogger.h`: class-named entry header for the runtime diagnostic logger defined in the runtime infrastructure layer.
+- `DiagnosticLogBudget.h`: limits and budgeting rules for diagnostic logging volume.
+- `DiagnosticMotionPlan.h`: helpers that describe the intended diagnostic motion sequence.
+- `DiagnosticSensorSuite.h`: class-named entry header for the diagnostic sensor pipeline defined in the runtime sensor layer.
+- `DiagonalWallCentering.h`: logic for centering the robot on diagonal wall references.
+- `Direction.h` / `Direction.cpp`: directional enums and relative-direction helpers used across mapping and motion code.
+- `DirectionalLocation.h` / `DirectionalLocation.cpp`: combine a maze location with a facing direction.
+- `DirectionalPathFinder.h` / `DirectionalPathFinder.cpp`: path finder that accounts for heading changes and directional costs.
+- `DriveBase.h`: runtime drive subsystem that owns motor actuation, odometry, and closed-loop wheel control.
+- `MazeMapRuntimeDrive.h`: compatibility wrapper for `DriveBase.h`; existing code can still include the historical runtime-drive header name.
+- `EncoderStallPolicy.h`: stall-detection policy for encoder-driven motion.
+- `EigenCompat.h`: local compatibility helpers for Eigen use inside MazeMap.
+- `FanRampProfile.h`: fan ramp-up and ramp-down profile definitions.
+- `FloodFillPathFinder.h`: concrete flood-fill planner used for search-mode exploration and goal routing.
+- `framework.h`: Visual Studio framework include plumbing.
+- `Fresnel.h` / `Fresnel.cpp`: Fresnel and curve-geometry helpers used in motion profile calculations.
+- `FrontWallCharacterizationConfig.h`: configuration for front-wall sensing/characterization runs.
+- `FrontWallCharacterizationStorage.h`: storage records and match helpers for captured front-wall characterization data.
+- `GyroBiasUpdatePolicy.h`: rules for when gyro bias should be updated from stationary data.
+- `HardwareConfig.h`: hardware timing, PWM, ADC, and SD bring-up constants used by board support and runtime code.
+- `HalfStepPath.h`: path container with half-cell resolution for fine-grained maneuver generation.
+- `ImuCalibrationPolicy.h`: IMU calibration helpers and encoder-count support types.
+- `ImuSamplingProfile.h`: UI-facing IMU sampling profile selection.
+- `InPlaceTurnProfile.h`: parameter bundle for in-place turn behavior.
+- `Kinematics.h` / `Kinematics.cpp`: linear and rotational kinematics primitives.
+- `LaunchAssistProfile.h`: launch-assist tuning used to overcome wheel rest friction.
+- `LedCalibrationConfig.h`: LED and wall-sensor calibration constants.
+- `LSV6DSV16X_IMU.h`: IMU driver, register abstractions, and status helpers for the LSV6DSV16X device.
+- `Maneuver.h` / `Maneuver.cpp`: maneuver catalogue, smooth-turn geometry, and maneuver identifiers used by high-level path execution.
+- `ManeuverInstance.h`: one realized maneuver segment, including endpoints and per-step geometry.
+- `ManeuverPath.h` / `ManeuverPath.cpp`: path container expressed as maneuver instances instead of raw cells.
+- `ManeuverPathFinder.h` / `ManeuverPathFinder.cpp`: planner that builds executable maneuver sequences from maze state.
+- `ManeuverQueue.h`: queue used to stage maneuvers for execution.
+- `ManeuverSet.h` / `ManeuverSet.cpp`: registry of legal maneuvers and the movement semantics attached to each maneuver code.
+- `MaskQueue.h` / `MaskQueue.cpp`: queue helpers built on maze masks for flood-fill style searches.
+- `MapEvidenceUpdater.h`: class-named entry header for the wall/map evidence updater defined in `MouseUkf.h`.
+- `Maze.h` / `Maze.cpp`: full maze representation, indexing, wall knowledge, and goal-cell handling.
+- `MazeLocation.h` / `MazeLocation.cpp`: physical or logical location within a maze cell, including conversions between them.
+- `MazeMapApplication.h` / `MazeMapApplication.cpp`: top-level application object and startup mode selection.
+- `MazeMapApplicationEntry.cpp`: entrypoint glue that boots the application in the correct host or embedded mode.
+- `MazeMapApplicationMode.h`: interface for a runnable application mode with `Begin` and `Run` phases.
+- `MazeMapApplicationPrivate.h`: private application umbrella include that wires runtime subsystems and mission logic together.
+- `MazeMapApplicationRuntime.h`: declarations for the application runtime boundary between startup and active control loops.
+- `MazeMapControllerRegistry.h`: registry helpers for application controllers and standalone mode selection.
+- `MazeMapCore.cpp`: excluded legacy/experimental core file; retained in the project but not built.
+- `MazeMapMissionController.cpp`: main mission controller that coordinates exploration, speed runs, telemetry, and audits.
+- `MazeMapMissionModeHost.h`: host interface that mission modes call to enter specific mission workflows.
+- `MazeMapMissionModes.h` / `MazeMapMissionModes.cpp`: concrete mission mode wrappers used by the standalone app.
+- `MazeMapRuntimeCore.h`: shared runtime state, calibration, asynchronous sensor-read helpers, and wall-distance calibration logic.
+- `WallDistanceCalibration.h`: class-named entry header for the wall-distance calibration subsystem defined in `MazeMapRuntimeCore.h`.
+- `MazeMapRuntimeCsvLog.h` / `MazeMapRuntimeCsvLog.cpp`: CSV-oriented runtime event logging support.
+- `MazeMapRuntimeInfrastructure.h`: runtime logging, telemetry, and open-floor measurement infrastructure.
+- `MazeMapRuntimeMmLog.h`: runtime log-writer helpers layered on top of the shared `MmLog.h` MMLOG file-format definitions.
+- `MazeMapRuntimeSensors.h`: mission and diagnostic sensor-capture pipelines.
+- `MazeMapRuntimeSignalHelpers.h` / `MazeMapRuntimeSignalHelpers.cpp`: signal filtering and threshold helpers shared by runtime sensing.
+- `MazeMapSharedRuntime.h` / `MazeMapSharedRuntime.cpp`: shared runtime composition root that owns the maze, vehicles, planners, drive, and sensor subsystems.
+- `MazeMapStandaloneModes.cpp`: standalone controllers for diagnostics, auxiliary measurements, LED calibration, and open-floor measurements.
+- `MazeMask.h` / `MazeMask.cpp`: bitmask-based occupancy or visitation helpers for maze algorithms.
+- `MissionMazeExport.h`: maze export helpers for mission data capture.
+- `MissionStartPolicy.h`: mission-start policy, including front-calibration heading classification.
+- `MmLog.h`: MMLOG file-format constants, packed record headers, and scalar packing helpers shared by runtime log writers.
+- `MotionTargetProjection.h`: helpers that project control targets into the robot motion frame.
+- `MotorEncoderDrive.h`: motor+encoder drive abstraction with physical model and hardware configuration.
+- `MotorModelUnits.h`: unit conversions and constants for motor modeling.
+- `MouseUkfFacade.h`: class-named entry header for the high-level estimator facade defined in `MouseUkf.h`.
+- `MouseUkf.h`: UKF plant, wall-geometry preprocessing, evidence update, and facade types used by runtime state estimation.
+- `OpenFloorMeasurementSpec.h`: IDs and geometry definitions for open-floor measurement routines.
+- `OpenFloorMainLogger.h`: class-named entry header for the primary open-floor logger defined in the runtime infrastructure layer.
+- `OpenFloorMainLoggerV2.h`: class-named entry header for the second-generation primary open-floor logger defined in the runtime infrastructure layer.
+- `OpenFloorRunManifestWriter.h`: class-named entry header for the open-floor manifest writer defined in the runtime infrastructure layer.
+- `OpenFloorTimingLogger.h`: class-named entry header for the timing open-floor logger defined in the runtime infrastructure layer.
+- `OpenFloorTimingLoggerV2.h`: class-named entry header for the second-generation timing logger defined in the runtime infrastructure layer.
+- `OpenLoopDriveCommand.h`: open-loop motor command payload.
+- `OptionalRuntimeEventLog.h`: class-named entry header for the optional runtime event log defined in the runtime infrastructure layer.
+- `Path.h` / `Path.cpp`: fixed-capacity path container for cell-by-cell routes.
+- `PathFinder.h` / `PathFinder.cpp`: abstract path-finding contract and shared gradient-descent implementation.
+- `PathPoint.h` / `PathPoint.cpp`: per-point path helpers for path containers.
+- `pch.h` / `pch.cpp`: precompiled-header setup for the production library.
+- `PlantModel.h`: class-named entry header for the UKF plant model defined in `MouseUkf.h`.
+- `Pins.h`: board-level pin assignments shared by Teensy bring-up code and host-side runtime configuration.
+- `PrimitiveInverseSolver.h`: class-named entry header for the maneuver primitive inverse solver defined in `MouseUkf.h`.
+- `RollingAverageWindow.h`: small fixed-size rolling average helper.
+- `RuntimeBinaryLogFile.h`: class-named entry header for the runtime binary log file writer defined in the MMLOG runtime layer.
+- `RuntimeRecordBuilder.h`: class-named entry header for fixed-width runtime binary record builders defined in the MMLOG runtime layer.
+- `RuntimeTextBlockBuilder.h`: class-named entry header for metadata and note text-block builders defined in the MMLOG runtime layer.
+- `SearchRunPlanner.h`: search-run straight planning and replanning response helpers.
+- `Sensor.h`: generic sensor abstraction template.
+- `SensorSuite.h`: class-named entry header for the mission sensor pipeline defined in the runtime sensor layer.
+- `SmoothTurnYawRateController.h`: state bundle for smooth-turn yaw-rate control.
+- `StartupWaitProfile.h`: startup wait timing and policy constants.
+- `SrUkfCore.h`: class-named entry header for the specialized square-root UKF core defined in `MouseUkf.h`.
+- `TeensyLayout.h`: Teensy-specific startup, SD-card bring-up, and board-support helper routines that consume `Pins.h` and `HardwareConfig.h`.
+- `TrackWidthEstimate.h`: helpers for estimating or adjusting effective track width.
+- `TractionLimitSweep.h`: structures for traction-limit sweep metrics and launch commands.
+- `TurnCommandGeometry.h`: helpers that derive geometry for turn commands.
+- `TurnWallEdgeTracker.h`: state bundle for tracking wall-edge timing during turns.
+- `UKF.h`: generic square-root UKF math and reusable UKF implementation.
+- `Vehicle.h` / `Vehicle.cpp`: physical vehicle model, limits, and utility accessors for the robot.
+- `VehicleState.h` / `VehicleState.cpp`: estimator state layout, observations, and the state container used by the UKF.
+- `WallBeliefMap.h`: wall-belief accumulation and update logic for partially known mazes.
+- `WallDetectionThresholds.h`: threshold helpers for wall detection decisions.
+- `WallGeometryModel.h`: class-named entry header for wall-geometry prediction helpers defined in `MouseUkf.h`.
+- `WallObservationPipeline.h`: wall-observation classification and accumulation helpers.
+- `WallSensor.h`: wall-sensor abstraction and distance model.
+- `WallSensorCalibration.h`: wall-sensor calibration curve and supporting point definitions.
+- `WallSensorPreprocessor.h`: class-named entry header for the wall-sensor preprocessing stage defined in `MouseUkf.h`.
+- `WallSensorLedCalibrationPhase.h`: phase enum for LED calibration workflows.
+- `WheelControlProfile.h`: wheel-control gain scaling bundle used by the runtime drive subsystem.
+- `dllmain.cpp`: Windows DLL entrypoint for the library target.
+
+## MazeSimulation
+
+- `Mazes.h` / `Mazes.cpp`: simulation-side maze catalogue and loading helpers.
+- `MazeSimulation.cpp`: desktop simulation entrypoint and benchmark harness.
+- `mmsAPI.h` / `mmsAPI.cpp`: simulator API bridge used to talk to the Micromouse simulator environment.
+- `SimVehicle.h` / `SimVehicle.cpp`: simulation vehicle used to execute maze runs in the desktop harness.
+
+## MazeMapTest
+
+- `CellTest.cpp`: unit tests for `Cell`.
+- `DiagnosticCoverageTest.cpp`: tests for diagnostic coverage helpers and related runtime decision logic.
+- `DirectionTest.cpp`: unit tests for direction math and relative-direction helpers.
+- `FresnelTest.cpp`: verification for Fresnel and curve-geometry calculations.
+- `HistoricalMazePathFinderTest.cpp`: regression sweep across historical mazes for the path-finding stack.
+- `ManeuverPathFinderTest.cpp`: tests for maneuver-aware path planning.
+- `ManeuverTest.cpp`: tests for maneuver geometry, identifiers, and maneuver semantics.
+- `MazeMapApplicationTest.cpp`: tests around application startup and mode selection.
+- `MazeMapRuntimeHelperTest.cpp`: tests for runtime helper functions and utility routines.
+- `MazeMapSharedRuntimeTest.cpp`: tests for shared runtime composition and default wiring.
+- `MazeMapTest.cpp`: broad integration-style tests for the MazeMap library.
+- `MazeMaskTest.cpp`: tests for mask and bit-grid helpers.
+- `MazeRef.h`: test helper that supplies reference mazes for assertions.
+- `MazeTest.cpp`: tests for maze mutation, lookup, and path interaction behavior.
+- `PathFinderTest.cpp`: tests for abstract/flood-fill/directional path-finding behavior.
+- `RelativeDirectionalDistanceTest.cpp`: tests for relative directional distance math.
+- `SearchRunPlannerTest.cpp`: tests for search-run planning and replanning helpers.
+- `Templates.h`: shared unit-test helper templates.
+- `UKFTest.cpp`: tests for the reusable UKF implementation and supporting math.
+- `Vector2fTest.cpp`: tests for vector math assumptions used by estimator code.
+- `pch.h` / `pch.cpp`: precompiled-header setup for the test project.

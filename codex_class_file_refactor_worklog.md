@@ -1,0 +1,110 @@
+# Codex Class/File Refactor Work Log
+
+- Started: 2026-04-02 America/Chicago
+- Scope: Split oversized or shared declarations into appropriately named files, follow `Cell.h` / `Cell.cpp` const-correctness conventions, and document each class in its header.
+
+## Activity
+
+- Status: Initialized work log.
+- Working On: Repository audit and `Cell` convention review.
+- Visited Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Cell.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Cell.cpp`
+- Produced Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\codex_class_file_refactor_worklog.md`
+
+- Status: Created first navigation deliverables and started class/file realignment.
+- Working On: Promoting class-named headers and writing an exhaustive source-tree navigation guide.
+- Visited Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\PathFinder.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\PathFinder.cpp`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapApplicationPrivate.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapMissionController.cpp`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapSharedRuntime.cpp`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.cpp`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeSensors.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\DriveBase.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeDrive.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\CODEBASE_NAVIGATION.md`
+- Produced Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\FloodFillPathFinder.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\DriveBase.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\CODEBASE_NAVIGATION.md`
+
+- Status: Release rebuild succeeded; scope expanded to namespace normalization and namespace-based Visual Studio filters.
+- Working On: Auditing non-`MazeMap` namespaces and planning filter alignment in `MazeMap.vcxproj.filters`.
+- Produced Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\AuxMeasurementLogger.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\CoreBinaryFileExport.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\DiagnosticLogger.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\DiagnosticSensorSuite.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MapEvidenceUpdater.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MouseUkfFacade.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\OpenFloorMainLogger.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\OpenFloorMainLoggerV2.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\OpenFloorRunManifestWriter.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\OpenFloorTimingLogger.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\OpenFloorTimingLoggerV2.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\OptionalRuntimeEventLog.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\PlantModel.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\PrimitiveInverseSolver.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\RuntimeBinaryLogFile.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\RuntimeRecordBuilder.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\RuntimeTextBlockBuilder.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\SensorSuite.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\SrUkfCore.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallDistanceCalibration.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallGeometryModel.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallSensorPreprocessor.h`
+
+- Status: Scope expanded after user clarification.
+- Working On: Full first-party source-tree navigation audit and mismatched file/class refactor plan.
+- Visited Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Maneuver.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Maneuver.cpp`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MouseUkf.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\PathFinder.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Sensor.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapApplicationMode.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapMissionModeHost.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeCore.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeDrive.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeInfrastructure.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeMmLog.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeSensors.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapSharedRuntime.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj.filters`
+- Produced Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\codex_class_file_refactor_worklog.md`
+
+- Status: Split namespace ownership into dedicated headers and rebuilt Visual Studio filter metadata around MazeMap sub-namespaces.
+- Working On: Final namespace/filter verification before the Release rebuild and Release test run.
+- Visited Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Pins.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\HardwareConfig.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MmLog.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\TeensyLayout.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeCore.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeMmLog.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallSensorLedCalibrationPhase.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj.filters`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\CODEBASE_NAVIGATION.md`
+- Produced Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Pins.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\HardwareConfig.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MmLog.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj.filters`
+
+- Status: Release verification completed after resolving namespace-alias fallout in shared runtime headers.
+- Working On: Final reporting and handoff.
+- Visited Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Defines.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeCore.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapRuntimeInfrastructure.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallSensorLedCalibrationPhase.h`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMapStandaloneModes.cpp`
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\x64\Release\MazeMapTest.dll`
+- Produced Files:
+  - `C:\Users\thene\source\repos\MicroMouse2025\MazeMap\x64\Release\MazeMapTest.dll`

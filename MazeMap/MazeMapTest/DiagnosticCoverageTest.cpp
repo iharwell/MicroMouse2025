@@ -495,12 +495,12 @@ namespace MazeMap
 
 		TEST_METHOD(CodeDegreesUsesRightTurnSignForUnmirroredSmoothTurns)
 		{
-			Assert::AreEqual(static_cast<int>(-180), static_cast<int>(CodeDegrees(IP180)));
-			Assert::AreEqual(static_cast<int>(180), static_cast<int>(CodeDegrees(IP180_M)));
-			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90SS)));
-			Assert::AreEqual(static_cast<int>(90), static_cast<int>(CodeDegrees(S90SS_M)));
-			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90LS)));
-			Assert::AreEqual(static_cast<int>(90), static_cast<int>(CodeDegrees(S90LS_M)));
+			Assert::AreEqual(static_cast<int>(180), static_cast<int>(CodeDegrees(IP180)));
+			Assert::AreEqual(static_cast<int>(-180), static_cast<int>(CodeDegrees(IP180_M)));
+			Assert::AreEqual(static_cast<int>(90), static_cast<int>(CodeDegrees(S90SS)));
+			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90SS_M)));
+			Assert::AreEqual(static_cast<int>(90), static_cast<int>(CodeDegrees(S90LS)));
+			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90LS_M)));
 		}
 
 		TEST_METHOD(TryComputeSmoothTurnTargetUsesStraightRampCurveAndRampOutPhases)
@@ -772,28 +772,28 @@ namespace MazeMap
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::OpenNorth),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					90.0f * DEG_TO_RAD_F,
+					0.0f * DEG_TO_RAD_F,
 					25.0f * DEG_TO_RAD_F,
 					30.0f * DEG_TO_RAD_F,
 					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Ignore),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					63.0f * DEG_TO_RAD_F,
+					27.0f * DEG_TO_RAD_F,
 					25.0f * DEG_TO_RAD_F,
 					30.0f * DEG_TO_RAD_F,
 					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Wall),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					59.0f * DEG_TO_RAD_F,
+					31.0f * DEG_TO_RAD_F,
 					25.0f * DEG_TO_RAD_F,
 					30.0f * DEG_TO_RAD_F,
 					90.0f * DEG_TO_RAD_F)));
 			Assert::AreEqual(
 				static_cast<int>(FrontCalibrationSpinHeadingClass::Wall),
 				static_cast<int>(ClassifyFrontCalibrationSpinHeadingFromNorth(
-					0.0f * DEG_TO_RAD_F,
+					90.0f * DEG_TO_RAD_F,
 					25.0f * DEG_TO_RAD_F,
 					30.0f * DEG_TO_RAD_F,
 					90.0f * DEG_TO_RAD_F)));

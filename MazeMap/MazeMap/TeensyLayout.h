@@ -1,4 +1,6 @@
 #pragma once
+#include "Pins.h"
+#include "HardwareConfig.h"
 
 #include "StartupWaitProfile.h"
 
@@ -7,56 +9,6 @@
 #include <IntervalTimer.h>
 #include <SPI.h>
 #include <SD.h>
-
-namespace Pins
-{
-    constexpr uint8_t R_MotorA = 5;
-    constexpr uint8_t R_MotorB = 6;
-    constexpr uint8_t R_EncA = 7;
-    constexpr uint8_t R_EncB = 8;
-
-    constexpr uint8_t L_MotorA = 24;
-    constexpr uint8_t L_MotorB = 25;
-    constexpr uint8_t L_EncA = 2;
-    constexpr uint8_t L_EncB = 3;
-
-    constexpr uint8_t Fan_CTRL = 4;
-
-    constexpr uint8_t IMU_CS_A = 36;
-    constexpr uint8_t IMU_CS_B = 37;
-    constexpr uint8_t IMU_INT_1A = 32;
-    constexpr uint8_t IMU_INT_1B = 33;
-
-    constexpr uint8_t WS_Forward_Right = 23;
-    constexpr uint8_t LED_Ctrl_Forward_Right = 19;
-
-    constexpr uint8_t WS_Forward_Left = 22;
-    constexpr uint8_t LED_Ctrl_Forward_Left = 18;
-
-    constexpr uint8_t WS_Side_Right = 21;
-    constexpr uint8_t LED_Ctrl_Side_Right = 17;
-
-    constexpr uint8_t WS_Side_Left = 20;
-    constexpr uint8_t LED_Ctrl_Side_Left = 16;
-}
-
-namespace HardwareConfig
-{
-    constexpr uint32_t kMotorPwmFrequencyHz = 80000U;
-    constexpr uint32_t kFanPwmFrequencyHz = 80000U;
-
-    constexpr uint8_t kPwmBits = 12U;
-    constexpr uint8_t kAdcBits = 12U;
-
-    // Front wall sensors use log-amp front ends and need a longer settle after LED transitions.
-    constexpr uint32_t kFrontWallSensorSwitchSettleTime_us = 60U;
-    // Side wall sensors settle much faster and are trimmed separately on the scope.
-    constexpr uint32_t kSideWallSensorSwitchSettleTime_us = 30U;
-
-    // Keep retrying SD init indefinitely so the operator can insert the card after power-up.
-    constexpr uint16_t kSdInitRetryDelayMs = 150U;
-    constexpr uint16_t kSdWaitBlinkPeriodMs = 1000U;
-}
 
 namespace
 {

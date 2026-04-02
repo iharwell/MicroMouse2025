@@ -161,8 +161,8 @@ namespace MazeMap
 
             for (const ContactForce& force : forces.contacts)
             {
-                Assert::IsTrue(std::isfinite(force.fx));
-                Assert::IsTrue(std::isfinite(force.fy));
+                Assert::IsTrue(std::isfinite(force.rightForceN));
+                Assert::IsTrue(std::isfinite(force.forwardForceN));
                 Assert::IsTrue(force.saturation >= 0.0f);
                 Assert::IsTrue(force.saturation <= 1.0f);
             }
@@ -193,10 +193,10 @@ namespace MazeMap
             const PlantDerivatives withLever = plant.forwardStep(state, control, leverParams);
 
             const float expectedDeltaX =
-                (-withLever.stateDot(VehicleState::kR) * leverParams.imu.positionBodyM.y()) -
+                (withLever.stateDot(VehicleState::kR) * leverParams.imu.positionBodyM.y()) -
                 ((state(VehicleState::kR) * state(VehicleState::kR)) * leverParams.imu.positionBodyM.x());
             const float expectedDeltaY =
-                (withLever.stateDot(VehicleState::kR) * leverParams.imu.positionBodyM.x()) -
+                (-withLever.stateDot(VehicleState::kR) * leverParams.imu.positionBodyM.x()) -
                 ((state(VehicleState::kR) * state(VehicleState::kR)) * leverParams.imu.positionBodyM.y());
 
             Assert::AreEqual(
@@ -207,6 +207,31 @@ namespace MazeMap
                 zeroLever.imuAccelBodyMps2.y() + expectedDeltaY,
                 withLever.imuAccelBodyMps2.y(),
                 1.0e-5f);
+        }
+
+        TEST_METHOD(PlantModelPredictsImuAccelerationInProjectBodyAxes)
+        {
+            PlantModel plant;
+            PlantParams params = PlantParams::Default();
+
+            VehicleState::StateVector state = VehicleState::StateVector::Zero();
+            state(VehicleState::kU) = 1.1f;
+            state(VehicleState::kV) = -0.3f;
+            state(VehicleState::kR) = 4.0f;
+            state(VehicleState::kOmegaL) = 0.95f * (state(VehicleState::kU) / params.wheelRadiusM);
+            state(VehicleState::kOmegaR) = 1.05f * (state(VehicleState::kU) / params.wheelRadiusM);
+
+            ControlInput control;
+            control.leftMotorCommand = 0.25f;
+            control.rightMotorCommand = 0.45f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            const PlantDerivatives derivatives = plant.forwardStep(state, control, params);
+            const Eigen::Vector2f predictedMeasurement = plant.imuPlanarAcceleration(state, control, params);
+
+            Assert::AreEqual(derivatives.imuAccelBodyMps2.x(), predictedMeasurement.x(), 1.0e-5f);
+            Assert::AreEqual(derivatives.imuAccelBodyMps2.y(), predictedMeasurement.y(), 1.0e-5f);
         }
 
         TEST_METHOD(ComputeEncoderPairSqrtNoise_UsesGeneralSigmaMappingForNonZeroReadings)
@@ -326,6 +351,103 @@ namespace MazeMap
             const VehicleState::StateVector& state = core.state();
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
             Assert::AreEqual(rawStationaryGyroRadps, state(VehicleState::kBgz), 1.0e-6f);
+        }
+
+        TEST_METHOD(SrUkfCoreUsesProvidedWheelRatesAfterPriorEncoderObservation)
+        {
+            SrUkfCore core;
+            ControlInput control{};
+            constexpr float dt = 0.001f;
+
+            Assert::IsTrue(core.predict(dt, control));
+            EncoderObs first{};
+            first.totalLeftCounts = 120;
+            first.totalRightCounts = -96;
+            first.omegaLeftRadps = 0.35f;
+            first.omegaRightRadps = -0.28f;
+            const MeasurementUpdateResult firstResult = core.updateEncoderPair(first, dt);
+            Assert::IsTrue(firstResult.attempted);
+            Assert::IsTrue(firstResult.accepted);
+
+            Assert::IsTrue(core.predict(dt, control));
+            EncoderObs second{};
+            second.totalLeftCounts = -7;
+            second.totalRightCounts = 11;
+            second.omegaLeftRadps = 1.25f;
+            second.omegaRightRadps = -0.75f;
+            const MeasurementUpdateResult secondResult = core.updateEncoderPair(second, dt);
+            Assert::IsTrue(secondResult.attempted);
+            Assert::IsTrue(secondResult.accepted);
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::AreEqual(second.omegaLeftRadps, state(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(second.omegaRightRadps, state(VehicleState::kOmegaR), 1.0e-6f);
+        }
+
+        TEST_METHOD(SrUkfCoreDoesNotLetControlInputCreateForwardMotionWithoutEncoderSupport)
+        {
+            SrUkfCore core;
+            const PlantParams params = PlantParams::Default();
+            ControlInput control{};
+            control.leftMotorCommand = 0.18f;
+            control.rightMotorCommand = 0.18f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+            EncoderObs encoder{};
+            constexpr float dt = 0.001f;
+
+            for (int step = 0; step < 200; ++step)
+            {
+                Assert::IsTrue(core.predict(dt, control));
+
+                const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
+                Assert::IsTrue(encoderResult.attempted);
+                Assert::IsTrue(encoderResult.accepted);
+
+                const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
+                Assert::IsTrue(yawResult.attempted);
+                Assert::IsTrue(yawResult.accepted);
+            }
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kPy)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 1.0e-4f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-4f);
+        }
+
+        TEST_METHOD(SrUkfCoreAnchorsPoseIncrementToEncoderCountsInsteadOfControlPrediction)
+        {
+            SrUkfCore core;
+            const PlantParams params = PlantParams::Default();
+            ControlInput control{};
+            control.leftMotorCommand = 0.18f;
+            control.rightMotorCommand = 0.18f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+            constexpr float dt = 0.001f;
+
+            const float distancePerCountM =
+                (2.0f * PI_F * params.wheelRadiusM) /
+                (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
+            const float measuredOmegaRadps = distancePerCountM / (params.wheelRadiusM * dt);
+
+            Assert::IsTrue(core.predict(dt, control));
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 1;
+            encoder.totalRightCounts = 1;
+            encoder.omegaLeftRadps = measuredOmegaRadps;
+            encoder.omegaRightRadps = measuredOmegaRadps;
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
+            Assert::IsTrue(encoderResult.attempted);
+            Assert::IsTrue(encoderResult.accepted);
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < 1.0e-7f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kPy) - distancePerCountM) < 1.0e-7f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kU) - (distancePerCountM / dt)) < 1.0e-5f);
         }
 
         TEST_METHOD(SrUkfCoreDoesNotDriftUnderRepeatedZeroMotionMeasurements)

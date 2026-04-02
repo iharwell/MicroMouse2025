@@ -3,7 +3,7 @@
 #include "MazeMapApplicationMode.h"
 #include "MazeMapMissionModeHost.h"
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     IApplicationMode& GetAuxMeasurementMode();
     IApplicationMode& GetFrontWallCharacterizationMode();
@@ -11,3 +11,4 @@ namespace MazeMapApp::Internal
     IApplicationMode& GetDiagnosticMode();
     IMissionModeHost& GetMissionModeHost();
 }
+

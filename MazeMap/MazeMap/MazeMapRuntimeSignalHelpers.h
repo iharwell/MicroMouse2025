@@ -3,7 +3,7 @@
 #include "Defines.h"
 #include "WallDetectionThresholds.h"
 
-namespace MazeMapApp::Internal::Runtime
+namespace MazeMap::App::Internal::Runtime
 {
     // Computes the usable reflected-light rise above a calibrated open-space baseline.
     EXPORT float ComputeSignalRiseAboveBaseline(float measuredDifferentialLight, float signalBaseline) noexcept;
@@ -25,3 +25,4 @@ namespace MazeMapApp::Internal::Runtime
         bool rightDistanceValidForControl,
         float expectedSideWallDistanceM) noexcept;
 }
+

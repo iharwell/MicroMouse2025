@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace MazeMapApp::Internal::Runtime
+namespace MazeMap::App::Internal::Runtime
 {
     float ComputeSignalRiseAboveBaseline(float measuredDifferentialLight, float signalBaseline) noexcept
     {
@@ -57,3 +57,4 @@ namespace MazeMapApp::Internal::Runtime
         return 0.0f;
     }
 }
+

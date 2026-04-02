@@ -1,7 +1,7 @@
 #pragma once
 #include "Defines.h"
 
-namespace FrontWallCharacterizationConfig
+namespace MazeMap::FrontWallCharacterizationConfig
 {
     // [Low] Short pins 39 and 40 at startup to enter the persistent front-wall characterization routine. These pins
     // are selector-only and are not sampled as part of the stored curve.
@@ -43,3 +43,5 @@ namespace FrontWallCharacterizationConfig
     // needs to coexist in the same Teensy EEPROM region.
     constexpr int kStorageAddress = 0;
 }
+
+namespace FrontWallCharacterizationConfig = MazeMap::FrontWallCharacterizationConfig;

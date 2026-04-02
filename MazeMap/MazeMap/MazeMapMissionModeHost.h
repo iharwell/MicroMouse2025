@@ -1,7 +1,9 @@
 #pragma once
+// Declares the mission-mode host callbacks used by the standalone mission controller modes.
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
+    // Defines the host services that concrete mission modes use to enter and run each mission workflow.
     class IMissionModeHost
     {
     public:
@@ -16,3 +18,4 @@ namespace MazeMapApp::Internal
         virtual void RunPositionAccuracyAuditMode() = 0;
     };
 }
+

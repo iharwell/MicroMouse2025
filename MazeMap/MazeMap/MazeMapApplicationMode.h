@@ -1,7 +1,9 @@
 #pragma once
+// Declares the application-mode interface used by the desktop and embedded entry points.
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
+    // Represents a runnable application mode with explicit begin and run phases.
     class IApplicationMode
     {
     public:
@@ -10,3 +12,4 @@ namespace MazeMapApp::Internal
         virtual void Run() = 0;
     };
 }
+

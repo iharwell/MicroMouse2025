@@ -1,8 +1,8 @@
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapSharedRuntime.h"
 
-using MazeMapApp::Internal::GetSharedRobotRuntime;
-using MazeMapApp::Internal::SharedRobotRuntime;
+using MazeMap::App::Internal::GetSharedRobotRuntime;
+using MazeMap::App::Internal::SharedRobotRuntime;
 
 class MissionController final : public IMissionModeHost
 {
@@ -221,7 +221,7 @@ public:
         }
 
         char fileName[32] = {};
-        if (!MazeMapApp::Internal::Runtime::SelectSequentialRuntimeFileName(
+        if (!MazeMap::App::Internal::Runtime::SelectSequentialRuntimeFileName(
                 fileName,
                 sizeof(fileName),
                 nullptr,
@@ -282,7 +282,7 @@ public:
         }
 
         char fileName[32] = {};
-        if (!MazeMapApp::Internal::Runtime::SelectSequentialRuntimeFileName(
+        if (!MazeMap::App::Internal::Runtime::SelectSequentialRuntimeFileName(
                 fileName,
                 sizeof(fileName),
                 nullptr,
@@ -2843,9 +2843,9 @@ private:
             *seatedYawErrorRad = 0.0f;
         }
 
-        MazeMapApp::Internal::Runtime::WallTouchExecutionResult result{};
+        MazeMap::App::Internal::Runtime::WallTouchExecutionResult result{};
         const auto tickWallTouch =
-            [this](bool stationary, float& dtSeconds, MazeMapApp::Internal::Runtime::WallTouchObservation& observation) -> bool
+            [this](bool stationary, float& dtSeconds, MazeMap::App::Internal::Runtime::WallTouchObservation& observation) -> bool
         {
             SensorSnapshot snapshot{};
             if (!TickControl(stationary, dtSeconds, snapshot))
@@ -2853,7 +2853,7 @@ private:
                 return false;
             }
 
-            observation = MazeMapApp::Internal::Runtime::MakeWallTouchObservation(snapshot);
+            observation = MazeMap::App::Internal::Runtime::MakeWallTouchObservation(snapshot);
             return true;
         };
         const auto appendTraceLine =
@@ -2871,7 +2871,7 @@ private:
             return HoldBrakedUntilDriveSettles(timeoutMessage, Config::kStartupWallCalibrationSettleMs, 0U);
         };
         const auto onSeatedHold =
-            [this, poseResetTarget, seatedYawErrorRad](const MazeMapApp::Internal::Runtime::WallTouchExecutionResult& touchResult) -> bool
+            [this, poseResetTarget, seatedYawErrorRad](const MazeMap::App::Internal::Runtime::WallTouchExecutionResult& touchResult) -> bool
         {
             if (seatedYawErrorRad != nullptr)
             {
@@ -2888,7 +2888,7 @@ private:
             return true;
         };
 
-        if (!MazeMapApp::Internal::Runtime::ExecuteSharedWallTouchOff(
+        if (!MazeMap::App::Internal::Runtime::ExecuteSharedWallTouchOff(
                 _drive,
                 targetYawRad,
                 minLatchTravelM,
@@ -7125,7 +7125,7 @@ private:
         ApplyAsymmetricQueueLimits(queue, FinalLimits(), _speedVehicle, initialEntrySpeed, finalExitSpeed);
     }
 };
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     IMissionModeHost& GetMissionModeHost()
     {
@@ -7133,5 +7133,6 @@ namespace MazeMapApp::Internal
         return mission;
     }
 }
+
 
 

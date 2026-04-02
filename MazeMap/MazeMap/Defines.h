@@ -13,12 +13,24 @@ constexpr float RT2 = 1.414213562f;
 constexpr float HALF_RT2 = 0.707106781f;
 constexpr float WALL_THICKNESS = 0.012f;
 constexpr float MIN_CLEARANCE = 0.012f;
-
+#include <assert.h>
 #if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
-
+#include <arm_math.h>
 #include <Arduino.h>
 #include <QuadEncoder.h>
 #include <new>
+
+/*
+*   void arm_sin_cos_f32(
+  float32_t theta,
+  float32_t * pSinVal,
+  float32_t * pCosVal);
+*/
+
+inline void sin_cosf(float theta, float& sin, float& cos)
+{
+    arm_sin_cos_f32(theta, &sin, &cos);
+}
 
 #ifndef EXPORT
 #define EXPORT
@@ -48,6 +60,11 @@ constexpr float MIN_CLEARANCE = 0.012f;
 #include <thread>
 #include <new>
 
+inline void sin_cosf(float theta, float& sin, float& cos)
+{
+    sin = std::sinf(theta);
+    cos = std::cosf(theta);
+}
 // Host builds avoid defining Arduino's boolean alias to prevent Windows RPC type collisions.
 using byte = std::uint8_t;
 using word = std::uint16_t;
@@ -211,7 +228,7 @@ inline long map(long x, long in_min, long in_max, long out_min, long out_max)
         : (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-namespace arduino_stub_detail
+namespace MazeMap::arduino_stub_detail
 {
     constexpr size_t kHostDigitalPinCapacity = 256U;
 
@@ -353,6 +370,8 @@ namespace arduino_stub_detail
         return resolved;
     }
 }
+
+namespace arduino_stub_detail = MazeMap::arduino_stub_detail;
 
 inline unsigned long millis()
 {

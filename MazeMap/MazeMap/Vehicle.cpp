@@ -113,8 +113,8 @@ namespace MazeMap
     ImuExtrinsics Vehicle::GetBackLeftImuExtrinsics() noexcept
     {
         ImuExtrinsics extrinsics{};
-        // The back-left IMU board location as directly measured on the board.
-        extrinsics.positionBodyM = Eigen::Vector2f(-0.011f, 0.023f);
+        // Body frame is +X right, +Y forward.
+        extrinsics.positionBodyM = Eigen::Vector2f(-0.023f, -0.011f);
         extrinsics.accelBodyFromImu = Eigen::Matrix2f::Identity();
         extrinsics.gyroZSign = 1.0f;
         return extrinsics;
@@ -123,32 +123,32 @@ namespace MazeMap
     SensorExtrinsics Vehicle::GetFrontLeftSensorExtrinsics() noexcept
     {
         return {
-            Eigen::Vector2f(0.04223f, 0.03465f),
-            Eigen::Vector2f(0.99452f, 0.10453f),
+            Eigen::Vector2f(-0.03465f, 0.04223f),
+            Eigen::Vector2f(-0.10453f, 0.99452f),
             0.0f
         };
     }
     SensorExtrinsics Vehicle::GetFrontRightSensorExtrinsics() noexcept
     {
         return {
-            Eigen::Vector2f(0.04223f, -0.03459f),
-            Eigen::Vector2f(0.99452f, -0.10453f),
+            Eigen::Vector2f(0.03459f, 0.04223f),
+            Eigen::Vector2f(0.10453f, 0.99452f),
             0.0f
         };
     }
     SensorExtrinsics Vehicle::GetSideLeftSensorExtrinsics() noexcept
     {
         return {
-            Eigen::Vector2f(0.05026f, 0.02918f),
-            Eigen::Vector2f(0.0f, 1.0f),
+            Eigen::Vector2f(-0.02918f, 0.05026f),
+            Eigen::Vector2f(-1.0f, 0.0f),
             0.0f
         };
     }
     SensorExtrinsics Vehicle::GetSideRightSensorExtrinsics() noexcept
     {
         return {
-            Eigen::Vector2f(0.05026f, -0.02772f),
-            Eigen::Vector2f(0.0f, -1.0f),
+            Eigen::Vector2f(0.02772f, 0.05026f),
+            Eigen::Vector2f(1.0f, 0.0f),
             0.0f
         };
     }

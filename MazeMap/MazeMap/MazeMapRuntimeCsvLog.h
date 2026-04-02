@@ -1,25 +1,17 @@
 #pragma once
 
-#include "CoreFileExport.h"
+#include "MazeMapRuntimeMmLog.h"
 
 #include <cstddef>
 #include <cstdint>
 
-namespace MazeMapApp::Internal::Runtime
+namespace MazeMap::App::Internal::Runtime
 {
-    // Chooses a CSV file name for a runtime log using either an explicit name, the next Teensy slot, or a host fallback.
-    EXPORT bool SelectSequentialCsvFileName(
-        char* buffer,
-        std::size_t bufferSize,
-        const char* explicitFileName,
-        const char* teensyFormat,
-        const char* hostFallback);
-
-    // Shared CSV writer used by the application loggers to keep file naming, metadata, and phase/event formatting consistent.
-    class RuntimeCsvLogFile
+    // Shared structured event writer used by the application loggers for sidecar-based .mmlog event streams.
+    class RuntimeEventLogFile
     {
     public:
-        RuntimeCsvLogFile() noexcept;
+        RuntimeEventLogFile() noexcept;
 
         bool Begin(const char* explicitFileName, const char* teensyFormat, const char* hostFallback);
         bool Write(const char* line);
@@ -34,8 +26,20 @@ namespace MazeMapApp::Internal::Runtime
         const char* GetFileName() const noexcept;
 
     private:
-        MazeMap::CoreFileExport _file;
+        static constexpr uint32_t kEventFieldCount = 6U;
+        static constexpr const char* kEventSchema =
+            "u32_seq,u32_t_us,u32_phase_id,s32_row_kind,s32_name,s32_message";
+
+        bool EnsureLogOpen();
+        bool AppendMetadataLine(const char* line);
+
+        RuntimeBinaryLogFile _log;
+        RuntimeTextBlockBuilder<2048U> _metadata;
         char _fileName[64];
         unsigned long _lastFlushMs;
+        unsigned long _rowCount;
+        bool _begun;
+        bool _opened;
     };
 }
+

@@ -3,7 +3,7 @@
 #include "Defines.h"
 #include "DirectionalLocation.h"
 #include "Maneuver.h"
-namespace AuxMeasurementConfig
+namespace MazeMap::AuxMeasurementConfig
 {
     enum class Routine : uint8_t
     {
@@ -163,3 +163,5 @@ namespace AuxMeasurementConfig
     // interruption; increase it if flush overhead becomes the limiting factor.
     constexpr uint32_t kLogFlushPeriodMs = 250U;
 }
+
+namespace AuxMeasurementConfig = MazeMap::AuxMeasurementConfig;

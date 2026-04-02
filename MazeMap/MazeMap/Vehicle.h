@@ -35,13 +35,13 @@ namespace MazeMap
     {
     private:
         inline static constexpr VehiclePhysicalModel kPhysicalModel = {
-            0.14f,
-            0.0842f,
-            0.1085f,
+            0.14f, //Mass
+            0.0842f, //Width
+            0.1085f, //Length
             // March 22, 2026 aux008 first fast IP180 fit from the clean early acceleration ramp gave an effective
             // yaw inertia around 6.65e-4 kg*m^2. This is intentionally larger than the bare rectangular body estimate
             // because it captures the drivetrain and tire-scrub dynamics the turn controller actually has to drive.
-            0.000665f,
+            0.000665f, //Yaw inertia
             0.056f,
             // March 22, 2026 aux008 latest completed fast IP180 audit pass fit 84.635 mm effective track width.
             0.084635f,

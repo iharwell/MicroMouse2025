@@ -6,7 +6,7 @@
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
-namespace MazeMapApp
+namespace MazeMap::App
 {
     TEST_CLASS(MazeMapApplicationTest)
     {
@@ -98,3 +98,4 @@ namespace MazeMapApp
         }
     };
 }
+

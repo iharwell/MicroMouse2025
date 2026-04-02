@@ -1,13 +1,13 @@
 #include "MazeMapApplicationPrivate.h"
 
-using MazeMapApp::Internal::IApplicationMode;
-using MazeMapApp::Internal::IMissionModeHost;
-using MazeMapApp::Internal::MissionRunMode;
-using MazeMapApp::Internal::ManeuverFileTestMode;
-using MazeMapApp::Internal::CorridorRepeatabilityMode;
-using MazeMapApp::Internal::PositionAccuracyAuditMode;
+using MazeMap::App::Internal::IApplicationMode;
+using MazeMap::App::Internal::IMissionModeHost;
+using MazeMap::App::Internal::MissionRunMode;
+using MazeMap::App::Internal::ManeuverFileTestMode;
+using MazeMap::App::Internal::CorridorRepeatabilityMode;
+using MazeMap::App::Internal::PositionAccuracyAuditMode;
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     IApplicationMode& GetAuxMeasurementMode();
     IApplicationMode& GetFrontWallCharacterizationMode();
@@ -22,11 +22,11 @@ namespace
     {
     public:
         ApplicationControllers()
-            : ledCalibration(MazeMapApp::Internal::GetWallSensorLedCalibrationMode())
-            , frontWallCharacterization(MazeMapApp::Internal::GetFrontWallCharacterizationMode())
-            , auxMeasurement(MazeMapApp::Internal::GetAuxMeasurementMode())
-            , diagnostic(MazeMapApp::Internal::GetDiagnosticMode())
-            , mission(MazeMapApp::Internal::GetMissionModeHost())
+            : ledCalibration(MazeMap::App::Internal::GetWallSensorLedCalibrationMode())
+            , frontWallCharacterization(MazeMap::App::Internal::GetFrontWallCharacterizationMode())
+            , auxMeasurement(MazeMap::App::Internal::GetAuxMeasurementMode())
+            , diagnostic(MazeMap::App::Internal::GetDiagnosticMode())
+            , mission(MazeMap::App::Internal::GetMissionModeHost())
             , missionMode(mission)
             , maneuverFileTestMode(mission)
             , corridorRepeatabilityMode(mission)
@@ -51,9 +51,9 @@ namespace
         return controllers;
     }
 
-    MazeMapApp::StartupModeRequests ReadStartupModeRequests()
+    MazeMap::App::StartupModeRequests ReadStartupModeRequests()
     {
-        MazeMapApp::StartupModeRequests requests{};
+        MazeMap::App::StartupModeRequests requests{};
         requests.frontWallCharacterization = IsFrontWallCharacterizationModeRequested();
         requests.wallSensorLedCalibration = IsWallSensorLedCalibrationModeRequested();
         requests.auxiliaryMeasurement = IsAuxiliaryMeasurementModeRequested();
@@ -77,28 +77,28 @@ namespace
         return controllers.auxMeasurement;
     }
 
-    IApplicationMode& ResolveApplicationMode(ApplicationControllers& controllers, MazeMapApp::StartupMode startupMode)
+    IApplicationMode& ResolveApplicationMode(ApplicationControllers& controllers, MazeMap::App::StartupMode startupMode)
     {
         switch (startupMode)
         {
-        case MazeMapApp::StartupMode::FrontWallCharacterization:
+        case MazeMap::App::StartupMode::FrontWallCharacterization:
             return controllers.frontWallCharacterization;
-        case MazeMapApp::StartupMode::WallSensorLedCalibration:
+        case MazeMap::App::StartupMode::WallSensorLedCalibration:
             return controllers.ledCalibration;
-        case MazeMapApp::StartupMode::AuxiliaryMeasurement:
+        case MazeMap::App::StartupMode::AuxiliaryMeasurement:
             return ResolveAuxiliaryMeasurementMode(controllers);
-        case MazeMapApp::StartupMode::ManeuverFileTest:
+        case MazeMap::App::StartupMode::ManeuverFileTest:
             return controllers.maneuverFileTestMode;
-        case MazeMapApp::StartupMode::PrimaryDiagnostic:
+        case MazeMap::App::StartupMode::PrimaryDiagnostic:
             return controllers.diagnostic;
-        case MazeMapApp::StartupMode::Mission:
+        case MazeMap::App::StartupMode::Mission:
         default:
             return controllers.missionMode;
         }
     }
 }
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     IApplicationMode& ResolveActiveApplicationMode()
     {
@@ -106,3 +106,4 @@ namespace MazeMapApp::Internal
         return ResolveApplicationMode(controllers, ResolveStartupMode(ReadStartupModeRequests()));
     }
 }
+

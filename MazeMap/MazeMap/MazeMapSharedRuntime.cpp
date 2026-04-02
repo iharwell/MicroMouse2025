@@ -2,7 +2,7 @@
 #include "MazeMapSharedRuntime.h"
 #include "MazeMapApplicationPrivate.h"
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     class SharedRobotRuntime::Implementation final
     {
@@ -116,3 +116,4 @@ namespace MazeMapApp::Internal
         return runtime;
     }
 }
+

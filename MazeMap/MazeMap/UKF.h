@@ -18,7 +18,7 @@ namespace MazeMap
     {
         static constexpr int kSigmaCount = (2 * NState) + 1;
 
-        float alpha = 0.3f;
+        float alpha = 0.05f;
         float beta = 2.0f;
         float kappa = 0.0f;
 

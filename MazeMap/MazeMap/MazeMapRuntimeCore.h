@@ -1,12 +1,12 @@
 #pragma once
-// Private runtime core definitions shared by MazeMap application subsystems.
+// Declares shared runtime state, calibration, and sensor-processing utilities used across the MazeMap application runtime.
 
 #include "Defines.h"
 
 inline bool AppendStartupTrace(const char* line);
 
-#if !defined(ARDUINO_TEENSY41)
-namespace Pins
+#if !defined(ARDUINO_TEENSY41) && !defined(MAZEMAP_PINS_NAMESPACE_AVAILABLE)
+namespace MazeMap::Pins
 {
     constexpr uint8_t R_MotorA = 5;
     constexpr uint8_t R_MotorB = 6;
@@ -24,20 +24,32 @@ namespace Pins
     constexpr uint8_t LED_Ctrl_Side_Right = 17;
     constexpr uint8_t LED_Ctrl_Side_Left = 16;
 }
+#endif
 
-namespace HardwareConfig
+#if !defined(ARDUINO_TEENSY41) && !defined(MAZEMAP_HARDWARE_CONFIG_NAMESPACE_AVAILABLE)
+namespace MazeMap::HardwareConfig
 {
     constexpr uint32_t kFrontWallSensorSwitchSettleTime_us = 60U;
     constexpr uint32_t kSideWallSensorSwitchSettleTime_us = 30U;
 }
+#endif
 
+#if !defined(MAZEMAP_PINS_NAMESPACE_AVAILABLE)
+namespace Pins = MazeMap::Pins;
+#endif
+
+#if !defined(MAZEMAP_HARDWARE_CONFIG_NAMESPACE_AVAILABLE)
+namespace HardwareConfig = MazeMap::HardwareConfig;
+#endif
+
+#if !defined(ARDUINO_TEENSY41)
 inline bool SetupHardware()
 {
     return true;
 }
 #endif
 
-namespace Config
+namespace MazeMap::Config
 {
     // Supported mission tuning parameters live here. Treat hard-coded literals elsewhere as implementation
     // details unless they are intentionally promoted into this section with documentation.
@@ -554,8 +566,8 @@ struct MotionLimits
     float decelMps2;
     float maxAngularSpeedRadps;
     float angularAccelRadps2;
-    float angleToleranceRad = Config::kAngleToleranceRad;
-    float angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+    float angleToleranceRad = MazeMap::Config::kAngleToleranceRad;
+    float angularSpeedToleranceRadps = MazeMap::Config::kAngularSpeedToleranceRadps;
 };
 
 struct PoseEstimate
@@ -675,7 +687,7 @@ struct EncoderProgressWatchdog
 
     bool Stalled(float traveledM, float commandedSpeedMps, float remainingM, unsigned long nowMs) noexcept
     {
-        if ((traveledM - _lastProgressM) >= Config::kEncoderProgressEpsilonM)
+        if ((traveledM - _lastProgressM) >= MazeMap::Config::kEncoderProgressEpsilonM)
         {
             _lastProgressM = traveledM;
             _lastProgressMs = nowMs;
@@ -685,11 +697,11 @@ struct EncoderProgressWatchdog
                 commandedSpeedMps,
                 remainingM,
                 _activeMotionCommand ? (nowMs - _activeMotionStartMs) : 0UL,
-                Config::kEncoderStallCommandThresholdMps,
-                Config::kDistanceToleranceM,
-                Config::kEncoderStallStartupGraceMs))
+                MazeMap::Config::kEncoderStallCommandThresholdMps,
+                MazeMap::Config::kDistanceToleranceM,
+                MazeMap::Config::kEncoderStallStartupGraceMs))
         {
-            if ((commandedSpeedMps >= Config::kEncoderStallCommandThresholdMps) && (remainingM > Config::kDistanceToleranceM))
+            if ((commandedSpeedMps >= MazeMap::Config::kEncoderStallCommandThresholdMps) && (remainingM > MazeMap::Config::kDistanceToleranceM))
             {
                 if (!_activeMotionCommand)
                 {
@@ -708,7 +720,7 @@ struct EncoderProgressWatchdog
             return false;
         }
 
-        return static_cast<unsigned long>(nowMs - _lastProgressMs) >= Config::kEncoderStallTimeoutMs;
+        return static_cast<unsigned long>(nowMs - _lastProgressMs) >= MazeMap::Config::kEncoderStallTimeoutMs;
     }
 
 private:
@@ -1314,7 +1326,7 @@ public:
     WallDistanceCalibration()
         : _curves{}
         , _frontSignalModelCache{}
-        , _expectedSideWallDistanceM(Config::kExpectedSideWallDistanceM)
+        , _expectedSideWallDistanceM(MazeMap::Config::kExpectedSideWallDistanceM)
     {
     }
 
@@ -1375,7 +1387,7 @@ public:
         _sideWallReferenceDistanceM[1] = 0.0f;
         _sideWallReferenceDistanceValid[0] = false;
         _sideWallReferenceDistanceValid[1] = false;
-        _expectedSideWallDistanceM = Config::kExpectedSideWallDistanceM;
+        _expectedSideWallDistanceM = MazeMap::Config::kExpectedSideWallDistanceM;
     }
 
     bool AddPoint(WallSensorId sensorId, float measuredValue, float actualDistanceM, float ambientLight = 0.0f)
@@ -1621,8 +1633,8 @@ public:
 
     bool TryComputeSideWallDistanceThresholds(float latchSignalFraction, float releaseSignalFraction, float& onThresholdM, float& offThresholdM) const
     {
-        onThresholdM = Config::kSideWallOnThresholdM;
-        offThresholdM = Config::kSideWallOffThresholdM;
+        onThresholdM = MazeMap::Config::kSideWallOnThresholdM;
+        offThresholdM = MazeMap::Config::kSideWallOffThresholdM;
 
         float derivedOnThresholdM = 0.0f;
         float derivedOffThresholdM = 0.0f;
@@ -1982,8 +1994,8 @@ public:
             vehicle.FrontLeft.GetPosition().x(),
             vehicle.FrontRight.GetPosition().x());
         if (!MazeMap::TryComputeFrontWallHalfwayIntoAdjacentDistanceM(
-                Config::kCellSizeM,
-                Config::kMazeWallThicknessM,
+                MazeMap::Config::kCellSizeM,
+                MazeMap::Config::kMazeWallThicknessM,
                 forwardSensorOffsetM,
                 onDistanceThresholdM) ||
             !MazeMap::TryExpandWallThresholdDistanceM(
@@ -1997,8 +2009,8 @@ public:
         return MazeMap::TryClampWallThresholdDistanceRangeM(
             onDistanceThresholdM,
             offDistanceThresholdM,
-            Config::kFrontWallOnThresholdM,
-            Config::kFrontWallOffThresholdM,
+            MazeMap::Config::kFrontWallOnThresholdM,
+            MazeMap::Config::kFrontWallOffThresholdM,
             onDistanceThresholdM,
             offDistanceThresholdM);
     }
@@ -2047,8 +2059,8 @@ public:
                 baselineDifferentialLightHigh,
                 weakestCalibrationDifferentialLightLow,
                 weakestCalibrationDifferentialLightHigh,
-                Config::kFrontWallSignalLatchFractionOfCalibratedSpan,
-                Config::kFrontWallSignalReleaseFractionOfCalibratedSpan,
+                MazeMap::Config::kFrontWallSignalLatchFractionOfCalibratedSpan,
+                MazeMap::Config::kFrontWallSignalReleaseFractionOfCalibratedSpan,
                 onMeasuredThreshold,
                 offMeasuredThreshold,
                 signalBaseline))
@@ -2063,8 +2075,8 @@ public:
             MazeMap::TryComputeSignalRiseThresholds(
                 baselineDifferentialLight,
                 weakestCalibrationSignal,
-                Config::kFrontWallSignalLatchFractionOfCalibratedSpan,
-                Config::kFrontWallSignalReleaseFractionOfCalibratedSpan,
+                MazeMap::Config::kFrontWallSignalLatchFractionOfCalibratedSpan,
+                MazeMap::Config::kFrontWallSignalReleaseFractionOfCalibratedSpan,
                 onMeasuredThreshold,
                 offMeasuredThreshold))
         {
@@ -2110,7 +2122,7 @@ public:
         }
 
         if (!MazeMap::TryScaleSignalHighThresholds(
-                Config::kFrontWallMeasuredSignalThresholdScale,
+                MazeMap::Config::kFrontWallMeasuredSignalThresholdScale,
                 onMeasuredThreshold,
                 offMeasuredThreshold))
         {
@@ -2287,13 +2299,13 @@ inline float ComputeDiagonalWallCenterOmegaRadps(
             leftReferenceSignal,
             rightMeasuredSignal,
             rightReferenceSignal,
-            Config::kDiagonalWallMinNormalizedSignal,
+            MazeMap::Config::kDiagonalWallMinNormalizedSignal,
             balanceError))
     {
         return 0.0f;
     }
 
-    return Config::kDiagonalWallCenterGain * balanceError;
+    return MazeMap::Config::kDiagonalWallCenterGain * balanceError;
 }
 
 inline bool TryComputeSideWallSignalDistanceM(
@@ -2346,8 +2358,8 @@ inline bool IsCalibratedSideDistanceValidForControl(
     float signalBaseline = 0.0f;
     if (!wallCalibration.TryComputeSideWallMeasuredThresholds(
             sensorId,
-            Config::kSideWallMeasuredSignalLatchThreshold,
-            Config::kSideWallMeasuredSignalReleaseThreshold,
+            MazeMap::Config::kSideWallMeasuredSignalLatchThreshold,
+            MazeMap::Config::kSideWallMeasuredSignalReleaseThreshold,
             onMeasuredThreshold,
             offMeasuredThreshold,
             signalBaseline))
@@ -2386,7 +2398,7 @@ inline bool TryComputeStraightWallCenterErrorM(
                 leftReferenceSignal,
                 rightMeasuredSignal,
                 rightReferenceSignal,
-                Config::kSideWallMeasuredSignalReleaseThreshold,
+                MazeMap::Config::kSideWallMeasuredSignalReleaseThreshold,
                 balanceError))
         {
             corridorErrorM = -0.5f * expectedDistanceM * balanceError;
@@ -2447,6 +2459,8 @@ inline Eigen::Vector2f DirectionToUnitVector(MazeMap::Direction direction)
     MazeMap::GetHeading(direction, dx, dy);
     return Eigen::Vector2f(dx, dy);
 }
+
+namespace Config = MazeMap::Config;
 
 inline float DirectionToYawRad(MazeMap::Direction direction)
 {
@@ -2519,7 +2533,7 @@ inline float GetMissionFanDutyCycle()
 inline void RampFanDutyCycle(float targetDutyCycle)
 {
 #if defined(ARDUINO_TEENSY41)
-    const unsigned long rampDurationMs = static_cast<unsigned long>(Config::kRacingFanRampMs);
+    const unsigned long rampDurationMs = static_cast<unsigned long>(MazeMap::Config::kRacingFanRampMs);
     const float clampedTargetDutyCycle = MazeMap::ComputeFanRampDutyCycle(targetDutyCycle, rampDurationMs, rampDurationMs);
     if (clampedTargetDutyCycle <= 0.0f)
     {
@@ -2557,7 +2571,7 @@ inline void SetMissionLevelFanEnabled(bool enabled)
 {
     if (enabled)
     {
-        RampFanDutyCycle(Config::kRacingFanDutyCycle);
+        RampFanDutyCycle(MazeMap::Config::kRacingFanDutyCycle);
         return;
     }
 
@@ -2602,9 +2616,9 @@ inline bool TryDistanceToWestWall(const PoseEstimate& pose, const MazeMap::WallS
 {
     const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
     const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
-    const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+    const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
     if (sensorFacing.x() >= -0.1f)
     {
         return false;
@@ -2625,9 +2639,9 @@ inline bool TryDistanceToEastWall(const PoseEstimate& pose, const MazeMap::WallS
 {
     const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
     const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
-    const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
-    const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+    const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
+    const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
     if (sensorFacing.x() <= 0.1f)
     {
         return false;
@@ -2648,9 +2662,9 @@ inline bool TryDistanceToSouthWall(const PoseEstimate& pose, const MazeMap::Wall
 {
     const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
     const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
-    const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+    const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
     if (sensorFacing.y() >= -0.1f)
     {
         return false;
@@ -2671,9 +2685,9 @@ inline bool TryDistanceToNorthWall(const PoseEstimate& pose, const MazeMap::Wall
 {
     const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
     const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
-    const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
-    const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+    const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
+    const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
     if (sensorFacing.y() <= 0.1f)
     {
         return false;
@@ -2738,7 +2752,7 @@ inline bool TryComputeEffectiveTurnRadiusM(
 
 inline bool TryGetCellCenterMeters(const MazeMap::CellCoordinates& cell, float& xMeters, float& yMeters)
 {
-    MazeMap::MazeLocation::CellCenter(cell).GetPhysicalLocation(Config::kCellSizeM, xMeters, yMeters);
+    MazeMap::MazeLocation::CellCenter(cell).GetPhysicalLocation(MazeMap::Config::kCellSizeM, xMeters, yMeters);
     return std::isfinite(xMeters) && std::isfinite(yMeters);
 }
 
@@ -2748,21 +2762,21 @@ inline bool TryGetCellWallFaceCoordinateM(
     float& coordinateM)
 {
     coordinateM = 0.0f;
-    const float cellBaseXM = static_cast<float>(cell.GetX()) * Config::kCellSizeM;
-    const float cellBaseYM = static_cast<float>(cell.GetY()) * Config::kCellSizeM;
+    const float cellBaseXM = static_cast<float>(cell.GetX()) * MazeMap::Config::kCellSizeM;
+    const float cellBaseYM = static_cast<float>(cell.GetY()) * MazeMap::Config::kCellSizeM;
     switch (wallDirection)
     {
     case MazeMap::Left:
-        coordinateM = cellBaseXM + MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
+        coordinateM = cellBaseXM + MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
         return true;
     case MazeMap::Right:
-        coordinateM = cellBaseXM + MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+        coordinateM = cellBaseXM + MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
         return true;
     case MazeMap::Down:
-        coordinateM = cellBaseYM + MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
+        coordinateM = cellBaseYM + MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
         return true;
     case MazeMap::Up:
-        coordinateM = cellBaseYM + MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+        coordinateM = cellBaseYM + MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
         return true;
     default:
         return false;
@@ -2786,12 +2800,12 @@ inline bool TryComputeDistanceToCellWallM(
 
     const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
     const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
-    const float cellBaseXM = static_cast<float>(cell.GetX()) * Config::kCellSizeM;
-    const float cellBaseYM = static_cast<float>(cell.GetY()) * Config::kCellSizeM;
-    const float cellInnerMinXM = cellBaseXM + MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float cellInnerMaxXM = cellBaseXM + MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
-    const float cellInnerMinYM = cellBaseYM + MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
-    const float cellInnerMaxYM = cellBaseYM + MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
+    const float cellBaseXM = static_cast<float>(cell.GetX()) * MazeMap::Config::kCellSizeM;
+    const float cellBaseYM = static_cast<float>(cell.GetY()) * MazeMap::Config::kCellSizeM;
+    const float cellInnerMinXM = cellBaseXM + MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float cellInnerMaxXM = cellBaseXM + MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
+    const float cellInnerMinYM = cellBaseYM + MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
+    const float cellInnerMaxYM = cellBaseYM + MazeMap::ComputeCellInnerMaxCoordinateM(MazeMap::Config::kCellSizeM, MazeMap::Config::kMazeWallThicknessM);
 
     switch (wallDirection)
     {
@@ -2896,12 +2910,12 @@ inline bool TryComputeFrontWallObservationSampleDistanceM(
     if (!MazeMap::TryComputeSideWallObservationSamplePoseM(
             observedCell,
             MazeMap::Up,
-            Config::kCellSizeM,
-            Config::kMazeWallThicknessM,
+            MazeMap::Config::kCellSizeM,
+            MazeMap::Config::kMazeWallThicknessM,
             sideSensorForwardOffsetM,
-            Config::kSideWallSegmentCenterFraction,
+            MazeMap::Config::kSideWallSegmentCenterFraction,
             sampleIndex,
-            Config::kSearchRollingObservationSampleCount,
+            MazeMap::Config::kSearchRollingObservationSampleCount,
             poseXM,
             poseYM))
     {
@@ -2937,7 +2951,7 @@ inline bool TryComputeFrontWallObservationThresholdDistancesM(
         vehicle.FrontLeft :
         vehicle.FrontRight;
     constexpr uint8_t kLatchSampleIndex =
-        Config::kSearchRollingObservationSampleCount - Config::kSearchRollingObservationMajorityCount;
+        MazeMap::Config::kSearchRollingObservationSampleCount - MazeMap::Config::kSearchRollingObservationMajorityCount;
     float preferredOnThresholdM = 0.0f;
     float farthestObservationThresholdM = 0.0f;
     if (!TryComputeFrontWallObservationSampleDistanceM(
@@ -2973,8 +2987,8 @@ inline bool TryComputeFrontWallObservationThresholdDistancesM(
     return MazeMap::TryClampWallThresholdDistanceRangeM(
         preferredOnThresholdM,
         preferredOffThresholdM,
-        Config::kFrontWallOnThresholdM,
-        Config::kFrontWallOffThresholdM,
+        MazeMap::Config::kFrontWallOnThresholdM,
+        MazeMap::Config::kFrontWallOffThresholdM,
         onThresholdM,
         offThresholdM);
 }
@@ -2996,19 +3010,19 @@ inline bool TryComputeWallTouchTargetCoordinateForCellWall(
     {
     case MazeMap::Left:
         calibrationWall = CalibrationWall::West;
-        targetCoordinateM = wallFaceCoordinateM + Config::kWallTouchContactStandoffM;
+        targetCoordinateM = wallFaceCoordinateM + MazeMap::Config::kWallTouchContactStandoffM;
         return true;
     case MazeMap::Right:
         calibrationWall = CalibrationWall::East;
-        targetCoordinateM = wallFaceCoordinateM - Config::kWallTouchContactStandoffM;
+        targetCoordinateM = wallFaceCoordinateM - MazeMap::Config::kWallTouchContactStandoffM;
         return true;
     case MazeMap::Down:
         calibrationWall = CalibrationWall::South;
-        targetCoordinateM = wallFaceCoordinateM + Config::kWallTouchContactStandoffM;
+        targetCoordinateM = wallFaceCoordinateM + MazeMap::Config::kWallTouchContactStandoffM;
         return true;
     case MazeMap::Up:
         calibrationWall = CalibrationWall::North;
-        targetCoordinateM = wallFaceCoordinateM - Config::kWallTouchContactStandoffM;
+        targetCoordinateM = wallFaceCoordinateM - MazeMap::Config::kWallTouchContactStandoffM;
         return true;
     default:
         return false;
@@ -3453,10 +3467,10 @@ inline void SampleWallCalibrationInputRawPair(
 
 inline WallSensorCalibrationCapture SampleWallCalibrationCaptureAverageRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor)
 {
-    AveragedWallSensorInputWindow<static_cast<uint8_t>(Config::kWallCalibrationAverageSampleCount)> averageWindow{};
-    std::array<float, Config::kWallCalibrationAverageSampleCount> differentialLightSamples{};
+    AveragedWallSensorInputWindow<static_cast<uint8_t>(MazeMap::Config::kWallCalibrationAverageSampleCount)> averageWindow{};
+    std::array<float, MazeMap::Config::kWallCalibrationAverageSampleCount> differentialLightSamples{};
     uint16_t differentialLightCount = 0U;
-    for (uint16_t i = 0U; i < Config::kWallCalibrationAverageSampleCount; ++i)
+    for (uint16_t i = 0U; i < MazeMap::Config::kWallCalibrationAverageSampleCount; ++i)
     {
         const WallSensorCalibrationInput input = SampleWallCalibrationInputRaw(sensorId, sensor);
         averageWindow.PushAndAverage(input);
@@ -3469,7 +3483,7 @@ inline WallSensorCalibrationCapture SampleWallCalibrationCaptureAverageRaw(WallS
     capture.haveDifferentialLightBand = MazeMap::TryComputeRobustSignalBandFromSamples(
         differentialLightSamples,
         differentialLightCount,
-        Config::kWallCalibrationScaledMadMultiplier,
+        MazeMap::Config::kWallCalibrationScaledMadMultiplier,
         capture.differentialLightBand.median,
         capture.differentialLightBand.low,
         capture.differentialLightBand.high);
@@ -3484,12 +3498,12 @@ inline void SampleWallCalibrationCaptureAverageRawPair(
     WallSensorCalibrationCapture& firstCapture,
     WallSensorCalibrationCapture& secondCapture)
 {
-    AveragedWallSensorInputWindow<static_cast<uint8_t>(Config::kWallCalibrationAverageSampleCount)> firstAverageWindow{};
-    AveragedWallSensorInputWindow<static_cast<uint8_t>(Config::kWallCalibrationAverageSampleCount)> secondAverageWindow{};
-    std::array<float, Config::kWallCalibrationAverageSampleCount> firstDifferentialLightSamples{};
-    std::array<float, Config::kWallCalibrationAverageSampleCount> secondDifferentialLightSamples{};
+    AveragedWallSensorInputWindow<static_cast<uint8_t>(MazeMap::Config::kWallCalibrationAverageSampleCount)> firstAverageWindow{};
+    AveragedWallSensorInputWindow<static_cast<uint8_t>(MazeMap::Config::kWallCalibrationAverageSampleCount)> secondAverageWindow{};
+    std::array<float, MazeMap::Config::kWallCalibrationAverageSampleCount> firstDifferentialLightSamples{};
+    std::array<float, MazeMap::Config::kWallCalibrationAverageSampleCount> secondDifferentialLightSamples{};
     uint16_t differentialLightCount = 0U;
-    for (uint16_t i = 0U; i < Config::kWallCalibrationAverageSampleCount; ++i)
+    for (uint16_t i = 0U; i < MazeMap::Config::kWallCalibrationAverageSampleCount; ++i)
     {
         WallSensorCalibrationInput firstInput{};
         WallSensorCalibrationInput secondInput{};
@@ -3512,7 +3526,7 @@ inline void SampleWallCalibrationCaptureAverageRawPair(
     firstCapture.haveDifferentialLightBand = MazeMap::TryComputeRobustSignalBandFromSamples(
         firstDifferentialLightSamples,
         differentialLightCount,
-        Config::kWallCalibrationScaledMadMultiplier,
+        MazeMap::Config::kWallCalibrationScaledMadMultiplier,
         firstCapture.differentialLightBand.median,
         firstCapture.differentialLightBand.low,
         firstCapture.differentialLightBand.high);
@@ -3522,7 +3536,7 @@ inline void SampleWallCalibrationCaptureAverageRawPair(
     secondCapture.haveDifferentialLightBand = MazeMap::TryComputeRobustSignalBandFromSamples(
         secondDifferentialLightSamples,
         differentialLightCount,
-        Config::kWallCalibrationScaledMadMultiplier,
+        MazeMap::Config::kWallCalibrationScaledMadMultiplier,
         secondCapture.differentialLightBand.median,
         secondCapture.differentialLightBand.low,
         secondCapture.differentialLightBand.high);
@@ -3779,9 +3793,9 @@ inline float EstimateMissionGyroBiasRadps(MazeMap::Vehicle& vehicle)
     float accumulatedRadps = 0.0f;
     constexpr unsigned long kBiasSampleIntervalMs = 2UL;
     const unsigned long requiredSamples = MazeMap::ComputeGyroBiasSampleCount(
-        static_cast<unsigned long>(Config::kGyroBiasSamples),
+        static_cast<unsigned long>(MazeMap::Config::kGyroBiasSamples),
         kBiasSampleIntervalMs,
-        static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs));
+        static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs));
     for (unsigned long i = 0UL; i < requiredSamples; ++i)
     {
         accumulatedRadps += ReadBackLeftGyroZRadpsRaw(vehicle);
@@ -3832,16 +3846,16 @@ inline bool CalibrateStationaryBackLeftGyroBias(
         }
 
         const unsigned long requiredSamples = MazeMap::ComputeGyroBiasSampleCount(
-            static_cast<unsigned long>(Config::kGyroBiasSamples),
+            static_cast<unsigned long>(MazeMap::Config::kGyroBiasSamples),
             kImuCalibrationSampleIntervalMs,
-            static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs));
+            static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs));
         const unsigned long measurementStartMs = millis();
         double accumulatedRadps = 0.0;
         double accumulatedAccelXG = 0.0;
         double accumulatedAccelYG = 0.0;
         unsigned long collectedSamples = 0UL;
         while ((collectedSamples < requiredSamples) ||
-            ((millis() - measurementStartMs) < static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs)))
+            ((millis() - measurementStartMs) < static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs)))
         {
             if (HaveDriveEncodersMovedSince(startCounts))
             {
@@ -3929,11 +3943,11 @@ inline bool TryComputeSideWallAimCoordinateM(
         (yawSin * sensorFacing.x()) +
         (yawCos * sensorFacing.y());
     const float innerMinCoordinateM =
-        MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
+        MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
     const float innerMaxCoordinateM =
         MazeMap::ComputeCellInnerMaxCoordinateM(
-            Config::kCellSizeM,
-            Config::kMazeWallThicknessM);
+            MazeMap::Config::kCellSizeM,
+            MazeMap::Config::kMazeWallThicknessM);
 
     if (std::fabs(facingXM) >= std::fabs(facingYM))
     {
@@ -3943,7 +3957,7 @@ inline bool TryComputeSideWallAimCoordinateM(
         }
 
         const float cellBaseXM =
-            std::floor(sensorXM / Config::kCellSizeM) * Config::kCellSizeM;
+            std::floor(sensorXM / MazeMap::Config::kCellSizeM) * MazeMap::Config::kCellSizeM;
         const float wallFaceXM =
             (facingXM >= 0.0f) ?
             (cellBaseXM + innerMaxCoordinateM) :
@@ -3964,7 +3978,7 @@ inline bool TryComputeSideWallAimCoordinateM(
     }
 
     const float cellBaseYM =
-        std::floor(sensorYM / Config::kCellSizeM) * Config::kCellSizeM;
+        std::floor(sensorYM / MazeMap::Config::kCellSizeM) * MazeMap::Config::kCellSizeM;
     const float wallFaceYM =
         (facingYM >= 0.0f) ?
         (cellBaseYM + innerMaxCoordinateM) :
@@ -3991,9 +4005,9 @@ inline bool IsSideWallDetectionWindowValid(
             alongWallCoordinateM) &&
         MazeMap::IsWithinWallSegmentCenterWindowM(
             alongWallCoordinateM,
-            Config::kCellSizeM,
-            Config::kMazeWallThicknessM,
-            Config::kSideWallSegmentCenterFraction);
+            MazeMap::Config::kCellSizeM,
+            MazeMap::Config::kMazeWallThicknessM,
+            MazeMap::Config::kSideWallSegmentCenterFraction);
 }
 
 struct RollingObservationVoteSummary
@@ -4104,9 +4118,9 @@ inline bool BuildEvidenceObservationSnapshot(
             sample.frontWall ?
                 MazeMap::WallSampleClassification::WallHit :
                 MazeMap::WallSampleClassification::WallMiss,
-            Config::kWallMapEvidenceHitWeight,
-            Config::kWallMapEvidenceMissWeight,
-            Config::kWallMapEvidenceUnknownDecay);
+            MazeMap::Config::kWallMapEvidenceHitWeight,
+            MazeMap::Config::kWallMapEvidenceMissWeight,
+            MazeMap::Config::kWallMapEvidenceUnknownDecay);
 
         leftEvidence.Update(
             sample.leftWallObservationWindowValid ?
@@ -4114,13 +4128,13 @@ inline bool BuildEvidenceObservationSnapshot(
                     MazeMap::WallSampleClassification::WallHit :
                     MazeMap::WallSampleClassification::WallMiss) :
                 MazeMap::WallSampleClassification::Unknown,
-            Config::kWallMapEvidenceHitWeight,
-            Config::kWallMapEvidenceMissWeight,
-            Config::kWallMapEvidenceUnknownDecay);
+            MazeMap::Config::kWallMapEvidenceHitWeight,
+            MazeMap::Config::kWallMapEvidenceMissWeight,
+            MazeMap::Config::kWallMapEvidenceUnknownDecay);
         if (sample.leftTransitionDetected)
         {
             leftTransitionDetected = true;
-            leftEvidence.InjectMissImpulse(Config::kWallMapEvidenceTransitionMissWeight);
+            leftEvidence.InjectMissImpulse(MazeMap::Config::kWallMapEvidenceTransitionMissWeight);
         }
 
         rightEvidence.Update(
@@ -4129,13 +4143,13 @@ inline bool BuildEvidenceObservationSnapshot(
                     MazeMap::WallSampleClassification::WallHit :
                     MazeMap::WallSampleClassification::WallMiss) :
                 MazeMap::WallSampleClassification::Unknown,
-            Config::kWallMapEvidenceHitWeight,
-            Config::kWallMapEvidenceMissWeight,
-            Config::kWallMapEvidenceUnknownDecay);
+            MazeMap::Config::kWallMapEvidenceHitWeight,
+            MazeMap::Config::kWallMapEvidenceMissWeight,
+            MazeMap::Config::kWallMapEvidenceUnknownDecay);
         if (sample.rightTransitionDetected)
         {
             rightTransitionDetected = true;
-            rightEvidence.InjectMissImpulse(Config::kWallMapEvidenceTransitionMissWeight);
+            rightEvidence.InjectMissImpulse(MazeMap::Config::kWallMapEvidenceTransitionMissWeight);
         }
 
         if (std::isfinite(sample.frontLeftDistanceM))
@@ -4226,11 +4240,11 @@ inline bool BuildEvidenceObservationSnapshot(
     combinedSnapshot.gyroRadps =
         AverageFiniteObservationValue(gyroSum, gyroCount, lastSample.gyroRadps);
     const MazeMap::WallSampleClassification frontDecision =
-        frontEvidence.FinalClassification(Config::kWallMapEvidenceCommitThreshold);
+        frontEvidence.FinalClassification(MazeMap::Config::kWallMapEvidenceCommitThreshold);
     const MazeMap::WallSampleClassification leftDecision =
-        leftEvidence.FinalClassification(Config::kWallMapEvidenceCommitThreshold);
+        leftEvidence.FinalClassification(MazeMap::Config::kWallMapEvidenceCommitThreshold);
     const MazeMap::WallSampleClassification rightDecision =
-        rightEvidence.FinalClassification(Config::kWallMapEvidenceCommitThreshold);
+        rightEvidence.FinalClassification(MazeMap::Config::kWallMapEvidenceCommitThreshold);
     combinedSnapshot.frontWall = frontDecision == MazeMap::WallSampleClassification::WallHit;
     combinedSnapshot.frontLeftWall = ObservationVoteWinsMajority(voteSummary.frontLeftWallVotes, sampleCount);
     combinedSnapshot.frontRightWall = ObservationVoteWinsMajority(voteSummary.frontRightWallVotes, sampleCount);

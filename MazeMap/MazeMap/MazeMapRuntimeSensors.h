@@ -1,7 +1,7 @@
 #pragma once
+// Declares the runtime sensor capture pipelines used for mission control and diagnostic data collection.
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeSignalHelpers.h"
-// Private sensor pipeline implementations for the MazeMap application runtime.
 class SensorSuite
 {
 public:
@@ -367,7 +367,7 @@ public:
             sideWallOnThresholdM,
             sideRightObservationEligible);
         snapshot.frontSkewM = snapshot.frontLeftDistanceM - snapshot.frontRightDistanceM;
-        snapshot.corridorErrorM = MazeMapApp::Internal::Runtime::ComputeCorridorError(
+        snapshot.corridorErrorM = MazeMap::App::Internal::Runtime::ComputeCorridorError(
             snapshot.sideLeftDistanceM,
             snapshot.sideRightDistanceM,
             snapshot.leftDistanceValidForControl,
@@ -533,7 +533,7 @@ private:
             return false;
         }
 
-        signalRise = MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+        signalRise = MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
             measuredDifferentialLight,
             signalBaseline);
         missRiseThreshold = Config::kWallMapMissSignalFractionOfLatch * latchRiseThreshold;
@@ -608,7 +608,7 @@ private:
                 offMeasuredThreshold,
                 signalBaseline))
         {
-            return MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+            return MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
                        measuredDifferentialLight,
                        signalBaseline) >= onMeasuredThreshold;
         }
@@ -646,8 +646,8 @@ private:
                 offMeasuredThreshold,
                 signalBaseline))
         {
-            return MazeMapApp::Internal::Runtime::UpdateFilteredSignalState(
-                MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+            return MazeMap::App::Internal::Runtime::UpdateFilteredSignalState(
+                MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
                     measuredDifferentialLight,
                     signalBaseline),
                 onMeasuredThreshold,
@@ -703,8 +703,8 @@ private:
             _frontWallUsesFallbackDetection = false;
             if (haveLeftThreshold)
             {
-                MazeMapApp::Internal::Runtime::UpdateFilteredSignalState(
-                    MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+                MazeMap::App::Internal::Runtime::UpdateFilteredSignalState(
+                    MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
                         leftMeasuredDifferentialLight,
                         leftSignalBaseline),
                     leftOnMeasuredThreshold,
@@ -721,8 +721,8 @@ private:
 
             if (haveRightThreshold)
             {
-                MazeMapApp::Internal::Runtime::UpdateFilteredSignalState(
-                    MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+                MazeMap::App::Internal::Runtime::UpdateFilteredSignalState(
+                    MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
                         rightMeasuredDifferentialLight,
                         rightSignalBaseline),
                     rightOnMeasuredThreshold,
@@ -1007,7 +1007,7 @@ public:
         snapshot.sideLeft.wall = snapshot.leftWall;
         snapshot.sideRight.wall = snapshot.rightWall;
         snapshot.frontSkewM = snapshot.frontLeft.distanceM - snapshot.frontRight.distanceM;
-        snapshot.corridorErrorM = MazeMapApp::Internal::Runtime::ComputeCorridorError(
+        snapshot.corridorErrorM = MazeMap::App::Internal::Runtime::ComputeCorridorError(
             snapshot.sideLeft.distanceM,
             snapshot.sideRight.distanceM,
             snapshot.leftDistanceValidForControl,
@@ -1171,8 +1171,8 @@ private:
                 offMeasuredThreshold,
                 signalBaseline))
         {
-            return MazeMapApp::Internal::Runtime::UpdateFilteredSignalState(
-                MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+            return MazeMap::App::Internal::Runtime::UpdateFilteredSignalState(
+                MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
                     measuredDifferentialLight,
                     signalBaseline),
                 onMeasuredThreshold,
@@ -1227,8 +1227,8 @@ private:
         {
             if (haveLeftThreshold)
             {
-                MazeMapApp::Internal::Runtime::UpdateFilteredSignalState(
-                    MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+                MazeMap::App::Internal::Runtime::UpdateFilteredSignalState(
+                    MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
                         leftMeasuredDifferentialLight,
                         leftSignalBaseline),
                     leftOnMeasuredThreshold,
@@ -1245,8 +1245,8 @@ private:
 
             if (haveRightThreshold)
             {
-                MazeMapApp::Internal::Runtime::UpdateFilteredSignalState(
-                    MazeMapApp::Internal::Runtime::ComputeSignalRiseAboveBaseline(
+                MazeMap::App::Internal::Runtime::UpdateFilteredSignalState(
+                    MazeMap::App::Internal::Runtime::ComputeSignalRiseAboveBaseline(
                         rightMeasuredDifferentialLight,
                         rightSignalBaseline),
                     rightOnMeasuredThreshold,
@@ -1333,6 +1333,7 @@ private:
         return ReadBackLeftGyroZRadpsRaw(_vehicle);
     }
 };
+
 
 
 

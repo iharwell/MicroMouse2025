@@ -3,7 +3,7 @@
 #include "MazeMapApplicationMode.h"
 #include "MazeMapMissionModeHost.h"
 
-namespace MazeMapApp::Internal
+namespace MazeMap::App::Internal
 {
     class MissionHostedModeBase : public IApplicationMode
     {
@@ -53,3 +53,4 @@ namespace MazeMapApp::Internal
         void Run() override;
     };
 }
+

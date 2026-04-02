@@ -1,6 +1,7 @@
 #pragma once
+// Declares the binary mission-log file format and runtime helpers that write MMLOG-compatible telemetry streams.
 
-#include "Defines.h"
+#include "MmLog.h"
 
 #if defined(ARDUINO_TEENSY41)
 #include <SD.h>
@@ -16,152 +17,18 @@
 #include <limits>
 #include <stdio.h>
 
-namespace mmlog
+namespace MazeMap::App::Internal::Runtime
 {
-    static constexpr char kMagic[8] = { 'M', 'M', 'L', 'O', 'G', '1', '\0', '\0' };
-    static constexpr uint32_t kVersion = 1u;
-    static constexpr uint32_t kHeaderBytes = 64u;
-    static constexpr uint32_t kGenericMagic = 0x474C4D4Du;
-    static constexpr uint16_t kGenericVersionMajor = 2u;
-    static constexpr uint16_t kGenericVersionMinor = 0u;
-
-    static constexpr uint32_t FLAG_HAS_CRC32 = 1u << 0;
-    static constexpr uint32_t FLAG_HAS_STAGE = 1u << 1;
-    static constexpr uint32_t FLAG_HAS_SEQ = 1u << 2;
-    static constexpr uint32_t FLAG_HAS_T_US = 1u << 3;
-    static constexpr uint32_t FLAG_HAS_DT_US = 1u << 4;
-    static constexpr uint32_t FLAG_HAS_METADATA = 1u << 5;
-    static constexpr uint32_t FLAG_HAS_NOTES = 1u << 6;
-    static constexpr uint32_t FLAG_LITTLE_ENDIAN = 1u << 7;
-
-    constexpr uint32_t TAG4(char a, char b, char c, char d) noexcept
+    enum class RuntimeBinaryLogWriteMode : uint8_t
     {
-        return (static_cast<uint32_t>(static_cast<uint8_t>(a))) |
-            (static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8) |
-            (static_cast<uint32_t>(static_cast<uint8_t>(c)) << 16) |
-            (static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24);
-    }
-
-#pragma pack(push, 1)
-    struct FileHeader
-    {
-        char magic[8];
-        uint32_t version;
-        uint32_t header_bytes;
-        uint32_t record_bytes;
-        uint32_t field_count;
-        uint32_t metadata_bytes;
-        uint32_t schema_bytes;
-        uint32_t notes_bytes;
-        uint32_t flags;
-        uint32_t run_id;
-        uint32_t start_time_us_lo;
-        uint32_t start_time_us_hi;
-        uint32_t reserved[3];
+        Synchronous = 0u,
+        Buffered = 1u
     };
 
-    struct GenericFileHeader
-    {
-        uint32_t magic;
-        uint16_t fmt_ver_major;
-        uint16_t fmt_ver_minor;
-        uint32_t stream_type;
-        uint32_t schema_id;
-        uint32_t flags;
-        uint32_t producer_id;
-        uint32_t header_bytes;
-        uint32_t metadata_bytes;
-        uint32_t notes_bytes;
-        uint32_t reserved0;
-        uint32_t reserved1;
-    };
+    // Keep write cost on the calling path by default; buffered mode remains available as an explicit opt-in.
+    inline constexpr RuntimeBinaryLogWriteMode kDefaultRuntimeBinaryLogWriteMode =
+        RuntimeBinaryLogWriteMode::Synchronous;
 
-    struct LogRecordHeader
-    {
-        uint32_t rec_type;
-        uint16_t rec_size;
-        uint16_t rec_ver;
-    };
-#pragma pack(pop)
-
-    static_assert(sizeof(FileHeader) == 64u, "MMLOG1 FileHeader must be 64 bytes");
-    static_assert(sizeof(GenericFileHeader) == 44u, "MMLG GenericFileHeader must be 44 bytes");
-    static_assert(sizeof(LogRecordHeader) == 8u, "MMLG LogRecordHeader must be 8 bytes");
-
-    inline uint32_t packU32(uint32_t value) noexcept
-    {
-        return value;
-    }
-
-    inline uint32_t packI32(int32_t value) noexcept
-    {
-        uint32_t packed = 0u;
-        std::memcpy(&packed, &value, sizeof(packed));
-        return packed;
-    }
-
-    inline uint32_t packF32(float value) noexcept
-    {
-        uint32_t packed = 0u;
-        std::memcpy(&packed, &value, sizeof(packed));
-        return packed;
-    }
-
-    inline void fillHeader(
-        FileHeader& header,
-        uint32_t recordBytes,
-        uint32_t fieldCount,
-        uint32_t metadataBytes,
-        uint32_t schemaBytes,
-        uint32_t notesBytes,
-        uint32_t flags,
-        uint32_t runId,
-        uint64_t startTimeUs) noexcept
-    {
-        std::memcpy(header.magic, kMagic, sizeof(kMagic));
-        header.version = kVersion;
-        header.header_bytes = kHeaderBytes + metadataBytes + schemaBytes + notesBytes;
-        header.record_bytes = recordBytes;
-        header.field_count = fieldCount;
-        header.metadata_bytes = metadataBytes;
-        header.schema_bytes = schemaBytes;
-        header.notes_bytes = notesBytes;
-        header.flags = flags | FLAG_LITTLE_ENDIAN;
-        header.run_id = runId;
-        header.start_time_us_lo = static_cast<uint32_t>(startTimeUs & 0xFFFFFFFFull);
-        header.start_time_us_hi = static_cast<uint32_t>((startTimeUs >> 32) & 0xFFFFFFFFull);
-        for (uint32_t& value : header.reserved)
-        {
-            value = 0u;
-        }
-    }
-
-    inline void fillGenericHeader(
-        GenericFileHeader& header,
-        uint32_t streamType,
-        uint32_t schemaId,
-        uint32_t metadataBytes,
-        uint32_t notesBytes,
-        uint32_t flags,
-        uint32_t producerId) noexcept
-    {
-        header.magic = kGenericMagic;
-        header.fmt_ver_major = kGenericVersionMajor;
-        header.fmt_ver_minor = kGenericVersionMinor;
-        header.stream_type = streamType;
-        header.schema_id = schemaId;
-        header.flags = flags | FLAG_LITTLE_ENDIAN;
-        header.producer_id = producerId;
-        header.header_bytes = static_cast<uint32_t>(sizeof(GenericFileHeader)) + metadataBytes + notesBytes;
-        header.metadata_bytes = metadataBytes;
-        header.notes_bytes = notesBytes;
-        header.reserved0 = 0u;
-        header.reserved1 = 0u;
-    }
-}
-
-namespace MazeMapApp::Internal::Runtime
-{
     class CoreBinaryFileExport
     {
     public:
@@ -270,7 +137,7 @@ namespace MazeMapApp::Internal::Runtime
 
         if (explicitFileName != nullptr && explicitFileName[0] != '\0')
         {
-            std::snprintf(buffer, bufferSize, "%s", explicitFileName);
+            snprintf(buffer, bufferSize, "%s", explicitFileName);
             return true;
         }
 
@@ -282,18 +149,18 @@ namespace MazeMapApp::Internal::Runtime
 
         for (uint16_t index = 0U; index < 1000U; ++index)
         {
-            std::snprintf(buffer, bufferSize, teensyFormat, static_cast<unsigned>(index));
+            snprintf(buffer, bufferSize, teensyFormat, static_cast<unsigned>(index));
             if (!SD.exists(buffer))
             {
                 return true;
             }
         }
 
-        std::snprintf(buffer, bufferSize, teensyFormat, 999U);
+        snprintf(buffer, bufferSize, teensyFormat, 999U);
         return true;
 #else
         (void)teensyFormat;
-        std::snprintf(buffer, bufferSize, "%s", (hostFallback != nullptr) ? hostFallback : "runtime_log.mmlog");
+        snprintf(buffer, bufferSize, "%s", (hostFallback != nullptr) ? hostFallback : "runtime_log.mmlog");
         return true;
 #endif
     }
@@ -328,6 +195,146 @@ namespace MazeMapApp::Internal::Runtime
         return true;
     }
 
+    inline const char* FileNameComponent(const char* path) noexcept
+    {
+        if (path == nullptr)
+        {
+            return "";
+        }
+
+        const char* name = path;
+        for (const char* cursor = path; *cursor != '\0'; ++cursor)
+        {
+            if (*cursor == '/' || *cursor == '\\')
+            {
+                name = cursor + 1;
+            }
+        }
+        return name;
+    }
+
+    inline uint32_t Fnv1a32(const char* text) noexcept
+    {
+        uint32_t hash = 2166136261u;
+        if (text == nullptr)
+        {
+            return hash;
+        }
+
+        for (const uint8_t* cursor = reinterpret_cast<const uint8_t*>(text); *cursor != 0u; ++cursor)
+        {
+            hash ^= *cursor;
+            hash *= 16777619u;
+        }
+        return hash;
+    }
+
+    inline bool IsSchemaPrefix(const char* prefix, std::size_t length) noexcept
+    {
+        switch (length)
+        {
+        case 2U:
+            return
+                (std::strncmp(prefix, "u8", 2U) == 0) ||
+                (std::strncmp(prefix, "i8", 2U) == 0) ||
+                (std::strncmp(prefix, "s8", 2U) == 0);
+        case 3U:
+            return
+                (std::strncmp(prefix, "u16", 3U) == 0) ||
+                (std::strncmp(prefix, "i16", 3U) == 0) ||
+                (std::strncmp(prefix, "u32", 3U) == 0) ||
+                (std::strncmp(prefix, "i32", 3U) == 0) ||
+                (std::strncmp(prefix, "f32", 3U) == 0) ||
+                (std::strncmp(prefix, "s16", 3U) == 0) ||
+                (std::strncmp(prefix, "s32", 3U) == 0);
+        default:
+            return false;
+        }
+    }
+
+    inline uint32_t SchemaFieldWidth(const char* prefix, std::size_t length) noexcept
+    {
+        if (length == 2U)
+        {
+            return 1U;
+        }
+
+        if (length == 3U &&
+            ((std::strncmp(prefix, "u16", 3U) == 0) ||
+             (std::strncmp(prefix, "i16", 3U) == 0) ||
+             (std::strncmp(prefix, "s16", 3U) == 0)))
+        {
+            return 2U;
+        }
+
+        return 4U;
+    }
+
+    inline bool SchemaPrefixUsesStringHash(const char* prefix, std::size_t length) noexcept
+    {
+        return
+            ((length == 2U) && (std::strncmp(prefix, "s8", 2U) == 0)) ||
+            ((length == 3U) && ((std::strncmp(prefix, "s16", 3U) == 0) || (std::strncmp(prefix, "s32", 3U) == 0)));
+    }
+
+    inline bool ValidateTypedSchema(
+        const char* schemaCsv,
+        uint32_t expectedFieldCount,
+        uint32_t expectedRowBytes,
+        bool& hasStringHashField) noexcept
+    {
+        hasStringHashField = false;
+        if (schemaCsv == nullptr || schemaCsv[0] == '\0')
+        {
+            return false;
+        }
+
+        uint32_t fieldCount = 0U;
+        uint32_t rowBytes = 0U;
+        const char* fieldStart = schemaCsv;
+        for (const char* cursor = schemaCsv;; ++cursor)
+        {
+            if (*cursor != ',' && *cursor != '\0')
+            {
+                continue;
+            }
+
+            if (cursor == fieldStart)
+            {
+                return false;
+            }
+
+            const char* separator = fieldStart;
+            while (separator < cursor && *separator != '_')
+            {
+                ++separator;
+            }
+
+            if (separator == fieldStart || separator == cursor)
+            {
+                return false;
+            }
+
+            const std::size_t prefixLength = static_cast<std::size_t>(separator - fieldStart);
+            if (!IsSchemaPrefix(fieldStart, prefixLength))
+            {
+                return false;
+            }
+
+            rowBytes += SchemaFieldWidth(fieldStart, prefixLength);
+            hasStringHashField = hasStringHashField || SchemaPrefixUsesStringHash(fieldStart, prefixLength);
+            ++fieldCount;
+
+            if (*cursor == '\0')
+            {
+                break;
+            }
+            fieldStart = cursor + 1;
+        }
+
+        return (fieldCount == expectedFieldCount) && (rowBytes == expectedRowBytes);
+    }
+
     inline uint32_t PackTextTagOrHash(const char* text) noexcept
     {
         if (text == nullptr || text[0] == '\0')
@@ -351,13 +358,7 @@ namespace MazeMapApp::Internal::Runtime
             return mmlog::TAG4(tag[0], tag[1], tag[2], tag[3]);
         }
 
-        uint32_t hash = 2166136261u;
-        for (size_t index = 0U; index < length; ++index)
-        {
-            hash ^= static_cast<uint8_t>(text[index]);
-            hash *= 16777619u;
-        }
-        return hash;
+        return Fnv1a32(text);
     }
 
     template <std::size_t MaxBytes = 8192U>
@@ -400,7 +401,7 @@ namespace MazeMapApp::Internal::Runtime
         bool AppendKeyValue(const char* key, const char* value)
         {
             char line[192] = {};
-            const int length = std::snprintf(
+            const int length = snprintf(
                 line,
                 sizeof(line),
                 "%s=%s",
@@ -412,7 +413,7 @@ namespace MazeMapApp::Internal::Runtime
         bool AppendUnsigned(const char* key, unsigned long value)
         {
             char line[192] = {};
-            const int length = std::snprintf(
+            const int length = snprintf(
                 line,
                 sizeof(line),
                 "%s=%lu",
@@ -424,7 +425,7 @@ namespace MazeMapApp::Internal::Runtime
         bool AppendFloat(const char* key, float value, uint8_t precision)
         {
             char line[192] = {};
-            const int length = std::snprintf(
+            const int length = snprintf(
                 line,
                 sizeof(line),
                 "%s=%.*f",
@@ -519,18 +520,21 @@ namespace MazeMapApp::Internal::Runtime
     public:
         RuntimeBinaryLogFile() noexcept
             : _file()
+            , _sidecarFile()
             , _blocks(nullptr)
             , _activeIndex(-1)
             , _fieldCount(0u)
             , _recordBytes(0u)
             , _blockBytes(0u)
             , _bufferCount(0u)
+            , _writeMode(kDefaultRuntimeBinaryLogWriteMode)
             , _isOpen(false)
             , _overflowed(false)
             , _writeFailed(false)
             , _queuedBlockCount(0u)
         {
             _fileName[0] = '\0';
+            _sidecarName[0] = '\0';
         }
 
         ~RuntimeBinaryLogFile()
@@ -547,6 +551,7 @@ namespace MazeMapApp::Internal::Runtime
             uint32_t flags = mmlog::FLAG_HAS_METADATA | mmlog::FLAG_HAS_SEQ | mmlog::FLAG_HAS_T_US,
             uint32_t runId = 0u,
             uint64_t startTimeUs = 0u,
+            RuntimeBinaryLogWriteMode writeMode = kDefaultRuntimeBinaryLogWriteMode,
             size_t blockBytes = 4096u,
             uint8_t bufferCount = 4u)
         {
@@ -560,16 +565,17 @@ namespace MazeMapApp::Internal::Runtime
                 return false;
             }
 
-            std::snprintf(_fileName, sizeof(_fileName), "%s", fileName);
+            snprintf(_fileName, sizeof(_fileName), "%s", fileName);
             _fieldCount = fieldCount;
             _recordBytes = fieldCount * sizeof(uint32_t);
-            _blockBytes = blockBytes;
-            _bufferCount = bufferCount;
+            _blockBytes = (writeMode == RuntimeBinaryLogWriteMode::Buffered) ? blockBytes : 0u;
+            _bufferCount = (writeMode == RuntimeBinaryLogWriteMode::Buffered) ? bufferCount : 0u;
+            _writeMode = writeMode;
             _overflowed = false;
             _writeFailed = false;
             _queuedBlockCount = 0u;
 
-            if (!AllocateBlocks())
+            if ((_writeMode == RuntimeBinaryLogWriteMode::Buffered) && !AllocateBlocks())
             {
                 return false;
             }
@@ -583,8 +589,10 @@ namespace MazeMapApp::Internal::Runtime
             if (!WriteHeaderAndDescriptors(schemaCsv, metadataKv, notes, flags, runId, startTimeUs))
             {
                 _file.Close();
+                _sidecarFile.Close();
                 FreeBlocks();
                 _fileName[0] = '\0';
+                _sidecarName[0] = '\0';
                 return false;
             }
 
@@ -594,7 +602,22 @@ namespace MazeMapApp::Internal::Runtime
 
         bool AppendRecord(const uint32_t* words, uint32_t fieldCount)
         {
-            if (!_isOpen || words == nullptr || fieldCount != _fieldCount || _blocks == nullptr || _activeIndex < 0)
+            if (!_isOpen || words == nullptr || fieldCount != _fieldCount)
+            {
+                return false;
+            }
+
+            if (_writeMode == RuntimeBinaryLogWriteMode::Synchronous)
+            {
+                if (_file.WriteBytes(words, _recordBytes) != _recordBytes)
+                {
+                    _writeFailed = true;
+                    return false;
+                }
+                return true;
+            }
+
+            if (_blocks == nullptr || _activeIndex < 0)
             {
                 return false;
             }
@@ -622,6 +645,11 @@ namespace MazeMapApp::Internal::Runtime
                 return false;
             }
 
+            if (_writeMode == RuntimeBinaryLogWriteMode::Synchronous)
+            {
+                return true;
+            }
+
             const uint32_t limit = (maxBlocks == 0u) ? 1u : maxBlocks;
             for (uint32_t index = 0u; index < limit; ++index)
             {
@@ -645,15 +673,19 @@ namespace MazeMapApp::Internal::Runtime
                 return;
             }
 
-            while (FindQueuedBlockIndex() >= 0)
+            if (_writeMode == RuntimeBinaryLogWriteMode::Buffered)
             {
-                if (!Service(static_cast<uint32_t>(_bufferCount)))
+                while (FindQueuedBlockIndex() >= 0)
                 {
-                    break;
+                    if (!Service(static_cast<uint32_t>(_bufferCount)))
+                    {
+                        break;
+                    }
                 }
+                (void)WriteActivePartialBlock();
             }
-            (void)WriteActivePartialBlock();
             _file.Flush();
+            _sidecarFile.Flush();
         }
 
         void Close()
@@ -662,6 +694,12 @@ namespace MazeMapApp::Internal::Runtime
             {
                 Flush();
                 _file.Close();
+                _sidecarFile.Close();
+            }
+            else
+            {
+                _file.Close();
+                _sidecarFile.Close();
             }
 
             _isOpen = false;
@@ -669,16 +707,23 @@ namespace MazeMapApp::Internal::Runtime
             _recordBytes = 0u;
             _blockBytes = 0u;
             _bufferCount = 0u;
+            _writeMode = kDefaultRuntimeBinaryLogWriteMode;
             _overflowed = false;
             _writeFailed = false;
             _queuedBlockCount = 0u;
             _fileName[0] = '\0';
+            _sidecarName[0] = '\0';
             FreeBlocks();
         }
 
         const char* GetFileName() const noexcept
         {
             return _fileName;
+        }
+
+        const char* GetSidecarFileName() const noexcept
+        {
+            return _sidecarName;
         }
 
         bool IsOpen() const noexcept
@@ -694,6 +739,26 @@ namespace MazeMapApp::Internal::Runtime
         bool HadWriteFailure() const noexcept
         {
             return _writeFailed;
+        }
+
+        uint32_t InternLabel(const char* text)
+        {
+            if (text == nullptr || text[0] == '\0')
+            {
+                return std::numeric_limits<uint32_t>::max();
+            }
+
+            const uint32_t hash = Fnv1a32(text);
+            if (_sidecarFile.IsOpen())
+            {
+                const size_t length = std::strlen(text);
+                if ((_sidecarFile.WriteBytes(text, length) != length) ||
+                    (_sidecarFile.WriteBytes("\n", 1U) != 1U))
+                {
+                    _writeFailed = true;
+                }
+            }
+            return hash;
         }
 
     private:
@@ -764,43 +829,130 @@ namespace MazeMapApp::Internal::Runtime
             uint32_t runId,
             uint64_t startTimeUs)
         {
-            const uint32_t metadataBytes = (metadataKv != nullptr) ? static_cast<uint32_t>(std::strlen(metadataKv)) : 0u;
-            const uint32_t schemaBytes = static_cast<uint32_t>(std::strlen(schemaCsv));
-            const uint32_t notesBytes = (notes != nullptr) ? static_cast<uint32_t>(std::strlen(notes)) : 0u;
-            if (schemaBytes == 0u)
+            bool hasStringHashField = false;
+            if (!ValidateTypedSchema(schemaCsv, _fieldCount, _recordBytes, hasStringHashField))
             {
                 return false;
             }
 
-            mmlog::FileHeader header{};
-            mmlog::fillHeader(
-                header,
-                _recordBytes,
-                _fieldCount,
-                metadataBytes,
-                schemaBytes,
-                notesBytes,
-                flags,
-                runId,
-                startTimeUs);
+            if (!BuildSiblingRuntimeFileName(_sidecarName, sizeof(_sidecarName), _fileName, ".sidecar"))
+            {
+                return false;
+            }
+            if (!_sidecarFile.Open(_sidecarName))
+            {
+                return false;
+            }
 
-            if (_file.WriteBytes(&header, sizeof(header)) != sizeof(header))
+            if (!WriteSidecarLine("schema_version=2"))
             {
                 return false;
             }
-            if ((metadataBytes > 0u) && (_file.WriteBytes(metadataKv, metadataBytes) != metadataBytes))
+            if (!WriteUnsignedMetadataLine("row_bytes", static_cast<unsigned long>(_recordBytes)))
             {
                 return false;
             }
-            if (_file.WriteBytes(schemaCsv, schemaBytes) != schemaBytes)
+            if (hasStringHashField && !WriteSidecarLine("string_hash=fnv1a32"))
             {
                 return false;
             }
-            if ((notesBytes > 0u) && (_file.WriteBytes(notes, notesBytes) != notesBytes))
+            if ((flags != 0U) && !WriteUnsignedMetadataLine("legacy_flags", static_cast<unsigned long>(flags)))
+            {
+                return false;
+            }
+            if ((runId != 0U) && !WriteUnsignedMetadataLine("run_id", static_cast<unsigned long>(runId)))
+            {
+                return false;
+            }
+            if ((startTimeUs != 0U) && !WriteUnsigned64MetadataLine("start_time_us", startTimeUs))
+            {
+                return false;
+            }
+            if (!WriteSidecarBlock(metadataKv) || !WriteSidecarBlock(notes))
+            {
+                return false;
+            }
+            if (!WriteSidecarLine(schemaCsv) || !WriteSidecarLine("LABELS:"))
+            {
+                return false;
+            }
+
+            char bindingLine[96] = {};
+            const int bindingLength = snprintf(
+                bindingLine,
+                sizeof(bindingLine),
+                "sidecar_file=%s\n",
+                FileNameComponent(_sidecarName));
+            if (bindingLength <= 0)
+            {
+                return false;
+            }
+            return _file.WriteBytes(bindingLine, static_cast<size_t>(bindingLength)) == static_cast<size_t>(bindingLength);
+        }
+
+        bool WriteSidecarLine(const char* line)
+        {
+            if (line == nullptr)
+            {
+                return false;
+            }
+
+            const size_t length = std::strlen(line);
+            return
+                (_sidecarFile.WriteBytes(line, length) == length) &&
+                (_sidecarFile.WriteBytes("\n", 1U) == 1U);
+        }
+
+        bool WriteSidecarBlock(const char* block)
+        {
+            if (block == nullptr || block[0] == '\0')
+            {
+                return true;
+            }
+
+            const size_t length = std::strlen(block);
+            if (_sidecarFile.WriteBytes(block, length) != length)
+            {
+                return false;
+            }
+
+            if (block[length - 1U] != '\n' && (_sidecarFile.WriteBytes("\n", 1U) != 1U))
             {
                 return false;
             }
             return true;
+        }
+
+        bool WriteUnsignedMetadataLine(const char* key, unsigned long value)
+        {
+            char line[96] = {};
+            const int length = snprintf(
+                line,
+                sizeof(line),
+                "%s=%lu",
+                (key != nullptr) ? key : "",
+                value);
+            if (length <= 0 || length >= static_cast<int>(sizeof(line)))
+            {
+                return false;
+            }
+            return WriteSidecarLine(line);
+        }
+
+        bool WriteUnsigned64MetadataLine(const char* key, uint64_t value)
+        {
+            char line[96] = {};
+            const int length = snprintf(
+                line,
+                sizeof(line),
+                "%s=%llu",
+                (key != nullptr) ? key : "",
+                static_cast<unsigned long long>(value));
+            if (length <= 0 || length >= static_cast<int>(sizeof(line)))
+            {
+                return false;
+            }
+            return WriteSidecarLine(line);
         }
 
         bool EnqueueActiveAndRotate()
@@ -920,404 +1072,21 @@ namespace MazeMapApp::Internal::Runtime
         }
 
         CoreBinaryFileExport _file;
+        CoreBinaryFileExport _sidecarFile;
         Block* _blocks;
         int _activeIndex;
         uint32_t _fieldCount;
         uint32_t _recordBytes;
         size_t _blockBytes;
         uint8_t _bufferCount;
+        RuntimeBinaryLogWriteMode _writeMode;
         bool _isOpen;
         bool _overflowed;
         bool _writeFailed;
         uint32_t _queuedBlockCount;
         char _fileName[64];
+        char _sidecarName[64];
     };
 
-    class RuntimeTypedBinaryLogFile
-    {
-    public:
-        RuntimeTypedBinaryLogFile() noexcept
-            : _file()
-            , _blocks(nullptr)
-            , _activeIndex(-1)
-            , _blockBytes(0u)
-            , _bufferCount(0u)
-            , _isOpen(false)
-            , _overflowed(false)
-            , _writeFailed(false)
-            , _queuedBlockCount(0u)
-        {
-            _fileName[0] = '\0';
-        }
-
-        ~RuntimeTypedBinaryLogFile()
-        {
-            Close();
-        }
-
-        bool BeginTyped(
-            const char* fileName,
-            uint32_t streamType,
-            uint32_t schemaId,
-            const char* metadataKv,
-            const char* notes,
-            uint32_t producerId,
-            uint32_t flags = mmlog::FLAG_HAS_METADATA | mmlog::FLAG_HAS_NOTES,
-            size_t blockBytes = 4096u,
-            uint8_t bufferCount = 4u)
-        {
-            Close();
-            if (fileName == nullptr || fileName[0] == '\0')
-            {
-                return false;
-            }
-
-            std::snprintf(_fileName, sizeof(_fileName), "%s", fileName);
-            _blockBytes = blockBytes;
-            _bufferCount = bufferCount;
-            _overflowed = false;
-            _writeFailed = false;
-            _queuedBlockCount = 0u;
-
-            if (!AllocateBlocks())
-            {
-                return false;
-            }
-
-            if (!_file.Open(_fileName))
-            {
-                FreeBlocks();
-                return false;
-            }
-
-            if (!WriteHeaderAndDescriptors(streamType, schemaId, metadataKv, notes, flags, producerId))
-            {
-                _file.Close();
-                FreeBlocks();
-                _fileName[0] = '\0';
-                return false;
-            }
-
-            _isOpen = true;
-            return true;
-        }
-
-        bool AppendRecord(const void* bytes, uint16_t recordBytes)
-        {
-            if (!_isOpen || bytes == nullptr || recordBytes == 0u || _blocks == nullptr || _activeIndex < 0)
-            {
-                return false;
-            }
-
-            if (recordBytes > _blockBytes)
-            {
-                _overflowed = true;
-                return false;
-            }
-
-            Block& active = _blocks[_activeIndex];
-            if ((active.used + recordBytes) > _blockBytes)
-            {
-                if (!EnqueueActiveAndRotate())
-                {
-                    _overflowed = true;
-                    return false;
-                }
-            }
-
-            Block& destination = _blocks[_activeIndex];
-            std::memcpy(destination.data + destination.used, bytes, recordBytes);
-            destination.used += recordBytes;
-            return true;
-        }
-
-        bool Service(uint32_t maxBlocks = 1u)
-        {
-            if (!_isOpen)
-            {
-                return false;
-            }
-
-            const uint32_t limit = (maxBlocks == 0u) ? 1u : maxBlocks;
-            for (uint32_t index = 0u; index < limit; ++index)
-            {
-                const int queuedIndex = FindQueuedBlockIndex();
-                if (queuedIndex < 0)
-                {
-                    break;
-                }
-                if (!WriteBlock(queuedIndex))
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        void Flush()
-        {
-            if (!_isOpen)
-            {
-                return;
-            }
-
-            while (FindQueuedBlockIndex() >= 0)
-            {
-                if (!Service(static_cast<uint32_t>(_bufferCount)))
-                {
-                    break;
-                }
-            }
-            (void)WriteActivePartialBlock();
-            _file.Flush();
-        }
-
-        void Close()
-        {
-            if (_isOpen)
-            {
-                Flush();
-                _file.Close();
-            }
-
-            _isOpen = false;
-            _blockBytes = 0u;
-            _bufferCount = 0u;
-            _overflowed = false;
-            _writeFailed = false;
-            _queuedBlockCount = 0u;
-            _fileName[0] = '\0';
-            FreeBlocks();
-        }
-
-        const char* GetFileName() const noexcept
-        {
-            return _fileName;
-        }
-
-        bool HadOverflow() const noexcept
-        {
-            return _overflowed;
-        }
-
-        bool HadWriteFailure() const noexcept
-        {
-            return _writeFailed;
-        }
-
-    private:
-        struct Block
-        {
-            uint8_t* data = nullptr;
-            uint32_t used = 0u;
-            bool queued = false;
-            bool active = false;
-        };
-
-        bool AllocateBlocks()
-        {
-            if (_bufferCount < 2u || _blockBytes == 0u)
-            {
-                return false;
-            }
-
-            _blocks = new Block[_bufferCount];
-            if (_blocks == nullptr)
-            {
-                return false;
-            }
-
-            for (uint8_t index = 0u; index < _bufferCount; ++index)
-            {
-                _blocks[index].data = static_cast<uint8_t*>(std::malloc(_blockBytes));
-                if (_blocks[index].data == nullptr)
-                {
-                    FreeBlocks();
-                    return false;
-                }
-                _blocks[index].used = 0u;
-                _blocks[index].queued = false;
-                _blocks[index].active = false;
-            }
-
-            _activeIndex = 0;
-            _blocks[_activeIndex].active = true;
-            return true;
-        }
-
-        void FreeBlocks()
-        {
-            if (_blocks != nullptr)
-            {
-                for (uint8_t index = 0u; index < _bufferCount; ++index)
-                {
-                    if (_blocks[index].data != nullptr)
-                    {
-                        std::free(_blocks[index].data);
-                        _blocks[index].data = nullptr;
-                    }
-                }
-
-                delete[] _blocks;
-                _blocks = nullptr;
-            }
-
-            _activeIndex = -1;
-        }
-
-        bool WriteHeaderAndDescriptors(
-            uint32_t streamType,
-            uint32_t schemaId,
-            const char* metadataKv,
-            const char* notes,
-            uint32_t flags,
-            uint32_t producerId)
-        {
-            const uint32_t metadataBytes = (metadataKv != nullptr) ? static_cast<uint32_t>(std::strlen(metadataKv)) : 0u;
-            const uint32_t notesBytes = (notes != nullptr) ? static_cast<uint32_t>(std::strlen(notes)) : 0u;
-            mmlog::GenericFileHeader header{};
-            mmlog::fillGenericHeader(header, streamType, schemaId, metadataBytes, notesBytes, flags, producerId);
-
-            if (_file.WriteBytes(&header, sizeof(header)) != sizeof(header))
-            {
-                return false;
-            }
-            if ((metadataBytes > 0u) && (_file.WriteBytes(metadataKv, metadataBytes) != metadataBytes))
-            {
-                return false;
-            }
-            if ((notesBytes > 0u) && (_file.WriteBytes(notes, notesBytes) != notesBytes))
-            {
-                return false;
-            }
-            return true;
-        }
-
-        bool EnqueueActiveAndRotate()
-        {
-            if (_blocks == nullptr || _activeIndex < 0)
-            {
-                return false;
-            }
-
-            Block& active = _blocks[_activeIndex];
-            if (active.used == 0u)
-            {
-                return true;
-            }
-
-            const int freeIndex = FindFreeBlockIndex();
-            if (freeIndex < 0)
-            {
-                return false;
-            }
-
-            active.active = false;
-            active.queued = true;
-            ++_queuedBlockCount;
-
-            _activeIndex = freeIndex;
-            _blocks[_activeIndex].active = true;
-            _blocks[_activeIndex].queued = false;
-            _blocks[_activeIndex].used = 0u;
-            return true;
-        }
-
-        int FindFreeBlockIndex() const noexcept
-        {
-            if (_blocks == nullptr)
-            {
-                return -1;
-            }
-
-            for (uint8_t index = 0u; index < _bufferCount; ++index)
-            {
-                if (!_blocks[index].active && !_blocks[index].queued && (_blocks[index].used == 0u))
-                {
-                    return static_cast<int>(index);
-                }
-            }
-            return -1;
-        }
-
-        int FindQueuedBlockIndex() const noexcept
-        {
-            if (_blocks == nullptr)
-            {
-                return -1;
-            }
-
-            for (uint8_t index = 0u; index < _bufferCount; ++index)
-            {
-                if (_blocks[index].queued && !_blocks[index].active)
-                {
-                    return static_cast<int>(index);
-                }
-            }
-            return -1;
-        }
-
-        bool WriteBlock(int blockIndex)
-        {
-            if (_blocks == nullptr || blockIndex < 0)
-            {
-                return false;
-            }
-
-            Block& block = _blocks[blockIndex];
-            if (block.used == 0u)
-            {
-                block.queued = false;
-                return true;
-            }
-
-            if (_file.WriteBytes(block.data, block.used) != block.used)
-            {
-                _writeFailed = true;
-                return false;
-            }
-
-            block.used = 0u;
-            block.queued = false;
-            if (_queuedBlockCount > 0u)
-            {
-                --_queuedBlockCount;
-            }
-            return true;
-        }
-
-        bool WriteActivePartialBlock()
-        {
-            if (_blocks == nullptr || _activeIndex < 0)
-            {
-                return false;
-            }
-
-            Block& active = _blocks[_activeIndex];
-            if (active.used == 0u)
-            {
-                return true;
-            }
-
-            if (_file.WriteBytes(active.data, active.used) != active.used)
-            {
-                _writeFailed = true;
-                return false;
-            }
-
-            active.used = 0u;
-            return true;
-        }
-
-        CoreBinaryFileExport _file;
-        Block* _blocks;
-        int _activeIndex;
-        size_t _blockBytes;
-        uint8_t _bufferCount;
-        bool _isOpen;
-        bool _overflowed;
-        bool _writeFailed;
-        uint32_t _queuedBlockCount;
-        char _fileName[64];
-    };
 }
+

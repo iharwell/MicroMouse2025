@@ -46,6 +46,7 @@ The required build path is:
 - `codex_verify/verify_latest_build.cmd --no-pause`
 
 That wrapper runs the firmware build first, then the Release host rebuild, then the Release unit tests.
+The firmware build forces the Teensy 4.1 `Optimize` board option to `Faster with LTO` (`opt=o2lto`), which maps to `-O2` plus link-time optimization.
 
 The verified firmware artifacts are emitted to the canonical upload location:
 
