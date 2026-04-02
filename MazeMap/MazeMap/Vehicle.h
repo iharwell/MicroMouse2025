@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Defines.h"
-#include "Vector2f.h"
 #include "Direction.h"
 #include "CircularBuffer.h"
 #include "VehicleState.h"
@@ -73,6 +72,7 @@ namespace MazeMap
             return kPhysicalModel;
         }
 
+        static ImuExtrinsics GetBackLeftImuExtrinsics() noexcept;
         static SensorExtrinsics GetFrontLeftSensorExtrinsics() noexcept;
         static SensorExtrinsics GetFrontRightSensorExtrinsics() noexcept;
         static SensorExtrinsics GetSideLeftSensorExtrinsics() noexcept;

@@ -1,8 +1,7 @@
 #pragma once
 
 #include "Defines.h"
-#include "Vector2f.h"
-#include "MazeMapEigen.h"
+#include "EigenCompat.h"
 
 #include <algorithm>
 #include <array>
@@ -27,9 +26,16 @@ namespace MazeMap
 
     struct SensorExtrinsics
     {
-        Vectorf<2> positionBodyM{};
-        Vectorf<2> directionBody = Vectorf<2>(1.0f, 0.0f);
+        Eigen::Vector2f positionBodyM = Eigen::Vector2f::Zero();
+        Eigen::Vector2f directionBody = Eigen::Vector2f(1.0f, 0.0f);
         float yawOffsetRad = 0.0f;
+    };
+
+    struct ImuExtrinsics
+    {
+        Eigen::Vector2f positionBodyM = Eigen::Vector2f::Zero();
+        Eigen::Matrix2f accelBodyFromImu = Eigen::Matrix2f::Identity();
+        float gyroZSign = 1.0f;
     };
 
     struct ControlInput
@@ -37,6 +43,7 @@ namespace MazeMap
         float leftMotorCommand = 0.0f;
         float rightMotorCommand = 0.0f;
         float fanDutyCycle = 0.80f;
+        float batteryVoltageV = 0.0f;
     };
 
     struct EncoderObs
@@ -47,12 +54,21 @@ namespace MazeMap
         float omegaRightRadps = 0.0f;
     };
 
-    struct ImuMergedObs
+    struct ImuObservation
     {
         bool valid = false;
-        float yawRateRadps = 0.0f;
-        float accelXComMps2 = 0.0f;
-        float accelYComMps2 = 0.0f;
+        float gyroZRadps = 0.0f;
+        float accelBodyXMps2 = 0.0f;
+        float accelBodyYMps2 = 0.0f;
+    };
+
+    using ImuMergedObs = ImuObservation;
+
+    struct ImuAccelObs
+    {
+        bool valid = false;
+        float accelBodyXMps2 = 0.0f;
+        float accelBodyYMps2 = 0.0f;
     };
 
     struct WallObs
@@ -66,7 +82,7 @@ namespace MazeMap
     class EXPORT VehicleState
     {
     public:
-        static constexpr int kDimension = 14;
+        static constexpr int kDimension = 9;
 
         enum Index : int
         {
@@ -78,12 +94,7 @@ namespace MazeMap
             kR = 5,
             kOmegaL = 6,
             kOmegaR = 7,
-            kKappaL = 8,
-            kKappaR = 9,
-            kAlphaFL = 10,
-            kAlphaFR = 11,
-            kAlphaRL = 12,
-            kAlphaRR = 13
+            kBgz = 8
         };
 
         using StateVector = Eigen::Matrix<float, kDimension, 1>;
@@ -100,7 +111,11 @@ namespace MazeMap
         const StateVector& GetStateVector() const noexcept { return _state; }
         StateVector& MutableStateVector() noexcept { return _state; }
 
-        void SetStateVector(const StateVector& state) noexcept { _state = state; NormalizeStateVector(_state); }
+        void SetStateVector(const StateVector& state) noexcept
+        {
+            _state = state;
+            NormalizeStateVector(_state);
+        }
 
         const StateMatrix& GetSqrtCovariance() const noexcept { return _sqrtCovariance; }
         void SetSqrtCovariance(const StateMatrix& sqrtCovariance) noexcept { _sqrtCovariance = sqrtCovariance; }
@@ -110,7 +125,7 @@ namespace MazeMap
         void SetCovariance(const StateMatrix& covariance) noexcept
         {
             Eigen::LLT<StateMatrix> llt;
-            StateMatrix symmetric = 0.5f * (covariance + covariance.transpose());
+            const StateMatrix symmetric = 0.5f * (covariance + covariance.transpose());
             llt.compute(symmetric);
             if (llt.info() == Eigen::Success)
             {
@@ -118,109 +133,82 @@ namespace MazeMap
             }
         }
 
-        void SetPosition(const Vectorf<2>& position) noexcept { _state(kPx) = position.GetX(); _state(kPy) = position.GetY(); }
+        void SetPosition(const Eigen::Vector2f& position) noexcept
+        {
+            _state(kPx) = position.x();
+            _state(kPy) = position.y();
+        }
 
-        Vectorf<2> GetPosition() const noexcept { return Vectorf<2>(_state(kPx), _state(kPy)); }
+        Eigen::Vector2f GetPosition() const noexcept
+        {
+            return Eigen::Vector2f(_state(kPx), _state(kPy));
+        }
 
-        Vectorf<2> GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
+        Eigen::Vector2f GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
 
         void SetVelocity(float velocity) noexcept { _state(kU) = velocity; }
-
         float GetVelocity() const noexcept { return _state(kU); }
-
         float GetVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetVelocity(); }
 
         void SetLateralVelocity(float velocity) noexcept { _state(kV) = velocity; }
-
         float GetLateralVelocity() const noexcept { return _state(kV); }
-
         float GetLateralVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetLateralVelocity(); }
 
-        void SetOrientation(const float& orientation) noexcept { _state(kPsi) = orientation; NormalizeStateVector(_state); }
+        void SetOrientation(float orientation) noexcept
+        {
+            _state(kPsi) = orientation;
+            NormalizeStateVector(_state);
+        }
 
         float GetOrientation() const noexcept { return _state(kPsi); }
-
         float GetOrientation() noexcept { return const_cast<const VehicleState*>(this)->GetOrientation(); }
 
         void SetRotationalVelocity(float rotationalVelocity) noexcept { _state(kR) = rotationalVelocity; }
-
         float GetRotationalVelocity() const noexcept { return _state(kR); }
-
         float GetRotationalVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocity(); }
 
         void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept { _state(kOmegaL) = wheelSpeedRadps; }
-
         float GetWheelSpeedLeft() const noexcept { return _state(kOmegaL); }
 
         void SetWheelSpeedRight(float wheelSpeedRadps) noexcept { _state(kOmegaR) = wheelSpeedRadps; }
-
         float GetWheelSpeedRight() const noexcept { return _state(kOmegaR); }
 
-        void SetSlipRatioLeft(float value) noexcept { _state(kKappaL) = value; }
-
-        float GetSlipRatioLeft() const noexcept { return _state(kKappaL); }
-
-        void SetSlipRatioRight(float value) noexcept { _state(kKappaR) = value; }
-
-        float GetSlipRatioRight() const noexcept { return _state(kKappaR); }
-
-        void SetSlipAngleFrontLeft(float value) noexcept { _state(kAlphaFL) = NormalizeAngle(value); }
-
-        float GetSlipAngleFrontLeft() const noexcept { return _state(kAlphaFL); }
-
-        void SetSlipAngleFrontRight(float value) noexcept { _state(kAlphaFR) = NormalizeAngle(value); }
-
-        float GetSlipAngleFrontRight() const noexcept { return _state(kAlphaFR); }
-
-        void SetSlipAngleRearLeft(float value) noexcept { _state(kAlphaRL) = NormalizeAngle(value); }
-
-        float GetSlipAngleRearLeft() const noexcept { return _state(kAlphaRL); }
-
-        void SetSlipAngleRearRight(float value) noexcept { _state(kAlphaRR) = NormalizeAngle(value); }
-
-        float GetSlipAngleRearRight() const noexcept { return _state(kAlphaRR); }
+        void SetGyroBiasZ(float gyroBiasRadps) noexcept { _state(kBgz) = gyroBiasRadps; }
+        float GetGyroBiasZ() const noexcept { return _state(kBgz); }
 
         void SetTime(float time) noexcept { _time = time; }
-
         float GetTime() const noexcept { return _time; }
-
         float GetTime() noexcept { return const_cast<const VehicleState*>(this)->GetTime(); }
 
         void SetMotorDriveL(float motorDriveL) noexcept { _control.leftMotorCommand = motorDriveL; }
-
         float GetMotorDriveL() const noexcept { return _control.leftMotorCommand; }
-
         float GetMotorDriveL() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveL(); }
 
         void SetMotorDriveR(float motorDriveR) noexcept { _control.rightMotorCommand = motorDriveR; }
-
         float GetMotorDriveR() const noexcept { return _control.rightMotorCommand; }
-
         float GetMotorDriveR() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveR(); }
 
         void SetFanDutyCycle(float fanDutyCycle) noexcept { _control.fanDutyCycle = fanDutyCycle; }
-
         float GetFanDutyCycle() const noexcept { return _control.fanDutyCycle; }
 
         const ControlInput& GetControlInput() const noexcept { return _control; }
-
         void SetControlInput(const ControlInput& control) noexcept { _control = control; }
 
-        void SetPositionVar(const Vectorf<2>& positionVariance) noexcept
+        void SetPositionVar(const Eigen::Vector2f& positionVariance) noexcept
         {
             StateMatrix covariance = GetCovariance();
-            covariance(kPx, kPx) = (std::max)(0.0f, positionVariance.GetX());
-            covariance(kPy, kPy) = (std::max)(0.0f, positionVariance.GetY());
+            covariance(kPx, kPx) = (std::max)(0.0f, positionVariance.x());
+            covariance(kPy, kPy) = (std::max)(0.0f, positionVariance.y());
             SetCovariance(covariance);
         }
 
-        Vectorf<2> GetPositionVar() const noexcept
+        Eigen::Vector2f GetPositionVar() const noexcept
         {
             const StateMatrix covariance = GetCovariance();
-            return Vectorf<2>(covariance(kPx, kPx), covariance(kPy, kPy));
+            return Eigen::Vector2f(covariance(kPx, kPx), covariance(kPy, kPy));
         }
 
-        Vectorf<2> GetPositionVar() noexcept { return const_cast<const VehicleState*>(this)->GetPositionVar(); }
+        Eigen::Vector2f GetPositionVar() noexcept { return const_cast<const VehicleState*>(this)->GetPositionVar(); }
 
         void SetVelocityVar(float velocityVariance) noexcept
         {
@@ -230,10 +218,9 @@ namespace MazeMap
         }
 
         float GetVelocityVar() const noexcept { return GetCovariance()(kU, kU); }
-
         float GetVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetVelocityVar(); }
 
-        void SetOrientationVar(const float& orientationVariance) noexcept
+        void SetOrientationVar(float orientationVariance) noexcept
         {
             StateMatrix covariance = GetCovariance();
             covariance(kPsi, kPsi) = (std::max)(0.0f, orientationVariance);
@@ -241,7 +228,6 @@ namespace MazeMap
         }
 
         float GetOrientationVar() const noexcept { return GetCovariance()(kPsi, kPsi); }
-
         float GetOrientationVar() noexcept { return const_cast<const VehicleState*>(this)->GetOrientationVar(); }
 
         void SetRotationalVelocityVar(float rotationalVelocityVariance) noexcept
@@ -252,7 +238,6 @@ namespace MazeMap
         }
 
         float GetRotationalVelocityVar() const noexcept { return GetCovariance()(kR, kR); }
-
         float GetRotationalVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocityVar(); }
 
         void SetMotorDriveLVar(float motorDriveLVariance) noexcept
@@ -263,7 +248,6 @@ namespace MazeMap
         }
 
         float GetMotorDriveLVar() const noexcept { return GetCovariance()(kOmegaL, kOmegaL); }
-
         float GetMotorDriveLVar() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveLVar(); }
 
         void SetMotorDriveRVar(float motorDriveRVariance) noexcept
@@ -274,8 +258,16 @@ namespace MazeMap
         }
 
         float GetMotorDriveRVar() const noexcept { return GetCovariance()(kOmegaR, kOmegaR); }
-
         float GetMotorDriveRVar() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveRVar(); }
+
+        void SetGyroBiasZVar(float gyroBiasVariance) noexcept
+        {
+            StateMatrix covariance = GetCovariance();
+            covariance(kBgz, kBgz) = (std::max)(0.0f, gyroBiasVariance);
+            SetCovariance(covariance);
+        }
+
+        float GetGyroBiasZVar() const noexcept { return GetCovariance()(kBgz, kBgz); }
 
         static float NormalizeAngle(float angleRad) noexcept
         {
@@ -288,7 +280,7 @@ namespace MazeMap
             {
                 angleRad -= TWO_PI_F;
             }
-            while (angleRad < -PI_F)
+            while (angleRad <= -PI_F)
             {
                 angleRad += TWO_PI_F;
             }
@@ -298,10 +290,6 @@ namespace MazeMap
         static void NormalizeStateVector(StateVector& state) noexcept
         {
             state(kPsi) = NormalizeAngle(state(kPsi));
-            state(kAlphaFL) = NormalizeAngle(state(kAlphaFL));
-            state(kAlphaFR) = NormalizeAngle(state(kAlphaFR));
-            state(kAlphaRL) = NormalizeAngle(state(kAlphaRL));
-            state(kAlphaRR) = NormalizeAngle(state(kAlphaRR));
         }
 
     private:

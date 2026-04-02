@@ -73,13 +73,7 @@
   <PropertyGroup>
     <OutDir>$(ProjectDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
-    <MazeMapEigenIncludeDir>$(ProjectDir)libraries\Eigen\src</MazeMapEigenIncludeDir>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <ExternalIncludePath>$(ProjectDir)\eigen-5.0.0\Eigen;$(ExternalIncludePath)</ExternalIncludePath>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\Eigen;$(IncludePath)</IncludePath>
+    <MazeMapEigenIncludeDir>$(ProjectDir)..\eigen-5.0.0</MazeMapEigenIncludeDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -206,7 +200,6 @@
     <ClInclude Include="ManeuverQueue.h" />
     <ClInclude Include="ManeuverSet.h" />
     <ClInclude Include="MaskQueue.h" />
-    <ClInclude Include="Matrixf.h" />
     <ClInclude Include="Maze.h" />
     <ClInclude Include="MazeMapApplication.h" />
     <ClInclude Include="MazeMapApplicationMode.h" />
@@ -245,7 +238,6 @@
     <ClInclude Include="TurnCommandGeometry.h" />
     <ClInclude Include="TurnWallEdgeTracker.h" />
     <ClInclude Include="UKF.h" />
-    <ClInclude Include="Vector2f.h" />
     <ClInclude Include="Vehicle.h" />
     <ClInclude Include="VehicleState.h" />
     <ClInclude Include="WallDetectionThresholds.h" />
@@ -303,7 +295,6 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="Vector2f.cpp" />
     <ClCompile Include="Vehicle.cpp" />
     <ClCompile Include="VehicleState.cpp" />
     <ClCompile Include="WheelMotor.cpp" />

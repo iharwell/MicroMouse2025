@@ -55,6 +55,13 @@ inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MotionLim
 class DriveBase
 {
 public:
+    static constexpr uint16_t kModeClosedLoop = 1u << 0;
+    static constexpr uint16_t kModeOpenLoop = 1u << 1;
+    static constexpr uint16_t kModeRawOpenLoop = 1u << 2;
+    static constexpr uint16_t kModeBraking = 1u << 3;
+    static constexpr uint16_t kModeLaunchAssistLeft = 1u << 4;
+    static constexpr uint16_t kModeLaunchAssistRight = 1u << 5;
+
     DriveBase()
         : _leftMotor(MazeMap::MotorEncoderDrive::CreateDefaultLeftDrive())
         , _rightMotor(MazeMap::MotorEncoderDrive::CreateDefaultRightDrive())
@@ -251,12 +258,6 @@ public:
         state(MazeMap::VehicleState::kR) = measured.angularSpeedRadps;
         state(MazeMap::VehicleState::kOmegaL) = measured.leftVelocityMps / params.wheelRadiusM;
         state(MazeMap::VehicleState::kOmegaR) = measured.rightVelocityMps / params.wheelRadiusM;
-        state(MazeMap::VehicleState::kKappaL) = 0.0f;
-        state(MazeMap::VehicleState::kKappaR) = 0.0f;
-        state(MazeMap::VehicleState::kAlphaFL) = 0.0f;
-        state(MazeMap::VehicleState::kAlphaFR) = 0.0f;
-        state(MazeMap::VehicleState::kAlphaRL) = 0.0f;
-        state(MazeMap::VehicleState::kAlphaRR) = 0.0f;
         MazeMap::VehicleState::NormalizeStateVector(state);
         (void)_ukf.ukf().setState(state, covariance);
         SyncPoseEstimate();
@@ -334,21 +335,39 @@ public:
             rightTargetAccelMps2,
             rightErrorMps,
             _rightIntegral);
+        float leftLaunchAssistFloor = 0.0f;
+        float rightLaunchAssistFloor = 0.0f;
         if (leftLaunchAssistActive)
         {
+            leftLaunchAssistFloor = GetWheelLaunchAssistFloor(_leftLaunchAssist, nowMs);
             leftCommand = ApplyLaunchAssistFloor(
                 leftCommand,
                 leftTargetMps,
-                GetWheelLaunchAssistFloor(_leftLaunchAssist, nowMs));
+                leftLaunchAssistFloor);
         }
         if (rightLaunchAssistActive)
         {
+            rightLaunchAssistFloor = GetWheelLaunchAssistFloor(_rightLaunchAssist, nowMs);
             rightCommand = ApplyLaunchAssistFloor(
                 rightCommand,
                 rightTargetMps,
-                GetWheelLaunchAssistFloor(_rightLaunchAssist, nowMs));
+                rightLaunchAssistFloor);
         }
 
+        _lastLeftFeedforwardCommand = leftFeedforwardCommand;
+        _lastRightFeedforwardCommand = rightFeedforwardCommand;
+        _lastLeftFeedbackCommand = leftCommand - leftFeedforwardCommand;
+        _lastRightFeedbackCommand = rightCommand - rightFeedforwardCommand;
+        _lastLeftTargetVelocityMps = leftTargetMps;
+        _lastRightTargetVelocityMps = rightTargetMps;
+        _lastLeftLaunchAssistFloor = leftLaunchAssistFloor;
+        _lastRightLaunchAssistFloor = rightLaunchAssistFloor;
+        _lastModeFlags = kModeClosedLoop |
+            (leftLaunchAssistActive ? kModeLaunchAssistLeft : 0u) |
+            (rightLaunchAssistActive ? kModeLaunchAssistRight : 0u);
+        _lastSaturationFlags =
+            ((std::fabs(leftCommand) >= 0.999f) ? 0x1u : 0u) |
+            ((std::fabs(rightCommand) >= 0.999f) ? 0x2u : 0u);
         _leftMotor.setDriveCommand(leftCommand);
         _rightMotor.setDriveCommand(rightCommand);
     }
@@ -366,19 +385,41 @@ public:
         const unsigned long nowMs = millis();
         if (UpdateWheelLaunchAssistState(_leftLaunchAssist, leftMeasuredMps, leftDriveCommand, _leftMotor.getDriveCommand(), nowMs))
         {
+            _lastLeftLaunchAssistFloor = GetWheelLaunchAssistFloor(_leftLaunchAssist, nowMs);
             leftDriveCommand = ApplyLaunchAssistFloor(
                 leftDriveCommand,
                 leftDriveCommand,
-                GetWheelLaunchAssistFloor(_leftLaunchAssist, nowMs));
+                _lastLeftLaunchAssistFloor);
+        }
+        else
+        {
+            _lastLeftLaunchAssistFloor = 0.0f;
         }
         if (UpdateWheelLaunchAssistState(_rightLaunchAssist, rightMeasuredMps, rightDriveCommand, _rightMotor.getDriveCommand(), nowMs))
         {
+            _lastRightLaunchAssistFloor = GetWheelLaunchAssistFloor(_rightLaunchAssist, nowMs);
             rightDriveCommand = ApplyLaunchAssistFloor(
                 rightDriveCommand,
                 rightDriveCommand,
-                GetWheelLaunchAssistFloor(_rightLaunchAssist, nowMs));
+                _lastRightLaunchAssistFloor);
+        }
+        else
+        {
+            _lastRightLaunchAssistFloor = 0.0f;
         }
 
+        _lastLeftFeedforwardCommand = 0.0f;
+        _lastRightFeedforwardCommand = 0.0f;
+        _lastLeftFeedbackCommand = leftDriveCommand;
+        _lastRightFeedbackCommand = rightDriveCommand;
+        _lastLeftTargetVelocityMps = 0.0f;
+        _lastRightTargetVelocityMps = 0.0f;
+        _lastModeFlags = kModeOpenLoop |
+            ((_lastLeftLaunchAssistFloor > 0.0f) ? kModeLaunchAssistLeft : 0u) |
+            ((_lastRightLaunchAssistFloor > 0.0f) ? kModeLaunchAssistRight : 0u);
+        _lastSaturationFlags =
+            ((std::fabs(leftDriveCommand) >= 0.999f) ? 0x1u : 0u) |
+            ((std::fabs(rightDriveCommand) >= 0.999f) ? 0x2u : 0u);
         SetOpenLoopRaw(leftDriveCommand, rightDriveCommand);
     }
 
@@ -399,6 +440,18 @@ public:
         _lastAngularCommandRadps = 0.0f;
         ResetLaunchAssist();
         _targetVelocityInitialized = false;
+        _lastLeftFeedforwardCommand = 0.0f;
+        _lastRightFeedforwardCommand = 0.0f;
+        _lastLeftFeedbackCommand = leftDriveCommand;
+        _lastRightFeedbackCommand = rightDriveCommand;
+        _lastLeftTargetVelocityMps = 0.0f;
+        _lastRightTargetVelocityMps = 0.0f;
+        _lastLeftLaunchAssistFloor = 0.0f;
+        _lastRightLaunchAssistFloor = 0.0f;
+        _lastModeFlags = kModeRawOpenLoop;
+        _lastSaturationFlags =
+            ((std::fabs(leftDriveCommand) >= 0.999f) ? 0x1u : 0u) |
+            ((std::fabs(rightDriveCommand) >= 0.999f) ? 0x2u : 0u);
         SetOpenLoopRaw(leftDriveCommand, rightDriveCommand);
     }
 
@@ -413,6 +466,16 @@ public:
         _lastAngularCommandRadps = 0.0f;
         ResetLaunchAssist();
         _targetVelocityInitialized = false;
+        _lastLeftFeedforwardCommand = 0.0f;
+        _lastRightFeedforwardCommand = 0.0f;
+        _lastLeftFeedbackCommand = 0.0f;
+        _lastRightFeedbackCommand = 0.0f;
+        _lastLeftTargetVelocityMps = 0.0f;
+        _lastRightTargetVelocityMps = 0.0f;
+        _lastLeftLaunchAssistFloor = 0.0f;
+        _lastRightLaunchAssistFloor = 0.0f;
+        _lastModeFlags = kModeBraking;
+        _lastSaturationFlags = 0u;
         _leftMotor.brake();
         _rightMotor.brake();
     }
@@ -452,13 +515,49 @@ public:
         DriveTelemetry telemetry{};
         telemetry.leftDriveCommand = _leftMotor.getDriveCommand();
         telemetry.rightDriveCommand = _rightMotor.getDriveCommand();
+        telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
+        telemetry.rightFeedforwardCommand = _lastRightFeedforwardCommand;
+        telemetry.leftFeedbackCommand = _lastLeftFeedbackCommand;
+        telemetry.rightFeedbackCommand = _lastRightFeedbackCommand;
+        telemetry.leftTargetVelocityMps = _lastLeftTargetVelocityMps;
+        telemetry.rightTargetVelocityMps = _lastRightTargetVelocityMps;
+        telemetry.leftLaunchAssistFloor = _lastLeftLaunchAssistFloor;
+        telemetry.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
         telemetry.leftEncoderCount = _leftMotor.getEncoderCount();
         telemetry.rightEncoderCount = _rightMotor.getEncoderCount();
         telemetry.leftDistanceM = _leftMotor.getEncoderDistanceMeters();
         telemetry.rightDistanceM = _rightMotor.getEncoderDistanceMeters();
         telemetry.leftVelocityMps = _leftMotor.getEncoderVelocityMetersPerSecond();
         telemetry.rightVelocityMps = _rightMotor.getEncoderVelocityMetersPerSecond();
+        telemetry.leftEncoderOmegaRadps = _lastEncoderObservation.omegaLeftRadps;
+        telemetry.rightEncoderOmegaRadps = _lastEncoderObservation.omegaRightRadps;
+        telemetry.modeFlags = _lastModeFlags;
+        telemetry.saturationFlags = _lastSaturationFlags;
+        telemetry.encoderObservationValid = _encoderObservationValid;
         return telemetry;
+    }
+
+    static void BuildLoggedFrontPairObservations(
+        const DiagnosticSensorSnapshot& snapshot,
+        float maxRangeM,
+        MazeMap::WallObs& left,
+        MazeMap::WallObs& right) noexcept
+    {
+        BuildUkfFrontPairObservations(snapshot, maxRangeM, left, right);
+    }
+
+    static MazeMap::WallObs BuildLoggedLeftSideObservation(
+        const DiagnosticSensorSnapshot& snapshot,
+        float maxRangeM) noexcept
+    {
+        return BuildUkfLeftSideObservation(snapshot, maxRangeM);
+    }
+
+    static MazeMap::WallObs BuildLoggedRightSideObservation(
+        const DiagnosticSensorSnapshot& snapshot,
+        float maxRangeM) noexcept
+    {
+        return BuildUkfRightSideObservation(snapshot, maxRangeM);
     }
 
 private:
@@ -468,6 +567,7 @@ private:
             MazeMap::VehicleState::StateMatrix::Identity() * 1.0e-3f;
         covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL) = 0.25f;
         covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR) = 0.25f;
+        covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz) = 0.01f;
         return covariance;
     }
 
@@ -568,9 +668,9 @@ private:
         }
 
         observation.valid = true;
-        observation.yawRateRadps = snapshot.gyroRadps;
-        observation.accelXComMps2 = snapshot.accelBodyXMps2;
-        observation.accelYComMps2 = snapshot.accelBodyYMps2;
+        observation.gyroZRadps = snapshot.gyroRawRadps;
+        observation.accelBodyXMps2 = snapshot.accelBodyXMps2;
+        observation.accelBodyYMps2 = snapshot.accelBodyYMps2;
         return observation;
     }
 
@@ -586,9 +686,9 @@ private:
         }
 
         observation.valid = true;
-        observation.yawRateRadps = snapshot.gyroRadps;
-        observation.accelXComMps2 = snapshot.accelBodyXMps2;
-        observation.accelYComMps2 = snapshot.accelBodyYMps2;
+        observation.gyroZRadps = snapshot.gyroRawRadps;
+        observation.accelBodyXMps2 = snapshot.accelBodyXMps2;
+        observation.accelBodyYMps2 = snapshot.accelBodyYMps2;
         return observation;
     }
 
@@ -753,6 +853,7 @@ private:
         control.leftMotorCommand = _leftMotor.getDriveCommand();
         control.rightMotorCommand = _rightMotor.getDriveCommand();
         control.fanDutyCycle = GetMissionFanDutyCycle();
+        control.batteryVoltageV = 0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage());
 
         if (timing != nullptr)
         {
@@ -789,13 +890,15 @@ private:
             encoderObservation.omegaLeftRadps = _leftMotor.getEncoderVelocityMetersPerSecond() / params.wheelRadiusM;
             encoderObservation.omegaRightRadps = _rightMotor.getEncoderVelocityMetersPerSecond() / params.wheelRadiusM;
         }
+        _lastEncoderObservation = encoderObservation;
+        _encoderObservationValid = true;
         (void)_ukf.updateEncoderPair(encoderObservation, dtSeconds, loopHook);
 
         beforeYawUpdate();
 
-        if (std::isfinite(snapshot.gyroRadps))
+        if (std::isfinite(snapshot.gyroRawRadps))
         {
-            const MazeMap::MeasurementUpdateResult yawUpdate = _ukf.updateYawRate(snapshot.gyroRadps, loopHook);
+            const MazeMap::MeasurementUpdateResult yawUpdate = _ukf.updateYawRate(snapshot.gyroRawRadps, loopHook);
             if (!yawUpdate.accepted)
             {
                 TriggerEstimatorFault("yaw_update_failed");
@@ -805,6 +908,41 @@ private:
                     timing->ukfUpdateDurationUs = timing->ukfUpdateEndUs - timing->ukfUpdateStartUs;
                 }
                 return;
+            }
+        }
+
+        if (snapshot.accelBiasValid)
+        {
+            MazeMap::ImuAccelObs accelObservation{};
+            accelObservation.valid =
+                std::isfinite(snapshot.accelBodyXMps2) &&
+                std::isfinite(snapshot.accelBodyYMps2);
+            accelObservation.accelBodyXMps2 = snapshot.accelBodyXMps2;
+            accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
+            (void)_ukf.updatePlanarAccel(accelObservation, loopHook);
+        }
+
+        if (map != nullptr)
+        {
+            const MazeMap::LocalMapView mapView = BuildUkfMapView(map);
+            MazeMap::WallObs frontLeftObs{};
+            MazeMap::WallObs frontRightObs{};
+            BuildUkfFrontPairObservations(snapshot, params.noHitRangeM, frontLeftObs, frontRightObs);
+            if (frontLeftObs.valid && frontRightObs.valid)
+            {
+                (void)_ukf.updateFrontPair(frontLeftObs, frontRightObs, mapView);
+            }
+
+            const MazeMap::WallObs leftSideObs = BuildUkfLeftSideObservation(snapshot, params.noHitRangeM);
+            if (leftSideObs.valid)
+            {
+                (void)_ukf.updateSideSensor(MazeMap::Side::Left, leftSideObs, mapView);
+            }
+
+            const MazeMap::WallObs rightSideObs = BuildUkfRightSideObservation(snapshot, params.noHitRangeM);
+            if (rightSideObs.valid)
+            {
+                (void)_ukf.updateSideSensor(MazeMap::Side::Right, rightSideObs, mapView);
             }
         }
         if (timing != nullptr)
@@ -829,6 +967,18 @@ private:
     float _rightIntegral;
     float _lastLinearCommandMps;
     float _lastAngularCommandRadps;
+    float _lastLeftFeedforwardCommand = 0.0f;
+    float _lastRightFeedforwardCommand = 0.0f;
+    float _lastLeftFeedbackCommand = 0.0f;
+    float _lastRightFeedbackCommand = 0.0f;
+    float _lastLeftTargetVelocityMps = 0.0f;
+    float _lastRightTargetVelocityMps = 0.0f;
+    float _lastLeftLaunchAssistFloor = 0.0f;
+    float _lastRightLaunchAssistFloor = 0.0f;
+    MazeMap::EncoderObs _lastEncoderObservation{};
+    uint16_t _lastModeFlags = kModeBraking;
+    uint16_t _lastSaturationFlags = 0u;
+    bool _encoderObservationValid = false;
     bool _targetVelocityInitialized = false;
     MazeMap::WheelControlProfile _wheelControlProfile;
     struct WheelLaunchAssistState

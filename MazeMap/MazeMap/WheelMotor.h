@@ -1,8 +1,6 @@
 #pragma once
 
 #include "Defines.h"
-#include "Vector2f.h"
-
 namespace MazeMap
 {
 	class EXPORT WheelMotor

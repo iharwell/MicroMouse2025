@@ -24,8 +24,8 @@ namespace MazeMap
 			return WallSensor(
 				0U,
 				1U,
-				Vectorf<2>(0.0f, 0.0f),
-				Vectorf<2>(1.0f, 0.0f),
+				Eigen::Vector2f(0.0f, 0.0f),
+				Eigen::Vector2f(1.0f, 0.0f),
 				adcToLightTable,
 				distanceModel);
 		}
@@ -187,8 +187,8 @@ namespace MazeMap
 
 			WallGeometryModel geometry;
 			SensorExtrinsics sensor{};
-			sensor.positionBodyM = Vectorf<2>(0.0f, 0.0f);
-			sensor.directionBody = Vectorf<2>(1.0f, 0.0f);
+			sensor.positionBodyM = Eigen::Vector2f(0.0f, 0.0f);
+			sensor.directionBody = Eigen::Vector2f(1.0f, 0.0f);
 			sensor.yawOffsetRad = PI_F / 4.0f;
 
 			VehicleState::StateVector state = VehicleState::StateVector::Zero();
@@ -269,3 +269,4 @@ namespace MazeMap
 
 	};
 }
+

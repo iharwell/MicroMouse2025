@@ -8,13 +8,13 @@
 #else
 #include <Arduino.h>
 #endif
+#include "EigenCompat.h"
 #include <array>
 #include <assert.h>
 #include <cmath>
 #include <stddef.h>
 #include <stdint.h>
 #include "defines.h"
-#include "vector2f.h"
 
 
 namespace MazeMap
@@ -35,8 +35,8 @@ namespace MazeMap
         WallSensor(
             uint8_t wallSensorInPin,
             uint8_t ledOutPin,
-            const Vectorf<2>& position,
-            const Vectorf<2>& facingDirection,
+            const Eigen::Vector2f& position,
+            const Eigen::Vector2f& facingDirection,
             const std::array<float, 8>& adcToLightTable,
             const DistanceModel& distanceModel
         )
@@ -49,8 +49,7 @@ namespace MazeMap
         {
 #ifndef NDEBUG
             const float dirMagSq =
-                facingDirection.GetX() * facingDirection.GetX() +
-                facingDirection.GetY() * facingDirection.GetY();
+                facingDirection.squaredNorm();
 
             assert(dirMagSq > 0.0f);
             assert(distanceModel.exponent > 0.0f);
@@ -65,8 +64,8 @@ namespace MazeMap
 
         uint8_t GetWallSensorInPin() const { return _wallSensorInPin; }
         uint8_t GetLedOutPin() const { return _ledOutPin; }
-        const Vectorf<2>& GetPosition() const { return _position; }
-        const Vectorf<2>& GetFacingDirection() const { return _facingDirection; }
+        const Eigen::Vector2f& GetPosition() const { return _position; }
+        const Eigen::Vector2f& GetFacingDirection() const { return _facingDirection; }
 
         void SetLedEnabled(bool enabled) const
         {
@@ -112,14 +111,14 @@ namespace MazeMap
 
         uint8_t _wallSensorInPin;
         uint8_t _ledOutPin;
-        Vectorf<2> _position;
-        Vectorf<2> _facingDirection;
+        Eigen::Vector2f _position;
+        Eigen::Vector2f _facingDirection;
         std::array<float, 8> _adcToLightTable;
         DistanceModel _distanceModel;
 
-        static Vectorf<2> Normalize(const Vectorf<2>& v)
+        static Eigen::Vector2f Normalize(const Eigen::Vector2f& v)
         {
-            const float magSq = v.GetX() * v.GetX() + v.GetY() * v.GetY();
+            const float magSq = v.squaredNorm();
 
 #ifndef NDEBUG
             assert(magSq > 0.0f);
@@ -127,11 +126,10 @@ namespace MazeMap
 
             if (magSq <= 0.0f)
             {
-                return { 1.0f, 0.0f };
+                return Eigen::Vector2f(1.0f, 0.0f);
             }
 
-            const float invMag = 1.0f / std::sqrt(magSq);
-            return { v.GetX() * invMag, v.GetY() * invMag };
+            return v.normalized();
         }
 
         static float Lerp(float a, float b, float t)

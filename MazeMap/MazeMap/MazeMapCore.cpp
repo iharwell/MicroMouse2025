@@ -13,7 +13,6 @@
 #include "MazeLocation.cpp"
 #include "MazeMask.cpp"
 #include "PathFinder.cpp"
-#include "Vector2f.cpp"
 #include "Vehicle.cpp"
 #include "VehicleState.cpp"
 #endif

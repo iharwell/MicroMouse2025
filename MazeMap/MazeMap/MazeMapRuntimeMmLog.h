@@ -21,6 +21,9 @@ namespace mmlog
     static constexpr char kMagic[8] = { 'M', 'M', 'L', 'O', 'G', '1', '\0', '\0' };
     static constexpr uint32_t kVersion = 1u;
     static constexpr uint32_t kHeaderBytes = 64u;
+    static constexpr uint32_t kGenericMagic = 0x474C4D4Du;
+    static constexpr uint16_t kGenericVersionMajor = 2u;
+    static constexpr uint16_t kGenericVersionMinor = 0u;
 
     static constexpr uint32_t FLAG_HAS_CRC32 = 1u << 0;
     static constexpr uint32_t FLAG_HAS_STAGE = 1u << 1;
@@ -56,9 +59,34 @@ namespace mmlog
         uint32_t start_time_us_hi;
         uint32_t reserved[3];
     };
+
+    struct GenericFileHeader
+    {
+        uint32_t magic;
+        uint16_t fmt_ver_major;
+        uint16_t fmt_ver_minor;
+        uint32_t stream_type;
+        uint32_t schema_id;
+        uint32_t flags;
+        uint32_t producer_id;
+        uint32_t header_bytes;
+        uint32_t metadata_bytes;
+        uint32_t notes_bytes;
+        uint32_t reserved0;
+        uint32_t reserved1;
+    };
+
+    struct LogRecordHeader
+    {
+        uint32_t rec_type;
+        uint16_t rec_size;
+        uint16_t rec_ver;
+    };
 #pragma pack(pop)
 
     static_assert(sizeof(FileHeader) == 64u, "MMLOG1 FileHeader must be 64 bytes");
+    static_assert(sizeof(GenericFileHeader) == 44u, "MMLG GenericFileHeader must be 44 bytes");
+    static_assert(sizeof(LogRecordHeader) == 8u, "MMLG LogRecordHeader must be 8 bytes");
 
     inline uint32_t packU32(uint32_t value) noexcept
     {
@@ -106,6 +134,29 @@ namespace mmlog
         {
             value = 0u;
         }
+    }
+
+    inline void fillGenericHeader(
+        GenericFileHeader& header,
+        uint32_t streamType,
+        uint32_t schemaId,
+        uint32_t metadataBytes,
+        uint32_t notesBytes,
+        uint32_t flags,
+        uint32_t producerId) noexcept
+    {
+        header.magic = kGenericMagic;
+        header.fmt_ver_major = kGenericVersionMajor;
+        header.fmt_ver_minor = kGenericVersionMinor;
+        header.stream_type = streamType;
+        header.schema_id = schemaId;
+        header.flags = flags | FLAG_LITTLE_ENDIAN;
+        header.producer_id = producerId;
+        header.header_bytes = static_cast<uint32_t>(sizeof(GenericFileHeader)) + metadataBytes + notesBytes;
+        header.metadata_bytes = metadataBytes;
+        header.notes_bytes = notesBytes;
+        header.reserved0 = 0u;
+        header.reserved1 = 0u;
     }
 }
 
@@ -873,6 +924,394 @@ namespace MazeMapApp::Internal::Runtime
         int _activeIndex;
         uint32_t _fieldCount;
         uint32_t _recordBytes;
+        size_t _blockBytes;
+        uint8_t _bufferCount;
+        bool _isOpen;
+        bool _overflowed;
+        bool _writeFailed;
+        uint32_t _queuedBlockCount;
+        char _fileName[64];
+    };
+
+    class RuntimeTypedBinaryLogFile
+    {
+    public:
+        RuntimeTypedBinaryLogFile() noexcept
+            : _file()
+            , _blocks(nullptr)
+            , _activeIndex(-1)
+            , _blockBytes(0u)
+            , _bufferCount(0u)
+            , _isOpen(false)
+            , _overflowed(false)
+            , _writeFailed(false)
+            , _queuedBlockCount(0u)
+        {
+            _fileName[0] = '\0';
+        }
+
+        ~RuntimeTypedBinaryLogFile()
+        {
+            Close();
+        }
+
+        bool BeginTyped(
+            const char* fileName,
+            uint32_t streamType,
+            uint32_t schemaId,
+            const char* metadataKv,
+            const char* notes,
+            uint32_t producerId,
+            uint32_t flags = mmlog::FLAG_HAS_METADATA | mmlog::FLAG_HAS_NOTES,
+            size_t blockBytes = 4096u,
+            uint8_t bufferCount = 4u)
+        {
+            Close();
+            if (fileName == nullptr || fileName[0] == '\0')
+            {
+                return false;
+            }
+
+            std::snprintf(_fileName, sizeof(_fileName), "%s", fileName);
+            _blockBytes = blockBytes;
+            _bufferCount = bufferCount;
+            _overflowed = false;
+            _writeFailed = false;
+            _queuedBlockCount = 0u;
+
+            if (!AllocateBlocks())
+            {
+                return false;
+            }
+
+            if (!_file.Open(_fileName))
+            {
+                FreeBlocks();
+                return false;
+            }
+
+            if (!WriteHeaderAndDescriptors(streamType, schemaId, metadataKv, notes, flags, producerId))
+            {
+                _file.Close();
+                FreeBlocks();
+                _fileName[0] = '\0';
+                return false;
+            }
+
+            _isOpen = true;
+            return true;
+        }
+
+        bool AppendRecord(const void* bytes, uint16_t recordBytes)
+        {
+            if (!_isOpen || bytes == nullptr || recordBytes == 0u || _blocks == nullptr || _activeIndex < 0)
+            {
+                return false;
+            }
+
+            if (recordBytes > _blockBytes)
+            {
+                _overflowed = true;
+                return false;
+            }
+
+            Block& active = _blocks[_activeIndex];
+            if ((active.used + recordBytes) > _blockBytes)
+            {
+                if (!EnqueueActiveAndRotate())
+                {
+                    _overflowed = true;
+                    return false;
+                }
+            }
+
+            Block& destination = _blocks[_activeIndex];
+            std::memcpy(destination.data + destination.used, bytes, recordBytes);
+            destination.used += recordBytes;
+            return true;
+        }
+
+        bool Service(uint32_t maxBlocks = 1u)
+        {
+            if (!_isOpen)
+            {
+                return false;
+            }
+
+            const uint32_t limit = (maxBlocks == 0u) ? 1u : maxBlocks;
+            for (uint32_t index = 0u; index < limit; ++index)
+            {
+                const int queuedIndex = FindQueuedBlockIndex();
+                if (queuedIndex < 0)
+                {
+                    break;
+                }
+                if (!WriteBlock(queuedIndex))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        void Flush()
+        {
+            if (!_isOpen)
+            {
+                return;
+            }
+
+            while (FindQueuedBlockIndex() >= 0)
+            {
+                if (!Service(static_cast<uint32_t>(_bufferCount)))
+                {
+                    break;
+                }
+            }
+            (void)WriteActivePartialBlock();
+            _file.Flush();
+        }
+
+        void Close()
+        {
+            if (_isOpen)
+            {
+                Flush();
+                _file.Close();
+            }
+
+            _isOpen = false;
+            _blockBytes = 0u;
+            _bufferCount = 0u;
+            _overflowed = false;
+            _writeFailed = false;
+            _queuedBlockCount = 0u;
+            _fileName[0] = '\0';
+            FreeBlocks();
+        }
+
+        const char* GetFileName() const noexcept
+        {
+            return _fileName;
+        }
+
+        bool HadOverflow() const noexcept
+        {
+            return _overflowed;
+        }
+
+        bool HadWriteFailure() const noexcept
+        {
+            return _writeFailed;
+        }
+
+    private:
+        struct Block
+        {
+            uint8_t* data = nullptr;
+            uint32_t used = 0u;
+            bool queued = false;
+            bool active = false;
+        };
+
+        bool AllocateBlocks()
+        {
+            if (_bufferCount < 2u || _blockBytes == 0u)
+            {
+                return false;
+            }
+
+            _blocks = new Block[_bufferCount];
+            if (_blocks == nullptr)
+            {
+                return false;
+            }
+
+            for (uint8_t index = 0u; index < _bufferCount; ++index)
+            {
+                _blocks[index].data = static_cast<uint8_t*>(std::malloc(_blockBytes));
+                if (_blocks[index].data == nullptr)
+                {
+                    FreeBlocks();
+                    return false;
+                }
+                _blocks[index].used = 0u;
+                _blocks[index].queued = false;
+                _blocks[index].active = false;
+            }
+
+            _activeIndex = 0;
+            _blocks[_activeIndex].active = true;
+            return true;
+        }
+
+        void FreeBlocks()
+        {
+            if (_blocks != nullptr)
+            {
+                for (uint8_t index = 0u; index < _bufferCount; ++index)
+                {
+                    if (_blocks[index].data != nullptr)
+                    {
+                        std::free(_blocks[index].data);
+                        _blocks[index].data = nullptr;
+                    }
+                }
+
+                delete[] _blocks;
+                _blocks = nullptr;
+            }
+
+            _activeIndex = -1;
+        }
+
+        bool WriteHeaderAndDescriptors(
+            uint32_t streamType,
+            uint32_t schemaId,
+            const char* metadataKv,
+            const char* notes,
+            uint32_t flags,
+            uint32_t producerId)
+        {
+            const uint32_t metadataBytes = (metadataKv != nullptr) ? static_cast<uint32_t>(std::strlen(metadataKv)) : 0u;
+            const uint32_t notesBytes = (notes != nullptr) ? static_cast<uint32_t>(std::strlen(notes)) : 0u;
+            mmlog::GenericFileHeader header{};
+            mmlog::fillGenericHeader(header, streamType, schemaId, metadataBytes, notesBytes, flags, producerId);
+
+            if (_file.WriteBytes(&header, sizeof(header)) != sizeof(header))
+            {
+                return false;
+            }
+            if ((metadataBytes > 0u) && (_file.WriteBytes(metadataKv, metadataBytes) != metadataBytes))
+            {
+                return false;
+            }
+            if ((notesBytes > 0u) && (_file.WriteBytes(notes, notesBytes) != notesBytes))
+            {
+                return false;
+            }
+            return true;
+        }
+
+        bool EnqueueActiveAndRotate()
+        {
+            if (_blocks == nullptr || _activeIndex < 0)
+            {
+                return false;
+            }
+
+            Block& active = _blocks[_activeIndex];
+            if (active.used == 0u)
+            {
+                return true;
+            }
+
+            const int freeIndex = FindFreeBlockIndex();
+            if (freeIndex < 0)
+            {
+                return false;
+            }
+
+            active.active = false;
+            active.queued = true;
+            ++_queuedBlockCount;
+
+            _activeIndex = freeIndex;
+            _blocks[_activeIndex].active = true;
+            _blocks[_activeIndex].queued = false;
+            _blocks[_activeIndex].used = 0u;
+            return true;
+        }
+
+        int FindFreeBlockIndex() const noexcept
+        {
+            if (_blocks == nullptr)
+            {
+                return -1;
+            }
+
+            for (uint8_t index = 0u; index < _bufferCount; ++index)
+            {
+                if (!_blocks[index].active && !_blocks[index].queued && (_blocks[index].used == 0u))
+                {
+                    return static_cast<int>(index);
+                }
+            }
+            return -1;
+        }
+
+        int FindQueuedBlockIndex() const noexcept
+        {
+            if (_blocks == nullptr)
+            {
+                return -1;
+            }
+
+            for (uint8_t index = 0u; index < _bufferCount; ++index)
+            {
+                if (_blocks[index].queued && !_blocks[index].active)
+                {
+                    return static_cast<int>(index);
+                }
+            }
+            return -1;
+        }
+
+        bool WriteBlock(int blockIndex)
+        {
+            if (_blocks == nullptr || blockIndex < 0)
+            {
+                return false;
+            }
+
+            Block& block = _blocks[blockIndex];
+            if (block.used == 0u)
+            {
+                block.queued = false;
+                return true;
+            }
+
+            if (_file.WriteBytes(block.data, block.used) != block.used)
+            {
+                _writeFailed = true;
+                return false;
+            }
+
+            block.used = 0u;
+            block.queued = false;
+            if (_queuedBlockCount > 0u)
+            {
+                --_queuedBlockCount;
+            }
+            return true;
+        }
+
+        bool WriteActivePartialBlock()
+        {
+            if (_blocks == nullptr || _activeIndex < 0)
+            {
+                return false;
+            }
+
+            Block& active = _blocks[_activeIndex];
+            if (active.used == 0u)
+            {
+                return true;
+            }
+
+            if (_file.WriteBytes(active.data, active.used) != active.used)
+            {
+                _writeFailed = true;
+                return false;
+            }
+
+            active.used = 0u;
+            return true;
+        }
+
+        CoreBinaryFileExport _file;
+        Block* _blocks;
+        int _activeIndex;
         size_t _blockBytes;
         uint8_t _bufferCount;
         bool _isOpen;

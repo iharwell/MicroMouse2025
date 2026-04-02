@@ -98,5 +98,11 @@ namespace MazeMapApp
             Assert::AreNotEqual(mmlog::TAG4('f', 'r', 'o', 'n'), longPacked);
         }
 
+        TEST_METHOD(GenericMmLogHeaders_UseExpectedFixedSizes)
+        {
+            Assert::AreEqual<size_t>(static_cast<size_t>(44u), sizeof(mmlog::GenericFileHeader));
+            Assert::AreEqual<size_t>(static_cast<size_t>(8u), sizeof(mmlog::LogRecordHeader));
+        }
+
     };
 }

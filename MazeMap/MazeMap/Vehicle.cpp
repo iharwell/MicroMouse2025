@@ -110,36 +110,46 @@ namespace MazeMap
     }
 
     const VehicleState& Vehicle::GetVehicleState() const { return _state; }
+    ImuExtrinsics Vehicle::GetBackLeftImuExtrinsics() noexcept
+    {
+        ImuExtrinsics extrinsics{};
+        // The back-left IMU board location as directly measured on the board.
+        extrinsics.positionBodyM = Eigen::Vector2f(-0.011f, 0.023f);
+        extrinsics.accelBodyFromImu = Eigen::Matrix2f::Identity();
+        extrinsics.gyroZSign = 1.0f;
+        return extrinsics;
+    }
+
     SensorExtrinsics Vehicle::GetFrontLeftSensorExtrinsics() noexcept
     {
         return {
-            Vectorf<2>(0.04223f, 0.03465f),
-            Vectorf<2>(0.99452f, 0.10453f),
-            std::atan2(0.10453f, 0.99452f)
+            Eigen::Vector2f(0.04223f, 0.03465f),
+            Eigen::Vector2f(0.99452f, 0.10453f),
+            0.0f
         };
     }
     SensorExtrinsics Vehicle::GetFrontRightSensorExtrinsics() noexcept
     {
         return {
-            Vectorf<2>(0.04223f, -0.03459f),
-            Vectorf<2>(0.99452f, -0.10453f),
-            std::atan2(-0.10453f, 0.99452f)
+            Eigen::Vector2f(0.04223f, -0.03459f),
+            Eigen::Vector2f(0.99452f, -0.10453f),
+            0.0f
         };
     }
     SensorExtrinsics Vehicle::GetSideLeftSensorExtrinsics() noexcept
     {
         return {
-            Vectorf<2>(0.05026f, 0.02918f),
-            Vectorf<2>(0.0f, 1.0f),
-            0.5f * PI_F
+            Eigen::Vector2f(0.05026f, 0.02918f),
+            Eigen::Vector2f(0.0f, 1.0f),
+            0.0f
         };
     }
     SensorExtrinsics Vehicle::GetSideRightSensorExtrinsics() noexcept
     {
         return {
-            Vectorf<2>(0.05026f, -0.02772f),
-            Vectorf<2>(0.0f, -1.0f),
-            -0.5f * PI_F
+            Eigen::Vector2f(0.05026f, -0.02772f),
+            Eigen::Vector2f(0.0f, -1.0f),
+            0.0f
         };
     }
     void Vehicle::ProgressVehicleState(const VehicleState& previousState, VehicleState& projectedState, float timeDelta)

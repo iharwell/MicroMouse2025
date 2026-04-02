@@ -589,8 +589,8 @@ struct OpenFloorMeasurementLabels
 {
     MazeMap::OpenFloorSectionId sectionId = MazeMap::OpenFloorSectionId::Sec00Timing;
     MazeMap::OpenFloorMarkerId startMarkerId = MazeMap::OpenFloorMarkerId::C;
-    const char* primitiveId = "NONE";
-    const char* direction = "NONE";
+    MazeMap::OpenFloorPrimitiveId primitiveId = MazeMap::OpenFloorPrimitiveId::None;
+    MazeMap::OpenFloorDirectionId directionId = MazeMap::OpenFloorDirectionId::None;
     MazeMap::OpenFloorPhaseId phaseId = MazeMap::OpenFloorPhaseId::Idle;
     MazeMap::OpenFloorSpeedBin speedBin = MazeMap::OpenFloorSpeedBin::None;
     uint16_t repeatIndex = 0U;
@@ -601,16 +601,21 @@ struct OpenFloorMeasurementLabels
 struct OpenFloorMeasurementCycle
 {
     uint32_t masterTimeUs = 0UL;
+    uint32_t controlTickSequence = 0UL;
     uint32_t dtUs = 0UL;
     ControlCycleTiming controlTiming{};
     DriveTelemetry driveTelemetry{};
     DiagnosticSensorSnapshot sensorSnapshot{};
     float measuredLinearSpeedMps = 0.0f;
     float measuredAngularSpeedRadps = 0.0f;
+    float planarAccelMps2 = 0.0f;
     float batteryVoltage = std::numeric_limits<float>::quiet_NaN();
     float boardTemperatureC = std::numeric_limits<float>::quiet_NaN();
     float fanDutyCycle = 0.0f;
-    uint32_t errorFlags = 0UL;
+    uint16_t clippingFlags = 0U;
+    uint16_t watchdogFlags = 0U;
+    bool workspaceViolation = false;
+    bool estimatorFault = false;
 };
 
 class OpenFloorTimingLogger
@@ -879,8 +884,8 @@ public:
         MazeMapApp::Internal::Runtime::AppendOpticalTimingFields(record, cycle.sensorSnapshot.rightTiming);
         record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash(runId));
         record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorSectionName(labels.sectionId)));
-        record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash((labels.primitiveId != nullptr) ? labels.primitiveId : "NONE"));
-        record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorDirectionLabel(labels.direction)));
+        record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorPrimitiveName(labels.primitiveId)));
+        record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorDirectionName(labels.directionId)));
         record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorPhaseName(labels.phaseId)));
         record.U32(labels.repeatIndex);
         record.U32(MazeMapApp::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorMarkerName(labels.startMarkerId)));
@@ -918,7 +923,11 @@ public:
         record.F32(cycle.batteryVoltage);
         record.F32(cycle.boardTemperatureC);
         record.F32(cycle.fanDutyCycle);
-        record.U32(cycle.errorFlags);
+        uint32_t legacyErrorFlags = static_cast<uint32_t>(cycle.clippingFlags);
+        legacyErrorFlags |= static_cast<uint32_t>(cycle.watchdogFlags) << 16;
+        if (cycle.workspaceViolation) legacyErrorFlags |= 1u << 30;
+        if (cycle.estimatorFault) legacyErrorFlags |= 1u << 31;
+        record.U32(legacyErrorFlags);
         if (!MazeMapApp::Internal::Runtime::AppendBinaryRecord(_sampleLog, record))
         {
             return false;
@@ -978,8 +987,8 @@ private:
             sizeof(message),
             "section_id=%s;primitive_id=%s;direction=%s;start_marker=%s;repeat_index=%u;speed_bin=%s%s%s",
             MazeMap::OpenFloorSectionName(labels.sectionId),
-            (labels.primitiveId != nullptr) ? labels.primitiveId : "NONE",
-            MazeMap::OpenFloorDirectionLabel(labels.direction),
+            MazeMap::OpenFloorPrimitiveName(labels.primitiveId),
+            MazeMap::OpenFloorDirectionName(labels.directionId),
             MazeMap::OpenFloorMarkerName(labels.startMarkerId),
             static_cast<unsigned>(labels.repeatIndex),
             MazeMap::OpenFloorSpeedBinName(labels.speedBin),
@@ -993,28 +1002,603 @@ private:
     }
 };
 
+namespace OpenFloorLoggingV2
+{
+    static constexpr uint32_t kProducerId = mmlog::TAG4('M', 'M', 'F', 'W');
+    static constexpr uint32_t kTimingStreamType = mmlog::TAG4('O', 'F', 'T', 'M');
+    static constexpr uint32_t kTimingSchemaId = 0x00010001u;
+    static constexpr uint32_t kMainStreamType = mmlog::TAG4('O', 'F', 'M', 'N');
+    static constexpr uint32_t kMainSchemaId = 0x00010001u;
+    static constexpr uint32_t kTimingPrimaryRecordType = mmlog::TAG4('T', 'S', 'U', 'M');
+    static constexpr uint32_t kMainPrimaryRecordType = mmlog::TAG4('M', 'R', 'O', 'W');
+    static constexpr uint32_t kFaultRecordType = mmlog::TAG4('F', 'A', 'U', 'L');
+    static constexpr uint16_t kRecordVersion = 1u;
+
+    static constexpr uint16_t kLoggerFlagOverflow = 1u << 0;
+    static constexpr uint16_t kLoggerFlagWriteFailure = 1u << 1;
+
+    static constexpr uint16_t kMeasurementFlagAbortMarker = 1u << 0;
+    static constexpr uint16_t kMeasurementFlagWorkspaceViolation = 1u << 1;
+    static constexpr uint16_t kMeasurementFlagEstimatorFault = 1u << 2;
+    static constexpr uint16_t kMeasurementFlagFanEnabled = 1u << 3;
+    static constexpr uint16_t kMeasurementFlagEncoderValid = 1u << 4;
+    static constexpr uint16_t kMeasurementFlagImuValid = 1u << 5;
+    static constexpr uint16_t kMeasurementFlagAccelBiasValid = 1u << 6;
+    static constexpr uint16_t kMeasurementFlagFrontLeftObsValid = 1u << 7;
+    static constexpr uint16_t kMeasurementFlagFrontRightObsValid = 1u << 8;
+    static constexpr uint16_t kMeasurementFlagLeftObsValid = 1u << 9;
+    static constexpr uint16_t kMeasurementFlagRightObsValid = 1u << 10;
+
+#pragma pack(push, 1)
+    struct TimingPrimaryRecord
+    {
+        mmlog::LogRecordHeader header{};
+        uint32_t monoTimeUs = 0UL;
+        uint32_t controlTickSequence = 0UL;
+        uint32_t dtUs = 0UL;
+        uint8_t sectionId = 0U;
+        uint8_t reserved0 = 0U;
+        uint16_t loggerFlags = 0U;
+        uint32_t controlStartUs = 0UL;
+        uint32_t controlEndUs = 0UL;
+        uint32_t pwmLatchUs = 0UL;
+        uint32_t encoderLatchUs = 0UL;
+        uint32_t encoderReadDoneUs = 0UL;
+        uint32_t ukfPredictStartUs = 0UL;
+        uint32_t ukfPredictEndUs = 0UL;
+        uint32_t ukfPredictDurationUs = 0UL;
+        uint32_t ukfUpdateStartUs = 0UL;
+        uint32_t ukfUpdateEndUs = 0UL;
+        uint32_t ukfUpdateDurationUs = 0UL;
+        uint32_t imuDrdyUs = 0UL;
+        uint32_t imuReadStartUs = 0UL;
+        uint32_t imuReadDoneUs = 0UL;
+        uint32_t frontLedOnUs = 0UL;
+        uint32_t frontAdcOnUs = 0UL;
+        uint32_t frontLedOffUs = 0UL;
+        uint32_t frontAdcOffUs = 0UL;
+        uint32_t frontReadyUs = 0UL;
+        uint32_t leftLedOnUs = 0UL;
+        uint32_t leftAdcOnUs = 0UL;
+        uint32_t leftLedOffUs = 0UL;
+        uint32_t leftAdcOffUs = 0UL;
+        uint32_t leftReadyUs = 0UL;
+        uint32_t rightLedOnUs = 0UL;
+        uint32_t rightAdcOnUs = 0UL;
+        uint32_t rightLedOffUs = 0UL;
+        uint32_t rightAdcOffUs = 0UL;
+        uint32_t rightReadyUs = 0UL;
+        uint32_t cycleCounterStart = 0UL;
+        uint32_t cycleCounterEnd = 0UL;
+    };
+
+    struct MainPrimaryRecord
+    {
+        mmlog::LogRecordHeader header{};
+        uint32_t masterTimeUs = 0UL;
+        uint32_t controlTickSequence = 0UL;
+        uint32_t dtUs = 0UL;
+        uint8_t sectionId = 0U;
+        uint8_t primitiveId = 0U;
+        uint8_t primitiveFamily = 0U;
+        uint8_t directionId = 0U;
+        uint8_t phaseId = 0U;
+        uint8_t speedBin = 0U;
+        uint8_t startMarkerId = 0U;
+        uint8_t mirrored = 0U;
+        uint16_t repeatIndex = 0U;
+        float progressNorm = 0.0f;
+        uint16_t modeFlags = 0U;
+        uint16_t clippingFlags = 0U;
+        uint16_t saturationFlags = 0U;
+        uint16_t loggerFlags = 0U;
+        uint16_t watchdogFlags = 0U;
+        uint16_t measurementFlags = 0U;
+        float poseXMeters = 0.0f;
+        float poseYMeters = 0.0f;
+        float poseYawRad = 0.0f;
+        float measuredLinearSpeedMps = 0.0f;
+        float measuredAngularSpeedRadps = 0.0f;
+        float cmdLinearMps = 0.0f;
+        float cmdAngularRadps = 0.0f;
+        float leftDriveCommand = 0.0f;
+        float rightDriveCommand = 0.0f;
+        float leftFeedforwardCommand = 0.0f;
+        float rightFeedforwardCommand = 0.0f;
+        float leftFeedbackCommand = 0.0f;
+        float rightFeedbackCommand = 0.0f;
+        float leftTargetVelocityMps = 0.0f;
+        float rightTargetVelocityMps = 0.0f;
+        float leftLaunchAssistFloor = 0.0f;
+        float rightLaunchAssistFloor = 0.0f;
+        uint32_t encoderTimestampUs = 0UL;
+        int32_t leftEncoderCount = 0;
+        int32_t rightEncoderCount = 0;
+        float leftEncoderOmegaRadps = 0.0f;
+        float rightEncoderOmegaRadps = 0.0f;
+        float leftEncoderDistanceM = 0.0f;
+        float rightEncoderDistanceM = 0.0f;
+        float leftEncoderVelocityMps = 0.0f;
+        float rightEncoderVelocityMps = 0.0f;
+        uint32_t imuTimestampUs = 0UL;
+        uint8_t imuStatus = 0U;
+        uint8_t imuInterruptHigh = 0U;
+        uint8_t accelBiasValid = 0U;
+        uint8_t reserved0 = 0U;
+        int16_t imuGyroX = 0;
+        int16_t imuGyroY = 0;
+        int16_t imuGyroZ = 0;
+        int16_t imuAccelX = 0;
+        int16_t imuAccelY = 0;
+        int16_t imuAccelZ = 0;
+        int16_t imuTemp = 0;
+        float gyroRawRadps = 0.0f;
+        float gyroBiasRadps = 0.0f;
+        float gyroRadps = 0.0f;
+        float accelBodyXMps2 = 0.0f;
+        float accelBodyYMps2 = 0.0f;
+        float planarAccelMps2 = 0.0f;
+        uint32_t frontTimestampUs = 0UL;
+        uint32_t leftTimestampUs = 0UL;
+        uint32_t rightTimestampUs = 0UL;
+        uint8_t frontLeftObsClass = 0U;
+        uint8_t frontRightObsClass = 0U;
+        uint8_t leftObsClass = 0U;
+        uint8_t rightObsClass = 0U;
+        float frontLeftObsRhoM = 0.0f;
+        float frontRightObsRhoM = 0.0f;
+        float leftObsRhoM = 0.0f;
+        float rightObsRhoM = 0.0f;
+        float frontLeftObsConfidence = 0.0f;
+        float frontRightObsConfidence = 0.0f;
+        float leftObsConfidence = 0.0f;
+        float rightObsConfidence = 0.0f;
+        float batteryVoltage = 0.0f;
+        float boardTemperatureC = 0.0f;
+        float fanDutyCycle = 0.0f;
+    };
+
+    struct FaultRecord
+    {
+        mmlog::LogRecordHeader header{};
+        uint32_t monoTimeUs = 0UL;
+        uint32_t controlTickSequence = 0UL;
+        uint32_t dtUs = 0UL;
+        uint8_t sectionId = 0U;
+        uint8_t primitiveId = 0U;
+        uint8_t primitiveFamily = 0U;
+        uint8_t faultCode = 0U;
+        uint8_t directionId = 0U;
+        uint8_t phaseId = 0U;
+        uint8_t speedBin = 0U;
+        uint8_t startMarkerId = 0U;
+        uint16_t repeatIndex = 0U;
+        uint8_t mirrored = 0U;
+        uint8_t controlHalted = 0U;
+        uint16_t measurementFlags = 0U;
+        uint32_t extra0 = 0UL;
+        uint32_t extra1 = 0UL;
+    };
+#pragma pack(pop)
+
+    static_assert(sizeof(TimingPrimaryRecord) == 148u, "Open-floor timing primary record must be 148 bytes");
+    static_assert(sizeof(MainPrimaryRecord) == 256u, "Open-floor main primary record must be 256 bytes");
+    static_assert(sizeof(FaultRecord) == 42u, "Open-floor fault record must be 42 bytes");
+
+    template <typename TRecord>
+    inline void InitializeRecordHeader(TRecord& record, uint32_t recordType)
+    {
+        record.header.rec_type = recordType;
+        record.header.rec_size = static_cast<uint16_t>(sizeof(TRecord));
+        record.header.rec_ver = kRecordVersion;
+    }
+
+    inline uint16_t LoggerFlags(const MazeMapApp::Internal::Runtime::RuntimeTypedBinaryLogFile& log)
+    {
+        uint16_t flags = 0U;
+        if (log.HadOverflow()) flags |= kLoggerFlagOverflow;
+        if (log.HadWriteFailure()) flags |= kLoggerFlagWriteFailure;
+        return flags;
+    }
+
+    inline uint16_t MeasurementFlags(
+        const OpenFloorMeasurementLabels& labels,
+        const OpenFloorMeasurementCycle& cycle,
+        bool encoderValid,
+        bool imuValid,
+        const MazeMap::WallObs& frontLeftObs,
+        const MazeMap::WallObs& frontRightObs,
+        const MazeMap::WallObs& leftObs,
+        const MazeMap::WallObs& rightObs)
+    {
+        uint16_t flags = 0U;
+        if (labels.abortMarker) flags |= kMeasurementFlagAbortMarker;
+        if (cycle.workspaceViolation) flags |= kMeasurementFlagWorkspaceViolation;
+        if (cycle.estimatorFault) flags |= kMeasurementFlagEstimatorFault;
+        if (cycle.fanDutyCycle > 0.0f) flags |= kMeasurementFlagFanEnabled;
+        if (encoderValid) flags |= kMeasurementFlagEncoderValid;
+        if (imuValid) flags |= kMeasurementFlagImuValid;
+        if (cycle.sensorSnapshot.accelBiasValid) flags |= kMeasurementFlagAccelBiasValid;
+        if (frontLeftObs.valid) flags |= kMeasurementFlagFrontLeftObsValid;
+        if (frontRightObs.valid) flags |= kMeasurementFlagFrontRightObsValid;
+        if (leftObs.valid) flags |= kMeasurementFlagLeftObsValid;
+        if (rightObs.valid) flags |= kMeasurementFlagRightObsValid;
+        return flags;
+    }
+}
+
+class OpenFloorTimingLoggerV2
+{
+public:
+    bool Begin(const char* runId)
+    {
+        _metadata.Clear();
+        _notes.Clear();
+        if (!_metadata.AppendKeyValue("file", MazeMap::kOpenFloorTimingFileName)) return false;
+        if (!_metadata.AppendKeyValue("mode", MazeMap::kOpenFloorSelectedRoutineName)) return false;
+        if (!_metadata.AppendKeyValue("stream_type", "open_floor_timing")) return false;
+        if (!_metadata.AppendKeyValue("logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision)) return false;
+        if (runId != nullptr && runId[0] != '\0' && !_metadata.AppendKeyValue("run_id", runId)) return false;
+        if (!_metadata.AppendUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
+        if (!_notes.AppendLine("primary_record=one_timing_summary_row_per_control_loop")) return false;
+        if (!_notes.AppendLine("fault_record=emitted_only_when_timing_capture_halts_or_aborts")) return false;
+        return _sampleLog.BeginTyped(
+            MazeMap::kOpenFloorTimingFileName,
+            OpenFloorLoggingV2::kTimingStreamType,
+            OpenFloorLoggingV2::kTimingSchemaId,
+            _metadata.Data(),
+            _notes.Data(),
+            OpenFloorLoggingV2::kProducerId);
+    }
+
+    bool LogSample(const OpenFloorMeasurementCycle& cycle)
+    {
+        OpenFloorLoggingV2::TimingPrimaryRecord record{};
+        OpenFloorLoggingV2::InitializeRecordHeader(record, OpenFloorLoggingV2::kTimingPrimaryRecordType);
+        record.monoTimeUs = cycle.masterTimeUs;
+        record.controlTickSequence = cycle.controlTickSequence;
+        record.dtUs = cycle.dtUs;
+        record.sectionId = static_cast<uint8_t>(MazeMap::OpenFloorSectionId::Sec00Timing);
+        record.loggerFlags = OpenFloorLoggingV2::LoggerFlags(_sampleLog);
+        record.controlStartUs = cycle.controlTiming.controlStartUs;
+        record.controlEndUs = cycle.controlTiming.controlEndUs;
+        record.pwmLatchUs = cycle.controlTiming.pwmLatchUs;
+        record.encoderLatchUs = cycle.controlTiming.encoderLatchUs;
+        record.encoderReadDoneUs = cycle.controlTiming.encoderReadDoneUs;
+        record.ukfPredictStartUs = cycle.controlTiming.ukfPredictStartUs;
+        record.ukfPredictEndUs = cycle.controlTiming.ukfPredictEndUs;
+        record.ukfPredictDurationUs = cycle.controlTiming.ukfPredictDurationUs;
+        record.ukfUpdateStartUs = cycle.controlTiming.ukfUpdateStartUs;
+        record.ukfUpdateEndUs = cycle.controlTiming.ukfUpdateEndUs;
+        record.ukfUpdateDurationUs = cycle.controlTiming.ukfUpdateDurationUs;
+        record.imuDrdyUs = cycle.sensorSnapshot.imuTiming.drdyUs;
+        record.imuReadStartUs = cycle.sensorSnapshot.imuTiming.readStartUs;
+        record.imuReadDoneUs = cycle.sensorSnapshot.imuTiming.readDoneUs;
+        record.frontLedOnUs = cycle.sensorSnapshot.frontTiming.ledOnCommandUs;
+        record.frontAdcOnUs = cycle.sensorSnapshot.frontTiming.adcOnSampleUs;
+        record.frontLedOffUs = cycle.sensorSnapshot.frontTiming.ledOffCommandUs;
+        record.frontAdcOffUs = cycle.sensorSnapshot.frontTiming.adcOffSampleUs;
+        record.frontReadyUs = cycle.sensorSnapshot.frontTiming.observationReadyUs;
+        record.leftLedOnUs = cycle.sensorSnapshot.leftTiming.ledOnCommandUs;
+        record.leftAdcOnUs = cycle.sensorSnapshot.leftTiming.adcOnSampleUs;
+        record.leftLedOffUs = cycle.sensorSnapshot.leftTiming.ledOffCommandUs;
+        record.leftAdcOffUs = cycle.sensorSnapshot.leftTiming.adcOffSampleUs;
+        record.leftReadyUs = cycle.sensorSnapshot.leftTiming.observationReadyUs;
+        record.rightLedOnUs = cycle.sensorSnapshot.rightTiming.ledOnCommandUs;
+        record.rightAdcOnUs = cycle.sensorSnapshot.rightTiming.adcOnSampleUs;
+        record.rightLedOffUs = cycle.sensorSnapshot.rightTiming.ledOffCommandUs;
+        record.rightAdcOffUs = cycle.sensorSnapshot.rightTiming.adcOffSampleUs;
+        record.rightReadyUs = cycle.sensorSnapshot.rightTiming.observationReadyUs;
+        record.cycleCounterStart = cycle.controlTiming.cycleCounterStart;
+        record.cycleCounterEnd = cycle.controlTiming.cycleCounterEnd;
+        return _sampleLog.AppendRecord(&record, record.header.rec_size);
+    }
+
+    bool LogFault(
+        const OpenFloorMeasurementCycle& cycle,
+        MazeMap::OpenFloorFaultCode faultCode,
+        bool controlHalted,
+        uint32_t extra0 = 0UL,
+        uint32_t extra1 = 0UL)
+    {
+        OpenFloorMeasurementLabels labels{};
+        labels.sectionId = MazeMap::OpenFloorSectionId::Sec00Timing;
+        OpenFloorLoggingV2::FaultRecord record{};
+        OpenFloorLoggingV2::InitializeRecordHeader(record, OpenFloorLoggingV2::kFaultRecordType);
+        record.monoTimeUs = cycle.masterTimeUs;
+        record.controlTickSequence = cycle.controlTickSequence;
+        record.dtUs = cycle.dtUs;
+        record.sectionId = static_cast<uint8_t>(labels.sectionId);
+        record.primitiveId = static_cast<uint8_t>(labels.primitiveId);
+        record.primitiveFamily = static_cast<uint8_t>(MazeMap::OpenFloorPrimitiveFamilyForId(labels.primitiveId));
+        record.faultCode = static_cast<uint8_t>(faultCode);
+        record.directionId = static_cast<uint8_t>(labels.directionId);
+        record.phaseId = static_cast<uint8_t>(labels.phaseId);
+        record.speedBin = static_cast<uint8_t>(labels.speedBin);
+        record.startMarkerId = static_cast<uint8_t>(labels.startMarkerId);
+        record.repeatIndex = labels.repeatIndex;
+        record.mirrored = MazeMap::OpenFloorPrimitiveIsMirrored(labels.primitiveId) ? 1U : 0U;
+        record.controlHalted = controlHalted ? 1U : 0U;
+        record.measurementFlags =
+            (cycle.workspaceViolation ? OpenFloorLoggingV2::kMeasurementFlagWorkspaceViolation : 0U) |
+            (cycle.estimatorFault ? OpenFloorLoggingV2::kMeasurementFlagEstimatorFault : 0U);
+        record.extra0 = extra0;
+        record.extra1 = extra1;
+        return _sampleLog.AppendRecord(&record, record.header.rec_size);
+    }
+
+    bool LogSummary(const char*, unsigned long, float, float)
+    {
+        return true;
+    }
+
+    bool LogFailure(const char*)
+    {
+        return true;
+    }
+
+    void Service()
+    {
+        (void)_sampleLog.Service(1U);
+    }
+
+    void Flush()
+    {
+        _sampleLog.Flush();
+    }
+
+    void Close()
+    {
+        _sampleLog.Close();
+    }
+
+private:
+    MazeMapApp::Internal::Runtime::RuntimeTypedBinaryLogFile _sampleLog;
+    MazeMapApp::Internal::Runtime::RuntimeTextBlockBuilder<1024U> _metadata;
+    MazeMapApp::Internal::Runtime::RuntimeTextBlockBuilder<512U> _notes;
+};
+
+class OpenFloorMainLoggerV2
+{
+public:
+    bool Begin(const DiagnosticSensorSuite& sensors, const char* runId)
+    {
+        _metadata.Clear();
+        _notes.Clear();
+        if (!_metadata.AppendKeyValue("file", MazeMap::kOpenFloorMainFileName)) return false;
+        if (!_metadata.AppendKeyValue("mode", MazeMap::kOpenFloorSelectedRoutineName)) return false;
+        if (!_metadata.AppendKeyValue("stream_type", "open_floor_main")) return false;
+        if (!_metadata.AppendKeyValue("logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision)) return false;
+        if (!_metadata.AppendKeyValue("active_imu_id", MazeMap::kOpenFloorActiveImuId)) return false;
+        if (!_metadata.AppendKeyValue("imu_extrinsics_revision", MazeMap::kOpenFloorImuExtrinsicsRevision)) return false;
+        if (runId != nullptr && runId[0] != '\0' && !_metadata.AppendKeyValue("run_id", runId)) return false;
+        if (!_metadata.AppendUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
+        if (!_metadata.AppendFloat("imu_gyro_mdps_per_lsb", sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
+        if (!_metadata.AppendFloat("imu_accel_mg_per_lsb", sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
+        if (!_notes.AppendLine("primary_record=one_measurement_row_per_control_loop")) return false;
+        if (!_notes.AppendLine("fault_record=emitted_only_when_control_halts_or_section_aborts")) return false;
+        return _sampleLog.BeginTyped(
+            MazeMap::kOpenFloorMainFileName,
+            OpenFloorLoggingV2::kMainStreamType,
+            OpenFloorLoggingV2::kMainSchemaId,
+            _metadata.Data(),
+            _notes.Data(),
+            OpenFloorLoggingV2::kProducerId);
+    }
+
+    bool LogSample(
+        const OpenFloorMeasurementLabels& labels,
+        const PoseEstimate& pose,
+        const DriveBase& drive,
+        const OpenFloorMeasurementCycle& cycle)
+    {
+        const bool encoderValid = cycle.driveTelemetry.encoderObservationValid;
+        const bool imuValid = std::isfinite(cycle.sensorSnapshot.gyroRawRadps);
+        const float maxRangeM = MazeMap::PlantParams::Default().noHitRangeM;
+        MazeMap::WallObs frontLeftObs{};
+        MazeMap::WallObs frontRightObs{};
+        DriveBase::BuildLoggedFrontPairObservations(cycle.sensorSnapshot, maxRangeM, frontLeftObs, frontRightObs);
+        const MazeMap::WallObs leftObs = DriveBase::BuildLoggedLeftSideObservation(cycle.sensorSnapshot, maxRangeM);
+        const MazeMap::WallObs rightObs = DriveBase::BuildLoggedRightSideObservation(cycle.sensorSnapshot, maxRangeM);
+
+        OpenFloorLoggingV2::MainPrimaryRecord record{};
+        OpenFloorLoggingV2::InitializeRecordHeader(record, OpenFloorLoggingV2::kMainPrimaryRecordType);
+        record.masterTimeUs = cycle.masterTimeUs;
+        record.controlTickSequence = cycle.controlTickSequence;
+        record.dtUs = cycle.dtUs;
+        record.sectionId = static_cast<uint8_t>(labels.sectionId);
+        record.primitiveId = static_cast<uint8_t>(labels.primitiveId);
+        record.primitiveFamily = static_cast<uint8_t>(MazeMap::OpenFloorPrimitiveFamilyForId(labels.primitiveId));
+        record.directionId = static_cast<uint8_t>(labels.directionId);
+        record.phaseId = static_cast<uint8_t>(labels.phaseId);
+        record.speedBin = static_cast<uint8_t>(labels.speedBin);
+        record.startMarkerId = static_cast<uint8_t>(labels.startMarkerId);
+        record.mirrored = MazeMap::OpenFloorPrimitiveIsMirrored(labels.primitiveId) ? 1U : 0U;
+        record.repeatIndex = labels.repeatIndex;
+        record.progressNorm = labels.progressNorm;
+        record.modeFlags = cycle.driveTelemetry.modeFlags;
+        record.clippingFlags = cycle.clippingFlags;
+        record.saturationFlags = cycle.driveTelemetry.saturationFlags;
+        record.loggerFlags = OpenFloorLoggingV2::LoggerFlags(_sampleLog);
+        record.watchdogFlags = cycle.watchdogFlags;
+        record.measurementFlags = OpenFloorLoggingV2::MeasurementFlags(
+            labels,
+            cycle,
+            encoderValid,
+            imuValid,
+            frontLeftObs,
+            frontRightObs,
+            leftObs,
+            rightObs);
+        record.poseXMeters = pose.xMeters;
+        record.poseYMeters = pose.yMeters;
+        record.poseYawRad = pose.yawRad;
+        record.measuredLinearSpeedMps = cycle.measuredLinearSpeedMps;
+        record.measuredAngularSpeedRadps = cycle.measuredAngularSpeedRadps;
+        record.cmdLinearMps = drive.GetLastLinearCommandMps();
+        record.cmdAngularRadps = drive.GetLastAngularCommandRadps();
+        record.leftDriveCommand = cycle.driveTelemetry.leftDriveCommand;
+        record.rightDriveCommand = cycle.driveTelemetry.rightDriveCommand;
+        record.leftFeedforwardCommand = cycle.driveTelemetry.leftFeedforwardCommand;
+        record.rightFeedforwardCommand = cycle.driveTelemetry.rightFeedforwardCommand;
+        record.leftFeedbackCommand = cycle.driveTelemetry.leftFeedbackCommand;
+        record.rightFeedbackCommand = cycle.driveTelemetry.rightFeedbackCommand;
+        record.leftTargetVelocityMps = cycle.driveTelemetry.leftTargetVelocityMps;
+        record.rightTargetVelocityMps = cycle.driveTelemetry.rightTargetVelocityMps;
+        record.leftLaunchAssistFloor = cycle.driveTelemetry.leftLaunchAssistFloor;
+        record.rightLaunchAssistFloor = cycle.driveTelemetry.rightLaunchAssistFloor;
+        record.encoderTimestampUs = cycle.controlTiming.encoderReadDoneUs;
+        record.leftEncoderCount = cycle.driveTelemetry.leftEncoderCount;
+        record.rightEncoderCount = cycle.driveTelemetry.rightEncoderCount;
+        record.leftEncoderOmegaRadps = cycle.driveTelemetry.leftEncoderOmegaRadps;
+        record.rightEncoderOmegaRadps = cycle.driveTelemetry.rightEncoderOmegaRadps;
+        record.leftEncoderDistanceM = cycle.driveTelemetry.leftDistanceM;
+        record.rightEncoderDistanceM = cycle.driveTelemetry.rightDistanceM;
+        record.leftEncoderVelocityMps = cycle.driveTelemetry.leftVelocityMps;
+        record.rightEncoderVelocityMps = cycle.driveTelemetry.rightVelocityMps;
+        record.imuTimestampUs = cycle.sensorSnapshot.imuTiming.readDoneUs;
+        record.imuStatus = cycle.sensorSnapshot.imuBackLeft.status;
+        record.imuInterruptHigh = cycle.sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+        record.accelBiasValid = cycle.sensorSnapshot.accelBiasValid ? 1U : 0U;
+        record.imuGyroX = cycle.sensorSnapshot.imuBackLeft.gyroX;
+        record.imuGyroY = cycle.sensorSnapshot.imuBackLeft.gyroY;
+        record.imuGyroZ = cycle.sensorSnapshot.imuBackLeft.gyroZ;
+        record.imuAccelX = cycle.sensorSnapshot.imuBackLeft.accelX;
+        record.imuAccelY = cycle.sensorSnapshot.imuBackLeft.accelY;
+        record.imuAccelZ = cycle.sensorSnapshot.imuBackLeft.accelZ;
+        record.imuTemp = cycle.sensorSnapshot.imuBackLeft.temp;
+        record.gyroRawRadps = cycle.sensorSnapshot.gyroRawRadps;
+        record.gyroBiasRadps = cycle.sensorSnapshot.gyroBiasRadps;
+        record.gyroRadps = cycle.sensorSnapshot.gyroRadps;
+        record.accelBodyXMps2 = cycle.sensorSnapshot.accelBodyXMps2;
+        record.accelBodyYMps2 = cycle.sensorSnapshot.accelBodyYMps2;
+        record.planarAccelMps2 = cycle.planarAccelMps2;
+        record.frontTimestampUs = cycle.sensorSnapshot.frontTiming.observationReadyUs;
+        record.leftTimestampUs = cycle.sensorSnapshot.leftTiming.observationReadyUs;
+        record.rightTimestampUs = cycle.sensorSnapshot.rightTiming.observationReadyUs;
+        record.frontLeftObsClass = static_cast<uint8_t>(frontLeftObs.cls);
+        record.frontRightObsClass = static_cast<uint8_t>(frontRightObs.cls);
+        record.leftObsClass = static_cast<uint8_t>(leftObs.cls);
+        record.rightObsClass = static_cast<uint8_t>(rightObs.cls);
+        record.frontLeftObsRhoM = frontLeftObs.rho;
+        record.frontRightObsRhoM = frontRightObs.rho;
+        record.leftObsRhoM = leftObs.rho;
+        record.rightObsRhoM = rightObs.rho;
+        record.frontLeftObsConfidence = frontLeftObs.confidence;
+        record.frontRightObsConfidence = frontRightObs.confidence;
+        record.leftObsConfidence = leftObs.confidence;
+        record.rightObsConfidence = rightObs.confidence;
+        record.batteryVoltage = cycle.batteryVoltage;
+        record.boardTemperatureC = cycle.boardTemperatureC;
+        record.fanDutyCycle = cycle.fanDutyCycle;
+        return _sampleLog.AppendRecord(&record, record.header.rec_size);
+    }
+
+    bool LogFault(
+        const OpenFloorMeasurementLabels& labels,
+        const OpenFloorMeasurementCycle& cycle,
+        MazeMap::OpenFloorFaultCode faultCode,
+        bool controlHalted,
+        uint32_t extra0 = 0UL,
+        uint32_t extra1 = 0UL)
+    {
+        OpenFloorLoggingV2::FaultRecord record{};
+        OpenFloorLoggingV2::InitializeRecordHeader(record, OpenFloorLoggingV2::kFaultRecordType);
+        record.monoTimeUs = cycle.masterTimeUs;
+        record.controlTickSequence = cycle.controlTickSequence;
+        record.dtUs = cycle.dtUs;
+        record.sectionId = static_cast<uint8_t>(labels.sectionId);
+        record.primitiveId = static_cast<uint8_t>(labels.primitiveId);
+        record.primitiveFamily = static_cast<uint8_t>(MazeMap::OpenFloorPrimitiveFamilyForId(labels.primitiveId));
+        record.faultCode = static_cast<uint8_t>(faultCode);
+        record.directionId = static_cast<uint8_t>(labels.directionId);
+        record.phaseId = static_cast<uint8_t>(labels.phaseId);
+        record.speedBin = static_cast<uint8_t>(labels.speedBin);
+        record.startMarkerId = static_cast<uint8_t>(labels.startMarkerId);
+        record.repeatIndex = labels.repeatIndex;
+        record.mirrored = MazeMap::OpenFloorPrimitiveIsMirrored(labels.primitiveId) ? 1U : 0U;
+        record.controlHalted = controlHalted ? 1U : 0U;
+        record.measurementFlags =
+            (labels.abortMarker ? OpenFloorLoggingV2::kMeasurementFlagAbortMarker : 0U) |
+            (cycle.workspaceViolation ? OpenFloorLoggingV2::kMeasurementFlagWorkspaceViolation : 0U) |
+            (cycle.estimatorFault ? OpenFloorLoggingV2::kMeasurementFlagEstimatorFault : 0U);
+        record.extra0 = extra0;
+        record.extra1 = extra1;
+        return _sampleLog.AppendRecord(&record, record.header.rec_size);
+    }
+
+    bool BeginSection(const OpenFloorMeasurementLabels&)
+    {
+        return true;
+    }
+
+    bool EndSection(const OpenFloorMeasurementLabels&)
+    {
+        return true;
+    }
+
+    bool AbortSection(const OpenFloorMeasurementLabels&, const char*)
+    {
+        return true;
+    }
+
+    bool WriteEvent(const char*, const char*)
+    {
+        return true;
+    }
+
+    void Service()
+    {
+        (void)_sampleLog.Service(1U);
+    }
+
+    void Flush()
+    {
+        _sampleLog.Flush();
+    }
+
+    void Close()
+    {
+        _sampleLog.Close();
+    }
+
+private:
+    MazeMapApp::Internal::Runtime::RuntimeTypedBinaryLogFile _sampleLog;
+    MazeMapApp::Internal::Runtime::RuntimeTextBlockBuilder<2048U> _metadata;
+    MazeMapApp::Internal::Runtime::RuntimeTextBlockBuilder<512U> _notes;
+};
+
 class OpenFloorRunManifestWriter
 {
 public:
-    bool WriteManifest(const char* runId, bool pinsLatchedAtBoot)
+    bool WriteManifest(const char* runId, bool pinsLatchedAtBoot, float batteryVoltageStart, float fanDutyCycleStart)
     {
         MazeMap::CoreFileExport file;
-        if (!file.Open("run_manifest.json"))
+        if (!file.Open(MazeMap::kOpenFloorManifestFileName))
         {
             return false;
         }
 
         const char* safeRunId = (runId != nullptr) ? runId : "";
         if (!file.Write("{\n")) return false;
-        if (!WriteJsonString(file, "build_id", __DATE__ " " __TIME__, true)) return false;
+        if (!WriteJsonString(file, "format_version", MazeMap::kOpenFloorFormatVersion, true)) return false;
         if (!WriteJsonString(file, "run_id", safeRunId, true)) return false;
+        if (!WriteJsonString(file, "firmware_revision", __DATE__ " " __TIME__, true)) return false;
         if (!WriteJsonString(file, "boot_reason", "pins_27_28_shorted_at_boot", true)) return false;
-        if (!WriteJsonString(file, "selected_routine", "open_floor_measurement", true)) return false;
+        if (!WriteJsonString(file, "selected_routine", MazeMap::kOpenFloorSelectedRoutineName, true)) return false;
+        if (!WriteJsonString(file, "primitive_schedule_revision", MazeMap::kOpenFloorPrimitiveScheduleRevision, true)) return false;
+        if (!WriteJsonString(file, "phase_binning_revision", MazeMap::kOpenFloorPhaseBinningRevision, true)) return false;
+        if (!WriteJsonString(file, "active_imu_id", MazeMap::kOpenFloorActiveImuId, true)) return false;
+        if (!WriteJsonString(file, "imu_extrinsics_revision", MazeMap::kOpenFloorImuExtrinsicsRevision, true)) return false;
+        if (!WriteJsonString(file, "start_marker_definitions_revision", MazeMap::kOpenFloorStartMarkerDefinitionsRevision, true)) return false;
+        if (!WriteJsonString(file, "logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision, true)) return false;
         if (!WriteJsonBool(file, "pins_27_28_shorted_at_boot", pinsLatchedAtBoot, true)) return false;
+        if (!WriteJsonFloat(file, "battery_voltage_start", batteryVoltageStart, true)) return false;
+        if (!WriteJsonFanState(file, fanDutyCycleStart, true)) return false;
         if (!WriteJsonStringArray(
                 file,
                 "files_written",
-                { "run_manifest.json", "timing_boot.mmlog", "timing_boot.events.txt", "open_floor_main.mmlog", "open_floor_main.events.txt" },
+                { MazeMap::kOpenFloorManifestFileName, MazeMap::kOpenFloorTimingFileName, MazeMap::kOpenFloorMainFileName },
                 true)) return false;
         if (!WriteJsonActiveConstants(file, true)) return false;
         if (!WriteJsonWorkspaceDefinition(file, true)) return false;
@@ -1030,6 +1614,19 @@ public:
     }
 
 private:
+    static bool WriteJsonFanState(MazeMap::CoreFileExport& file, float fanDutyCycle, bool trailingComma)
+    {
+        char line[160] = {};
+        const int length = snprintf(
+            line,
+            sizeof(line),
+            "  \"fan_state_start\": {\"enabled\": %s, \"duty_cycle\": %.3f}%s\n",
+            fanDutyCycle > 0.0f ? "true" : "false",
+            fanDutyCycle,
+            trailingComma ? "," : "");
+        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
+    }
+
     static bool WriteJsonString(MazeMap::CoreFileExport& file, const char* key, const char* value, bool trailingComma)
     {
         char line[256] = {};

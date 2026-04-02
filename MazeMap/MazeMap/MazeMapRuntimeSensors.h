@@ -422,20 +422,23 @@ private:
 
     void CaptureInertialSnapshot(bool stationary, SensorSnapshot& snapshot)
     {
+        const MazeMap::ImuExtrinsics imuExtrinsics = MazeMap::Vehicle::GetBackLeftImuExtrinsics();
 #if defined(ARDUINO_TEENSY41)
         const MazeMap::Vehicle::ImuBackLeft::Axes accel = _vehicle.IMU_BL.ReadAccel();
-        const float accelXG = _vehicle.IMU_BL.AccelRawToG(accel.x);
-        const float accelYG = _vehicle.IMU_BL.AccelRawToG(accel.y);
+        const Eigen::Vector2f accelImuG(
+            _vehicle.IMU_BL.AccelRawToG(accel.x),
+            _vehicle.IMU_BL.AccelRawToG(accel.y));
+        const Eigen::Vector2f accelBodyG = imuExtrinsics.accelBodyFromImu * accelImuG;
         snapshot.accelBiasValid = _accelBiasInitialized;
         if (_accelBiasInitialized && stationary)
         {
-            _accelBiasXG = (0.998f * _accelBiasXG) + (0.002f * accelXG);
-            _accelBiasYG = (0.998f * _accelBiasYG) + (0.002f * accelYG);
+            _accelBiasXG = (0.998f * _accelBiasXG) + (0.002f * accelBodyG.x());
+            _accelBiasYG = (0.998f * _accelBiasYG) + (0.002f * accelBodyG.y());
         }
         if (_accelBiasInitialized)
         {
-            const float accelDeltaXG = accelXG - _accelBiasXG;
-            const float accelDeltaYG = accelYG - _accelBiasYG;
+            const float accelDeltaXG = accelBodyG.x() - _accelBiasXG;
+            const float accelDeltaYG = accelBodyG.y() - _accelBiasYG;
             snapshot.accelBodyXMps2 = kStandardGravityMps2 * accelDeltaXG;
             snapshot.accelBodyYMps2 = kStandardGravityMps2 * accelDeltaYG;
             snapshot.planarAccelMps2 =
@@ -454,12 +457,14 @@ private:
         snapshot.accelBiasValid = false;
 #endif
 
-        const float rawGyroRadps = ReadGyroZRadpsRaw();
+        const float rawGyroRadps = imuExtrinsics.gyroZSign * ReadGyroZRadpsRaw();
         if (stationary &&
             MazeMap::ShouldUpdateGyroBiasFromStationarySample(rawGyroRadps, Config::kGyroBiasUpdateMaxAbsRateRadps))
         {
             _gyroBiasRadps = (0.995f * _gyroBiasRadps) + (0.005f * rawGyroRadps);
         }
+        snapshot.gyroRawRadps = rawGyroRadps;
+        snapshot.gyroBiasRadps = _gyroBiasRadps;
         snapshot.gyroRadps = rawGyroRadps - _gyroBiasRadps;
     }
 
@@ -1047,8 +1052,13 @@ public:
         {
             return 0.0f;
         }
-        const float accelXG = _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelX) - _accelBiasXG;
-        const float accelYG = _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelY) - _accelBiasYG;
+        const MazeMap::ImuExtrinsics imuExtrinsics = MazeMap::Vehicle::GetBackLeftImuExtrinsics();
+        const Eigen::Vector2f accelImuG(
+            _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelX),
+            _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelY));
+        const Eigen::Vector2f accelBodyG = imuExtrinsics.accelBodyFromImu * accelImuG;
+        const float accelXG = accelBodyG.x() - _accelBiasXG;
+        const float accelYG = accelBodyG.y() - _accelBiasYG;
         return kStandardGravityMps2 * std::sqrt((accelXG * accelXG) + (accelYG * accelYG));
     }
 
@@ -1068,21 +1078,26 @@ private:
 
     void CaptureInertialSnapshot(bool stationary, DiagnosticSensorSnapshot& snapshot)
     {
+        const MazeMap::ImuExtrinsics imuExtrinsics = MazeMap::Vehicle::GetBackLeftImuExtrinsics();
         snapshot.imuFrontRight = {};
         snapshot.imuBackLeft = CaptureImu(_vehicle.IMU_BL, Pins::IMU_INT_1B, &snapshot.imuTiming);
-        const float blGyroZRadps = _vehicle.IMU_BL.GyroRawToDps(snapshot.imuBackLeft.gyroZ) * DEG_TO_RAD_F;
-        const float accelXG = _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelX);
-        const float accelYG = _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelY);
+        const float blGyroZRadps =
+            imuExtrinsics.gyroZSign *
+            (_vehicle.IMU_BL.GyroRawToDps(snapshot.imuBackLeft.gyroZ) * DEG_TO_RAD_F);
+        const Eigen::Vector2f accelImuG(
+            _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelX),
+            _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelY));
+        const Eigen::Vector2f accelBodyG = imuExtrinsics.accelBodyFromImu * accelImuG;
         snapshot.accelBiasValid = _accelBiasInitialized;
         if (_accelBiasInitialized && stationary)
         {
-            _accelBiasXG = (0.998f * _accelBiasXG) + (0.002f * accelXG);
-            _accelBiasYG = (0.998f * _accelBiasYG) + (0.002f * accelYG);
+            _accelBiasXG = (0.998f * _accelBiasXG) + (0.002f * accelBodyG.x());
+            _accelBiasYG = (0.998f * _accelBiasYG) + (0.002f * accelBodyG.y());
         }
         if (_accelBiasInitialized)
         {
-            snapshot.accelBodyXMps2 = kStandardGravityMps2 * (accelXG - _accelBiasXG);
-            snapshot.accelBodyYMps2 = kStandardGravityMps2 * (accelYG - _accelBiasYG);
+            snapshot.accelBodyXMps2 = kStandardGravityMps2 * (accelBodyG.x() - _accelBiasXG);
+            snapshot.accelBodyYMps2 = kStandardGravityMps2 * (accelBodyG.y() - _accelBiasYG);
         }
         else
         {

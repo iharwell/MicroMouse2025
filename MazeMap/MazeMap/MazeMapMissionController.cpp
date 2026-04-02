@@ -669,8 +669,8 @@ private:
     float SearchUnmappedCruiseSpeedMps() const
     {
         const float frontSensorForwardOffsetM = (std::min)(
-            _speedVehicle.FrontLeft.GetPosition().GetX(),
-            _speedVehicle.FrontRight.GetPosition().GetX());
+            _speedVehicle.FrontLeft.GetPosition().x(),
+            _speedVehicle.FrontRight.GetPosition().x());
         float frontWallOnThresholdM = Config::kFrontWallOnThresholdM;
         float frontWallOffThresholdM = Config::kFrontWallOffThresholdM;
         gWallDistanceCalibration.TryComputeFrontWallDistanceThresholds(
@@ -1961,8 +1961,8 @@ private:
         const MotionLimits touchLimits = StartupWallCalibrationLimits();
         const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
         char phaseName[48] = {};
-        const MazeMap::Vectorf<2> northHeading = DirectionToUnitVector(MazeMap::Up);
-        const MazeMap::Vectorf<2> southHeading = DirectionToUnitVector(MazeMap::Down);
+        const Eigen::Vector2f northHeading = DirectionToUnitVector(MazeMap::Up);
+        const Eigen::Vector2f southHeading = DirectionToUnitVector(MazeMap::Down);
         const float farCellCenterYM = (0.5f * Config::kCellSizeM) + outDistanceM;
         const float corridorSpanYM =
             Config::kCellSizeM *
@@ -1971,8 +1971,8 @@ private:
             corridorSpanYM,
             Config::kMazeWallThicknessM,
             Config::kWallTouchContactStandoffM);
-        const MazeMap::Vectorf<2> farCellCenter(0.5f * Config::kCellSizeM, farCellCenterYM);
-        const MazeMap::Vectorf<2> startCellCenter(0.5f * Config::kCellSizeM, 0.5f * Config::kCellSizeM);
+        const Eigen::Vector2f farCellCenter(0.5f * Config::kCellSizeM, farCellCenterYM);
+        const Eigen::Vector2f startCellCenter(0.5f * Config::kCellSizeM, 0.5f * Config::kCellSizeM);
 
         snprintf(phaseName, sizeof(phaseName), "corridor_%u_start", static_cast<unsigned>(speedIndex));
         if (!HoldPosition(AuxMeasurementConfig::kCorridorRepeatabilityStartSettleMs, phaseName))
@@ -2101,10 +2101,10 @@ private:
         const MotionLimits limits = PositionAccuracyAuditStraightLimits(cruiseSpeedMps);
         const MotionLimits turnLimits = PositionAccuracyAuditTurnLimits();
         const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
-        const MazeMap::Vectorf<2> northHeading = DirectionToUnitVector(MazeMap::Up);
-        const MazeMap::Vectorf<2> southHeading = DirectionToUnitVector(MazeMap::Down);
-        const MazeMap::Vectorf<2> farCellCenter(0.5f * Config::kCellSizeM, geometry.farCellCenterYM);
-        const MazeMap::Vectorf<2> startCellCenter(0.5f * Config::kCellSizeM, 0.5f * Config::kCellSizeM);
+        const Eigen::Vector2f northHeading = DirectionToUnitVector(MazeMap::Up);
+        const Eigen::Vector2f southHeading = DirectionToUnitVector(MazeMap::Down);
+        const Eigen::Vector2f farCellCenter(0.5f * Config::kCellSizeM, geometry.farCellCenterYM);
+        const Eigen::Vector2f startCellCenter(0.5f * Config::kCellSizeM, 0.5f * Config::kCellSizeM);
         char phaseName[64] = {};
 
         snprintf(phaseName, sizeof(phaseName), "position_straight_%u_start", static_cast<unsigned>(speedIndex));
@@ -2341,13 +2341,13 @@ private:
         float finalTargetXM = 0.0f;
         float finalTargetYM = 0.0f;
         finalLocation.GetLocation().GetPhysicalLocation(Config::kCellSizeM, finalTargetXM, finalTargetYM);
-        const MazeMap::Vectorf<2> northHeading = DirectionToUnitVector(MazeMap::Up);
-        const MazeMap::Vectorf<2> finalHeading = DirectionToUnitVector(finalLocation.GetDirection());
+        const Eigen::Vector2f northHeading = DirectionToUnitVector(MazeMap::Up);
+        const Eigen::Vector2f finalHeading = DirectionToUnitVector(finalLocation.GetDirection());
         float launchXM = 0.0f;
         float launchYM = 0.0f;
         launchLocation.GetLocation().GetPhysicalLocation(Config::kCellSizeM, launchXM, launchYM);
-        const MazeMap::Vectorf<2> launchPosition(launchXM, launchYM);
-        const MazeMap::Vectorf<2> finalPosition(finalTargetXM, finalTargetYM);
+        const Eigen::Vector2f launchPosition(launchXM, launchYM);
+        const Eigen::Vector2f finalPosition(finalTargetXM, finalTargetYM);
         const float launchDistanceM = launchYM - (0.5f * Config::kCellSizeM);
         const float maneuverDistanceM = ManeuverDistanceMeters(code);
         const float maneuverAngleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
@@ -2661,7 +2661,7 @@ private:
         }
 
         const PoseEstimate& startPose = _drive.GetPose();
-        const float headingX = startPose.headingUnit.GetX();
+        const float headingX = startPose.headingUnit.x();
         if (std::fabs(headingX) < 0.5f)
         {
             return Fail("Startup calibration x reposition requires east-west heading");
@@ -2669,8 +2669,8 @@ private:
 
         const float deltaXMeters = targetXMeters - startPose.xMeters;
         const float signedTravelMeters = deltaXMeters / headingX;
-        const MazeMap::Vectorf<2> targetHeading = startPose.headingUnit;
-        const MazeMap::Vectorf<2> targetPosition(targetXMeters, startPose.yMeters);
+        const Eigen::Vector2f targetHeading = startPose.headingUnit;
+        const Eigen::Vector2f targetPosition(targetXMeters, startPose.yMeters);
         AppendStartupCalibrationMoveTrace("x", startPose.xMeters, targetXMeters, signedTravelMeters);
         if (signedTravelMeters > Config::kDistanceToleranceM)
         {
@@ -2704,7 +2704,7 @@ private:
         }
 
         const PoseEstimate& startPose = _drive.GetPose();
-        const float headingY = startPose.headingUnit.GetY();
+        const float headingY = startPose.headingUnit.y();
         if (std::fabs(headingY) < 0.5f)
         {
             return Fail("Startup calibration y reposition requires north-south heading");
@@ -2712,8 +2712,8 @@ private:
 
         const float deltaYMeters = targetYMeters - startPose.yMeters;
         const float signedTravelMeters = deltaYMeters / headingY;
-        const MazeMap::Vectorf<2> targetHeading = startPose.headingUnit;
-        const MazeMap::Vectorf<2> targetPosition(startPose.xMeters, targetYMeters);
+        const Eigen::Vector2f targetHeading = startPose.headingUnit;
+        const Eigen::Vector2f targetPosition(startPose.xMeters, targetYMeters);
         AppendStartupCalibrationMoveTrace("y", startPose.yMeters, targetYMeters, signedTravelMeters);
         if (signedTravelMeters > Config::kDistanceToleranceM)
         {
@@ -2775,7 +2775,7 @@ private:
         }
 
         const PoseEstimate& pose = _drive.GetPose();
-        const float headingX = pose.headingUnit.GetX();
+        const float headingX = pose.headingUnit.x();
         if (std::fabs(headingX) < 0.5f)
         {
             return true;
@@ -4729,8 +4729,8 @@ private:
     bool ExecuteReverseStraightProfile(
         float distanceM,
         const MotionLimits& limits,
-        const MazeMap::Vectorf<2>* targetHeadingOverride = nullptr,
-        const MazeMap::Vectorf<2>* targetPositionOverride = nullptr)
+        const Eigen::Vector2f* targetHeadingOverride = nullptr,
+        const Eigen::Vector2f* targetPositionOverride = nullptr)
     {
         if (!(std::isfinite(distanceM) && distanceM > 0.0f))
         {
@@ -4738,7 +4738,7 @@ private:
         }
 
         const float startDistanceM = _drive.GetAverageDistanceMeters();
-        const MazeMap::Vectorf<2> targetHeading =
+        const Eigen::Vector2f targetHeading =
             (targetHeadingOverride != nullptr) ?
             *targetHeadingOverride :
             _drive.GetPose().headingUnit;
@@ -4765,10 +4765,10 @@ private:
                 if (!MazeMap::TryComputeProjectedDistanceToTargetM(
                     pose.xMeters,
                     pose.yMeters,
-                    targetPositionOverride->GetX(),
-                    targetPositionOverride->GetY(),
-                    -targetHeading.GetX(),
-                    -targetHeading.GetY(),
+                    targetPositionOverride->x(),
+                    targetPositionOverride->y(),
+                    -targetHeading.x(),
+                    -targetHeading.y(),
                     projectedRemainingM))
                 {
                     if (!projectionFallbackLogged)
@@ -5534,7 +5534,7 @@ private:
             destination = destination >> direction;
         }
 
-        const MazeMap::Vectorf<2> targetHeading = DirectionToUnitVector(direction);
+        const Eigen::Vector2f targetHeading = DirectionToUnitVector(direction);
         float targetXMeters = 0.0f;
         float targetYMeters = 0.0f;
         MazeMap::MazeLocation::CellCenter(destination).GetPhysicalLocation(Config::kCellSizeM, targetXMeters, targetYMeters);
@@ -5546,8 +5546,8 @@ private:
             startPose.yMeters,
             targetXMeters,
             targetYMeters,
-            targetHeading.GetX(),
-            targetHeading.GetY(),
+            targetHeading.x(),
+            targetHeading.y(),
             distanceToTargetM))
         {
             return Fail("Search straight target distance is invalid");
@@ -5558,7 +5558,7 @@ private:
         }
 
         const float sideSensorForwardOffsetM =
-            (std::max)(_speedVehicle.SideLeft.GetPosition().GetX(), _speedVehicle.SideRight.GetPosition().GetX());
+            (std::max)(_speedVehicle.SideLeft.GetPosition().x(), _speedVehicle.SideRight.GetPosition().x());
         uint16_t rollingObservationCount = 0U;
         MazeMap::CellCoordinates nextRollingObservationCell = startCell;
         float rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount] = {};
@@ -5629,8 +5629,8 @@ private:
                         startPose.yMeters,
                         targetObservationXMeters,
                         targetObservationYMeters,
-                        targetHeading.GetX(),
-                        targetHeading.GetY(),
+                        targetHeading.x(),
+                        targetHeading.y(),
                         triggerTravelM))
                 {
                     return Fail("Search straight rolling observation sample trigger is invalid");
@@ -5672,8 +5672,8 @@ private:
                     startPose.yMeters,
                     targetResetXMeters,
                     targetResetYMeters,
-                    targetHeading.GetX(),
-                    targetHeading.GetY(),
+                    targetHeading.x(),
+                    targetHeading.y(),
                     resetTriggerTravelM))
             {
                 return Fail("Search straight side reset trigger is invalid");
@@ -5860,8 +5860,8 @@ private:
                     livePose.yMeters,
                     targetXMeters,
                     targetYMeters,
-                    targetHeading.GetX(),
-                    targetHeading.GetY(),
+                    targetHeading.x(),
+                    targetHeading.y(),
                     projectedRemainingM))
             {
                 return Fail("Search straight target projection is invalid");
@@ -6138,15 +6138,15 @@ private:
             return false;
         }
 
-        const MazeMap::Vectorf<2> worldOffset = RotateBodyVectorToWorld(pose, sensor.GetPosition());
-        const float sensorXM = pose.xMeters + worldOffset.GetX();
-        const float sensorYM = pose.yMeters + worldOffset.GetY();
-        const MazeMap::Vectorf<2> sensorFacing = SensorWorldFacing(pose, sensor);
+        const Eigen::Vector2f worldOffset = RotateBodyVectorToWorld(pose, sensor.GetPosition());
+        const float sensorXM = pose.xMeters + worldOffset.x();
+        const float sensorYM = pose.yMeters + worldOffset.y();
+        const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
 
         int cellX = -1;
         int cellY = -1;
         MazeMap::Direction wallDirection = MazeMap::None;
-        if (std::fabs(sensorFacing.GetX()) >= std::fabs(sensorFacing.GetY()))
+        if (std::fabs(sensorFacing.x()) >= std::fabs(sensorFacing.y()))
         {
             if (!std::isfinite(sensorXM) || !std::isfinite(alongWallCoordinateM))
             {
@@ -6155,7 +6155,7 @@ private:
 
             cellX = static_cast<int>(std::floor(sensorXM / Config::kCellSizeM));
             cellY = static_cast<int>(std::floor(alongWallCoordinateM / Config::kCellSizeM));
-            wallDirection = (sensorFacing.GetX() >= 0.0f) ? MazeMap::Right : MazeMap::Left;
+            wallDirection = (sensorFacing.x() >= 0.0f) ? MazeMap::Right : MazeMap::Left;
         }
         else
         {
@@ -6166,7 +6166,7 @@ private:
 
             cellX = static_cast<int>(std::floor(alongWallCoordinateM / Config::kCellSizeM));
             cellY = static_cast<int>(std::floor(sensorYM / Config::kCellSizeM));
-            wallDirection = (sensorFacing.GetY() >= 0.0f) ? MazeMap::Up : MazeMap::Down;
+            wallDirection = (sensorFacing.y() >= 0.0f) ? MazeMap::Up : MazeMap::Down;
         }
 
         if (cellX < 0 || cellY < 0 ||
@@ -6293,8 +6293,8 @@ private:
 
         const float errorXM = correctsXAxis ? (corridorCoordinateM - centerXM) : 0.0f;
         const float errorYM = correctsXAxis ? 0.0f : (corridorCoordinateM - centerYM);
-        const MazeMap::Vectorf<2> heading = DirectionToUnitVector(_currentDirection);
-        corridorErrorM = (heading.GetY() * errorXM) - (heading.GetX() * errorYM);
+        const Eigen::Vector2f heading = DirectionToUnitVector(_currentDirection);
+        corridorErrorM = (heading.y() * errorXM) - (heading.x() * errorYM);
         return std::isfinite(corridorErrorM);
     }
 
@@ -6576,11 +6576,11 @@ private:
         float exitSpeed,
         const MotionLimits& limits,
         bool useWallCentering,
-        const MazeMap::Vectorf<2>* targetHeadingOverride = nullptr,
-        const MazeMap::Vectorf<2>* targetPositionOverride = nullptr)
+        const Eigen::Vector2f* targetHeadingOverride = nullptr,
+        const Eigen::Vector2f* targetPositionOverride = nullptr)
     {
         const float startDistanceM = _drive.GetAverageDistanceMeters();
-        const MazeMap::Vectorf<2> targetHeading =
+        const Eigen::Vector2f targetHeading =
             (targetHeadingOverride != nullptr) ?
             *targetHeadingOverride :
             _drive.GetPose().headingUnit;
@@ -6613,10 +6613,10 @@ private:
                 if (!MazeMap::TryComputeProjectedDistanceToTargetM(
                     pose.xMeters,
                     pose.yMeters,
-                    targetPositionOverride->GetX(),
-                    targetPositionOverride->GetY(),
-                    targetHeading.GetX(),
-                    targetHeading.GetY(),
+                    targetPositionOverride->x(),
+                    targetPositionOverride->y(),
+                    targetHeading.x(),
+                    targetHeading.y(),
                     projectedRemainingM))
                 {
                     return Fail("Straight target projection is invalid");
@@ -7133,3 +7133,5 @@ namespace MazeMapApp::Internal
         return mission;
     }
 }
+
+

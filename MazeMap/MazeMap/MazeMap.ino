@@ -1,3 +1,4 @@
+#include <Eigen.h>
 #include "MazeMapApplication.h"
 
 namespace

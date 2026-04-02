@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Defines.h"
-#include "MazeMapEigen.h"
+#include "EigenCompat.h"
 
 #include <cmath>
 #include <limits>
@@ -347,12 +347,21 @@ namespace MazeMap
                 predictedSigma.col(column) = normalizedSigma;
             }
 
-            StateVec predictedMean = meanWeight0 * predictedSigma.col(0);
+            StateVec predictedMean = predictedSigma.col(0);
+            StateVec meanDelta = StateVec::Zero();
+            {
+                StateVec centralDelta = predictedSigma.col(0) - predictedSigma.col(0);
+                normalizeState(centralDelta);
+                meanDelta += meanWeight0 * centralDelta;
+            }
             for (int column = 1; column < kSigmaCount; ++column)
             {
                 loopHook();
-                predictedMean += meanWeightOuter * predictedSigma.col(column);
+                StateVec delta = predictedSigma.col(column) - predictedSigma.col(0);
+                normalizeState(delta);
+                meanDelta += meanWeightOuter * delta;
             }
+            predictedMean += meanDelta;
             normalizeState(predictedMean);
 
             Eigen::Matrix<float, NState, (2 * NState) + NState> stacked;

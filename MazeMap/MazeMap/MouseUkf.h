@@ -11,6 +11,7 @@
 #include "WallSensor.h"
 #include "WallSensorCalibration.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -30,12 +31,6 @@ namespace MazeMap
         float vy = 0.0f;
     };
 
-    struct HeadingUnitVector
-    {
-        float x = 1.0f;
-        float y = 0.0f;
-    };
-
     struct WheelKinematics
     {
         float leftBankLongitudinalVelocityMps = 0.0f;
@@ -47,10 +42,7 @@ namespace MazeMap
     {
         float kappaLeft = 0.0f;
         float kappaRight = 0.0f;
-        std::array<float, 4> alpha{};
-        float tauKappaLeftS = 0.0f;
-        float tauKappaRightS = 0.0f;
-        std::array<float, 4> tauAlphaS{};
+        std::array<float, 4> lateralRatio{};
     };
 
     struct ContactForce
@@ -102,6 +94,8 @@ namespace MazeMap
         ContactForces contactForces{};
         WheelKinematics wheelKinematics{};
         SlipTargets slipTargets{};
+        Eigen::Vector2f originAccelBodyMps2 = Eigen::Vector2f::Zero();
+        Eigen::Vector2f imuAccelBodyMps2 = Eigen::Vector2f::Zero();
         float longitudinalAccelMps2 = 0.0f;
         float lateralAccelMps2 = 0.0f;
         float yawAccelRadps2 = 0.0f;
@@ -110,9 +104,10 @@ namespace MazeMap
     struct PlantParams
     {
         float massKg = 0.14f;
+        float effectiveLongitudinalMassKg = 0.14f;
         float yawInertiaKgM2 = 0.000665f;
         float trackWidthM = 0.084635f;
-        float wheelBaseM = 0.08328f;
+        float contactPatchLongitudinalOffsetM = 0.015f;
         float wheelRadiusM = 0.01261f;
         float equivalentWheelInertiaKgM2 = 4.8e-5f;
 
@@ -121,6 +116,7 @@ namespace MazeMap
         float torqueConstantNmPerA = 0.00396f;
         float speedConstantRadpsPerVolt = 0.0f;
         float noLoadCurrentA = 0.0459f;
+        float motorCurrentLimitA = 0.0f;
         float gearRatio = 56.0f / 17.0f;
         uint16_t encoderCountsPerMotorRev = 4096U;
 
@@ -133,10 +129,7 @@ namespace MazeMap
         float corneringStiffnessRearNPerRad = 16.0f;
         float muFront = 1.65f;
         float muRear = 1.65f;
-
-        float relaxationLengthKappaM = 0.014f;
-        float relaxationLengthAlphaFrontM = 0.018f;
-        float relaxationLengthAlphaRearM = 0.018f;
+        float frontLoadFraction = 0.5f;
 
         float velocityEpsilonMps = 0.05f;
         float forceEpsilonN = 1.0e-4f;
@@ -147,12 +140,18 @@ namespace MazeMap
         float mazeWallThicknessM = WALL_THICKNESS;
         float noHitRangeM = 0.30f;
         float postHalfWidthM = 0.5f * WALL_THICKNESS;
-        std::array<Vectorf<2>, 4> contactPositionsBodyM{};
+        std::array<Eigen::Vector2f, 4> contactPositionsBodyM = {
+            Eigen::Vector2f::Zero(),
+            Eigen::Vector2f::Zero(),
+            Eigen::Vector2f::Zero(),
+            Eigen::Vector2f::Zero()
+        };
 
         SensorExtrinsics frontLeftSensor{};
         SensorExtrinsics frontRightSensor{};
         SensorExtrinsics sideLeftSensor{};
         SensorExtrinsics sideRightSensor{};
+        ImuExtrinsics imu{};
 
         static PlantParams Default() noexcept
         {
@@ -160,10 +159,10 @@ namespace MazeMap
             const VehiclePhysicalModel& physicalModel = Vehicle::GetPhysicalModel();
             const MotorEncoderDrivePhysicalModel& driveModel = MotorEncoderDrive::GetSharedPhysicalModel();
             params.massKg = physicalModel.massKg;
+            params.effectiveLongitudinalMassKg = physicalModel.massKg;
             params.yawInertiaKgM2 = physicalModel.yawInertiaKgM2;
             params.trackWidthM = physicalModel.trackWidthM;
             params.wheelRadiusM = 0.5f * driveModel.wheelDiameterM;
-            params.wheelBaseM = physicalModel.lengthM - driveModel.wheelDiameterM;
             params.supplyVoltageV = driveModel.supplyVoltageV;
             params.driveResistanceOhms = driveModel.resistanceOhms;
             params.torqueConstantNmPerA = driveModel.torqueConstantNmPerA;
@@ -171,47 +170,46 @@ namespace MazeMap
             params.noLoadCurrentA = driveModel.noLoadCurrentA;
             params.gearRatio = driveModel.gearRatio;
             params.encoderCountsPerMotorRev = driveModel.pulsesPerRev;
+            params.motorCurrentLimitA =
+                (params.driveResistanceOhms > 0.0f) ?
+                (params.supplyVoltageV / params.driveResistanceOhms) :
+                0.0f;
 
-            params.frontLeftSensor = {
-                Vectorf<2>(0.04223f, 0.03465f),
-                Vectorf<2>(0.99452f, 0.10453f),
-                0.0f
-            };
-            params.frontRightSensor = {
-                Vectorf<2>(0.04223f, -0.03459f),
-                Vectorf<2>(0.99452f, -0.10453f),
-                0.0f
-            };
-            params.sideLeftSensor = {
-                Vectorf<2>(0.05026f, 0.02918f),
-                Vectorf<2>(0.0f, 1.0f),
-                0.0f
-            };
-            params.sideRightSensor = {
-                Vectorf<2>(0.05026f, -0.02772f),
-                Vectorf<2>(0.0f, -1.0f),
-                0.0f
-            };
-            const float halfWheelBaseM = 0.5f * params.wheelBaseM;
+            params.frontLeftSensor = Vehicle::GetFrontLeftSensorExtrinsics();
+            params.frontRightSensor = Vehicle::GetFrontRightSensorExtrinsics();
+            params.sideLeftSensor = Vehicle::GetSideLeftSensorExtrinsics();
+            params.sideRightSensor = Vehicle::GetSideRightSensorExtrinsics();
+            params.imu = Vehicle::GetBackLeftImuExtrinsics();
+
+            const float frontContactX = std::fabs(params.contactPatchLongitudinalOffsetM);
             const float halfTrackWidthM = 0.5f * params.trackWidthM;
-            params.contactPositionsBodyM[0] = Vectorf<2>(halfWheelBaseM, halfTrackWidthM);
-            params.contactPositionsBodyM[1] = Vectorf<2>(halfWheelBaseM, -halfTrackWidthM);
-            params.contactPositionsBodyM[2] = Vectorf<2>(-halfWheelBaseM, halfTrackWidthM);
-            params.contactPositionsBodyM[3] = Vectorf<2>(-halfWheelBaseM, -halfTrackWidthM);
+            params.contactPositionsBodyM[0] = Eigen::Vector2f(frontContactX, halfTrackWidthM);
+            params.contactPositionsBodyM[1] = Eigen::Vector2f(frontContactX, -halfTrackWidthM);
+            params.contactPositionsBodyM[2] = Eigen::Vector2f(-frontContactX, halfTrackWidthM);
+            params.contactPositionsBodyM[3] = Eigen::Vector2f(-frontContactX, -halfTrackWidthM);
             return params;
         }
 
-        Vectorf<2> ContactPosition(uint8_t index) const noexcept
+        Eigen::Vector2f ContactPosition(uint8_t index) const noexcept
         {
             return contactPositionsBodyM[(index < contactPositionsBodyM.size()) ? index : (contactPositionsBodyM.size() - 1U)];
         }
 
-        float StaticWheelLoadN(float fanDutyCycle) const noexcept
+        float TotalNormalLoadN(float fanDutyCycle) const noexcept
         {
-            const float totalNormalForceN =
+            return
                 (massKg * gravityMps2) +
                 ((std::max)(0.0f, fanDutyCycle) * fanDownforceAtFullDutyN);
-            return 0.25f * totalNormalForceN;
+        }
+
+        float FrontWheelLoadN(float fanDutyCycle) const noexcept
+        {
+            return 0.5f * frontLoadFraction * TotalNormalLoadN(fanDutyCycle);
+        }
+
+        float RearWheelLoadN(float fanDutyCycle) const noexcept
+        {
+            return 0.5f * (1.0f - frontLoadFraction) * TotalNormalLoadN(fanDutyCycle);
         }
     };
 
@@ -385,7 +383,7 @@ namespace MazeMap
         bool hit = false;
         GeometryHitType type = GeometryHitType::None;
         float rangeM = 0.0f;
-        Vectorf<2> pointWorldM{};
+        Eigen::Vector2f pointWorldM = Eigen::Vector2f::Zero();
         CellCoordinates cell{};
         Direction edge = Direction::None;
         uint8_t postGridX = 0U;
@@ -428,29 +426,28 @@ namespace MazeMap
         GeometryPrediction rightPrediction{};
     };
 
-    inline HeadingUnitVector HeadingUnitFromYaw(float yaw) noexcept
+    inline Eigen::Vector2f HeadingUnitFromYaw(float yaw) noexcept
     {
-        HeadingUnitVector heading{};
-        heading.x = cosf(yaw);
-        heading.y = sinf(yaw);
-        return heading;
+        return Eigen::Vector2f(cosf(yaw), sinf(yaw));
     }
 
-    inline Vectorf<2> RotateBodyVectorToWorld(const Vectorf<2>& vectorBody, const HeadingUnitVector& heading) noexcept
+    inline Eigen::Vector2f RotateBodyVectorToWorld(
+        const Eigen::Vector2f& vectorBody,
+        const Eigen::Vector2f& heading) noexcept
     {
-        return Vectorf<2>(
-            (heading.x * vectorBody.GetX()) - (heading.y * vectorBody.GetY()),
-            (heading.y * vectorBody.GetX()) + (heading.x * vectorBody.GetY()));
+        return Eigen::Vector2f(
+            (heading.x() * vectorBody.x()) - (heading.y() * vectorBody.y()),
+            (heading.y() * vectorBody.x()) + (heading.x() * vectorBody.y()));
     }
 
-    inline Vectorf<2> ResolveSensorDirectionBody(const SensorExtrinsics& sensor) noexcept
+    inline Eigen::Vector2f ResolveSensorDirectionBody(const SensorExtrinsics& sensor) noexcept
     {
         if (std::fabs(sensor.yawOffsetRad) <= 1.0e-6f)
         {
             return sensor.directionBody;
         }
 
-        const HeadingUnitVector offsetHeading = HeadingUnitFromYaw(sensor.yawOffsetRad);
+        const Eigen::Vector2f offsetHeading = HeadingUnitFromYaw(sensor.yawOffsetRad);
         return RotateBodyVectorToWorld(sensor.directionBody, offsetHeading);
     }
 
@@ -480,6 +477,10 @@ namespace MazeMap
             const StateVector& state,
             const ControlInput& control,
             const PlantParams& params) const noexcept;
+        Eigen::Vector2f imuPlanarAcceleration(
+            const StateVector& state,
+            const ControlInput& control,
+            const PlantParams& params) const noexcept;
         StateVector integrateMidpoint(
             const StateVector& state,
             const ControlInput& control,
@@ -488,6 +489,7 @@ namespace MazeMap
         float driveTorqueFromCommand(
             float motorCommand,
             float wheelBankSpeedRadps,
+            float batteryVoltageV,
             const PlantParams& params) const noexcept;
         float driveFrictionTorque(float wheelBankSpeedRadps, const PlantParams& params) const noexcept;
     };
@@ -692,8 +694,8 @@ namespace MazeMap
     public:
         struct GeometryStateFrame
         {
-            Vectorf<2> positionWorldM{};
-            HeadingUnitVector heading{};
+            Eigen::Vector2f positionWorldM = Eigen::Vector2f::Zero();
+            Eigen::Vector2f heading = Eigen::Vector2f(1.0f, 0.0f);
             CellCoordinates centerCell{};
         };
 
@@ -707,19 +709,19 @@ namespace MazeMap
             const SensorExtrinsics& sensorExtrinsics,
             const LocalMapView& map) const noexcept;
 
-        Vectorf<2> sensorOriginWorld(
+        Eigen::Vector2f sensorOriginWorld(
             const VehicleState::StateVector& state,
             const SensorExtrinsics& sensorExtrinsics) const noexcept;
 
-        Vectorf<2> sensorOriginWorld(
+        Eigen::Vector2f sensorOriginWorld(
             const GeometryStateFrame& frame,
             const SensorExtrinsics& sensorExtrinsics) const noexcept;
 
-        Vectorf<2> sensorDirectionWorld(
+        Eigen::Vector2f sensorDirectionWorld(
             const VehicleState::StateVector& state,
             const SensorExtrinsics& sensorExtrinsics) const noexcept;
 
-        Vectorf<2> sensorDirectionWorld(
+        Eigen::Vector2f sensorDirectionWorld(
             const GeometryStateFrame& frame,
             const SensorExtrinsics& sensorExtrinsics) const noexcept;
 
@@ -730,14 +732,14 @@ namespace MazeMap
     private:
         static CellCoordinates worldToCell(float xMeters, float yMeters, float cellSizeM) noexcept;
         static bool intersectRayAabb(
-            const Vectorf<2>& origin,
-            const Vectorf<2>& direction,
-            const Vectorf<2>& minCorner,
-            const Vectorf<2>& maxCorner,
+            const Eigen::Vector2f& origin,
+            const Eigen::Vector2f& direction,
+            const Eigen::Vector2f& minCorner,
+            const Eigen::Vector2f& maxCorner,
             float& rangeM) noexcept;
         static void testUniqueWall(
-            const Vectorf<2>& rayOrigin,
-            const Vectorf<2>& rayDirection,
+            const Eigen::Vector2f& rayOrigin,
+            const Eigen::Vector2f& rayDirection,
             const CellCoordinates& cell,
             Direction direction,
             WallState state,
@@ -843,6 +845,9 @@ namespace MazeMap
         MeasurementUpdateResult updateYawRate(float yawRateRadps) noexcept;
         template <typename LoopHook>
         MeasurementUpdateResult updateYawRate(float yawRateRadps, LoopHook&& loopHook) noexcept;
+        MeasurementUpdateResult updatePlanarAccel(const ImuAccelObs& observation) noexcept;
+        template <typename LoopHook>
+        MeasurementUpdateResult updatePlanarAccel(const ImuAccelObs& observation, LoopHook&& loopHook) noexcept;
         MeasurementUpdateResult updateImuMerged(const ImuMergedObs& observation) noexcept;
         FrontPairUpdateResult updateFrontPair(
             const WallObs& left,
@@ -859,6 +864,7 @@ namespace MazeMap
         bool controlCommandsAreEffectivelyZero() const noexcept;
         void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
+        Eigen::Matrix<float, 2, 1> accelPredictionForState(const StateVector& sigmaPoint) const noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
             const StateVector& sigmaPoint,
             const LocalMapView& map) const noexcept;
@@ -924,6 +930,17 @@ namespace MazeMap
             return _core.updateYawRate(yawRateRadps, loopHook);
         }
 
+        MeasurementUpdateResult updatePlanarAccel(const ImuAccelObs& observation) noexcept
+        {
+            return _core.updatePlanarAccel(observation);
+        }
+
+        template <typename LoopHook>
+        MeasurementUpdateResult updatePlanarAccel(const ImuAccelObs& observation, LoopHook&& loopHook) noexcept
+        {
+            return _core.updatePlanarAccel(observation, loopHook);
+        }
+
         MeasurementUpdateResult updateImuMerged(const ImuMergedObs& observation) noexcept
         {
             return _core.updateImuMerged(observation);
@@ -973,8 +990,10 @@ namespace MazeMap
             std::isfinite(control.rightMotorCommand) &&
             std::isfinite(control.fanDutyCycle) &&
             std::isfinite(params.massKg) &&
+            std::isfinite(params.effectiveLongitudinalMassKg) &&
             std::isfinite(params.yawInertiaKgM2) &&
             (params.massKg > 0.0f) &&
+            (params.effectiveLongitudinalMassKg > 0.0f) &&
             (params.yawInertiaKgM2 > 0.0f) &&
             (params.wheelRadiusM > 0.0f) &&
             (params.trackWidthM > 0.0f)))
@@ -992,26 +1011,30 @@ namespace MazeMap
         const float r = state(VehicleState::kR);
         const float omegaLeft = state(VehicleState::kOmegaL);
         const float omegaRight = state(VehicleState::kOmegaR);
+        const float batteryVoltageV =
+            (std::isfinite(control.batteryVoltageV) && (control.batteryVoltageV > 0.0f)) ?
+            control.batteryVoltageV :
+            params.supplyVoltageV;
 
         float yawMomentNm = 0.0f;
         for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
         {
-            const Vectorf<2> contactPosition = params.ContactPosition(contactIndex);
+            const Eigen::Vector2f contactPosition = params.ContactPosition(contactIndex);
             yawMomentNm +=
-                (contactPosition.GetX() * forces.contacts[contactIndex].fy) -
-                (contactPosition.GetY() * forces.contacts[contactIndex].fx);
+                (contactPosition.x() * forces.contacts[contactIndex].fy) -
+                (contactPosition.y() * forces.contacts[contactIndex].fx);
         }
 
-        const float tauMotorLeft = driveTorqueFromCommand(control.leftMotorCommand, omegaLeft, params);
-        const float tauMotorRight = driveTorqueFromCommand(control.rightMotorCommand, omegaRight, params);
+        const float tauMotorLeft = driveTorqueFromCommand(control.leftMotorCommand, omegaLeft, batteryVoltageV, params);
+        const float tauMotorRight = driveTorqueFromCommand(control.rightMotorCommand, omegaRight, batteryVoltageV, params);
         const float tauFrictionLeft = driveFrictionTorque(omegaLeft, params);
         const float tauFrictionRight = driveFrictionTorque(omegaRight, params);
-        const HeadingUnitVector heading = HeadingUnitFromYaw(psi);
+        const Eigen::Vector2f heading = HeadingUnitFromYaw(psi);
 
-        derivatives.stateDot(VehicleState::kPx) = (u * heading.x) - (v * heading.y);
-        derivatives.stateDot(VehicleState::kPy) = (u * heading.y) + (v * heading.x);
+        derivatives.stateDot(VehicleState::kPx) = (u * heading.x()) - (v * heading.y());
+        derivatives.stateDot(VehicleState::kPy) = (u * heading.y()) + (v * heading.x());
         derivatives.stateDot(VehicleState::kPsi) = r;
-        derivatives.stateDot(VehicleState::kU) = (r * v) + (forces.SumFx() / params.massKg);
+        derivatives.stateDot(VehicleState::kU) = (r * v) + (forces.SumFx() / params.effectiveLongitudinalMassKg);
         derivatives.stateDot(VehicleState::kV) = (-r * u) + (forces.SumFy() / params.massKg);
         derivatives.stateDot(VehicleState::kR) = yawMomentNm / params.yawInertiaKgM2;
         derivatives.stateDot(VehicleState::kOmegaL) =
@@ -1020,32 +1043,23 @@ namespace MazeMap
         derivatives.stateDot(VehicleState::kOmegaR) =
             (tauMotorRight - (params.wheelRadiusM * forces.RightBankFx()) - tauFrictionRight) /
             params.equivalentWheelInertiaKgM2;
-
-        derivatives.stateDot(VehicleState::kKappaL) =
-            (targets.kappaLeft - state(VehicleState::kKappaL)) /
-            (std::max)(targets.tauKappaLeftS, 1.0e-4f);
-        derivatives.stateDot(VehicleState::kKappaR) =
-            (targets.kappaRight - state(VehicleState::kKappaR)) /
-            (std::max)(targets.tauKappaRightS, 1.0e-4f);
-
-        derivatives.stateDot(VehicleState::kAlphaFL) =
-            FastAngleErrorRad(targets.alpha[0], state(VehicleState::kAlphaFL)) /
-            (std::max)(targets.tauAlphaS[0], 1.0e-4f);
-        derivatives.stateDot(VehicleState::kAlphaFR) =
-            FastAngleErrorRad(targets.alpha[1], state(VehicleState::kAlphaFR)) /
-            (std::max)(targets.tauAlphaS[1], 1.0e-4f);
-        derivatives.stateDot(VehicleState::kAlphaRL) =
-            FastAngleErrorRad(targets.alpha[2], state(VehicleState::kAlphaRL)) /
-            (std::max)(targets.tauAlphaS[2], 1.0e-4f);
-        derivatives.stateDot(VehicleState::kAlphaRR) =
-            FastAngleErrorRad(targets.alpha[3], state(VehicleState::kAlphaRR)) /
-            (std::max)(targets.tauAlphaS[3], 1.0e-4f);
+        derivatives.stateDot(VehicleState::kBgz) = 0.0f;
 
         derivatives.contactForces = forces;
         derivatives.wheelKinematics = kinematics;
         derivatives.slipTargets = targets;
-        derivatives.longitudinalAccelMps2 = derivatives.stateDot(VehicleState::kU);
-        derivatives.lateralAccelMps2 = derivatives.stateDot(VehicleState::kV);
+        derivatives.originAccelBodyMps2 = Eigen::Vector2f(
+            derivatives.stateDot(VehicleState::kU) - (r * v),
+            derivatives.stateDot(VehicleState::kV) + (r * u));
+        derivatives.imuAccelBodyMps2 = Eigen::Vector2f(
+            derivatives.originAccelBodyMps2.x() -
+                (derivatives.stateDot(VehicleState::kR) * params.imu.positionBodyM.y()) -
+                ((r * r) * params.imu.positionBodyM.x()),
+            derivatives.originAccelBodyMps2.y() +
+                (derivatives.stateDot(VehicleState::kR) * params.imu.positionBodyM.x()) -
+                ((r * r) * params.imu.positionBodyM.y()));
+        derivatives.longitudinalAccelMps2 = derivatives.originAccelBodyMps2.x();
+        derivatives.lateralAccelMps2 = derivatives.originAccelBodyMps2.y();
         derivatives.yawAccelRadps2 = derivatives.stateDot(VehicleState::kR);
         return derivatives;
     }
@@ -1059,10 +1073,10 @@ namespace MazeMap
 
         for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
         {
-            const Vectorf<2> position = params.ContactPosition(contactIndex);
+            const Eigen::Vector2f position = params.ContactPosition(contactIndex);
             ContactKinematics& contact = kinematics.contacts[contactIndex];
-            contact.vx = u - (r * position.GetY());
-            contact.vy = v + (r * position.GetX());
+            contact.vx = u - (r * position.y());
+            contact.vy = v + (r * position.x());
         }
 
         kinematics.leftBankLongitudinalVelocityMps = kinematics.contacts[0].vx;
@@ -1095,20 +1109,9 @@ namespace MazeMap
         for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
         {
             const ContactKinematics& contact = kinematics.contacts[contactIndex];
-            targets.alpha[contactIndex] =
-                atan2f(-contact.vy, (std::max)(std::fabs(contact.vx), velocityEpsilonMps));
-            const float relaxationLengthM =
-                (contactIndex < 2U) ? params.relaxationLengthAlphaFrontM : params.relaxationLengthAlphaRearM;
-            targets.tauAlphaS[contactIndex] =
-                relaxationLengthM / (std::max)(std::fabs(contact.vx), velocityEpsilonMps);
+            targets.lateralRatio[contactIndex] =
+                -contact.vy / (std::max)(std::fabs(contact.vx), velocityEpsilonMps);
         }
-
-        targets.tauKappaLeftS =
-            params.relaxationLengthKappaM /
-            (std::max)(std::fabs(kinematics.leftBankLongitudinalVelocityMps), velocityEpsilonMps);
-        targets.tauKappaRightS =
-            params.relaxationLengthKappaM /
-            (std::max)(std::fabs(kinematics.rightBankLongitudinalVelocityMps), velocityEpsilonMps);
         return targets;
     }
 
@@ -1123,36 +1126,47 @@ namespace MazeMap
         const PlantParams& params) const noexcept
     {
         ContactForces forces{};
-        const float staticWheelLoadN = params.StaticWheelLoadN((std::clamp)(control.fanDutyCycle, 0.0f, 1.0f));
+        const WheelKinematics kinematics = wheelKinematics(state, params);
+        const SlipTargets targets = slipTargets(state, kinematics, params);
+        const float fanDutyCycle = (std::clamp)(control.fanDutyCycle, 0.0f, 1.0f);
+        const float frontWheelLoadN = params.FrontWheelLoadN(fanDutyCycle);
+        const float rearWheelLoadN = params.RearWheelLoadN(fanDutyCycle);
 
         for (uint8_t contactIndex = 0U; contactIndex < 4U; ++contactIndex)
         {
             ContactForce& force = forces.contacts[contactIndex];
+            const bool isFront = contactIndex < 2U;
             const bool isLeft = (contactIndex == 0U) || (contactIndex == 2U);
-            const float kappa =
-                isLeft ? state(VehicleState::kKappaL) : state(VehicleState::kKappaR);
-            const float alpha =
-                (contactIndex == 0U) ? state(VehicleState::kAlphaFL) :
-                (contactIndex == 1U) ? state(VehicleState::kAlphaFR) :
-                (contactIndex == 2U) ? state(VehicleState::kAlphaRL) :
-                state(VehicleState::kAlphaRR);
-            const float mu = (contactIndex < 2U) ? params.muFront : params.muRear;
+            const float kappa = isLeft ? targets.kappaLeft : targets.kappaRight;
+            const float lateralRatio = targets.lateralRatio[contactIndex];
+            const float mu = isFront ? params.muFront : params.muRear;
             const float corneringStiffness =
-                (contactIndex < 2U) ? params.corneringStiffnessFrontNPerRad : params.corneringStiffnessRearNPerRad;
-            const float fx0 = params.longitudinalStiffnessN * kappa;
-            const float fy0 = -corneringStiffness * std::tan(alpha);
+                isFront ? params.corneringStiffnessFrontNPerRad : params.corneringStiffnessRearNPerRad;
+            const float normalLoadN = isFront ? frontWheelLoadN : rearWheelLoadN;
+            const float fx0 = 0.5f * params.longitudinalStiffnessN * kappa;
+            const float fy0 = -corneringStiffness * lateralRatio;
             const float requestedForceMagnitudeN = MazeMap::Math::Sqrtf((fx0 * fx0) + (fy0 * fy0));
             const float lambda =
-                (mu * staticWheelLoadN) /
+                (mu * normalLoadN) /
                 ((2.0f * requestedForceMagnitudeN) + (std::max)(params.forceEpsilonN, 1.0e-5f));
             const float saturation =
-                (lambda >= 1.0f) ? 1.0f : (lambda * (2.0f - lambda));
+                (lambda >= 1.0f) ? 1.0f :
+                (lambda <= 0.0f) ? 0.0f :
+                (lambda * (2.0f - lambda));
             force.fx = saturation * fx0;
             force.fy = saturation * fy0;
-            force.fz = staticWheelLoadN;
+            force.fz = normalLoadN;
             force.saturation = saturation;
         }
         return forces;
+    }
+
+    inline Eigen::Vector2f PlantModel::imuPlanarAcceleration(
+        const StateVector& state,
+        const ControlInput& control,
+        const PlantParams& params) const noexcept
+    {
+        return forwardStep(state, control, params).imuAccelBodyMps2;
     }
 
     inline PlantModel::StateVector PlantModel::integrateMidpoint(
@@ -1178,30 +1192,28 @@ namespace MazeMap
     inline float PlantModel::driveTorqueFromCommand(
         float motorCommand,
         float wheelBankSpeedRadps,
+        float batteryVoltageV,
         const PlantParams& params) const noexcept
     {
         const float command = (std::clamp)(motorCommand, -1.0f, 1.0f);
         const float motorSpeedRadps = wheelBankSpeedRadps * params.gearRatio;
-        const float appliedVoltageV = command * params.supplyVoltageV;
+        const float appliedVoltageV =
+            command *
+            ((std::isfinite(batteryVoltageV) && (batteryVoltageV > 0.0f)) ? batteryVoltageV : params.supplyVoltageV);
         const float backEmfVoltageV =
             (params.speedConstantRadpsPerVolt > 0.0f) ?
             (motorSpeedRadps / params.speedConstantRadpsPerVolt) :
             0.0f;
-        const float rawCurrentA =
+        float currentA =
             (params.driveResistanceOhms > 0.0f) ?
             ((appliedVoltageV - backEmfVoltageV) / params.driveResistanceOhms) :
             0.0f;
-        float effectiveCurrentA = rawCurrentA;
-        if (effectiveCurrentA > 0.0f)
+        if (params.motorCurrentLimitA > 0.0f)
         {
-            effectiveCurrentA = (std::max)(0.0f, effectiveCurrentA - params.noLoadCurrentA);
-        }
-        else if (effectiveCurrentA < 0.0f)
-        {
-            effectiveCurrentA = (std::min)(0.0f, effectiveCurrentA + params.noLoadCurrentA);
+            currentA = (std::clamp)(currentA, -params.motorCurrentLimitA, params.motorCurrentLimitA);
         }
 
-        const float motorTorqueNm = params.torqueConstantNmPerA * effectiveCurrentA;
+        const float motorTorqueNm = params.torqueConstantNmPerA * currentA;
         return motorTorqueNm * params.gearRatio * params.drivetrainEfficiency;
     }
 
@@ -1215,28 +1227,28 @@ namespace MazeMap
             (params.viscousFrictionNmPerRadps * wheelBankSpeedRadps);
     }
 
-    inline Vectorf<2> WallGeometryModel::sensorOriginWorld(
+    inline Eigen::Vector2f WallGeometryModel::sensorOriginWorld(
         const VehicleState::StateVector& state,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
         return sensorOriginWorld(buildStateFrame(state, LocalMapView{}), sensorExtrinsics);
     }
 
-    inline Vectorf<2> WallGeometryModel::sensorOriginWorld(
+    inline Eigen::Vector2f WallGeometryModel::sensorOriginWorld(
         const GeometryStateFrame& frame,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
         return frame.positionWorldM + RotateBodyVectorToWorld(sensorExtrinsics.positionBodyM, frame.heading);
     }
 
-    inline Vectorf<2> WallGeometryModel::sensorDirectionWorld(
+    inline Eigen::Vector2f WallGeometryModel::sensorDirectionWorld(
         const VehicleState::StateVector& state,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
         return sensorDirectionWorld(buildStateFrame(state, LocalMapView{}), sensorExtrinsics);
     }
 
-    inline Vectorf<2> WallGeometryModel::sensorDirectionWorld(
+    inline Eigen::Vector2f WallGeometryModel::sensorDirectionWorld(
         const GeometryStateFrame& frame,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
@@ -1248,9 +1260,9 @@ namespace MazeMap
         const LocalMapView& map) const noexcept
     {
         GeometryStateFrame frame{};
-        frame.positionWorldM = Vectorf<2>(state(VehicleState::kPx), state(VehicleState::kPy));
+        frame.positionWorldM = Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy));
         frame.heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
-        frame.centerCell = worldToCell(frame.positionWorldM.GetX(), frame.positionWorldM.GetY(), map.cellSizeM);
+        frame.centerCell = worldToCell(frame.positionWorldM.x(), frame.positionWorldM.y(), map.cellSizeM);
         return frame;
     }
 
@@ -1265,10 +1277,10 @@ namespace MazeMap
     }
 
     inline bool WallGeometryModel::intersectRayAabb(
-        const Vectorf<2>& origin,
-        const Vectorf<2>& direction,
-        const Vectorf<2>& minCorner,
-        const Vectorf<2>& maxCorner,
+        const Eigen::Vector2f& origin,
+        const Eigen::Vector2f& direction,
+        const Eigen::Vector2f& minCorner,
+        const Eigen::Vector2f& maxCorner,
         float& rangeM) noexcept
     {
         rangeM = 0.0f;
@@ -1317,8 +1329,8 @@ namespace MazeMap
     }
 
     inline void WallGeometryModel::testUniqueWall(
-        const Vectorf<2>& rayOrigin,
-        const Vectorf<2>& rayDirection,
+        const Eigen::Vector2f& rayOrigin,
+        const Eigen::Vector2f& rayDirection,
         const CellCoordinates& cell,
         Direction direction,
         WallState state,
@@ -1333,26 +1345,26 @@ namespace MazeMap
         const float cellX = static_cast<float>(cell.GetX()) * map.cellSizeM;
         const float cellY = static_cast<float>(cell.GetY()) * map.cellSizeM;
 
-        Vectorf<2> minCorner{};
-        Vectorf<2> maxCorner{};
+        Eigen::Vector2f minCorner = Eigen::Vector2f::Zero();
+        Eigen::Vector2f maxCorner = Eigen::Vector2f::Zero();
         switch (direction)
         {
         case Direction::Up:
-            minCorner = Vectorf<2>(cellX, cellY + map.cellSizeM - (0.5f * map.wallThicknessM));
-            maxCorner = Vectorf<2>(cellX + map.cellSizeM, cellY + map.cellSizeM + (0.5f * map.wallThicknessM));
+            minCorner = Eigen::Vector2f(cellX, cellY + map.cellSizeM - (0.5f * map.wallThicknessM));
+            maxCorner = Eigen::Vector2f(cellX + map.cellSizeM, cellY + map.cellSizeM + (0.5f * map.wallThicknessM));
             break;
         case Direction::Down:
-            minCorner = Vectorf<2>(cellX, cellY - (0.5f * map.wallThicknessM));
-            maxCorner = Vectorf<2>(cellX + map.cellSizeM, cellY + (0.5f * map.wallThicknessM));
+            minCorner = Eigen::Vector2f(cellX, cellY - (0.5f * map.wallThicknessM));
+            maxCorner = Eigen::Vector2f(cellX + map.cellSizeM, cellY + (0.5f * map.wallThicknessM));
             break;
         case Direction::Left:
-            minCorner = Vectorf<2>(cellX - (0.5f * map.wallThicknessM), cellY);
-            maxCorner = Vectorf<2>(cellX + (0.5f * map.wallThicknessM), cellY + map.cellSizeM);
+            minCorner = Eigen::Vector2f(cellX - (0.5f * map.wallThicknessM), cellY);
+            maxCorner = Eigen::Vector2f(cellX + (0.5f * map.wallThicknessM), cellY + map.cellSizeM);
             break;
         case Direction::Right:
         default:
-            minCorner = Vectorf<2>(cellX + map.cellSizeM - (0.5f * map.wallThicknessM), cellY);
-            maxCorner = Vectorf<2>(cellX + map.cellSizeM + (0.5f * map.wallThicknessM), cellY + map.cellSizeM);
+            minCorner = Eigen::Vector2f(cellX + map.cellSizeM - (0.5f * map.wallThicknessM), cellY);
+            maxCorner = Eigen::Vector2f(cellX + map.cellSizeM + (0.5f * map.wallThicknessM), cellY + map.cellSizeM);
             break;
         }
 
@@ -1394,8 +1406,8 @@ namespace MazeMap
             return best;
         }
 
-        const Vectorf<2> rayOrigin = sensorOriginWorld(frame, sensorExtrinsics);
-        const Vectorf<2> rayDirection = sensorDirectionWorld(frame, sensorExtrinsics);
+        const Eigen::Vector2f rayOrigin = sensorOriginWorld(frame, sensorExtrinsics);
+        const Eigen::Vector2f rayDirection = sensorDirectionWorld(frame, sensorExtrinsics);
         const CellCoordinates centerCell = frame.centerCell;
 
         const int minX = (std::max)(0, static_cast<int>(centerCell.GetX()) - static_cast<int>(map.radiusCells));
@@ -1428,8 +1440,8 @@ namespace MazeMap
             {
                 const float gridXM = static_cast<float>(gridX) * map.cellSizeM;
                 const float gridYM = static_cast<float>(gridY) * map.cellSizeM;
-                const Vectorf<2> minCorner(gridXM - map.postHalfWidthM, gridYM - map.postHalfWidthM);
-                const Vectorf<2> maxCorner(gridXM + map.postHalfWidthM, gridYM + map.postHalfWidthM);
+                const Eigen::Vector2f minCorner(gridXM - map.postHalfWidthM, gridYM - map.postHalfWidthM);
+                const Eigen::Vector2f maxCorner(gridXM + map.postHalfWidthM, gridYM + map.postHalfWidthM);
                 float rangeM = 0.0f;
                 if (!intersectRayAabb(rayOrigin, rayDirection, minCorner, maxCorner, rangeM))
                 {
@@ -1588,6 +1600,7 @@ namespace MazeMap
         StateMatrix initialCovariance = StateMatrix::Identity() * 1.0e-3f;
         initialCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = 0.25f;
         initialCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = 0.25f;
+        initialCovariance(VehicleState::kBgz, VehicleState::kBgz) = 0.01f;
         _filter.setState(initialState, initialCovariance);
 
         StateMatrix processNoise = StateMatrix::Zero();
@@ -1600,12 +1613,7 @@ namespace MazeMap
             6.0e-4f,
             4.0e-2f,
             4.0e-2f,
-            8.0e-3f,
-            8.0e-3f,
-            8.0e-3f,
-            8.0e-3f,
-            8.0e-3f,
-            8.0e-3f;
+            2.0e-5f;
         _sqrtProcessNoiseDensity = StateMatrix::Zero();
         _sqrtProcessNoiseDensity.diagonal() = processNoise.diagonal().cwiseSqrt();
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
@@ -1723,23 +1731,15 @@ namespace MazeMap
             return result;
         }
 
-        Eigen::Matrix<float, 3, 1> z;
-        z << observation.yawRateRadps, observation.accelXComMps2, observation.accelYComMps2;
-        result.accepted = _filter.Update<3>(
-            z,
-            _sqrtImuNoise,
-            12.83816f,
-            [this](const StateVector& sigmaPoint) noexcept
-            {
-                const PlantDerivatives derivatives = _plantModel.forwardStep(sigmaPoint, _lastControl, _params);
-                Eigen::Matrix<float, 3, 1> prediction;
-                prediction <<
-                    sigmaPoint(VehicleState::kR),
-                    derivatives.stateDot(VehicleState::kU) - (sigmaPoint(VehicleState::kR) * sigmaPoint(VehicleState::kV)),
-                    derivatives.stateDot(VehicleState::kV) + (sigmaPoint(VehicleState::kR) * sigmaPoint(VehicleState::kU));
-                return prediction;
-            });
-        result.nis = _filter.lastNis();
+        const MeasurementUpdateResult yawResult = updateYawRate(observation.gyroZRadps);
+        const ImuAccelObs accelObservation{
+            observation.valid,
+            observation.accelBodyXMps2,
+            observation.accelBodyYMps2
+        };
+        const MeasurementUpdateResult accelResult = updatePlanarAccel(accelObservation);
+        result.accepted = yawResult.accepted && accelResult.accepted;
+        result.nis = accelResult.attempted ? accelResult.nis : yawResult.nis;
         return result;
     }
 
@@ -1769,23 +1769,56 @@ namespace MazeMap
             [](const StateVector& sigmaPoint) noexcept
             {
                 Eigen::Matrix<float, 1, 1> prediction;
-                prediction << sigmaPoint(VehicleState::kR);
+                prediction << sigmaPoint(VehicleState::kR) + sigmaPoint(VehicleState::kBgz);
                 return prediction;
             },
             loopHook);
         if (result.accepted)
         {
-            StateVector anchoredState = _filter.state();
-            anchoredState(VehicleState::kR) = yawRateRadps;
-            VehicleState::NormalizeStateVector(anchoredState);
-            _filter.setState(anchoredState, _filter.covariance());
             if (controlCommandsAreEffectivelyZero() &&
-                HasExactZeroWheelObservation(_lastEncoderObs) &&
-                (std::fabs(yawRateRadps) <= (4.0f * kImuYawRateSigmaRadps)))
+                HasExactZeroWheelObservation(_lastEncoderObs))
             {
                 applyStationaryZeroMotionConstraint(yawRateRadps);
             }
         }
+        result.nis = _filter.lastNis();
+        return result;
+    }
+
+    inline MeasurementUpdateResult SrUkfCore::updatePlanarAccel(const ImuAccelObs& observation) noexcept
+    {
+        return updatePlanarAccel(observation, MazeMap::NoopUkfLoopHook{});
+    }
+
+    template <typename LoopHook>
+    inline MeasurementUpdateResult SrUkfCore::updatePlanarAccel(
+        const ImuAccelObs& observation,
+        LoopHook&& loopHook) noexcept
+    {
+        MeasurementUpdateResult result{};
+        result.attempted =
+            observation.valid &&
+            std::isfinite(observation.accelBodyXMps2) &&
+            std::isfinite(observation.accelBodyYMps2);
+        if (!result.attempted)
+        {
+            return result;
+        }
+
+        Eigen::Matrix<float, 2, 1> z;
+        z << observation.accelBodyXMps2, observation.accelBodyYMps2;
+        Eigen::Matrix<float, 2, 2> sqrtNoise = Eigen::Matrix<float, 2, 2>::Zero();
+        sqrtNoise(0, 0) = _sqrtImuNoise(1, 1);
+        sqrtNoise(1, 1) = _sqrtImuNoise(2, 2);
+        result.accepted = _filter.Update<2>(
+            z,
+            sqrtNoise,
+            9.21034f,
+            [this](const StateVector& sigmaPoint) noexcept
+            {
+                return accelPredictionForState(sigmaPoint);
+            },
+            loopHook);
         result.nis = _filter.lastNis();
         return result;
     }
@@ -1825,15 +1858,10 @@ namespace MazeMap
         StateVector anchoredState = _filter.state();
         anchoredState(VehicleState::kU) = 0.0f;
         anchoredState(VehicleState::kV) = 0.0f;
-        anchoredState(VehicleState::kR) = yawRateRadps;
+        anchoredState(VehicleState::kR) = 0.0f;
         anchoredState(VehicleState::kOmegaL) = 0.0f;
         anchoredState(VehicleState::kOmegaR) = 0.0f;
-        anchoredState(VehicleState::kKappaL) = 0.0f;
-        anchoredState(VehicleState::kKappaR) = 0.0f;
-        anchoredState(VehicleState::kAlphaFL) = 0.0f;
-        anchoredState(VehicleState::kAlphaFR) = 0.0f;
-        anchoredState(VehicleState::kAlphaRL) = 0.0f;
-        anchoredState(VehicleState::kAlphaRR) = 0.0f;
+        anchoredState(VehicleState::kBgz) = yawRateRadps;
         VehicleState::NormalizeStateVector(anchoredState);
 
         StateMatrix anchoredCovariance = _filter.covariance();
@@ -1843,40 +1871,29 @@ namespace MazeMap
             (std::max)(kStationaryEncoderVelocitySigmaMps * kStationaryEncoderVelocitySigmaMps, 1.0e-12f);
         const float yawVarianceRadps2 =
             (std::max)(kImuYawRateSigmaRadps * kImuYawRateSigmaRadps, 1.0e-12f);
-        const float slipRatioVariance = 1.0e-6f;
-        const float slipAngleVarianceRad2 = 1.0e-6f;
+        const float gyroBiasVarianceRadps2 = (std::max)(yawVarianceRadps2, 1.0e-8f);
 
-        const std::array<int, 10> constrainedIndices = {
+        const std::array<int, 5> constrainedIndices = {
             VehicleState::kU,
             VehicleState::kV,
             VehicleState::kR,
             VehicleState::kOmegaL,
-            VehicleState::kOmegaR,
-            VehicleState::kKappaL,
-            VehicleState::kKappaR,
-            VehicleState::kAlphaFL,
-            VehicleState::kAlphaFR,
-            VehicleState::kAlphaRL
+            VehicleState::kOmegaR
         };
         for (const int index : constrainedIndices)
         {
             anchoredCovariance.row(index).setZero();
             anchoredCovariance.col(index).setZero();
         }
-        anchoredCovariance.row(VehicleState::kAlphaRR).setZero();
-        anchoredCovariance.col(VehicleState::kAlphaRR).setZero();
+        anchoredCovariance.row(VehicleState::kBgz).setZero();
+        anchoredCovariance.col(VehicleState::kBgz).setZero();
 
         anchoredCovariance(VehicleState::kU, VehicleState::kU) = linearVarianceMps2;
         anchoredCovariance(VehicleState::kV, VehicleState::kV) = linearVarianceMps2;
         anchoredCovariance(VehicleState::kR, VehicleState::kR) = yawVarianceRadps2;
         anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = wheelVarianceRadps2;
         anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = wheelVarianceRadps2;
-        anchoredCovariance(VehicleState::kKappaL, VehicleState::kKappaL) = slipRatioVariance;
-        anchoredCovariance(VehicleState::kKappaR, VehicleState::kKappaR) = slipRatioVariance;
-        anchoredCovariance(VehicleState::kAlphaFL, VehicleState::kAlphaFL) = slipAngleVarianceRad2;
-        anchoredCovariance(VehicleState::kAlphaFR, VehicleState::kAlphaFR) = slipAngleVarianceRad2;
-        anchoredCovariance(VehicleState::kAlphaRL, VehicleState::kAlphaRL) = slipAngleVarianceRad2;
-        anchoredCovariance(VehicleState::kAlphaRR, VehicleState::kAlphaRR) = slipAngleVarianceRad2;
+        anchoredCovariance(VehicleState::kBgz, VehicleState::kBgz) = gyroBiasVarianceRadps2;
         _filter.setState(anchoredState, anchoredCovariance);
     }
 
@@ -1884,6 +1901,14 @@ namespace MazeMap
     {
         const float normalizedConfidence = (std::clamp)(confidence, 0.0f, 1.0f);
         return minimumNoise + ((1.0f - normalizedConfidence) * 0.020f);
+    }
+
+    inline Eigen::Matrix<float, 2, 1> SrUkfCore::accelPredictionForState(const StateVector& sigmaPoint) const noexcept
+    {
+        Eigen::Matrix<float, 2, 1> prediction{};
+        const Eigen::Vector2f accel = _plantModel.imuPlanarAcceleration(sigmaPoint, _lastControl, _params);
+        prediction << accel.x(), accel.y();
+        return prediction;
     }
 
     inline float SrUkfCore::wallPredictionForSensor(
@@ -1986,10 +2011,10 @@ namespace MazeMap
         const SensorExtrinsics& sensor,
         const VehicleState::StateVector& state) noexcept
     {
-        const HeadingUnitVector heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
-        const Vectorf<2> directionWorld = RotateBodyVectorToWorld(ResolveSensorDirectionBody(sensor), heading);
-        const float x = directionWorld.GetX();
-        const float y = directionWorld.GetY();
+        const Eigen::Vector2f heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
+        const Eigen::Vector2f directionWorld = RotateBodyVectorToWorld(ResolveSensorDirectionBody(sensor), heading);
+        const float x = directionWorld.x();
+        const float y = directionWorld.y();
         if (std::fabs(x) >= std::fabs(y))
         {
             return (x >= 0.0f) ? Direction::Right : Direction::Left;
@@ -2002,12 +2027,12 @@ namespace MazeMap
         const VehicleState::StateVector& state,
         float cellSizeM) noexcept
     {
-        const HeadingUnitVector heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
-        const Vectorf<2> sensorPositionWorld =
-            Vectorf<2>(state(VehicleState::kPx), state(VehicleState::kPy)) +
+        const Eigen::Vector2f heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
+        const Eigen::Vector2f sensorPositionWorld =
+            Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)) +
             RotateBodyVectorToWorld(sensor.positionBodyM, heading);
-        const float x = sensorPositionWorld.GetX();
-        const float y = sensorPositionWorld.GetY();
+        const float x = sensorPositionWorld.x();
+        const float y = sensorPositionWorld.y();
         const float safeCellSize = (cellSizeM > 0.0f) ? cellSizeM : 0.18f;
         int cellX = static_cast<int>(std::floor(x / safeCellSize));
         int cellY = static_cast<int>(std::floor(y / safeCellSize));

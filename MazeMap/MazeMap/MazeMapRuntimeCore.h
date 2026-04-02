@@ -545,6 +545,7 @@ namespace Config
 #include "AuxMeasurementConfig.h"
 #include "FrontWallCharacterizationConfig.h"
 #include "LedCalibrationConfig.h"
+#include "EigenCompat.h"
 
 struct MotionLimits
 {
@@ -559,12 +560,12 @@ struct MotionLimits
 
 struct PoseEstimate
 {
-    float xMeters;
-    float yMeters;
-    MazeMap::Vectorf<2> headingUnit;
-    float yawRad;
-    float linearSpeedMps;
-    float angularSpeedRadps;
+    float xMeters = 0.0f;
+    float yMeters = 0.0f;
+    Eigen::Vector2f headingUnit = Eigen::Vector2f(1.0f, 0.0f);
+    float yawRad = 0.0f;
+    float linearSpeedMps = 0.0f;
+    float angularSpeedRadps = 0.0f;
 };
 
 struct SensorSnapshot
@@ -582,6 +583,8 @@ struct SensorSnapshot
     float accelBodyXMps2;
     float accelBodyYMps2;
     float planarAccelMps2;
+    float gyroRawRadps;
+    float gyroBiasRadps;
     float gyroRadps;
     bool accelBiasValid;
     bool frontWall;
@@ -606,12 +609,25 @@ struct DriveTelemetry
 {
     float leftDriveCommand = 0.0f;
     float rightDriveCommand = 0.0f;
+    float leftFeedforwardCommand = 0.0f;
+    float rightFeedforwardCommand = 0.0f;
+    float leftFeedbackCommand = 0.0f;
+    float rightFeedbackCommand = 0.0f;
+    float leftTargetVelocityMps = 0.0f;
+    float rightTargetVelocityMps = 0.0f;
+    float leftLaunchAssistFloor = 0.0f;
+    float rightLaunchAssistFloor = 0.0f;
     int32_t leftEncoderCount = 0;
     int32_t rightEncoderCount = 0;
     float leftDistanceM = 0.0f;
     float rightDistanceM = 0.0f;
     float leftVelocityMps = 0.0f;
     float rightVelocityMps = 0.0f;
+    float leftEncoderOmegaRadps = 0.0f;
+    float rightEncoderOmegaRadps = 0.0f;
+    uint16_t modeFlags = 0U;
+    uint16_t saturationFlags = 0U;
+    bool encoderObservationValid = false;
 };
 
 struct OpticalObservationTiming
@@ -1963,8 +1979,8 @@ public:
         float& offDistanceThresholdM) const
     {
         const float forwardSensorOffsetM = (std::min)(
-            vehicle.FrontLeft.GetPosition().GetX(),
-            vehicle.FrontRight.GetPosition().GetX());
+            vehicle.FrontLeft.GetPosition().x(),
+            vehicle.FrontRight.GetPosition().x());
         if (!MazeMap::TryComputeFrontWallHalfwayIntoAdjacentDistanceM(
                 Config::kCellSizeM,
                 Config::kMazeWallThicknessM,
@@ -2424,12 +2440,12 @@ inline float AngleErrorRad(float target, float measured)
     return WrapAngleRad(target - measured);
 }
 
-inline MazeMap::Vectorf<2> DirectionToUnitVector(MazeMap::Direction direction)
+inline Eigen::Vector2f DirectionToUnitVector(MazeMap::Direction direction)
 {
     float dx = 0.0f;
     float dy = 0.0f;
     MazeMap::GetHeading(direction, dx, dy);
-    return MazeMap::Vectorf<2>(dx, dy);
+    return Eigen::Vector2f(dx, dy);
 }
 
 inline float DirectionToYawRad(MazeMap::Direction direction)
@@ -2457,15 +2473,15 @@ inline float DirectionToYawRad(MazeMap::Direction direction)
     }
 }
 
-inline MazeMap::Vectorf<2> HeadingUnitFromYawRad(float yawRad)
+inline Eigen::Vector2f HeadingUnitFromYawRad(float yawRad)
 {
-    return MazeMap::Vectorf<2>(cosf(yawRad), sinf(yawRad));
+    return Eigen::Vector2f(cosf(yawRad), sinf(yawRad));
 }
 
-inline float HeadingErrorRad(const MazeMap::Vectorf<2>& targetHeading, const MazeMap::Vectorf<2>& measuredHeading)
+inline float HeadingErrorRad(const Eigen::Vector2f& targetHeading, const Eigen::Vector2f& measuredHeading)
 {
-    const float dot = (std::clamp)((targetHeading * measuredHeading), -1.0f, 1.0f);
-    const float cross = (measuredHeading.GetX() * targetHeading.GetY()) - (measuredHeading.GetY() * targetHeading.GetX());
+    const float dot = (std::clamp)(targetHeading.dot(measuredHeading), -1.0f, 1.0f);
+    const float cross = (measuredHeading.x() * targetHeading.y()) - (measuredHeading.y() * targetHeading.x());
     return atan2f(cross, dot);
 }
 
@@ -2558,44 +2574,44 @@ inline float ReachableSpeedWithBoundary(float boundarySpeed, float distance, flo
     return MazeMap::LinearKinematics::V1IgnoringT((std::max)(distance, 0.0f), boundarySpeed, accel);
 }
 
-inline MazeMap::Vectorf<2> LeftUnitFromHeading(const MazeMap::Vectorf<2>& headingUnit)
+inline Eigen::Vector2f LeftUnitFromHeading(const Eigen::Vector2f& headingUnit)
 {
-    return MazeMap::Vectorf<2>(-headingUnit.GetY(), headingUnit.GetX());
+    return Eigen::Vector2f(-headingUnit.y(), headingUnit.x());
 }
 
-inline MazeMap::Vectorf<2> RotateBodyVectorToWorld(const PoseEstimate& pose, const MazeMap::Vectorf<2>& bodyVector)
+inline Eigen::Vector2f RotateBodyVectorToWorld(const PoseEstimate& pose, const Eigen::Vector2f& bodyVector)
 {
-    const MazeMap::Vectorf<2> leftUnit = LeftUnitFromHeading(pose.headingUnit);
-    return MazeMap::Vectorf<2>(
-        (pose.headingUnit.GetX() * bodyVector.GetX()) + (leftUnit.GetX() * bodyVector.GetY()),
-        (pose.headingUnit.GetY() * bodyVector.GetX()) + (leftUnit.GetY() * bodyVector.GetY()));
+    const Eigen::Vector2f leftUnit = LeftUnitFromHeading(pose.headingUnit);
+    return Eigen::Vector2f(
+        (pose.headingUnit.x() * bodyVector.x()) + (leftUnit.x() * bodyVector.y()),
+        (pose.headingUnit.y() * bodyVector.x()) + (leftUnit.y() * bodyVector.y()));
 }
 
-inline MazeMap::Vectorf<2> SensorWorldPosition(const PoseEstimate& pose, const MazeMap::WallSensor& sensor)
+inline Eigen::Vector2f SensorWorldPosition(const PoseEstimate& pose, const MazeMap::WallSensor& sensor)
 {
-    const MazeMap::Vectorf<2> worldOffset = RotateBodyVectorToWorld(pose, sensor.GetPosition());
-    return MazeMap::Vectorf<2>(pose.xMeters + worldOffset.GetX(), pose.yMeters + worldOffset.GetY());
+    const Eigen::Vector2f worldOffset = RotateBodyVectorToWorld(pose, sensor.GetPosition());
+    return Eigen::Vector2f(pose.xMeters + worldOffset.x(), pose.yMeters + worldOffset.y());
 }
 
-inline MazeMap::Vectorf<2> SensorWorldFacing(const PoseEstimate& pose, const MazeMap::WallSensor& sensor)
+inline Eigen::Vector2f SensorWorldFacing(const PoseEstimate& pose, const MazeMap::WallSensor& sensor)
 {
     return RotateBodyVectorToWorld(pose, sensor.GetFacingDirection());
 }
 
 inline bool TryDistanceToWestWall(const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& distanceM)
 {
-    const MazeMap::Vectorf<2> sensorPosition = SensorWorldPosition(pose, sensor);
-    const MazeMap::Vectorf<2> sensorFacing = SensorWorldFacing(pose, sensor);
+    const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
+    const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
     const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
     const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
     const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
-    if (sensorFacing.GetX() >= -0.1f)
+    if (sensorFacing.x() >= -0.1f)
     {
         return false;
     }
 
-    const float candidateDistanceM = (westWallXM - sensorPosition.GetX()) / sensorFacing.GetX();
-    const float intersectionY = sensorPosition.GetY() + (candidateDistanceM * sensorFacing.GetY());
+    const float candidateDistanceM = (westWallXM - sensorPosition.x()) / sensorFacing.x();
+    const float intersectionY = sensorPosition.y() + (candidateDistanceM * sensorFacing.y());
     if (candidateDistanceM <= 0.0f || intersectionY < (southWallYM - 0.005f) || intersectionY > (northWallYM + 0.005f))
     {
         return false;
@@ -2607,18 +2623,18 @@ inline bool TryDistanceToWestWall(const PoseEstimate& pose, const MazeMap::WallS
 
 inline bool TryDistanceToEastWall(const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& distanceM)
 {
-    const MazeMap::Vectorf<2> sensorPosition = SensorWorldPosition(pose, sensor);
-    const MazeMap::Vectorf<2> sensorFacing = SensorWorldFacing(pose, sensor);
+    const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
+    const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
     const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
     const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
     const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
-    if (sensorFacing.GetX() <= 0.1f)
+    if (sensorFacing.x() <= 0.1f)
     {
         return false;
     }
 
-    const float candidateDistanceM = (eastWallXM - sensorPosition.GetX()) / sensorFacing.GetX();
-    const float intersectionY = sensorPosition.GetY() + (candidateDistanceM * sensorFacing.GetY());
+    const float candidateDistanceM = (eastWallXM - sensorPosition.x()) / sensorFacing.x();
+    const float intersectionY = sensorPosition.y() + (candidateDistanceM * sensorFacing.y());
     if (candidateDistanceM <= 0.0f || intersectionY < (southWallYM - 0.005f) || intersectionY > (northWallYM + 0.005f))
     {
         return false;
@@ -2630,18 +2646,18 @@ inline bool TryDistanceToEastWall(const PoseEstimate& pose, const MazeMap::WallS
 
 inline bool TryDistanceToSouthWall(const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& distanceM)
 {
-    const MazeMap::Vectorf<2> sensorPosition = SensorWorldPosition(pose, sensor);
-    const MazeMap::Vectorf<2> sensorFacing = SensorWorldFacing(pose, sensor);
+    const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
+    const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
     const float southWallYM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
     const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
     const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
-    if (sensorFacing.GetY() >= -0.1f)
+    if (sensorFacing.y() >= -0.1f)
     {
         return false;
     }
 
-    const float candidateDistanceM = (southWallYM - sensorPosition.GetY()) / sensorFacing.GetY();
-    const float intersectionX = sensorPosition.GetX() + (candidateDistanceM * sensorFacing.GetX());
+    const float candidateDistanceM = (southWallYM - sensorPosition.y()) / sensorFacing.y();
+    const float intersectionX = sensorPosition.x() + (candidateDistanceM * sensorFacing.x());
     if (candidateDistanceM <= 0.0f || intersectionX < (westWallXM - 0.005f) || intersectionX > (eastWallXM + 0.005f))
     {
         return false;
@@ -2653,18 +2669,18 @@ inline bool TryDistanceToSouthWall(const PoseEstimate& pose, const MazeMap::Wall
 
 inline bool TryDistanceToNorthWall(const PoseEstimate& pose, const MazeMap::WallSensor& sensor, float& distanceM)
 {
-    const MazeMap::Vectorf<2> sensorPosition = SensorWorldPosition(pose, sensor);
-    const MazeMap::Vectorf<2> sensorFacing = SensorWorldFacing(pose, sensor);
+    const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
+    const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
     const float northWallYM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
     const float westWallXM = MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
     const float eastWallXM = MazeMap::ComputeCellInnerMaxCoordinateM(Config::kCellSizeM, Config::kMazeWallThicknessM);
-    if (sensorFacing.GetY() <= 0.1f)
+    if (sensorFacing.y() <= 0.1f)
     {
         return false;
     }
 
-    const float candidateDistanceM = (northWallYM - sensorPosition.GetY()) / sensorFacing.GetY();
-    const float intersectionX = sensorPosition.GetX() + (candidateDistanceM * sensorFacing.GetX());
+    const float candidateDistanceM = (northWallYM - sensorPosition.y()) / sensorFacing.y();
+    const float intersectionX = sensorPosition.x() + (candidateDistanceM * sensorFacing.x());
     if (candidateDistanceM <= 0.0f || intersectionX < (westWallXM - 0.005f) || intersectionX > (eastWallXM + 0.005f))
     {
         return false;
@@ -2768,8 +2784,8 @@ inline bool TryComputeDistanceToCellWallM(
         return false;
     }
 
-    const MazeMap::Vectorf<2> sensorPosition = SensorWorldPosition(pose, sensor);
-    const MazeMap::Vectorf<2> sensorFacing = SensorWorldFacing(pose, sensor);
+    const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
+    const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
     const float cellBaseXM = static_cast<float>(cell.GetX()) * Config::kCellSizeM;
     const float cellBaseYM = static_cast<float>(cell.GetY()) * Config::kCellSizeM;
     const float cellInnerMinXM = cellBaseXM + MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
@@ -2782,14 +2798,14 @@ inline bool TryComputeDistanceToCellWallM(
     case MazeMap::Left:
     case MazeMap::Right:
     {
-        if (((wallDirection == MazeMap::Left) && sensorFacing.GetX() >= -0.1f) ||
-            ((wallDirection == MazeMap::Right) && sensorFacing.GetX() <= 0.1f))
+        if (((wallDirection == MazeMap::Left) && sensorFacing.x() >= -0.1f) ||
+            ((wallDirection == MazeMap::Right) && sensorFacing.x() <= 0.1f))
         {
             return false;
         }
 
-        const float candidateDistanceM = (wallCoordinateM - sensorPosition.GetX()) / sensorFacing.GetX();
-        const float intersectionYM = sensorPosition.GetY() + (candidateDistanceM * sensorFacing.GetY());
+        const float candidateDistanceM = (wallCoordinateM - sensorPosition.x()) / sensorFacing.x();
+        const float intersectionYM = sensorPosition.y() + (candidateDistanceM * sensorFacing.y());
         if (candidateDistanceM <= 0.0f ||
             intersectionYM < (cellInnerMinYM - 0.005f) ||
             intersectionYM > (cellInnerMaxYM + 0.005f))
@@ -2803,14 +2819,14 @@ inline bool TryComputeDistanceToCellWallM(
     case MazeMap::Down:
     case MazeMap::Up:
     {
-        if (((wallDirection == MazeMap::Down) && sensorFacing.GetY() >= -0.1f) ||
-            ((wallDirection == MazeMap::Up) && sensorFacing.GetY() <= 0.1f))
+        if (((wallDirection == MazeMap::Down) && sensorFacing.y() >= -0.1f) ||
+            ((wallDirection == MazeMap::Up) && sensorFacing.y() <= 0.1f))
         {
             return false;
         }
 
-        const float candidateDistanceM = (wallCoordinateM - sensorPosition.GetY()) / sensorFacing.GetY();
-        const float intersectionXM = sensorPosition.GetX() + (candidateDistanceM * sensorFacing.GetX());
+        const float candidateDistanceM = (wallCoordinateM - sensorPosition.y()) / sensorFacing.y();
+        const float intersectionXM = sensorPosition.x() + (candidateDistanceM * sensorFacing.x());
         if (candidateDistanceM <= 0.0f ||
             intersectionXM < (cellInnerMinXM - 0.005f) ||
             intersectionXM > (cellInnerMaxXM + 0.005f))
@@ -2875,7 +2891,7 @@ inline bool TryComputeFrontWallObservationSampleDistanceM(
     float poseXM = 0.0f;
     float poseYM = 0.0f;
     const float sideSensorForwardOffsetM =
-        (std::max)(vehicle.SideLeft.GetPosition().GetX(), vehicle.SideRight.GetPosition().GetX());
+        (std::max)(vehicle.SideLeft.GetPosition().x(), vehicle.SideRight.GetPosition().x());
     const MazeMap::CellCoordinates observedCell(0, 0);
     if (!MazeMap::TryComputeSideWallObservationSamplePoseM(
             observedCell,
@@ -3019,31 +3035,31 @@ inline bool TryComputePoseAxisFromObservedWall(
         return false;
     }
 
-    const MazeMap::Vectorf<2> worldOffset = RotateBodyVectorToWorld(pose, sensor.GetPosition());
-    const MazeMap::Vectorf<2> sensorFacing = SensorWorldFacing(pose, sensor);
+    const Eigen::Vector2f worldOffset = RotateBodyVectorToWorld(pose, sensor.GetPosition());
+    const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
     if (wallDirection == MazeMap::Left || wallDirection == MazeMap::Right)
     {
-        if (!std::isfinite(worldOffset.GetX()) ||
-            !std::isfinite(sensorFacing.GetX()) ||
-            ((wallDirection == MazeMap::Left) && sensorFacing.GetX() >= -0.1f) ||
-            ((wallDirection == MazeMap::Right) && sensorFacing.GetX() <= 0.1f))
+        if (!std::isfinite(worldOffset.x()) ||
+            !std::isfinite(sensorFacing.x()) ||
+            ((wallDirection == MazeMap::Left) && sensorFacing.x() >= -0.1f) ||
+            ((wallDirection == MazeMap::Right) && sensorFacing.x() <= 0.1f))
         {
             return false;
         }
 
-        coordinateM = wallCoordinateM - worldOffset.GetX() - (measuredDistanceM * sensorFacing.GetX());
+        coordinateM = wallCoordinateM - worldOffset.x() - (measuredDistanceM * sensorFacing.x());
         return std::isfinite(coordinateM);
     }
 
-    if (!std::isfinite(worldOffset.GetY()) ||
-        !std::isfinite(sensorFacing.GetY()) ||
-        ((wallDirection == MazeMap::Down) && sensorFacing.GetY() >= -0.1f) ||
-        ((wallDirection == MazeMap::Up) && sensorFacing.GetY() <= 0.1f))
+    if (!std::isfinite(worldOffset.y()) ||
+        !std::isfinite(sensorFacing.y()) ||
+        ((wallDirection == MazeMap::Down) && sensorFacing.y() >= -0.1f) ||
+        ((wallDirection == MazeMap::Up) && sensorFacing.y() <= 0.1f))
     {
         return false;
     }
 
-    coordinateM = wallCoordinateM - worldOffset.GetY() - (measuredDistanceM * sensorFacing.GetY());
+    coordinateM = wallCoordinateM - worldOffset.y() - (measuredDistanceM * sensorFacing.y());
     return std::isfinite(coordinateM);
 }
 
@@ -3521,10 +3537,10 @@ inline bool HysteresisWall(bool currentState, float distanceM, float onThreshold
     return distanceM < onThresholdM;
 }
 
-inline bool IsApproximatelyDiagonalHeadingUnit(const MazeMap::Vectorf<2>& headingUnit)
+inline bool IsApproximatelyDiagonalHeadingUnit(const Eigen::Vector2f& headingUnit)
 {
-    const float absX = std::fabs(headingUnit.GetX());
-    const float absY = std::fabs(headingUnit.GetY());
+    const float absX = std::fabs(headingUnit.x());
+    const float absY = std::fabs(headingUnit.y());
     return absX > 0.5f && absY > 0.5f && std::fabs(absX - absY) <= 0.15f;
 }
 
@@ -3896,22 +3912,22 @@ inline bool TryComputeSideWallAimCoordinateM(
 
     const float yawCos = std::cos(pose.yawRad);
     const float yawSin = std::sin(pose.yawRad);
-    const MazeMap::Vectorf<2>& sensorPosition = sensor.GetPosition();
-    const MazeMap::Vectorf<2>& sensorFacing = sensor.GetFacingDirection();
+    const Eigen::Vector2f& sensorPosition = sensor.GetPosition();
+    const Eigen::Vector2f& sensorFacing = sensor.GetFacingDirection();
     const float sensorXM =
         pose.xMeters +
-        (yawCos * sensorPosition.GetX()) -
-        (yawSin * sensorPosition.GetY());
+        (yawCos * sensorPosition.x()) -
+        (yawSin * sensorPosition.y());
     const float sensorYM =
         pose.yMeters +
-        (yawSin * sensorPosition.GetX()) +
-        (yawCos * sensorPosition.GetY());
+        (yawSin * sensorPosition.x()) +
+        (yawCos * sensorPosition.y());
     const float facingXM =
-        (yawCos * sensorFacing.GetX()) -
-        (yawSin * sensorFacing.GetY());
+        (yawCos * sensorFacing.x()) -
+        (yawSin * sensorFacing.y());
     const float facingYM =
-        (yawSin * sensorFacing.GetX()) +
-        (yawCos * sensorFacing.GetY());
+        (yawSin * sensorFacing.x()) +
+        (yawCos * sensorFacing.y());
     const float innerMinCoordinateM =
         MazeMap::ComputeCellInnerMinCoordinateM(Config::kMazeWallThicknessM);
     const float innerMaxCoordinateM =
@@ -4231,6 +4247,7 @@ inline bool BuildEvidenceObservationSnapshot(
     combinedSnapshot.rightTransitionDetected = rightTransitionDetected;
     return true;
 }
+
 
 
 

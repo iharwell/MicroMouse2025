@@ -76,7 +76,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <MazeMapEigenIncludeDir>$(MSBuildProjectDirectory)\..\MazeMap\libraries\Eigen\src</MazeMapEigenIncludeDir>
+    <MazeMapEigenIncludeDir>$(MSBuildProjectDirectory)\..\eigen-5.0.0</MazeMapEigenIncludeDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
