@@ -9,6 +9,7 @@
 
 // Private application infrastructure helpers for the MazeMap runtime.
 
+
 class DiagnosticLogger
 {
 public:
@@ -592,7 +593,6 @@ private:
         return true;
     }
 };
-*/
 class OpenFloorMainLogger
 {
 public:
@@ -791,6 +791,7 @@ private:
     }
 };
 
+*/
 class OpenFloorRunManifestWriter
 {
 public:

@@ -551,6 +551,9 @@
     <ClCompile Include="VehicleState.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="MmLog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="MazeMap.ino">

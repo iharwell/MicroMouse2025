@@ -305,6 +305,7 @@
     <ClCompile Include="MazeMapApplication.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="MmLog.cpp" />
     <ClCompile Include="OpenFloorMainLoggerV2.cpp" />
     <ClCompile Include="OpenFloorTimingLoggerV2.cpp" />
     <ClCompile Include="MouseUkfFacade.cpp" />

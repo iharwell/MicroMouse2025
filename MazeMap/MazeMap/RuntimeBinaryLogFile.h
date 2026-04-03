@@ -17,6 +17,7 @@ namespace MazeMap
 		{
 			namespace Runtime
 			{
+				/*
 				// Writes fixed-width runtime telemetry rows into a binary log file with a matching sidecar description.
 				class EXPORT RuntimeBinaryLogFile
 				{
@@ -104,7 +105,7 @@ namespace MazeMap
 					bool HadWriteFailure() const;
 
 					uint32_t InternLabel(const char* text);
-				};
+				};*/
 			}
 		}
 	}

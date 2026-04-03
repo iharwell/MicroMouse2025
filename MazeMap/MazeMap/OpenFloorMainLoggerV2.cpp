@@ -7,7 +7,6 @@
 
 #include <cmath>
 #include <stdio.h>
-
 namespace OpenFloorLoggingV2 = MazeMap::App::Internal::Runtime::OpenFloorLoggingV2;
 
 namespace MazeMap
@@ -18,6 +17,7 @@ namespace MazeMap
 		{
 			namespace Runtime
 			{
+				/*
 				bool OpenFloorMainLoggerV2::Begin(const DiagnosticSensorSuite& sensors, const char* runId)
 				{
 					_metadata.Clear();
@@ -52,7 +52,7 @@ namespace MazeMap
 					if (!_sampleLog.BeginSelected(
 							MazeMap::kOpenFloorMainFileName,
 							kMainSchema,
-							kMainFieldCount,
+							kMainSize,
 							_metadata.Data(),
 							_notes.Data()))
 					{
@@ -77,26 +77,26 @@ namespace MazeMap
 					const MazeMap::WallObs leftObs = DriveBase::BuildLoggedLeftSideObservation(cycle.sensorSnapshot, maxRangeM);
 					const MazeMap::WallObs rightObs = DriveBase::BuildLoggedRightSideObservation(cycle.sensorSnapshot, maxRangeM);
 
-					MazeMap::App::Internal::Runtime::RuntimeRecordBuilder<kMainFieldCount> record;
+					MazeMap::App::Internal::Runtime::RuntimeRecordBuilder<kMainSize> record;
 					record.U32(cycle.masterTimeUs);
 					record.U32(cycle.controlTickSequence);
 					record.U32(cycle.dtUs);
-					record.U32(static_cast<uint32_t>(labels.sectionId));
-					record.U32(static_cast<uint32_t>(labels.primitiveId));
-					record.U32(static_cast<uint32_t>(MazeMap::OpenFloorPrimitiveFamilyForId(labels.primitiveId)));
-					record.U32(static_cast<uint32_t>(labels.directionId));
-					record.U32(static_cast<uint32_t>(labels.phaseId));
-					record.U32(static_cast<uint32_t>(labels.speedBin));
-					record.U32(static_cast<uint32_t>(labels.startMarkerId));
-					record.U32(MazeMap::OpenFloorPrimitiveIsMirrored(labels.primitiveId) ? 1U : 0U);
-					record.U32(labels.repeatIndex);
+					record.U8(static_cast<uint8_t>(labels.sectionId));
+					record.U8(static_cast<uint8_t>(labels.primitiveId));
+					record.U8(static_cast<uint8_t>(MazeMap::OpenFloorPrimitiveFamilyForId(labels.primitiveId)));
+					record.U8(static_cast<uint8_t>(labels.directionId));
+					record.U8(static_cast<uint8_t>(labels.phaseId));
+					record.U8(static_cast<uint8_t>(labels.speedBin));
+					record.U16(static_cast<uint16_t>(labels.startMarkerId));
+					record.U8(MazeMap::OpenFloorPrimitiveIsMirrored(labels.primitiveId) ? 1U : 0U);
+					record.U16(labels.repeatIndex);
 					record.F32(labels.progressNorm);
-					record.U32(cycle.driveTelemetry.modeFlags);
+					record.U16(cycle.driveTelemetry.modeFlags);
 					record.U32(cycle.clippingFlags);
 					record.U16(cycle.driveTelemetry.saturationFlags);
-					record.U32(OpenFloorLoggingV2::LoggerFlags(_sampleLog));
-					record.U32(cycle.watchdogFlags);
-					record.U32(OpenFloorLoggingV2::MeasurementFlags(
+					record.U16(OpenFloorLoggingV2::LoggerFlags(_sampleLog));
+					record.U16(cycle.watchdogFlags);
+					record.U16(OpenFloorLoggingV2::MeasurementFlags(
 						labels,
 						cycle,
 						encoderValid,
@@ -132,16 +132,17 @@ namespace MazeMap
 					record.F32(cycle.driveTelemetry.leftVelocityMps);
 					record.F32(cycle.driveTelemetry.rightVelocityMps);
 					record.U32(cycle.sensorSnapshot.imuTiming.readDoneUs);
-					record.U32(cycle.sensorSnapshot.imuBackLeft.status);
-					record.U32(cycle.sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U);
-					record.U32(cycle.sensorSnapshot.accelBiasValid ? 1U : 0U);
-					record.I32(cycle.sensorSnapshot.imuBackLeft.gyroX);
-					record.I32(cycle.sensorSnapshot.imuBackLeft.gyroY);
-					record.I32(cycle.sensorSnapshot.imuBackLeft.gyroZ);
-					record.I32(cycle.sensorSnapshot.imuBackLeft.accelX);
-					record.I32(cycle.sensorSnapshot.imuBackLeft.accelY);
-					record.I32(cycle.sensorSnapshot.imuBackLeft.accelZ);
-					record.I32(cycle.sensorSnapshot.imuBackLeft.temp);
+					record.U8(cycle.sensorSnapshot.imuBackLeft.status);
+
+					record.U8(cycle.sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U);
+					record.U8(cycle.sensorSnapshot.accelBiasValid ? 1U : 0U);
+					record.I16(cycle.sensorSnapshot.imuBackLeft.gyroX);
+					record.I16(cycle.sensorSnapshot.imuBackLeft.gyroY);
+					record.I16(cycle.sensorSnapshot.imuBackLeft.gyroZ);
+					record.I16(cycle.sensorSnapshot.imuBackLeft.accelX);
+					record.I16(cycle.sensorSnapshot.imuBackLeft.accelY);
+					record.I16(cycle.sensorSnapshot.imuBackLeft.accelZ);
+					record.I16(cycle.sensorSnapshot.imuBackLeft.temp);
 					record.F32(cycle.sensorSnapshot.gyroRawRadps);
 					record.F32(cycle.sensorSnapshot.gyroBiasRadps);
 					record.F32(cycle.sensorSnapshot.gyroRadps);
@@ -151,10 +152,10 @@ namespace MazeMap
 					record.U32(cycle.sensorSnapshot.frontTiming.observationReadyUs);
 					record.U32(cycle.sensorSnapshot.leftTiming.observationReadyUs);
 					record.U32(cycle.sensorSnapshot.rightTiming.observationReadyUs);
-					record.U32(static_cast<uint32_t>(frontLeftObs.cls));
-					record.U32(static_cast<uint32_t>(frontRightObs.cls));
-					record.U32(static_cast<uint32_t>(leftObs.cls));
-					record.U32(static_cast<uint32_t>(rightObs.cls));
+					record.U8(static_cast<uint32_t>(frontLeftObs.cls));
+					record.U8(static_cast<uint32_t>(frontRightObs.cls));
+					record.U8(static_cast<uint32_t>(leftObs.cls));
+					record.U8(static_cast<uint32_t>(rightObs.cls));
 					record.F32(frontLeftObs.rho);
 					record.F32(frontRightObs.rho);
 					record.F32(leftObs.rho);
@@ -260,7 +261,7 @@ namespace MazeMap
 						return false;
 					}
 					return _eventLog.WriteEvent(micros(), type, message);
-				}
+				}*/
 			}
 		}
 	}

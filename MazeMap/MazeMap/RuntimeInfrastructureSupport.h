@@ -29,7 +29,6 @@ namespace MazeMap
 		{
 			namespace Runtime
 			{
-				static constexpr uint32_t kRuntimeBinaryLogFlags = mmlog::FLAG_HAS_METADATA | mmlog::FLAG_HAS_NOTES;
 				inline constexpr const char* kRuntimeControlLogFileName = "logging.txt";
 
 				inline bool AppendRuntimeBinaryNotes(RuntimeTextBlockBuilder<512U>& notes, const char* eventFileName)

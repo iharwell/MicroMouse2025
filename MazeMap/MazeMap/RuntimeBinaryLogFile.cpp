@@ -19,7 +19,7 @@ namespace MazeMap
 					, _sidecarFile()
 					, _blocks(nullptr)
 					, _activeIndex(-1)
-					, _fieldCount(0U)
+					, _size(0U)
 					, _recordBytes(0U)
 					, _blockBytes(0U)
 					, _bufferCount(0U)
@@ -62,7 +62,7 @@ namespace MazeMap
 					}
 
 					snprintf(_fileName, sizeof(_fileName), "%s", fileName);
-					_fieldCount = fieldCount;
+					_size = fieldCount;
 					_recordBytes = fieldCount * sizeof(uint32_t);
 					_blockBytes = (writeMode == RuntimeBinaryLogWriteMode::Buffered) ? blockBytes : 0U;
 					_bufferCount = (writeMode == RuntimeBinaryLogWriteMode::Buffered) ? bufferCount : 0U;
@@ -96,7 +96,7 @@ namespace MazeMap
 					return true;
 				}
 
-				bool RuntimeBinaryLogFile::AppendRecord(const uint32_t* words, uint32_t fieldCount)
+				bool RuntimeBinaryLogFile::AppendRecord(const uint8_t* words, uint32_t size)
 				{
 					if (!_isOpen || words == nullptr || fieldCount != _fieldCount)
 					{
