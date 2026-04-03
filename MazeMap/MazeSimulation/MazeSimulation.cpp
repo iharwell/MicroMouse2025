@@ -13,7 +13,7 @@
 #include "..\MazeMap\Maze.h"
 #include "..\MazeMap\PathFinder.h"
 #include "..\MazeMap\DirectionalPathFinder.h"
-#include "..\MazeMap\MouseUkf.h"
+#include "..\MazeMap\MouseUkfFacade.h"
 #include "Mazes.h"
 #include "SimVehicle.h"
 #include "../MazeMap/ManeuverPathFinder.h"

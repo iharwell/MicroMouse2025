@@ -5,7 +5,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MazeMap` contains the production maze, motion, runtime, and hardware-integration code.
 - `MazeSimulation` contains the desktop simulation harness and simulator-side helpers.
 - `MazeMapTest` contains unit and regression coverage for the production library.
-- Wrapper headers such as `MazeMapRuntimeDrive.h` exist for compatibility; prefer the class-named header when one is available.
 
 ## MazeMap Library
 
@@ -31,7 +30,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `DirectionalLocation.h` / `DirectionalLocation.cpp`: combine a maze location with a facing direction.
 - `DirectionalPathFinder.h` / `DirectionalPathFinder.cpp`: path finder that accounts for heading changes and directional costs.
 - `DriveBase.h`: runtime drive subsystem that owns motor actuation, odometry, and closed-loop wheel control.
-- `MazeMapRuntimeDrive.h`: compatibility wrapper for `DriveBase.h`; existing code can still include the historical runtime-drive header name.
 - `EncoderStallPolicy.h`: stall-detection policy for encoder-driven motion.
 - `EigenCompat.h`: local compatibility helpers for Eigen use inside MazeMap.
 - `FanRampProfile.h`: fan ramp-up and ramp-down profile definitions.
@@ -57,19 +55,19 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `ManeuverQueue.h`: queue used to stage maneuvers for execution.
 - `ManeuverSet.h` / `ManeuverSet.cpp`: registry of legal maneuvers and the movement semantics attached to each maneuver code.
 - `MaskQueue.h` / `MaskQueue.cpp`: queue helpers built on maze masks for flood-fill style searches.
-- `MapEvidenceUpdater.h`: class-named entry header for the wall/map evidence updater defined in `MouseUkf.h`.
+- `MapEvidenceUpdater.h` / `MapEvidenceUpdater.cpp`: accumulate accepted UKF wall observations into per-edge maze evidence.
 - `Maze.h` / `Maze.cpp`: full maze representation, indexing, wall knowledge, and goal-cell handling.
 - `MazeLocation.h` / `MazeLocation.cpp`: physical or logical location within a maze cell, including conversions between them.
 - `MazeMapApplication.h` / `MazeMapApplication.cpp`: top-level application object and startup mode selection.
 - `MazeMapApplicationEntry.cpp`: entrypoint glue that boots the application in the correct host or embedded mode.
 - `MazeMapApplicationMode.h`: interface for a runnable application mode with `Begin` and `Run` phases.
-- `MazeMapApplicationPrivate.h`: private application umbrella include that wires runtime subsystems and mission logic together.
+- `MazeMapApplicationPrivate.h`: private application include set that assembles runtime, mission, and hardware dependencies for the app entrypoints.
 - `MazeMapApplicationRuntime.h`: declarations for the application runtime boundary between startup and active control loops.
 - `MazeMapControllerRegistry.h`: registry helpers for application controllers and standalone mode selection.
 - `MazeMapCore.cpp`: excluded legacy/experimental core file; retained in the project but not built.
 - `MazeMapMissionController.cpp`: main mission controller that coordinates exploration, speed runs, telemetry, and audits.
 - `MazeMapMissionModeHost.h`: host interface that mission modes call to enter specific mission workflows.
-- `MazeMapMissionModes.h` / `MazeMapMissionModes.cpp`: concrete mission mode wrappers used by the standalone app.
+- `MazeMapMissionModes.h` / `MazeMapMissionModes.cpp`: concrete mission mode types used by the standalone app.
 - `MazeMapRuntimeCore.h`: shared runtime state, calibration, asynchronous sensor-read helpers, and wall-distance calibration logic.
 - `WallDistanceCalibration.h`: class-named entry header for the wall-distance calibration subsystem defined in `MazeMapRuntimeCore.h`.
 - `MazeMapRuntimeCsvLog.h` / `MazeMapRuntimeCsvLog.cpp`: CSV-oriented runtime event logging support.
@@ -86,8 +84,7 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MotionTargetProjection.h`: helpers that project control targets into the robot motion frame.
 - `MotorEncoderDrive.h`: motor+encoder drive abstraction with physical model and hardware configuration.
 - `MotorModelUnits.h`: unit conversions and constants for motor modeling.
-- `MouseUkfFacade.h`: class-named entry header for the high-level estimator facade defined in `MouseUkf.h`.
-- `MouseUkf.h`: UKF plant, wall-geometry preprocessing, evidence update, and facade types used by runtime state estimation.
+- `MouseUkfFacade.h` / `MouseUkfFacade.cpp`: high-level estimator facade that combines the SR-UKF core with maze-evidence updates.
 - `OpenFloorMeasurementSpec.h`: IDs and geometry definitions for open-floor measurement routines.
 - `OpenFloorMainLogger.h`: class-named entry header for the primary open-floor logger defined in the runtime infrastructure layer.
 - `OpenFloorMainLoggerV2.h`: class-named entry header for the second-generation primary open-floor logger defined in the runtime infrastructure layer.
@@ -100,9 +97,9 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `PathFinder.h` / `PathFinder.cpp`: abstract path-finding contract and shared gradient-descent implementation.
 - `PathPoint.h` / `PathPoint.cpp`: per-point path helpers for path containers.
 - `pch.h` / `pch.cpp`: precompiled-header setup for the production library.
-- `PlantModel.h`: class-named entry header for the UKF plant model defined in `MouseUkf.h`.
+- `PlantModel.h` / `PlantModel.cpp`: vehicle process model, tire-force helpers, and plant parameter definitions used by the UKF.
 - `Pins.h`: board-level pin assignments shared by Teensy bring-up code and host-side runtime configuration.
-- `PrimitiveInverseSolver.h`: class-named entry header for the maneuver primitive inverse solver defined in `MouseUkf.h`.
+- `PrimitiveInverseSolver.h` / `PrimitiveInverseSolver.cpp`: inverse-solve maneuver primitives into plant-consistent motor-command sample tables.
 - `RollingAverageWindow.h`: small fixed-size rolling average helper.
 - `RuntimeBinaryLogFile.h`: class-named entry header for the runtime binary log file writer defined in the MMLOG runtime layer.
 - `RuntimeRecordBuilder.h`: class-named entry header for fixed-width runtime binary record builders defined in the MMLOG runtime layer.
@@ -112,7 +109,7 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `SensorSuite.h`: class-named entry header for the mission sensor pipeline defined in the runtime sensor layer.
 - `SmoothTurnYawRateController.h`: state bundle for smooth-turn yaw-rate control.
 - `StartupWaitProfile.h`: startup wait timing and policy constants.
-- `SrUkfCore.h`: class-named entry header for the specialized square-root UKF core defined in `MouseUkf.h`.
+- `SrUkfCore.h` / `SrUkfCore.cpp`: estimator-specific square-root UKF core with encoder, IMU, and wall-update logic.
 - `TeensyLayout.h`: Teensy-specific startup, SD-card bring-up, and board-support helper routines that consume `Pins.h` and `HardwareConfig.h`.
 - `TrackWidthEstimate.h`: helpers for estimating or adjusting effective track width.
 - `TractionLimitSweep.h`: structures for traction-limit sweep metrics and launch commands.
@@ -123,11 +120,11 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `VehicleState.h` / `VehicleState.cpp`: estimator state layout, observations, and the state container used by the UKF.
 - `WallBeliefMap.h`: wall-belief accumulation and update logic for partially known mazes.
 - `WallDetectionThresholds.h`: threshold helpers for wall detection decisions.
-- `WallGeometryModel.h`: class-named entry header for wall-geometry prediction helpers defined in `MouseUkf.h`.
+- `WallGeometryModel.h` / `WallGeometryModel.cpp`: ray-cast wall-geometry prediction helpers used by UKF wall updates.
 - `WallObservationPipeline.h`: wall-observation classification and accumulation helpers.
 - `WallSensor.h`: wall-sensor abstraction and distance model.
 - `WallSensorCalibration.h`: wall-sensor calibration curve and supporting point definitions.
-- `WallSensorPreprocessor.h`: class-named entry header for the wall-sensor preprocessing stage defined in `MouseUkf.h`.
+- `WallSensorPreprocessor.h` / `WallSensorPreprocessor.cpp`: convert raw wall-sensor LED samples into typed UKF wall observations.
 - `WallSensorLedCalibrationPhase.h`: phase enum for LED calibration workflows.
 - `WheelControlProfile.h`: wheel-control gain scaling bundle used by the runtime drive subsystem.
 - `dllmain.cpp`: Windows DLL entrypoint for the library target.

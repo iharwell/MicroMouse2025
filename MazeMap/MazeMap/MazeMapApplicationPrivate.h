@@ -34,7 +34,6 @@
 #include "MissionStartPolicy.h"
 #include "MissionMazeExport.h"
 #include "MotorModelUnits.h"
-#include "MouseUkf.h"
 #include "OpenLoopDriveCommand.h"
 #include "RollingAverageWindow.h"
 #include "SmoothTurnYawRateController.h"
@@ -78,7 +77,7 @@ namespace MazeMap
 }
 
 #include "MazeMapRuntimeCore.h"
-#include "MazeMapRuntimeDrive.h"
+#include "DriveBase.h"
 #include "MazeMapRuntimeSensors.h"
 #include "MazeMapRuntimeInfrastructure.h"
 

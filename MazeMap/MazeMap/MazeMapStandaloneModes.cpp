@@ -2561,7 +2561,7 @@ bool OpenFloorMeasurementController::RecoverToMarker(
     const float targetX = MazeMap::OpenFloorMarkerXMeters(markerId);
     const float targetY = MazeMap::OpenFloorMarkerYMeters(markerId);
     const Eigen::Vector2f targetHeading = DirectionToUnitVector(marker.heading);
-    const Eigen::Vector2f leftUnit = -MazeMap::RightUnitFromHeading(targetHeading);
+    const Eigen::Vector2f leftUnit(-targetHeading.y(), targetHeading.x());
     const unsigned long deadline = millis() + FailureTimeoutMs(timeoutMs);
     const PoseEstimate startPose = _drive.GetPose();
     const float initialLongitudinalError = std::fabs(

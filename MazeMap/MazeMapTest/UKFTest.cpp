@@ -2,7 +2,9 @@
 #include "CppUnitTest.h"
 #include "Templates.h"
 
-#include "..\MazeMap\MouseUkf.h"
+#include "..\MazeMap\PlantModel.h"
+#include "..\MazeMap\SrUkfCore.h"
+#include "..\MazeMap\UKF.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -241,7 +243,7 @@ namespace MazeMap
             observation.omegaLeftRadps = 1.0f;
             observation.omegaRightRadps = 1.0f;
 
-            const Eigen::Matrix<float, 2, 2> sqrtNoise = ComputeEncoderPairSqrtNoise(observation, params);
+            const Eigen::Matrix<float, 2, 2> sqrtNoise = SrUkfCore::ComputeEncoderPairSqrtNoise(observation, params);
             const Eigen::Matrix<float, 2, 2> covariance = sqrtNoise * sqrtNoise.transpose();
             const float halfTrackWidthM = 0.5f * params.trackWidthM;
             const float varianceUMps2 = 0.0018f * 0.0018f;
@@ -262,13 +264,13 @@ namespace MazeMap
         {
             const PlantParams params = PlantParams::Default();
             const float expectedSigmaRadps = 1.76e-6f / params.wheelRadiusM;
-            Assert::AreEqual(expectedSigmaRadps, ComputeStationaryEncoderOmegaSigmaRadps(params), 1.0e-9f);
+            Assert::AreEqual(expectedSigmaRadps, SrUkfCore::ComputeStationaryEncoderOmegaSigmaRadps(params), 1.0e-9f);
         }
 
         TEST_METHOD(ConfiguredGeneralImuSigmasMatchInitialEstimates)
         {
-            Assert::AreEqual(0.0013f, kImuYawRateSigmaRadps, 1.0e-9f);
-            Assert::AreEqual(0.014f, kImuAccelSigmaMps2, 1.0e-9f);
+            Assert::AreEqual(0.0013f, SrUkfCore::kImuYawRateSigmaRadps, 1.0e-9f);
+            Assert::AreEqual(0.014f, SrUkfCore::kImuAccelSigmaMps2, 1.0e-9f);
         }
 
         TEST_METHOD(SrUkfCoreRejectsInvalidMergedImuUpdate)

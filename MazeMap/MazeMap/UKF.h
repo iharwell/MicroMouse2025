@@ -8,11 +8,13 @@
 
 namespace MazeMap
 {
+    // Default no-op callback used when a UKF caller does not need per-sigma-point instrumentation.
     struct NoopUkfLoopHook
     {
         void operator()() const noexcept {}
     };
 
+    // Tunable unscented-transform weights for a square-root UKF with a fixed state dimension.
     template <int NState>
     struct SrUkfWeights
     {
@@ -54,6 +56,7 @@ namespace MazeMap
         }
     };
 
+    // Square-root covariance helpers shared by the reusable UKF implementation and estimator-specific layers.
     template <int NState>
     struct SrUkfMath
     {
@@ -233,6 +236,7 @@ namespace MazeMap
         }
     };
 
+    // Generic square-root unscented Kalman filter for a fixed state, default measurement, and control dimension.
     template <int NState, int MDefault, int NControl>
     class UKF
     {

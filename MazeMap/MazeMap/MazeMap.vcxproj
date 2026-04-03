@@ -215,7 +215,6 @@
     <ClInclude Include="MazeMapControllerRegistry.h" />
     <ClInclude Include="MazeMapRuntimeCsvLog.h" />
     <ClInclude Include="MazeMapRuntimeCore.h" />
-    <ClInclude Include="MazeMapRuntimeDrive.h" />
     <ClInclude Include="MazeMapRuntimeInfrastructure.h" />
     <ClInclude Include="MazeMapRuntimeMmLog.h" />
     <ClInclude Include="MazeMapRuntimeSignalHelpers.h" />
@@ -239,7 +238,6 @@
     <ClInclude Include="MotorEncoderDrive.h" />
     <ClInclude Include="MotorModelUnits.h" />
     <ClInclude Include="MouseUkfFacade.h" />
-    <ClInclude Include="MouseUkf.h" />
     <ClInclude Include="CoreBinaryFileExport.h" />
     <ClInclude Include="OpenFloorLoggingV2Support.h" />
     <ClInclude Include="OpenFloorMeasurementCycle.h" />
@@ -303,12 +301,14 @@
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
     <ClCompile Include="CoreBinaryFileExport.cpp" />
+    <ClCompile Include="MapEvidenceUpdater.cpp" />
     <ClCompile Include="MazeMapApplicationEntry.cpp" />
     <ClCompile Include="MazeMapApplication.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="OpenFloorMainLoggerV2.cpp" />
     <ClCompile Include="OpenFloorTimingLoggerV2.cpp" />
+    <ClCompile Include="MouseUkfFacade.cpp" />
     <ClCompile Include="MazeMapStandaloneModes.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -338,6 +338,11 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="PlantModel.cpp" />
+    <ClCompile Include="PrimitiveInverseSolver.cpp" />
+    <ClCompile Include="SrUkfCore.cpp" />
+    <ClCompile Include="WallGeometryModel.cpp" />
+    <ClCompile Include="WallSensorPreprocessor.cpp" />
     <ClCompile Include="RuntimeBinaryLogFile.cpp" />
     <ClCompile Include="Vehicle.cpp" />
     <ClCompile Include="VehicleState.cpp" />

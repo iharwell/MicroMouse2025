@@ -219,9 +219,6 @@
     <ClInclude Include="MazeMapRuntimeCore.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapRuntimeDrive.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
     <ClInclude Include="MazeMapRuntimeInfrastructure.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
@@ -289,9 +286,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MouseUkfFacade.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="MouseUkf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CoreBinaryFileExport.h">
@@ -479,6 +473,9 @@
     <ClCompile Include="CoreBinaryFileExport.cpp">
       <Filter>Source Files\App\Internal\Runtime</Filter>
     </ClCompile>
+    <ClCompile Include="MapEvidenceUpdater.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="MazeMapApplicationEntry.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
@@ -490,6 +487,9 @@
     </ClCompile>
     <ClCompile Include="OpenFloorTimingLoggerV2.cpp">
       <Filter>Source Files\App\Internal\Runtime</Filter>
+    </ClCompile>
+    <ClCompile Include="MouseUkfFacade.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapStandaloneModes.cpp">
       <Filter>Source Files\App\Internal</Filter>
@@ -516,6 +516,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PrimitiveInverseSolver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SrUkfCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WallGeometryModel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WallSensorPreprocessor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeMask.cpp">

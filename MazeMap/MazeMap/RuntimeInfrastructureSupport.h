@@ -4,7 +4,7 @@
 // Defines shared runtime logging helpers used by MazeMap diagnostic and measurement infrastructure.
 
 #include "OpenFloorMeasurementSpec.h"
-#include "MazeMapRuntimeDrive.h"
+#include "DriveBase.h"
 #include "MazeMapRuntimeSensors.h"
 #include "MazeMapRuntimeCsvLog.h"
 #include "MazeMapRuntimeMmLog.h"
