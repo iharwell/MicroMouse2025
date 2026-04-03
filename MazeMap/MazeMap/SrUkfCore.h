@@ -197,7 +197,7 @@ namespace MazeMap
         PlantModel _plantModel;
         WallGeometryModel _geometryModel;
         PlantParams _params;
-        UKF<VehicleState::kDimension, 3, 3> _filter;
+        UKF<VehicleState::kDimension, 3> _filter;
         ControlInput _lastControl;
         EncoderObs _lastEncoderObs;
         StateVector _prePredictState;

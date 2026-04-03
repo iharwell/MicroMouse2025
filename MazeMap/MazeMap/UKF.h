@@ -236,8 +236,8 @@ namespace MazeMap
         }
     };
 
-    // Generic square-root unscented Kalman filter for a fixed state, default measurement, and control dimension.
-    template <int NState, int MDefault, int NControl>
+    // Generic square-root unscented Kalman filter for a fixed state and control dimension.
+    template <int NState, int NControl>
     class UKF
     {
     public:
@@ -246,8 +246,6 @@ namespace MazeMap
         using StateVec = Eigen::Matrix<float, NState, 1>;
         using StateMat = Eigen::Matrix<float, NState, NState>;
         using ControlVec = Eigen::Matrix<float, NControl, 1>;
-        using DefaultMeasVec = Eigen::Matrix<float, MDefault, 1>;
-        using DefaultMeasMat = Eigen::Matrix<float, MDefault, MDefault>;
         using SigmaMat = Eigen::Matrix<float, NState, kSigmaCount>;
 
         UKF() noexcept
@@ -267,7 +265,7 @@ namespace MazeMap
         const StateMat& sqrtCovariance() const noexcept { return _sqrtCovariance; }
         StateMat covariance() const noexcept
         {
-            return SrUkfMath<NState>::Symmetrize(_sqrtCovariance * _sqrtCovariance.transpose());
+            return (_sqrtCovariance * _sqrtCovariance.transpose());
         }
         float lastNis() const noexcept { return _lastNis; }
 
@@ -562,7 +560,7 @@ namespace MazeMap
         {
             StateMat covariance = this->covariance();
             covariance -= updateColumns * updateColumns.transpose();
-            return SrUkfMath<NState>::Symmetrize(covariance);
+            return (covariance);
         }
 
         void makeSigmaPoints(

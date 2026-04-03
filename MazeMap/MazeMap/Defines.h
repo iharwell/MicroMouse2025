@@ -13,6 +13,8 @@ constexpr float RT2 = 1.414213562f;
 constexpr float HALF_RT2 = 0.707106781f;
 constexpr float WALL_THICKNESS = 0.012f;
 constexpr float MIN_CLEARANCE = 0.012f;
+constexpr float GRAVITY_MPS2 = 9.80665f;
+
 #include <assert.h>
 #if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
 #include <arm_math.h>

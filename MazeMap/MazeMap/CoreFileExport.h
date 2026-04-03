@@ -36,7 +36,7 @@ namespace MazeMap
 #if defined(ARDUINO_TEENSY41)
             SD.remove(fileName);
             _file = SD.open(fileName, FILE_WRITE);
-            return static_cast<bool>(_file);
+            return _file ? true : false;
 #else
             _file.open(fileName, std::ios::out | std::ios::trunc);
             return _file.is_open();
@@ -46,7 +46,7 @@ namespace MazeMap
         bool IsOpen()
         {
 #if defined(ARDUINO_TEENSY41)
-            return static_cast<bool>(_file);
+            return _file ? true : false;
 #else
             return _file.is_open();
 #endif

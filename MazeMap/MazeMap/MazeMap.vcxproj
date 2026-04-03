@@ -249,7 +249,6 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
-    <ClInclude Include="PrimitiveInverseSolver.h" />
     <ClInclude Include="RollingAverageWindow.h" />
     <ClInclude Include="RuntimeBinaryLogFile.h" />
     <ClInclude Include="RuntimeBinaryRecordSupport.h" />
@@ -339,7 +338,6 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PlantModel.cpp" />
-    <ClCompile Include="PrimitiveInverseSolver.cpp" />
     <ClCompile Include="SrUkfCore.cpp" />
     <ClCompile Include="WallGeometryModel.cpp" />
     <ClCompile Include="WallSensorPreprocessor.cpp" />

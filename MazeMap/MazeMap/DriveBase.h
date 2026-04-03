@@ -320,20 +320,29 @@ public:
         _leftIntegral = (std::clamp)(_leftIntegral + (leftErrorMps * dtSeconds), -integralLimit, integralLimit);
         _rightIntegral = (std::clamp)(_rightIntegral + (rightErrorMps * dtSeconds), -integralLimit, integralLimit);
 
-        const float leftFeedforwardCommand = ModelDriveFeedforwardForTargetMotion(
-            _leftMotor,
-            leftTargetMps,
-            linearTargetAccelMps2,
-            angularTargetAccelRadps2,
-            effectiveTrackWidthM,
-            true);
-        const float rightFeedforwardCommand = ModelDriveFeedforwardForTargetMotion(
-            _rightMotor,
-            rightTargetMps,
-            linearTargetAccelMps2,
-            angularTargetAccelRadps2,
-            effectiveTrackWidthM,
-            false);
+        const MazeMap::PlantParams& params = _ukf.ukf().params();
+        const MazeMap::VehicleState::StateVector& estimatedState = _ukf.ukf().state();
+        const MeasuredKinematics measured = GetMeasuredKinematics();
+        const float presentLinearSpeedMps =
+            std::isfinite(estimatedState(MazeMap::VehicleState::kU)) ?
+            estimatedState(MazeMap::VehicleState::kU) :
+            measured.linearSpeedMps;
+        const float presentYawRateRadps =
+            std::isfinite(estimatedState(MazeMap::VehicleState::kR)) ?
+            estimatedState(MazeMap::VehicleState::kR) :
+            measured.angularSpeedRadps;
+        MazeMap::PlantModel plantModel;
+        const MazeMap::DriveCommandSolution feedforwardSolution =
+            plantModel.solveDriveCommands(
+                presentLinearSpeedMps,
+                linearTargetAccelMps2,
+                presentYawRateRadps,
+                angularTargetAccelRadps2,
+                params,
+                GetMissionFanDutyCycle(),
+                0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage()));
+        const float leftFeedforwardCommand = feedforwardSolution.control.leftMotorCommand;
+        const float rightFeedforwardCommand = feedforwardSolution.control.rightMotorCommand;
         float leftCommand = VelocityCommandFromError(
             leftFeedforwardCommand,
             leftTargetMps,
@@ -1067,30 +1076,6 @@ private:
     WheelLaunchAssistState _rightLaunchAssist;
     bool _estimatorFaulted = false;
     char _estimatorFaultReason[64] = {};
-
-    float ModelDriveFeedforwardForTargetMotion(
-        const MazeMap::MotorEncoderDrive& motor,
-        float targetSpeedMps,
-        float linearTargetAccelMps2,
-        float angularTargetAccelRadps2,
-        float effectiveTrackWidthM,
-        bool isLeftWheel) const
-    {
-        // Use the shared vehicle mass/inertia plus the motor model so wheel feedforward covers both the commanded
-        // wheel-speed back-EMF and the longitudinal/yaw force required to hit the requested v/omega acceleration.
-        const MazeMap::VehiclePhysicalModel& physicalModel = MazeMap::Vehicle::GetPhysicalModel();
-        float trackWidthM = effectiveTrackWidthM;
-        if (!(trackWidthM > 0.0f) || !std::isfinite(trackWidthM))
-        {
-            trackWidthM = physicalModel.trackWidthM;
-        }
-
-        const float yawInertiaKgM2 = physicalModel.yawInertiaKgM2;
-        const float sharedForceN = 0.5f * physicalModel.massKg * linearTargetAccelMps2;
-        const float yawForceN = (trackWidthM > 0.0f) ? ((yawInertiaKgM2 * angularTargetAccelRadps2) / trackWidthM) : 0.0f;
-        const float wheelForceN = isLeftWheel ? (sharedForceN + yawForceN) : (sharedForceN - yawForceN);
-        return motor.getDriveCommandForGroundForce(wheelForceN, targetSpeedMps);
-    }
 
     float VelocityCommandFromError(
         float feedforwardCommand,

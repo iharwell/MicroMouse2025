@@ -31,6 +31,11 @@ namespace MazeMap
         ArcTrackWidthInterpolation arcTrackWidthInterpolation;
     };
 
+    // The root authority of all details related to the physical layout, construction, or hardware aspects of the robot.
+    // The hub class, and the only object one should need to run any particular subsystem.
+    // As additional things are called for, build this class out through composition to make the static initialization readable.
+    // Because the system uses TCM, there is no reason to copy things from this class elsewhere. Just pass this object or it's members by reference.
+    // This class makes any global fields across the project obsolete. If you find any that aren't here, it's time to update this class.
     class EXPORT Vehicle
     {
     private:

@@ -12,7 +12,7 @@
 #include "WallDetectionThresholds.h"
 #include "WallObservationPipeline.h"
 #include "WallSensorCalibration.h"
-
+#include "Pins.h"
 inline bool AppendStartupTrace(const char* line);
 
 #if !defined(ARDUINO_TEENSY41) && !defined(MAZEMAP_PINS_NAMESPACE_AVAILABLE)

@@ -16,6 +16,7 @@ namespace MazeMap
         float speedConstantRadpsPerVolt;
         float gearRatio;
         float wheelDiameterM;
+        float wheelYOffsetM;
         uint16_t pulsesPerRev;
     };
 
@@ -50,6 +51,7 @@ namespace MazeMap
             // encoder distance by about 3.05 mm on the 0.72 m north-corridor run, so trim the shared wheel diameter
             // down by 0.42% to keep the fixed-distance phases from finishing short.
             0.025220f,
+            0.01475f,
             4096U
         };
         inline static constexpr MotorEncoderDriveHardwareConfig kLeftHardwareConfig = {

@@ -159,7 +159,7 @@ namespace MazeMap
         projectedState.SetTime(previousState.GetTime() + timeDelta);
         projectedState.SetControlInput(previousState.GetControlInput());
         projectedState.SetStateVector(
-            plantModel.integrateMidpoint(
+            plantModel.integrate(
                 previousState.GetStateVector(),
                 previousState.GetControlInput(),
                 timeDelta,

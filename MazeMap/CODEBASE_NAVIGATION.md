@@ -97,9 +97,8 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `PathFinder.h` / `PathFinder.cpp`: abstract path-finding contract and shared gradient-descent implementation.
 - `PathPoint.h` / `PathPoint.cpp`: per-point path helpers for path containers.
 - `pch.h` / `pch.cpp`: precompiled-header setup for the production library.
-- `PlantModel.h` / `PlantModel.cpp`: vehicle process model, tire-force helpers, and plant parameter definitions used by the UKF.
+- `PlantModel.h` / `PlantModel.cpp`: vehicle process model, tire-force helpers, motor-command inverse dynamics, and plant parameter definitions used by the UKF.
 - `Pins.h`: board-level pin assignments shared by Teensy bring-up code and host-side runtime configuration.
-- `PrimitiveInverseSolver.h` / `PrimitiveInverseSolver.cpp`: inverse-solve maneuver primitives into plant-consistent motor-command sample tables.
 - `RollingAverageWindow.h`: small fixed-size rolling average helper.
 - `RuntimeBinaryLogFile.h`: class-named entry header for the runtime binary log file writer defined in the MMLOG runtime layer.
 - `RuntimeRecordBuilder.h`: class-named entry header for fixed-width runtime binary record builders defined in the MMLOG runtime layer.

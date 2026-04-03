@@ -94,31 +94,48 @@ namespace MazeMap
         float yawAccelRadps2 = 0.0f;
     };
 
+    // Inverse-dynamics result for a requested body motion at the current operating point.
+    struct DriveCommandSolution
+    {
+        ControlInput control{};
+        float leftSlipRatio = 0.0f;
+        float rightSlipRatio = 0.0f;
+        float leftWheelSpeedRadps = 0.0f;
+        float rightWheelSpeedRadps = 0.0f;
+        float leftWheelTorqueNm = 0.0f;
+        float rightWheelTorqueNm = 0.0f;
+        float leftWheelAccelRadps2 = 0.0f;
+        float rightWheelAccelRadps2 = 0.0f;
+        float longitudinalAccelErrorMps2 = 0.0f;
+        float yawAccelErrorRadps2 = 0.0f;
+        bool converged = false;
+    };
+
     // Tunable physical parameters and sensor extrinsics for the UKF plant model.
     struct PlantParams
     {
-        float massKg = 0.14f;
-        float effectiveLongitudinalMassKg = 0.14f;
-        float yawInertiaKgM2 = 0.000665f;
-        float trackWidthM = 0.084635f;
-        float contactPatchLongitudinalOffsetM = 0.015f;
-        float wheelRadiusM = 0.01261f;
+        float massKg;
+        float effectiveLongitudinalMassKg;
+        float yawInertiaKgM2;
+        float trackWidthM;
+        float contactPatchLongitudinalOffsetM;
+        float wheelRadiusM;
         float equivalentWheelInertiaKgM2 = 4.8e-5f;
 
-        float supplyVoltageV = 8.4f;
-        float driveResistanceOhms = 4.31f;
-        float torqueConstantNmPerA = 0.00396f;
-        float speedConstantRadpsPerVolt = 2410.0f;
-        float noLoadCurrentA = 0.0459f;
-        float motorCurrentLimitA = 2.4f;
-        float gearRatio = 56.0f / 17.0f;
-        uint16_t encoderCountsPerMotorRev = 4096U;
+        float supplyVoltageV;
+        float driveResistanceOhms;
+        float torqueConstantNmPerA;
+        float speedConstantRadpsPerVolt;
+        float noLoadCurrentA;
+        float motorCurrentLimitA;
+        float gearRatio;
+        uint16_t encoderCountsPerMotorRev;
 
         float drivetrainEfficiency = 0.5f;
         float rollingFrictionTorqueNm = 0.0035f;
         float viscousFrictionNmPerRadps = 2.5e-4f;
 
-        float longitudinalStiffnessN = 18.0f;
+        float longitudinalTireStiffnessN = 6.0f;
         float corneringStiffnessFrontNPerRad = 18.0f;
         float corneringStiffnessRearNPerRad = 16.0f;
         float muFront = 1.65f;
@@ -127,8 +144,7 @@ namespace MazeMap
 
         float velocityEpsilonMps = 0.05f;
         float forceEpsilonN = 1.0e-4f;
-        float gravityMps2 = 9.80665f;
-        float fanDownforceAtFullDutyN = 1.60f;
+        float fanDownforceAtFullDutyN = 0.7f;
 
         float noHitRangeM = 0.30f;
         std::array<Eigen::Vector2f, 4> contactPositionsBodyM = {
@@ -154,8 +170,8 @@ namespace MazeMap
         float TotalNormalLoadN(float fanDutyCycle) const noexcept
         {
             return
-                (massKg * gravityMps2) +
-                ((std::max)(0.0f, fanDutyCycle) * fanDownforceAtFullDutyN);
+                (massKg * GRAVITY_MPS2) +
+                fanDutyCycle * fanDownforceAtFullDutyN;
         }
 
         float FrontWheelLoadN(float fanDutyCycle) const noexcept
@@ -195,13 +211,26 @@ namespace MazeMap
             const StateVector& state,
             const ControlInput& control,
             const PlantParams& params) const noexcept;
-        StateVector integrateMidpoint(
+        StateVector integrate(
             const StateVector& state,
             const ControlInput& control,
             float dt,
             const PlantParams& params) const noexcept;
+        DriveCommandSolution solveDriveCommands(
+            float forwardVelocityMps,
+            float desiredLongitudinalAccelMps2,
+            float yawRateRadps,
+            float desiredYawAccelRadps2,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f) const noexcept;
         float driveTorqueFromCommand(
             float motorCommand,
+            float wheelBankSpeedRadps,
+            float batteryVoltageV,
+            const PlantParams& params) const noexcept;
+        float driveCommandFromTorque(
+            float wheelTorqueNm,
             float wheelBankSpeedRadps,
             float batteryVoltageV,
             const PlantParams& params) const noexcept;

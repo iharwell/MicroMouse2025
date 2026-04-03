@@ -29,7 +29,7 @@ namespace MazeMap
 #if defined(ARDUINO_TEENSY41)
 					SD.remove(fileName);
 					_file = SD.open(fileName, FILE_WRITE);
-					return static_cast<bool>(_file);
+					return _file ? true : false;
 #else
 					_file.open(fileName, std::ios::out | std::ios::binary | std::ios::trunc);
 					return _file.is_open();
@@ -39,7 +39,7 @@ namespace MazeMap
 				bool CoreBinaryFileExport::IsOpen() const
 				{
 #if defined(ARDUINO_TEENSY41)
-					return static_cast<bool>(_file);
+					return const_cast<CoreBinaryFileExport*>(this)->IsOpen();
 #else
 					return _file.is_open();
 #endif

@@ -82,25 +82,6 @@ namespace MazeMap::MmLog
     static_assert(sizeof(GenericFileHeader) == 44u, "MMLG GenericFileHeader must be 44 bytes");
     static_assert(sizeof(LogRecordHeader) == 8u, "MMLG LogRecordHeader must be 8 bytes");
 
-    inline uint32_t packU32(uint32_t value) noexcept
-    {
-        return value;
-    }
-
-    inline uint32_t packI32(int32_t value) noexcept
-    {
-        uint32_t packed = 0u;
-        std::memcpy(&packed, &value, sizeof(packed));
-        return packed;
-    }
-
-    inline uint32_t packF32(float value) noexcept
-    {
-        uint32_t packed = 0u;
-        std::memcpy(&packed, &value, sizeof(packed));
-        return packed;
-    }
-
     inline void fillHeader(
         FileHeader& header,
         uint32_t recordBytes,

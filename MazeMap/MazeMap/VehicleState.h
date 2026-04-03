@@ -88,6 +88,9 @@ namespace MazeMap
     {
     public:
         static constexpr int kDimension = 9;
+        using StateVector = Eigen::Matrix<float, kDimension, 1>;
+        using StateMatrix = Eigen::Matrix<float, kDimension, kDimension>;
+
         // World pose uses +X right and +Y forward.
         // Body velocity uses kV = body-right speed, kU = body-forward speed, and kR = clockwise yaw rate.
 
@@ -104,8 +107,6 @@ namespace MazeMap
             kBgz = 8
         };
 
-        using StateVector = Eigen::Matrix<float, kDimension, 1>;
-        using StateMatrix = Eigen::Matrix<float, kDimension, kDimension>;
 
         VehicleState() noexcept
             : _state(StateVector::Zero())
@@ -116,7 +117,6 @@ namespace MazeMap
         }
 
         const StateVector& GetStateVector() const noexcept { return _state; }
-        StateVector& MutableStateVector() noexcept { return _state; }
 
         void SetStateVector(const StateVector& state) noexcept
         {
@@ -128,7 +128,6 @@ namespace MazeMap
         void SetSqrtCovariance(const StateMatrix& sqrtCovariance) noexcept { _sqrtCovariance = sqrtCovariance; }
 
         StateMatrix GetCovariance() const noexcept { return _sqrtCovariance * _sqrtCovariance.transpose(); }
-
         void SetCovariance(const StateMatrix& covariance) noexcept
         {
             Eigen::LLT<StateMatrix> llt;
@@ -148,7 +147,6 @@ namespace MazeMap
         }
 
         void SetPosition(const Eigen::Vector2f& position) noexcept { _state(kPx) = position.x(); _state(kPy) = position.y(); }
-
         Eigen::Vector2f GetPosition() const noexcept { return Eigen::Vector2f(_state(kPx), _state(kPy)); }
         Eigen::Vector2f GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
 
@@ -160,11 +158,7 @@ namespace MazeMap
         float GetLateralVelocity() const noexcept { return _state(kV); }
         float GetLateralVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetLateralVelocity(); }
 
-        void SetOrientation(float orientation) noexcept
-        {
-            _state(kPsi) = NormalizeAngle(orientation);
-        }
-
+        void SetOrientation(float orientation) noexcept { _state(kPsi) = NormalizeAngle(orientation); }
         float GetOrientation() const noexcept { return _state(kPsi); }
         float GetOrientation() noexcept { return const_cast<const VehicleState*>(this)->GetOrientation(); }
 
@@ -174,12 +168,15 @@ namespace MazeMap
 
         void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept { _state(kOmegaL) = wheelSpeedRadps; }
         float GetWheelSpeedLeft() const noexcept { return _state(kOmegaL); }
+        float GetWheelSpeedLeft() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedLeft(); }
 
         void SetWheelSpeedRight(float wheelSpeedRadps) noexcept { _state(kOmegaR) = wheelSpeedRadps; }
         float GetWheelSpeedRight() const noexcept { return _state(kOmegaR); }
+        float GetWheelSpeedRight() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedRight(); }
 
         void SetGyroBiasZ(float gyroBiasRadps) noexcept { _state(kBgz) = gyroBiasRadps; }
         float GetGyroBiasZ() const noexcept { return _state(kBgz); }
+        float GetGyroBiasZ() noexcept { return const_cast<const VehicleState*>(this)->GetGyroBiasZ(); }
 
         void SetTime(float time) noexcept { _time = time; }
         float GetTime() const noexcept { return _time; }
@@ -195,9 +192,16 @@ namespace MazeMap
 
         void SetFanDutyCycle(float fanDutyCycle) noexcept { _control.fanDutyCycle = fanDutyCycle; }
         float GetFanDutyCycle() const noexcept { return _control.fanDutyCycle; }
+        float GetFanDutyCycle() noexcept { return const_cast<const VehicleState*>(this)->GetFanDutyCycle(); }
 
-        const ControlInput& GetControlInput() const noexcept { return _control; }
         void SetControlInput(const ControlInput& control) noexcept { _control = control; }
+        const ControlInput& GetControlInput() const noexcept { return _control; }
+        const ControlInput& GetControlInput() noexcept { return const_cast<const VehicleState*>(this)->GetControlInput(); }
+
+        void SetVarianceValues(float xVar, float yVar, float velocityVar, float orientationVar, float rotVelocityVar)
+        {
+
+        }
 
         void SetPositionVar(const Eigen::Vector2f& positionVariance) noexcept
         {
@@ -245,25 +249,25 @@ namespace MazeMap
         float GetRotationalVelocityVar() const noexcept { return GetCovariance()(kR, kR); }
         float GetRotationalVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocityVar(); }
 
-        void SetMotorDriveLVar(float motorDriveLVariance) noexcept
+        void SetLWheelSpeedVar(float motorDriveLVariance) noexcept
         {
             StateMatrix covariance = GetCovariance();
             covariance(kOmegaL, kOmegaL) = (std::max)(0.0f, motorDriveLVariance);
             SetCovariance(covariance);
         }
 
-        float GetMotorDriveLVar() const noexcept { return GetCovariance()(kOmegaL, kOmegaL); }
-        float GetMotorDriveLVar() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveLVar(); }
+        float GetLWheelSpeedVar() const noexcept { return GetCovariance()(kOmegaL, kOmegaL); }
+        float GetLWheelSpeedVar() noexcept { return const_cast<const VehicleState*>(this)->GetLWheelSpeedVar(); }
 
-        void SetMotorDriveRVar(float motorDriveRVariance) noexcept
+        void SetRWheelSpeedVar(float motorDriveRVariance) noexcept
         {
             StateMatrix covariance = GetCovariance();
             covariance(kOmegaR, kOmegaR) = (std::max)(0.0f, motorDriveRVariance);
             SetCovariance(covariance);
         }
 
-        float GetMotorDriveRVar() const noexcept { return GetCovariance()(kOmegaR, kOmegaR); }
-        float GetMotorDriveRVar() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveRVar(); }
+        float GetRWheelSpeedVar() const noexcept { return GetCovariance()(kOmegaR, kOmegaR); }
+        float GetRWheelSpeedVar() noexcept { return const_cast<const VehicleState*>(this)->GetRWheelSpeedVar(); }
 
         void SetGyroBiasZVar(float gyroBiasVariance) noexcept
         {

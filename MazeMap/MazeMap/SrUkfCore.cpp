@@ -209,7 +209,7 @@ namespace MazeMap
             controlVector,
             [this, &control](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
             {
-                return _plantModel.integrateMidpoint(sigmaPoint, control, sigmaDt, _params);
+                return _plantModel.integrate(sigmaPoint, control, sigmaDt, _params);
             },
             invokeLoop);
     }
@@ -462,7 +462,7 @@ namespace MazeMap
         const float leftDistanceM = static_cast<float>(measured.totalLeftCounts) * distancePerCountM;
         const float rightDistanceM = static_cast<float>(measured.totalRightCounts) * distancePerCountM;
         const float forwardDistanceM = 0.5f * (leftDistanceM + rightDistanceM);
-        const float deltaYawRad = (rightDistanceM - leftDistanceM) / trackWidthM;
+        const float deltaYawRad = (leftDistanceM - rightDistanceM) / trackWidthM;
         const float referenceYawRad = _prePredictState(VehicleState::kPsi);
         const float translationYawRad = VehicleState::NormalizeAngle(referenceYawRad + (0.5f * deltaYawRad));
         const Eigen::Vector2f heading = HeadingUnitFromYaw(translationYawRad);

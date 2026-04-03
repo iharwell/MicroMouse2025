@@ -35,8 +35,6 @@ namespace MazeMap
 					if (!_metadata.AppendFloat("imu_gyro_mdps_per_lsb", sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
 					if (!_metadata.AppendFloat("imu_accel_mg_per_lsb", sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
 					if (!MazeMap::App::Internal::Runtime::AppendRuntimeBinaryNotes(_notes, _eventLog.GetFileName())) return false;
-					if (!_notes.AppendLine("primary_record=one_measurement_row_per_control_loop")) return false;
-					if (!_notes.AppendLine("phase_transitions_faults_and_summaries_are_emitted_to_logging_txt")) return false;
 
 					if (_eventLog.IsEnabled())
 					{
@@ -95,7 +93,7 @@ namespace MazeMap
 					record.F32(labels.progressNorm);
 					record.U32(cycle.driveTelemetry.modeFlags);
 					record.U32(cycle.clippingFlags);
-					record.U32(cycle.driveTelemetry.saturationFlags);
+					record.U16(cycle.driveTelemetry.saturationFlags);
 					record.U32(OpenFloorLoggingV2::LoggerFlags(_sampleLog));
 					record.U32(cycle.watchdogFlags);
 					record.U32(OpenFloorLoggingV2::MeasurementFlags(
@@ -165,8 +163,6 @@ namespace MazeMap
 					record.F32(frontRightObs.confidence);
 					record.F32(leftObs.confidence);
 					record.F32(rightObs.confidence);
-					record.F32(cycle.batteryVoltage);
-					record.F32(cycle.boardTemperatureC);
 					record.F32(cycle.fanDutyCycle);
 					return MazeMap::App::Internal::Runtime::AppendBinaryRecord(_sampleLog, record);
 				}
