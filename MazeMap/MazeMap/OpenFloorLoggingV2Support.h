@@ -6,7 +6,6 @@
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"
 #include "OpenFloorMeasurementSpec.h"
-#include "RuntimeBinaryLogFile.h"
 #include "VehicleState.h"
 
 #include <cstdint>
@@ -36,11 +35,11 @@ namespace MazeMap
 					static constexpr uint16_t kMeasurementFlagLeftObsValid = 1u << 9;
 					static constexpr uint16_t kMeasurementFlagRightObsValid = 1u << 10;
 
-					inline uint16_t LoggerFlags(const RuntimeBinaryLogFile& log)
+					inline uint16_t LoggerFlags(bool overflowed, bool writeFailure)
 					{
 						uint16_t flags = 0U;
-						if (log.HadOverflow()) flags |= kLoggerFlagOverflow;
-						if (log.HadWriteFailure()) flags |= kLoggerFlagWriteFailure;
+						if (overflowed) flags |= kLoggerFlagOverflow;
+						if (writeFailure) flags |= kLoggerFlagWriteFailure;
 						return flags;
 					}
 

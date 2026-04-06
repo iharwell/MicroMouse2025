@@ -126,12 +126,14 @@ public:
         ResetControllers();
     }
 
+    // DANGEROUS!!!! Do not use unless you've literally made contact with a physical reference like a wall.
     void SetPose(float xMeters, float yMeters, float yawRad)
     {
         ResetPoseEstimate(xMeters, yMeters, yawRad);
         ResetControllers();
     }
 
+    // DANGEROUS!!!! Do not use unless you've literally made contact with a physical reference like a wall.
     void SetPoseXMeters(float xMeters)
     {
         if (std::isfinite(xMeters))
@@ -140,6 +142,7 @@ public:
         }
     }
 
+    // DANGEROUS!!!! Do not use unless you've literally made contact with a physical reference like a wall.
     void SetPoseYMeters(float yMeters)
     {
         if (std::isfinite(yMeters))

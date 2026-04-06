@@ -93,9 +93,6 @@
     <ClInclude Include="DiagnosticLogBudget.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DiagnosticLogger.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
     <ClInclude Include="DiagnosticMotionPlan.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -213,9 +210,6 @@
     <ClInclude Include="MazeMapControllerRegistry.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapRuntimeCsvLog.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
     <ClInclude Include="MazeMapRuntimeCore.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
@@ -246,9 +240,6 @@
     <ClInclude Include="MazeMapMissionModes.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="OpenFloorMainLogger.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
     <ClInclude Include="OpenFloorMainLoggerV2.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
@@ -256,9 +247,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OpenFloorRunManifestWriter.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
-    <ClInclude Include="OpenFloorTimingLogger.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="OpenFloorTimingLoggerV2.h">
@@ -324,25 +312,10 @@
     <ClInclude Include="RollingAverageWindow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="RuntimeBinaryLogFile.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
     <ClInclude Include="RuntimeBinaryLogSupport.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
-    <ClInclude Include="RuntimeBinaryRecordSupport.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
     <ClInclude Include="RuntimeControlLogSupport.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
-    <ClInclude Include="RuntimeInfrastructureSupport.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
-    <ClInclude Include="RuntimeRecordBuilder.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
-    <ClInclude Include="RuntimeTextBlockBuilder.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="SearchRunPlanner.h">
@@ -417,9 +390,6 @@
     <ClInclude Include="WheelControlProfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="AuxMeasurementLogger.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Cell.cpp">
@@ -479,20 +449,11 @@
     <ClCompile Include="MazeMapApplication.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
-    <ClCompile Include="OpenFloorMainLoggerV2.cpp">
-      <Filter>Source Files\App\Internal\Runtime</Filter>
-    </ClCompile>
-    <ClCompile Include="OpenFloorTimingLoggerV2.cpp">
-      <Filter>Source Files\App\Internal\Runtime</Filter>
-    </ClCompile>
     <ClCompile Include="MouseUkfFacade.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapStandaloneModes.cpp">
       <Filter>Source Files\App\Internal</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeMapRuntimeCsvLog.cpp">
-      <Filter>Source Files\App\Internal\Runtime</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapMissionController.cpp">
       <Filter>Source Files\App\Internal</Filter>
@@ -541,9 +502,6 @@
     </ClCompile>
     <ClCompile Include="pch.cpp">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="RuntimeBinaryLogFile.cpp">
-      <Filter>Source Files\App\Internal\Runtime</Filter>
     </ClCompile>
     <ClCompile Include="Vehicle.cpp">
       <Filter>Source Files</Filter>

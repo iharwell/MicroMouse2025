@@ -173,7 +173,6 @@
     <ClInclude Include="DiagnosticConfig.h" />
     <ClInclude Include="DiagnosticCoverage.h" />
     <ClInclude Include="DiagnosticLogBudget.h" />
-    <ClInclude Include="DiagnosticLogger.h" />
     <ClInclude Include="DiagnosticMotionPlan.h" />
     <ClInclude Include="DiagnosticSensorSuite.h" />
     <ClInclude Include="DiagonalWallCentering.h" />
@@ -213,7 +212,6 @@
     <ClInclude Include="MazeMapApplicationPrivate.h" />
     <ClInclude Include="MazeMapApplicationRuntime.h" />
     <ClInclude Include="MazeMapControllerRegistry.h" />
-    <ClInclude Include="MazeMapRuntimeCsvLog.h" />
     <ClInclude Include="MazeMapRuntimeCore.h" />
     <ClInclude Include="MazeMapRuntimeInfrastructure.h" />
     <ClInclude Include="MazeMapRuntimeMmLog.h" />
@@ -224,11 +222,9 @@
     <ClInclude Include="MazeMask.h" />
     <ClInclude Include="MazeMapMissionModeHost.h" />
     <ClInclude Include="MazeMapMissionModes.h" />
-    <ClInclude Include="OpenFloorMainLogger.h" />
     <ClInclude Include="OpenFloorMainLoggerV2.h" />
     <ClInclude Include="OpenFloorMeasurementSpec.h" />
     <ClInclude Include="OpenFloorRunManifestWriter.h" />
-    <ClInclude Include="OpenFloorTimingLogger.h" />
     <ClInclude Include="OpenFloorTimingLoggerV2.h" />
     <ClInclude Include="OptionalRuntimeEventLog.h" />
     <ClInclude Include="MissionMazeExport.h" />
@@ -250,13 +246,8 @@
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="RollingAverageWindow.h" />
-    <ClInclude Include="RuntimeBinaryLogFile.h" />
-    <ClInclude Include="RuntimeBinaryRecordSupport.h" />
     <ClInclude Include="RuntimeBinaryLogSupport.h" />
     <ClInclude Include="RuntimeControlLogSupport.h" />
-    <ClInclude Include="RuntimeInfrastructureSupport.h" />
-    <ClInclude Include="RuntimeRecordBuilder.h" />
-    <ClInclude Include="RuntimeTextBlockBuilder.h" />
     <ClInclude Include="SearchRunPlanner.h" />
     <ClInclude Include="Sensor.h" />
     <ClInclude Include="SensorSuite.h" />
@@ -281,7 +272,6 @@
     <ClInclude Include="WallSensorLedCalibrationPhase.h" />
     <ClInclude Include="WallSensorPreprocessor.h" />
     <ClInclude Include="WheelControlProfile.h" />
-    <ClInclude Include="AuxMeasurementLogger.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Cell.cpp" />
@@ -306,13 +296,8 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MmLog.cpp" />
-    <ClCompile Include="OpenFloorMainLoggerV2.cpp" />
-    <ClCompile Include="OpenFloorTimingLoggerV2.cpp" />
     <ClCompile Include="MouseUkfFacade.cpp" />
     <ClCompile Include="MazeMapStandaloneModes.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-    </ClCompile>
-    <ClCompile Include="MazeMapRuntimeCsvLog.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MazeMapMissionController.cpp">
@@ -342,7 +327,6 @@
     <ClCompile Include="SrUkfCore.cpp" />
     <ClCompile Include="WallGeometryModel.cpp" />
     <ClCompile Include="WallSensorPreprocessor.cpp" />
-    <ClCompile Include="RuntimeBinaryLogFile.cpp" />
     <ClCompile Include="Vehicle.cpp" />
     <ClCompile Include="VehicleState.cpp" />
   </ItemGroup>

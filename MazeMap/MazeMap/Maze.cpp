@@ -93,10 +93,13 @@ namespace MazeMap
 	{
 		return _cells[coords.GetX()][coords.GetY()];
 	}
-	void Maze::SetWall(Cell& cell, Direction direction, WallState state)
+	void Maze::SetWall(uint8_t x, uint8_t y, Direction direction, WallState state)
 	{
-		CellCoordinates coords = cell.GetCoords();
-
+		CellCoordinates coords = CellCoordinates(x, y);
+		SetWall(coords, direction, state);
+	}
+	void Maze::SetWall(CellCoordinates coords, Direction direction, WallState state)
+	{
 		// Don't set the thing if we're not changing it.
 		if (Index(coords).GetWall(direction) == state)
 		{
@@ -135,44 +138,11 @@ namespace MazeMap
 				}
 			}
 		}
-		/*
-		switch (direction)
-		{
-		case Up:
-			Index(x, y).SetUp(state);
-			if (y < 15)
-			{
-				Index(x, y + 1).SetDown(state);
-			}
-			break;
-		case Down:
-			Index(x, y).SetDown(state);
-			if (y > 0)
-			{
-				Index(x, y - 1).SetUp(state);
-			}
-			break;
-		case Left:
-			Index(x, y).SetLeft(state);
-			if (x > 0)
-			{
-				Index(x-1, y).SetRight(state);
-			}
-			break;
-		case Right:
-		default:
-			Index(x, y).SetRight(state);
-			if (x < 15)
-			{
-				Index(x+1, y).SetLeft(state);
-			}
-			break;
-		}*/
 	}
-	/*float Maze::GetCellDimension() const
+	void Maze::SetWall(Cell& cell, Direction direction, WallState state)
 	{
-		return _cellDimension;
-	}*/
+		SetWall(cell.GetCoords(), direction, state);
+	}
 
 	bool Maze::HasFoundGoal()
 	{

@@ -1,8 +1,12 @@
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "pch.h"
 #include "CppUnitTest.h"
-#include "..\MazeMap\MazeMapRuntimeCsvLog.h"
 #include "..\MazeMap\MazeMapRuntimeMmLog.h"
 #include "..\MazeMap\MazeMapRuntimeSignalHelpers.h"
+#include "..\MazeMap\RuntimeBinaryLogSupport.h"
 
 #include <cstdio>
 #include <fstream>
@@ -12,6 +16,13 @@
 #include <limits>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
+
+#define RUNTIME_HELPER_TEST_FIELDS(X) \
+    X(std::uint32_t, seq) \
+    X(float,         value) \
+    X(mmlog::s32_t,  kind)
+
+MMLOG_DEFINE_ROW(RuntimeHelperTestRow, RUNTIME_HELPER_TEST_FIELDS);
 
 namespace MazeMap::App
 {
@@ -116,38 +127,26 @@ namespace MazeMap::App
             Assert::IsTrue(std::strcmp(buffer, "open_floor_main.events.mmlog") == 0);
         }
 
-        TEST_METHOD(PackTextTagOrHash_UsesTagForShortTextAndHashForLongText)
+        TEST_METHOD(MmLogLogger_WritesRevGBindingAndSidecar)
         {
-            const uint32_t shortPacked = MazeMap::App::Internal::Runtime::PackTextTagOrHash("imu");
-            Assert::AreEqual(mmlog::TAG4('i', 'm', 'u', '\0'), shortPacked);
-
-            const uint32_t longPacked = MazeMap::App::Internal::Runtime::PackTextTagOrHash("front_pair_stream");
-            Assert::AreNotEqual(0U, longPacked);
-            Assert::AreNotEqual(mmlog::TAG4('f', 'r', 'o', 'n'), longPacked);
-        }
-
-        TEST_METHOD(RuntimeBinaryLogFile_WritesRevGBindingAndSidecar)
-        {
-            using MazeMap::App::Internal::Runtime::RuntimeBinaryLogFile;
-            using MazeMap::App::Internal::Runtime::RuntimeRecordBuilder;
+            using MazeMap::mmlog::MmLogLogger;
 
             const std::string primaryPath = CreateTempPath(".mmlog");
             const std::string sidecarPath = ReplaceExtension(primaryPath, ".sidecar");
 
-            RuntimeBinaryLogFile log;
-            Assert::IsTrue(log.BeginSelected(
-                primaryPath.c_str(),
-                "u32_seq,f32_value,s32_kind",
-                3U,
-                "mode=test\n",
-                "unit_case=runtime_binary_log\n"));
+            MmLogLogger log;
+            Assert::IsTrue(log.open(primaryPath.c_str()));
+            Assert::IsTrue(log.writeMetadata("mode", "test"));
+            Assert::IsTrue(log.writeMetadata("unit_case", "runtime_helper"));
+            Assert::IsTrue(log.begin(RuntimeHelperTestRow{}));
 
-            RuntimeRecordBuilder<3U> record;
-            record.U32(1U);
-            record.F32(1.25f);
-            record.U32(log.InternLabel("TEST_KIND"));
-            Assert::IsTrue(log.AppendRecord(record.Data(), record.Count()));
-            log.Close();
+            RuntimeHelperTestRow row{};
+            row.seq = 1U;
+            row.value = 1.25f;
+            row.kind = mmlog::hash32("TEST_KIND");
+            Assert::IsTrue(log.log(row));
+            Assert::IsTrue(log.writeLabel("TEST_KIND"));
+            Assert::IsTrue(log.close());
 
             const std::string primaryBytes = ReadAllBytes(primaryPath);
             const std::size_t newline = primaryBytes.find('\n');
@@ -156,11 +155,10 @@ namespace MazeMap::App
             Assert::IsTrue(static_cast<size_t>(newline + 1U + (3U * sizeof(uint32_t))) == primaryBytes.size());
 
             const std::string sidecarText = ReadAllBytes(sidecarPath);
-            Assert::IsTrue(sidecarText.find("schema_version=2\n") != std::string::npos);
+            Assert::IsTrue(sidecarText.find("schema_version=" + std::to_string(mmlog::kSchemaVersion) + "\n") != std::string::npos);
             Assert::IsTrue(sidecarText.find("row_bytes=12\n") != std::string::npos);
-            Assert::IsTrue(sidecarText.find("string_hash=fnv1a32\n") != std::string::npos);
             Assert::IsTrue(sidecarText.find("mode=test\n") != std::string::npos);
-            Assert::IsTrue(sidecarText.find("unit_case=runtime_binary_log\n") != std::string::npos);
+            Assert::IsTrue(sidecarText.find("unit_case=runtime_helper\n") != std::string::npos);
             Assert::IsTrue(sidecarText.find("u32_seq,f32_value,s32_kind\n") != std::string::npos);
             Assert::IsTrue(sidecarText.find("LABELS:\nTEST_KIND\n") != std::string::npos);
 

@@ -12,20 +12,12 @@ namespace MazeMap
 {
 	MAZEMAP_INLINE bool IsFiniteFloat(const float value) noexcept
 	{
-#if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
 		return isfinite(value);
-#else
-		return std::isfinite(value);
-#endif
 	}
 
 	MAZEMAP_INLINE float AbsFloat(const float value) noexcept
 	{
-#if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
 		return fabs(value);
-#else
-		return std::fabs(value);
-#endif
 	}
 
 	MAZEMAP_INLINE float ClampFloat(const float value, const float low, const float high) noexcept
@@ -45,19 +37,19 @@ namespace MazeMap
 
 		MAZEMAP_INLINE bool IsValid() const noexcept
 		{
-			return IsFiniteFloat(radius) &&
+			return isfinite(radius) &&
 				(radius > 0.0f) &&
-				IsFiniteFloat(radians) &&
-				(AbsFloat(radians) > 0.0f) &&
-				IsFiniteFloat(turnInDistance) &&
+				isfinite(radians) &&
+				(fabs(radians) > 0.0f) &&
+				isfinite(turnInDistance) &&
 				(turnInDistance >= 0.0f) &&
-				IsFiniteFloat(preTurnDistance) &&
+				isfinite(preTurnDistance) &&
 				(preTurnDistance >= 0.0f) &&
-				IsFiniteFloat(constantTurnDistance) &&
+				isfinite(constantTurnDistance) &&
 				(constantTurnDistance >= 0.0f) &&
-				IsFiniteFloat(postTurnDistance) &&
+				isfinite(postTurnDistance) &&
 				(postTurnDistance >= 0.0f) &&
-				IsFiniteFloat(totalDistance) &&
+				isfinite(totalDistance) &&
 				(totalDistance > 0.0f);
 		}
 	};

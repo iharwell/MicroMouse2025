@@ -9,7 +9,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 ## MazeMap Library
 
 - `AuxMeasurementConfig.h`: configuration enums and thresholds for auxiliary runtime measurement routines.
-- `AuxMeasurementLogger.h`: class-named entry header for auxiliary measurement logging defined in the runtime infrastructure layer.
 - `Cell.h` / `Cell.cpp`: represent one maze cell, including wall state storage and serialization helpers.
 - `CellCoordinates.h` / `CellCoordinates.cpp`: represent maze-grid coordinates and directional movement helpers.
 - `CircularBuffer.h`: generic circular-buffer utilities, including timestamped buffer entries.
@@ -21,7 +20,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `Defines.h`: platform shims, Arduino/host compatibility types, and low-level utility definitions shared across the codebase.
 - `DiagnosticConfig.h`: configuration constants for diagnostic and audit workflows.
 - `DiagnosticCoverage.h`: diagnostic coverage instructions and result-shaping helpers.
-- `DiagnosticLogger.h`: class-named entry header for the runtime diagnostic logger defined in the runtime infrastructure layer.
 - `DiagnosticLogBudget.h`: limits and budgeting rules for diagnostic logging volume.
 - `DiagnosticMotionPlan.h`: helpers that describe the intended diagnostic motion sequence.
 - `DiagnosticSensorSuite.h`: class-named entry header for the diagnostic sensor pipeline defined in the runtime sensor layer.
@@ -70,7 +68,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MazeMapMissionModes.h` / `MazeMapMissionModes.cpp`: concrete mission mode types used by the standalone app.
 - `MazeMapRuntimeCore.h`: shared runtime state, calibration, asynchronous sensor-read helpers, and wall-distance calibration logic.
 - `WallDistanceCalibration.h`: class-named entry header for the wall-distance calibration subsystem defined in `MazeMapRuntimeCore.h`.
-- `MazeMapRuntimeCsvLog.h` / `MazeMapRuntimeCsvLog.cpp`: CSV-oriented runtime event logging support.
 - `MazeMapRuntimeInfrastructure.h`: runtime logging, telemetry, and open-floor measurement infrastructure.
 - `MazeMapRuntimeMmLog.h`: runtime log-writer helpers layered on top of the shared `MmLog.h` MMLOG file-format definitions.
 - `MazeMapRuntimeSensors.h`: mission and diagnostic sensor-capture pipelines.
@@ -86,11 +83,9 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MotorModelUnits.h`: unit conversions and constants for motor modeling.
 - `MouseUkfFacade.h` / `MouseUkfFacade.cpp`: high-level estimator facade that combines the SR-UKF core with maze-evidence updates.
 - `OpenFloorMeasurementSpec.h`: IDs and geometry definitions for open-floor measurement routines.
-- `OpenFloorMainLogger.h`: class-named entry header for the primary open-floor logger defined in the runtime infrastructure layer.
-- `OpenFloorMainLoggerV2.h`: class-named entry header for the second-generation primary open-floor logger defined in the runtime infrastructure layer.
+- `OpenFloorMainLoggerV2.h`: row-definition header for the standardized open-floor primary sample stream.
 - `OpenFloorRunManifestWriter.h`: class-named entry header for the open-floor manifest writer defined in the runtime infrastructure layer.
-- `OpenFloorTimingLogger.h`: class-named entry header for the timing open-floor logger defined in the runtime infrastructure layer.
-- `OpenFloorTimingLoggerV2.h`: class-named entry header for the second-generation timing logger defined in the runtime infrastructure layer.
+- `OpenFloorTimingLoggerV2.h`: row-definition header for the standardized open-floor timing stream.
 - `OpenLoopDriveCommand.h`: open-loop motor command payload.
 - `OptionalRuntimeEventLog.h`: class-named entry header for the optional runtime event log defined in the runtime infrastructure layer.
 - `Path.h` / `Path.cpp`: fixed-capacity path container for cell-by-cell routes.
@@ -100,9 +95,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `PlantModel.h` / `PlantModel.cpp`: vehicle process model, tire-force helpers, motor-command inverse dynamics, and plant parameter definitions used by the UKF.
 - `Pins.h`: board-level pin assignments shared by Teensy bring-up code and host-side runtime configuration.
 - `RollingAverageWindow.h`: small fixed-size rolling average helper.
-- `RuntimeBinaryLogFile.h`: class-named entry header for the runtime binary log file writer defined in the MMLOG runtime layer.
-- `RuntimeRecordBuilder.h`: class-named entry header for fixed-width runtime binary record builders defined in the MMLOG runtime layer.
-- `RuntimeTextBlockBuilder.h`: class-named entry header for metadata and note text-block builders defined in the MMLOG runtime layer.
 - `SearchRunPlanner.h`: search-run straight planning and replanning response helpers.
 - `Sensor.h`: generic sensor abstraction template.
 - `SensorSuite.h`: class-named entry header for the mission sensor pipeline defined in the runtime sensor layer.

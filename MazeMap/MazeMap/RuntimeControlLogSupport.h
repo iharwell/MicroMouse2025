@@ -1,15 +1,9 @@
 #ifndef RUNTIMECONTROLLOGSUPPORT_H
 #define RUNTIMECONTROLLOGSUPPORT_H
 
-// Defines the plain-text runtime control-log helpers shared by event-log writers.
+// Defines the centralized plain-text runtime control-log helpers shared by event-log writers.
 
-#include "Defines.h"
-
-#if defined(ARDUINO_TEENSY41)
-#include <SD.h>
-#else
-#include <fstream>
-#endif
+#include "CoreFileExport.h"
 
 #include <stdio.h>
 
@@ -23,35 +17,67 @@ namespace MazeMap
 			{
 				inline constexpr const char* kRuntimeControlLogFileName = "logging.txt";
 
+				inline MazeMap::CoreFileExport& RuntimeControlLogFile() noexcept
+				{
+					static MazeMap::CoreFileExport file;
+					return file;
+				}
+
+				inline bool& RuntimeControlLogFaulted() noexcept
+				{
+					static bool faulted = false;
+					return faulted;
+				}
+
+				inline bool EnsureRuntimeControlLogOpen()
+				{
+					if (RuntimeControlLogFaulted())
+					{
+						return false;
+					}
+
+					MazeMap::CoreFileExport& file = RuntimeControlLogFile();
+					if (file.IsOpen())
+					{
+						return true;
+					}
+
+					if (!file.Open(kRuntimeControlLogFileName))
+					{
+						RuntimeControlLogFaulted() = true;
+						return false;
+					}
+					return true;
+				}
+
+				inline bool RuntimeControlLogIsOpen()
+				{
+					return RuntimeControlLogFile().IsOpen();
+				}
+
 				inline bool AppendRuntimeControlLogLine(const char* line)
 				{
-					if (line == nullptr || line[0] == '\0')
+					if (line == nullptr || line[0] == '\0' || !EnsureRuntimeControlLogOpen())
 					{
 						return false;
 					}
 
-#if defined(ARDUINO_TEENSY41)
-					File file = SD.open(kRuntimeControlLogFileName, FILE_WRITE);
-					if (!file)
+					MazeMap::CoreFileExport& file = RuntimeControlLogFile();
+					if (!file.Write(line) || !file.WriteChar('\n'))
 					{
+						file.Close();
+						RuntimeControlLogFaulted() = true;
 						return false;
 					}
+					return true;
+				}
 
-					const bool ok = (file.print(line) > 0U) && (file.write('\n') == 1U);
-					file.flush();
-					file.close();
-					return ok;
-#else
-					std::ofstream file(kRuntimeControlLogFileName, std::ios::out | std::ios::app);
-					if (!file.is_open())
+				inline void FlushRuntimeControlLog()
+				{
+					if (RuntimeControlLogIsOpen())
 					{
-						return false;
+						RuntimeControlLogFile().Flush();
 					}
-
-					file << line << '\n';
-					file.flush();
-					return file.good();
-#endif
 				}
 
 				inline bool AppendRuntimeControlLogEntry(

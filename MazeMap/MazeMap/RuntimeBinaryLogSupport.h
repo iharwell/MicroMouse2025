@@ -1,9 +1,9 @@
 #ifndef RUNTIMEBINARYLOGSUPPORT_H
 #define RUNTIMEBINARYLOGSUPPORT_H
 
-// Defines shared MMLOG support utilities for runtime file naming, schema validation, and label packing.
+// Defines shared mmlog support utilities for runtime file naming and metadata formatting.
 
-#include "MmLog.h"
+#include "MazeMapRuntimeMmLog.h"
 
 #if defined(ARDUINO_TEENSY41)
 #include <SD.h>
@@ -22,16 +22,6 @@ namespace MazeMap
 		{
 			namespace Runtime
 			{
-				enum class RuntimeBinaryLogWriteMode : uint8_t
-				{
-					Synchronous = 0u,
-					Buffered = 1u
-				};
-
-				// Keeps runtime logging synchronous by default unless a caller explicitly opts into buffering.
-				inline constexpr RuntimeBinaryLogWriteMode kDefaultRuntimeBinaryLogWriteMode =
-					RuntimeBinaryLogWriteMode::Synchronous;
-
 				inline bool SelectSequentialRuntimeFileName(
 					char* buffer,
 					std::size_t bufferSize,
@@ -123,153 +113,69 @@ namespace MazeMap
 					return name;
 				}
 
-				inline uint32_t Fnv1a32(const char* text) noexcept
+				inline bool WriteMmLogMetadataUnsigned(
+					MazeMap::mmlog::MmLogLogger& log,
+					const char* key,
+					unsigned long value)
 				{
-					uint32_t hash = 2166136261u;
-					if (text == nullptr)
-					{
-						return hash;
-					}
-
-					for (const uint8_t* cursor = reinterpret_cast<const uint8_t*>(text); *cursor != 0u; ++cursor)
-					{
-						hash ^= *cursor;
-						hash *= 16777619u;
-					}
-					return hash;
-				}
-
-				inline bool IsSchemaPrefix(const char* prefix, std::size_t length) noexcept
-				{
-					switch (length)
-					{
-					case 2U:
-						return
-							(std::strncmp(prefix, "u8", 2U) == 0) ||
-							(std::strncmp(prefix, "i8", 2U) == 0) ||
-							(std::strncmp(prefix, "s8", 2U) == 0);
-					case 3U:
-						return
-							(std::strncmp(prefix, "u16", 3U) == 0) ||
-							(std::strncmp(prefix, "i16", 3U) == 0) ||
-							(std::strncmp(prefix, "u32", 3U) == 0) ||
-							(std::strncmp(prefix, "i32", 3U) == 0) ||
-							(std::strncmp(prefix, "f32", 3U) == 0) ||
-							(std::strncmp(prefix, "s16", 3U) == 0) ||
-							(std::strncmp(prefix, "s32", 3U) == 0);
-					default:
-						return false;
-					}
-				}
-
-				inline uint32_t SchemaFieldWidth(const char* prefix, std::size_t length) noexcept
-				{
-					if (length == 2U)
-					{
-						return 1U;
-					}
-
-					if (length == 3U &&
-						((std::strncmp(prefix, "u16", 3U) == 0) ||
-						 (std::strncmp(prefix, "i16", 3U) == 0) ||
-						 (std::strncmp(prefix, "s16", 3U) == 0)))
-					{
-						return 2U;
-					}
-
-					return 4U;
-				}
-
-				inline bool SchemaPrefixUsesStringHash(const char* prefix, std::size_t length) noexcept
-				{
-					return
-						((length == 2U) && (std::strncmp(prefix, "s8", 2U) == 0)) ||
-						((length == 3U) &&
-						 ((std::strncmp(prefix, "s16", 3U) == 0) || (std::strncmp(prefix, "s32", 3U) == 0)));
-				}
-
-				inline bool ValidateTypedSchema(
-					const char* schemaCsv,
-					uint32_t expectedFieldCount,
-					uint32_t expectedRowBytes,
-					bool& hasStringHashField) noexcept
-				{
-					hasStringHashField = false;
-					if (schemaCsv == nullptr || schemaCsv[0] == '\0')
+					if (key == nullptr || key[0] == '\0')
 					{
 						return false;
 					}
 
-					uint32_t fieldCount = 0U;
-					uint32_t rowBytes = 0U;
-					const char* fieldStart = schemaCsv;
-					for (const char* cursor = schemaCsv;; ++cursor)
+					char valueText[32] = {};
+					const int length = snprintf(valueText, sizeof(valueText), "%lu", value);
+					if (length <= 0 || length >= static_cast<int>(sizeof(valueText)))
 					{
-						if (*cursor != ',' && *cursor != '\0')
-						{
-							continue;
-						}
-
-						if (cursor == fieldStart)
-						{
-							return false;
-						}
-
-						const char* separator = fieldStart;
-						while (separator < cursor && *separator != '_')
-						{
-							++separator;
-						}
-
-						if (separator == fieldStart || separator == cursor)
-						{
-							return false;
-						}
-
-						const std::size_t prefixLength = static_cast<std::size_t>(separator - fieldStart);
-						if (!IsSchemaPrefix(fieldStart, prefixLength))
-						{
-							return false;
-						}
-
-						rowBytes += SchemaFieldWidth(fieldStart, prefixLength);
-						hasStringHashField = hasStringHashField || SchemaPrefixUsesStringHash(fieldStart, prefixLength);
-						++fieldCount;
-
-						if (*cursor == '\0')
-						{
-							break;
-						}
-						fieldStart = cursor + 1;
+						return false;
 					}
-
-					return (fieldCount == expectedFieldCount) && (rowBytes == expectedRowBytes);
+					return log.writeMetadata(key, valueText);
 				}
 
-				inline uint32_t PackTextTagOrHash(const char* text) noexcept
+				inline bool WriteMmLogMetadataFloat(
+					MazeMap::mmlog::MmLogLogger& log,
+					const char* key,
+					float value,
+					std::uint8_t precision)
 				{
-					if (text == nullptr || text[0] == '\0')
+					if (key == nullptr || key[0] == '\0')
 					{
-						return 0u;
+						return false;
 					}
 
-					char tag[4] = { '\0', '\0', '\0', '\0' };
-					std::size_t length = 0U;
-					while (text[length] != '\0')
+					char valueText[48] = {};
+					const int length = snprintf(
+						valueText,
+						sizeof(valueText),
+						"%.*f",
+						static_cast<int>(precision),
+						value);
+					if (length <= 0 || length >= static_cast<int>(sizeof(valueText)))
 					{
-						if (length < 4U)
-						{
-							tag[length] = text[length];
-						}
-						++length;
+						return false;
+					}
+					return log.writeMetadata(key, valueText);
+				}
+
+				inline void CaptureMmLogFailure(
+					const MazeMap::mmlog::MmLogLogger& log,
+					bool& overflowed,
+					bool& writeFailed) noexcept
+				{
+					const char* error = log.lastError();
+					if (error == nullptr || error[0] == '\0')
+					{
+						return;
 					}
 
-					if (length <= 4U)
+					if (std::strstr(error, "overflow") != nullptr)
 					{
-						return mmlog::TAG4(tag[0], tag[1], tag[2], tag[3]);
+						overflowed = true;
 					}
-
-					return Fnv1a32(text);
+					else
+					{
+						writeFailed = true;
+					}
 				}
 			}
 		}

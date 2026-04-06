@@ -1,154 +1,223 @@
 #pragma once
 // Declares runtime logging, telemetry, and measurement-capture infrastructure for the MazeMap application runtime.
-#include "RuntimeInfrastructureSupport.h"
+#include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"
 #include "OptionalRuntimeEventLog.h"
-#include "OpenFloorTimingLoggerV2.h"
-#include "OpenFloorMainLoggerV2.h"
+#include "RuntimeBinaryLogSupport.h"
+#include "RuntimeControlLogSupport.h"
 
 // Private application infrastructure helpers for the MazeMap runtime.
 
+#define DIAGNOSTIC_LOG_FIELDS(X)                  \
+    X(std::uint32_t, sample)                     \
+    X(std::uint32_t, phase_id)                   \
+    X(std::uint32_t, t_us)                       \
+    X(std::uint32_t, dt_us)                      \
+    X(std::uint32_t, stationary)                 \
+    X(float,         pose_x_m)                   \
+    X(float,         pose_y_m)                   \
+    X(float,         yaw_rad)                    \
+    X(float,         linear_speed_mps)           \
+    X(float,         angular_speed_radps)        \
+    X(float,         cmd_linear_mps)             \
+    X(float,         cmd_angular_radps)          \
+    X(float,         left_drive_cmd)             \
+    X(float,         right_drive_cmd)            \
+    X(std::int32_t,  left_encoder_count)         \
+    X(std::int32_t,  right_encoder_count)        \
+    X(float,         left_distance_m)            \
+    X(float,         right_distance_m)           \
+    X(float,         left_velocity_mps)          \
+    X(float,         right_velocity_mps)         \
+    X(std::uint32_t, imu_fr_status)              \
+    X(std::int32_t,  imu_fr_gyro_x)              \
+    X(std::int32_t,  imu_fr_gyro_y)              \
+    X(std::int32_t,  imu_fr_gyro_z)              \
+    X(std::int32_t,  imu_fr_accel_x)             \
+    X(std::int32_t,  imu_fr_accel_y)             \
+    X(std::int32_t,  imu_fr_accel_z)             \
+    X(std::int32_t,  imu_fr_temp)                \
+    X(std::uint32_t, imu_fr_int)                 \
+    X(std::uint32_t, imu_bl_status)              \
+    X(std::int32_t,  imu_bl_gyro_x)              \
+    X(std::int32_t,  imu_bl_gyro_y)              \
+    X(std::int32_t,  imu_bl_gyro_z)              \
+    X(std::int32_t,  imu_bl_accel_x)             \
+    X(std::int32_t,  imu_bl_accel_y)             \
+    X(std::int32_t,  imu_bl_accel_z)             \
+    X(std::int32_t,  imu_bl_temp)                \
+    X(std::uint32_t, imu_bl_int)                 \
+    X(float,         ws_fl_ambient)              \
+    X(float,         ws_fl_lit)                  \
+    X(float,         ws_fl_delta)                \
+    X(float,         ws_fl_raw_distance_m)       \
+    X(float,         ws_fl_distance_m)           \
+    X(float,         ws_fr_ambient)              \
+    X(float,         ws_fr_lit)                  \
+    X(float,         ws_fr_delta)                \
+    X(float,         ws_fr_raw_distance_m)       \
+    X(float,         ws_fr_distance_m)           \
+    X(float,         ws_sl_ambient)              \
+    X(float,         ws_sl_lit)                  \
+    X(float,         ws_sl_delta)                \
+    X(float,         ws_sl_raw_distance_m)       \
+    X(float,         ws_sl_distance_m)           \
+    X(float,         ws_sr_ambient)              \
+    X(float,         ws_sr_lit)                  \
+    X(float,         ws_sr_delta)                \
+    X(float,         ws_sr_raw_distance_m)       \
+    X(float,         ws_sr_distance_m)           \
+    X(std::uint32_t, front_wall)                 \
+    X(std::uint32_t, left_wall)                  \
+    X(std::uint32_t, right_wall)                 \
+    X(float,         corridor_error_m)           \
+    X(float,         front_skew_m)               \
+    X(float,         gyro_bias_radps)            \
+    X(float,         gyro_raw_radps)             \
+    X(float,         gyro_radps)
 
-class DiagnosticLogger
+MMLOG_DEFINE_ROW(DiagnosticLogRow, DIAGNOSTIC_LOG_FIELDS);
+
+
+namespace MazeMap::App::Internal::Runtime
 {
-public:
-    DiagnosticLogger()
-        : _sampleLog()
-        , _eventLog()
-        , _metadata()
-        , _notes()
-        , _phaseId(0UL)
-        , _sampleCount(0UL)
+    inline bool WriteMmLogAccelBiasMetadata(
+        MazeMap::mmlog::MmLogLogger& log,
+        const DiagnosticSensorSuite& sensors)
     {
-        _fileName[0] = '\0';
+        char value[48] = {};
+        if (!sensors.HasAccelBias())
+        {
+            return log.writeMetadata("mission_accel_bias_mg", "na");
+        }
+
+        const int length = snprintf(
+            value,
+            sizeof(value),
+            "x=%.3f;y=%.3f",
+            sensors.GetAccelBiasXG() * 1000.0f,
+            sensors.GetAccelBiasYG() * 1000.0f);
+        return
+            length > 0 &&
+            length < static_cast<int>(sizeof(value)) &&
+            log.writeMetadata("mission_accel_bias_mg", value);
     }
 
-    bool Begin(
-        const DiagnosticSensorSuite& sensors,
-        const char* fileName = nullptr,
-        unsigned long controlPeriodUs = DiagnosticConfig::kControlPeriodUs,
-        const char* modeName = nullptr)
+    inline bool WriteDiagnosticTuningEvents(OptionalRuntimeEventLog& eventLog)
     {
-        _phaseId = 0UL;
-        _sampleCount = 0UL;
-        _metadata.Clear();
-        _notes.Clear();
+        const auto& driveModel = MazeMap::MotorEncoderDrive::GetSharedPhysicalModel();
+        const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
+        static const MazeMap::Vehicle sharedVehicle{};
+        const MazeMap::InPlaceTurnProfile inPlaceTurnProfile = BuildSharedInPlaceTurnProfile(sharedVehicle);
+        char message[256] = {};
+        auto writeConfig = [&eventLog, &message](const char* format, auto... args) -> bool
+        {
+            const int length = snprintf(message, sizeof(message), format, args...);
+            if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+            {
+                return false;
+            }
+            return eventLog.WriteEvent(micros(), "config", message);
+        };
 
-        if (!SelectFileName(fileName))
-        {
-            return false;
-        }
-        if (!_eventLog.BeginSibling(_fileName))
-        {
-            return false;
-        }
+        return
+            writeConfig(
+                "drive_geometry:track_width_m=%.6f;tight_r_m=%.6f;tight_w_m=%.6f;wide_r_m=%.6f;wide_w_m=%.6f",
+                Config::kTrackWidthM,
+                vehicleModel.arcTrackWidthInterpolation.tightRadiusM,
+                vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM,
+                vehicleModel.arcTrackWidthInterpolation.wideRadiusM,
+                vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM) &&
+            writeConfig(
+                "motor_model:wheel_diam_m=%.6f;encoder_cpr=%lu;gear=%.6f;nom_v=%.3f;no_load_rpm=%.1f;supply_v=%.3f",
+                driveModel.wheelDiameterM,
+                static_cast<unsigned long>(driveModel.pulsesPerRev),
+                driveModel.gearRatio,
+                driveModel.nominalVoltageV,
+                driveModel.nominalNoLoadSpeedRpm,
+                driveModel.supplyVoltageV) &&
+            writeConfig(
+                "wheel_control:static_ff=%.6f;vel_ff=%.6f;accel_gain=%.6f;vel_kp=%.6f;vel_ki=%.6f;i_lim=%.6f",
+                Config::kWheelStaticFeedforward,
+                Config::kWheelVelocityFeedforward,
+                Config::kWheelAccelerationResponseGainPerMps2,
+                Config::kWheelVelocityKp,
+                Config::kWheelVelocityKi,
+                Config::kWheelIntegralLimit) &&
+            writeConfig(
+                "launch_fan:racing_duty=%.6f;fan_ramp_ms=%lu;launch_cmd=%.6f;launch_max=%.6f;launch_ramp_ms=%lu",
+                Config::kRacingFanDutyCycle,
+                static_cast<unsigned long>(Config::kRacingFanRampMs),
+                Config::kWheelRestLaunchDriveCommand,
+                Config::kWheelRestLaunchMaxDriveCommand,
+                static_cast<unsigned long>(Config::kWheelRestLaunchRampMs)) &&
+            writeConfig(
+                "heading_wall:straight_kp=%.6f;straight_d=%.6f;wall_kp=%.6f;wall_d=%.6f;arc_kp=%.6f;arc_d=%.6f",
+                Config::kStraightHeadingKp,
+                Config::kStraightYawD,
+                Config::kWallCenterGain,
+                Config::kWallCenterD,
+                Config::kArcHeadingKp,
+                Config::kArcYawD) &&
+            writeConfig(
+                "turn_tol:turn_kp=%.6f;turn_d=%.6f;smooth_kp=%.6f;smooth_kd=%.6f;dist_tol_m=%.6f;ang_tol_rad=%.6f",
+                Config::kTurnHeadingKp,
+                Config::kTurnYawD,
+                Config::kSmoothTurnYawRateKp,
+                Config::kSmoothTurnYawRateKd,
+                Config::kDistanceToleranceM,
+                Config::kAngleToleranceRad) &&
+            writeConfig(
+                "stall_diag:stall_ms=%lu;stall_grace_ms=%lu;stall_eps_m=%.6f;stall_cmd_mps=%.6f;diag_kp_scale=%.6f;diag_ki_scale=%.6f",
+                static_cast<unsigned long>(Config::kEncoderStallTimeoutMs),
+                static_cast<unsigned long>(Config::kEncoderStallStartupGraceMs),
+                Config::kEncoderProgressEpsilonM,
+                Config::kEncoderStallCommandThresholdMps,
+                DiagnosticConfig::kDiagnosticWheelVelocityKpScale,
+                DiagnosticConfig::kDiagnosticWheelVelocityKiScale) &&
+            writeConfig(
+                "routine_cfg:startup_ms=%lu;baseline_ms=%lu;inter_ms=%lu;flush_ms=%lu;short_m=%.3f;long_m=%.3f",
+                static_cast<unsigned long>(DiagnosticConfig::kStartupSettleMs),
+                static_cast<unsigned long>(DiagnosticConfig::kBaselineHoldMs),
+                static_cast<unsigned long>(DiagnosticConfig::kInterTestHoldMs),
+                static_cast<unsigned long>(DiagnosticConfig::kLogFlushPeriodMs),
+                DiagnosticConfig::kShortStraightDistanceM,
+                DiagnosticConfig::kLongStraightDistanceM) &&
+            writeConfig(
+                "characterization:square_leg_m=%.3f;arc_half_m=%.3f;slow_v=%.3f;circle_v=%.3f;fast_v=%.3f;straight_a=%.3f",
+                DiagnosticConfig::kSquareLegDistanceM,
+                DiagnosticConfig::kArcHalfCircleDistanceM,
+                DiagnosticConfig::kSlowStraightSpeedMps,
+                DiagnosticConfig::kCircleMediumSpeedMps,
+                DiagnosticConfig::kFastStraightSpeedMps,
+                DiagnosticConfig::kStraightAccelMps2) &&
+            writeConfig(
+                "characterization2:straight_d=%.3f;turn_max_w=%.3f;turn_a=%.3f;kickoff_min=%.3f;kickoff_max=%.3f;kickoff_step=%.3f",
+                DiagnosticConfig::kStraightDecelMps2,
+                inPlaceTurnProfile.maxAngularSpeedRadps,
+                inPlaceTurnProfile.angularAccelRadps2,
+                DiagnosticConfig::kKickoffSweepMinDriveCommand,
+                DiagnosticConfig::kKickoffSweepMaxDriveCommand,
+                DiagnosticConfig::kKickoffSweepStepDriveCommand);
+    }
 
-        if (!WriteMetadata("file", _fileName))
+    inline bool WriteDiagnosticSummaryInstructions(OptionalRuntimeEventLog& eventLog)
+    {
+        for (size_t index = 0U; index < MazeMap::GetDiagnosticSummaryInstructionCount(); ++index)
         {
-            return false;
-        }
-        if (_eventLog.IsEnabled() && !WriteMetadata("control_log_file", _eventLog.GetFileName()))
-        {
-            return false;
-        }
-        if (modeName != nullptr && modeName[0] != '\0' && !WriteMetadata("mode", modeName))
-        {
-            return false;
-        }
-        if (!WriteMetadataUL("control_period_us", controlPeriodUs))
-        {
-            return false;
-        }
-        const unsigned long imuSampleRateHz = MazeMap::GetUiImuSampleRateHzForControlPeriodUs(controlPeriodUs);
-        if (imuSampleRateHz > 0UL && !WriteMetadataUL("imu_sample_rate_hz", imuSampleRateHz))
-        {
-            return false;
-        }
-        const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
-            controlPeriodUs,
-            Config::kMissionRuntimeAccelFilterFreq);
-        if (imuAccelLpf2CutoffHz > 0.0f && !WriteMetadataFloat("imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3))
-        {
-            return false;
-        }
-        const float imuGyroLpf1ReferenceHz = MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(controlPeriodUs);
-        if (imuGyroLpf1ReferenceHz > 0.0f && !WriteMetadataFloat("imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3))
-        {
-            return false;
-        }
-        if (!WriteMetadataFloat("boundary_half_span_m", DiagnosticConfig::kBoundaryHalfSpanM, 3))
-        {
-            return false;
-        }
-        if (!WriteMetadataFloat("imu_gyro_mdps_per_lsb", sensors.GetGyroSensitivityMdpsPerLsb(), 3))
-        {
-            return false;
-        }
-        if (!WriteMetadataFloat("imu_accel_mg_per_lsb", sensors.GetAccelSensitivityMgPerLsb(), 3))
-        {
-            return false;
-        }
-        if (!WriteMetadataFloat("mission_gyro_bias_estimate_radps", sensors.GetGyroBiasRadps(), 6))
-        {
-            return false;
-        }
-        if (!WriteMetadataUL("mission_accel_bias_valid", sensors.HasAccelBias() ? 1UL : 0UL))
-        {
-            return false;
-        }
-        if (sensors.HasAccelBias())
-        {
-            if (!WriteMetadataFloat("mission_accel_bias_x_mg", sensors.GetAccelBiasXG() * 1000.0f, 3) ||
-                !WriteMetadataFloat("mission_accel_bias_y_mg", sensors.GetAccelBiasYG() * 1000.0f, 3))
+            if (!eventLog.WriteEvent(micros(), "summary", MazeMap::GetDiagnosticSummaryInstruction(index).message))
             {
                 return false;
             }
         }
-        if (!WriteDiagnosticTuningMetadata())
-        {
-            return false;
-        }
-        if (!MazeMap::App::Internal::Runtime::AppendRuntimeBinaryNotes(_notes, _eventLog.GetFileName()))
-        {
-            return false;
-        }
-
-        if (!_sampleLog.BeginSelected(
-                _fileName,
-                kDiagnosticSchema,
-                kDiagnosticFieldCount,
-                _metadata.Data(),
-                _notes.Data(),
-                MazeMap::App::Internal::Runtime::kRuntimeBinaryLogFlags,
-                0U,
-                micros()))
-        {
-            _eventLog.Close();
-            return false;
-        }
-
-        if (_eventLog.IsEnabled())
-        {
-            (void)_eventLog.WriteMetadata("file", _eventLog.GetFileName());
-            (void)_eventLog.WriteMetadata("data_file", _fileName);
-            (void)_eventLog.WriteMetadata("mode", (modeName != nullptr && modeName[0] != '\0') ? modeName : "diagnostic");
-        }
-        return WriteSummaryInstructions();
+        return true;
     }
 
-    bool BeginPhase(const char* name)
-    {
-        ++_phaseId;
-        return _eventLog.WritePhase(_phaseId, micros(), name);
-    }
-
-    bool WriteEvent(const char* type, const char* message)
-    {
-        return _eventLog.WriteEvent(micros(), type, message);
-    }
-
-    bool LogSample(
+    inline void PopulateDiagnosticLogRow(
+        DiagnosticLogRow& row,
+        unsigned long sampleCount,
+        unsigned long phaseId,
         bool stationary,
         uint32_t timestampUs,
         uint32_t dtUs,
@@ -157,641 +226,75 @@ public:
         const DriveTelemetry& driveTelemetry,
         const DiagnosticSensorSnapshot& sensorSnapshot)
     {
-        MazeMap::App::Internal::Runtime::RuntimeRecordBuilder<kDiagnosticFieldCount> record;
-        record.U32(static_cast<uint32_t>(_sampleCount));
-        record.U32(static_cast<uint32_t>(_phaseId));
-        record.U32(timestampUs);
-        record.U32(dtUs);
-        record.U32(stationary ? 1U : 0U);
-        record.F32(pose.xMeters);
-        record.F32(pose.yMeters);
-        record.F32(pose.yawRad);
-        record.F32(pose.linearSpeedMps);
-        record.F32(pose.angularSpeedRadps);
-        record.F32(drive.GetLastLinearCommandMps());
-        record.F32(drive.GetLastAngularCommandRadps());
-        record.F32(driveTelemetry.leftDriveCommand);
-        record.F32(driveTelemetry.rightDriveCommand);
-        MazeMap::App::Internal::Runtime::AppendDriveTelemetryFields(record, driveTelemetry);
-        MazeMap::App::Internal::Runtime::AppendImuTelemetryFields(record, sensorSnapshot.imuFrontRight);
-        MazeMap::App::Internal::Runtime::AppendImuTelemetryFields(record, sensorSnapshot.imuBackLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.frontLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.frontRight);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.sideLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.sideRight);
-        record.U32(sensorSnapshot.frontWall ? 1U : 0U);
-        record.U32(sensorSnapshot.leftWall ? 1U : 0U);
-        record.U32(sensorSnapshot.rightWall ? 1U : 0U);
-        record.F32(sensorSnapshot.corridorErrorM);
-        record.F32(sensorSnapshot.frontSkewM);
-        record.F32(sensorSnapshot.gyroBiasRadps);
-        record.F32(sensorSnapshot.gyroRawRadps);
-        record.F32(sensorSnapshot.gyroRadps);
-
-        if (!MazeMap::App::Internal::Runtime::AppendBinaryRecord(_sampleLog, record))
-        {
-            return false;
-        }
-
-        ++_sampleCount;
-        return true;
+        row.sample = static_cast<std::uint32_t>(sampleCount);
+        row.phase_id = static_cast<std::uint32_t>(phaseId);
+        row.t_us = timestampUs;
+        row.dt_us = dtUs;
+        row.stationary = stationary ? 1U : 0U;
+        row.pose_x_m = pose.xMeters;
+        row.pose_y_m = pose.yMeters;
+        row.yaw_rad = pose.yawRad;
+        row.linear_speed_mps = pose.linearSpeedMps;
+        row.angular_speed_radps = pose.angularSpeedRadps;
+        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
+        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
+        row.left_drive_cmd = driveTelemetry.leftDriveCommand;
+        row.right_drive_cmd = driveTelemetry.rightDriveCommand;
+        row.left_encoder_count = driveTelemetry.leftEncoderCount;
+        row.right_encoder_count = driveTelemetry.rightEncoderCount;
+        row.left_distance_m = driveTelemetry.leftDistanceM;
+        row.right_distance_m = driveTelemetry.rightDistanceM;
+        row.left_velocity_mps = driveTelemetry.leftVelocityMps;
+        row.right_velocity_mps = driveTelemetry.rightVelocityMps;
+        row.imu_fr_status = sensorSnapshot.imuFrontRight.status;
+        row.imu_fr_gyro_x = sensorSnapshot.imuFrontRight.gyroX;
+        row.imu_fr_gyro_y = sensorSnapshot.imuFrontRight.gyroY;
+        row.imu_fr_gyro_z = sensorSnapshot.imuFrontRight.gyroZ;
+        row.imu_fr_accel_x = sensorSnapshot.imuFrontRight.accelX;
+        row.imu_fr_accel_y = sensorSnapshot.imuFrontRight.accelY;
+        row.imu_fr_accel_z = sensorSnapshot.imuFrontRight.accelZ;
+        row.imu_fr_temp = sensorSnapshot.imuFrontRight.temp;
+        row.imu_fr_int = sensorSnapshot.imuFrontRight.interruptHigh ? 1U : 0U;
+        row.imu_bl_status = sensorSnapshot.imuBackLeft.status;
+        row.imu_bl_gyro_x = sensorSnapshot.imuBackLeft.gyroX;
+        row.imu_bl_gyro_y = sensorSnapshot.imuBackLeft.gyroY;
+        row.imu_bl_gyro_z = sensorSnapshot.imuBackLeft.gyroZ;
+        row.imu_bl_accel_x = sensorSnapshot.imuBackLeft.accelX;
+        row.imu_bl_accel_y = sensorSnapshot.imuBackLeft.accelY;
+        row.imu_bl_accel_z = sensorSnapshot.imuBackLeft.accelZ;
+        row.imu_bl_temp = sensorSnapshot.imuBackLeft.temp;
+        row.imu_bl_int = sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+        row.ws_fl_ambient = sensorSnapshot.frontLeft.ambientLight;
+        row.ws_fl_lit = sensorSnapshot.frontLeft.litLight;
+        row.ws_fl_delta = sensorSnapshot.frontLeft.differentialLight;
+        row.ws_fl_raw_distance_m = sensorSnapshot.frontLeft.rawDistanceM;
+        row.ws_fl_distance_m = sensorSnapshot.frontLeft.distanceM;
+        row.ws_fr_ambient = sensorSnapshot.frontRight.ambientLight;
+        row.ws_fr_lit = sensorSnapshot.frontRight.litLight;
+        row.ws_fr_delta = sensorSnapshot.frontRight.differentialLight;
+        row.ws_fr_raw_distance_m = sensorSnapshot.frontRight.rawDistanceM;
+        row.ws_fr_distance_m = sensorSnapshot.frontRight.distanceM;
+        row.ws_sl_ambient = sensorSnapshot.sideLeft.ambientLight;
+        row.ws_sl_lit = sensorSnapshot.sideLeft.litLight;
+        row.ws_sl_delta = sensorSnapshot.sideLeft.differentialLight;
+        row.ws_sl_raw_distance_m = sensorSnapshot.sideLeft.rawDistanceM;
+        row.ws_sl_distance_m = sensorSnapshot.sideLeft.distanceM;
+        row.ws_sr_ambient = sensorSnapshot.sideRight.ambientLight;
+        row.ws_sr_lit = sensorSnapshot.sideRight.litLight;
+        row.ws_sr_delta = sensorSnapshot.sideRight.differentialLight;
+        row.ws_sr_raw_distance_m = sensorSnapshot.sideRight.rawDistanceM;
+        row.ws_sr_distance_m = sensorSnapshot.sideRight.distanceM;
+        row.front_wall = sensorSnapshot.frontWall ? 1U : 0U;
+        row.left_wall = sensorSnapshot.leftWall ? 1U : 0U;
+        row.right_wall = sensorSnapshot.rightWall ? 1U : 0U;
+        row.corridor_error_m = sensorSnapshot.corridorErrorM;
+        row.front_skew_m = sensorSnapshot.frontSkewM;
+        row.gyro_bias_radps = sensorSnapshot.gyroBiasRadps;
+        row.gyro_raw_radps = sensorSnapshot.gyroRawRadps;
+        row.gyro_radps = sensorSnapshot.gyroRadps;
     }
+}
 
-    void Service()
-    {
-        (void)_sampleLog.Service(1U);
-    }
-
-    void Flush()
-    {
-        _sampleLog.Flush();
-        _eventLog.Flush();
-    }
-
-    void Close()
-    {
-        _sampleLog.Close();
-        _eventLog.Close();
-    }
-
-    const char* GetFileName() const
-    {
-        return _fileName;
-    }
-
-    bool WriteMetadataUnsigned(const char* key, unsigned long value)
-    {
-        return WriteMetadataUL(key, value);
-    }
-
-    bool WriteMetadataValueFloat(const char* key, float value, uint8_t precision)
-    {
-        return WriteMetadataFloat(key, value, precision);
-    }
-
-private:
-    static constexpr uint32_t kDiagnosticFieldCount = 66U;
-    static constexpr const char* kDiagnosticSchema =
-        "u32_sample,u32_phase_id,u32_t_us,u32_dt_us,u32_stationary,"
-        "f32_pose_x_m,f32_pose_y_m,f32_yaw_rad,f32_linear_speed_mps,f32_angular_speed_radps,"
-        "f32_cmd_linear_mps,f32_cmd_angular_radps,f32_left_drive_cmd,f32_right_drive_cmd,"
-        "i32_left_encoder_count,i32_right_encoder_count,f32_left_distance_m,f32_right_distance_m,f32_left_velocity_mps,f32_right_velocity_mps,"
-        "u32_imu_fr_status,i32_imu_fr_gyro_x,i32_imu_fr_gyro_y,i32_imu_fr_gyro_z,i32_imu_fr_accel_x,i32_imu_fr_accel_y,i32_imu_fr_accel_z,i32_imu_fr_temp,u32_imu_fr_int,"
-        "u32_imu_bl_status,i32_imu_bl_gyro_x,i32_imu_bl_gyro_y,i32_imu_bl_gyro_z,i32_imu_bl_accel_x,i32_imu_bl_accel_y,i32_imu_bl_accel_z,i32_imu_bl_temp,u32_imu_bl_int,"
-        "f32_ws_fl_ambient,f32_ws_fl_lit,f32_ws_fl_delta,f32_ws_fl_raw_distance_m,f32_ws_fl_distance_m,f32_ws_fr_ambient,f32_ws_fr_lit,f32_ws_fr_delta,f32_ws_fr_raw_distance_m,f32_ws_fr_distance_m,"
-        "f32_ws_sl_ambient,f32_ws_sl_lit,f32_ws_sl_delta,f32_ws_sl_raw_distance_m,f32_ws_sl_distance_m,f32_ws_sr_ambient,f32_ws_sr_lit,f32_ws_sr_delta,f32_ws_sr_raw_distance_m,f32_ws_sr_distance_m,"
-        "u32_front_wall,u32_left_wall,u32_right_wall,f32_corridor_error_m,f32_front_skew_m,f32_gyro_bias_radps,f32_gyro_raw_radps,f32_gyro_radps";
-
-    MazeMap::App::Internal::Runtime::RuntimeBinaryLogFile _sampleLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _eventLog;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<12288U> _metadata;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<512U> _notes;
-    char _fileName[64];
-    unsigned long _phaseId;
-    unsigned long _sampleCount;
-
-    bool SelectFileName(const char* explicitFileName)
-    {
-        return MazeMap::App::Internal::Runtime::SelectSequentialRuntimeFileName(
-            _fileName,
-            sizeof(_fileName),
-            explicitFileName,
-            "diag%03u.mmlog",
-            "diagnostic_log.mmlog");
-    }
-
-    bool WriteMetadata(const char* key, const char* value)
-    {
-        return _metadata.AppendKeyValue(key, value);
-    }
-
-    bool WriteMetadataUL(const char* key, unsigned long value)
-    {
-        return _metadata.AppendUnsigned(key, value);
-    }
-
-    bool WriteMetadataFloat(const char* key, float value, uint8_t precision)
-    {
-        return _metadata.AppendFloat(key, value, precision);
-    }
-
-    bool WriteDiagnosticTuningMetadata()
-    {
-        const auto& driveModel = MazeMap::MotorEncoderDrive::GetSharedPhysicalModel();
-        const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
-        auto writeUL = [this](const char* key, unsigned long value) -> bool
-        {
-            return WriteMetadataUL(key, value);
-        };
-        auto writeFloat = [this](const char* key, float value) -> bool
-        {
-            return WriteMetadataFloat(key, value, 6);
-        };
-
-        if (!writeUL("kGyroBiasSamples", static_cast<unsigned long>(Config::kGyroBiasSamples))) return false;
-        if (!writeUL("kGyroBiasMinimumAveragingWindowMs", static_cast<unsigned long>(Config::kGyroBiasMinimumAveragingWindowMs))) return false;
-        if (!writeFloat("kGyroBiasUpdateMaxAbsRateRadps", Config::kGyroBiasUpdateMaxAbsRateRadps)) return false;
-        if (!writeFloat("kTrackWidthM", Config::kTrackWidthM)) return false;
-        if (!writeFloat("kArcTrackWidthTightRadiusM", vehicleModel.arcTrackWidthInterpolation.tightRadiusM)) return false;
-        if (!writeFloat("kArcTrackWidthTightM", vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM)) return false;
-        if (!writeFloat("kArcTrackWidthWideRadiusM", vehicleModel.arcTrackWidthInterpolation.wideRadiusM)) return false;
-        if (!writeFloat("kArcTrackWidthWideM", vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM)) return false;
-        if (!writeFloat("kWheelDiameterM", driveModel.wheelDiameterM)) return false;
-        if (!writeUL("kEncoderCountsPerRev", static_cast<unsigned long>(driveModel.pulsesPerRev))) return false;
-        if (!writeFloat("kMotorToWheelGearRatio", driveModel.gearRatio)) return false;
-        if (!writeFloat("kMotorNominalVoltageV", driveModel.nominalVoltageV)) return false;
-        if (!writeFloat("kMotorNominalNoLoadSpeedRpm", driveModel.nominalNoLoadSpeedRpm)) return false;
-        if (!writeFloat("kMotorSupplyVoltageV", driveModel.supplyVoltageV)) return false;
-        if (!writeFloat("kMotorTerminalResistanceOhms", driveModel.resistanceOhms)) return false;
-        if (!writeFloat("kMotorTorqueConstantNmPerA", driveModel.torqueConstantNmPerA)) return false;
-        if (!writeFloat("kMotorSpeedConstantRadpsPerVolt", driveModel.speedConstantRadpsPerVolt)) return false;
-        if (!writeFloat("kMotorNoLoadCurrentA", driveModel.noLoadCurrentA)) return false;
-        if (!writeFloat("kRacingFanDutyCycle", Config::kRacingFanDutyCycle)) return false;
-        if (!writeUL("kRacingFanRampMs", static_cast<unsigned long>(Config::kRacingFanRampMs))) return false;
-        if (!writeFloat("kWheelStaticFeedforward", Config::kWheelStaticFeedforward)) return false;
-        if (!writeFloat("kWheelRestLaunchDriveCommand", Config::kWheelRestLaunchDriveCommand)) return false;
-        if (!writeFloat("kWheelRestLaunchMaxDriveCommand", Config::kWheelRestLaunchMaxDriveCommand)) return false;
-        if (!writeUL("kWheelRestLaunchRampMs", Config::kWheelRestLaunchRampMs)) return false;
-        if (!writeFloat("kWheelRestLaunchSpeedThresholdMps", Config::kWheelRestLaunchSpeedThresholdMps)) return false;
-        if (!writeFloat("kWheelRestLaunchDriveThreshold", Config::kWheelRestLaunchDriveThreshold)) return false;
-        if (!writeFloat("kWheelVelocityFeedforward", Config::kWheelVelocityFeedforward)) return false;
-        if (!writeFloat("kWheelAccelerationResponseGainPerMps2", Config::kWheelAccelerationResponseGainPerMps2)) return false;
-        if (!writeFloat("kWheelAccelerationResponseDeltaWindowMps", Config::kWheelAccelerationResponseDeltaWindowMps)) return false;
-        if (!writeFloat("kMappingWheelAccelerationResponseScale", Config::kMappingWheelAccelerationResponseScale)) return false;
-        if (!writeFloat("kWheelVelocityKp", Config::kWheelVelocityKp)) return false;
-        if (!writeFloat("kWheelVelocityKi", Config::kWheelVelocityKi)) return false;
-        if (!writeFloat("kWheelIntegralLimit", Config::kWheelIntegralLimit)) return false;
-        if (!writeFloat("kDiagnosticWheelVelocityKpScale", DiagnosticConfig::kDiagnosticWheelVelocityKpScale)) return false;
-        if (!writeFloat("kDiagnosticWheelVelocityKiScale", DiagnosticConfig::kDiagnosticWheelVelocityKiScale)) return false;
-        if (!writeFloat("kDiagnosticWheelIntegralLimitScale", DiagnosticConfig::kDiagnosticWheelIntegralLimitScale)) return false;
-        if (!writeFloat("kDiagnosticWheelVelocityKpEffective", MazeMap::ScaleWheelControlValue(Config::kWheelVelocityKp, DiagnosticConfig::kDiagnosticWheelVelocityKpScale))) return false;
-        if (!writeFloat("kDiagnosticWheelVelocityKiEffective", MazeMap::ScaleWheelControlValue(Config::kWheelVelocityKi, DiagnosticConfig::kDiagnosticWheelVelocityKiScale))) return false;
-        if (!writeFloat("kDiagnosticWheelIntegralLimitEffective", MazeMap::ScaleWheelControlValue(Config::kWheelIntegralLimit, DiagnosticConfig::kDiagnosticWheelIntegralLimitScale))) return false;
-        if (!writeFloat("kStraightHeadingKp", Config::kStraightHeadingKp)) return false;
-        if (!writeFloat("kStraightYawD", Config::kStraightYawD)) return false;
-        if (!writeFloat("kWallCenterGain", Config::kWallCenterGain)) return false;
-        if (!writeFloat("kWallCenterD", Config::kWallCenterD)) return false;
-        if (!writeFloat("kWallCenterDerivativeFilterTauSeconds", Config::kWallCenterDerivativeFilterTauSeconds)) return false;
-        if (!writeFloat("kWallCenterMaxClosurePerCellM", Config::kWallCenterMaxClosurePerCellM)) return false;
-        if (!writeFloat("kArcHeadingKp", Config::kArcHeadingKp)) return false;
-        if (!writeFloat("kArcYawD", Config::kArcYawD)) return false;
-        if (!writeFloat("kSmoothTurnYawRateKp", Config::kSmoothTurnYawRateKp)) return false;
-        if (!writeFloat("kSmoothTurnYawRateKd", Config::kSmoothTurnYawRateKd)) return false;
-        if (!writeFloat("kTurnHeadingKp", Config::kTurnHeadingKp)) return false;
-        if (!writeFloat("kTurnYawD", Config::kTurnYawD)) return false;
-        if (!writeFloat("kDistanceToleranceM", Config::kDistanceToleranceM)) return false;
-        if (!writeFloat("kAngleToleranceRad", Config::kAngleToleranceRad)) return false;
-        if (!writeFloat("kSpeedToleranceMps", Config::kSpeedToleranceMps)) return false;
-        if (!writeFloat("kAngularSpeedToleranceRadps", Config::kAngularSpeedToleranceRadps)) return false;
-        if (!writeFloat("kMappingAngleToleranceRad", Config::kMappingAngleToleranceRad)) return false;
-        if (!writeFloat("kMappingAngularSpeedToleranceRadps", Config::kMappingAngularSpeedToleranceRadps)) return false;
-        if (!writeFloat("kObservedDiagnosticMinimumSustainableSpeedMps", Config::kObservedDiagnosticMinimumSustainableSpeedMps)) return false;
-        if (!writeFloat("kMinimumAllowedCruiseSpeedMps", Config::kMinimumAllowedCruiseSpeedMps)) return false;
-        if (!writeFloat("kEncoderProgressEpsilonM", Config::kEncoderProgressEpsilonM)) return false;
-        if (!writeFloat("kEncoderStallCommandThresholdMps", Config::kEncoderStallCommandThresholdMps)) return false;
-        if (!writeUL("kEncoderStallTimeoutMs", Config::kEncoderStallTimeoutMs)) return false;
-        if (!writeUL("kEncoderStallStartupGraceMs", Config::kEncoderStallStartupGraceMs)) return false;
-
-        if (!writeUL("kModeSelectPinA", static_cast<unsigned long>(DiagnosticConfig::kModeSelectPinA))) return false;
-        if (!writeUL("kModeSelectPinB", static_cast<unsigned long>(DiagnosticConfig::kModeSelectPinB))) return false;
-        if (!writeUL("kControlPeriodUs", DiagnosticConfig::kControlPeriodUs)) return false;
-        if (!writeUL("kStartupSettleMs", static_cast<unsigned long>(DiagnosticConfig::kStartupSettleMs))) return false;
-        if (!writeUL("kBaselineHoldMs", static_cast<unsigned long>(DiagnosticConfig::kBaselineHoldMs))) return false;
-        if (!writeUL("kInterTestHoldMs", static_cast<unsigned long>(DiagnosticConfig::kInterTestHoldMs))) return false;
-        if (!writeUL("kLogFlushPeriodMs", static_cast<unsigned long>(DiagnosticConfig::kLogFlushPeriodMs))) return false;
-        if (!writeFloat("kBoundaryHalfSpanM", DiagnosticConfig::kBoundaryHalfSpanM)) return false;
-        if (!writeFloat("kShortStraightDistanceM", DiagnosticConfig::kShortStraightDistanceM)) return false;
-        if (!writeFloat("kLongStraightDistanceM", DiagnosticConfig::kLongStraightDistanceM)) return false;
-        if (!writeFloat("kSquareLegDistanceM", DiagnosticConfig::kSquareLegDistanceM)) return false;
-        if (!writeFloat("kArcHalfCircleDistanceM", DiagnosticConfig::kArcHalfCircleDistanceM)) return false;
-        if (!writeFloat("kSlowStraightSpeedMps", DiagnosticConfig::kSlowStraightSpeedMps)) return false;
-        if (!writeFloat("kCircleMediumSpeedMps", DiagnosticConfig::kCircleMediumSpeedMps)) return false;
-        if (!writeFloat("kFastStraightSpeedMps", DiagnosticConfig::kFastStraightSpeedMps)) return false;
-        if (!writeFloat("kStraightAccelMps2", DiagnosticConfig::kStraightAccelMps2)) return false;
-        if (!writeFloat("kStraightDecelMps2", DiagnosticConfig::kStraightDecelMps2)) return false;
-        static const MazeMap::Vehicle sharedVehicle{};
-        const MazeMap::InPlaceTurnProfile inPlaceTurnProfile = BuildSharedInPlaceTurnProfile(sharedVehicle);
-        if (!writeFloat("kInPlaceTurnMaxOmegaRadps", inPlaceTurnProfile.maxAngularSpeedRadps)) return false;
-        if (!writeFloat("kInPlaceTurnAccelRadps2", inPlaceTurnProfile.angularAccelRadps2)) return false;
-        if (!writeFloat("kKickoffSweepMinDriveCommand", DiagnosticConfig::kKickoffSweepMinDriveCommand)) return false;
-        if (!writeFloat("kKickoffSweepMaxDriveCommand", DiagnosticConfig::kKickoffSweepMaxDriveCommand)) return false;
-        if (!writeFloat("kKickoffSweepStepDriveCommand", DiagnosticConfig::kKickoffSweepStepDriveCommand)) return false;
-        if (!writeUL("kKickoffSweepPulseMs", static_cast<unsigned long>(DiagnosticConfig::kKickoffSweepPulseMs))) return false;
-        if (!writeFloat("kKickoffSweepMoveThresholdM", DiagnosticConfig::kKickoffSweepMoveThresholdM)) return false;
-        if (!writeFloat("kKickoffSweepMoveThresholdMps", DiagnosticConfig::kKickoffSweepMoveThresholdMps)) return false;
-        if (!writeFloat("kForwardSweepKickoffDriveCommand", DiagnosticConfig::kForwardSweepKickoffDriveCommand)) return false;
-        if (!writeUL("kForwardSweepKickoffMs", static_cast<unsigned long>(DiagnosticConfig::kForwardSweepKickoffMs))) return false;
-        if (!writeFloat("kForwardSweepMinDriveCommand", DiagnosticConfig::kForwardSweepMinDriveCommand)) return false;
-        if (!writeFloat("kForwardSweepMaxDriveCommand", DiagnosticConfig::kForwardSweepMaxDriveCommand)) return false;
-        if (!writeFloat("kForwardSweepStepDriveCommand", DiagnosticConfig::kForwardSweepStepDriveCommand)) return false;
-        if (!writeUL("kForwardSweepHoldMs", static_cast<unsigned long>(DiagnosticConfig::kForwardSweepHoldMs))) return false;
-        if (!writeFloat("kForwardSweepCarryThresholdMps", DiagnosticConfig::kForwardSweepCarryThresholdMps)) return false;
-        if (!writeFloat("kForwardSweepCarryThresholdM", DiagnosticConfig::kForwardSweepCarryThresholdM)) return false;
-        if (!writeFloat("kCharacterizationBoundaryReserveM", DiagnosticConfig::kCharacterizationBoundaryReserveM)) return false;
-        if (!writeUL("kCharacterizationSettleMs", static_cast<unsigned long>(DiagnosticConfig::kCharacterizationSettleMs))) return false;
-        if (!writeFloat("kCharacterizationRecoverySpeedMps", DiagnosticConfig::kCharacterizationRecoverySpeedMps)) return false;
-
-        return true;
-    }
-
-    bool WriteSummaryInstructions()
-    {
-        for (size_t index = 0U; index < MazeMap::GetDiagnosticSummaryInstructionCount(); ++index)
-        {
-            if (!WriteEvent("summary", MazeMap::GetDiagnosticSummaryInstruction(index).message))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-};
-
-/*
-class OpenFloorTimingLogger
-{
-public:
-    bool Begin(const char* runId)
-    {
-        _metadata.Clear();
-        _notes.Clear();
-        if (!_eventLog.BeginSibling("timing_boot.mmlog"))
-        {
-            return false;
-        }
-        if (!_metadata.AppendKeyValue("file", "timing_boot.mmlog")) return false;
-        if (_eventLog.IsEnabled() && !_metadata.AppendKeyValue("control_log_file", _eventLog.GetFileName())) return false;
-        if (!_metadata.AppendKeyValue("mode", "open_floor_measurement")) return false;
-        if (runId != nullptr && runId[0] != '\0' && !_metadata.AppendKeyValue("run_id", runId)) return false;
-        if (!MazeMap::App::Internal::Runtime::AppendRuntimeBinaryNotes(_notes, _eventLog.GetFileName())) return false;
-        if (!_sampleLog.BeginSelected(
-                "timing_boot.mmlog",
-                kTimingSchema,
-                kTimingFieldCount,
-                _metadata.Data(),
-                _notes.Data(),
-                MazeMap::App::Internal::Runtime::kRuntimeBinaryLogFlags,
-                0U,
-                micros()))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    bool LogSample(
-        uint16_t controlTickIndex,
-        const ControlCycleTiming& controlTiming,
-        const DiagnosticSensorSnapshot& snapshot)
-    {
-        return LogRow(
-                   "sample",
-                   "control",
-                   controlTickIndex,
-                   controlTiming.controlStartUs,
-                   controlTiming,
-                   ImuObservationTiming{},
-                   OpticalObservationTiming{},
-                   "control") &&
-            LogRow(
-                   "sample",
-                   "encoder",
-                   controlTickIndex,
-                   controlTiming.encoderReadDoneUs,
-                   controlTiming,
-                   ImuObservationTiming{},
-                   OpticalObservationTiming{},
-                   "encoder") &&
-            LogRow(
-                   "sample",
-                   "imu",
-                   controlTickIndex,
-                   snapshot.imuTiming.readDoneUs,
-                   controlTiming,
-                   snapshot.imuTiming,
-                   OpticalObservationTiming{},
-                   "imu") &&
-            LogRow(
-                   "sample",
-                   "front_pair_stream",
-                   controlTickIndex,
-                   snapshot.frontTiming.observationReadyUs,
-                   controlTiming,
-                   ImuObservationTiming{},
-                   snapshot.frontTiming,
-                   "front") &&
-            LogRow(
-                   "sample",
-                   "left_side_stream",
-                   controlTickIndex,
-                   snapshot.leftTiming.observationReadyUs,
-                   controlTiming,
-                   ImuObservationTiming{},
-                   snapshot.leftTiming,
-                   "left") &&
-            LogRow(
-                   "sample",
-                   "right_side_stream",
-                   controlTickIndex,
-                   snapshot.rightTiming.observationReadyUs,
-                   controlTiming,
-                   ImuObservationTiming{},
-                   snapshot.rightTiming,
-                   "right");
-    }
-
-    bool LogSummary(const char* streamId, unsigned long sampleCount, float meanDelayUs, float jitterUs)
-    {
-        char message[160] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "%s;n=%lu;mean_delay_us=%.3f;jitter_us=%.3f",
-            (streamId != nullptr) ? streamId : "stream",
-            sampleCount,
-            meanDelayUs,
-            jitterUs);
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return false;
-        }
-        return _eventLog.WriteEvent(micros(), "summary", message);
-    }
-
-    bool LogFailure(const char* reason)
-    {
-        return _eventLog.WriteEvent(micros(), "fault", (reason != nullptr) ? reason : "timing_failure");
-    }
-
-    void Service()
-    {
-        (void)_sampleLog.Service(1U);
-    }
-
-    void Flush()
-    {
-        _sampleLog.Flush();
-        _eventLog.Flush();
-    }
-
-    void Close()
-    {
-        _sampleLog.Close();
-        _eventLog.Close();
-    }
-
-private:
-    static constexpr uint32_t kTimingFieldCount = 27U;
-    static constexpr const char* kTimingSchema =
-        "u32_mono_time,s32_timing_section_id,s32_event_type,s32_stream_id,u32_control_tick_index,"
-        "u32_t_control_start,u32_t_control_end,u32_t_pwm_latch,u32_t_enc_latch,u32_t_enc_read_done,"
-        "u32_t_ukf_predict_start,u32_t_ukf_predict_end,u32_dt_ukf_predict,u32_t_ukf_update_start,u32_t_ukf_update_end,u32_dt_ukf_update,"
-        "u32_t_imu_drdy,u32_t_imu_read_start,u32_t_imu_read_done,s32_led_mode,"
-        "u32_led_on_cmd_time,u32_adc_on_sample_time,u32_led_off_cmd_time,u32_adc_off_sample_time,u32_obs_ready_time,"
-        "u32_cycle_counter_start,u32_cycle_counter_end";
-    MazeMap::App::Internal::Runtime::RuntimeBinaryLogFile _sampleLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _eventLog;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<1024U> _metadata;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<512U> _notes;
-
-    bool LogRow(
-        const char* eventType,
-        const char* streamId,
-        uint16_t controlTickIndex,
-        uint32_t monoTimeUs,
-        const ControlCycleTiming& controlTiming,
-        const ImuObservationTiming& imuTiming,
-        const OpticalObservationTiming& opticalTiming,
-        const char* ledMode)
-    {
-        MazeMap::App::Internal::Runtime::RuntimeRecordBuilder<kTimingFieldCount> record;
-        record.U32(monoTimeUs);
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorSectionName(MazeMap::OpenFloorSectionId::Sec00Timing)));
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(eventType));
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(streamId));
-        record.U32(controlTickIndex);
-        record.U32(controlTiming.controlStartUs);
-        record.U32(controlTiming.controlEndUs);
-        record.U32(controlTiming.pwmLatchUs);
-        record.U32(controlTiming.encoderLatchUs);
-        record.U32(controlTiming.encoderReadDoneUs);
-        record.U32(controlTiming.ukfPredictStartUs);
-        record.U32(controlTiming.ukfPredictEndUs);
-        record.U32(controlTiming.ukfPredictDurationUs);
-        record.U32(controlTiming.ukfUpdateStartUs);
-        record.U32(controlTiming.ukfUpdateEndUs);
-        record.U32(controlTiming.ukfUpdateDurationUs);
-        MazeMap::App::Internal::Runtime::AppendImuTimingFields(record, imuTiming);
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(ledMode));
-        MazeMap::App::Internal::Runtime::AppendOpticalTimingFields(record, opticalTiming);
-        record.U32(controlTiming.cycleCounterStart);
-        record.U32(controlTiming.cycleCounterEnd);
-        if (!MazeMap::App::Internal::Runtime::AppendBinaryRecord(_sampleLog, record))
-        {
-            return false;
-        }
-        return true;
-    }
-};
-class OpenFloorMainLogger
-{
-public:
-    OpenFloorMainLogger()
-        : _sampleCount(0UL)
-    {
-    }
-
-    bool Begin(const DiagnosticSensorSuite& sensors, const char* runId)
-    {
-        _sampleCount = 0UL;
-        _metadata.Clear();
-        _notes.Clear();
-        if (!_eventLog.BeginSibling("open_floor_main.mmlog")) return false;
-        if (!_metadata.AppendKeyValue("file", "open_floor_main.mmlog")) return false;
-        if (_eventLog.IsEnabled() && !_metadata.AppendKeyValue("control_log_file", _eventLog.GetFileName())) return false;
-        if (!_metadata.AppendKeyValue("mode", "open_floor_measurement")) return false;
-        if (runId != nullptr && runId[0] != '\0' && !_metadata.AppendKeyValue("run_id", runId)) return false;
-        if (!_metadata.AppendUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
-        if (!_metadata.AppendFloat("imu_gyro_mdps_per_lsb", sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!_metadata.AppendFloat("imu_accel_mg_per_lsb", sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!MazeMap::App::Internal::Runtime::AppendRuntimeBinaryNotes(_notes, _eventLog.GetFileName())) return false;
-        return _sampleLog.BeginSelected(
-            "open_floor_main.mmlog",
-            kOpenFloorMainSchema,
-            kOpenFloorMainFieldCount,
-            _metadata.Data(),
-            _notes.Data(),
-            MazeMap::App::Internal::Runtime::kRuntimeBinaryLogFlags,
-            0U,
-            micros());
-    }
-
-    bool BeginSection(const OpenFloorMeasurementLabels& labels)
-    {
-        return WriteSectionMarker("section_start", labels, nullptr);
-    }
-
-    bool EndSection(const OpenFloorMeasurementLabels& labels)
-    {
-        return WriteSectionMarker("section_end", labels, nullptr);
-    }
-
-    bool AbortSection(const OpenFloorMeasurementLabels& labels, const char* reason)
-    {
-        return WriteSectionMarker("abort", labels, reason);
-    }
-
-    bool WriteEvent(const char* type, const char* message)
-    {
-        return _eventLog.WriteEvent(micros(), type, message);
-    }
-
-    bool LogSample(
-        const char* runId,
-        const OpenFloorMeasurementLabels& labels,
-        const PoseEstimate& pose,
-        const DriveBase& drive,
-        const OpenFloorMeasurementCycle& cycle)
-    {
-        MazeMap::App::Internal::Runtime::RuntimeRecordBuilder<kOpenFloorMainFieldCount> record;
-        record.U32(cycle.masterTimeUs);
-        record.U32(cycle.dtUs);
-        record.U32(cycle.controlTiming.controlStartUs);
-        record.U32(cycle.controlTiming.controlEndUs);
-        record.U32(cycle.controlTiming.pwmLatchUs);
-        record.U32(cycle.controlTiming.encoderLatchUs);
-        record.U32(cycle.controlTiming.encoderReadDoneUs);
-        record.U32(cycle.controlTiming.ukfPredictStartUs);
-        record.U32(cycle.controlTiming.ukfPredictEndUs);
-        record.U32(cycle.controlTiming.ukfPredictDurationUs);
-        record.U32(cycle.controlTiming.ukfUpdateStartUs);
-        record.U32(cycle.controlTiming.ukfUpdateEndUs);
-        record.U32(cycle.controlTiming.ukfUpdateDurationUs);
-        MazeMap::App::Internal::Runtime::AppendImuTimingFields(record, cycle.sensorSnapshot.imuTiming);
-        MazeMap::App::Internal::Runtime::AppendOpticalTimingFields(record, cycle.sensorSnapshot.frontTiming);
-        MazeMap::App::Internal::Runtime::AppendOpticalTimingFields(record, cycle.sensorSnapshot.leftTiming);
-        MazeMap::App::Internal::Runtime::AppendOpticalTimingFields(record, cycle.sensorSnapshot.rightTiming);
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(runId));
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorSectionName(labels.sectionId)));
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorPrimitiveName(labels.primitiveId)));
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorDirectionName(labels.directionId)));
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorPhaseName(labels.phaseId)));
-        record.U32(labels.repeatIndex);
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorMarkerName(labels.startMarkerId)));
-        record.U32(MazeMap::App::Internal::Runtime::PackTextTagOrHash(MazeMap::OpenFloorSpeedBinName(labels.speedBin)));
-        record.F32(labels.progressNorm);
-        record.F32(pose.xMeters);
-        record.F32(pose.yMeters);
-        record.F32(MazeMap::OpenFloorMetersToHalfSteps(pose.xMeters));
-        record.F32(MazeMap::OpenFloorMetersToHalfSteps(pose.yMeters));
-        record.F32(pose.yawRad);
-        record.F32(cycle.measuredLinearSpeedMps);
-        record.F32(cycle.measuredAngularSpeedRadps);
-        record.F32(drive.GetLastLinearCommandMps());
-        record.F32(drive.GetLastAngularCommandRadps());
-        record.F32(cycle.driveTelemetry.leftDriveCommand);
-        record.F32(cycle.driveTelemetry.rightDriveCommand);
-        MazeMap::App::Internal::Runtime::AppendDriveTelemetryFields(record, cycle.driveTelemetry);
-        record.U32(cycle.sensorSnapshot.imuBackLeft.status);
-        record.I32(cycle.sensorSnapshot.imuBackLeft.gyroX);
-        record.I32(cycle.sensorSnapshot.imuBackLeft.gyroY);
-        record.I32(cycle.sensorSnapshot.imuBackLeft.gyroZ);
-        record.I32(cycle.sensorSnapshot.imuBackLeft.accelX);
-        record.I32(cycle.sensorSnapshot.imuBackLeft.accelY);
-        record.I32(cycle.sensorSnapshot.imuBackLeft.accelZ);
-        record.I32(cycle.sensorSnapshot.imuBackLeft.temp);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, cycle.sensorSnapshot.frontLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, cycle.sensorSnapshot.frontRight);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, cycle.sensorSnapshot.sideLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, cycle.sensorSnapshot.sideRight);
-        record.U32(cycle.sensorSnapshot.frontWall ? 1U : 0U);
-        record.U32(cycle.sensorSnapshot.leftWall ? 1U : 0U);
-        record.U32(cycle.sensorSnapshot.rightWall ? 1U : 0U);
-        record.F32(cycle.sensorSnapshot.corridorErrorM);
-        record.F32(cycle.sensorSnapshot.frontSkewM);
-        record.F32(cycle.batteryVoltage);
-        record.F32(cycle.boardTemperatureC);
-        record.F32(cycle.fanDutyCycle);
-        uint32_t legacyErrorFlags = static_cast<uint32_t>(cycle.clippingFlags);
-        legacyErrorFlags |= static_cast<uint32_t>(cycle.watchdogFlags) << 16;
-        if (cycle.workspaceViolation) legacyErrorFlags |= 1u << 30;
-        if (cycle.estimatorFault) legacyErrorFlags |= 1u << 31;
-        record.U32(legacyErrorFlags);
-        if (!MazeMap::App::Internal::Runtime::AppendBinaryRecord(_sampleLog, record))
-        {
-            return false;
-        }
-        ++_sampleCount;
-        return true;
-    }
-
-    void Service()
-    {
-        (void)_sampleLog.Service(1U);
-    }
-
-    void Flush()
-    {
-        _sampleLog.Flush();
-        _eventLog.Flush();
-    }
-
-    void Close()
-    {
-        _sampleLog.Close();
-        _eventLog.Close();
-    }
-
-private:
-    static constexpr uint32_t kOpenFloorMainFieldCount = 94U;
-    static constexpr const char* kOpenFloorMainSchema =
-        "u32_t_master,u32_dt_control,u32_t_control_start,u32_t_control_end,u32_t_pwm_latch,u32_t_enc_latch,u32_t_enc_read_done,"
-        "u32_t_ukf_predict_start,u32_t_ukf_predict_end,u32_dt_ukf_predict,u32_t_ukf_update_start,u32_t_ukf_update_end,u32_dt_ukf_update,"
-        "u32_t_imu_drdy,u32_t_imu_read_start,u32_t_imu_read_done,"
-        "u32_t_front_led_on,u32_t_front_adc_on,u32_t_front_led_off,u32_t_front_adc_off,u32_t_front_obs_ready,"
-        "u32_t_left_led_on,u32_t_left_adc_on,u32_t_left_led_off,u32_t_left_adc_off,u32_t_left_obs_ready,"
-        "u32_t_right_led_on,u32_t_right_adc_on,u32_t_right_led_off,u32_t_right_adc_off,u32_t_right_obs_ready,"
-        "s32_run_id,s32_section_id,s32_primitive_id,s32_direction,s32_phase,u32_repeat_index,s32_start_marker_id,s32_speed_bin,f32_progress_norm,"
-        "f32_origin_x_m,f32_origin_y_m,f32_origin_x_half_steps,f32_origin_y_half_steps,f32_yaw_rad,f32_linear_speed_mps,f32_angular_speed_radps,"
-        "f32_cmd_linear_mps,f32_cmd_angular_radps,f32_u_left_cmd,f32_u_right_cmd,"
-        "i32_encoder_count_left,i32_encoder_count_right,f32_encoder_dist_left_m,f32_encoder_dist_right_m,f32_encoder_vel_left_mps,f32_encoder_vel_right_mps,"
-        "u32_imu_status,i32_imu_gyro_x,i32_imu_gyro_y,i32_imu_gyro_z,i32_imu_accel_x,i32_imu_accel_y,i32_imu_accel_z,i32_imu_temp,"
-        "f32_front_left_ambient,f32_front_left_lit,f32_front_left_delta,f32_front_left_raw_distance_m,f32_front_left_distance_m,"
-        "f32_front_right_ambient,f32_front_right_lit,f32_front_right_delta,f32_front_right_raw_distance_m,f32_front_right_distance_m,"
-        "f32_side_left_ambient,f32_side_left_lit,f32_side_left_delta,f32_side_left_raw_distance_m,f32_side_left_distance_m,"
-        "f32_side_right_ambient,f32_side_right_lit,f32_side_right_delta,f32_side_right_raw_distance_m,f32_side_right_distance_m,"
-        "u32_front_wall,u32_left_wall,u32_right_wall,f32_corridor_error_m,f32_front_skew_m,"
-        "f32_battery_voltage_v,f32_board_temperature_c,f32_fan_duty_cycle,u32_error_flags";
-    MazeMap::App::Internal::Runtime::RuntimeBinaryLogFile _sampleLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _eventLog;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<2048U> _metadata;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<512U> _notes;
-    unsigned long _sampleCount;
-
-    bool WriteSectionMarker(const char* type, const OpenFloorMeasurementLabels& labels, const char* reason)
-    {
-        char message[256] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "section_id=%s;primitive_id=%s;direction=%s;start_marker=%s;repeat_index=%u;speed_bin=%s%s%s",
-            MazeMap::OpenFloorSectionName(labels.sectionId),
-            MazeMap::OpenFloorPrimitiveName(labels.primitiveId),
-            MazeMap::OpenFloorDirectionName(labels.directionId),
-            MazeMap::OpenFloorMarkerName(labels.startMarkerId),
-            static_cast<unsigned>(labels.repeatIndex),
-            MazeMap::OpenFloorSpeedBinName(labels.speedBin),
-            (reason != nullptr && reason[0] != '\0') ? ";reason=" : "",
-            (reason != nullptr && reason[0] != '\0') ? reason : "");
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return false;
-        }
-        return _eventLog.WriteEvent(micros(), type, message);
-    }
-};
-
-*/
 class OpenFloorRunManifestWriter
 {
 public:
@@ -2077,145 +1580,84 @@ inline const char* AuxMeasurementRoutineName(AuxMeasurementConfig::Routine routi
     }
 }
 
-class AuxMeasurementLogger
+#define AUX_MEASUREMENT_LOG_FIELDS(X)             \
+    X(std::uint32_t, sample)                     \
+    X(std::uint32_t, phase_id)                   \
+    X(std::uint32_t, t_us)                       \
+    X(std::uint32_t, dt_us)                      \
+    X(std::uint32_t, stationary)                 \
+    X(std::uint32_t, fan_enabled)                \
+    X(float,         pose_x_m)                   \
+    X(float,         pose_y_m)                   \
+    X(float,         yaw_rad)                    \
+    X(float,         linear_speed_mps)           \
+    X(float,         angular_speed_radps)        \
+    X(float,         planar_accel_mps2)          \
+    X(float,         cmd_linear_mps)             \
+    X(float,         cmd_angular_radps)          \
+    X(float,         left_drive_cmd)             \
+    X(float,         right_drive_cmd)            \
+    X(std::int32_t,  left_encoder_count)         \
+    X(std::int32_t,  right_encoder_count)        \
+    X(float,         left_distance_m)            \
+    X(float,         right_distance_m)           \
+    X(float,         left_velocity_mps)          \
+    X(float,         right_velocity_mps)         \
+    X(std::uint32_t, imu_fr_status)              \
+    X(std::int32_t,  imu_fr_gyro_x)              \
+    X(std::int32_t,  imu_fr_gyro_y)              \
+    X(std::int32_t,  imu_fr_gyro_z)              \
+    X(std::int32_t,  imu_fr_accel_x)             \
+    X(std::int32_t,  imu_fr_accel_y)             \
+    X(std::int32_t,  imu_fr_accel_z)             \
+    X(std::int32_t,  imu_fr_temp)                \
+    X(std::uint32_t, imu_fr_int)                 \
+    X(std::uint32_t, imu_bl_status)              \
+    X(std::int32_t,  imu_bl_gyro_x)              \
+    X(std::int32_t,  imu_bl_gyro_y)              \
+    X(std::int32_t,  imu_bl_gyro_z)              \
+    X(std::int32_t,  imu_bl_accel_x)             \
+    X(std::int32_t,  imu_bl_accel_y)             \
+    X(std::int32_t,  imu_bl_accel_z)             \
+    X(std::int32_t,  imu_bl_temp)                \
+    X(std::uint32_t, imu_bl_int)                 \
+    X(float,         ws_fl_ambient)              \
+    X(float,         ws_fl_lit)                  \
+    X(float,         ws_fl_delta)                \
+    X(float,         ws_fl_raw_distance_m)       \
+    X(float,         ws_fl_distance_m)           \
+    X(float,         ws_fr_ambient)              \
+    X(float,         ws_fr_lit)                  \
+    X(float,         ws_fr_delta)                \
+    X(float,         ws_fr_raw_distance_m)       \
+    X(float,         ws_fr_distance_m)           \
+    X(float,         ws_sl_ambient)              \
+    X(float,         ws_sl_lit)                  \
+    X(float,         ws_sl_delta)                \
+    X(float,         ws_sl_raw_distance_m)       \
+    X(float,         ws_sl_distance_m)           \
+    X(float,         ws_sr_ambient)              \
+    X(float,         ws_sr_lit)                  \
+    X(float,         ws_sr_delta)                \
+    X(float,         ws_sr_raw_distance_m)       \
+    X(float,         ws_sr_distance_m)           \
+    X(std::uint32_t, front_wall)                 \
+    X(std::uint32_t, left_wall)                  \
+    X(std::uint32_t, right_wall)                 \
+    X(float,         corridor_error_m)           \
+    X(float,         front_skew_m)               \
+    X(float,         gyro_bias_radps)            \
+    X(float,         gyro_raw_radps)             \
+    X(float,         gyro_radps)
+
+MMLOG_DEFINE_ROW(AuxMeasurementLogRow, AUX_MEASUREMENT_LOG_FIELDS);
+
+namespace MazeMap::App::Internal::Runtime
 {
-public:
-    AuxMeasurementLogger()
-        : _sampleLog()
-        , _eventLog()
-        , _metadata()
-        , _notes()
-        , _phaseId(0UL)
-        , _sampleCount(0UL)
-    {
-        _fileName[0] = '\0';
-    }
-
-    bool Begin(
-        const DiagnosticSensorSuite& sensors,
-        AuxMeasurementConfig::Routine routine,
-        const char* fileName = nullptr)
-    {
-        const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
-        _phaseId = 0UL;
-        _sampleCount = 0UL;
-        _metadata.Clear();
-        _notes.Clear();
-        if (!MazeMap::App::Internal::Runtime::SelectSequentialRuntimeFileName(
-                _fileName,
-                sizeof(_fileName),
-                fileName,
-                "aux%03u.mmlog",
-                "aux_measurement_log.mmlog"))
-        {
-            return false;
-        }
-        if (!_eventLog.BeginSibling(_fileName))
-        {
-            return false;
-        }
-        if (!WriteMetadata("file", _fileName)) return false;
-        if (_eventLog.IsEnabled() && !WriteMetadata("control_log_file", _eventLog.GetFileName())) return false;
-        if (!WriteMetadata("mode", "aux_measurement")) return false;
-        if (!WriteMetadata("routine", AuxMeasurementRoutineName(routine))) return false;
-        if (!WriteMetadataUL("control_period_us", AuxMeasurementConfig::kControlPeriodUs)) return false;
-        {
-            const unsigned long imuSampleRateHz = MazeMap::GetUiImuSampleRateHzForControlPeriodUs(AuxMeasurementConfig::kControlPeriodUs);
-            if (imuSampleRateHz > 0UL && !WriteMetadataUL("imu_sample_rate_hz", imuSampleRateHz)) return false;
-        }
-        {
-            const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
-                AuxMeasurementConfig::kControlPeriodUs,
-                Config::kMissionRuntimeAccelFilterFreq);
-            if (imuAccelLpf2CutoffHz > 0.0f && !WriteMetadataFloat("imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3)) return false;
-        }
-        {
-            const float imuGyroLpf1ReferenceHz = MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(AuxMeasurementConfig::kControlPeriodUs);
-            if (imuGyroLpf1ReferenceHz > 0.0f && !WriteMetadataFloat("imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
-        }
-        if (!WriteMetadataUL("startup_settle_ms", static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs))) return false;
-        if (!WriteMetadataUL("log_flush_period_ms", static_cast<unsigned long>(AuxMeasurementConfig::kLogFlushPeriodMs))) return false;
-        if (!WriteMetadataUL("mode_select_pin_a", static_cast<unsigned long>(AuxMeasurementConfig::kModeSelectPinA))) return false;
-        if (!WriteMetadataUL("mode_select_pin_b", static_cast<unsigned long>(AuxMeasurementConfig::kModeSelectPinB))) return false;
-        if (!WriteMetadataFloat("imu_gyro_mdps_per_lsb", sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!WriteMetadataFloat("imu_accel_mg_per_lsb", sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!WriteMetadataFloat("mission_gyro_bias_estimate_radps", sensors.GetGyroBiasRadps(), 6)) return false;
-        if (!WriteMetadataUL("mission_accel_bias_valid", sensors.HasAccelBias() ? 1UL : 0UL)) return false;
-        if (sensors.HasAccelBias() &&
-            (!WriteMetadataFloat("mission_accel_bias_x_mg", sensors.GetAccelBiasXG() * 1000.0f, 3) ||
-             !WriteMetadataFloat("mission_accel_bias_y_mg", sensors.GetAccelBiasYG() * 1000.0f, 3))) return false;
-        if (!WriteMetadataFloat("kTrackWidthM", Config::kTrackWidthM, 6)) return false;
-        if (!WriteMetadataFloat("kArcTrackWidthTightRadiusM", vehicleModel.arcTrackWidthInterpolation.tightRadiusM, 6)) return false;
-        if (!WriteMetadataFloat("kArcTrackWidthTightM", vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM, 6)) return false;
-        if (!WriteMetadataFloat("kArcTrackWidthWideRadiusM", vehicleModel.arcTrackWidthInterpolation.wideRadiusM, 6)) return false;
-        if (!WriteMetadataFloat("kArcTrackWidthWideM", vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM, 6)) return false;
-        if (routine == AuxMeasurementConfig::Routine::FanStaticSurvey)
-        {
-            if (!WriteMetadataUL("baseline_hold_ms", static_cast<unsigned long>(AuxMeasurementConfig::kBaselineHoldMs))) return false;
-            if (!WriteMetadataUL("fan_hold_ms", static_cast<unsigned long>(AuxMeasurementConfig::kFanHoldMs))) return false;
-            if (!WriteMetadataUL("recovery_hold_ms", static_cast<unsigned long>(AuxMeasurementConfig::kRecoveryHoldMs))) return false;
-            if (!WriteMetadataFloat("kRacingFanDutyCycle", Config::kRacingFanDutyCycle, 6)) return false;
-            if (!WriteMetadataUL("kRacingFanRampMs", static_cast<unsigned long>(Config::kRacingFanRampMs))) return false;
-        }
-        if (routine == AuxMeasurementConfig::Routine::TurningTractionSweep)
-        {
-            if (!WriteMetadata("turn_direction", AuxMeasurementConfig::kTurningTractionSweepClockwise ? "cw" : "ccw")) return false;
-            if (!WriteMetadataFloat("turning_traction_radius_m", AuxMeasurementConfig::kTurningTractionSweepRadiusM, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_start_speed_mps", AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_accel_mps2", AuxMeasurementConfig::kTurningTractionSweepAccelMps2, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_max_speed_mps", AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps, 6)) return false;
-            if (!WriteMetadataUL("turning_traction_fan_settle_ms", static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSweepFanSettleMs))) return false;
-            if (!WriteMetadataUL("turning_traction_launch_ms", static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionLaunchMs))) return false;
-            if (!WriteMetadataFloat("turning_traction_max_omega_radps", AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_plateau_min_speed_mps", AuxMeasurementConfig::kTurningTractionPlateauMinSpeedMps, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_plateau_delta_mps", AuxMeasurementConfig::kTurningTractionPlateauDeltaMps, 6)) return false;
-            if (!WriteMetadataUL("turning_traction_plateau_window_ms", static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionPlateauWindowMs))) return false;
-            if (!WriteMetadataFloat("turning_traction_actuator_ceiling_cmd", AuxMeasurementConfig::kTurningTractionActuatorCeilingCommand, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_curvature_ramp_m_inv_per_s", AuxMeasurementConfig::kTurningTractionCurvatureRampMInvPerSec, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_slip_min_speed_mps", AuxMeasurementConfig::kTurningTractionSlipMinSpeedMps, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_slip_min_lat_accel_mps2", AuxMeasurementConfig::kTurningTractionSlipMinLatAccelMps2, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_slip_yaw_coherence_floor", AuxMeasurementConfig::kTurningTractionSlipYawCoherenceFloor, 6)) return false;
-            if (!WriteMetadataFloat("turning_traction_slip_planar_coherence_floor", AuxMeasurementConfig::kTurningTractionSlipPlanarCoherenceFloor, 6)) return false;
-            if (!WriteMetadataUL("turning_traction_slip_confirm_ms", static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSlipConfirmMs))) return false;
-            if (!WriteMetadataUL("turning_traction_timeout_ms", static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSweepTimeoutMs))) return false;
-            if (!WriteMetadataFloat("kRacingFanDutyCycle", Config::kRacingFanDutyCycle, 6)) return false;
-            if (!WriteMetadataUL("kRacingFanRampMs", static_cast<unsigned long>(Config::kRacingFanRampMs))) return false;
-        }
-        if (!WriteEvent("summary", "Enter by shorting pins 28 and 29 at boot. Those pins only select this mode; they are not measurement inputs.")) return false;
-        if (!WriteEvent("summary", "Edit AuxMeasurementConfig::kRoutine and RunSelectedRoutine() to repurpose this mode for one-off internal measurements.")) return false;
-        if (routine == AuxMeasurementConfig::Routine::TurningTractionSweep)
-        {
-            if (!WriteEvent("summary", "The default routine enables the mission fan, ramps circle speed without a software ceiling, and if speed plateaus before slip it tightens curvature until sustained encoder-vs-gyro/IMU mismatch indicates traction loss.")) return false;
-            if (!WriteEvent("summary", "Use traction_limit_result and the last steady samples before it to estimate the maximum sustainable circle speed, yaw rate, and lateral acceleration.")) return false;
-        }
-        else
-        {
-            if (!WriteEvent("summary", "The default routine logs stationary fan-off, fan-on, and recovery phases so you can quantify fan-induced sensor and vibration shifts.")) return false;
-        }
-        if (!MazeMap::App::Internal::Runtime::AppendRuntimeBinaryNotes(_notes, _eventLog.GetFileName())) return false;
-        return _sampleLog.BeginSelected(
-            _fileName,
-            kAuxSchema,
-            kAuxFieldCount,
-            _metadata.Data(),
-            _notes.Data(),
-            MazeMap::App::Internal::Runtime::kRuntimeBinaryLogFlags,
-            0U,
-            micros());
-    }
-
-    bool BeginPhase(const char* name)
-    {
-        ++_phaseId;
-        return _eventLog.WritePhase(_phaseId, micros(), name);
-    }
-
-    bool WriteEvent(const char* type, const char* message)
-    {
-        return _eventLog.WriteEvent(micros(), type, message);
-    }
-
-    bool LogSample(
+    inline void PopulateAuxMeasurementLogRow(
+        AuxMeasurementLogRow& row,
+        unsigned long sampleCount,
+        unsigned long phaseId,
         bool stationary,
         bool fanEnabled,
         uint32_t timestampUs,
@@ -2226,105 +1668,155 @@ public:
         const DiagnosticSensorSnapshot& sensorSnapshot,
         float planarAccelMps2)
     {
-        MazeMap::App::Internal::Runtime::RuntimeRecordBuilder<kAuxFieldCount> record;
-        record.U32(static_cast<uint32_t>(_sampleCount));
-        record.U32(static_cast<uint32_t>(_phaseId));
-        record.U32(timestampUs);
-        record.U32(dtUs);
-        record.U32(stationary ? 1U : 0U);
-        record.U32(fanEnabled ? 1U : 0U);
-        record.F32(pose.xMeters);
-        record.F32(pose.yMeters);
-        record.F32(pose.yawRad);
-        record.F32(pose.linearSpeedMps);
-        record.F32(pose.angularSpeedRadps);
-        record.F32(planarAccelMps2);
-        record.F32(drive.GetLastLinearCommandMps());
-        record.F32(drive.GetLastAngularCommandRadps());
-        record.F32(driveTelemetry.leftDriveCommand);
-        record.F32(driveTelemetry.rightDriveCommand);
-        MazeMap::App::Internal::Runtime::AppendDriveTelemetryFields(record, driveTelemetry);
-        MazeMap::App::Internal::Runtime::AppendImuTelemetryFields(record, sensorSnapshot.imuFrontRight);
-        MazeMap::App::Internal::Runtime::AppendImuTelemetryFields(record, sensorSnapshot.imuBackLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.frontLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.frontRight);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.sideLeft);
-        MazeMap::App::Internal::Runtime::AppendWallSensorFields(record, sensorSnapshot.sideRight);
-        record.U32(sensorSnapshot.frontWall ? 1U : 0U);
-        record.U32(sensorSnapshot.leftWall ? 1U : 0U);
-        record.U32(sensorSnapshot.rightWall ? 1U : 0U);
-        record.F32(sensorSnapshot.corridorErrorM);
-        record.F32(sensorSnapshot.frontSkewM);
-        record.F32(sensorSnapshot.gyroBiasRadps);
-        record.F32(sensorSnapshot.gyroRawRadps);
-        record.F32(sensorSnapshot.gyroRadps);
+        row.sample = static_cast<std::uint32_t>(sampleCount);
+        row.phase_id = static_cast<std::uint32_t>(phaseId);
+        row.t_us = timestampUs;
+        row.dt_us = dtUs;
+        row.stationary = stationary ? 1U : 0U;
+        row.fan_enabled = fanEnabled ? 1U : 0U;
+        row.pose_x_m = pose.xMeters;
+        row.pose_y_m = pose.yMeters;
+        row.yaw_rad = pose.yawRad;
+        row.linear_speed_mps = pose.linearSpeedMps;
+        row.angular_speed_radps = pose.angularSpeedRadps;
+        row.planar_accel_mps2 = planarAccelMps2;
+        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
+        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
+        row.left_drive_cmd = driveTelemetry.leftDriveCommand;
+        row.right_drive_cmd = driveTelemetry.rightDriveCommand;
+        row.left_encoder_count = driveTelemetry.leftEncoderCount;
+        row.right_encoder_count = driveTelemetry.rightEncoderCount;
+        row.left_distance_m = driveTelemetry.leftDistanceM;
+        row.right_distance_m = driveTelemetry.rightDistanceM;
+        row.left_velocity_mps = driveTelemetry.leftVelocityMps;
+        row.right_velocity_mps = driveTelemetry.rightVelocityMps;
+        row.imu_fr_status = sensorSnapshot.imuFrontRight.status;
+        row.imu_fr_gyro_x = sensorSnapshot.imuFrontRight.gyroX;
+        row.imu_fr_gyro_y = sensorSnapshot.imuFrontRight.gyroY;
+        row.imu_fr_gyro_z = sensorSnapshot.imuFrontRight.gyroZ;
+        row.imu_fr_accel_x = sensorSnapshot.imuFrontRight.accelX;
+        row.imu_fr_accel_y = sensorSnapshot.imuFrontRight.accelY;
+        row.imu_fr_accel_z = sensorSnapshot.imuFrontRight.accelZ;
+        row.imu_fr_temp = sensorSnapshot.imuFrontRight.temp;
+        row.imu_fr_int = sensorSnapshot.imuFrontRight.interruptHigh ? 1U : 0U;
+        row.imu_bl_status = sensorSnapshot.imuBackLeft.status;
+        row.imu_bl_gyro_x = sensorSnapshot.imuBackLeft.gyroX;
+        row.imu_bl_gyro_y = sensorSnapshot.imuBackLeft.gyroY;
+        row.imu_bl_gyro_z = sensorSnapshot.imuBackLeft.gyroZ;
+        row.imu_bl_accel_x = sensorSnapshot.imuBackLeft.accelX;
+        row.imu_bl_accel_y = sensorSnapshot.imuBackLeft.accelY;
+        row.imu_bl_accel_z = sensorSnapshot.imuBackLeft.accelZ;
+        row.imu_bl_temp = sensorSnapshot.imuBackLeft.temp;
+        row.imu_bl_int = sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+        row.ws_fl_ambient = sensorSnapshot.frontLeft.ambientLight;
+        row.ws_fl_lit = sensorSnapshot.frontLeft.litLight;
+        row.ws_fl_delta = sensorSnapshot.frontLeft.differentialLight;
+        row.ws_fl_raw_distance_m = sensorSnapshot.frontLeft.rawDistanceM;
+        row.ws_fl_distance_m = sensorSnapshot.frontLeft.distanceM;
+        row.ws_fr_ambient = sensorSnapshot.frontRight.ambientLight;
+        row.ws_fr_lit = sensorSnapshot.frontRight.litLight;
+        row.ws_fr_delta = sensorSnapshot.frontRight.differentialLight;
+        row.ws_fr_raw_distance_m = sensorSnapshot.frontRight.rawDistanceM;
+        row.ws_fr_distance_m = sensorSnapshot.frontRight.distanceM;
+        row.ws_sl_ambient = sensorSnapshot.sideLeft.ambientLight;
+        row.ws_sl_lit = sensorSnapshot.sideLeft.litLight;
+        row.ws_sl_delta = sensorSnapshot.sideLeft.differentialLight;
+        row.ws_sl_raw_distance_m = sensorSnapshot.sideLeft.rawDistanceM;
+        row.ws_sl_distance_m = sensorSnapshot.sideLeft.distanceM;
+        row.ws_sr_ambient = sensorSnapshot.sideRight.ambientLight;
+        row.ws_sr_lit = sensorSnapshot.sideRight.litLight;
+        row.ws_sr_delta = sensorSnapshot.sideRight.differentialLight;
+        row.ws_sr_raw_distance_m = sensorSnapshot.sideRight.rawDistanceM;
+        row.ws_sr_distance_m = sensorSnapshot.sideRight.distanceM;
+        row.front_wall = sensorSnapshot.frontWall ? 1U : 0U;
+        row.left_wall = sensorSnapshot.leftWall ? 1U : 0U;
+        row.right_wall = sensorSnapshot.rightWall ? 1U : 0U;
+        row.corridor_error_m = sensorSnapshot.corridorErrorM;
+        row.front_skew_m = sensorSnapshot.frontSkewM;
+        row.gyro_bias_radps = sensorSnapshot.gyroBiasRadps;
+        row.gyro_raw_radps = sensorSnapshot.gyroRawRadps;
+        row.gyro_radps = sensorSnapshot.gyroRadps;
+    }
 
-        if (!MazeMap::App::Internal::Runtime::AppendBinaryRecord(_sampleLog, record))
+    inline bool WriteAuxRoutineConfigEvents(
+        OptionalRuntimeEventLog& eventLog,
+        AuxMeasurementConfig::Routine routine,
+        const MazeMap::VehiclePhysicalModel& vehicleModel)
+    {
+        char message[256] = {};
+        auto writeConfig = [&eventLog, &message](const char* format, auto... args) -> bool
+        {
+            const int length = snprintf(message, sizeof(message), format, args...);
+            if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+            {
+                return false;
+            }
+            return eventLog.WriteEvent(micros(), "config", message);
+        };
+
+        if (!writeConfig(
+                "aux_common:startup_ms=%lu;flush_ms=%lu;pin_a=%lu;pin_b=%lu;track_width_m=%.6f",
+                static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs),
+                static_cast<unsigned long>(AuxMeasurementConfig::kLogFlushPeriodMs),
+                static_cast<unsigned long>(AuxMeasurementConfig::kModeSelectPinA),
+                static_cast<unsigned long>(AuxMeasurementConfig::kModeSelectPinB),
+                Config::kTrackWidthM))
         {
             return false;
         }
 
-        ++_sampleCount;
-        return true;
-    }
+        if (!writeConfig(
+                "aux_track:tight_r_m=%.6f;tight_w_m=%.6f;wide_r_m=%.6f;wide_w_m=%.6f",
+                vehicleModel.arcTrackWidthInterpolation.tightRadiusM,
+                vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM,
+                vehicleModel.arcTrackWidthInterpolation.wideRadiusM,
+                vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM))
+        {
+            return false;
+        }
 
-    void Service()
-    {
-        (void)_sampleLog.Service(1U);
-    }
+        if (routine == AuxMeasurementConfig::Routine::FanStaticSurvey)
+        {
+            return writeConfig(
+                "fan_static:baseline_ms=%lu;fan_ms=%lu;recovery_ms=%lu;fan_duty=%.6f;fan_ramp_ms=%lu",
+                static_cast<unsigned long>(AuxMeasurementConfig::kBaselineHoldMs),
+                static_cast<unsigned long>(AuxMeasurementConfig::kFanHoldMs),
+                static_cast<unsigned long>(AuxMeasurementConfig::kRecoveryHoldMs),
+                Config::kRacingFanDutyCycle,
+                static_cast<unsigned long>(Config::kRacingFanRampMs));
+        }
 
-    void Flush()
-    {
-        _sampleLog.Flush();
-        _eventLog.Flush();
+        return
+            writeConfig(
+                "turning_sweep:dir=%s;radius_m=%.6f;start_v_mps=%.6f;accel_mps2=%.6f;max_v_mps=%.6f",
+                AuxMeasurementConfig::kTurningTractionSweepClockwise ? "cw" : "ccw",
+                AuxMeasurementConfig::kTurningTractionSweepRadiusM,
+                AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps,
+                AuxMeasurementConfig::kTurningTractionSweepAccelMps2,
+                AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps) &&
+            writeConfig(
+                "turning_limits:fan_settle_ms=%lu;launch_ms=%lu;max_w_radps=%.6f;plateau_v_mps=%.6f;plateau_dv_mps=%.6f",
+                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSweepFanSettleMs),
+                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionLaunchMs),
+                AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps,
+                AuxMeasurementConfig::kTurningTractionPlateauMinSpeedMps,
+                AuxMeasurementConfig::kTurningTractionPlateauDeltaMps) &&
+            writeConfig(
+                "turning_slip:plateau_ms=%lu;ceiling_cmd=%.6f;curv_ramp_m_invps=%.6f;slip_v_mps=%.6f;slip_lat_mps2=%.6f",
+                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionPlateauWindowMs),
+                AuxMeasurementConfig::kTurningTractionActuatorCeilingCommand,
+                AuxMeasurementConfig::kTurningTractionCurvatureRampMInvPerSec,
+                AuxMeasurementConfig::kTurningTractionSlipMinSpeedMps,
+                AuxMeasurementConfig::kTurningTractionSlipMinLatAccelMps2) &&
+            writeConfig(
+                "turning_slip2:yaw_floor=%.6f;planar_floor=%.6f;confirm_ms=%lu;timeout_ms=%lu;fan_duty=%.6f",
+                AuxMeasurementConfig::kTurningTractionSlipYawCoherenceFloor,
+                AuxMeasurementConfig::kTurningTractionSlipPlanarCoherenceFloor,
+                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSlipConfirmMs),
+                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSweepTimeoutMs),
+                Config::kRacingFanDutyCycle);
     }
-
-    void Close()
-    {
-        _sampleLog.Close();
-        _eventLog.Close();
-    }
-
-    const char* GetFileName() const
-    {
-        return _fileName;
-    }
-
-private:
-    static constexpr uint32_t kAuxFieldCount = 68U;
-    static constexpr const char* kAuxSchema =
-        "u32_sample,u32_phase_id,u32_t_us,u32_dt_us,u32_stationary,u32_fan_enabled,"
-        "f32_pose_x_m,f32_pose_y_m,f32_yaw_rad,f32_linear_speed_mps,f32_angular_speed_radps,f32_planar_accel_mps2,"
-        "f32_cmd_linear_mps,f32_cmd_angular_radps,f32_left_drive_cmd,f32_right_drive_cmd,"
-        "i32_left_encoder_count,i32_right_encoder_count,f32_left_distance_m,f32_right_distance_m,f32_left_velocity_mps,f32_right_velocity_mps,"
-        "u32_imu_fr_status,i32_imu_fr_gyro_x,i32_imu_fr_gyro_y,i32_imu_fr_gyro_z,i32_imu_fr_accel_x,i32_imu_fr_accel_y,i32_imu_fr_accel_z,i32_imu_fr_temp,u32_imu_fr_int,"
-        "u32_imu_bl_status,i32_imu_bl_gyro_x,i32_imu_bl_gyro_y,i32_imu_bl_gyro_z,i32_imu_bl_accel_x,i32_imu_bl_accel_y,i32_imu_bl_accel_z,i32_imu_bl_temp,u32_imu_bl_int,"
-        "f32_ws_fl_ambient,f32_ws_fl_lit,f32_ws_fl_delta,f32_ws_fl_raw_distance_m,f32_ws_fl_distance_m,f32_ws_fr_ambient,f32_ws_fr_lit,f32_ws_fr_delta,f32_ws_fr_raw_distance_m,f32_ws_fr_distance_m,"
-        "f32_ws_sl_ambient,f32_ws_sl_lit,f32_ws_sl_delta,f32_ws_sl_raw_distance_m,f32_ws_sl_distance_m,f32_ws_sr_ambient,f32_ws_sr_lit,f32_ws_sr_delta,f32_ws_sr_raw_distance_m,f32_ws_sr_distance_m,"
-        "u32_front_wall,u32_left_wall,u32_right_wall,f32_corridor_error_m,f32_front_skew_m,f32_gyro_bias_radps,f32_gyro_raw_radps,f32_gyro_radps";
-    MazeMap::App::Internal::Runtime::RuntimeBinaryLogFile _sampleLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _eventLog;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<8192U> _metadata;
-    MazeMap::App::Internal::Runtime::RuntimeTextBlockBuilder<512U> _notes;
-    char _fileName[64];
-    unsigned long _phaseId;
-    unsigned long _sampleCount;
-
-    bool WriteMetadata(const char* key, const char* value)
-    {
-        return _metadata.AppendKeyValue(key, value);
-    }
-
-    bool WriteMetadataUL(const char* key, unsigned long value)
-    {
-        return _metadata.AppendUnsigned(key, value);
-    }
-
-    bool WriteMetadataFloat(const char* key, float value, uint8_t precision)
-    {
-        return _metadata.AppendFloat(key, value, precision);
-    }
-};
+}
 
 
 

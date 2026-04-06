@@ -91,6 +91,17 @@ namespace MazeMap {
             static bool g_teensyStorageClaimed = false;
 #endif
 
+            bool syncStorageFile(StorageFileHandle& file) noexcept {
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+                return file.sync();
+#elif defined(ARDUINO)
+                file.flush();
+                return static_cast<bool>(file);
+#else
+                return file.flush();
+#endif
+            }
+
         } // namespace
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO || !defined(ARDUINO)
@@ -291,7 +302,7 @@ namespace MazeMap {
                 return fail("Failed to write header line.");
             }
 
-            if (!m_sidecarFile.flush()) {
+            if (!syncStorageFile(m_sidecarFile)) {
                 return fail("Failed to flush sidecar header.");
             }
 
@@ -380,10 +391,10 @@ namespace MazeMap {
                 return false;
             }
 
-            if (m_sidecarFile && !m_sidecarFile.flush()) {
+            if (m_sidecarFile && !syncStorageFile(m_sidecarFile)) {
                 return fail("Failed to flush sidecar file.");
             }
-            if (m_primaryFile && !m_primaryFile.flush()) {
+            if (m_primaryFile && !syncStorageFile(m_primaryFile)) {
                 return fail("Failed to flush primary file.");
             }
             return true;

@@ -23,6 +23,11 @@ namespace MazeMap
 				bool OptionalRuntimeEventLog::BeginSibling(const char* dataFileName)
 				{
 					Close();
+					if (!EnsureRuntimeControlLogOpen())
+					{
+						return false;
+					}
+
 					const char* component = FileNameComponent(dataFileName);
 					if (component == nullptr || component[0] == '\0')
 					{
@@ -100,6 +105,7 @@ namespace MazeMap
 
 				void OptionalRuntimeEventLog::Flush()
 				{
+					FlushRuntimeControlLog();
 				}
 
 				void OptionalRuntimeEventLog::Close()

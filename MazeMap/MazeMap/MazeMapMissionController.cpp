@@ -16,6 +16,8 @@ public:
         , _wallBeliefMap(runtime.WallBeliefMap())
         , _sensors(runtime.MissionSensors())
         , _telemetrySensors(runtime.TelemetrySensors())
+        , _telemetryLog()
+        , _telemetryEventLog()
         , _drive(runtime.Drive())
         , _currentCell(0, 0)
         , _currentDirection(MazeMap::Up)
@@ -31,8 +33,11 @@ public:
         , _frontWallCharacterizationAvailable(false)
         , _lastWallTouchStandoffEstimateM(0.0f)
         , _hasWallTouchStandoffEstimate(false)
+        , _telemetryPhaseId(0UL)
+        , _telemetrySampleCount(0UL)
         , _lastControlMicros(0UL)
     {
+        _telemetryLogFileName[0] = '\0';
     }
 
     MissionController(const MissionController&) = delete;
@@ -137,7 +142,7 @@ public:
         {
             return Fail("Telemetry sensor init failed");
         }
-        if (!_telemetryLogger.Begin(_telemetrySensors, "maneuver_test.mmlog", Config::kControlPeriodUs, "maneuver_test"))
+        if (!BeginTelemetryLog("maneuver_test.mmlog", "maneuver_test"))
         {
             AppendStartupTrace("maneuver_test:telemetry_logger_open_failed");
             Serial.println("Maneuver test telemetry log unavailable; continuing without telemetry file");
@@ -147,7 +152,7 @@ public:
 
         _telemetryLoggingEnabled = true;
         AppendStartupTrace("maneuver_test:telemetry_logger_opened");
-        if (!_telemetryLogger.WriteEvent("source", "test.txt"))
+        if (!WriteTelemetryEvent("source", "test.txt"))
         {
             AppendStartupTrace("maneuver_test:source_metadata_write_failed");
             Serial.println("Maneuver test source metadata write failed; disabling telemetry file logging");
@@ -230,7 +235,7 @@ public:
         {
             return Fail("Unable to choose corridor repeatability log file");
         }
-        if (!_telemetryLogger.Begin(_telemetrySensors, fileName, Config::kControlPeriodUs, "corridor_repeatability"))
+        if (!BeginTelemetryLog(fileName, "corridor_repeatability"))
         {
             return Fail("Unable to open corridor repeatability log");
         }
@@ -291,7 +296,7 @@ public:
         {
             return Fail("Unable to choose position accuracy audit log file");
         }
-        if (!_telemetryLogger.Begin(_telemetrySensors, fileName, Config::kControlPeriodUs, "position_accuracy_audit"))
+        if (!BeginTelemetryLog(fileName, "position_accuracy_audit"))
         {
             return Fail("Unable to open position accuracy audit log");
         }
@@ -584,8 +589,8 @@ private:
     MazeMap::WallBeliefMap& _wallBeliefMap;
     SensorSuite& _sensors;
     DiagnosticSensorSuite& _telemetrySensors;
-    DiagnosticLogger _telemetryLogger;
-    MazeMap::CoreFileExport _missionTextLogFile;
+    MazeMap::mmlog::MmLogLogger _telemetryLog;
+    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _telemetryEventLog;
     DriveBase& _drive;
     MazeMap::CellCoordinates _currentCell;
     MazeMap::Direction _currentDirection;
@@ -601,7 +606,96 @@ private:
     bool _frontWallCharacterizationAvailable;
     float _lastWallTouchStandoffEstimateM;
     bool _hasWallTouchStandoffEstimate;
+    char _telemetryLogFileName[64];
+    unsigned long _telemetryPhaseId;
+    unsigned long _telemetrySampleCount;
     unsigned long _lastControlMicros;
+
+    bool BeginTelemetryLog(const char* fileName, const char* modeName)
+    {
+        const char* resolvedFileName = (fileName != nullptr && fileName[0] != '\0') ? fileName : "telemetry.mmlog";
+        const char* resolvedModeName = (modeName != nullptr && modeName[0] != '\0') ? modeName : "telemetry";
+        _telemetryPhaseId = 0UL;
+        _telemetrySampleCount = 0UL;
+        _telemetryEventLog.Close();
+        _telemetryLogFileName[0] = '\0';
+        (void)_telemetryLog.close();
+        snprintf(_telemetryLogFileName, sizeof(_telemetryLogFileName), "%s", resolvedFileName);
+
+        if (!_telemetryEventLog.BeginSibling(_telemetryLogFileName))
+        {
+            return false;
+        }
+        if (!_telemetryLog.open(_telemetryLogFileName))
+        {
+            _telemetryEventLog.Close();
+            return false;
+        }
+
+        if (!_telemetryLog.writeMetadata("file", _telemetryLogFileName)) return false;
+        if (_telemetryEventLog.IsEnabled() && !_telemetryLog.writeMetadata("control_log_file", _telemetryEventLog.GetFileName())) return false;
+        if (!_telemetryLog.writeMetadata("mode", resolvedModeName)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(_telemetryLog, "control_period_us", Config::kControlPeriodUs)) return false;
+        {
+            const unsigned long imuSampleRateHz = MazeMap::GetUiImuSampleRateHzForControlPeriodUs(Config::kControlPeriodUs);
+            if (imuSampleRateHz > 0UL && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(_telemetryLog, "imu_sample_rate_hz", imuSampleRateHz)) return false;
+        }
+        {
+            const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
+                Config::kControlPeriodUs,
+                Config::kMissionRuntimeAccelFilterFreq);
+            if (imuAccelLpf2CutoffHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3)) return false;
+        }
+        {
+            const float imuGyroLpf1ReferenceHz = MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(Config::kControlPeriodUs);
+            if (imuGyroLpf1ReferenceHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
+        }
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "boundary_half_span_m", DiagnosticConfig::kBoundaryHalfSpanM, 3)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_gyro_mdps_per_lsb", _telemetrySensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_accel_mg_per_lsb", _telemetrySensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "mission_gyro_bias_estimate_radps", _telemetrySensors.GetGyroBiasRadps(), 6)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogAccelBiasMetadata(_telemetryLog, _telemetrySensors)) return false;
+        if (!_telemetryLog.writeMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
+        if (!_telemetryLog.writeMetadata("endianness", "little")) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteDiagnosticTuningEvents(_telemetryEventLog)) return false;
+
+        DiagnosticLogRow row{};
+        if (!_telemetryLog.begin(row))
+        {
+            _telemetryEventLog.Close();
+            return false;
+        }
+
+        if (_telemetryEventLog.IsEnabled())
+        {
+            (void)_telemetryEventLog.WriteMetadata("file", _telemetryEventLog.GetFileName());
+            (void)_telemetryEventLog.WriteMetadata("data_file", _telemetryLogFileName);
+            (void)_telemetryEventLog.WriteMetadata("mode", resolvedModeName);
+        }
+        return MazeMap::App::Internal::Runtime::WriteDiagnosticSummaryInstructions(_telemetryEventLog);
+    }
+
+    bool WriteTelemetryEvent(const char* type, const char* message)
+    {
+        return !_telemetryLoggingEnabled || _telemetryEventLog.WriteEvent(micros(), type, message);
+    }
+
+    void ServiceTelemetryLog()
+    {
+        (void)_telemetryLog.service();
+    }
+
+    void FlushTelemetryLog()
+    {
+        (void)_telemetryLog.flush();
+        _telemetryEventLog.Flush();
+    }
+
+    void CloseTelemetryLog()
+    {
+        (void)_telemetryLog.close();
+        _telemetryEventLog.Close();
+    }
 
     static void SetRacingFanEnabled(bool enabled)
     {
@@ -762,7 +856,7 @@ private:
         _goalPauseComplete = false;
         _missionComplete = false;
         _faulted = false;
-        _missionTextLogFile.Close();
+        MazeMap::App::Internal::Runtime::FlushRuntimeControlLog();
         _hasWallTouchStandoffEstimate = false;
     }
 
@@ -774,9 +868,9 @@ private:
         }
 
         _drive.Brake();
-        _telemetryLogger.Flush();
+        FlushTelemetryLog();
         _telemetryLoggingEnabled = false;
-        _telemetryLogger.Close();
+        CloseTelemetryLog();
     }
 
     bool OpenMissionTextLog()
@@ -786,20 +880,20 @@ private:
             return true;
         }
 
-        return _missionTextLogFile.Open("logging.txt");
+        return MazeMap::App::Internal::Runtime::EnsureRuntimeControlLogOpen();
     }
 
     void FlushMissionTextLog()
     {
         if (_missionTextLoggingEnabled)
         {
-            _missionTextLogFile.Flush();
+            MazeMap::App::Internal::Runtime::FlushRuntimeControlLog();
         }
     }
 
     void CloseMissionTextLog()
     {
-        _missionTextLogFile.Close();
+        MazeMap::App::Internal::Runtime::FlushRuntimeControlLog();
     }
 
     bool WriteMissionTextLineIfEnabled(const char* message)
@@ -809,18 +903,12 @@ private:
             return true;
         }
 
-        if (message == nullptr || !_missionTextLogFile.IsOpen())
+        if (message == nullptr)
         {
             return false;
         }
 
-        if (!_missionTextLogFile.Write(message) || !_missionTextLogFile.WriteChar('\n'))
-        {
-            return false;
-        }
-
-        _missionTextLogFile.Flush();
-        return true;
+        return MazeMap::App::Internal::Runtime::AppendRuntimeControlLogLine(message);
     }
 
     void DisableMissionTextLogging(const char* traceLabel)
@@ -1161,7 +1249,7 @@ private:
 
         AppendStartupTrace(line);
         (void)WriteMissionTraceLineBestEffort(line, "mission_text_logging:wall_observation_write_failed");
-        if (_telemetryLoggingEnabled && !_telemetryLogger.WriteEvent("wall_observation", line))
+        if (_telemetryLoggingEnabled && !WriteTelemetryEvent("wall_observation", line))
         {
             return Fail("Unable to write wall observation log");
         }
@@ -1406,7 +1494,7 @@ private:
     bool LogCorridorRepeatabilityMetadata()
     {
         char line[160] = {};
-        if (!_telemetryLogger.WriteEvent(
+        if (!WriteTelemetryEvent(
             "summary",
             "Place the robot in a 5-cell enclosed row like a mission start. This routine runs startup wall calibration, drives to the far end and back at several speeds, and logs closure error at the start cell."))
         {
@@ -1414,7 +1502,7 @@ private:
         }
 
         snprintf(line, sizeof(line), "row_cell_count,%u", static_cast<unsigned>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount));
-        if (!_telemetryLogger.WriteEvent("corridor_repeatability", line))
+        if (!WriteTelemetryEvent("corridor_repeatability", line))
         {
             return Fail("Unable to write corridor repeatability metadata");
         }
@@ -1424,7 +1512,7 @@ private:
             (Config::kCellSizeM * static_cast<float>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount - 1U)) :
             0.0f;
         snprintf(line, sizeof(line), "out_distance_m,%.6f", outDistanceM);
-        if (!_telemetryLogger.WriteEvent("corridor_repeatability", line))
+        if (!WriteTelemetryEvent("corridor_repeatability", line))
         {
             return Fail("Unable to write corridor repeatability metadata");
         }
@@ -1437,7 +1525,7 @@ private:
             AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2,
             Config::kSearchTurnMaxOmegaRadps,
             Config::kSearchTurnAccelRadps2);
-        if (!_telemetryLogger.WriteEvent("corridor_repeatability", line))
+        if (!WriteTelemetryEvent("corridor_repeatability", line))
         {
             return Fail("Unable to write corridor repeatability metadata");
         }
@@ -1450,7 +1538,7 @@ private:
                 "speed_%u_mps,%.6f",
                 static_cast<unsigned>(speedIndex),
                 AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[speedIndex]);
-            if (!_telemetryLogger.WriteEvent("corridor_repeatability_speed", line))
+            if (!WriteTelemetryEvent("corridor_repeatability_speed", line))
             {
                 return Fail("Unable to write corridor repeatability speed metadata");
             }
@@ -1468,48 +1556,48 @@ private:
             "Build a one-cell-wide fixture: normal mission start, a %u-cell north corridor including the start and corner cells, and a %u-cell east extension beyond that corner with solid side walls. All following phases reuse this same fixed geometry.",
             static_cast<unsigned>(geometry.northCorridorCellCount),
             static_cast<unsigned>(geometry.eastExtensionCellCount));
-        if (!_telemetryLogger.WriteEvent("summary", line))
+        if (!WriteTelemetryEvent("summary", line))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
-        if (!_telemetryLogger.WriteEvent(
+        if (!WriteTelemetryEvent(
                 "summary",
                 "position_straight_result isolates wheel-diameter, straight feedforward, and stop-distance error through north_touch_correction_m, enc_out_err_m, closure_m, and yaw_err_deg."))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
-        if (!_telemetryLogger.WriteEvent(
+        if (!WriteTelemetryEvent(
                 "summary",
                 "position_in_place_turn_result isolates the shared in-place turn profile through yaw_err_deg, effective_track_width_m, and wall_touch_correction_m."))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
-        if (!_telemetryLogger.WriteEvent(
+        if (!WriteTelemetryEvent(
                 "summary",
                 "position_smooth_turn_result compares S90SS and S90LS against nominal_radius_m, measured_radius_m, effective_track_width_m, corridor_err_m, and east_touch_correction_m to expose radius-dependent feedforward error."))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
-        if (!_telemetryLogger.WriteEvent(
+        if (!WriteTelemetryEvent(
                 "summary",
                 "Phase 1 runs S8, centers in the north corner, turns in place to face down, and runs S8 back to start."))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
-        if (!_telemetryLogger.WriteEvent(
+        if (!WriteTelemetryEvent(
                 "summary",
                 "Phase 2 reseats at start, runs S7 + S90SS + S7, centers at the east end, turns to face left, and returns on the reversed maneuver path."))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
-        if (!_telemetryLogger.WriteEvent(
+        if (!WriteTelemetryEvent(
                 "summary",
                 "Phase 3 reseats at start, runs S6 + S90LS + S6, recenters at the east end, and returns on the reversed maneuver path."))
         {
             return Fail("Unable to write position accuracy audit summary");
         }
         if (AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled &&
-            !_telemetryLogger.WriteEvent(
+            !WriteTelemetryEvent(
                 "summary",
                 "Smooth-turn phases run with the mission fan enabled; the existing 2 s ramp to 80% completes before motion begins so high-speed S90 data reflects the intended downforce state."))
         {
@@ -1523,7 +1611,7 @@ private:
             static_cast<unsigned>(geometry.northCorridorCellCount),
             static_cast<unsigned>(geometry.eastExtensionCellCount),
             static_cast<unsigned>(geometry.eastTotalCellCount));
-        if (!_telemetryLogger.WriteEvent("position_audit", line))
+        if (!WriteTelemetryEvent("position_audit", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
         }
@@ -1535,7 +1623,7 @@ private:
             AuxMeasurementConfig::kPositionAuditAccelMps2,
             AuxMeasurementConfig::kPositionAuditDecelMps2,
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditStartSettleMs));
-        if (!_telemetryLogger.WriteEvent("position_audit", line))
+        if (!WriteTelemetryEvent("position_audit", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
         }
@@ -1547,7 +1635,7 @@ private:
             AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled ? 1U : 0U,
             Config::kRacingFanDutyCycle,
             static_cast<unsigned>(Config::kRacingFanRampMs));
-        if (!_telemetryLogger.WriteEvent("position_audit", line))
+        if (!WriteTelemetryEvent("position_audit", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
         }
@@ -1558,7 +1646,7 @@ private:
             "phase=1;forward_half_steps=%u;turn=IP180;return_half_steps=%u",
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps),
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps));
-        if (!_telemetryLogger.WriteEvent("position_audit_phase", line))
+        if (!WriteTelemetryEvent("position_audit_phase", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
         }
@@ -1569,7 +1657,7 @@ private:
             "phase=2;forward=%u,S90SS,%u;return=reverse(forward)",
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PreTurnHalfSteps),
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PostTurnHalfSteps));
-        if (!_telemetryLogger.WriteEvent("position_audit_phase", line))
+        if (!WriteTelemetryEvent("position_audit_phase", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
         }
@@ -1580,7 +1668,7 @@ private:
             "phase=3;forward=%u,S90LS,%u;return=reverse(forward)",
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PreTurnHalfSteps),
             static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PostTurnHalfSteps));
-        if (!_telemetryLogger.WriteEvent("position_audit_phase", line))
+        if (!WriteTelemetryEvent("position_audit_phase", line))
         {
             return Fail("Unable to write position accuracy audit metadata");
         }
@@ -1593,7 +1681,7 @@ private:
                 "speed_%u_mps,%.6f",
                 static_cast<unsigned>(speedIndex),
                 AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[speedIndex]);
-            if (!_telemetryLogger.WriteEvent("position_audit_straight_speed", line))
+            if (!WriteTelemetryEvent("position_audit_straight_speed", line))
             {
                 return Fail("Unable to write position accuracy audit speed metadata");
             }
@@ -1607,7 +1695,7 @@ private:
                 "speed_%u_mps,%.6f",
                 static_cast<unsigned>(speedIndex),
                 AuxMeasurementConfig::kPositionAuditCornerSpeedsMps[speedIndex]);
-            if (!_telemetryLogger.WriteEvent("position_audit_corner_speed", line))
+            if (!WriteTelemetryEvent("position_audit_corner_speed", line))
             {
                 return Fail("Unable to write position accuracy audit speed metadata");
             }
@@ -1625,7 +1713,7 @@ private:
                 codeName,
                 MazeMap::ManeuverSet::GetSet()[code].GetNominalTurnRadiusInCells() * Config::kCellSizeM,
                 ManeuverDistanceMeters(code));
-            if (!_telemetryLogger.WriteEvent("position_audit_turn_code", line))
+            if (!WriteTelemetryEvent("position_audit_turn_code", line))
             {
                 return Fail("Unable to write position accuracy audit turn metadata");
             }
@@ -1705,7 +1793,7 @@ private:
         {
             return Fail("Corridor repeatability result event overflowed");
         }
-        if (_telemetryLogger.WriteEvent("corridor_repeatability_result", message))
+        if (WriteTelemetryEvent("corridor_repeatability_result", message))
         {
             return true;
         }
@@ -1747,7 +1835,7 @@ private:
         {
             return Fail("Position straight result event overflowed");
         }
-        if (_telemetryLogger.WriteEvent("position_straight_result", message))
+        if (WriteTelemetryEvent("position_straight_result", message))
         {
             return true;
         }
@@ -1799,7 +1887,7 @@ private:
         {
             return Fail("Position in-place turn result event overflowed");
         }
-        if (_telemetryLogger.WriteEvent("position_in_place_turn_result", message))
+        if (WriteTelemetryEvent("position_in_place_turn_result", message))
         {
             return true;
         }
@@ -1871,7 +1959,7 @@ private:
         {
             return Fail("Position smooth turn result event overflowed");
         }
-        if (_telemetryLogger.WriteEvent("position_smooth_turn_result", message))
+        if (WriteTelemetryEvent("position_smooth_turn_result", message))
         {
             return true;
         }
@@ -3952,7 +4040,8 @@ private:
         {
             return true;
         }
-        if (_telemetryLogger.BeginPhase(name))
+        ++_telemetryPhaseId;
+        if (_telemetryEventLog.WritePhase(_telemetryPhaseId, micros(), name))
         {
             return true;
         }
@@ -3972,7 +4061,7 @@ private:
             sizeof(line),
             "calibration_average_samples,%u",
             static_cast<unsigned>(Config::kWallCalibrationAverageSampleCount));
-        if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+        if (!WriteTelemetryEvent("wall_calibration", line))
         {
             return Fail("Unable to write wall calibration metadata");
         }
@@ -3981,7 +4070,7 @@ private:
             sizeof(line),
             "detection_window_cycles,%u",
             static_cast<unsigned>(Config::kWallDetectionAverageWindowCycles));
-        if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+        if (!WriteTelemetryEvent("wall_calibration", line))
         {
             return Fail("Unable to write wall calibration metadata");
         }
@@ -3990,7 +4079,7 @@ private:
             sizeof(line),
             "front_sweep_turn_count,%u",
             static_cast<unsigned>(Config::kStartupWallCalibrationFrontSpinTurnCount));
-        if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+        if (!WriteTelemetryEvent("wall_calibration", line))
         {
             return Fail("Unable to write wall calibration metadata");
         }
@@ -3999,7 +4088,7 @@ private:
             sizeof(line),
             "front_sweep_capture_step_deg,%.1f",
             RAD_TO_DEG_F * Config::kStartupWallCalibrationFrontSpinCaptureStepRad);
-        if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+        if (!WriteTelemetryEvent("wall_calibration", line))
         {
             return Fail("Unable to write wall calibration metadata");
         }
@@ -4010,7 +4099,7 @@ private:
             RAD_TO_DEG_F * Config::kStartupWallCalibrationFrontNorthOpenHalfWidthRad,
             RAD_TO_DEG_F * Config::kStartupWallCalibrationFrontWallMinEastOfNorthRad,
             RAD_TO_DEG_F * Config::kStartupWallCalibrationFrontWallMaxEastOfNorthRad);
-        if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+        if (!WriteTelemetryEvent("wall_calibration", line))
         {
             return Fail("Unable to write wall calibration metadata");
         }
@@ -4019,7 +4108,7 @@ private:
             sizeof(line),
             "expected_side_distance_m,%.6f",
             gWallDistanceCalibration.GetExpectedSideWallDistanceM());
-        if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+        if (!WriteTelemetryEvent("wall_calibration", line))
         {
             return Fail("Unable to write wall calibration metadata");
         }
@@ -4028,7 +4117,7 @@ private:
             sizeof(line),
             "configured_touch_standoff_m,%.6f",
             Config::kWallTouchContactStandoffM);
-        if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+        if (!WriteTelemetryEvent("wall_calibration", line))
         {
             return Fail("Unable to write wall calibration metadata");
         }
@@ -4039,7 +4128,7 @@ private:
                 sizeof(line),
                 "estimated_touch_standoff_m,%.6f",
                 _lastWallTouchStandoffEstimateM);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4059,7 +4148,7 @@ private:
                 "derived_side_wall_thresholds_m,%.6f,%.6f",
                 sideWallOnThresholdM,
                 sideWallOffThresholdM);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4081,7 +4170,7 @@ private:
                 "side_wall_reference_diff,%.6f,%.6f",
                 sideLeftReferenceDifferentialLight,
                 sideRightReferenceDifferentialLight);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4109,7 +4198,7 @@ private:
                 sideLeftReferenceDifferentialLightHigh,
                 sideRightReferenceDifferentialLightLow,
                 sideRightReferenceDifferentialLightHigh);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4131,7 +4220,7 @@ private:
                 "side_wall_reference_distance_m,%.6f,%.6f",
                 sideLeftReferenceDistanceM,
                 sideRightReferenceDistanceM);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4153,7 +4242,7 @@ private:
                 "side_scene_baseline_diff,%.6f,%.6f",
                 sideLeftBaselineDifferentialLight,
                 sideRightBaselineDifferentialLight);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4181,7 +4270,7 @@ private:
                 sideLeftBaselineDifferentialLightHigh,
                 sideRightBaselineDifferentialLightLow,
                 sideRightBaselineDifferentialLightHigh);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4217,7 +4306,7 @@ private:
                 sideLeftOffMeasuredThreshold,
                 sideRightOnMeasuredThreshold,
                 sideRightOffMeasuredThreshold);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4237,7 +4326,7 @@ private:
                 "derived_front_wall_thresholds_m,%.6f,%.6f",
                 frontWallOnThresholdM,
                 frontWallOffThresholdM);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4281,7 +4370,7 @@ private:
                 "derived_front_wall_diff_reference_ambient,%.6f,%.6f",
                 frontLeftReferenceAmbientLight,
                 frontRightReferenceAmbientLight);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4296,7 +4385,7 @@ private:
                 frontLeftOffMeasuredThreshold,
                 frontRightOnMeasuredThreshold,
                 frontRightOffMeasuredThreshold);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4315,7 +4404,7 @@ private:
                 "front_scene_baseline_diff,%.6f,%.6f",
                 frontLeftSignalBaseline,
                 frontRightSignalBaseline);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4343,7 +4432,7 @@ private:
                 frontLeftBaselineDifferentialLightHigh,
                 frontRightBaselineDifferentialLightLow,
                 frontRightBaselineDifferentialLightHigh);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4371,7 +4460,7 @@ private:
                 frontLeftWeakestDifferentialLightHigh,
                 frontRightWeakestDifferentialLightLow,
                 frontRightWeakestDifferentialLightHigh);
-            if (!_telemetryLogger.WriteEvent("wall_calibration", line))
+            if (!WriteTelemetryEvent("wall_calibration", line))
             {
                 return Fail("Unable to write wall calibration metadata");
             }
@@ -4388,7 +4477,7 @@ private:
                 WallSensorIdName(sensorId),
                 WallSensorCalibrationMeasurementName(sensorId),
                 static_cast<unsigned>(curve.GetCount()));
-            if (!_telemetryLogger.WriteEvent("wall_calibration_curve", line))
+            if (!WriteTelemetryEvent("wall_calibration_curve", line))
             {
                 return Fail("Unable to write wall calibration curve metadata");
             }
@@ -4405,7 +4494,7 @@ private:
                     static_cast<unsigned>(pointIndex),
                     point.measuredValue,
                     point.actualDistanceM);
-                if (!_telemetryLogger.WriteEvent("wall_calibration_point", line))
+                if (!WriteTelemetryEvent("wall_calibration_point", line))
                 {
                     return Fail("Unable to write wall calibration point metadata");
                 }
@@ -4431,11 +4520,24 @@ private:
             },
             [this]() noexcept
             {
-                _telemetryLogger.Flush();
+                FlushTelemetryLog();
             });
         const DriveTelemetry telemetry = _drive.GetTelemetry();
-        if (_telemetryLogger.LogSample(stationary, timestampUs, dtUs, _drive.GetPose(), _drive, telemetry, telemetrySnapshot))
+        DiagnosticLogRow row{};
+        MazeMap::App::Internal::Runtime::PopulateDiagnosticLogRow(
+            row,
+            _telemetrySampleCount,
+            _telemetryPhaseId,
+            stationary,
+            timestampUs,
+            dtUs,
+            _drive.GetPose(),
+            _drive,
+            telemetry,
+            telemetrySnapshot);
+        if (_telemetryLog.log(row))
         {
+            ++_telemetrySampleCount;
             return true;
         }
         return Fail("Failed to write maneuver test sample");
@@ -4457,8 +4559,8 @@ private:
         }
         if (_telemetryLoggingEnabled)
         {
-            _telemetryLogger.WriteEvent("fault", message);
-            _telemetryLogger.Flush();
+            WriteTelemetryEvent("fault", message);
+            FlushTelemetryLog();
         }
         FlushMissionTextLog();
         if (_missionTextLoggingEnabled)
@@ -4472,7 +4574,7 @@ private:
     {
         while ((micros() - _lastControlMicros) < Config::kControlPeriodUs)
         {
-            _telemetryLogger.Service();
+            ServiceTelemetryLog();
             delayMicroseconds(50);
         }
 
@@ -4500,7 +4602,7 @@ private:
             },
             [this]() noexcept
             {
-                _telemetryLogger.Flush();
+                FlushTelemetryLog();
             });
         if (_drive.HasEstimatorFault())
         {
@@ -4907,12 +5009,12 @@ private:
 
         char message[128] = {};
         snprintf(message, sizeof(message), "count,%u", static_cast<unsigned>(queue.size()));
-        if (!_telemetryLogger.WriteEvent("queue", message))
+        if (!WriteTelemetryEvent("queue", message))
         {
             AppendStartupTrace("maneuver_test:queue_logging_disabled");
             Serial.println("Maneuver queue logging unavailable; continuing without queue metadata");
-            _telemetryLogger.Flush();
-            _telemetryLogger.Close();
+            FlushTelemetryLog();
+            CloseTelemetryLog();
             _telemetryLoggingEnabled = false;
             return true;
         }
@@ -4931,12 +5033,12 @@ private:
                 queue[i].GetEntrySpeed(),
                 queue[i].GetExitSpeed());
 
-            if (!_telemetryLogger.WriteEvent("queue_entry", queueLine))
+            if (!WriteTelemetryEvent("queue_entry", queueLine))
             {
                 AppendStartupTrace("maneuver_test:queue_logging_disabled");
                 Serial.println("Maneuver queue entry logging unavailable; continuing without queue metadata");
-                _telemetryLogger.Flush();
-                _telemetryLogger.Close();
+                FlushTelemetryLog();
+                CloseTelemetryLog();
                 _telemetryLoggingEnabled = false;
                 return true;
             }

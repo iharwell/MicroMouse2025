@@ -51,6 +51,9 @@
     <ClCompile Include="MazeMapRuntimeHelperTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\MazeMap\MmLog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="MazeMapSharedRuntimeTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
