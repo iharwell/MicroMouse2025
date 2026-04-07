@@ -17,7 +17,8 @@ namespace MazeMap::App::Internal
             , drive()
             , missionSensors(speedVehicle, gWallDistanceCalibration)
             , telemetrySensors(speedVehicle, gWallDistanceCalibration)
-            , diagnosticSensors(speedVehicle, gWallDistanceCalibration)
+            , loggingFile("logging.txt")
+            , dataLogger()
         {
             // Search-mode queue timing stays intentionally conservative even though the shared
             // physical vehicle model is reused everywhere else.
@@ -26,6 +27,8 @@ namespace MazeMap::App::Internal
             searchVehicle.SetMaxLateralAcceleration(Config::kSearchMaxLateralAccelerationMps2);
         }
 
+		MazeMap::mmlog::MmLogLogger dataLogger;
+		MazeMap::CoreFileExport loggingFile;
         MazeMap::Vehicle speedVehicle;
         MazeMap::Vehicle searchVehicle;
         MazeMap::Maze maze;
@@ -35,7 +38,6 @@ namespace MazeMap::App::Internal
         DriveBase drive;
         SensorSuite missionSensors;
         DiagnosticSensorSuite telemetrySensors;
-        DiagnosticSensorSuite diagnosticSensors;
     };
 
     SharedRobotRuntime::SharedRobotRuntime()
@@ -90,6 +92,16 @@ namespace MazeMap::App::Internal
         return _impl->wallBeliefMap;
     }
 
+    MazeMap::mmlog::MmLogLogger& SharedRobotRuntime::GetDataLogger()
+    {
+		return _impl->dataLogger;
+    }
+
+    MazeMap::CoreFileExport& SharedRobotRuntime::GetLoggingFile()
+    {
+		return _impl->loggingFile;
+    }
+
     DriveBase& SharedRobotRuntime::Drive() noexcept
     {
         return _impl->drive;
@@ -103,11 +115,6 @@ namespace MazeMap::App::Internal
     DiagnosticSensorSuite& SharedRobotRuntime::TelemetrySensors() noexcept
     {
         return _impl->telemetrySensors;
-    }
-
-    DiagnosticSensorSuite& SharedRobotRuntime::DiagnosticSensors() noexcept
-    {
-        return _impl->diagnosticSensors;
     }
 
     SharedRobotRuntime& GetSharedRobotRuntime()

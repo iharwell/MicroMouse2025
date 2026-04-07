@@ -86,8 +86,8 @@ namespace MazeMap {
             }
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            DMAMEM static alignas(32) std::uint8_t g_primaryStorage[MMLOG_PRIMARY_QUEUE_BYTES];
-            DMAMEM static alignas(32) std::uint8_t g_sidecarStorage[MMLOG_SIDECAR_QUEUE_BYTES];
+            DMAMEM alignas(32) static std::uint8_t g_primaryStorage[MMLOG_PRIMARY_QUEUE_BYTES];
+            DMAMEM alignas(32) static std::uint8_t g_sidecarStorage[MMLOG_SIDECAR_QUEUE_BYTES];
             static bool g_teensyStorageClaimed = false;
 #endif
 

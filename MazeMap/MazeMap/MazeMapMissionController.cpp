@@ -45,16 +45,6 @@ public:
     MissionController(MissionController&&) = delete;
     MissionController& operator=(MissionController&&) = delete;
 
-    void CommandOpenLoop(const MazeMap::OpenLoopDriveCommand& command)
-    {
-        _drive.CommandOpenLoop(command);
-    }
-
-    void CommandOpenLoopRaw(const MazeMap::OpenLoopDriveCommand& command)
-    {
-        _drive.CommandOpenLoopRaw(command);
-    }
-
     bool BeginMissionRunMode() override
     {
         ResetForMode(false, true);
@@ -833,17 +823,16 @@ private:
         _currentCell = MazeMap::CellCoordinates(0, 0);
         _currentDirection = MazeMap::Up;
         _currentDirectionalLocation = MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(_currentCell), _currentDirection);
-        _drive.SnapTo(_currentDirectionalLocation);
+        _drive.SetStartPoint(_currentDirectionalLocation);
         _lastControlMicros = micros();
     }
 
     void PrimeKnownMissionStartCell()
     {
-        MazeMap::Cell& cell = _maze[MazeMap::CellCoordinates(0, 0)];
-        _maze.SetWall(cell, MazeMap::Up, MazeMap::NoWall);
-        _maze.SetWall(cell, MazeMap::Down, MazeMap::Wall);
-        _maze.SetWall(cell, MazeMap::Left, MazeMap::Wall);
-        _maze.SetWall(cell, MazeMap::Right, MazeMap::Wall);
+        _maze.SetWall(0, 0, MazeMap::Up, MazeMap::NoWall);
+        _maze.SetWall(0, 0, MazeMap::Down, MazeMap::Wall);
+        _maze.SetWall(0, 0, MazeMap::Left, MazeMap::Wall);
+        _maze.SetWall(0, 0, MazeMap::Right, MazeMap::Wall);
         SeedWallBeliefsFromKnownMaze();
     }
 
@@ -2027,7 +2016,6 @@ private:
             return false;
         }
 
-        SnapToStartPose();
         PrimeKnownMissionStartCell();
         snprintf(phaseName, sizeof(phaseName), "%s_settle", (phasePrefix != nullptr) ? phasePrefix : "reseat");
         return HoldPosition(settleMs, phaseName);
@@ -4014,7 +4002,6 @@ private:
         }
         AppendStartupTrace("initialize:sensors_ok");
 
-        SnapToStartPose();
         if (!RunStartupWallCalibration())
         {
             return false;
@@ -5023,15 +5010,15 @@ private:
         {
             char codeName[24] = {};
             char queueLine[160] = {};
-            FormatManeuverCodeName(queue[i].GetCode(), codeName, sizeof(codeName));
+            FormatManeuverCodeName(queue[i].getCode(), codeName, sizeof(codeName));
             snprintf(
                 queueLine,
                 sizeof(queueLine),
                 "%u,%s,%.6f,%.6f",
                 static_cast<unsigned>(i),
                 codeName,
-                queue[i].GetEntrySpeed(),
-                queue[i].GetExitSpeed());
+                queue[i].getEntrySpeed(),
+                queue[i].getExitSpeed());
 
             if (!WriteTelemetryEvent("queue_entry", queueLine))
             {
@@ -5057,9 +5044,9 @@ private:
         for (uint16_t i = 0; i < queue.size(); ++i)
         {
             const MazeMap::ManeuverInstance& entry = queue[i];
-            const MazeMap::ManeuverCode code = entry.GetCode();
-            const float entrySpeed = entry.GetEntrySpeed();
-            const float exitSpeed = entry.GetExitSpeed();
+            const MazeMap::ManeuverCode code = entry.getCode();
+            const float entrySpeed = entry.getEntrySpeed();
+            const float exitSpeed = entry.getExitSpeed();
             char codeName[24] = {};
             FormatManeuverCodeName(code, codeName, sizeof(codeName));
 
@@ -5123,7 +5110,7 @@ private:
                 return false;
             }
 
-            _currentDirectionalLocation = entry.GetEnd();
+            _currentDirectionalLocation = entry.getEnd();
             _currentDirection = _currentDirectionalLocation.GetDirection();
             _currentCell = static_cast<MazeMap::CellCoordinates>(_currentDirectionalLocation.GetLocation());
 
@@ -5140,7 +5127,7 @@ private:
 
             if (snapToExpectedLocation)
             {
-                _drive.SnapTo(_currentDirectionalLocation);
+                _drive.SetStartPoint(_currentDirectionalLocation);
             }
         }
 
@@ -5563,7 +5550,6 @@ private:
             return Fail("Sensor reset failed after inter-run service");
         }
 
-        SnapToStartPose();
         return RunStartupWallCalibration();
     }
 
@@ -7156,21 +7142,21 @@ private:
         for (uint16_t i = 0; i < queue.size(); ++i)
         {
             MazeMap::ManeuverInstance& entry = queue[i];
-            const float speedLimit = ManeuverSpeedLimit(entry.GetCode(), limits, vehicle);
-            if (IsStraightCode(entry.GetCode()))
+            const float speedLimit = ManeuverSpeedLimit(entry.getCode(), limits, vehicle);
+            if (IsStraightCode(entry.getCode()))
             {
-                const float distanceM = ManeuverDistanceMeters(entry.GetCode());
+                const float distanceM = ManeuverDistanceMeters(entry.getCode());
                 const float entrySpeed = (std::min)(boundarySpeed, speedLimit);
-                const float exitSpeed = (std::min)(entry.GetExitSpeed(), (std::min)(speedLimit, ReachableSpeedWithBoundary(entrySpeed, distanceM, limits.accelMps2)));
-                entry.SetEntrySpeed(entrySpeed);
-                entry.SetExitSpeed(exitSpeed);
+                const float exitSpeed = (std::min)(entry.getExitSpeed(), (std::min)(speedLimit, ReachableSpeedWithBoundary(entrySpeed, distanceM, limits.accelMps2)));
+                entry.setEntrySpeed(entrySpeed);
+                entry.setExitSpeed(exitSpeed);
                 boundarySpeed = exitSpeed;
             }
             else
             {
-                const float maneuverSpeed = (std::min)((std::min)(entry.GetEntrySpeed(), boundarySpeed), speedLimit);
-                entry.SetEntrySpeed(maneuverSpeed);
-                entry.SetExitSpeed(maneuverSpeed);
+                const float maneuverSpeed = (std::min)((std::min)(entry.getEntrySpeed(), boundarySpeed), speedLimit);
+                entry.setEntrySpeed(maneuverSpeed);
+                entry.setExitSpeed(maneuverSpeed);
                 boundarySpeed = maneuverSpeed;
             }
         }
@@ -7179,21 +7165,21 @@ private:
         for (int i = static_cast<int>(queue.size()) - 1; i >= 0; --i)
         {
             MazeMap::ManeuverInstance& entry = queue[static_cast<uint16_t>(i)];
-            const float speedLimit = ManeuverSpeedLimit(entry.GetCode(), limits, vehicle);
-            if (IsStraightCode(entry.GetCode()))
+            const float speedLimit = ManeuverSpeedLimit(entry.getCode(), limits, vehicle);
+            if (IsStraightCode(entry.getCode()))
             {
-                const float distanceM = ManeuverDistanceMeters(entry.GetCode());
-                const float exitSpeed = (std::min)(entry.GetExitSpeed(), (std::min)(requiredExitSpeed, speedLimit));
-                const float entrySpeed = (std::min)(entry.GetEntrySpeed(), (std::min)(speedLimit, ReachableSpeedWithBoundary(exitSpeed, distanceM, limits.decelMps2)));
-                entry.SetEntrySpeed(entrySpeed);
-                entry.SetExitSpeed(exitSpeed);
+                const float distanceM = ManeuverDistanceMeters(entry.getCode());
+                const float exitSpeed = (std::min)(entry.getExitSpeed(), (std::min)(requiredExitSpeed, speedLimit));
+                const float entrySpeed = (std::min)(entry.getEntrySpeed(), (std::min)(speedLimit, ReachableSpeedWithBoundary(exitSpeed, distanceM, limits.decelMps2)));
+                entry.setEntrySpeed(entrySpeed);
+                entry.setExitSpeed(exitSpeed);
                 requiredExitSpeed = entrySpeed;
             }
             else
             {
-                const float maneuverSpeed = (std::min)(entry.GetEntrySpeed(), (std::min)(requiredExitSpeed, speedLimit));
-                entry.SetEntrySpeed(maneuverSpeed);
-                entry.SetExitSpeed(maneuverSpeed);
+                const float maneuverSpeed = (std::min)(entry.getEntrySpeed(), (std::min)(requiredExitSpeed, speedLimit));
+                entry.setEntrySpeed(maneuverSpeed);
+                entry.setExitSpeed(maneuverSpeed);
                 requiredExitSpeed = maneuverSpeed;
             }
         }
@@ -7202,21 +7188,21 @@ private:
         for (uint16_t i = 0; i < queue.size(); ++i)
         {
             MazeMap::ManeuverInstance& entry = queue[i];
-            const float speedLimit = ManeuverSpeedLimit(entry.GetCode(), limits, vehicle);
-            if (IsStraightCode(entry.GetCode()))
+            const float speedLimit = ManeuverSpeedLimit(entry.getCode(), limits, vehicle);
+            if (IsStraightCode(entry.getCode()))
             {
-                const float distanceM = ManeuverDistanceMeters(entry.GetCode());
-                const float entrySpeed = (std::min)(entry.GetEntrySpeed(), (std::min)(boundarySpeed, speedLimit));
-                const float exitSpeed = (std::min)(entry.GetExitSpeed(), (std::min)(speedLimit, ReachableSpeedWithBoundary(entrySpeed, distanceM, limits.accelMps2)));
-                entry.SetEntrySpeed(entrySpeed);
-                entry.SetExitSpeed(exitSpeed);
+                const float distanceM = ManeuverDistanceMeters(entry.getCode());
+                const float entrySpeed = (std::min)(entry.getEntrySpeed(), (std::min)(boundarySpeed, speedLimit));
+                const float exitSpeed = (std::min)(entry.getExitSpeed(), (std::min)(speedLimit, ReachableSpeedWithBoundary(entrySpeed, distanceM, limits.accelMps2)));
+                entry.setEntrySpeed(entrySpeed);
+                entry.setExitSpeed(exitSpeed);
                 boundarySpeed = exitSpeed;
             }
             else
             {
-                const float maneuverSpeed = (std::min)(entry.GetEntrySpeed(), (std::min)(boundarySpeed, speedLimit));
-                entry.SetEntrySpeed(maneuverSpeed);
-                entry.SetExitSpeed(maneuverSpeed);
+                const float maneuverSpeed = (std::min)(entry.getEntrySpeed(), (std::min)(boundarySpeed, speedLimit));
+                entry.setEntrySpeed(maneuverSpeed);
+                entry.setExitSpeed(maneuverSpeed);
                 boundarySpeed = maneuverSpeed;
             }
         }

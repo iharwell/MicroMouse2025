@@ -63,6 +63,8 @@ inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MotionLim
 // Serves as the runtime drive subsystem for the MazeMap application by coordinating motors, odometry, and motion control.
 class DriveBase
 {
+private:
+    bool startSet = false;
 public:
     static constexpr uint16_t kModeClosedLoop = 1u << 0;
     static constexpr uint16_t kModeOpenLoop = 1u << 1;
@@ -117,13 +119,15 @@ public:
         SetWheelControlProfile(BuildNominalWheelControlProfile());
     }
 
-    void SnapTo(MazeMap::DirectionalLocation logical)
+    void SetStartPoint(MazeMap::DirectionalLocation logical)
     {
+		assert(!startSet);
         float xMeters = 0.0f;
         float yMeters = 0.0f;
         logical.GetLocation().GetPhysicalLocation(Config::kCellSizeM, xMeters, yMeters);
         ResetPoseEstimate(xMeters, yMeters, DirectionToYawRad(logical.GetDirection()));
         ResetControllers();
+		startSet = true;
     }
 
     // DANGEROUS!!!! Do not use unless you've literally made contact with a physical reference like a wall.

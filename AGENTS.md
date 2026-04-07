@@ -7,7 +7,8 @@
   - Core facts must have a single exclusive owner in this heirarchy, and no external sources independent of this class or it's members.
 - The PlantModel class serves as the single source of truth regarding the physical motion model of the robot, including projected movement, calculating required force at the wheels, etc. It should not internalize the parameters of the robot, but should supply the project with shared motion equations.
 - The Maze class is the authority on the layout of the maze.
-- Locomotion should prefer using the Maneuver primatives when in a maze, 
+- The SharedRobotRuntime class provides the only two legal logging instances in the project through GetDataLogger() and GetLoggingFile(). No other class should own logger or file classes independently, nor should helper functions exist outside of those two instance classes.
+
 
 # Project Organization Guidelines
 
@@ -38,3 +39,9 @@
 - Reject structs and classes without members documented, organized headers, or const-aware methods.
 - Reject structs and classes with public fields unless there is a clear, documented performance reason for the type to exist.
 - Strongly prefer composed types over inheritance except for interface types or where inheritance offers substantial benefits in at least four other places in code.
+- When building, use verify_latest_build.cmd or verify_latest_build.ps.
+- Locomotion should prefer using the Maneuver classes when in a maze, manually generate ManeuverInstance objects for more manual control for general custom tasks followed by a small target yaw PID if needed, or an open loop command for low-level tasks like wall tapping or certain measurments. Direct position or yaw control should be reserved for very specific tasks that cannot reasonably be done through other means.
+- Serial-style output should be sparse and should be written to the logging.txt file. All heavy datalogging tasks should use the mmlog system and set up using the appropriate macros.
+
+# Depreciated files
+ - RuntimeBinaryLogSupport.h, CoreBinaryFileExport.h/cpp, OptionalRuntimeEventLog.h/cpp, 

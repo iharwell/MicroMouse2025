@@ -1126,9 +1126,6 @@ namespace MazeMap::App::Internal::Runtime
             const PoseEstimate& pose = drive.GetPose();
             const DriveTelemetry telemetry = drive.GetTelemetry();
             const float traveledDistanceM = std::fabs(drive.GetAverageDistanceMeters() - startDistanceM);
-            const float encoderSpeedMps = MazeMap::ComputeAverageEncoderAbsSpeedMps(
-                telemetry.leftVelocityMps,
-                telemetry.rightVelocityMps);
             const bool frontSignalActive =
                 observation.frontWall ||
                 observation.frontLeftWall ||

@@ -224,7 +224,6 @@
     <ClInclude Include="MazeMapMissionModes.h" />
     <ClInclude Include="OpenFloorMainLoggerV2.h" />
     <ClInclude Include="OpenFloorMeasurementSpec.h" />
-    <ClInclude Include="OpenFloorRunManifestWriter.h" />
     <ClInclude Include="OpenFloorTimingLoggerV2.h" />
     <ClInclude Include="OptionalRuntimeEventLog.h" />
     <ClInclude Include="MissionMazeExport.h" />

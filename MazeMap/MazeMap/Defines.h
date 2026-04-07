@@ -31,6 +31,7 @@ constexpr float GRAVITY_MPS2 = 9.80665f;
 
 inline void sin_cosf(float theta, float& sin, float& cos)
 {
+	theta = PI_F * theta / 180.0f;
     arm_sin_cos_f32(theta, &sin, &cos);
 }
 

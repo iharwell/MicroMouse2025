@@ -49,43 +49,29 @@ namespace MazeMap
 		{
 		}
 
-		MAZEMAP_INLINE ManeuverCode GetCode() { return const_cast<const ManeuverInstance*>(this)->GetCode(); }
-		MAZEMAP_INLINE ManeuverCode GetCode() const { return _code; }
-		MAZEMAP_INLINE ManeuverCode getCode() { return GetCode(); }
-		MAZEMAP_INLINE ManeuverCode getCode() const { return GetCode(); }
-		MAZEMAP_INLINE void SetCode(ManeuverCode code) { _code = code; }
-		MAZEMAP_INLINE void setCode(ManeuverCode code) { SetCode(code); }
+		MAZEMAP_INLINE ManeuverCode getCode() { return const_cast<const ManeuverInstance*>(this)->getCode(); }
+		MAZEMAP_INLINE ManeuverCode getCode() const { return _code; }
+		MAZEMAP_INLINE void setCode(ManeuverCode code) { _code = code; }
 
-		MAZEMAP_INLINE DirectionalLocation GetStart() { return const_cast<const ManeuverInstance*>(this)->GetStart(); }
-		MAZEMAP_INLINE DirectionalLocation GetStart() const { return _start; }
-		MAZEMAP_INLINE DirectionalLocation getStart() { return GetStart(); }
-		MAZEMAP_INLINE DirectionalLocation getStart() const { return GetStart(); }
-		MAZEMAP_INLINE void SetStart(DirectionalLocation start) { _start = start; }
-		MAZEMAP_INLINE void setStart(DirectionalLocation start) { SetStart(start); }
+		MAZEMAP_INLINE DirectionalLocation getStart() { return const_cast<const ManeuverInstance*>(this)->getStart(); }
+		MAZEMAP_INLINE DirectionalLocation getStart() const { return _start; }
+		MAZEMAP_INLINE void setStart(DirectionalLocation start) { _start = start; }
 
-		MAZEMAP_INLINE DirectionalLocation GetEnd() { return const_cast<const ManeuverInstance*>(this)->GetEnd(); }
-		MAZEMAP_INLINE DirectionalLocation GetEnd() const
+		MAZEMAP_INLINE DirectionalLocation getEnd() { return const_cast<const ManeuverInstance*>(this)->getEnd(); }
+		MAZEMAP_INLINE DirectionalLocation getEnd() const
 		{
 			return ManeuverSet::GetSet().Move(_code, _start);
 		}
-		MAZEMAP_INLINE DirectionalLocation getEnd() { return GetEnd(); }
-		MAZEMAP_INLINE DirectionalLocation getEnd() const { return GetEnd(); }
 
-		MAZEMAP_INLINE float GetEntrySpeed() { return const_cast<const ManeuverInstance*>(this)->GetEntrySpeed(); }
-		MAZEMAP_INLINE float GetEntrySpeed() const { return _entrySpeed; }
-		MAZEMAP_INLINE float getEntrySpeed() { return GetEntrySpeed(); }
-		MAZEMAP_INLINE float getEntrySpeed() const { return GetEntrySpeed(); }
-		MAZEMAP_INLINE void SetEntrySpeed(float entrySpeed) { _entrySpeed = entrySpeed; }
-		MAZEMAP_INLINE void setEntrySpeed(float entrySpeed) { SetEntrySpeed(entrySpeed); }
+		inline float getEntrySpeed() { return const_cast<const ManeuverInstance*>(this)->getEntrySpeed(); }
+		inline float getEntrySpeed() const { return _entrySpeed; }
+		inline void setEntrySpeed(float entrySpeed) { _entrySpeed = entrySpeed; }
 
-		MAZEMAP_INLINE float GetExitSpeed() { return const_cast<const ManeuverInstance*>(this)->GetExitSpeed(); }
-		MAZEMAP_INLINE float GetExitSpeed() const { return _exitSpeed; }
-		MAZEMAP_INLINE float getExitSpeed() { return GetExitSpeed(); }
-		MAZEMAP_INLINE float getExitSpeed() const { return GetExitSpeed(); }
-		MAZEMAP_INLINE void SetExitSpeed(float exitSpeed) { _exitSpeed = exitSpeed; }
-		MAZEMAP_INLINE void setExitSpeed(float exitSpeed) { SetExitSpeed(exitSpeed); }
+		inline float getExitSpeed() { return const_cast<const ManeuverInstance*>(this)->getExitSpeed(); }
+		inline float getExitSpeed() const { return _exitSpeed; }
+		inline void setExitSpeed(float exitSpeed) { _exitSpeed = exitSpeed; }
 
-		MAZEMAP_INLINE bool IsStraight() const
+		inline bool IsStraight() const
 		{
 			return _code != MC_NONE && _code <= S31;
 		}

@@ -4,6 +4,8 @@
 #include "Defines.h"
 
 #include <memory>
+#include "CoreFileExport.h"
+#include "MmLog.h"
 
 class DriveBase;
 class SensorSuite;
@@ -47,10 +49,13 @@ namespace MazeMap::App::Internal
         MazeMap::ManeuverPathFinder& SpeedPathFinder() noexcept;
         MazeMap::WallBeliefMap& WallBeliefMap() noexcept;
 
+		mmlog::MmLogLogger& GetDataLogger();
+
+        MazeMap::CoreFileExport& GetLoggingFile();
+
         DriveBase& Drive() noexcept;
         SensorSuite& MissionSensors() noexcept;
         DiagnosticSensorSuite& TelemetrySensors() noexcept;
-        DiagnosticSensorSuite& DiagnosticSensors() noexcept;
 
     private:
         class Implementation;

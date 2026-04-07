@@ -23,7 +23,9 @@ namespace MazeMap
         DoubleMazeMask _accessible;
         void FindReachables(MazeMask& mask, CellCoordinates cell) const;
     public:
+        // Initializes the maze with the guaranteed starting wall arrangement.
         Maze();
+		// Initializes the maze with the provided cell dimension and guaranteed starting wall arrangement.
         Maze(float cellDimension);
 
         // The left-right size of the maze in cells.

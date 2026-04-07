@@ -87,17 +87,17 @@ namespace MazeMap
 
 		MAZEMAP_INLINE DirectionalLocation GetNextStart() const
 		{
-			return empty() ? DirectionalLocation() : back().GetEnd();
+			return empty() ? DirectionalLocation() : back().getEnd();
 		}
 
 		MAZEMAP_INLINE bool push_back(const ManeuverInstance& instance)
 		{
-			if (full() || instance.GetCode() == MC_NONE)
+			if (full() || instance.getCode() == MC_NONE)
 			{
 				return false;
 			}
 
-			if (!empty() && !(back().GetEnd() == instance.GetStart()))
+			if (!empty() && !(back().getEnd() == instance.getStart()))
 			{
 				return false;
 			}
@@ -119,7 +119,7 @@ namespace MazeMap
 				return false;
 			}
 
-			return push_back(code, back().GetEnd());
+			return push_back(code, back().getEnd());
 		}
 
 		MAZEMAP_INLINE bool push_back(const ManeuverPath& path, DirectionalLocation start)
@@ -129,7 +129,7 @@ namespace MazeMap
 				return false;
 			}
 
-			if (!empty() && !(back().GetEnd() == start))
+			if (!empty() && !(back().getEnd() == start))
 			{
 				return false;
 			}
@@ -146,7 +146,7 @@ namespace MazeMap
 			for (uint16_t i = 0; i < path.GetSize(); ++i)
 			{
 				_entries[_size] = ManeuverInstance(path[i], current);
-				current = _entries[_size].GetEnd();
+				current = _entries[_size].getEnd();
 				++_size;
 			}
 			return true;
@@ -164,7 +164,7 @@ namespace MazeMap
 				return false;
 			}
 
-			return push_back(path, back().GetEnd());
+			return push_back(path, back().getEnd());
 		}
 
 		MAZEMAP_INLINE bool pop_front()
@@ -209,21 +209,21 @@ namespace MazeMap
 			for (uint16_t i = 0; i < count; ++i)
 			{
 				ManeuverInstance& entry = entries[i];
-				float speedLimit = GetSpeedLimit(entry.GetCode(), vehicle);
+				float speedLimit = GetSpeedLimit(entry.getCode(), vehicle);
 
-				if (IsStraightCode(entry.GetCode()))
+				if (IsStraightCode(entry.getCode()))
 				{
 					float entrySpeed = std::min(currentBoundarySpeed, speedLimit);
-					float exitSpeed = std::min(speedLimit, ReachableSpeed(entrySpeed, GetStraightDistanceMeters(entry.GetCode()), vehicle));
-					entry.SetEntrySpeed(entrySpeed);
-					entry.SetExitSpeed(exitSpeed);
+					float exitSpeed = std::min(speedLimit, ReachableSpeed(entrySpeed, GetStraightDistanceMeters(entry.getCode()), vehicle));
+					entry.setEntrySpeed(entrySpeed);
+					entry.setExitSpeed(exitSpeed);
 					currentBoundarySpeed = exitSpeed;
 				}
 				else
 				{
 					float maneuverSpeed = std::min(currentBoundarySpeed, speedLimit);
-					entry.SetEntrySpeed(maneuverSpeed);
-					entry.SetExitSpeed(maneuverSpeed);
+					entry.setEntrySpeed(maneuverSpeed);
+					entry.setExitSpeed(maneuverSpeed);
 					currentBoundarySpeed = maneuverSpeed;
 				}
 			}
@@ -232,21 +232,21 @@ namespace MazeMap
 			for (int i = static_cast<int>(count) - 1; i >= 0; --i)
 			{
 				ManeuverInstance& entry = entries[i];
-				float speedLimit = GetSpeedLimit(entry.GetCode(), vehicle);
+				float speedLimit = GetSpeedLimit(entry.getCode(), vehicle);
 
-				if (IsStraightCode(entry.GetCode()))
+				if (IsStraightCode(entry.getCode()))
 				{
-					float exitSpeed = std::min(entry.GetExitSpeed(), std::min(requiredExitSpeed, speedLimit));
-					float entrySpeed = std::min(entry.GetEntrySpeed(), std::min(speedLimit, ReachableSpeed(exitSpeed, GetStraightDistanceMeters(entry.GetCode()), vehicle)));
-					entry.SetEntrySpeed(entrySpeed);
-					entry.SetExitSpeed(exitSpeed);
+					float exitSpeed = std::min(entry.getExitSpeed(), std::min(requiredExitSpeed, speedLimit));
+					float entrySpeed = std::min(entry.getEntrySpeed(), std::min(speedLimit, ReachableSpeed(exitSpeed, GetStraightDistanceMeters(entry.getCode()), vehicle)));
+					entry.setEntrySpeed(entrySpeed);
+					entry.setExitSpeed(exitSpeed);
 					requiredExitSpeed = entrySpeed;
 				}
 				else
 				{
-					float maneuverSpeed = std::min(entry.GetEntrySpeed(), std::min(requiredExitSpeed, speedLimit));
-					entry.SetEntrySpeed(maneuverSpeed);
-					entry.SetExitSpeed(maneuverSpeed);
+					float maneuverSpeed = std::min(entry.getEntrySpeed(), std::min(requiredExitSpeed, speedLimit));
+					entry.setEntrySpeed(maneuverSpeed);
+					entry.setExitSpeed(maneuverSpeed);
 					requiredExitSpeed = maneuverSpeed;
 				}
 			}

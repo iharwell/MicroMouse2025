@@ -246,9 +246,6 @@
     <ClInclude Include="OpenFloorMeasurementSpec.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="OpenFloorRunManifestWriter.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
-    </ClInclude>
     <ClInclude Include="OpenFloorTimingLoggerV2.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>

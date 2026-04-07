@@ -30,10 +30,7 @@ class AuxMeasurementController : public IApplicationMode
 {
 public:
     explicit AuxMeasurementController(SharedRobotRuntime& runtime)
-        : _sensors(runtime.DiagnosticSensors())
-        , _drive(runtime.Drive())
-        , _sampleLog()
-        , _eventLog()
+        : _runtime(runtime)
         , _faulted(false)
         , _fanEnabled(false)
         , _phaseId(0UL)
@@ -54,21 +51,21 @@ public:
             return Fail("Hardware setup failed");
         }
         ResetStartupTrace("mode:aux_measurement");
-        if (!_drive.Begin())
+        if (!_runtime.Drive().Begin())
         {
             return Fail("Drive base init failed");
         }
         if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
         {
-            _drive.SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
+            _runtime.Drive().SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
         }
         else
         {
-            _drive.UseNominalWheelControlProfile();
+            _runtime.Drive().UseNominalWheelControlProfile();
         }
         SetFanEnabled(false);
         gWallDistanceCalibration.Clear();
-        if (!_sensors.Begin(AuxMeasurementConfig::kControlPeriodUs))
+        if (!_runtime.TelemetrySensors().Begin(AuxMeasurementConfig::kControlPeriodUs))
         {
             return Fail("Auxiliary sensor init failed");
         }
@@ -77,7 +74,7 @@ public:
             return Fail("Auxiliary measurement log open failed");
         }
 
-        _drive.SnapTo(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
+        _runtime.Drive().SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
         _lastControlMicros = micros();
         return true;
     }
@@ -107,25 +104,24 @@ public:
     }
 
 private:
-    DiagnosticSensorSuite& _sensors;
-    DriveBase& _drive;
-    MazeMap::mmlog::MmLogLogger _sampleLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _eventLog;
+	SharedRobotRuntime& _runtime;
+    //MazeMap::mmlog::MmLogLogger _sampleLog;
+    //MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _eventLog;
     char _logFileName[64];
     bool _faulted;
     bool _fanEnabled;
     unsigned long _phaseId;
     unsigned long _sampleCount;
     unsigned long _lastControlMicros;
-
+    MazeMap::mmlog::MmLogLogger& getDataLogger() { return _runtime.GetDataLogger(); }
+    MazeMap::CoreFileExport& getLog() { return _runtime.GetLoggingFile(); }
     bool BeginLog()
     {
         const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
         _phaseId = 0UL;
         _sampleCount = 0UL;
-        _eventLog.Close();
         _logFileName[0] = '\0';
-        (void)_sampleLog.close();
+        _runtime.GetDataLogger().close();
         if (!MazeMap::App::Internal::Runtime::SelectSequentialRuntimeFileName(
                 _logFileName,
                 sizeof(_logFileName),
@@ -135,41 +131,34 @@ private:
         {
             return false;
         }
-        if (!_eventLog.BeginSibling(_logFileName))
+        if (!_runtime.GetDataLogger().open(_logFileName))
         {
             return false;
         }
-        if (!_sampleLog.open(_logFileName))
-        {
-            _eventLog.Close();
-            return false;
-        }
-
-        if (!_sampleLog.writeMetadata("file", _logFileName)) return false;
-        if (_eventLog.IsEnabled() && !_sampleLog.writeMetadata("control_log_file", _eventLog.GetFileName())) return false;
-        if (!_sampleLog.writeMetadata("mode", "aux_measurement")) return false;
-        if (!_sampleLog.writeMetadata("routine", AuxMeasurementRoutineName(AuxMeasurementConfig::kRoutine))) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(_sampleLog, "control_period_us", AuxMeasurementConfig::kControlPeriodUs)) return false;
+        _runtime.GetLoggingFile();
+        if (!_runtime.GetDataLogger().writeMetadata("file", _logFileName)) return false;
+        if (!getDataLogger().writeMetadata("mode", "aux_measurement")) return false;
+        if (!getDataLogger().writeMetadata("routine", AuxMeasurementRoutineName(AuxMeasurementConfig::kRoutine))) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(getDataLogger(), "control_period_us", AuxMeasurementConfig::kControlPeriodUs)) return false;
         {
             const unsigned long imuSampleRateHz = MazeMap::GetUiImuSampleRateHzForControlPeriodUs(AuxMeasurementConfig::kControlPeriodUs);
-            if (imuSampleRateHz > 0UL && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(_sampleLog, "imu_sample_rate_hz", imuSampleRateHz)) return false;
+            if (imuSampleRateHz > 0UL && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(getDataLogger(), "imu_sample_rate_hz", imuSampleRateHz)) return false;
         }
         {
             const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
                 AuxMeasurementConfig::kControlPeriodUs,
                 Config::kMissionRuntimeAccelFilterFreq);
-            if (imuAccelLpf2CutoffHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_sampleLog, "imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3)) return false;
+            if (imuAccelLpf2CutoffHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(getDataLogger(), "imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3)) return false;
         }
         {
             const float imuGyroLpf1ReferenceHz = MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(AuxMeasurementConfig::kControlPeriodUs);
-            if (imuGyroLpf1ReferenceHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_sampleLog, "imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
+            if (imuGyroLpf1ReferenceHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(getDataLogger(), "imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
         }
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(_sampleLog, "startup_settle_ms", static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs))) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_sampleLog, "imu_gyro_mdps_per_lsb", _sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_sampleLog, "imu_accel_mg_per_lsb", _sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_sampleLog, "mission_gyro_bias_estimate_radps", _sensors.GetGyroBiasRadps(), 6)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogAccelBiasMetadata(_sampleLog, _sensors)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteAuxRoutineConfigEvents(_eventLog, AuxMeasurementConfig::kRoutine, vehicleModel)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(getDataLogger(), "startup_settle_ms", static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs))) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(getDataLogger(), "imu_gyro_mdps_per_lsb", _sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(getDataLogger(), "imu_accel_mg_per_lsb", _sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(getDataLogger(), "mission_gyro_bias_estimate_radps", _sensors.GetGyroBiasRadps(), 6)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteMmLogAccelBiasMetadata(getDataLogger(), _sensors)) return false;
         if (!WriteEvent("summary", "Enter by shorting pins 28 and 29 at boot. Those pins only select this mode; they are not measurement inputs.")) return false;
         if (!WriteEvent("summary", "Edit AuxMeasurementConfig::kRoutine and RunSelectedRoutine() to repurpose this mode for one-off internal measurements.")) return false;
         if (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
@@ -181,22 +170,38 @@ private:
         {
             if (!WriteEvent("summary", "The default routine logs stationary fan-off, fan-on, and recovery phases so you can quantify fan-induced sensor and vibration shifts.")) return false;
         }
-        if (!_sampleLog.writeMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
-        if (!_sampleLog.writeMetadata("endianness", "little")) return false;
+        if (!getDataLogger().writeMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
 
         AuxMeasurementLogRow row{};
-        return _sampleLog.begin(row);
+        return getDataLogger().begin(row);
     }
 
     bool BeginPhase(const char* name)
     {
         ++_phaseId;
-        return _eventLog.WritePhase(_phaseId, micros(), name);
+        return getDataLogger().WritePhase(_phaseId, micros(), name);
     }
 
     bool WriteEvent(const char* type, const char* message)
     {
-        return _eventLog.WriteEvent(micros(), type, message);
+        char line[384] = {};
+        const int length = snprintf(
+            line,
+            sizeof(line),
+            "%s [%lu] %s%s%s",
+            (type != nullptr && type[0] != '\0') ? source : "runtime",
+            micros(),
+            (type != nullptr && type[0] != '\0') ? type : "event",
+            (message != nullptr && message[0] != '\0') ? ": " : "",
+            (message != nullptr) ? message : "");
+        if (length <= 0)
+        {
+            return false;
+        }
+
+        line[sizeof(line) - 1U] = '\0';
+        return AppendRuntimeControlLogLine(line);
+        return getLog().Write(line);
     }
 
     bool LogSample(
@@ -224,7 +229,7 @@ private:
             driveTelemetry,
             sensorSnapshot,
             planarAccelMps2);
-        if (!_sampleLog.log(row))
+        if (!getDataLogger().log(row))
         {
             return false;
         }
@@ -235,19 +240,19 @@ private:
 
     void ServiceLog()
     {
-        (void)_sampleLog.service();
+        (void)getDataLogger().service();
     }
 
     void FlushLog()
     {
-        (void)_sampleLog.flush();
-        _eventLog.Flush();
+        (void)getDataLogger().flush();
+        getLog().Flush();
     }
 
     void CloseLog()
     {
-        (void)_sampleLog.close();
-        _eventLog.Close();
+        (void)getDataLogger().close();
+        getLog().Close();
     }
 
     const char* GetLogFileName() const
@@ -294,13 +299,13 @@ private:
         }
 
         SetFanEnabled(true);
-        _drive.SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
+        _runtime.Drive().SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
         const float directionSign = AuxMeasurementConfig::kTurningTractionSweepClockwise ? 1.0f : -1.0f;
         const float circleRadiusM = AuxMeasurementConfig::kTurningTractionSweepRadiusM;
         float commandedSpeedMps = AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps;
         float heldSpeedMps = commandedSpeedMps;
         float commandedCurvatureMInv = (circleRadiusM > 1.0e-6f) ? (1.0f / circleRadiusM) : 0.0f;
-        float targetYawRad = _drive.GetPose().yawRad;
+        float targetYawRad = _runtime.Drive().GetPose().yawRad;
         const unsigned long phaseStartMs = millis();
         unsigned long saturationPlateauStartMs = 0UL;
         unsigned long slipCandidateStartMs = 0UL;
@@ -316,7 +321,7 @@ private:
             const unsigned long nowMs = millis();
             if (static_cast<unsigned long>(nowMs - phaseStartMs) >= AuxMeasurementConfig::kTurningTractionSweepTimeoutMs)
             {
-                _drive.Brake();
+                _runtime.Drive().Brake();
                 return WriteTurningTractionResult(
                     "timeout",
                     false,
@@ -331,12 +336,12 @@ private:
             uint32_t dtUs = 0U;
             WaitForNextSample(timestampUs, dtUs);
 
-            const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(false, _drive.GetPose());
+            const DiagnosticSensorSnapshot sensorSnapshot = _runtime.TelemetrySensors().Capture(false, _runtime.Drive().GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, sensorSnapshot);
-            if (_drive.HasEstimatorFault())
+            _runtime.Drive().UpdateOdometry(dtSeconds, sensorSnapshot);
+            if (_runtime.Drive().HasEstimatorFault())
             {
-                return Fail(_drive.GetEstimatorFaultReason());
+                return Fail(_runtime.Drive().GetEstimatorFaultReason());
             }
             if (!tighteningTurn)
             {
@@ -358,8 +363,8 @@ private:
             lastCommandedOmegaRadps = MazeMap::ComputeTurningTractionAngularCommand(
                 nominalOmegaRadps,
                 targetYawRad,
-                _drive.GetPose().yawRad,
-                _drive.GetPose().angularSpeedRadps,
+                _runtime.Drive().GetPose().yawRad,
+                _runtime.Drive().GetPose().angularSpeedRadps,
                 Config::kArcHeadingKp,
                 Config::kArcYawD,
                 AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps);
@@ -372,15 +377,15 @@ private:
                     lastCommandedOmegaRadps,
                     effectiveTrackWidthM,
                     Config::kWheelRestLaunchDriveCommand);
-                _drive.CommandOpenLoopRaw(launchCommands.leftCommand, launchCommands.rightCommand);
+                _runtime.Drive().CommandOpenLoopRaw(launchCommands.leftCommand, launchCommands.rightCommand);
             }
             else
             {
-                _drive.CommandVelocity(commandedSpeedMps, lastCommandedOmegaRadps, dtSeconds);
+                _runtime.Drive().CommandVelocity(commandedSpeedMps, lastCommandedOmegaRadps, dtSeconds);
             }
 
-            const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
-            const float planarAccelMps2 = _sensors.GetPlanarAccelMps2(sensorSnapshot);
+            const DriveTelemetry driveTelemetry = _runtime.Drive().GetTelemetry();
+            const float planarAccelMps2 = _runtime.Drive().GetPlanarAccelMps2(sensorSnapshot);
             const MazeMap::TurningTractionMetrics metrics = MazeMap::ComputeTurningTractionMetrics(
                 driveTelemetry.leftVelocityMps,
                 driveTelemetry.rightVelocityMps,
@@ -395,8 +400,8 @@ private:
                 _fanEnabled,
                 timestampUs,
                 dtUs,
-                _drive.GetPose(),
-                _drive,
+                _runtime.Drive().GetPose(),
+                _runtime.Drive(),
                 driveTelemetry,
                 sensorSnapshot,
                 planarAccelMps2))
@@ -419,7 +424,7 @@ private:
                 }
                 else if (static_cast<unsigned long>(nowMs - slipCandidateStartMs) >= AuxMeasurementConfig::kTurningTractionSlipConfirmMs)
                 {
-                    _drive.Brake();
+                    _runtime.Drive().Brake();
                     return WriteTurningTractionResult(
                         "traction_loss",
                         true,
@@ -502,23 +507,23 @@ private:
             uint32_t dtUs = 0U;
             WaitForNextSample(timestampUs, dtUs);
 
-            _drive.Brake();
-            const DiagnosticSensorSnapshot sensorSnapshot = _sensors.Capture(stationary, _drive.GetPose());
+            _runtime.Drive().Brake();
+            const DiagnosticSensorSnapshot sensorSnapshot = _runtime.TelemetrySensors().Capture(stationary, _runtime.Drive().GetPose());
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, sensorSnapshot);
-            if (_drive.HasEstimatorFault())
+            _runtime.Drive().UpdateOdometry(dtSeconds, sensorSnapshot);
+            if (_runtime.Drive().HasEstimatorFault())
             {
-                return Fail(_drive.GetEstimatorFaultReason());
+                return Fail(_runtime.Drive().GetEstimatorFaultReason());
             }
-            const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
-            const float planarAccelMps2 = _sensors.GetPlanarAccelMps2(sensorSnapshot);
+            const DriveTelemetry driveTelemetry = _runtime.Drive().GetTelemetry();
+            const float planarAccelMps2 = _runtime.TelemetrySensors().GetPlanarAccelMps2(sensorSnapshot);
             if (!LogSample(
                 stationary,
                 _fanEnabled,
                 timestampUs,
                 dtUs,
-                _drive.GetPose(),
-                _drive,
+                _runtime.Drive().GetPose(),
+                _runtime.Drive(),
                 driveTelemetry,
                 sensorSnapshot,
                 planarAccelMps2))
@@ -594,7 +599,7 @@ private:
     bool Fail(const char* reason)
     {
         _faulted = true;
-        _drive.Brake();
+        _runtime.Drive().Brake();
         SetFanEnabled(false);
         Serial.print("Auxiliary measurement fault: ");
         Serial.println((reason != nullptr) ? reason : "unknown");
@@ -1160,7 +1165,7 @@ public:
             return Fail("Diagnostic log open failed");
         }
 
-        _drive.SnapTo(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
+        _drive.SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
         _startX = _drive.GetPose().xMeters;
         _startY = _drive.GetPose().yMeters;
         _lastControlMicros = micros();
@@ -2324,15 +2329,15 @@ private:
     MazeMap::Vehicle& _vehicle;
     DiagnosticSensorSuite& _sensors;
     DriveBase& _drive;
-    MazeMap::mmlog::MmLogLogger _timingLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _timingEventLog;
-    bool _timingOverflowed;
-    bool _timingWriteFailed;
-    MazeMap::mmlog::MmLogLogger _mainLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _mainEventLog;
-    bool _mainOverflowed;
-    bool _mainWriteFailed;
-    OpenFloorRunManifestWriter _manifestWriter;
+    //MazeMap::mmlog::MmLogLogger _timingLog;
+    //MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _timingEventLog;
+    //bool _timingOverflowed;
+    //bool _timingWriteFailed;
+    //MazeMap::mmlog::MmLogLogger _mainLog;
+    //MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _mainEventLog;
+    //bool _mainOverflowed;
+    //bool _mainWriteFailed;
+    //OpenFloorRunManifestWriter _manifestWriter;
     bool _faulted;
     bool _timingLogOpen;
     bool _mainLogOpen;
@@ -2476,13 +2481,13 @@ bool OpenFloorMeasurementController::BeginTimingLog()
 
     if (!_timingEventLog.BeginSibling(MazeMap::kOpenFloorTimingFileName))
     {
-        return false;
+        return Fail("Timing log open failed1");
     }
 
     if (!_timingLog.open(MazeMap::kOpenFloorTimingFileName))
     {
         _timingEventLog.Close();
-        return false;
+        return Fail("Timing log open failed2");
     }
 
     if (!_timingLog.writeMetadata("file", MazeMap::kOpenFloorTimingFileName)) return false;
@@ -2499,7 +2504,7 @@ bool OpenFloorMeasurementController::BeginTimingLog()
     if (!_timingLog.begin(row))
     {
         _timingEventLog.Close();
-        return false;
+        return Fail("Timing log open failed3");
     }
 
     if (_timingEventLog.IsEnabled())
@@ -2859,7 +2864,7 @@ bool OpenFloorMeasurementController::AbortMainSection(const OpenFloorMeasurement
     return WriteMainSectionMarker("abort", labels, reason);
 }
 
-bool OpenFloorMeasurementController::WriteMainEvent(const char* type, const char* message)
+/*bool OpenFloorMeasurementController::WriteMainEvent(const char* type, const char* message)
 {
     return _mainEventLog.WriteEvent(micros(), type, message);
 }
@@ -2893,7 +2898,7 @@ void OpenFloorMeasurementController::CloseMainLog()
 void OpenFloorMeasurementController::RecordMainLogFailure() noexcept
 {
     MazeMap::App::Internal::Runtime::CaptureMmLogFailure(_mainLog, _mainOverflowed, _mainWriteFailed);
-}
+}*/
 
 bool OpenFloorMeasurementController::Begin()
 {

@@ -73,6 +73,10 @@ namespace MazeMap
 				}
 			}
 		}
+		_cells[0][0].SetRight(WallState::Wall);
+		_cells[1][0].SetLeft(WallState::Wall);
+		_cells[0][0].SetUp(WallState::NoWall);
+		_cells[0][1].SetDown(WallState::NoWall);
 	}
 
 	uint8_t MazeMap::Maze::GetXSize() const { return static_cast<uint8_t>(sizeof(_cells) / sizeof(Cell) / GetYSize()); }

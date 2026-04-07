@@ -510,9 +510,9 @@ namespace MazeMap
 			ManeuverSet& set = ManeuverSet::GetSet();
 
 			Assert::AreEqual(static_cast<uint16_t>(3), queue.size());
-			Assert::AreEqual(start, queue[0].GetStart());
-			Assert::AreEqual(set.Move(S2, start), queue[1].GetStart());
-			Assert::AreEqual(set.Move(S90SS, queue[1].GetStart()), queue[2].GetStart());
+			Assert::AreEqual(start, queue[0].getStart());
+			Assert::AreEqual(set.Move(S2, start), queue[1].getStart());
+			Assert::AreEqual(set.Move(S90SS, queue[1].getStart()), queue[2].getStart());
 		}
 
 		TEST_METHOD(ManeuverQueueAppendsSequentialCommands)
@@ -521,9 +521,9 @@ namespace MazeMap
 			ManeuverQueue queue = ManeuverQueue();
 
 			Assert::IsTrue(queue.push_back(S4, start));
-			DirectionalLocation secondStart = queue[0].GetEnd();
+			DirectionalLocation secondStart = queue[0].getEnd();
 			Assert::IsTrue(queue.push_back(S90SS));
-			Assert::AreEqual(secondStart, queue[1].GetStart());
+			Assert::AreEqual(secondStart, queue[1].getStart());
 		}
 
 		TEST_METHOD(ManeuverQueueHonorsCapacity)
@@ -553,12 +553,12 @@ namespace MazeMap
 			queue.ComputeSpeeds(v, 0.0f, 0.0f);
 
 			float turnSpeed = ManeuverSet::GetSet()[S90SS].GetVMax(v);
-			Assert::AreEqual(0.0f, queue[0].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(turnSpeed, queue[0].GetExitSpeed(), tolerance);
-			Assert::AreEqual(turnSpeed, queue[1].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(turnSpeed, queue[1].GetExitSpeed(), tolerance);
-			Assert::AreEqual(turnSpeed, queue[2].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(0.0f, queue[2].GetExitSpeed(), tolerance);
+			Assert::AreEqual(0.0f, queue[0].getEntrySpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[0].getExitSpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].getEntrySpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].getExitSpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[2].getEntrySpeed(), tolerance);
+			Assert::AreEqual(0.0f, queue[2].getExitSpeed(), tolerance);
 		}
 
 		TEST_METHOD(ManeuverQueueFreshSpeedsUpdatePriorStraight)
@@ -569,15 +569,15 @@ namespace MazeMap
 
 			Assert::IsTrue(queue.push_back(S10, DirectionalLocation(MazeLocation(15, 15), Up)));
 			queue.ComputeSpeeds(v, 0.0f, 0.0f);
-			Assert::AreEqual(0.0f, queue[0].GetExitSpeed(), tolerance);
+			Assert::AreEqual(0.0f, queue[0].getExitSpeed(), tolerance);
 
 			Assert::IsTrue(queue.push_back(S90SS));
 			queue.ComputeFreshSpeeds(v, 1);
 
 			float turnSpeed = ManeuverSet::GetSet()[S90SS].GetVMax(v);
-			Assert::AreEqual(turnSpeed, queue[0].GetExitSpeed(), tolerance);
-			Assert::AreEqual(turnSpeed, queue[1].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(turnSpeed, queue[1].GetExitSpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[0].getExitSpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].getEntrySpeed(), tolerance);
+			Assert::AreEqual(turnSpeed, queue[1].getExitSpeed(), tolerance);
 		}
 
 		TEST_METHOD(ManeuverQueueComputesConstantSpeedAcrossAdjacentTurns)
@@ -600,10 +600,10 @@ namespace MazeMap
 				expected = secondLimit;
 			}
 
-			Assert::AreEqual(expected, fresh[0].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(expected, fresh[0].GetExitSpeed(), tolerance);
-			Assert::AreEqual(expected, fresh[1].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(expected, fresh[1].GetExitSpeed(), tolerance);
+			Assert::AreEqual(expected, fresh[0].getEntrySpeed(), tolerance);
+			Assert::AreEqual(expected, fresh[0].getExitSpeed(), tolerance);
+			Assert::AreEqual(expected, fresh[1].getEntrySpeed(), tolerance);
+			Assert::AreEqual(expected, fresh[1].getExitSpeed(), tolerance);
 		}
 		TEST_METHOD(ManeuverQueueSpeedPass_ConsecutiveTurnsKeepSameSpeed)
 		{
@@ -615,11 +615,11 @@ namespace MazeMap
 
 			ManeuverQueue::ComputeSpeeds(v, fresh, 3, v.GetMaxSpeed(), v.GetMaxSpeed());
 
-			float sharedSpeed = fresh[0].GetEntrySpeed();
+			float sharedSpeed = fresh[0].getEntrySpeed();
 			for (uint16_t i = 0; i < 3; ++i)
 			{
-				Assert::AreEqual(sharedSpeed, fresh[i].GetEntrySpeed(), tolerance);
-				Assert::AreEqual(sharedSpeed, fresh[i].GetExitSpeed(), tolerance);
+				Assert::AreEqual(sharedSpeed, fresh[i].getEntrySpeed(), tolerance);
+				Assert::AreEqual(sharedSpeed, fresh[i].getExitSpeed(), tolerance);
 			}
 		}
 
@@ -647,8 +647,8 @@ namespace MazeMap
 
 			for (uint16_t i = 0; i < 3; ++i)
 			{
-				Assert::AreEqual(expected, fresh[i].GetEntrySpeed(), tolerance);
-				Assert::AreEqual(expected, fresh[i].GetExitSpeed(), tolerance);
+				Assert::AreEqual(expected, fresh[i].getEntrySpeed(), tolerance);
+				Assert::AreEqual(expected, fresh[i].getExitSpeed(), tolerance);
 			}
 		}
 
@@ -670,12 +670,12 @@ namespace MazeMap
 				expectedSecondTurnSpeed = secondTurnLimit;
 			}
 
-			Assert::AreEqual(firstTurnSpeed, fresh[0].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(firstTurnSpeed, fresh[0].GetExitSpeed(), tolerance);
-			Assert::AreEqual(firstTurnSpeed, fresh[1].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(expectedSecondTurnSpeed, fresh[1].GetExitSpeed(), tolerance);
-			Assert::AreEqual(expectedSecondTurnSpeed, fresh[2].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(expectedSecondTurnSpeed, fresh[2].GetExitSpeed(), tolerance);
+			Assert::AreEqual(firstTurnSpeed, fresh[0].getEntrySpeed(), tolerance);
+			Assert::AreEqual(firstTurnSpeed, fresh[0].getExitSpeed(), tolerance);
+			Assert::AreEqual(firstTurnSpeed, fresh[1].getEntrySpeed(), tolerance);
+			Assert::AreEqual(expectedSecondTurnSpeed, fresh[1].getExitSpeed(), tolerance);
+			Assert::AreEqual(expectedSecondTurnSpeed, fresh[2].getEntrySpeed(), tolerance);
+			Assert::AreEqual(expectedSecondTurnSpeed, fresh[2].getExitSpeed(), tolerance);
 			Assert::IsTrue(expectedSecondTurnSpeed < secondTurnLimit);
 		}
 
@@ -691,12 +691,12 @@ namespace MazeMap
 
 			float firstTurnLimit = ManeuverSet::GetSet()[S90LS].GetVMax(v);
 			float secondTurnLimit = ManeuverSet::GetSet()[S90SS].GetVMax(v);
-			Assert::AreEqual(firstTurnLimit, fresh[0].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(firstTurnLimit, fresh[0].GetExitSpeed(), tolerance);
-			Assert::AreEqual(firstTurnLimit, fresh[1].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(secondTurnLimit, fresh[1].GetExitSpeed(), tolerance);
-			Assert::AreEqual(secondTurnLimit, fresh[2].GetEntrySpeed(), tolerance);
-			Assert::AreEqual(secondTurnLimit, fresh[2].GetExitSpeed(), tolerance);
+			Assert::AreEqual(firstTurnLimit, fresh[0].getEntrySpeed(), tolerance);
+			Assert::AreEqual(firstTurnLimit, fresh[0].getExitSpeed(), tolerance);
+			Assert::AreEqual(firstTurnLimit, fresh[1].getEntrySpeed(), tolerance);
+			Assert::AreEqual(secondTurnLimit, fresh[1].getExitSpeed(), tolerance);
+			Assert::AreEqual(secondTurnLimit, fresh[2].getEntrySpeed(), tolerance);
+			Assert::AreEqual(secondTurnLimit, fresh[2].getExitSpeed(), tolerance);
 		}
 		TEST_METHOD(MovementTest)
 		{
