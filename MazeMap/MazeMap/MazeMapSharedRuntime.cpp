@@ -17,21 +17,22 @@ namespace
     static_assert((kTextLogQueueBytes % MazeMap::mmlog::kSdSectorBytes) == 0U);
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-    using TextLogFileHandle = File;
+    using TextLogFileHandle = FsFile;
 
     bool OpenFreshTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
     {
         file.close();
-        SD.remove(path);
-        file = SD.open(path, FILE_WRITE);
-        return static_cast<bool>(file);
+        if (SD.sdfs.exists(path) && !SD.sdfs.remove(path))
+        {
+            return false;
+        }
+        return file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_TRUNC);
     }
 
     bool OpenAppendTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
     {
         file.close();
-        file = SD.open(path, FILE_WRITE);
-        return static_cast<bool>(file);
+        return file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_AT_END);
     }
 
     bool TextLogFileIsOpen(TextLogFileHandle& file) noexcept
@@ -46,14 +47,12 @@ namespace
 
     bool FlushTextLogFile(TextLogFileHandle& file) noexcept
     {
-        file.flush();
-        return static_cast<bool>(file);
+        return file.sync();
     }
 
     bool TextLogTransferBusy(TextLogFileHandle& file) noexcept
     {
-        (void)file;
-        return false;
+        return file.isBusy();
     }
 
     void CloseTextLogFile(TextLogFileHandle& file) noexcept
@@ -62,6 +61,55 @@ namespace
         {
             file.close();
         }
+    }
+
+    bool FinalizeTextLogFileLength(TextLogFileHandle& file, const std::uint64_t logicalLength) noexcept
+    {
+        if (!file.seekSet(logicalLength))
+        {
+            return false;
+        }
+        if (!file.truncate())
+        {
+            return false;
+        }
+        if (!file.seekSet(logicalLength))
+        {
+            return false;
+        }
+        return FlushTextLogFile(file);
+    }
+
+    bool FlushPartialTextLogTail(
+        TextLogFileHandle& file,
+        MazeMap::mmlog::detail::ByteRing& queue) noexcept
+    {
+        if (queue.empty())
+        {
+            return true;
+        }
+
+        std::uint8_t sector[MazeMap::mmlog::kSdSectorBytes] = {};
+        const std::size_t tailBytes = queue.size();
+        if (tailBytes >= MazeMap::mmlog::kSdSectorBytes)
+        {
+            return false;
+        }
+
+        queue.readCopy(sector, tailBytes);
+        const std::uint64_t logicalLength = file.curPosition() + tailBytes;
+        if (file.write(sector, MazeMap::mmlog::kSdSectorBytes) != MazeMap::mmlog::kSdSectorBytes)
+        {
+            return false;
+        }
+
+        queue.consume(tailBytes);
+        while (file.isBusy())
+        {
+        }
+
+        // Keep physical writes sector-sized, then trim the file back to the true byte count.
+        return FinalizeTextLogFileLength(file, logicalLength);
     }
 #elif defined(ARDUINO)
     using TextLogFileHandle = File;
@@ -309,8 +357,9 @@ namespace
             {
             }
         }
-#endif
 
+        return FlushPartialTextLogTail(file, queue);
+#else
         while (!queue.empty())
         {
             const std::size_t chunk = queue.contiguousReadSize();
@@ -329,6 +378,7 @@ namespace
         }
 
         return true;
+#endif
     }
 }
 

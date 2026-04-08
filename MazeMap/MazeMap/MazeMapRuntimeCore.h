@@ -2470,21 +2470,21 @@ inline float DirectionToYawRad(MazeMap::Direction direction)
     switch (direction)
     {
     case MazeMap::Up:
-        return HALF_PI_F;
+        return 0.0f;
     case MazeMap::UpRight:
         return 0.25f * PI_F;
     case MazeMap::Right:
-        return 0.0f;
+        return HALF_PI_F;
     case MazeMap::DownRight:
-        return -0.25f * PI_F;
+        return 0.75f * PI_F;
     case MazeMap::Down:
-        return -HALF_PI_F;
+        return PI_F;
     case MazeMap::DownLeft:
         return -0.75f * PI_F;
     case MazeMap::Left:
-        return PI_F;
+        return -HALF_PI_F;
     case MazeMap::UpLeft:
-        return 0.75f * PI_F;
+        return -0.25f * PI_F;
     default:
         return 0.0f;
     }
@@ -2492,13 +2492,13 @@ inline float DirectionToYawRad(MazeMap::Direction direction)
 
 inline Eigen::Vector2f HeadingUnitFromYawRad(float yawRad)
 {
-    return Eigen::Vector2f(cosf(yawRad), sinf(yawRad));
+    return Eigen::Vector2f(sinf(yawRad), cosf(yawRad));
 }
 
 inline float HeadingErrorRad(const Eigen::Vector2f& targetHeading, const Eigen::Vector2f& measuredHeading)
 {
     const float dot = (std::clamp)(targetHeading.dot(measuredHeading), -1.0f, 1.0f);
-    const float cross = (measuredHeading.x() * targetHeading.y()) - (measuredHeading.y() * targetHeading.x());
+    const float cross = (targetHeading.x() * measuredHeading.y()) - (targetHeading.y() * measuredHeading.x());
     return atan2f(cross, dot);
 }
 

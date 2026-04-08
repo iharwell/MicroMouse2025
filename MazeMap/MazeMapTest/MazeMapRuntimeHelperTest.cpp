@@ -4,6 +4,7 @@
 
 #include "pch.h"
 #include "CppUnitTest.h"
+#include "..\MazeMap\MazeMapRuntimeCore.h"
 #include "..\MazeMap\MazeMapRuntimeMmLog.h"
 #include "..\MazeMap\MazeMapRuntimeSignalHelpers.h"
 #include "..\MazeMap\RuntimeBinaryLogSupport.h"
@@ -125,6 +126,50 @@ namespace MazeMap::App
             char buffer[64] = {};
             Assert::IsTrue(BuildSiblingRuntimeFileName(buffer, sizeof(buffer), "open_floor_main.mmlog", ".events.mmlog"));
             Assert::IsTrue(std::strcmp(buffer, "open_floor_main.events.mmlog") == 0);
+        }
+
+        TEST_METHOD(DirectionToYawRad_UsesProjectUpAsZeroAndClockwisePositive)
+        {
+            Assert::AreEqual(0.0f, DirectionToYawRad(MazeMap::Up), 1.0e-6f);
+            Assert::AreEqual(0.25f * PI_F, DirectionToYawRad(MazeMap::UpRight), 1.0e-6f);
+            Assert::AreEqual(HALF_PI_F, DirectionToYawRad(MazeMap::Right), 1.0e-6f);
+            Assert::AreEqual(PI_F, DirectionToYawRad(MazeMap::Down), 1.0e-6f);
+            Assert::AreEqual(-HALF_PI_F, DirectionToYawRad(MazeMap::Left), 1.0e-6f);
+            Assert::AreEqual(-0.25f * PI_F, DirectionToYawRad(MazeMap::UpLeft), 1.0e-6f);
+        }
+
+        TEST_METHOD(HeadingUnitFromYawRad_MapsYawZeroToPositiveY)
+        {
+            const Eigen::Vector2f up = HeadingUnitFromYawRad(0.0f);
+            Assert::AreEqual(0.0f, up.x(), 1.0e-6f);
+            Assert::AreEqual(1.0f, up.y(), 1.0e-6f);
+
+            const Eigen::Vector2f right = HeadingUnitFromYawRad(HALF_PI_F);
+            Assert::AreEqual(1.0f, right.x(), 1.0e-6f);
+            Assert::AreEqual(0.0f, right.y(), 1.0e-6f);
+
+            const Eigen::Vector2f left = HeadingUnitFromYawRad(-HALF_PI_F);
+            Assert::AreEqual(-1.0f, left.x(), 1.0e-6f);
+            Assert::AreEqual(0.0f, left.y(), 1.0e-6f);
+        }
+
+        TEST_METHOD(HeadingErrorRad_MatchesClockwiseYawErrorConvention)
+        {
+            const float upToRight =
+                HeadingErrorRad(DirectionToUnitVector(MazeMap::Right), DirectionToUnitVector(MazeMap::Up));
+            Assert::AreEqual(HALF_PI_F, upToRight, 1.0e-6f);
+
+            const float rightToUp =
+                HeadingErrorRad(DirectionToUnitVector(MazeMap::Up), DirectionToUnitVector(MazeMap::Right));
+            Assert::AreEqual(-HALF_PI_F, rightToUp, 1.0e-6f);
+
+            const float diagonalError = HeadingErrorRad(
+                DirectionToUnitVector(MazeMap::UpRight),
+                DirectionToUnitVector(MazeMap::UpLeft));
+            Assert::AreEqual(
+                AngleErrorRad(DirectionToYawRad(MazeMap::UpRight), DirectionToYawRad(MazeMap::UpLeft)),
+                diagonalError,
+                1.0e-6f);
         }
 
         TEST_METHOD(MmLogLogger_WritesRevGBindingAndSidecar)

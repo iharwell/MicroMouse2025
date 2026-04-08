@@ -528,8 +528,8 @@ namespace MazeMap
         const float maxMeters = OpenFloorWorkspaceMaxMeters();
         return std::isfinite(pose.xMeters) &&
             std::isfinite(pose.yMeters) &&
-            pose.xMeters >= 0.0f &&
-            pose.yMeters >= 0.0f &&
+            pose.xMeters >= -0.1f &&
+            pose.yMeters >= -0.1f &&
             pose.xMeters <= maxMeters &&
             pose.yMeters <= maxMeters;
     }

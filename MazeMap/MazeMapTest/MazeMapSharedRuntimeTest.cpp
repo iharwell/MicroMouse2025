@@ -233,6 +233,28 @@ namespace MazeMap::App
             std::remove(controlPath.c_str());
         }
 
+        TEST_METHOD(SharedRuntime_FlushTextLogWritesExactBufferedBytesWithoutPadding)
+        {
+            const std::string controlPath = Internal::kSharedRuntimeTextLogFileName;
+            const std::string expected = "alpha\nbeta\ngamma\n";
+            std::remove(controlPath.c_str());
+
+            {
+                Internal::SharedRobotRuntime runtime;
+
+                Assert::IsTrue(runtime.AppendTextLogLine("alpha"));
+                Assert::IsTrue(runtime.AppendTextLogLine("beta"));
+                Assert::IsTrue(runtime.AppendTextLogLine("gamma"));
+                runtime.FlushTextLog();
+            }
+
+            const std::string controlText = ReadAllBytes(controlPath);
+            Assert::IsTrue(controlText == expected);
+            Assert::IsTrue(controlText.find('\0') == std::string::npos);
+
+            std::remove(controlPath.c_str());
+        }
+
         TEST_METHOD(SharedRuntime_FailActiveModeClosesAndDisablesRuntimeLogs)
         {
             const std::string dataPath = CreateTempPath("codex_shared_runtime_fault");
