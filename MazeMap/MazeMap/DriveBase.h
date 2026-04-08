@@ -529,6 +529,12 @@ public:
         return (_estimatorFaultReason[0] != '\0') ? _estimatorFaultReason : "ukf_failure";
     }
 
+    template <typename Sink>
+    bool WriteUkfDebugTextDump(Sink&& sink) const noexcept
+    {
+        return _ukf.ukf().WriteDebugTextDump(static_cast<Sink&&>(sink));
+    }
+
     float GetLastLinearCommandMps() const
     {
         return _lastLinearCommandMps;
@@ -606,12 +612,7 @@ private:
 
     static MazeMap::VehicleState::StateMatrix BuildEstimatorCovariance()
     {
-        MazeMap::VehicleState::StateMatrix covariance =
-            MazeMap::VehicleState::StateMatrix::Identity() * 1.0e-3f;
-        covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL) = 0.25f;
-        covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR) = 0.25f;
-        covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz) = 0.01f;
-        return covariance;
+        return MazeMap::SrUkfCore::BuildDefaultInitialCovariance();
     }
 
     void ResetEncoderTracking() noexcept

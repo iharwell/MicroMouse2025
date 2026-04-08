@@ -3783,7 +3783,7 @@ inline void FormatManeuverCodeName(MazeMap::ManeuverCode code, char* buffer, siz
 inline float ReadBackLeftGyroZRadpsRaw(MazeMap::Vehicle& vehicle)
 {
 #if defined(ARDUINO_TEENSY41)
-    const float blDps = vehicle.IMU_BL.GyroRawToDps(vehicle.IMU_BL.ReadGyroZ());
+    const float blDps = vehicle.IMU_BL.ReadClockwiseYawDps();
     return blDps * DEG_TO_RAD_F;
 #else
     (void)vehicle;

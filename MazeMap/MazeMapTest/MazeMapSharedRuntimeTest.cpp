@@ -27,6 +27,12 @@ namespace
         char reason[64] = {};
     };
 
+    struct StreamingFaultCallbackState
+    {
+        MazeMap::App::Internal::SharedRobotRuntime* runtime = nullptr;
+        unsigned int linesWritten = 0U;
+    };
+
     void CaptureFaultCallback(void* context, const char* reason) noexcept
     {
         auto* state = static_cast<FaultCallbackState*>(context);
@@ -38,6 +44,50 @@ namespace
         ++state->count;
         const char* text = (reason != nullptr) ? reason : "";
         std::snprintf(state->reason, sizeof(state->reason), "%s", text);
+    }
+
+    void StreamLongFaultDump(void* context, const char* reason) noexcept
+    {
+        auto* state = static_cast<StreamingFaultCallbackState*>(context);
+        if (state == nullptr || state->runtime == nullptr)
+        {
+            return;
+        }
+
+        for (unsigned int index = 0U; index < 32U; ++index)
+        {
+            char message[256] = {};
+            const int length = std::snprintf(
+                message,
+                sizeof(message),
+                "reason=%s;line=%u;payload=%.3u%.3u%.3u%.3u%.3u%.3u%.3u%.3u%.3u%.3u%.3u%.3u",
+                (reason != nullptr) ? reason : "unknown",
+                index,
+                index,
+                index + 1U,
+                index + 2U,
+                index + 3U,
+                index + 4U,
+                index + 5U,
+                index + 6U,
+                index + 7U,
+                index + 8U,
+                index + 9U,
+                index + 10U,
+                index + 11U);
+            if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+            {
+                return;
+            }
+
+            if (!state->runtime->WriteTextLogEntry(1000U + index, "ukf_dump_test", message))
+            {
+                return;
+            }
+
+            state->runtime->FlushTextLog();
+            ++state->linesWritten;
+        }
     }
 }
 
@@ -302,6 +352,42 @@ namespace MazeMap::App
             std::remove(sidecarPath.c_str());
             std::remove(retryDataPath.c_str());
             std::remove(retrySidecarPath.c_str());
+            std::remove(controlPath.c_str());
+        }
+
+        TEST_METHOD(SharedRuntime_FaultCallbackCanStreamTextBeyondQueueCapacityByFlushingIncrementally)
+        {
+            const std::string dataPath = CreateTempPath("codex_shared_runtime_fault_dump");
+            const std::string sidecarPath = ReplaceExtension(dataPath, ".sidecar");
+            const std::string controlPath = Internal::kSharedRuntimeTextLogFileName;
+            std::remove(controlPath.c_str());
+
+            {
+                Internal::SharedRobotRuntime runtime;
+                StreamingFaultCallbackState callbackState{};
+                callbackState.runtime = &runtime;
+
+                Assert::IsTrue(runtime.OpenUtilityDataLogFile(dataPath.c_str()));
+                Assert::IsTrue(runtime.WriteTextLogMetadata("mode", "fault_dump_stream"));
+                Assert::IsTrue(runtime.RegisterModeFaultHandler(&StreamLongFaultDump, &callbackState, "fault_dump_stream"));
+
+                SharedRuntimeTestLogRow row{};
+                Assert::IsTrue(runtime.BeginUtilityDataLogSchema(row));
+                row.seq = 2U;
+                row.value = 1.0f;
+                Assert::IsTrue(runtime.LogUtilityDataRow(row));
+
+                Assert::IsFalse(runtime.FailActiveMode("stream_fault_dump"));
+                Assert::AreEqual(32U, callbackState.linesWritten);
+            }
+
+            const std::string controlText = ReadAllBytes(controlPath);
+            Assert::IsTrue(controlText.find("fault: stream_fault_dump") != std::string::npos);
+            Assert::IsTrue(controlText.find("ukf_dump_test: reason=stream_fault_dump;line=0;") != std::string::npos);
+            Assert::IsTrue(controlText.find("ukf_dump_test: reason=stream_fault_dump;line=31;") != std::string::npos);
+
+            std::remove(dataPath.c_str());
+            std::remove(sidecarPath.c_str());
             std::remove(controlPath.c_str());
         }
     };

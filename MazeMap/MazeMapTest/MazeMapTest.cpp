@@ -181,6 +181,13 @@ namespace MazeMap
 			Assert::IsTrue(rotated.rangeM > baseline.rangeM);
 		}
 
+		TEST_METHOD(WallGeometryModelDefaultFrameUsesProjectForwardHeading)
+		{
+			const WallGeometryModel::GeometryStateFrame frame{};
+			Assert::AreEqual(0.0f, frame.heading.x(), 1.0e-6f);
+			Assert::AreEqual(1.0f, frame.heading.y(), 1.0e-6f);
+		}
+
 		TEST_METHOD(WallGeometryModelCanIdentifyPostHits)
 		{
 			Maze maze;

@@ -2578,6 +2578,8 @@ private:
     bool EndMainSection(const OpenFloorMeasurementLabels& labels);
     bool AbortMainSection(const OpenFloorMeasurementLabels& labels, const char* reason);
     bool WriteMainEvent(const char* type, const char* message);
+    bool WriteFaultDumpTextEntryAndFlush(const char* type, const char* message);
+    bool DumpUkfFaultToTextLog(const char* reason);
     void ServiceMainLog();
     void FlushMainLog();
     void CloseMainLog();
@@ -3110,6 +3112,49 @@ bool OpenFloorMeasurementController::WriteMainEvent(const char* type, const char
     return _runtime.WriteTextLogEntry(micros(), type, message);
 }
 
+bool OpenFloorMeasurementController::WriteFaultDumpTextEntryAndFlush(const char* type, const char* message)
+{
+    if (!_runtime.WriteTextLogEntry(micros(), type, message))
+    {
+        return false;
+    }
+
+    _runtime.FlushTextLog();
+    return true;
+}
+
+bool OpenFloorMeasurementController::DumpUkfFaultToTextLog(const char* reason)
+{
+    char header[224] = {};
+    const int length = snprintf(
+        header,
+        sizeof(header),
+        "reason=%s;estimator_fault=%u;estimator_fault_reason=%s",
+        (reason != nullptr && reason[0] != '\0') ? reason : "unknown",
+        _drive.HasEstimatorFault() ? 1U : 0U,
+        _drive.GetEstimatorFaultReason());
+    if (length <= 0 || length >= static_cast<int>(sizeof(header)))
+    {
+        return false;
+    }
+
+    if (!WriteFaultDumpTextEntryAndFlush("ukf_dump_begin", header))
+    {
+        return false;
+    }
+
+    if (!_drive.WriteUkfDebugTextDump(
+            [this](const char* type, const char* message) noexcept -> bool
+            {
+                return WriteFaultDumpTextEntryAndFlush(type, message);
+            }))
+    {
+        return false;
+    }
+
+    return WriteFaultDumpTextEntryAndFlush("ukf_dump_end", "complete=true");
+}
+
 void OpenFloorMeasurementController::ServiceMainLog()
 {
     if (!_runtime.ServiceUtilityDataLog())
@@ -3389,6 +3434,12 @@ void OpenFloorMeasurementController::OnRuntimeFault(const char* message) noexcep
     {
         AppendStartupTrace(message);
     }
+
+    if (!DumpUkfFaultToTextLog(message))
+    {
+        AppendStartupTrace("open_floor_ukf_dump_failed");
+    }
+
     _timingLogOpen = false;
     _mainLogOpen = false;
 }

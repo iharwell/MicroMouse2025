@@ -1092,7 +1092,7 @@ private:
         snapshot.imuBackLeft = CaptureImu(_vehicle.IMU_BL, Pins::IMU_INT_1B, &snapshot.imuTiming);
         const float blGyroZRadps =
             imuExtrinsics.gyroZSign *
-            (_vehicle.IMU_BL.GyroRawToDps(snapshot.imuBackLeft.gyroZ) * DEG_TO_RAD_F);
+            (_vehicle.IMU_BL.GyroRawToClockwiseYawDps(snapshot.imuBackLeft.gyroZ) * DEG_TO_RAD_F);
         const Eigen::Vector2f accelImuG(
             _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelX),
             _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelY));

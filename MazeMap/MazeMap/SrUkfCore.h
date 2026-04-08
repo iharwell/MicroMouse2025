@@ -36,15 +36,19 @@ namespace MazeMap
     class EXPORT SrUkfCore
     {
     public:
-        static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.0018f;
-        static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.051f;
+        // April 8, 2026 D:\open_floor_main.csv tuning:
+        // - stationary hold set the IMU noise floor,
+        // - repeated open-loop launch passes set the moving encoder noise floor.
+        static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.0027f;
+        static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.065f;
         static constexpr float kStationaryEncoderVelocitySigmaMps = 1.76e-6f;
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
-        static constexpr float kImuYawRateSigmaRadps = 0.0013f;
-        static constexpr float kImuAccelSigmaMps2 = 0.014f;
+        static constexpr float kImuYawRateSigmaRadps = 0.0028f;
+        static constexpr float kImuAccelSigmaMps2 = 0.0052f;
 
         using StateVector = VehicleState::StateVector;
         using StateMatrix = VehicleState::StateMatrix;
+        using DebugTextSink = bool (*)(void* context, const char* type, const char* message) noexcept;
 
         SrUkfCore(
             const PlantParams& params = PlantParams::Default(),
@@ -65,8 +69,23 @@ namespace MazeMap
             return _params;
         }
 
+        bool WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept;
+
+        template <typename Sink>
+        bool WriteDebugTextDump(Sink&& sink) const noexcept
+        {
+            using SinkType = std::remove_reference_t<Sink>;
+            return WriteDebugTextDump(
+                const_cast<void*>(static_cast<const void*>(&sink)),
+                [](void* context, const char* type, const char* message) noexcept -> bool
+                {
+                    return (*static_cast<SinkType*>(context))(type, message);
+                });
+        }
+
         bool reset(const StateVector& state, const StateMatrix& covariance) noexcept;
         bool setState(const StateVector& state, const StateMatrix& covariance) noexcept;
+        static StateMatrix BuildDefaultInitialCovariance() noexcept;
 
         bool predict(float dt, const ControlInput& control) noexcept;
 
@@ -160,6 +179,7 @@ namespace MazeMap
 
         static void InvokeLoopHook(void* context, LoopHookInvoker loopHook) noexcept;
         static bool HasExactZeroWheelObservation(const EncoderObs& observation) noexcept;
+        static StateMatrix BuildDefaultProcessNoiseDensity() noexcept;
         static float ComputeDistancePerEncoderCountM(const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedMps(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedVarianceMps2(const EncoderObs& observation) noexcept;

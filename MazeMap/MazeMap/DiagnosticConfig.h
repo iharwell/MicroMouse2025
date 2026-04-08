@@ -33,7 +33,7 @@ namespace MazeMap::DiagnosticConfig
     constexpr uint16_t kInterTestHoldMs = 350U;
     // [Medium] SD flush cadence during diagnostics. Decrease it if you want less data loss risk on power interruption;
     // increase it if flush overhead limits logging throughput.
-    constexpr uint32_t kLogFlushPeriodMs = 250U;
+    constexpr uint32_t kLogFlushPeriodMs = 250000U;
     // [Medium] Launch repeats per command magnitude and sign in SEC_20_LAUNCH.
     constexpr uint8_t kLaunchRepeatsPerMagnitude = 5U;
     // [Medium] Straight repeats per speed bin and direction in SEC_30_STRAIGHT.
@@ -86,18 +86,18 @@ namespace MazeMap::DiagnosticConfig
     constexpr float kDiagnosticWheelIntegralLimitScale = Config::kNominalWheelIntegralLimitScale;
     // [High] Lowest raw drive command included in the kickoff sweep. Decrease to probe weaker launches; increase if
     // the robot clearly does not move at very low values and you want a shorter sweep.
-    constexpr float kKickoffSweepMinDriveCommand = 0.15f;
+    constexpr float kKickoffSweepMinDriveCommand = 0.05f;
     // [High] Highest raw drive command included in the kickoff sweep. Increase to probe more aggressive launches;
     // decrease if the sweep already reaches reliable breakaway or the robot moves too far per sample.
-    constexpr float kKickoffSweepMaxDriveCommand = 0.70f;
+    constexpr float kKickoffSweepMaxDriveCommand = 0.30f;
     // [Medium] Step size between kickoff sweep commands. Decrease for finer resolution; increase for a faster sweep.
     constexpr float kKickoffSweepStepDriveCommand = 0.01f;
     // [High] Pulse length for each kickoff sample. Increase if static friction needs a longer shove to reveal the
     // threshold; decrease if the robot moves too far before the recovery segment.
-    constexpr uint16_t kKickoffSweepPulseMs = 120U;
+    constexpr uint16_t kKickoffSweepPulseMs = 250U;
     // [Medium] Minimum distance that counts as "moved" during the kickoff sweep. Increase if encoder noise causes false
     // positives; decrease if real breakaway moves are being missed.
-    constexpr float kKickoffSweepMoveThresholdM = 0.02f;
+    constexpr float kKickoffSweepMoveThresholdM = 0.03f;
     // [Medium] Minimum peak speed that counts as "moved" during the kickoff sweep. Increase if noise spikes look like
     // launches; decrease if the robot creeps but does not cross the distance threshold.
     constexpr float kKickoffSweepMoveThresholdMps = 0.03f;
@@ -106,7 +106,7 @@ namespace MazeMap::DiagnosticConfig
     constexpr float kForwardSweepKickoffDriveCommand = 0.35f;
     // [Medium] Kickoff pulse length used before each forward-hold sample. Increase if the robot needs more time to
     // break away; decrease if the kickoff contributes too much of the measured travel.
-    constexpr uint16_t kForwardSweepKickoffMs = 80U;
+    constexpr uint16_t kForwardSweepKickoffMs = 120U;
     // [High] Lowest raw hold command included in the forward sweep. Decrease to probe weaker sustaining commands;
     // increase if very low commands are obviously useless.
     constexpr float kForwardSweepMinDriveCommand = 0.10f;

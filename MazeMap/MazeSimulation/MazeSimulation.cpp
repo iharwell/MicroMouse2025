@@ -36,12 +36,7 @@ namespace
 
     MazeMap::VehicleState::StateMatrix BuildOpenFloorBenchmarkCovariance()
     {
-        MazeMap::VehicleState::StateMatrix covariance =
-            MazeMap::VehicleState::StateMatrix::Identity() * 1.0e-3f;
-        covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL) = 0.25f;
-        covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR) = 0.25f;
-        covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz) = 0.01f;
-        return covariance;
+        return MazeMap::SrUkfCore::BuildDefaultInitialCovariance();
     }
 
     void ResetOpenFloorBenchmarkUkf(MazeMap::MouseUkfFacade& ukf)

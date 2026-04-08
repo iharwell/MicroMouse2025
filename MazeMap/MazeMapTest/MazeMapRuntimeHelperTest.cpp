@@ -172,6 +172,18 @@ namespace MazeMap::App
                 1.0e-6f);
         }
 
+        TEST_METHOD(Lsm6Dsv16xGyroProjectYawConversionFlipsSensorCounterclockwiseSign)
+        {
+            MazeMap::Vehicle::ImuBackLeft imu;
+            constexpr int16_t rawSample = 3200;
+
+            Assert::AreEqual(-1.0f, MazeMap::Vehicle::ImuBackLeft::ClockwiseYawFromSensorZSign(), 1.0e-6f);
+            Assert::AreEqual(
+                -imu.GyroRawToDps(rawSample),
+                imu.GyroRawToClockwiseYawDps(rawSample),
+                1.0e-6f);
+        }
+
         TEST_METHOD(MmLogLogger_WritesRevGBindingAndSidecar)
         {
             using MazeMap::mmlog::MmLogLogger;

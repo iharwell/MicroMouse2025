@@ -57,7 +57,7 @@ namespace MazeMap
         struct GeometryStateFrame
         {
             Eigen::Vector2f positionWorldM = Eigen::Vector2f::Zero();
-            Eigen::Vector2f heading = Eigen::Vector2f(1.0f, 0.0f);
+            Eigen::Vector2f heading = Eigen::Vector2f(0.0f, 1.0f);
             CellCoordinates centerCell{};
         };
 

@@ -6,16 +6,166 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 namespace
 {
+    constexpr std::array<const char*, MazeMap::VehicleState::kDimension> kUkfStateFieldNames = {
+        "px_m",
+        "py_m",
+        "psi_rad",
+        "u_mps",
+        "v_mps",
+        "r_radps",
+        "omega_l_radps",
+        "omega_r_radps",
+        "bgz_radps"
+    };
+
+    constexpr std::array<const char*, 3> kUkfImuNoiseFieldNames = {
+        "gyro_z_radps",
+        "accel_body_x_mps2",
+        "accel_body_y_mps2"
+    };
+
+    constexpr std::array<const char*, 2> kUkfFrontNoiseFieldNames = {
+        "front_left_range_m",
+        "front_right_range_m"
+    };
+
+    constexpr std::array<const char*, 1> kUkfSideNoiseFieldNames = {
+        "side_range_m"
+    };
+
     Eigen::Vector2f HeadingUnitFromYaw(float yaw) noexcept
     {
         float s = 0.0f;
         float c = 0.0f;
         sin_cosf(yaw, s, c);
         return Eigen::Vector2f(s, c);
+    }
+
+    template <typename... Args>
+    bool AppendFormattedFragment(
+        char* buffer,
+        const std::size_t bufferSize,
+        std::size_t& used,
+        const char* format,
+        Args... args) noexcept
+    {
+        if (buffer == nullptr || format == nullptr || used >= bufferSize)
+        {
+            return false;
+        }
+
+        const int length = std::snprintf(buffer + used, bufferSize - used, format, args...);
+        if (length <= 0 || static_cast<std::size_t>(length) >= (bufferSize - used))
+        {
+            return false;
+        }
+
+        used += static_cast<std::size_t>(length);
+        return true;
+    }
+
+    inline bool EmitDebugTextMessage(
+        void* context,
+        const MazeMap::SrUkfCore::DebugTextSink sink,
+        const char* type,
+        const char* message) noexcept
+    {
+        return
+            sink != nullptr &&
+            type != nullptr &&
+            type[0] != '\0' &&
+            message != nullptr &&
+            sink(context, type, message);
+    }
+
+    template <typename... Args>
+    bool EmitDebugTextLine(
+        void* context,
+        const MazeMap::SrUkfCore::DebugTextSink sink,
+        const char* type,
+        const char* format,
+        Args... args) noexcept
+    {
+        char message[300] = {};
+        const int length = std::snprintf(message, sizeof(message), format, args...);
+        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        {
+            return false;
+        }
+
+        return EmitDebugTextMessage(context, sink, type, message);
+    }
+
+    template <std::size_t N, typename Reader>
+    bool EmitNamedFloatValuesLine(
+        void* context,
+        const MazeMap::SrUkfCore::DebugTextSink sink,
+        const char* type,
+        const char* prefix,
+        const std::array<const char*, N>& fieldNames,
+        Reader&& reader) noexcept
+    {
+        char message[300] = {};
+        std::size_t used = 0U;
+        if (prefix != nullptr && prefix[0] != '\0' &&
+            !AppendFormattedFragment(message, sizeof(message), used, "%s", prefix))
+        {
+            return false;
+        }
+
+        for (std::size_t index = 0; index < N; ++index)
+        {
+            if (!AppendFormattedFragment(
+                    message,
+                    sizeof(message),
+                    used,
+                    "%s%s=%.9g",
+                    (used != 0U) ? ";" : "",
+                    fieldNames[index],
+                    static_cast<double>(reader(index))))
+            {
+                return false;
+            }
+        }
+
+        return EmitDebugTextMessage(context, sink, type, message);
+    }
+
+    template <std::size_t N, typename MatrixType>
+    bool EmitNamedMatrixRowLine(
+        void* context,
+        const MazeMap::SrUkfCore::DebugTextSink sink,
+        const char* type,
+        const std::array<const char*, N>& fieldNames,
+        const MatrixType& matrix,
+        const int row) noexcept
+    {
+        char prefix[48] = {};
+        const int prefixLength = std::snprintf(
+            prefix,
+            sizeof(prefix),
+            "row=%s",
+            fieldNames[static_cast<std::size_t>(row)]);
+        if (prefixLength <= 0 || prefixLength >= static_cast<int>(sizeof(prefix)))
+        {
+            return false;
+        }
+
+        return EmitNamedFloatValuesLine(
+            context,
+            sink,
+            type,
+            prefix,
+            fieldNames,
+            [&](const std::size_t column) noexcept
+            {
+                return matrix(row, static_cast<int>(column));
+            });
     }
 }
 
@@ -40,23 +190,10 @@ namespace MazeMap
         _filter.setStateNormalizer(&VehicleState::NormalizeStateVector);
 
         StateVector initialState = StateVector::Zero();
-        StateMatrix initialCovariance = StateMatrix::Identity() * 1.0e-3f;
-        initialCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = 0.25f;
-        initialCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = 0.25f;
-        initialCovariance(VehicleState::kBgz, VehicleState::kBgz) = 0.01f;
+        const StateMatrix initialCovariance = BuildDefaultInitialCovariance();
         _filter.setState(initialState, initialCovariance);
 
-        StateMatrix processNoise = StateMatrix::Zero();
-        processNoise.diagonal() <<
-            0.0f,
-            0.0f,
-            0.0f,
-            3.0e-4f,
-            3.0e-4f,
-            6.0e-4f,
-            4.0e-2f,
-            4.0e-2f,
-            2.0e-5f;
+        const StateMatrix processNoise = BuildDefaultProcessNoiseDensity();
         _sqrtProcessNoiseDensity = StateMatrix::Zero();
         _sqrtProcessNoiseDensity.diagonal() = processNoise.diagonal().cwiseSqrt();
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
@@ -68,6 +205,286 @@ namespace MazeMap
         _sqrtFrontNoise(0, 0) = 0.010f;
         _sqrtFrontNoise(1, 1) = 0.010f;
         _sqrtSideNoise(0, 0) = 0.012f;
+    }
+
+    bool SrUkfCore::WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept
+    {
+        if (sink == nullptr)
+        {
+            return false;
+        }
+
+        if (!EmitNamedFloatValuesLine(
+                context,
+                sink,
+                "ukf_dump_state",
+                nullptr,
+                kUkfStateFieldNames,
+                [&](const std::size_t index) noexcept
+                {
+                    return _filter.state()(static_cast<int>(index));
+                }))
+        {
+            return false;
+        }
+
+        const StateMatrix covariance = _filter.covariance();
+        for (int row = 0; row < VehicleState::kDimension; ++row)
+        {
+            if (!EmitNamedMatrixRowLine(
+                    context,
+                    sink,
+                    "ukf_dump_covariance_row",
+                    kUkfStateFieldNames,
+                    covariance,
+                    row))
+            {
+                return false;
+            }
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_prediction_reference",
+                "have_prediction_reference=%s",
+                _havePredictionReference ? "true" : "false"))
+        {
+            return false;
+        }
+
+        if (!EmitNamedFloatValuesLine(
+                context,
+                sink,
+                "ukf_dump_pre_predict_state",
+                nullptr,
+                kUkfStateFieldNames,
+                [&](const std::size_t index) noexcept
+                {
+                    return _prePredictState(static_cast<int>(index));
+                }))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_last_control",
+                "left_motor_command=%.9g;right_motor_command=%.9g;fan_duty_cycle=%.9g;battery_voltage_v=%.9g",
+                static_cast<double>(_lastControl.leftMotorCommand),
+                static_cast<double>(_lastControl.rightMotorCommand),
+                static_cast<double>(_lastControl.fanDutyCycle),
+                static_cast<double>(_lastControl.batteryVoltageV)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_last_encoder_obs",
+                "total_left_counts=%ld;total_right_counts=%ld;omega_left_radps=%.9g;omega_right_radps=%.9g",
+                static_cast<long>(_lastEncoderObs.totalLeftCounts),
+                static_cast<long>(_lastEncoderObs.totalRightCounts),
+                static_cast<double>(_lastEncoderObs.omegaLeftRadps),
+                static_cast<double>(_lastEncoderObs.omegaRightRadps)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_params_mass_geometry",
+                "mass_kg=%.9g;effective_longitudinal_mass_kg=%.9g;yaw_inertia_kg_m2=%.9g;track_width_m=%.9g;contact_patch_longitudinal_offset_m=%.9g;wheel_radius_m=%.9g;equivalent_wheel_inertia_kg_m2=%.9g",
+                static_cast<double>(_params.massKg),
+                static_cast<double>(_params.effectiveLongitudinalMassKg),
+                static_cast<double>(_params.yawInertiaKgM2),
+                static_cast<double>(_params.trackWidthM),
+                static_cast<double>(_params.contactPatchLongitudinalOffsetM),
+                static_cast<double>(_params.wheelRadiusM),
+                static_cast<double>(_params.equivalentWheelInertiaKgM2)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_params_drive_electrical",
+                "supply_voltage_v=%.9g;drive_resistance_ohms=%.9g;torque_constant_nm_per_a=%.9g;speed_constant_radps_per_volt=%.9g;no_load_current_a=%.9g;motor_current_limit_a=%.9g;gear_ratio=%.9g;encoder_counts_per_motor_rev=%u",
+                static_cast<double>(_params.supplyVoltageV),
+                static_cast<double>(_params.driveResistanceOhms),
+                static_cast<double>(_params.torqueConstantNmPerA),
+                static_cast<double>(_params.speedConstantRadpsPerVolt),
+                static_cast<double>(_params.noLoadCurrentA),
+                static_cast<double>(_params.motorCurrentLimitA),
+                static_cast<double>(_params.gearRatio),
+                static_cast<unsigned>(_params.encoderCountsPerMotorRev)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_params_tire_friction",
+                "drivetrain_efficiency=%.9g;rolling_friction_torque_nm=%.9g;viscous_friction_nm_per_radps=%.9g;longitudinal_tire_stiffness_n=%.9g;cornering_stiffness_front_n_per_rad=%.9g;cornering_stiffness_rear_n_per_rad=%.9g;mu_front=%.9g;mu_rear=%.9g;front_load_fraction=%.9g",
+                static_cast<double>(_params.drivetrainEfficiency),
+                static_cast<double>(_params.rollingFrictionTorqueNm),
+                static_cast<double>(_params.viscousFrictionNmPerRadps),
+                static_cast<double>(_params.longitudinalTireStiffnessN),
+                static_cast<double>(_params.corneringStiffnessFrontNPerRad),
+                static_cast<double>(_params.corneringStiffnessRearNPerRad),
+                static_cast<double>(_params.muFront),
+                static_cast<double>(_params.muRear),
+                static_cast<double>(_params.frontLoadFraction)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_params_misc",
+                "velocity_epsilon_mps=%.9g;force_epsilon_n=%.9g;fan_downforce_at_full_duty_n=%.9g;no_hit_range_m=%.9g",
+                static_cast<double>(_params.velocityEpsilonMps),
+                static_cast<double>(_params.forceEpsilonN),
+                static_cast<double>(_params.fanDownforceAtFullDutyN),
+                static_cast<double>(_params.noHitRangeM)))
+        {
+            return false;
+        }
+
+        for (std::size_t index = 0; index < _params.contactPositionsBodyM.size(); ++index)
+        {
+            const Eigen::Vector2f& position = _params.contactPositionsBodyM[index];
+            if (!EmitDebugTextLine(
+                    context,
+                    sink,
+                    "ukf_dump_contact_position",
+                    "index=%u;x_m=%.9g;y_m=%.9g",
+                    static_cast<unsigned>(index),
+                    static_cast<double>(position.x()),
+                    static_cast<double>(position.y())))
+            {
+                return false;
+            }
+        }
+
+        auto emitSensorExtrinsics =
+            [&](const char* type, const SensorExtrinsics& sensor) noexcept
+            {
+                return EmitDebugTextLine(
+                    context,
+                    sink,
+                    type,
+                    "position_x_m=%.9g;position_y_m=%.9g;direction_x=%.9g;direction_y=%.9g;yaw_offset_rad=%.9g",
+                    static_cast<double>(sensor.positionBodyM.x()),
+                    static_cast<double>(sensor.positionBodyM.y()),
+                    static_cast<double>(sensor.directionBody.x()),
+                    static_cast<double>(sensor.directionBody.y()),
+                    static_cast<double>(sensor.yawOffsetRad));
+            };
+        if (!emitSensorExtrinsics("ukf_dump_sensor_front_left", _params.frontLeftSensor) ||
+            !emitSensorExtrinsics("ukf_dump_sensor_front_right", _params.frontRightSensor) ||
+            !emitSensorExtrinsics("ukf_dump_sensor_side_left", _params.sideLeftSensor) ||
+            !emitSensorExtrinsics("ukf_dump_sensor_side_right", _params.sideRightSensor))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_imu_extrinsics",
+                "position_x_m=%.9g;position_y_m=%.9g;accel_body_from_imu_00=%.9g;accel_body_from_imu_01=%.9g;accel_body_from_imu_10=%.9g;accel_body_from_imu_11=%.9g;gyro_z_sign=%.9g",
+                static_cast<double>(_params.imu.positionBodyM.x()),
+                static_cast<double>(_params.imu.positionBodyM.y()),
+                static_cast<double>(_params.imu.accelBodyFromImu(0, 0)),
+                static_cast<double>(_params.imu.accelBodyFromImu(0, 1)),
+                static_cast<double>(_params.imu.accelBodyFromImu(1, 0)),
+                static_cast<double>(_params.imu.accelBodyFromImu(1, 1)),
+                static_cast<double>(_params.imu.gyroZSign)))
+        {
+            return false;
+        }
+
+        for (int row = 0; row < VehicleState::kDimension; ++row)
+        {
+            if (!EmitNamedMatrixRowLine(
+                    context,
+                    sink,
+                    "ukf_dump_process_noise_sqrt_row",
+                    kUkfStateFieldNames,
+                    _sqrtProcessNoiseDensity,
+                    row))
+            {
+                return false;
+            }
+        }
+
+        for (int row = 0; row < static_cast<int>(kUkfImuNoiseFieldNames.size()); ++row)
+        {
+            if (!EmitNamedMatrixRowLine(
+                    context,
+                    sink,
+                    "ukf_dump_imu_noise_sqrt_row",
+                    kUkfImuNoiseFieldNames,
+                    _sqrtImuNoise,
+                    row))
+            {
+                return false;
+            }
+        }
+
+        for (int row = 0; row < static_cast<int>(kUkfFrontNoiseFieldNames.size()); ++row)
+        {
+            if (!EmitNamedMatrixRowLine(
+                    context,
+                    sink,
+                    "ukf_dump_front_noise_sqrt_row",
+                    kUkfFrontNoiseFieldNames,
+                    _sqrtFrontNoise,
+                    row))
+            {
+                return false;
+            }
+        }
+
+        return EmitNamedMatrixRowLine(
+            context,
+            sink,
+            "ukf_dump_side_noise_sqrt_row",
+            kUkfSideNoiseFieldNames,
+            _sqrtSideNoise,
+            0);
+    }
+
+    SrUkfCore::StateMatrix SrUkfCore::BuildDefaultInitialCovariance() noexcept
+    {
+        StateMatrix covariance = StateMatrix::Identity() * 1.0e-3f;
+        covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = 0.25f;
+        covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = 0.25f;
+        covariance(VehicleState::kBgz, VehicleState::kBgz) = 0.01f;
+        return covariance;
+    }
+
+    SrUkfCore::StateMatrix SrUkfCore::BuildDefaultProcessNoiseDensity() noexcept
+    {
+        StateMatrix processNoise = StateMatrix::Zero();
+        processNoise.diagonal() <<
+            0.0f,
+            0.0f,
+            0.0f,
+            3.0e-4f,
+            3.0e-4f,
+            6.0e-4f,
+            4.0e-2f,
+            4.0e-2f,
+            2.0e-5f;
+        return processNoise;
     }
 
     bool SrUkfCore::reset(const StateVector& state, const StateMatrix& covariance) noexcept

@@ -591,6 +591,21 @@ namespace MazeMap
             return (static_cast<float>(raw) * GyroSensitivityMdpsPerLsb()) / 1000.0f;
         }
 
+        static constexpr float ClockwiseYawFromSensorZSign() noexcept
+        {
+            return -1.0f;
+        }
+
+        float GyroRawToClockwiseYawDps(int16_t raw) const
+        {
+            return ClockwiseYawFromSensorZSign() * GyroRawToDps(raw);
+        }
+
+        float ReadClockwiseYawDps()
+        {
+            return GyroRawToClockwiseYawDps(ReadGyroZ());
+        }
+
     private:
         static constexpr uint8_t kReadMask = 0x80;
         static constexpr uint8_t kAddressMask = 0x7F;
@@ -905,6 +920,21 @@ namespace MazeMap
         float GyroRawToDps(int16_t raw) const
         {
             return (static_cast<float>(raw) * GyroSensitivityMdpsPerLsb()) / 1000.0f;
+        }
+
+        static constexpr float ClockwiseYawFromSensorZSign() noexcept
+        {
+            return -1.0f;
+        }
+
+        float GyroRawToClockwiseYawDps(int16_t raw) const
+        {
+            return ClockwiseYawFromSensorZSign() * GyroRawToDps(raw);
+        }
+
+        float ReadClockwiseYawDps() const
+        {
+            return GyroRawToClockwiseYawDps(ReadGyroZ());
         }
 
     private:
