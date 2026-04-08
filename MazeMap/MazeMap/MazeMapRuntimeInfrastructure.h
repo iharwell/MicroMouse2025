@@ -3,9 +3,7 @@
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"
-#include "OptionalRuntimeEventLog.h"
 #include "RuntimeBinaryLogSupport.h"
-#include "RuntimeControlLogSupport.h"
 
 // Private application infrastructure helpers for the MazeMap runtime.
 
@@ -104,21 +102,22 @@ namespace MazeMap::App::Internal::Runtime
             log.writeMetadata("mission_accel_bias_mg", value);
     }
 
-    inline bool WriteDiagnosticTuningEvents(OptionalRuntimeEventLog& eventLog)
+    template <typename WriteEventFn>
+    inline bool WriteDiagnosticTuningEvents(WriteEventFn&& writeEvent)
     {
         const auto& driveModel = MazeMap::MotorEncoderDrive::GetSharedPhysicalModel();
         const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
         static const MazeMap::Vehicle sharedVehicle{};
         const MazeMap::InPlaceTurnProfile inPlaceTurnProfile = BuildSharedInPlaceTurnProfile(sharedVehicle);
         char message[256] = {};
-        auto writeConfig = [&eventLog, &message](const char* format, auto... args) -> bool
+        auto writeConfig = [&writeEvent, &message](const char* format, auto... args) -> bool
         {
             const int length = snprintf(message, sizeof(message), format, args...);
             if (length <= 0 || length >= static_cast<int>(sizeof(message)))
             {
                 return false;
             }
-            return eventLog.WriteEvent(micros(), "config", message);
+            return writeEvent("config", message);
         };
 
         return
@@ -198,15 +197,16 @@ namespace MazeMap::App::Internal::Runtime
                 inPlaceTurnProfile.maxAngularSpeedRadps,
                 inPlaceTurnProfile.angularAccelRadps2,
                 DiagnosticConfig::kKickoffSweepMinDriveCommand,
-                DiagnosticConfig::kKickoffSweepMaxDriveCommand,
-                DiagnosticConfig::kKickoffSweepStepDriveCommand);
+                 DiagnosticConfig::kKickoffSweepMaxDriveCommand,
+                 DiagnosticConfig::kKickoffSweepStepDriveCommand);
     }
 
-    inline bool WriteDiagnosticSummaryInstructions(OptionalRuntimeEventLog& eventLog)
+    template <typename WriteEventFn>
+    inline bool WriteDiagnosticSummaryInstructions(WriteEventFn&& writeEvent)
     {
         for (size_t index = 0U; index < MazeMap::GetDiagnosticSummaryInstructionCount(); ++index)
         {
-            if (!eventLog.WriteEvent(micros(), "summary", MazeMap::GetDiagnosticSummaryInstruction(index).message))
+            if (!writeEvent("summary", MazeMap::GetDiagnosticSummaryInstruction(index).message))
             {
                 return false;
             }
@@ -295,442 +295,6 @@ namespace MazeMap::App::Internal::Runtime
     }
 }
 
-class OpenFloorRunManifestWriter
-{
-public:
-    bool WriteManifest(const char* runId, bool pinsLatchedAtBoot, float batteryVoltageStart, float fanDutyCycleStart)
-    {
-        MazeMap::CoreFileExport file;
-        if (!file.Open(MazeMap::kOpenFloorManifestFileName))
-        {
-            return false;
-        }
-
-        const char* safeRunId = (runId != nullptr) ? runId : "";
-        if (!file.Write("{\n")) return false;
-        if (!WriteJsonString(file, "format_version", MazeMap::kOpenFloorFormatVersion, true)) return false;
-        if (!WriteJsonString(file, "run_id", safeRunId, true)) return false;
-        if (!WriteJsonString(file, "firmware_revision", __DATE__ " " __TIME__, true)) return false;
-        if (!WriteJsonString(file, "boot_reason", "pins_27_28_shorted_at_boot", true)) return false;
-        if (!WriteJsonString(file, "selected_routine", MazeMap::kOpenFloorSelectedRoutineName, true)) return false;
-        if (!WriteJsonString(file, "primitive_schedule_revision", MazeMap::kOpenFloorPrimitiveScheduleRevision, true)) return false;
-        if (!WriteJsonString(file, "phase_binning_revision", MazeMap::kOpenFloorPhaseBinningRevision, true)) return false;
-        if (!WriteJsonString(file, "active_imu_id", MazeMap::kOpenFloorActiveImuId, true)) return false;
-        if (!WriteJsonString(file, "imu_extrinsics_revision", MazeMap::kOpenFloorImuExtrinsicsRevision, true)) return false;
-        if (!WriteJsonString(file, "start_marker_definitions_revision", MazeMap::kOpenFloorStartMarkerDefinitionsRevision, true)) return false;
-        if (!WriteJsonString(file, "logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision, true)) return false;
-        if (!WriteJsonBool(file, "pins_27_28_shorted_at_boot", pinsLatchedAtBoot, true)) return false;
-        if (!WriteJsonFloat(file, "battery_voltage_start", batteryVoltageStart, true)) return false;
-        if (!WriteJsonFanState(file, fanDutyCycleStart, true)) return false;
-        if (!WriteJsonStringArray(
-                file,
-                "files_written",
-                {
-                    MazeMap::kOpenFloorManifestFileName,
-                    MazeMap::kOpenFloorTimingFileName,
-                    MazeMap::kOpenFloorMainFileName,
-                    MazeMap::App::Internal::Runtime::kRuntimeControlLogFileName
-                },
-                true)) return false;
-        if (!WriteJsonActiveConstants(file, true)) return false;
-        if (!WriteJsonWorkspaceDefinition(file, true)) return false;
-        if (!WriteJsonMarkers(file, true)) return false;
-        if (!WriteJsonSectionDefinitions(file, true)) return false;
-        if (!WriteJsonPrimitiveSchedule(file, true)) return false;
-        if (!WriteJsonDeferredPrimitives(file, false)) return false;
-        if (!file.Write("}\n")) return false;
-
-        file.Flush();
-        file.Close();
-        return true;
-    }
-
-private:
-    static bool WriteJsonFanState(MazeMap::CoreFileExport& file, float fanDutyCycle, bool trailingComma)
-    {
-        char line[160] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "  \"fan_state_start\": {\"enabled\": %s, \"duty_cycle\": %.3f}%s\n",
-            fanDutyCycle > 0.0f ? "true" : "false",
-            fanDutyCycle,
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteJsonString(MazeMap::CoreFileExport& file, const char* key, const char* value, bool trailingComma)
-    {
-        char line[256] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "  \"%s\": \"%s\"%s\n",
-            (key != nullptr) ? key : "",
-            (value != nullptr) ? value : "",
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteJsonBool(MazeMap::CoreFileExport& file, const char* key, bool value, bool trailingComma)
-    {
-        char line[128] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "  \"%s\": %s%s\n",
-            (key != nullptr) ? key : "",
-            value ? "true" : "false",
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteJsonUnsigned(MazeMap::CoreFileExport& file, const char* key, unsigned long value, bool trailingComma)
-    {
-        char line[128] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "  \"%s\": %lu%s\n",
-            (key != nullptr) ? key : "",
-            value,
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteJsonFloat(MazeMap::CoreFileExport& file, const char* key, float value, bool trailingComma)
-    {
-        char line[128] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "  \"%s\": %.3f%s\n",
-            (key != nullptr) ? key : "",
-            value,
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteJsonStringArray(
-        MazeMap::CoreFileExport& file,
-        const char* key,
-        std::initializer_list<const char*> values,
-        bool trailingComma)
-    {
-        char line[512] = {};
-        int length = snprintf(line, sizeof(line), "  \"%s\": [", (key != nullptr) ? key : "");
-        if (length <= 0 || length >= static_cast<int>(sizeof(line)))
-        {
-            return false;
-        }
-
-        bool first = true;
-        for (const char* value : values)
-        {
-            const int written = snprintf(
-                line + length,
-                sizeof(line) - static_cast<size_t>(length),
-                "%s\"%s\"",
-                first ? "" : ", ",
-                (value != nullptr) ? value : "");
-            if (written <= 0 || (length + written) >= static_cast<int>(sizeof(line)))
-            {
-                return false;
-            }
-            length += written;
-            first = false;
-        }
-
-        const int tail = snprintf(
-            line + length,
-            sizeof(line) - static_cast<size_t>(length),
-            "]%s\n",
-            trailingComma ? "," : "");
-        return tail > 0 && (length + tail) < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteJsonActiveConstants(MazeMap::CoreFileExport& file, bool trailingComma)
-    {
-        if (!file.Write("  \"active_constants\": {\n"))
-        {
-            return false;
-        }
-
-        if (!WriteIndentedUnsigned(file, 4U, "control_period_us", DiagnosticConfig::kControlPeriodUs, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "timing_capture_cycles", DiagnosticConfig::kTimingCaptureCycles, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "workspace_half_steps", DiagnosticConfig::kWorkspaceSizeHalfSteps, true)) return false;
-        if (!WriteIndentedFloat(file, 4U, "half_step_mm", DiagnosticConfig::kHalfStepMm, 1U, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "static_hold_ms", DiagnosticConfig::kStaticHoldMs, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "launch_repeats_per_magnitude", DiagnosticConfig::kLaunchRepeatsPerMagnitude, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "straight_repeats_per_speed_direction", DiagnosticConfig::kStraightRepeatsPerSpeed, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "yaw_repeats_per_primitive_speed", DiagnosticConfig::kYawRepeatsPerPrimitiveSpeed, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "smooth_repeats_per_primitive_speed", DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed, true)) return false;
-        if (!WriteIndentedUnsigned(file, 4U, "loop_repeats", DiagnosticConfig::kLoopRepeats, true)) return false;
-        if (!WriteIndentedFloatArray(file, 4U, "straight_speed_bins_mps", MazeMap::kOpenFloorStraightSpeedBinsMps, 2U, true)) return false;
-        if (!WriteIndentedFloatArray(file, 4U, "yaw_omega_bins_radps", MazeMap::kOpenFloorYawOmegaBinsRadps, 2U, true)) return false;
-        if (!WriteIndentedFloatArray(file, 4U, "smooth_speed_bins_mps", MazeMap::kOpenFloorSmoothSpeedBinsMps, 2U, true)) return false;
-        if (!WriteIndentedFloatArray(file, 4U, "launch_drive_magnitudes", MazeMap::kOpenFloorLaunchDriveMagnitudes, 2U, false)) return false;
-
-        return file.Write(trailingComma ? "  },\n" : "  }\n");
-    }
-
-    static bool WriteJsonWorkspaceDefinition(MazeMap::CoreFileExport& file, bool trailingComma)
-    {
-        if (!file.Write("  \"workspace_definition\": {\n"))
-        {
-            return false;
-        }
-
-        if (!WriteIndentedString(file, 4U, "rule", "origin_only", true)) return false;
-        if (!WriteIndentedBool(file, 4U, "origin_bounded", true, true)) return false;
-        if (!WriteIndentedFloat(file, 4U, "x_half_steps_min", 0.0f, 1U, true)) return false;
-        if (!WriteIndentedFloat(file, 4U, "x_half_steps_max", static_cast<float>(DiagnosticConfig::kWorkspaceSizeHalfSteps), 1U, true)) return false;
-        if (!WriteIndentedFloat(file, 4U, "y_half_steps_min", 0.0f, 1U, true)) return false;
-        if (!WriteIndentedFloat(file, 4U, "y_half_steps_max", static_cast<float>(DiagnosticConfig::kWorkspaceSizeHalfSteps), 1U, true)) return false;
-        if (!WriteIndentedFloat(file, 4U, "half_step_mm", DiagnosticConfig::kHalfStepMm, 1U, false)) return false;
-
-        return file.Write(trailingComma ? "  },\n" : "  }\n");
-    }
-
-    static bool WriteJsonMarkers(MazeMap::CoreFileExport& file, bool trailingComma)
-    {
-        if (!file.Write("  \"start_markers\": [\n"))
-        {
-            return false;
-        }
-
-        for (size_t index = 0U; index < MazeMap::kOpenFloorMarkers.size(); ++index)
-        {
-            const MazeMap::OpenFloorMarkerPose& marker = MazeMap::kOpenFloorMarkers[index];
-            char line[256] = {};
-            const int length = snprintf(
-                line,
-                sizeof(line),
-                "    {\"id\": \"%s\", \"x_half_steps\": %.1f, \"y_half_steps\": %.1f, \"heading\": \"%s\"}%s\n",
-                marker.name,
-                marker.xHalfSteps,
-                marker.yHalfSteps,
-                DirectionName(marker.heading),
-                (index + 1U < MazeMap::kOpenFloorMarkers.size()) ? "," : "");
-            if (length <= 0 || length >= static_cast<int>(sizeof(line)) || !file.Write(line))
-            {
-                return false;
-            }
-        }
-
-        return file.Write(trailingComma ? "  ],\n" : "  ]\n");
-    }
-
-    static bool WriteJsonSectionDefinitions(MazeMap::CoreFileExport& file, bool trailingComma)
-    {
-        if (!file.Write("  \"section_definitions\": [\n"))
-        {
-            return false;
-        }
-
-        for (size_t index = 0U; index < MazeMap::kOpenFloorSections.size(); ++index)
-        {
-            const MazeMap::OpenFloorSectionDefinition& section = MazeMap::kOpenFloorSections[index];
-            char line[256] = {};
-            const int length = snprintf(
-                line,
-                sizeof(line),
-                "    {\"section_id\": \"%s\", \"start_marker\": \"%s\"}%s\n",
-                section.name,
-                MazeMap::OpenFloorMarkerName(section.startMarker),
-                (index + 1U < MazeMap::kOpenFloorSections.size()) ? "," : "");
-            if (length <= 0 || length >= static_cast<int>(sizeof(line)) || !file.Write(line))
-            {
-                return false;
-            }
-        }
-
-        return file.Write(trailingComma ? "  ],\n" : "  ]\n");
-    }
-
-    static bool WriteJsonPrimitiveSchedule(MazeMap::CoreFileExport& file, bool trailingComma)
-    {
-        return file.Write(
-                   "  \"primitive_schedule\": [\n"
-                   "    {\"section_id\": \"SEC_00_TIMING\", \"start_marker\": \"C\", \"sequence\": [], \"repeats\": 1, \"notes\": \"timing characterization only\"},\n"
-                   "    {\"section_id\": \"SEC_10_STATIC\", \"start_marker\": \"C\", \"sequence\": [], \"repeats\": 1, \"notes\": \"stationary hold\"},\n"
-                   "    {\"section_id\": \"SEC_20_LAUNCH\", \"start_marker\": \"C\", \"sequence\": [\"OPEN_LOOP_LAUNCH\"], \"signs\": [\"positive\", \"negative\"], \"repeats_per_magnitude\": 5, \"magnitudes\": [0.18, 0.24, 0.30, 0.36], \"recovery\": \"return_to_C_at_low_speed\"},\n"
-                   "    {\"section_id\": \"SEC_30_STRAIGHT\", \"start_marker\": \"N\", \"sequence\": [\"STR4\"], \"paired_start_marker\": \"S\", \"directions\": [\"northbound\", \"southbound\"], \"repeats_per_speed_direction\": 3, \"speed_bins_mps\": [0.25, 0.40, 0.55]},\n"
-                   "    {\"section_id\": \"SEC_40_YAW\", \"start_marker\": \"C\", \"sequence\": [\"IP90\", \"IP90_M\", \"IP180\"], \"repeats_per_primitive_speed\": 3, \"omega_bins_radps\": [3.00, 6.00, 9.00]},\n"
-                   "    {\"section_id\": \"SEC_50_SMOOTH\", \"start_marker\": \"C\", \"sequence\": [\"S45SS\", \"S45SS_M\", \"S90SS\", \"S90SS_M\", \"S135SS\", \"S135SS_M\"], \"repeats_per_primitive_speed\": 5, \"speed_bins_mps\": [0.25, 0.35, 0.45]},\n"
-                   "    {\"section_id\": \"SEC_60_LOOP_CW\", \"start_marker\": \"CW\", \"sequence\": [\"STR2\", \"IP90\", \"STR2\", \"IP90\", \"STR2\", \"IP90\", \"STR2\", \"IP90\"], \"repeats\": 5},\n"
-                   "    {\"section_id\": \"SEC_70_LOOP_CCW\", \"start_marker\": \"CCW\", \"sequence\": [\"STR2\", \"IP90_M\", \"STR2\", \"IP90_M\", \"STR2\", \"IP90_M\", \"STR2\", \"IP90_M\"], \"repeats\": 5}\n"
-                   "  ]")
-            && file.Write(trailingComma ? ",\n" : "\n");
-    }
-
-    static bool WriteJsonDeferredPrimitives(MazeMap::CoreFileExport& file, bool trailingComma)
-    {
-        if (!file.Write("  \"deferred_primitive_list\": [\n"))
-        {
-            return false;
-        }
-
-        for (size_t index = 0U; index < MazeMap::kOpenFloorDeferredPrimitiveIds.size(); ++index)
-        {
-            char line[96] = {};
-            const int length = snprintf(
-                line,
-                sizeof(line),
-                "    \"%s\"%s\n",
-                MazeMap::kOpenFloorDeferredPrimitiveIds[index],
-                (index + 1U < MazeMap::kOpenFloorDeferredPrimitiveIds.size()) ? "," : "");
-            if (length <= 0 || length >= static_cast<int>(sizeof(line)) || !file.Write(line))
-            {
-                return false;
-            }
-        }
-
-        return file.Write(trailingComma ? "  ],\n" : "  ]\n");
-    }
-
-    static bool WriteIndentedString(
-        MazeMap::CoreFileExport& file,
-        uint8_t indent,
-        const char* key,
-        const char* value,
-        bool trailingComma)
-    {
-        char line[256] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "%*s\"%s\": \"%s\"%s\n",
-            static_cast<int>(indent),
-            "",
-            (key != nullptr) ? key : "",
-            (value != nullptr) ? value : "",
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteIndentedBool(
-        MazeMap::CoreFileExport& file,
-        uint8_t indent,
-        const char* key,
-        bool value,
-        bool trailingComma)
-    {
-        char line[256] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "%*s\"%s\": %s%s\n",
-            static_cast<int>(indent),
-            "",
-            (key != nullptr) ? key : "",
-            value ? "true" : "false",
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteIndentedUnsigned(
-        MazeMap::CoreFileExport& file,
-        uint8_t indent,
-        const char* key,
-        unsigned long value,
-        bool trailingComma)
-    {
-        char line[256] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            "%*s\"%s\": %lu%s\n",
-            static_cast<int>(indent),
-            "",
-            (key != nullptr) ? key : "",
-            value,
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    static bool WriteIndentedFloat(
-        MazeMap::CoreFileExport& file,
-        uint8_t indent,
-        const char* key,
-        float value,
-        uint8_t precision,
-        bool trailingComma)
-    {
-        char format[48] = {};
-        if (snprintf(format, sizeof(format), "%%*s\"%%s\": %%.%uf%%s\n", static_cast<unsigned>(precision)) <= 0)
-        {
-            return false;
-        }
-
-        char line[256] = {};
-        const int length = snprintf(
-            line,
-            sizeof(line),
-            format,
-            static_cast<int>(indent),
-            "",
-            (key != nullptr) ? key : "",
-            value,
-            trailingComma ? "," : "");
-        return length > 0 && length < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-
-    template <size_t N>
-    static bool WriteIndentedFloatArray(
-        MazeMap::CoreFileExport& file,
-        uint8_t indent,
-        const char* key,
-        const std::array<float, N>& values,
-        uint8_t precision,
-        bool trailingComma)
-    {
-        char format[48] = {};
-        if (snprintf(format, sizeof(format), "%%s%%.%uf", static_cast<unsigned>(precision)) <= 0)
-        {
-            return false;
-        }
-
-        char line[512] = {};
-        int length = snprintf(
-            line,
-            sizeof(line),
-            "%*s\"%s\": [",
-            static_cast<int>(indent),
-            "",
-            (key != nullptr) ? key : "");
-        if (length <= 0 || length >= static_cast<int>(sizeof(line)))
-        {
-            return false;
-        }
-
-        for (size_t index = 0U; index < values.size(); ++index)
-        {
-            char valueBuffer[32] = {};
-            const int valueLength = snprintf(
-                valueBuffer,
-                sizeof(valueBuffer),
-                format,
-                (index == 0U) ? "" : ", ",
-                values[index]);
-            if (valueLength <= 0 || (length + valueLength) >= static_cast<int>(sizeof(line)))
-            {
-                return false;
-            }
-            memcpy(line + length, valueBuffer, static_cast<size_t>(valueLength));
-            length += valueLength;
-            line[length] = '\0';
-        }
-
-        const int tailLength = snprintf(
-            line + length,
-            sizeof(line) - static_cast<size_t>(length),
-            "]%s\n",
-            trailingComma ? "," : "");
-        return tailLength > 0 && (length + tailLength) < static_cast<int>(sizeof(line)) && file.Write(line);
-    }
-};
-
 inline bool IsPinPairStrapped(uint8_t pinA, uint8_t pinB)
 {
     pinMode(pinA, OUTPUT);
@@ -784,53 +348,30 @@ inline bool IsWallSensorLedCalibrationModeRequested()
 
 inline bool ResetStartupTrace(const char* firstLine)
 {
-#if defined(ARDUINO_TEENSY41)
     if (firstLine == nullptr || firstLine[0] == '\0')
     {
         return false;
     }
 
-    MazeMap::CoreFileExport file;
-    if (!file.Open("startup_trace.txt"))
-    {
-        return false;
-    }
-
-    if (!file.Write(firstLine) || !file.WriteChar('\n'))
-    {
-        return false;
-    }
-
-    file.Flush();
-    return true;
-#else
-    (void)firstLine;
-    return false;
-#endif
+    return MazeMap::App::Internal::GetSharedRobotRuntime().WriteTextLogEntry(
+        "startup_trace",
+        micros(),
+        "begin",
+        firstLine);
 }
 
 inline bool AppendStartupTrace(const char* line)
 {
-#if defined(ARDUINO_TEENSY41)
     if (line == nullptr || line[0] == '\0')
     {
         return false;
     }
 
-    File file = SD.open("startup_trace.txt", FILE_WRITE);
-    if (!file)
-    {
-        return false;
-    }
-
-    const bool ok = (file.print(line) > 0U) && (file.write('\n') == 1U);
-    file.flush();
-    file.close();
-    return ok;
-#else
-    (void)line;
-    return false;
-#endif
+    return MazeMap::App::Internal::GetSharedRobotRuntime().WriteTextLogEntry(
+        "startup_trace",
+        micros(),
+        "trace",
+        line);
 }
 
 inline bool WritePersistedFrontWallCharacterization(
@@ -1735,84 +1276,6 @@ namespace MazeMap::App::Internal::Runtime
         row.gyro_radps = sensorSnapshot.gyroRadps;
     }
 
-    inline bool WriteAuxRoutineConfigEvents(
-        OptionalRuntimeEventLog& eventLog,
-        AuxMeasurementConfig::Routine routine,
-        const MazeMap::VehiclePhysicalModel& vehicleModel)
-    {
-        char message[256] = {};
-        auto writeConfig = [&eventLog, &message](const char* format, auto... args) -> bool
-        {
-            const int length = snprintf(message, sizeof(message), format, args...);
-            if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-            {
-                return false;
-            }
-            return eventLog.WriteEvent(micros(), "config", message);
-        };
-
-        if (!writeConfig(
-                "aux_common:startup_ms=%lu;flush_ms=%lu;pin_a=%lu;pin_b=%lu;track_width_m=%.6f",
-                static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs),
-                static_cast<unsigned long>(AuxMeasurementConfig::kLogFlushPeriodMs),
-                static_cast<unsigned long>(AuxMeasurementConfig::kModeSelectPinA),
-                static_cast<unsigned long>(AuxMeasurementConfig::kModeSelectPinB),
-                Config::kTrackWidthM))
-        {
-            return false;
-        }
-
-        if (!writeConfig(
-                "aux_track:tight_r_m=%.6f;tight_w_m=%.6f;wide_r_m=%.6f;wide_w_m=%.6f",
-                vehicleModel.arcTrackWidthInterpolation.tightRadiusM,
-                vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM,
-                vehicleModel.arcTrackWidthInterpolation.wideRadiusM,
-                vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM))
-        {
-            return false;
-        }
-
-        if (routine == AuxMeasurementConfig::Routine::FanStaticSurvey)
-        {
-            return writeConfig(
-                "fan_static:baseline_ms=%lu;fan_ms=%lu;recovery_ms=%lu;fan_duty=%.6f;fan_ramp_ms=%lu",
-                static_cast<unsigned long>(AuxMeasurementConfig::kBaselineHoldMs),
-                static_cast<unsigned long>(AuxMeasurementConfig::kFanHoldMs),
-                static_cast<unsigned long>(AuxMeasurementConfig::kRecoveryHoldMs),
-                Config::kRacingFanDutyCycle,
-                static_cast<unsigned long>(Config::kRacingFanRampMs));
-        }
-
-        return
-            writeConfig(
-                "turning_sweep:dir=%s;radius_m=%.6f;start_v_mps=%.6f;accel_mps2=%.6f;max_v_mps=%.6f",
-                AuxMeasurementConfig::kTurningTractionSweepClockwise ? "cw" : "ccw",
-                AuxMeasurementConfig::kTurningTractionSweepRadiusM,
-                AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps,
-                AuxMeasurementConfig::kTurningTractionSweepAccelMps2,
-                AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps) &&
-            writeConfig(
-                "turning_limits:fan_settle_ms=%lu;launch_ms=%lu;max_w_radps=%.6f;plateau_v_mps=%.6f;plateau_dv_mps=%.6f",
-                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSweepFanSettleMs),
-                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionLaunchMs),
-                AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps,
-                AuxMeasurementConfig::kTurningTractionPlateauMinSpeedMps,
-                AuxMeasurementConfig::kTurningTractionPlateauDeltaMps) &&
-            writeConfig(
-                "turning_slip:plateau_ms=%lu;ceiling_cmd=%.6f;curv_ramp_m_invps=%.6f;slip_v_mps=%.6f;slip_lat_mps2=%.6f",
-                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionPlateauWindowMs),
-                AuxMeasurementConfig::kTurningTractionActuatorCeilingCommand,
-                AuxMeasurementConfig::kTurningTractionCurvatureRampMInvPerSec,
-                AuxMeasurementConfig::kTurningTractionSlipMinSpeedMps,
-                AuxMeasurementConfig::kTurningTractionSlipMinLatAccelMps2) &&
-            writeConfig(
-                "turning_slip2:yaw_floor=%.6f;planar_floor=%.6f;confirm_ms=%lu;timeout_ms=%lu;fan_duty=%.6f",
-                AuxMeasurementConfig::kTurningTractionSlipYawCoherenceFloor,
-                AuxMeasurementConfig::kTurningTractionSlipPlanarCoherenceFloor,
-                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSlipConfirmMs),
-                static_cast<unsigned long>(AuxMeasurementConfig::kTurningTractionSweepTimeoutMs),
-                Config::kRacingFanDutyCycle);
-    }
 }
 
 

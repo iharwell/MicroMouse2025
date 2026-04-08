@@ -5,6 +5,6 @@
 
 #include "MmLog.h"
 
-//namespace mmlog = MazeMap::mmlog;
+namespace mmlog = MazeMap::mmlog;
 
 #endif

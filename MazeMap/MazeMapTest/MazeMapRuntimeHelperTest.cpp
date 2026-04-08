@@ -166,6 +166,69 @@ namespace MazeMap::App
             std::remove(sidecarPath.c_str());
         }
 
+        TEST_METHOD(MmLogLogger_PrimaryFileContainsOnlyBindingLineAndBinaryRows)
+        {
+            using MazeMap::mmlog::MmLogLogger;
+
+            static_assert(sizeof(RuntimeHelperTestRow) == (3U * sizeof(uint32_t)));
+
+            const std::string primaryPath = CreateTempPath(".mmlog");
+            const std::string sidecarPath = ReplaceExtension(primaryPath, ".sidecar");
+
+            RuntimeHelperTestRow firstRow{};
+            firstRow.seq = 0x01020304U;
+            firstRow.value = 0.5f;
+            firstRow.kind = static_cast<mmlog::s32_t>(0x11223344U);
+
+            RuntimeHelperTestRow secondRow{};
+            secondRow.seq = 0x55667788U;
+            secondRow.value = 2.0f;
+            secondRow.kind = static_cast<mmlog::s32_t>(0x12345678U);
+
+            MmLogLogger log;
+            Assert::IsTrue(log.open(primaryPath.c_str()));
+            Assert::IsTrue(log.writeMetadata("mode", "test"));
+            Assert::IsTrue(log.writeMetadata("phase", "primary_bytes_only"));
+            Assert::IsTrue(log.begin(RuntimeHelperTestRow{}));
+            Assert::IsTrue(log.log(firstRow));
+            Assert::IsTrue(log.log(secondRow));
+            Assert::IsTrue(log.writeLabel("PRIMARY_BYTES_ONLY"));
+            Assert::IsTrue(log.close());
+
+            std::string expectedPrimaryBytes = std::string("sidecar_file=") + BaseName(sidecarPath) + "\n";
+            expectedPrimaryBytes.append(reinterpret_cast<const char*>(&firstRow), sizeof(firstRow));
+            expectedPrimaryBytes.append(reinterpret_cast<const char*>(&secondRow), sizeof(secondRow));
+
+            const std::string primaryBytes = ReadAllBytes(primaryPath);
+            Assert::AreEqual(expectedPrimaryBytes.size(), primaryBytes.size());
+            Assert::IsTrue(expectedPrimaryBytes == primaryBytes);
+
+            std::remove(primaryPath.c_str());
+            std::remove(sidecarPath.c_str());
+        }
+
+        TEST_METHOD(MmLogLogger_AcceptsLongMetadataKeysUsedByOpenFloorLogs)
+        {
+            using MazeMap::mmlog::MmLogLogger;
+
+            const std::string primaryPath = CreateTempPath(".mmlog");
+            const std::string sidecarPath = ReplaceExtension(primaryPath, ".sidecar");
+
+            MmLogLogger log;
+            Assert::IsTrue(log.open(primaryPath.c_str()));
+            Assert::IsTrue(log.writeMetadata("start_marker_definitions_revision", "rev_g"));
+            Assert::IsTrue(log.writeMetadata("imu_gyro_lpf1_cut213_datasheet_ref_hz", "223.000"));
+            Assert::IsTrue(log.begin(RuntimeHelperTestRow{}));
+            Assert::IsTrue(log.close());
+
+            const std::string sidecarText = ReadAllBytes(sidecarPath);
+            Assert::IsTrue(sidecarText.find("start_marker_definitions_revision=rev_g\n") != std::string::npos);
+            Assert::IsTrue(sidecarText.find("imu_gyro_lpf1_cut213_datasheet_ref_hz=223.000\n") != std::string::npos);
+
+            std::remove(primaryPath.c_str());
+            std::remove(sidecarPath.c_str());
+        }
+
     };
 }
 

@@ -15,7 +15,6 @@ namespace MazeMap
     inline constexpr const char* kOpenFloorStartMarkerDefinitionsRevision = "open_floor_markers_rev_d";
     inline constexpr const char* kOpenFloorImuExtrinsicsRevision = "back_left_imu_extrinsics_v1";
     inline constexpr const char* kOpenFloorActiveImuId = "IMU_BL";
-    inline constexpr const char* kOpenFloorManifestFileName = "open_floor_run_manifest.json";
     inline constexpr const char* kOpenFloorTimingFileName = "open_floor_timing.mmlog";
     inline constexpr const char* kOpenFloorMainFileName = "open_floor_main.mmlog";
 
@@ -117,7 +116,6 @@ namespace MazeMap
         HardwareSetupFailed,
         DriveInitFailed,
         SensorInitFailed,
-        ManifestWriteFailed,
         TimingLogOpenFailed,
         TimingLogWriteFailed,
         MainLogOpenFailed,
@@ -463,8 +461,6 @@ namespace MazeMap
             return "DRIVE_INIT_FAILED";
         case OpenFloorFaultCode::SensorInitFailed:
             return "SENSOR_INIT_FAILED";
-        case OpenFloorFaultCode::ManifestWriteFailed:
-            return "MANIFEST_WRITE_FAILED";
         case OpenFloorFaultCode::TimingLogOpenFailed:
             return "TIMING_LOG_OPEN_FAILED";
         case OpenFloorFaultCode::TimingLogWriteFailed:

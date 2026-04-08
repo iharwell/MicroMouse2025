@@ -102,6 +102,26 @@ namespace MazeMap {
 #endif
             }
 
+            bool finalizeStorageFileLength(StorageFileHandle& file) noexcept {
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+                if (!file) {
+                    return true;
+                }
+
+                const std::uint64_t logicalLength = file.curPosition();
+                if (!file.seekSet(logicalLength)) {
+                    return false;
+                }
+                if (!file.truncate()) {
+                    return false;
+                }
+                return syncStorageFile(file);
+#else
+                (void)file;
+                return true;
+#endif
+            }
+
         } // namespace
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO || !defined(ARDUINO)
@@ -185,7 +205,7 @@ namespace MazeMap {
             }
             if (!attachStorage()) {
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-                return fail("Teensy FIFO logger storage is already claimed by another instance.");
+                return fail("Teensy logger storage is already claimed by another instance.");
 #else
                 return fail("Logger storage is not available.");
 #endif
@@ -194,24 +214,23 @@ namespace MazeMap {
             clearError();
             resetSessionState();
 
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            if (!m_sd.begin(MMLOG_TEENSY_SDIO_CONFIG)) {
-                return fail("SdFat begin() failed for FIFO SDIO mode.");
-            }
-#endif
-
             if (!derivePaths(file_name)) {
                 return false;
             }
-
-            if (!removeFileIfPresent(m_primaryPath)) {
-                return false;
+            bool sidecarReady = false;
+            if (!removePrimaryFileIfPresent(m_primaryPath)) {
+                sidecarReady = false;
             }
-            if (!removeFileIfPresent(m_sidecarPath)) {
-                return false;
+            else if (!removeSidecarFileIfPresent(m_sidecarPath)) {
+                sidecarReady = false;
             }
-
-            if (!openSidecarForWrite()) {
+            else {
+                sidecarReady = openSidecarForWrite();
+            }
+            if (!sidecarReady) {
+                m_primaryFile.close();
+                m_sidecarFile.close();
+                resetSessionState();
                 return false;
             }
 
@@ -241,8 +260,34 @@ namespace MazeMap {
             if (m_metadataCount >= MMLOG_METADATA_MAX_ENTRIES) {
                 return fail("Metadata entry capacity exceeded.");
             }
-            if (std::strlen(key) > MMLOG_METADATA_KEY_MAX_LENGTH || std::strlen(value) > MMLOG_METADATA_VALUE_MAX_LENGTH) {
-                return fail("Metadata key or value too long.");
+            const std::size_t keyLength = std::strlen(key);
+            if (keyLength > MMLOG_METADATA_KEY_MAX_LENGTH) {
+                char message[kLineBufferChars]{};
+                if (std::snprintf(
+                    message,
+                    sizeof(message),
+                    "Metadata key too long: %s (%zu > %u).",
+                    key,
+                    keyLength,
+                    static_cast<unsigned>(MMLOG_METADATA_KEY_MAX_LENGTH)) >= static_cast<int>(sizeof(message))) {
+                    return fail("Metadata key too long.");
+                }
+                return fail(message);
+            }
+
+            const std::size_t valueLength = std::strlen(value);
+            if (valueLength > MMLOG_METADATA_VALUE_MAX_LENGTH) {
+                char message[kLineBufferChars]{};
+                if (std::snprintf(
+                    message,
+                    sizeof(message),
+                    "Metadata value too long for %s (%zu > %u).",
+                    key,
+                    valueLength,
+                    static_cast<unsigned>(MMLOG_METADATA_VALUE_MAX_LENGTH)) >= static_cast<int>(sizeof(message))) {
+                    return fail("Metadata value too long.");
+                }
+                return fail(message);
             }
 
             MetadataEntry& slot = m_metadata[m_metadataCount++];
@@ -274,48 +319,70 @@ namespace MazeMap {
                 return fail("Sidecar file is not open.");
             }
 
-            char line[kLineBufferChars]{};
+            {
+                char line[kLineBufferChars]{};
+                const char* sidecarHeaderError = nullptr;
 
-            std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
-            if (!writeLineDirect(m_sidecarFile, line)) {
-                return fail("Failed to write schema_version.");
-            }
-
-            std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes));
-            if (!writeLineDirect(m_sidecarFile, line)) {
-                return fail("Failed to write row_bytes.");
-            }
-
-            for (std::size_t i = 0u; i < m_metadataCount; ++i) {
-                if (!m_metadata[i].used) {
-                    continue;
-                }
-                if (std::snprintf(line, sizeof(line), "%s=%s", m_metadata[i].key, m_metadata[i].value) >= static_cast<int>(sizeof(line))) {
-                    return fail("Metadata line too long.");
-                }
+                std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
                 if (!writeLineDirect(m_sidecarFile, line)) {
-                    return fail("Failed to write metadata line.");
+                    sidecarHeaderError = "Failed to write schema_version.";
+                }
+                m_sidecarDirty = true;
+
+                if (sidecarHeaderError == nullptr) {
+                    std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes));
+                    if (!writeLineDirect(m_sidecarFile, line)) {
+                        sidecarHeaderError = "Failed to write row_bytes.";
+                    }
+                }
+
+                for (std::size_t i = 0u; sidecarHeaderError == nullptr && i < m_metadataCount; ++i) {
+                    if (!m_metadata[i].used) {
+                        continue;
+                    }
+                    if (std::snprintf(line, sizeof(line), "%s=%s", m_metadata[i].key, m_metadata[i].value) >= static_cast<int>(sizeof(line))) {
+                        sidecarHeaderError = "Metadata line too long.";
+                        break;
+                    }
+                    if (!writeLineDirect(m_sidecarFile, line)) {
+                        sidecarHeaderError = "Failed to write metadata line.";
+                        break;
+                    }
+                }
+
+                if (sidecarHeaderError == nullptr && !writeLineDirect(m_sidecarFile, header)) {
+                    sidecarHeaderError = "Failed to write header line.";
+                }
+
+                if (sidecarHeaderError == nullptr && !syncStorageFile(m_sidecarFile)) {
+                    sidecarHeaderError = "Failed to flush sidecar header.";
+                }
+
+                if (sidecarHeaderError != nullptr) {
+                    return fail(sidecarHeaderError);
                 }
             }
+            m_sidecarDirty = false;
 
-            if (!writeLineDirect(m_sidecarFile, header)) {
-                return fail("Failed to write header line.");
-            }
+            {
+                const char* primaryError = nullptr;
 
-            if (!syncStorageFile(m_sidecarFile)) {
-                return fail("Failed to flush sidecar header.");
-            }
+                if (!openPrimaryForWrite()) {
+                    primaryError = (m_lastError[0] != '\0') ? m_lastError : "Failed to prepare primary file.";
+                }
+                else {
+                    char bindingLine[kLineBufferChars]{};
+                    if (std::snprintf(bindingLine, sizeof(bindingLine), "sidecar_file=%s", m_sidecarBinding) >= static_cast<int>(sizeof(bindingLine))) {
+                        primaryError = "Sidecar binding line too long.";
+                    }
+                    else if (!writeLineDirect(m_primaryFile, bindingLine)) {
+                        primaryError = "Failed to write primary sidecar binding line.";
+                    }
+                }
 
-            if (!openPrimaryForWrite()) {
-                return false;
-            }
-
-            char bindingLine[kLineBufferChars]{};
-            if (std::snprintf(bindingLine, sizeof(bindingLine), "sidecar_file=%s", m_sidecarBinding) >= static_cast<int>(sizeof(bindingLine))) {
-                return fail("Sidecar binding line too long.");
-            }
-            if (!writeLineDirect(m_primaryFile, bindingLine)) {
-                return fail("Failed to write primary sidecar binding line.");
+                if (primaryError != nullptr) {
+                    return fail(primaryError);
+                }
             }
 
             m_activeRowBytes = rowBytes;
@@ -365,16 +432,45 @@ namespace MazeMap {
             return enqueueSidecar(&newline, 1u);
         }
 
+        bool MmLogLogger::isTransferBusy() const noexcept {
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+            auto fileBusy = [](const StorageFileHandle& file) noexcept -> bool {
+                return file && const_cast<StorageFileHandle&>(file).isBusy();
+            };
+            return
+                fileBusy(m_primaryFile) ||
+                fileBusy(m_sidecarFile);
+#else
+            return false;
+#endif
+        }
+
         bool MmLogLogger::service() {
             if (!m_isOpen || !m_isBegun) {
+                return true;
+            }
+            if (isTransferBusy()) {
+                return true;
+            }
+
+            const bool prioritizeSidecar =
+                m_sidecarFile &&
+                m_sidecarQueue.size() >= kSdSectorBytes;
+
+            if (prioritizeSidecar) {
+                if (!drainQueueToFile(m_sidecarFile, m_sidecarQueue, MMLOG_SERVICE_SIDECAR_BUDGET_BYTES, true)) {
+                    return false;
+                }
                 return true;
             }
 
             if (m_primaryFile && !drainQueueToFile(m_primaryFile, m_primaryQueue, MMLOG_SERVICE_PRIMARY_BUDGET_BYTES, true)) {
                 return false;
             }
-            if (m_sidecarFile && !drainQueueToFile(m_sidecarFile, m_sidecarQueue, MMLOG_SERVICE_SIDECAR_BUDGET_BYTES, true)) {
-                return false;
+            if (m_sidecarFile && !m_sidecarQueue.empty()) {
+                if (!drainQueueToFile(m_sidecarFile, m_sidecarQueue, MMLOG_SERVICE_SIDECAR_BUDGET_BYTES, true)) {
+                    return false;
+                }
             }
             return true;
         }
@@ -384,15 +480,17 @@ namespace MazeMap {
                 return true;
             }
 
+            if (m_sidecarFile && (m_sidecarDirty || !m_sidecarQueue.empty())) {
+                const bool sidecarFlushed =
+                    flushQueueToFile(m_sidecarFile, m_sidecarQueue, true) &&
+                    syncStorageFile(m_sidecarFile);
+                if (!sidecarFlushed) {
+                    return fail("Failed to flush sidecar file.");
+                }
+                m_sidecarDirty = false;
+            }
             if (m_primaryFile && !flushQueueToFile(m_primaryFile, m_primaryQueue, true)) {
                 return false;
-            }
-            if (m_sidecarFile && !flushQueueToFile(m_sidecarFile, m_sidecarQueue, true)) {
-                return false;
-            }
-
-            if (m_sidecarFile && !syncStorageFile(m_sidecarFile)) {
-                return fail("Failed to flush sidecar file.");
             }
             if (m_primaryFile && !syncStorageFile(m_primaryFile)) {
                 return fail("Failed to flush primary file.");
@@ -403,34 +501,49 @@ namespace MazeMap {
         bool MmLogLogger::close() {
             bool ok = true;
             char savedError[MMLOG_ERROR_TEXT_LENGTH + 1u]{};
+            auto captureCloseError = [&](const char* const fallback) {
+                ok = false;
+                if (savedError[0] != '\0') {
+                    return;
+                }
+
+                const char* const source =
+                    (m_lastError[0] != '\0') ? m_lastError : ((fallback != nullptr) ? fallback : "MmLog close failed.");
+                std::strncpy(savedError, source, sizeof(savedError) - 1u);
+                savedError[sizeof(savedError) - 1u] = '\0';
+            };
 
             if (m_isOpen && !flush()) {
-                ok = false;
-                std::strncpy(savedError, m_lastError, sizeof(savedError) - 1u);
-                savedError[sizeof(savedError) - 1u] = '\0';
+                captureCloseError("Failed to flush log files.");
             }
 
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+            if (m_isOpen && m_primaryFile) {
+                const bool primaryFinalized = finalizeStorageFileLength(m_primaryFile);
+                if (!primaryFinalized) {
+                    (void)fail("Failed to finalize primary file length.");
+                    captureCloseError("Failed to finalize primary file length.");
+                }
+            }
+            if (m_isOpen && m_sidecarFile) {
+                const bool sidecarFinalized = finalizeStorageFileLength(m_sidecarFile);
+                if (!sidecarFinalized) {
+                    (void)fail("Failed to finalize sidecar file length.");
+                    captureCloseError("Failed to finalize sidecar file length.");
+                }
+                else {
+                    m_sidecarDirty = false;
+                }
+            }
+
             if (m_primaryFile) {
                 m_primaryFile.close();
             }
             if (m_sidecarFile) {
                 m_sidecarFile.close();
             }
-#elif defined(ARDUINO)
-            if (m_primaryFile) {
-                m_primaryFile.close();
-            }
-            if (m_sidecarFile) {
-                m_sidecarFile.close();
-            }
-#else
-            m_primaryFile.close();
-            m_sidecarFile.close();
-#endif
 
             resetAllState();
-            if (!ok) {
+            if (savedError[0] != '\0') {
                 std::strncpy(m_lastError, savedError, sizeof(m_lastError) - 1u);
                 m_lastError[sizeof(m_lastError) - 1u] = '\0';
             }
@@ -454,6 +567,7 @@ namespace MazeMap {
             if (!m_sidecarQueue.push(data, len)) {
                 return fail("Sidecar queue overflow.");
             }
+            m_sidecarDirty = true;
             return true;
         }
 
@@ -541,6 +655,8 @@ namespace MazeMap {
                     if (!drainQueueToFile(file, queue, kSdSectorBytes, true)) {
                         return false;
                     }
+                    while (file.isBusy()) {
+                    }
                 }
             }
 #endif
@@ -583,7 +699,7 @@ namespace MazeMap {
         bool MmLogLogger::openPrimaryForWrite() {
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
             m_primaryFile.close();
-            if (!m_primaryFile.open(m_primaryPath, O_RDWR | O_CREAT | O_TRUNC)) {
+            if (!m_primaryFile.open(&SD.sdfs, m_primaryPath, O_RDWR | O_CREAT | O_TRUNC)) {
                 return fail("Failed to open primary file.");
             }
 #  if MMLOG_TEENSY_PRIMARY_PREALLOCATE_BYTES > 0
@@ -609,7 +725,7 @@ namespace MazeMap {
         bool MmLogLogger::openSidecarForWrite() {
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
             m_sidecarFile.close();
-            if (!m_sidecarFile.open(m_sidecarPath, O_RDWR | O_CREAT | O_TRUNC)) {
+            if (!m_sidecarFile.open(&SD.sdfs, m_sidecarPath, O_RDWR | O_CREAT | O_TRUNC)) {
                 return fail("Failed to open sidecar file.");
             }
 #  if MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES > 0
@@ -632,9 +748,28 @@ namespace MazeMap {
 #endif
         }
 
-        bool MmLogLogger::removeFileIfPresent(const char* const path) {
+        bool MmLogLogger::removePrimaryFileIfPresent(const char* const path) {
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            if (m_sd.exists(path) && !m_sd.remove(path)) {
+            if (SD.sdfs.exists(path) && !SD.sdfs.remove(path)) {
+                return fail("Failed to remove existing file.");
+            }
+            return true;
+#elif defined(ARDUINO)
+            if (m_fs.exists(path) && !m_fs.remove(path)) {
+                return fail("Failed to remove existing file.");
+            }
+            return true;
+#else
+            if (std::remove(path) != 0) {
+                return true;
+            }
+            return true;
+#endif
+        }
+
+        bool MmLogLogger::removeSidecarFileIfPresent(const char* const path) {
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+            if (SD.sdfs.exists(path) && !SD.sdfs.remove(path)) {
                 return fail("Failed to remove existing file.");
             }
             return true;
@@ -725,6 +860,7 @@ namespace MazeMap {
             m_sidecarBinding[0] = '\0';
             m_activeRowBytes = 0u;
             m_activeSchemaHash = 0u;
+            m_sidecarDirty = false;
             m_isBegun = false;
             m_labelSectionStarted = false;
         }

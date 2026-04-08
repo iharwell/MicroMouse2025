@@ -48,7 +48,7 @@ namespace MazeMap {
 
 /** Maximum metadata-key length, excluding the null terminator. */
 #ifndef MMLOG_METADATA_KEY_MAX_LENGTH
-#  define MMLOG_METADATA_KEY_MAX_LENGTH 31u
+#  define MMLOG_METADATA_KEY_MAX_LENGTH 63u
 #endif
 
 /** Maximum metadata-value length, excluding the null terminator. */
@@ -539,8 +539,8 @@ namespace MazeMap {
             /**
              * Constructs a logger bound to the default storage backend for the current build.
              *
-             * On Teensy FIFO SDIO builds, construction also claims the shared static queue storage
-             * used by that mode.
+             * On Teensy builds, construction also claims the shared static queue storage used by
+             * the runtime-owned logger instance.
              */
             MmLogLogger() noexcept;
 #else
@@ -631,9 +631,9 @@ namespace MazeMap {
             /**
              * Drains a bounded amount of queued data to storage.
              *
-             * This is the hot-path maintenance call intended for use inside the control loop. In Teensy FIFO
-             * SDIO mode it honors the configured byte budget and, by default, limits itself to one 512-byte
-             * sector per file per call.
+             * This is the hot-path maintenance call intended for use inside the control loop. On Teensy builds
+             * it honors the configured byte budget and, by default, limits itself to one 512-byte sector per
+             * file per call.
              */
             bool service();
 
@@ -656,6 +656,8 @@ namespace MazeMap {
             bool isOpen() const noexcept { return m_isOpen; }
             /** Returns true after begin() succeeds and before close() resets the session. */
             bool isBegun() const noexcept { return m_isBegun; }
+            /** Returns true when the storage backend is still completing a previously started transfer. */
+            bool isTransferBusy() const noexcept;
             /** Returns the most recent error string, or an empty string when no error is latched. */
             const char* lastError() const noexcept { return m_lastError; }
 
@@ -677,7 +679,8 @@ namespace MazeMap {
             bool writeLineDirect(StorageFileHandle& file, const char* text);
             bool openPrimaryForWrite();
             bool openSidecarForWrite();
-            bool removeFileIfPresent(const char* path);
+            bool removePrimaryFileIfPresent(const char* path);
+            bool removeSidecarFileIfPresent(const char* path);
             bool derivePaths(const char* file_name);
             bool validateMetadataToken(const char* text) const noexcept;
             bool fail(const char* text);
@@ -688,7 +691,6 @@ namespace MazeMap {
             bool isReservedMetadataKey(const char* key) const noexcept;
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            SdFs m_sd;
             bool m_storageAttached{ false };
 #elif defined(ARDUINO)
             fs::FS& m_fs;
@@ -717,6 +719,7 @@ namespace MazeMap {
 
             std::size_t m_activeRowBytes{ 0u };
             std::uint32_t m_activeSchemaHash{ 0u };
+            bool m_sidecarDirty{ false };
 
             bool m_isOpen{ false };
             bool m_isBegun{ false };

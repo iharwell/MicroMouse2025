@@ -8,16 +8,15 @@ class MissionController final : public IMissionModeHost
 {
 public:
     explicit MissionController(SharedRobotRuntime& runtime)
-        : _speedVehicle(runtime.SpeedVehicle())
+        : _runtime(runtime)
+        , _speedVehicle(runtime.SpeedVehicle())
         , _mappingVehicle(runtime.SearchVehicle())
         , _maze(runtime.Maze())
         , _searchPathFinder(runtime.SearchPathFinder())
         , _speedPathFinder(runtime.SpeedPathFinder())
         , _wallBeliefMap(runtime.WallBeliefMap())
         , _sensors(runtime.MissionSensors())
-        , _telemetrySensors(runtime.TelemetrySensors())
-        , _telemetryLog()
-        , _telemetryEventLog()
+        , _telemetrySensors(runtime.DiagnosticSensors())
         , _drive(runtime.Drive())
         , _currentCell(0, 0)
         , _currentDirection(MazeMap::Up)
@@ -33,6 +32,7 @@ public:
         , _frontWallCharacterizationAvailable(false)
         , _lastWallTouchStandoffEstimateM(0.0f)
         , _hasWallTouchStandoffEstimate(false)
+        , _activeModeFaultSource("mission")
         , _telemetryPhaseId(0UL)
         , _telemetrySampleCount(0UL)
         , _lastControlMicros(0UL)
@@ -47,7 +47,7 @@ public:
 
     bool BeginMissionRunMode() override
     {
-        ResetForMode(false, true);
+        ResetForMode(false, true, "mission");
         if (!Initialize("Micromouse mission setup", false))
         {
             return false;
@@ -121,7 +121,7 @@ public:
 
     bool BeginManeuverFileTestMode() override
     {
-        ResetForMode(true, false);
+        ResetForMode(true, false, "maneuver_file_test");
         if (!Initialize("Micromouse maneuver test setup", false))
         {
             return false;
@@ -135,7 +135,7 @@ public:
         if (!BeginTelemetryLog("maneuver_test.mmlog", "maneuver_test"))
         {
             AppendStartupTrace("maneuver_test:telemetry_logger_open_failed");
-            Serial.println("Maneuver test telemetry log unavailable; continuing without telemetry file");
+            (void)EmitMissionControllerLine("Maneuver test telemetry log unavailable; continuing without telemetry file");
             _telemetryLoggingEnabled = false;
             return true;
         }
@@ -145,7 +145,7 @@ public:
         if (!WriteTelemetryEvent("source", "test.txt"))
         {
             AppendStartupTrace("maneuver_test:source_metadata_write_failed");
-            Serial.println("Maneuver test source metadata write failed; disabling telemetry file logging");
+            (void)EmitMissionControllerLine("Maneuver test source metadata write failed; disabling telemetry file logging");
             ShutdownTelemetryMode(false);
             return true;
         }
@@ -173,9 +173,9 @@ public:
         }
         AppendStartupTrace("maneuver_test:queue_loaded");
 
-        Serial.print("Loaded maneuver test queue with ");
-        Serial.print(queue.size());
-        Serial.println(" maneuvers");
+        (void)EmitMissionControllerFormatted(
+            "Loaded maneuver test queue with %u maneuvers",
+            static_cast<unsigned>(queue.size()));
 
         if (!HoldPosition(Config::kObservationSettleMs, "startup_settle"))
         {
@@ -197,12 +197,12 @@ public:
 
         ShutdownTelemetryMode(false);
         AppendStartupTrace("maneuver_test:complete");
-        Serial.println("Maneuver file test complete");
+        (void)EmitMissionControllerLine("Maneuver file test complete");
     }
 
     bool BeginCorridorRepeatabilityMode() override
     {
-        ResetForMode(false, false);
+        ResetForMode(false, false, "corridor_repeatability");
         if (!Initialize("Corridor repeatability setup", false))
         {
             return false;
@@ -257,13 +257,13 @@ public:
         if (ok)
         {
             AppendStartupTrace("corridor_repeatability:complete");
-            Serial.println("Corridor repeatability sweep complete");
+            (void)EmitMissionControllerLine("Corridor repeatability sweep complete");
         }
     }
 
     bool BeginPositionAccuracyAuditMode() override
     {
-        ResetForMode(false, false);
+        ResetForMode(false, false, "position_accuracy_audit");
         if (!Initialize("Position accuracy audit setup", false))
         {
             return false;
@@ -319,11 +319,12 @@ public:
         if (ok)
         {
             AppendStartupTrace("position_accuracy_audit:complete");
-            Serial.println("Position accuracy audit complete");
+            (void)EmitMissionControllerLine("Position accuracy audit complete");
         }
     }
 
 private:
+    SharedRobotRuntime& _runtime;
     static void SetKnownMazeCellWalls(
         MazeMap::Maze& maze,
         const MazeMap::CellCoordinates& cellCoordinates,
@@ -579,8 +580,6 @@ private:
     MazeMap::WallBeliefMap& _wallBeliefMap;
     SensorSuite& _sensors;
     DiagnosticSensorSuite& _telemetrySensors;
-    MazeMap::mmlog::MmLogLogger _telemetryLog;
-    MazeMap::App::Internal::Runtime::OptionalRuntimeEventLog _telemetryEventLog;
     DriveBase& _drive;
     MazeMap::CellCoordinates _currentCell;
     MazeMap::Direction _currentDirection;
@@ -596,6 +595,7 @@ private:
     bool _frontWallCharacterizationAvailable;
     float _lastWallTouchStandoffEstimateM;
     bool _hasWallTouchStandoffEstimate;
+    const char* _activeModeFaultSource;
     char _telemetryLogFileName[64];
     unsigned long _telemetryPhaseId;
     unsigned long _telemetrySampleCount;
@@ -607,84 +607,76 @@ private:
         const char* resolvedModeName = (modeName != nullptr && modeName[0] != '\0') ? modeName : "telemetry";
         _telemetryPhaseId = 0UL;
         _telemetrySampleCount = 0UL;
-        _telemetryEventLog.Close();
         _telemetryLogFileName[0] = '\0';
-        (void)_telemetryLog.close();
+        (void)_runtime.CloseUtilityDataLog();
         snprintf(_telemetryLogFileName, sizeof(_telemetryLogFileName), "%s", resolvedFileName);
 
-        if (!_telemetryEventLog.BeginSibling(_telemetryLogFileName))
+        if (!_runtime.OpenUtilityDataLogFile(_telemetryLogFileName))
         {
-            return false;
-        }
-        if (!_telemetryLog.open(_telemetryLogFileName))
-        {
-            _telemetryEventLog.Close();
             return false;
         }
 
-        if (!_telemetryLog.writeMetadata("file", _telemetryLogFileName)) return false;
-        if (_telemetryEventLog.IsEnabled() && !_telemetryLog.writeMetadata("control_log_file", _telemetryEventLog.GetFileName())) return false;
-        if (!_telemetryLog.writeMetadata("mode", resolvedModeName)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(_telemetryLog, "control_period_us", Config::kControlPeriodUs)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadata("mode", resolvedModeName)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", Config::kControlPeriodUs)) return false;
         {
             const unsigned long imuSampleRateHz = MazeMap::GetUiImuSampleRateHzForControlPeriodUs(Config::kControlPeriodUs);
-            if (imuSampleRateHz > 0UL && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataUnsigned(_telemetryLog, "imu_sample_rate_hz", imuSampleRateHz)) return false;
+            if (imuSampleRateHz > 0UL && !_runtime.WriteUtilityDataLogMetadataUnsigned("imu_sample_rate_hz", imuSampleRateHz)) return false;
         }
         {
             const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
                 Config::kControlPeriodUs,
                 Config::kMissionRuntimeAccelFilterFreq);
-            if (imuAccelLpf2CutoffHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3)) return false;
+            if (imuAccelLpf2CutoffHz > 0.0f && !_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3)) return false;
         }
         {
             const float imuGyroLpf1ReferenceHz = MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(Config::kControlPeriodUs);
-            if (imuGyroLpf1ReferenceHz > 0.0f && !MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
+            if (imuGyroLpf1ReferenceHz > 0.0f && !_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
         }
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "boundary_half_span_m", DiagnosticConfig::kBoundaryHalfSpanM, 3)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_gyro_mdps_per_lsb", _telemetrySensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "imu_accel_mg_per_lsb", _telemetrySensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogMetadataFloat(_telemetryLog, "mission_gyro_bias_estimate_radps", _telemetrySensors.GetGyroBiasRadps(), 6)) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteMmLogAccelBiasMetadata(_telemetryLog, _telemetrySensors)) return false;
-        if (!_telemetryLog.writeMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
-        if (!_telemetryLog.writeMetadata("endianness", "little")) return false;
-        if (!MazeMap::App::Internal::Runtime::WriteDiagnosticTuningEvents(_telemetryEventLog)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("boundary_half_span_m", DiagnosticConfig::kBoundaryHalfSpanM, 3)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _telemetrySensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _telemetrySensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _telemetrySensors.GetGyroBiasRadps(), 6)) return false;
+        if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_telemetrySensors)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
+        if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return false;
 
         DiagnosticLogRow row{};
-        if (!_telemetryLog.begin(row))
-        {
-            _telemetryEventLog.Close();
-            return false;
-        }
+        if (!_runtime.BeginUtilityDataLogSchema(row)) return false;
 
-        if (_telemetryEventLog.IsEnabled())
-        {
-            (void)_telemetryEventLog.WriteMetadata("file", _telemetryEventLog.GetFileName());
-            (void)_telemetryEventLog.WriteMetadata("data_file", _telemetryLogFileName);
-            (void)_telemetryEventLog.WriteMetadata("mode", resolvedModeName);
-        }
-        return MazeMap::App::Internal::Runtime::WriteDiagnosticSummaryInstructions(_telemetryEventLog);
+        if (!_runtime.WriteTextLogMetadata("file", _runtime.TextLogFileName())) return false;
+        if (!_runtime.WriteTextLogMetadata("data_file", _telemetryLogFileName)) return false;
+        if (!_runtime.WriteTextLogMetadata("mode", resolvedModeName)) return false;
+        if (!MazeMap::App::Internal::Runtime::WriteDiagnosticTuningEvents(
+                [this](const char* type, const char* message) -> bool
+                {
+                    return _runtime.WriteTextLogEntry(micros(), type, message);
+                })) return false;
+        return MazeMap::App::Internal::Runtime::WriteDiagnosticSummaryInstructions(
+            [this](const char* type, const char* message) -> bool
+            {
+                return _runtime.WriteTextLogEntry(micros(), type, message);
+            });
     }
 
     bool WriteTelemetryEvent(const char* type, const char* message)
     {
-        return !_telemetryLoggingEnabled || _telemetryEventLog.WriteEvent(micros(), type, message);
+        return !_telemetryLoggingEnabled || _runtime.WriteTextLogEntry(micros(), type, message);
     }
 
     void ServiceTelemetryLog()
     {
-        (void)_telemetryLog.service();
+        (void)_runtime.ServiceUtilityDataLog();
     }
 
     void FlushTelemetryLog()
     {
-        (void)_telemetryLog.flush();
-        _telemetryEventLog.Flush();
+        (void)_runtime.FlushUtilityDataLog();
+        _runtime.FlushTextLog();
     }
 
     void CloseTelemetryLog()
     {
-        (void)_telemetryLog.close();
-        _telemetryEventLog.Close();
+        (void)_runtime.CloseUtilityDataLog();
     }
 
     static void SetRacingFanEnabled(bool enabled)
@@ -836,7 +828,17 @@ private:
         SeedWallBeliefsFromKnownMaze();
     }
 
-    void ResetForMode(bool maneuverTestMode, bool enableMissionTextLogging)
+    static void HandleRuntimeFault(void* context, const char* reason) noexcept
+    {
+        if (context == nullptr)
+        {
+            return;
+        }
+
+        static_cast<MissionController*>(context)->OnRuntimeFault(reason);
+    }
+
+    void ResetForMode(bool maneuverTestMode, bool enableMissionTextLogging, const char* activeModeFaultSource)
     {
         _maneuverTestMode = maneuverTestMode;
         _telemetryLoggingEnabled = false;
@@ -845,7 +847,9 @@ private:
         _goalPauseComplete = false;
         _missionComplete = false;
         _faulted = false;
-        MazeMap::App::Internal::Runtime::FlushRuntimeControlLog();
+        _activeModeFaultSource =
+            (activeModeFaultSource != nullptr && activeModeFaultSource[0] != '\0') ? activeModeFaultSource : "mission";
+        _runtime.FlushTextLog();
         _hasWallTouchStandoffEstimate = false;
     }
 
@@ -869,20 +873,20 @@ private:
             return true;
         }
 
-        return MazeMap::App::Internal::Runtime::EnsureRuntimeControlLogOpen();
+        return _runtime.EnsureTextLogOpen();
     }
 
     void FlushMissionTextLog()
     {
         if (_missionTextLoggingEnabled)
         {
-            MazeMap::App::Internal::Runtime::FlushRuntimeControlLog();
+            _runtime.FlushTextLog();
         }
     }
 
     void CloseMissionTextLog()
     {
-        MazeMap::App::Internal::Runtime::FlushRuntimeControlLog();
+        _runtime.FlushTextLog();
     }
 
     bool WriteMissionTextLineIfEnabled(const char* message)
@@ -897,7 +901,7 @@ private:
             return false;
         }
 
-        return MazeMap::App::Internal::Runtime::AppendRuntimeControlLogLine(message);
+        return _runtime.AppendTextLogLine(message);
     }
 
     void DisableMissionTextLogging(const char* traceLabel)
@@ -910,8 +914,7 @@ private:
         if (traceLabel != nullptr && traceLabel[0] != '\0')
         {
             AppendStartupTrace(traceLabel);
-            Serial.print("Mission text logging disabled: ");
-            Serial.println(traceLabel);
+            (void)_runtime.AppendTextLogFormatted("Mission text logging disabled: %s", traceLabel);
         }
 
         FlushMissionTextLog();
@@ -986,7 +989,7 @@ private:
                 _frontWallCharacterization.terminalDistanceM,
                 _frontWallCharacterization.commandedReverseSpeedMps);
             AppendStartupTrace(traceLine);
-            Serial.println("Loaded persisted front wall characterization.");
+            (void)EmitMissionControllerLine("Loaded persisted front wall characterization.");
         }
         else
         {
@@ -1263,8 +1266,7 @@ private:
             DisableMissionTextLogging("mission_text_logging:controller_write_failed");
         }
 
-        Serial.println(message);
-        return true;
+        return _runtime.AppendTextLogLine(message);
     }
 
     bool EmitMissionControllerFormatted(const char* format, ...)
@@ -3972,8 +3974,10 @@ private:
 
     bool Initialize(const char* banner, bool observeCurrentCellAfterInit)
     {
-        Serial.begin(115200);
-        delay(1000);
+        if (!_runtime.RegisterModeFaultHandler(&MissionController::HandleRuntimeFault, this, _activeModeFaultSource))
+        {
+            return false;
+        }
 
         if (!SetupHardware())
         {
@@ -4028,7 +4032,7 @@ private:
             return true;
         }
         ++_telemetryPhaseId;
-        if (_telemetryEventLog.WritePhase(_telemetryPhaseId, micros(), name))
+        if (_runtime.WriteTextLogPhase(_telemetryPhaseId, micros(), name))
         {
             return true;
         }
@@ -4522,7 +4526,7 @@ private:
             _drive,
             telemetry,
             telemetrySnapshot);
-        if (_telemetryLog.log(row))
+        if (_runtime.LogUtilityDataRow(row))
         {
             ++_telemetrySampleCount;
             return true;
@@ -4532,9 +4536,12 @@ private:
 
     bool Fail(const char* message)
     {
+        return _runtime.FailActiveMode(message);
+    }
+
+    void OnRuntimeFault(const char* message) noexcept
+    {
         _faulted = true;
-        SetRacingFanEnabled(false);
-        _drive.Brake();
         AppendStartupCalibrationStateTrace("fault_state");
         char traceMessage[128] = {};
         snprintf(traceMessage, sizeof(traceMessage), "fault:%s", (message != nullptr) ? message : "unknown");
@@ -4546,15 +4553,12 @@ private:
         }
         if (_telemetryLoggingEnabled)
         {
-            WriteTelemetryEvent("fault", message);
+            (void)WriteTelemetryEvent("fault", message);
             FlushTelemetryLog();
+            CloseTelemetryLog();
+            _telemetryLoggingEnabled = false;
         }
         FlushMissionTextLog();
-        if (_missionTextLoggingEnabled)
-        {
-            CloseMissionTextLog();
-        }
-        return false;
     }
 
     bool TickControl(bool stationary, float& dtSeconds, SensorSnapshot& snapshot)
@@ -4907,7 +4911,7 @@ private:
         if (!file)
         {
             AppendStartupTrace("maneuver_test:test_file_unavailable");
-            Serial.println("Maneuver file unavailable; skipping maneuver-file test");
+            (void)EmitMissionControllerLine("Maneuver file unavailable; skipping maneuver-file test");
             return false;
         }
         AppendStartupTrace("maneuver_test:test_txt_opened");
@@ -4942,14 +4946,14 @@ private:
                     snprintf(message, sizeof(message), "Maneuver file token issue on line %u: %s", lineNumber, token);
                     file.close();
                     AppendStartupTrace("maneuver_test:test_file_parse_issue");
-                    Serial.println(message);
+                    (void)EmitMissionControllerLine(message);
                     return false;
                 }
                 if (!path.push_back(code))
                 {
                     file.close();
                     AppendStartupTrace("maneuver_test:test_file_path_capacity_reached");
-                    Serial.println("Maneuver file exceeded path capacity; skipping maneuver-file test");
+                    (void)EmitMissionControllerLine("Maneuver file exceeded path capacity; skipping maneuver-file test");
                     return false;
                 }
             }
@@ -4960,7 +4964,7 @@ private:
         if (path.GetSize() == 0)
         {
             AppendStartupTrace("maneuver_test:test_file_empty");
-            Serial.println("Maneuver file did not contain any maneuvers");
+            (void)EmitMissionControllerLine("Maneuver file did not contain any maneuvers");
             return false;
         }
         AppendStartupTrace("maneuver_test:path_parsed");
@@ -4969,7 +4973,7 @@ private:
         if (!queue.push_back(path, _currentDirectionalLocation))
         {
             AppendStartupTrace("maneuver_test:queue_build_issue");
-            Serial.println("Maneuver file could not be converted into a queue");
+            (void)EmitMissionControllerLine("Maneuver file could not be converted into a queue");
             return false;
         }
         AppendStartupTrace("maneuver_test:queue_built");
@@ -4982,7 +4986,7 @@ private:
         (void)fileName;
         (void)queue;
         AppendStartupTrace("maneuver_test:teensy_target_required");
-        Serial.println("Maneuver-file test mode requires the Teensy target");
+        (void)EmitMissionControllerLine("Maneuver-file test mode requires the Teensy target");
         return false;
 #endif
     }
@@ -4999,7 +5003,7 @@ private:
         if (!WriteTelemetryEvent("queue", message))
         {
             AppendStartupTrace("maneuver_test:queue_logging_disabled");
-            Serial.println("Maneuver queue logging unavailable; continuing without queue metadata");
+            (void)EmitMissionControllerLine("Maneuver queue logging unavailable; continuing without queue metadata");
             FlushTelemetryLog();
             CloseTelemetryLog();
             _telemetryLoggingEnabled = false;
@@ -5023,7 +5027,7 @@ private:
             if (!WriteTelemetryEvent("queue_entry", queueLine))
             {
                 AppendStartupTrace("maneuver_test:queue_logging_disabled");
-                Serial.println("Maneuver queue entry logging unavailable; continuing without queue metadata");
+                (void)EmitMissionControllerLine("Maneuver queue entry logging unavailable; continuing without queue metadata");
                 FlushTelemetryLog();
                 CloseTelemetryLog();
                 _telemetryLoggingEnabled = false;

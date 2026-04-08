@@ -2,6 +2,7 @@
 // Declares shared runtime state, calibration, and sensor-processing utilities used across the MazeMap application runtime.
 
 #include "Defines.h"
+#include "MazeMapSharedRuntime.h"
 #include "DiagonalWallCentering.h"
 #include "EncoderStallPolicy.h"
 #include "ImuCalibrationPolicy.h"
@@ -979,8 +980,9 @@ inline bool ConfigureLoopMatchedBackLeftImu(
             Imu::ODR_SETTING::ODR_1920HZ_HP_N_LP);
         return true;
     default:
-        Serial.print("Unsupported IMU control period us: ");
-        Serial.println(controlPeriodUs);
+        (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+            "Unsupported IMU control period us: %lu",
+            controlPeriodUs);
         return false;
     }
 }
@@ -1201,29 +1203,20 @@ inline StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
         return StationaryImuCalibrationResult::Success;
     }
 
-    Serial.print("IMU stationary self-test failed; accel_delta_mg=[");
-    Serial.print(accelDeltaMgX, 1);
-    Serial.print(',');
-    Serial.print(accelDeltaMgY, 1);
-    Serial.print(',');
-    Serial.print(accelDeltaMgZ, 1);
-    Serial.print("], gyro_delta_dps=[");
-    Serial.print(gyroDeltaDpsX, 1);
-    Serial.print(',');
-    Serial.print(gyroDeltaDpsY, 1);
-    Serial.print(',');
-    Serial.print(gyroDeltaDpsZ, 1);
-    Serial.println(']');
+    (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+        "IMU stationary self-test failed; accel_delta_mg=[%.1f,%.1f,%.1f], gyro_delta_dps=[%.1f,%.1f,%.1f]",
+        accelDeltaMgX,
+        accelDeltaMgY,
+        accelDeltaMgZ,
+        gyroDeltaDpsX,
+        gyroDeltaDpsY,
+        gyroDeltaDpsZ);
     return StationaryImuCalibrationResult::Failure;
 }
 
-inline void PrintHexByte(uint8_t value)
+inline void FormatHexByte(uint8_t value, char (&buffer)[3])
 {
-    if (value < 0x10U)
-    {
-        Serial.print('0');
-    }
-    Serial.print(static_cast<unsigned>(value), HEX);
+    snprintf(buffer, sizeof(buffer), "%02X", static_cast<unsigned>(value));
 }
 #endif
 
@@ -3842,7 +3835,8 @@ inline bool CalibrateStationaryBackLeftGyroBias(
             RunStationaryBackLeftImuSelfTest(vehicle.IMU_BL, controlPeriodUs, startCounts, accelFilterFreq);
         if (selfTestResult == StationaryImuCalibrationResult::RestartEncoderMotion)
         {
-            Serial.println("Encoder motion detected during stationary IMU self-test; restarting bias calibration");
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
+                "Encoder motion detected during stationary IMU self-test; restarting bias calibration");
             continue;
         }
         if (selfTestResult != StationaryImuCalibrationResult::Success)
@@ -3869,7 +3863,8 @@ inline bool CalibrateStationaryBackLeftGyroBias(
         {
             if (HaveDriveEncodersMovedSince(startCounts))
             {
-                Serial.println("Encoder motion detected during gyro bias measurement; restarting IMU self-test");
+                (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
+                    "Encoder motion detected during gyro bias measurement; restarting IMU self-test");
                 accumulatedRadps = 0.0;
                 collectedSamples = 0UL;
                 break;
@@ -3893,7 +3888,8 @@ inline bool CalibrateStationaryBackLeftGyroBias(
 
         if (HaveDriveEncodersMovedSince(startCounts))
         {
-            Serial.println("Encoder motion detected after gyro bias capture; restarting IMU self-test");
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
+                "Encoder motion detected after gyro bias capture; restarting IMU self-test");
             continue;
         }
 

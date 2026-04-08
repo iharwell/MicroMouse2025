@@ -21,6 +21,7 @@ namespace MazeMap::HardwareConfig
     // Keep retrying SD init indefinitely so the operator can insert the card after power-up.
     constexpr uint16_t kSdInitRetryDelayMs = 150U;
     constexpr uint16_t kSdWaitBlinkPeriodMs = 1000U;
+    constexpr uint16_t kFaultIndicatorBlinkPeriodMs = 250U;
 }
 
 namespace HardwareConfig = MazeMap::HardwareConfig;

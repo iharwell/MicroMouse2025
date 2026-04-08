@@ -2,19 +2,21 @@
 
 ## Purpose
 
-This project is in active architectural cleanup. Existing code is **not** presumed acceptable merely because it compiles, links, or appears to work.
+This repository is in active architectural cleanup. Existing code is **not** presumed acceptable merely because it compiles, links, or appears to work.
 
-For cleanup tasks, architectural conformance takes priority over minimizing churn.
+This policy is intentionally aggressive and temporary. Its job is to force convergence while the repository is being cleaned up. Replace it with a less aggressive steady-state policy once the repository is in acceptable shape.
 
-When existing code conflicts with project architecture:
+During cleanup:
 
 1. identify the authoritative owner,
-2. move state and behavior to that owner or its proper subsystem,
+2. move state and behavior to that owner,
 3. delete redundant layers, wrappers, and parallel implementations,
 4. update callers to the canonical interface,
 5. remove dead code and superseded files.
 
-Do **not** preserve nonconforming structure for compatibility unless the prompt explicitly requires compatibility.
+Do **not** preserve nonconforming structure or compatibility shims unless the task explicitly requires staged compatibility.
+
+Preserve buildability, host/Teensy verification paths, and explicitly required external behavior. This repository is nonfunctional in places; current behavior is **not** automatically authoritative merely because it exists.
 
 ---
 
@@ -22,432 +24,258 @@ Do **not** preserve nonconforming structure for compatibility unless the prompt 
 
 Apply these rules in this order:
 
-1. preserve authoritative ownership and source-of-truth boundaries,
-2. remove duplicate systems, wrappers, and alternate access patterns,
-3. keep subsystem shapes coherent and testable,
-4. prefer composition over inheritance,
-5. minimize churn only after the architecture is correct.
+1. preserve authoritative ownership, buildability, and the ability to verify behavior on both host and Teensy,
+2. converge shared runtime resources and mission-relevant behavior into canonical owners,
+3. remove duplicate systems, wrappers, scattered redirections, and alternate access paths,
+4. keep subsystem shapes centralized and traceable,
+5. prefer composition over inheritance,
+6. minimize churn only after the architecture is correct.
 
 Working junk is still junk. Do not keep it just because replacing it touches many files.
 
 ---
 
-## Authoritative Owners
+## Canonical Owners
 
 ### Vehicle
 
-- Unchanging vehicle facts must be owned by `Vehicle` or by composed members owned by `Vehicle`.
 - `Vehicle` is the root source of truth for robot construction facts, dimensions, locations, physical limits, and fixed subsystem facts.
-- These facts should be arranged into composed members divided by physical subsystem.
-- Consumers should depend only on the relevant subsystem facts rather than on the whole `Vehicle` when practical for testing.
-- Derived facts that are expensive or repeatedly used should be precalculated and updated rather than recomputed ad hoc.
-- Core facts must have one exclusive owner in this hierarchy. Do not create independent duplicate sources elsewhere.
-- Performance-critical access must remain tightly contained inside the authoritative owner. Prefer internal caches with strict update rules over exposing public companion parameter or state types.
+- Those facts belong in `Vehicle` or in named composed members owned by `Vehicle`, not in copied parameter bags, helper mirrors, or mode-local extracts.
+- Prefer direct derivation first. Introduce cached derived state only when a real hot path is identified and the cache remains internal, explicit, and testable.
+- Do not expose companion parameter, state, or cache types merely for convenience or presumed performance.
 
 ### PlantModel
 
 - `PlantModel` is the single source of truth for the robot motion model and shared plant equations.
 - `PlantModel` must not become a second owner of vehicle facts already owned by `Vehicle`.
-- `PlantModel` should provide shared motion equations, state propagation, and inverse/forward motion relationships.
-- Do not create parallel plant-equation implementations in controllers, facades, helpers, or mode-specific files.
+- Do not duplicate plant equations in controllers, helpers, facades, or mode-specific files.
 
 ### Maze
 
-- `Maze` is the authority on maze layout and maze state.
-- Maze topology, wall state, reachability, accessibility, and maze-derived navigation legality belong with `Maze` or with tightly related maze-domain types.
+- `Maze` defines the authoritative maze representation and maze-domain behavior.
+- Maze topology, wall state, reachability, accessibility, and maze-derived legality belong with `Maze`.
+- Do **not** create alternate maze representations, helper mirrors, or mode-local copies.
 
 ### SharedRobotRuntime
 
-- `SharedRobotRuntime` provides the only legal logging instances in the project through `GetDataLogger()` and `GetLoggingFile()`.
-- No other class may own logger or logging file instances independently.
-- Additional structured log streams are allowed only when justified and must still be created and owned through `SharedRobotRuntime` or its designated shared logging subsystem rather than by per-mode classes.
-- Do not create alternate logger access helpers, wrappers, managers, or utility functions outside those owned instances.
+- In production runtime, `SharedRobotRuntime` owns every shared single-instance subsystem that must not be copied.
+- That includes the only production `MmLogLogger` instance, the `logging.txt` output, the canonical production `Maze` instance, the only production instances of all pathfinder implementations and variants including `FloodFill` and `ManeuverPathfinder`, and other similarly memory-constrained shared navigation/runtime subsystems.
+- The production `MmLogLogger` may close one file and reopen another file with a different designated schema when required, but that still uses the same one runtime-owned logger instance. Do **not** create a second production `MmLogLogger`.
+- Pathfinder ownership is intentionally absolute in production code. Do **not** create additional pathfinder instances as mode members, helper members, locals, file-statics, hidden caches, or dynamic allocations. These pathfinders are large enough that duplicate production instances are architectural and memory-allocation failures, not conveniences.
+- No per-mode, per-helper, per-subsystem, or wrapper-hidden copies are allowed in production code.
+- Access these subsystems through `SharedRobotRuntime`; do **not** create alternate managers, access helpers, wrappers, convenience owners, or on-demand construction paths.
+- `Maze` remains the authoritative maze-domain type. `SharedRobotRuntime` owns the production instance.
+- Host-side test architecture may use its own test logging system, but that does not create a second production ownership pattern.
 
 ### BootModeRegistry
 
-- `BootModeRegistry` (or the designated equivalent once introduced) is the single source of truth for top-level boot mode discovery and selection metadata.
-- Boot selector pins, jumpers, and startup-entry hardware conditions belong to this registry or to the platform pin map it owns or references, not to mode tuning or configuration profiles.
-- Every top-level boot mode must be discoverable from this one registry, including its selector condition, purpose summary, primary outputs or logs, implementation entry point, and the file or files where its implementation lives.
-- Do not duplicate boot selection logic in scattered mode files, comments, serial-print strings, or config namespaces.
+- `BootModeRegistry` is the single source of truth for top-level boot-mode discovery and selection metadata.
+- If it does not yet exist in acceptable form, any task touching boot-mode selection must introduce or converge on it rather than inventing another registry, selector helper, or parallel authority.
+- Boot selector pins, jumpers, and startup-entry hardware conditions belong here or in the platform pin map it owns or references, not in mode tuning or config files.
+- `BootModeRegistry` owns selection and discovery metadata only: stable mode identifier, selector condition, reboot requirement, and one authoritative descriptor reference.
+- Human-facing purpose summaries, phase descriptions, artifact descriptions, and implementation-location details belong to the authoritative mode descriptor, not duplicated ad hoc across the registry.
 
 ### BootUtilityModeFramework
 
-- `BootUtilityModeFramework` (or the designated equivalent once introduced) is the single owner of shared utility-mode execution helpers and contracts.
-- Shared concerns such as utility-mode setup and teardown, runtime or service access, logging lifecycle, failure handling, common control-tick capture, and common recovery helpers belong in this framework rather than inside each utility mode.
-- Until this framework exists, do **not** invent multiple provisional layers. If a task requires introducing it, follow the shared infrastructure planning mandate below and create one convergent framework rather than several ad hoc helpers.
-- Do **not** introduce new shared utility-mode framework types unless they replace clear duplication across multiple utility modes or are part of an explicit planned framework introduction with named intended consumers.
+- `BootUtilityModeFramework` is the intended authoritative home for shared utility-mode execution helpers and contracts when such shared infrastructure is justified.
+- It does **not** need to be introduced preemptively for a single mode.
+- If a task must introduce or substantially extend shared utility-mode infrastructure, it must converge on `BootUtilityModeFramework` rather than creating another host contract, setup layer, helper family, or provisional registry/context abstraction.
+- Shared setup/teardown, runtime access, logging lifecycle, failure handling, control-tick capture, and recovery helpers belong here once they are truly shared.
+- Until it exists in acceptable form, keep utility-mode logic direct and local rather than inventing temporary shared layers.
 
-### Software Limits
+### SoftwareLimits
 
-- Software-induced limits belong in a designated class or typed configuration owner common to all modes and configurations.
-- Do not scatter such limits across unrelated files or mode-specific constant bags.
-
----
-
-## Reference Shapes
-
-Use these shapes as the default target.
-
-### Allowed Shape A: Maze-style authoritative class
-
-A substantive subsystem should usually look like `Maze`:
-
-- one authoritative owner of relevant state,
-- one coherent public interface expressed in domain terms,
-- private storage and private implementation details,
-- no public forwarding shell layered on top of the real owner,
-- no exposure of internals merely to let callers bypass the parent.
-
-### Allowed Shape B: Direction-style domain vocabulary subsystem
-
-A supporting-type subsystem is acceptable only when it behaves like `Direction`:
-
-- a small, stable project language,
-- tightly related types and operations,
-- reused broadly across substantively different consumers,
-- not just a decomposition of one class's internal calculations.
+- Software-induced limits belong in `SoftwareLimits` or in one typed configuration object owned by `SoftwareLimits` and shared across modes.
+- Safety bounds, stop conditions, and shared runtime limits must use this typed ownership rather than scattered `stop if X` directives or mode-local constant bags.
 
 ---
 
-## Disallowed Default Shapes
+## Cross-Build Boundary
 
-These are forbidden by default unless the prompt explicitly justifies them and the justification survives review against these rules.
-
-- `Facade` + `Core` + `Helper` + `Manager` + `Utils` around one subsystem.
-- A new class whose public API mostly forwards to one owned object.
-- Multiple public entry points into the same subsystem with overlapping responsibility.
-- Public support-type families that mainly expose one class's internal pipeline.
-- Wrapper classes introduced only to reduce local edits.
-- One-off helper modules, utility dumps, or generalized convenience layers.
-- Parallel systems that are nearly identical but have slightly different naming, access, or behavior.
-- Compatibility wrappers that preserve a nonstandard pattern after the canonical pattern already exists.
-- Copy-and-fork architecture for new modes or new subsystems.
-- Companion `Params`, `State`, `Context`, `Data`, or similar public structs introduced mainly to simplify access, refactoring, or testing for one substantive owner.
-- Test seams, adapters, or facades introduced only to make mocking or local edits easier.
+- This project has one dual-build boundary: host testing and Teensy deployment.
+- Platform-specific redirection of embedded functions to feasible host-side equivalents must be centralized in one designated build boundary, currently `defines.h` unless replaced by one explicit authoritative subsystem.
+- Do **not** scatter thin host adapters, duplicate wrappers, `#ifdef` facades, or alternate platform shims throughout mode code or subsystem code.
+- If the centralized boundary must grow, extend that one boundary rather than creating local redirection layers.
+- Any boundary type introduced for this purpose must be minimal, centrally owned, and reused. It must not become a second architecture layered on top of the real subsystem owners.
 
 ---
 
-## One Public Concept Rule
+## Public API and Type Shape Rules
 
-For each substantive subsystem, prefer exactly one of the following:
+### Default shape
 
-1. one authoritative public class, or
-2. one coherent domain-vocabulary subsystem.
+For each substantive subsystem, expose **one authoritative public owner**.
 
-Do not create multiple public concepts for the same responsibility.
+Supporting public types are allowed only when they are one of the following:
 
-A class is forbidden if a substantial portion of its public API exists primarily to forward to, expose, rename, or repackage another owned object.
+1. a stable domain-vocabulary subsystem,
+2. a designated `mmlog` row schema declared with the project macros, or
+3. part of the single centralized host/target boundary or one centrally owned framework contract.
 
-Do not expose owned subsystem objects through getters unless there is a documented performance or interoperability reason and no cleaner domain API exists.
+If callers need more operations, add domain methods to the owner or move behavior inward. Do **not** publish a second public concept merely to expose, rename, or partially extract the owner's internals.
 
----
+### Forbidden default shapes
 
-## Supporting Type Policy
+Do **not** introduce or preserve:
 
-Supporting types are allowed only in these cases:
+- `Facade` + `Core` + `Helper` + `Manager` + `Utils` around one subsystem,
+- a class whose public API mostly forwards to one owned object,
+- multiple overlapping public entry points into the same responsibility,
+- public support-type families that mainly expose one class's internal pipeline,
+- wrapper classes introduced only to reduce local edits,
+- one-off helper dumps or generalized convenience layers,
+- parallel systems with slightly different naming or access patterns,
+- compatibility wrappers kept after the canonical pattern already exists,
+- copy-and-fork architecture for new modes or subsystems,
+- companion `Params`, `State`, `Context`, `Data`, or similar public structs created mainly to simplify access, refactoring, or testing for one substantive owner,
+- scattered thin adapters or `#ifdef` wrappers outside the centralized cross-build boundary.
 
-### 1. Domain vocabulary subsystems
+### Supporting types
 
-The types collectively define a small, stable project language.
-
-Examples of acceptable shape:
-
-- directions,
-- relative directions,
-- coordinates and locations,
-- maneuver codes,
-- wall-state vocabulary.
-
-### 2. Narrow transport types
-
-A small input or output record may be used when needed for a public API boundary.
-
-These must be:
-
-- minimal,
-- directly justified by that boundary,
-- not a decomposition of one class's internal algorithm,
-- not a companion container for one class's owned parameters, cached state, or derived values.
-
-### Forbidden supporting-type patterns
-
-Do **not** create public supporting types that mainly:
-
-- expose intermediate calculation stages,
-- mirror one class's internal processing steps,
-- represent temporary solver stages,
-- bundle one class's derivative bookkeeping,
-- organize one implementation's private algebra into top-level public structs,
-- duplicate facts already owned elsewhere.
-
-If a type mainly supports one class's implementation, keep it:
-
-- private,
-- nested, or
-- file-local in the `.cpp`.
-
-Before creating a new supporting type, verify all of the following:
+A public supporting type is acceptable only if all of the following are true unless it is an `mmlog` schema or centralized framework/boundary contract:
 
 - it is a stable domain concept rather than an implementation artifact,
 - it would still make sense if the current algorithm were rewritten,
-- it already has, or is clearly expected to have, at least three substantively different consumers unless it is fundamental project vocabulary,
-- it defines project vocabulary rather than one class's internal pipeline,
-- it does not compete with an existing authoritative owner.
+- it has broad cross-subsystem use and its own meaningful operations or ecosystem,
+- it does not compete with an existing authoritative owner,
+- it does not merely expose one owner's internals through a smaller surface area.
 
-If any of these are false, do not create a new public supporting type.
+If a type mainly supports one class's implementation, keep it private, nested, or file-local in the `.cpp`.
+
+Public fields are disallowed by default. They are acceptable only for:
+
+- designated `mmlog` row schemas,
+- true domain-vocabulary/value types with stable semantics and broad reuse.
+
+They are **not** acceptable for peeled-off internals, parameter bags, cache exposure, or testing conveniences.
 
 ---
 
-## Configuration Architecture
+## Configuration and Limits
 
 Configuration must have one authoritative ownership hierarchy.
 
-Do **not** create a new mode by copying an existing `*Config` namespace, file, or constant block.
+- Do **not** create a new mode by copying an existing `*Config` namespace, file, or constant block.
+- Shared settings must be owned once as typed configuration objects.
+- Mode-specific settings must be compact profiles or explicit overrides.
+- New modes must reuse shared typed groups and define only real deltas.
+- Mode-specific safety bounds must use the shared typed `SoftwareLimits` ownership.
+- Boot selector pins, jumper conditions, and startup-entry hardware conditions belong to `BootModeRegistry` or the platform pin map, not to mode tuning or config ownership.
 
-Peer configuration islands such as `CoreConfig`, `DiagnosticConfig`, `RaceConfig`, `CalibrationConfig`, or similar are disallowed by default when they duplicate structure or ownership.
+Reject any configuration architecture in which the production parameter set cannot be instantiated, inspected, and validated directly in unit tests through its authoritative typed owner.
 
-### Required configuration shape
+Do **not** use copied config namespaces, namespace aliases, scattered top-level constants, preprocessor switches, hidden file-local config state, or mode-specific forks as substitute ownership paths.
 
-- Shared settings must be owned once.
-- Shared parameter groups must be represented as typed configuration objects.
-- Mode-specific settings must be represented as compact mode profiles or explicit overrides.
-- New modes must reuse shared typed groups and define only true deltas.
-- Boot selector pins, jumper conditions, and startup-entry hardware conditions belong to `BootModeRegistry` or the platform pin map, not to mode tuning or configuration profiles.
+When adding a new mode:
 
-### Configuration testability rule
-
-Reject any configuration architecture in which the parameter set used by a production subsystem cannot be instantiated, inspected, and validated directly in unit tests through its authoritative typed owner.
-
-Do **not** use global namespace visibility as a substitute for testability.
-
-Disallow configuration primarily exposed through:
-
-- copied config namespaces,
-- namespace aliases used as alternate ownership paths,
-- scattered top-level constants,
-- preprocessor switches,
-- hidden file-local configuration state,
-- mode-specific forks of another config file.
-
-Every production mode must resolve to an explicit typed configuration object or profile that tests can obtain without alternate access paths.
-
-### Adding a new mode
-
-When adding a new operating mode:
-
-1. do not copy an existing mode config file or namespace,
-2. identify which settings are already shared and reuse them,
-3. create only a compact mode profile for values unique to that mode,
-4. if the new mode and an existing mode share a parameter group, extract that group once into a shared typed object,
+1. do **not** copy another mode's config file or namespace,
+2. reuse existing shared settings,
+3. define only a compact profile for mode-specific deltas,
+4. extract a shared typed group once if multiple modes truly share it,
 5. update callers to use the shared owner rather than introducing another access path.
 
 ---
 
 ## Boot-Selected Execution Modes
 
-Top-level application modes in this project are boot-selected execution modes.
+Top-level application modes are selected only at startup by reading designated mode-select pins or jumpers. Once selected, the application stays in that one top-level mode for the session.
 
-A top-level mode is chosen only during startup by reading designated mode-select pins or jumpers. Once startup selection is complete, the application remains in that one selected top-level mode for the rest of the session.
+- Do **not** model top-level modes as a runtime mode machine.
+- Do **not** implement runtime transitions between top-level modes.
+- Entering a different top-level mode requires a reboot.
+- Internal setup, calibration stages, sections, subtests, and recovery paths are **phases** of one mode, not separate modes.
 
-Do **not** design top-level application modes as a navigable runtime mode machine.
-Do **not** implement runtime transitions from one top-level application mode to another.
-Entering a different top-level application mode requires a reboot.
+### Mode categories
 
-Within a selected top-level mode, internal steps such as setup, calibration stages, sections, subtests, and recovery paths are phases of that mode, not separate modes.
-Do **not** model such internal phases as independent application modes.
+- `mission mode`: the normal operational top-level mode; it may remain a substantive owner.
+- `utility mode`: a boot-selected test, measurement, calibration, audit, or bring-up workflow; it should be lightweight and procedural rather than a parallel architecture.
 
-### Mode terminology
-
-Use these terms consistently:
-
-- `boot mode`: a top-level execution path selected only at startup,
-- `utility mode`: a boot-selected test, measurement, calibration, or audit workflow,
-- `mission mode`: the normal operational top-level mode of the robot,
-- `phase` / `section` / `subroutine`: an internal step within one boot mode,
-- `recovery path`: a control path within one boot mode,
-- `configuration profile`: data that tunes one boot mode or one shared subsystem.
-
-Do **not** call internal phases or subroutines separate application modes.
-
-### Boot utility modes vs mission mode
-
-Top-level application modes fall into two categories:
-
-1. `Mission mode`
-   - the normal operational mode of the robot,
-   - allowed to be a substantive owner with richer internal policy and behavior.
-
-2. `Boot utility modes`
-   - test, measurement, calibration, audit, and bring-up workflows selected only at startup,
-   - used to tune, validate, or characterize the robot and the mission mode,
-   - not intended to form an independent parallel architecture.
-
-Boot utility modes may use one class per mode **if that pattern is applied consistently**.
-A utility mode class is acceptable only when:
-
-- it is easy to locate by name,
-- it contains primarily mode-specific procedure and intent,
-- it uses the shared utility-mode infrastructure for setup, runtime access, logging, and teardown,
-- it does not introduce a new mode architecture, host pattern, logging system, or boot-selection mechanism.
-
-Do **not** add per-mode infrastructure.
-
-Mission mode may remain a more substantive owner. Utility modes should usually be lightweight and procedural. The lightweight convenience and shared-framework rules below apply to utility modes by default; mission mode is exempt except for the boot-selection, registry, logging-standard, and no-runtime-switching requirements.
+A utility mode may use one class per mode only when that pattern is applied consistently and the mode uses `BootUtilityModeFramework` for shared setup, runtime access, logging, and teardown.
 
 ### Utility-mode construction rule
 
-A boot utility mode should normally consist of:
+A non-mission utility mode should normally consist of:
 
-- one mode registration or definition entry,
-- one mode class or one small local implementation block when needed for findability,
-- optional small mode-specific callbacks only where the shared framework cannot express the behavior directly,
-- shared use of the canonical runtime, logging, control, sensing, recovery, and watchdog infrastructure.
+- one `BootModeRegistry` entry,
+- one authoritative descriptor,
+- one implementation file or one easy-to-find mode class,
+- optional small mode-specific callbacks only where `BootUtilityModeFramework` cannot express the behavior directly,
+- shared use of canonical runtime, logging, control, sensing, recovery, and watchdog infrastructure.
 
-Do **not** create a dedicated host-method pair, config namespace, wrapper, or file cluster for a new utility mode unless the mode has genuinely unique architecture that cannot be expressed through the shared framework.
+Editing a non-mission utility mode should usually require touching only:
 
-### Utility-mode convenience rule
+- `BootModeRegistry`,
+- the mode's authoritative implementation files,
 
-Adding or editing a non-mission utility mode should usually require changing only:
+and, when genuinely needed:
 
-- one central mode registry or definition file, and
-- one mode implementation file when a dedicated mode class is used.
+- the mode's unit test file,
+- mode-local `mmlog` schema declarations in the mode header,
+- shared typed tuning or `SoftwareLimits`,
+- shared framework-owned descriptor or context types when genuinely reused,
+- build metadata or non-code assets the mode or tooling genuinely consumes.
 
-This expectation applies outside deliberate shared-framework introduction tasks covered by the planning mandate below.
+It should **not** require new per-mode host interfaces, config namespaces, wrappers, logger ownership patterns, mode-specific label bundles, mode-specific cycle bundles, or scattered infrastructure families.
 
-Do **not** require a new utility mode to introduce:
+### Registry and descriptor rule
 
-- a dedicated host interface expansion,
-- a dedicated config namespace,
-- a dedicated wrapper,
-- a mode-specific logger type,
-- a mode-specific label bundle,
-- a mode-specific cycle or state bundle,
-- or multiple scattered infrastructure files,
+All top-level boot-selectable modes must be declared in one authoritative `BootModeRegistry`.
 
-unless the prompt explicitly justifies that extra structure. Shared framework-owned descriptor or context types are allowed when they are reused across multiple utility modes.
+For every boot mode, `BootModeRegistry` must contain only the selection/discovery metadata needed to find and enter the mode:
 
-### Utility-mode auditability rule
-
-Each utility mode must declare its purpose in one compact, easily audited place.
-
-Every utility mode must provide:
-
-- a one-sentence intent,
-- the measurement, calibration, or test goal,
-- the shared tuning it relies on,
-- any explicit tuning overrides,
-- the sequence of major phases or sections,
-- the expected artifacts produced,
-- and the boot condition that selects it.
-
-A reviewer must not need to read the full procedure body to learn what the mode is for.
-
-### Boot mode registry rule
-
-All top-level boot-selectable modes must be declared in one authoritative boot-mode registry.
-
-The registry must contain, for every boot mode:
-
-- mode name,
+- stable mode identifier or display name,
 - selector pins or jumper condition,
 - whether reboot is required to enter a different top-level mode,
+- one authoritative descriptor reference.
+
+Each boot mode must define one authoritative descriptor, colocated with the mode implementation or its header. The descriptor owns the human-facing and implementation-facing mode description. It must contain:
+
 - short purpose summary,
 - primary outputs or logs produced,
-- the implementation entry point, and
-- the implementation file or files.
+- the implementation entry point or callable,
+- authoritative implementation file location,
+- for utility modes: major phases or sections,
+- for utility modes: shared tuning relied upon,
+- for utility modes: any explicit tuning overrides,
+- for utility modes: expected artifacts produced.
 
-Do **not** hide boot conditions in:
+Do **not** duplicate selector metadata in descriptors or descriptive metadata in the registry beyond what the registry minimally needs for discovery.
 
-- comments,
-- serial-print strings,
-- scattered config files,
-- or per-mode implementation details.
+Do **not** duplicate boot conditions or mode metadata across comments, serial strings, scattered config files, or per-mode trivia.
 
-A reviewer must be able to find every boot-selectable mode and its hardware entry condition in one place.
+A reviewer must be able to inspect `BootModeRegistry` to find every boot-selectable mode and its hardware entry condition, then inspect one descriptor to learn what that mode does and where its implementation lives.
 
-### Shared infrastructure planning mandate
+### Shared framework introduction rule
 
-The shared utility-mode framework does not yet exist as a finished canonical subsystem. If a task requires introducing new shared boot-mode or utility-mode infrastructure, treat that as a deliberate architectural change rather than incidental byproduct of adding one mode.
+`BootUtilityModeFramework` becomes authoritative only when shared utility-mode infrastructure is deliberately introduced or substantially extended.
 
-Before creating such infrastructure, first define in the change plan or task notes:
+If a change must introduce or substantially extend shared utility-mode infrastructure, define in the plan or task notes:
 
-1. the proposed authoritative owner,
-2. the common mode contract and shared responsibilities,
+1. the authoritative owner,
+2. the common contract and shared responsibilities,
 3. which duplicated per-mode infrastructure it replaces,
-4. which files become authoritative and which files are expected to shrink or disappear,
-5. and which existing or planned utility modes will use it.
+4. which files become authoritative and which are expected to shrink or disappear,
+5. which existing or planned utility modes will use it.
 
-Do **not** begin by creating multiple provisional registries, contexts, helpers, wrappers, logger layers, or dispatch abstractions without this plan. Prefer one convergent framework introduction over iterative framework sprawl.
+Do **not** create multiple provisional registries, contexts, wrappers, logger layers, or dispatch abstractions without this plan. Prefer one convergent framework introduction over iterative framework sprawl.
+Introduce or extend shared utility-mode infrastructure only when it replaces duplicated per-mode machinery across multiple existing modes, or across one existing mode and at least one clearly planned additional mode, or when the task explicitly makes framework introduction a primary objective. Do **not** create shared framework layers opportunistically for a single mode when direct mode-local code still satisfies the canonical-owner rules.
 
-Only introduce new shared boot-mode or utility-mode infrastructure when:
+### Mode interface, logging, and tuning
 
-- it clearly replaces duplicated per-mode machinery across multiple existing or planned utility modes, or
-- the task explicitly calls for framework introduction as a primary objective.
-
-Do **not** create shared framework layers opportunistically for a single mode.
-
-### Mode interface rule
-
-Do **not** encode the set of modes into host interface method names.
-
-Forbidden:
-
-- `BeginXMode()` / `RunXMode()` growth on a host interface,
-- one forwarding wrapper class per mode,
-- one singleton getter per mode without a central registry.
-
-If utility modes use one class per mode, they must all conform to one common mode contract and be registered through the central boot-mode registry.
-
-### Utility-mode logging rule
-
-Utility modes must use the project-standard logging architecture only:
-
-- `mmlog` for structured data,
-- `logging.txt` for sparse human-readable text,
-- shared runtime-owned logging instances and helpers.
-
-Human-readable mode output should go through the shared `logging.txt` path rather than per-mode text files.
-
-Do **not** create per-mode logging subsystems, ad hoc log frameworks, legacy binary-log support, or mode-specific logger ownership patterns.
-
-If a utility mode needs a specialized row schema, define only the row schema and metadata within the shared logging pattern.
-Do **not** introduce a separate logging architecture for that mode.
-
-Utility modes may define one or more `mmlog` row schemas, including separate schemas for different internal phases, only when those schemas are declared with the designated `mmlog` macros and remain within the shared runtime-owned logging architecture.
-A phase-specific schema is allowed; a phase-specific logging subsystem is not.
-
-Utility modes may define row schemas and request streams, but may not own `MmLogLogger`, file-export, event-log, or other logging objects directly. Structured log streams must be created and owned by the shared runtime logging infrastructure.
-
-If a mode needs more than one structured stream, that must be explicitly justified in the mode description and must still use the shared `mmlog` infrastructure.
-
-### Utility-mode shared tuning rule
-
-Utility modes exist to test, measure, calibrate, or tune the robot and mission behavior.
-
-Therefore, utility modes must use the same shared mission and runtime tuning by default.
-
-Do **not** create separate control, estimator, sensing, drivetrain, or logging tuning families for utility modes unless the explicit purpose of the mode is to characterize or compare those exact parameters.
-
-Allowed utility-mode-specific parameters are limited to:
-
-- test geometry,
-- repetition counts,
-- workspace limits,
-- capture cadence,
-- labels and metadata,
-- safety bounds,
-- and explicit documented experimental overrides.
-
-If a utility mode temporarily overrides shared tuning, the override must be:
-
-- explicit,
-- minimal,
-- local to the mode definition or implementation,
-- and documented with why mission or shared tuning is insufficient for that experiment.
+- Do **not** encode the set of modes into host interface method names such as `BeginXMode()` or `RunXMode()`.
+- Do **not** create one forwarding wrapper per mode.
+- If utility modes use one class per mode, they must all conform to one common contract and be registered through `BootModeRegistry`.
+- In production runtime, utility modes must use only the shared logging architecture: the one runtime-owned `MmLogLogger` instance for structured data, `logging.txt` for sparse human-readable text, and other runtime-owned logging objects.
+- Utility modes may declare `mmlog` row schemas with the designated macros, including separate schemas for different internal phases.
+- Separate phase schemas are allowed only through the designated macros and only when bound through the one runtime-owned `MmLogLogger` instance by closing/reopening or otherwise reconfiguring that same logger according to the shared runtime logging architecture.
+- Utility modes may **not** own additional `MmLogLogger` instances, export objects, file-export objects, event-log objects, or alternate logging subsystems directly.
+- Utility modes must use shared mission/runtime tuning by default.
+- Allowed utility-mode-specific parameters are limited to test geometry, repetition counts, workspace limits, capture cadence, labels/metadata, safety bounds expressed through `SoftwareLimits`, and explicit documented experimental overrides.
+- Any tuning override must be explicit, minimal, local, and documented with why shared mission/runtime tuning is insufficient.
 
 ---
 
-## Cleanup and Deletion Policy
+## Cleanup Workflow and Deletion Policy
 
 Deletion is preferred over preservation when a type, file, or subsystem is:
 
@@ -455,189 +283,136 @@ Deletion is preferred over preservation when a type, file, or subsystem is:
 - a thin wrapper,
 - a second access path to the same behavior,
 - an obsolete implementation of a centralized responsibility,
-- a nearly identical duplicate of another system,
+- a nearly identical duplicate,
 - a compatibility layer preserving a nonstandard pattern.
 
-Do not leave old and new systems side by side.
-Do not keep transitional wrappers unless the prompt explicitly requests a staged migration.
-Default to completing the migration and removing the old path.
-Do not preserve both the legacy path and the canonical path after the change unless the prompt explicitly requires staged compatibility.
-
----
-
-## Required Workflow for Cleanup Tasks
+Do **not** leave old and new systems side by side unless the task explicitly requires staged compatibility.
 
 ### Before writing code
 
-1. Identify the authoritative owner for the responsibility being changed.
-2. Identify all existing classes, wrappers, helpers, configs, and access paths involved.
-3. Choose the single canonical destination for the responsibility.
-4. Confirm the explicit task boundaries and `done when` conditions.
-5. Plan to migrate touched callers to that destination.
-6. Plan deletion of superseded files, wrappers, and duplicate code.
-7. If new shared boot-mode or utility-mode infrastructure is required, complete the shared infrastructure planning mandate before creating files or abstractions.
+1. identify the authoritative owner,
+2. identify all wrappers, helpers, configs, and alternate access paths involved,
+3. choose the single canonical destination,
+4. confirm the task boundary and `done when` condition,
+5. plan caller migration,
+6. plan deletion of superseded code,
+7. if the task truly requires new or expanded shared boot-mode infrastructure, complete the framework-introduction rule first,
+8. if host/Teensy behavior differs, decide whether the difference belongs in the centralized build boundary rather than the subsystem itself.
 
 ### During implementation
 
-- Extend the authoritative type rather than creating a parallel type.
-- Move behavior inward toward the authority.
-- Keep helper logic private or file-local when it does not define shared domain vocabulary.
-- Prefer one authoritative class with private helpers over splitting behavior across thin cooperating classes.
-- Do not fix an ownership problem at the call site when the authoritative owner is known.
-- Do not broaden the task beyond the stated `done when` conditions unless a concrete architectural reason requires it.
-- Delete superseded code in the same change when feasible.
+- extend the authoritative owner rather than creating a parallel type,
+- move behavior inward toward the owner,
+- keep non-vocabulary helpers private or file-local,
+- prefer one authoritative class with private helpers over several thin cooperating classes,
+- do **not** fix an ownership problem at the call site when the owner is known,
+- do **not** broaden the task beyond its boundary unless convergence requires it,
+- delete superseded code in the same change when feasible.
 
 ### After implementation
 
-- remove dead declarations and includes,
-- remove obsolete files from the build,
+- remove dead declarations, includes, and obsolete files from the build,
 - ensure only the canonical access path remains,
-- ensure tests target the canonical path,
+- ensure tests hit the canonical path,
 - ensure configuration still resolves through authoritative typed owners,
-- ensure every new or edited file explicitly includes its own direct dependencies rather than relying on incidental inclusion order,
-- ensure every new or edited non-template `.cpp` includes its own header first after the project precompiled header if one is required.
+- ensure every edited file includes its own direct dependencies,
+- ensure every edited non-template `.cpp` includes its own header first after the project precompiled header if one is required.
 
 ---
 
-## Automatic Rejection Conditions
+## Automatic Rejection Checks
 
 Reject the design and revise it if any of the following are true:
 
-- A new class mostly forwards calls to one owned object.
-- A new class exists mainly to rename, expose, or repackage another class.
-- A subsystem ends up with multiple public entry points that overlap in responsibility.
-- A public supporting type mainly represents one class's internal calculation stage.
-- A file introduces a second naming convention, access pattern, or ownership pattern beside an existing project-standard one.
-- A wrapper is introduced only to reduce local edits.
-- Old and new implementations are left in parallel after the change.
-- A change preserves architectural junk because deleting it would require additional refactoring.
-- A new mode is created by copying another mode's config namespace or file.
-- The same conceptual parameter exists in more than one config owner.
-- Shared tuning is duplicated instead of referenced from one authority.
-- A namespace alias is used to create another casual access path to configuration.
-- Public fields are introduced without a clear, documented performance reason.
-- Inheritance is introduced where composition would suffice.
-- A new utility or helper module is introduced instead of extending the authoritative owner.
-- A change introduces test-only seams, wrappers, or adapters that do not belong in the production architecture.
-- A change expands beyond the stated task boundary without a concrete ownership or architecture reason.
-- Adding a mode requires new `BeginXMode()` / `RunXMode()` methods on a host interface.
-- Adding a mode requires a new forwarding wrapper subclass.
-- The architecture implies runtime switching between top-level application modes.
-- Internal phases of one boot-selected workflow are modeled as separate application modes.
-- A different top-level mode can be entered without reboot.
-- Adding a utility mode requires a new logging architecture.
-- Adding a utility mode hides its boot condition outside the central boot-mode registry.
-- Boot selector pins or jumper conditions are stored in mode tuning or configuration ownership instead of `BootModeRegistry` or the platform pin map.
-- Adding a utility mode makes shared tuning diverge without explicit experimental justification.
-- Adding a utility mode requires a cluster of new infrastructure files rather than primarily one mode registry entry and one mode implementation file.
-- Adding a utility mode makes it hard to tell, from one place, what the mode is for and what it produces.
-- Multiple utility modes solve the same setup, logging, recovery, or watchdog problem in inconsistent ways.
-- A utility mode owns `MmLogLogger`, file-export, or event-log objects directly instead of using shared runtime-owned logging infrastructure.
-- A change introduces new shared boot-mode or utility-mode infrastructure without first naming its authoritative owner, shared contract, replacement targets, and intended consumers.
-- A one-off shared boot-mode or utility-mode framework layer is introduced for a single mode when no clear multi-mode consolidation exists.
-- An entry header, alias header, or forwarding header is introduced or preserved instead of giving the subsystem either real authoritative files or no dedicated files at all.
-- A header or source file builds only because of incidental transitive inclusion or current include order rather than its own direct includes and forward declarations.
-- A newly extracted or moved class file omits required includes and relies on unrelated headers or precompiled-header leakage to compile.
-- A new or edited non-template `.cpp` does not include its own header first after the project precompiled header if one is required.
+- a new class mostly forwards to, renames, or repackages another class,
+- a subsystem ends up with multiple overlapping public entry points,
+- a public type mainly represents one class's internal pipeline or peeled-off internals,
+- old and new implementations remain in parallel after the change,
+- a wrapper or adapter is introduced only to reduce local edits, testing effort, or mock setup,
+- a new mode requires copied config, a new per-mode host interface, a forwarding wrapper, or a new logging architecture,
+- a boot condition or selector rule is hidden outside `BootModeRegistry` or the platform pin map,
+- selector metadata and descriptive mode metadata are duplicated instead of split cleanly between `BootModeRegistry` and the authoritative descriptor,
+- shared tuning diverges without explicit experimental justification,
+- the architecture implies runtime switching between top-level modes,
+- a new host/Teensy redirection is scattered outside the centralized build boundary,
+- public fields are introduced outside domain vocabulary or designated `mmlog` row schemas,
+- inheritance grows where composition or a flatter contract would suffice,
+- production code creates another `MmLogLogger` instance or another production pathfinder instance outside `SharedRobotRuntime`,
+- production code dynamically allocates a large shared pathfinder instead of using the runtime-owned instance,
+- shared utility-mode infrastructure is introduced or widened without satisfying the shared framework introduction rule,
+- a file builds only because of incidental transitive includes or forwarding headers.
 
 ---
 
-## Header and Include Hygiene
+## File, Header, and Inheritance Rules
 
 - Headers must be self-sufficient for the declarations they expose.
-- Do **not** rely on incidental transitive includes, unrelated include order, or the current build graph to make a header compile.
-- Include every direct dependency needed by a header's declarations, base classes, member objects, inline definitions, templates, and constants.
-- Use forward declarations only when they are sufficient and stable for the declaration being exposed.
-- If a type is used by value, as a base class, or in inline code requiring completeness, include its header rather than relying on a forward declaration.
-- Every new or edited non-template `.cpp` must include its own header first after the project precompiled header if one is required.
-- Source files must include the headers for the symbols they use directly. Do **not** rely on some other header in the include chain to pull them in accidentally.
-- When extracting or moving a class to a new file, add the full set of required includes and forward declarations for that file as part of the same change.
-- A file that only builds because another unrelated header happened to be included first is nonconforming even if the current build passes.
-
----
-
-## Class, File, and API Organization
-
-- Substantive classes must be placed in files sharing the name of that substantive class.
-- Non-template classes should have a `.h` with declarations and member documentation and a `.cpp` with implementation.
-- Enums and supporting types may be placed in the same file only if they are tightly related to that class or domain-vocabulary subsystem and satisfy the supporting-type rules above.
-- Structs and classes are subject to the same acceptance rules.
-- Reject structs and classes without documented public members, organized headers, or const-aware methods.
-- Reject structs and classes with public fields unless there is a clear, documented performance reason for the type to exist.
-- Public APIs should expose domain operations, not implementation staging.
-- Fully abstract the internal representation from consumers.
-- Offer const and non-const accessors only where both are sensible and meaningful.
-- Project constants should exist as compile-time objects owned by the proper class or typed configuration owner, not as scattered top-level constants.
-- Do not create additional public types or files merely to make the code look more decomposed; prefer private helpers, nested types, and file-local functions when the concept is not independently authoritative.
-- Do not create or preserve entry headers, alias headers, or forwarding headers that only include another file while pretending to define a separate subsystem. If a named subsystem is real, its declarations must live in its own authoritative files. If it is not real, remove the alias header and include the canonical owner directly.
-
----
-
-## Inheritance and Composition
-
-- Strongly prefer composed types over inheritance.
-- Inheritance is allowed only for true interface boundaries or when it provides substantial benefit across at least four real use sites.
-- Do not introduce inheritance trees to model convenience, categorization, or speculative reuse.
+- Do **not** rely on incidental transitive includes, unrelated include order, or current build-graph accidents.
+- Include every direct dependency needed by the file's declarations, inline definitions, templates, and constants.
+- Use forward declarations only when they are truly sufficient and stable.
+- Every edited non-template `.cpp` must include its own header first after the project precompiled header if one is required.
+- Substantive classes must live in same-named authoritative files.
+- Do **not** create or preserve alias headers, forwarding headers, or fake entry headers that only include another file while pretending to define a separate subsystem.
+- Prefer private helpers, nested types, and file-local functions over fake public decomposition.
+- Prefer direct concrete owners and composition.
+- Allow inheritance only for narrow interface contracts, unavoidable framework/toolchain integration, or one shallow abstraction layer with obvious substitutability.
+- Flatten lopsided or disparate inheritance trees that make call tracing harder than the equivalent composed design.
+- Do **not** introduce multi-level categorization trees, speculative base classes, or convenience inheritance.
 
 ---
 
 ## Testing Rules
 
-- Existing unit tests should not be modified merely to preserve a noncanonical design.
-- Existing unit tests may be updated when required to reach the canonical architecture or reflect an intentional behavior change.
-- New architecture must improve or preserve direct test access to the authoritative owner.
+- Existing tests should not be modified merely to preserve a noncanonical design.
+- Tests may be updated when needed to reach the canonical architecture or reflect an intentional behavior change.
+- New architecture must preserve or improve direct test access to authoritative owners.
 - Tests must be able to construct, inspect, and compare the exact parameter sets used by production code.
-- Do not hide production behavior behind wrappers, aliases, or mode forks that tests must special-case.
-- Do not introduce wrappers, facades, adapters, or companion structs solely to make testing easier.
-
-If a design makes the real production configuration or behavior harder to test through the canonical owner, revise the design.
-
----
-
-## Clarification Policy
-
-- Ask concise clarifying questions when ownership, required behavior, or interface contract is genuinely ambiguous.
-- Do not ask clarifying questions merely to avoid cleanup work.
-- If the authoritative owner is clear, proceed by extending that owner rather than inventing a new layer.
-- If a multi-step cleanup still contains minor ambiguity, state the working assumption and proceed without inventing a new public layer.
+- Do **not** hide production behavior behind wrappers, aliases, or mode forks that tests must special-case.
+- Do **not** introduce wrappers, facades, adapters, or companion structs solely to make testing easier.
+- Host-side redirection of embedded functions is allowed only through the centralized cross-build boundary.
+- Host-side test architecture may use its own logging system.
 
 ---
 
-## Task Scope and Completion Discipline
+## Clarification and Scope
 
-- Follow the explicit task request and its stated or implied `done when` conditions.
-- Do not expand the change set to nearby systems for speculative consistency or hypothetical reuse.
-- If a neighboring cleanup is truly required to preserve authoritative ownership, perform only the minimum additional work needed and keep the migration convergent.
-- Do not perform unrelated renames, abstractions, or decomposition passes during a targeted cleanup.
+- Ask concise clarifying questions only when ownership, required behavior, or interface contract is genuinely ambiguous.
+- Do **not** ask questions merely to avoid cleanup work.
+- If the authoritative owner is clear, extend it rather than inventing a new layer.
+- If a multi-step cleanup contains minor ambiguity, state the working assumption and proceed without creating a new public layer.
+- Follow the explicit task request and its stated or implied `done when` condition.
+- Do **not** expand the change set to nearby systems for speculative consistency or hypothetical reuse.
+- If neighboring cleanup is truly required to preserve authoritative ownership, perform only the minimum extra work needed and keep the migration convergent.
 
 ---
 
 ## Project-Specific Instructions
+
+### Operational constraints
 
 - No watchdog timers under 60 seconds that trigger a run failure.
 - Prefer recovery over fail-fast behavior.
 - When runtime behavior deviates from expectation, log the condition before attempting recovery.
 - The robot can sustain approximately `16.5 m/s^2` of lateral acceleration when the fan is running at `80%`.
 - Plan strategies with the high-performance operating envelope in mind.
-- Use the Decimus 5A project for guidance and reference to understand the intended style and performance envelope of this project.
-- Directional code must respect the conventions `+X = right`, `+Y = forward/up`, and `+Yaw = clockwise`.
-- Prefer being concise, clear, and writing understandable code **over** minimizing code churn when the existing code is nonconforming.
-- Do not introduce alternate access patterns, public fields, or companion structs based on presumed performance benefit. First establish correctness, ownership, and clean architecture. Only change representation for performance when the hot path is identified and the simpler encapsulated form is materially insufficient.
+- Use the Decimus 5A project as guidance for intended style and performance envelope.
+- Directional code must respect `+X = right`, `+Y = forward/up`, and `+Yaw = clockwise`.
+- Do **not** introduce alternate access patterns, public fields, or companion structs based on presumed performance benefit. First establish correctness, ownership, and clean architecture. Optimize representation only when the hot path is known and the simpler encapsulated form is materially insufficient.
 
 ### Navigation and locomotion
 
-- The `FloodFill` pathfinder should be used for simple navigation.
-- `ManeuverPathfinder` should only be used while stationary.
-- Locomotion should prefer the `Maneuver` classes when in a maze.
+- Use `FloodFill` for simple navigation.
+- Use `ManeuverPathfinder` only while stationary.
+- In a maze, locomotion should prefer the `Maneuver` classes.
 - For more manual control, generate `ManeuverInstance` objects directly and follow with a small target-yaw PID if needed.
 - Open-loop commands are appropriate for low-level tasks such as wall tapping or certain measurements.
-- Direct position or yaw control should be reserved for specific tasks that cannot reasonably be done through maneuver-based control.
+- Reserve direct position or yaw control for tasks that cannot reasonably be expressed through maneuver-based control.
 
 ### Logging and output
 
 - Serial-style output should be sparse and should go to `logging.txt`.
-- Heavy datalogging should use the `mmlog` system and the appropriate macros.
-- Do not create parallel ad hoc logging systems.
+- Heavy data logging should use `mmlog` and the designated macros.
+- Do **not** create parallel ad hoc logging systems.
 
 ### Build
 
@@ -645,21 +420,20 @@ If a design makes the real production configuration or behavior harder to test t
 
 ---
 
-## Preferred Coding Outcome
+## Preferred Cleanup Outcome
 
-A good cleanup change should usually result in all of the following:
+A good cleanup change should usually produce:
 
 - one clear authority for the edited responsibility,
-- fewer public entry points than before,
-- fewer wrappers and helper files than before,
-- fewer duplicate parameters or config owners than before,
-- fewer alternate naming and access patterns than before,
-- easier unit testing through the canonical owner than before,
-- easier discovery of every boot mode and its entry condition than before,
-- more consistent utility-mode setup, logging, and self-description than before.
-- stronger include hygiene and less reliance on incidental transitive includes than before.
+- fewer public entry points,
+- fewer wrappers, helper files, and alternate access paths,
+- fewer duplicate parameters or config owners,
+- easier unit testing through canonical owners,
+- easier discovery of every boot mode and its entry condition,
+- stronger include hygiene,
+- more consistent utility-mode setup, logging, and self-description.
 
-If the change increases the number of layers, config owners, access paths, wrappers, or parallel patterns, it is probably wrong.
+If a change increases the number of layers, config owners, wrappers, or parallel patterns, it is probably wrong.
 
 ---
 

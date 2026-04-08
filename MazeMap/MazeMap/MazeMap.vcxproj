@@ -167,7 +167,6 @@
     <ClInclude Include="CircularBuffer.h" />
     <ClInclude Include="CompactPath.h" />
     <ClInclude Include="CoreConfig.h" />
-    <ClInclude Include="CoreFileExport.h" />
     <ClInclude Include="CruiseSpeedFloor.h" />
     <ClInclude Include="Defines.h" />
     <ClInclude Include="DiagnosticConfig.h" />
@@ -222,10 +221,7 @@
     <ClInclude Include="MazeMask.h" />
     <ClInclude Include="MazeMapMissionModeHost.h" />
     <ClInclude Include="MazeMapMissionModes.h" />
-    <ClInclude Include="OpenFloorMainLoggerV2.h" />
     <ClInclude Include="OpenFloorMeasurementSpec.h" />
-    <ClInclude Include="OpenFloorTimingLoggerV2.h" />
-    <ClInclude Include="OptionalRuntimeEventLog.h" />
     <ClInclude Include="MissionMazeExport.h" />
     <ClInclude Include="MissionStartPolicy.h" />
     <ClInclude Include="MmLog.h" />
@@ -233,8 +229,6 @@
     <ClInclude Include="MotorEncoderDrive.h" />
     <ClInclude Include="MotorModelUnits.h" />
     <ClInclude Include="MouseUkfFacade.h" />
-    <ClInclude Include="CoreBinaryFileExport.h" />
-    <ClInclude Include="OpenFloorLoggingV2Support.h" />
     <ClInclude Include="OpenFloorMeasurementCycle.h" />
     <ClInclude Include="OpenFloorMeasurementLabels.h" />
     <ClInclude Include="OpenLoopDriveCommand.h" />
@@ -246,7 +240,6 @@
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="RollingAverageWindow.h" />
     <ClInclude Include="RuntimeBinaryLogSupport.h" />
-    <ClInclude Include="RuntimeControlLogSupport.h" />
     <ClInclude Include="SearchRunPlanner.h" />
     <ClInclude Include="Sensor.h" />
     <ClInclude Include="SensorSuite.h" />
@@ -288,7 +281,6 @@
     <ClCompile Include="ManeuverSet.cpp" />
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
-    <ClCompile Include="CoreBinaryFileExport.cpp" />
     <ClCompile Include="MapEvidenceUpdater.cpp" />
     <ClCompile Include="MazeMapApplicationEntry.cpp" />
     <ClCompile Include="MazeMapApplication.cpp">
@@ -304,7 +296,6 @@
     </ClCompile>
     <ClCompile Include="MazeMapMissionModes.cpp" />
     <ClCompile Include="MazeMapSharedRuntime.cpp" />
-    <ClCompile Include="OptionalRuntimeEventLog.cpp" />
     <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>

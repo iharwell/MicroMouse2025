@@ -31,7 +31,7 @@ constexpr float GRAVITY_MPS2 = 9.80665f;
 
 inline void sin_cosf(float theta, float& sin, float& cos)
 {
-	theta = PI_F * theta / 180.0f;
+	theta = 180.0f * theta / PI_F;
     arm_sin_cos_f32(theta, &sin, &cos);
 }
 
@@ -708,11 +708,78 @@ public:
     virtual void flush() {}
 };
 
+template <typename T>
+inline constexpr bool kSerialTextOutputIsBanned = false;
+
 class HardwareSerial : public Stream
 {
 public:
     void begin(unsigned long) {}
     void end() {}
+
+    template <typename T>
+    void print(const T &)
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
+
+    template <typename T, typename = std::enable_if_t<std::is_integral_v<T>>>
+    void print(T, int)
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
+
+    template <typename T = float>
+    void print(float, int)
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
+
+    template <typename T = double>
+    void print(double, int)
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
+
+    template <typename T>
+    void println(const T &)
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
+
+    template <typename T = void>
+    void println()
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
+
+    template <typename T = float>
+    void println(float, int)
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
+
+    template <typename T = double>
+    void println(double, int)
+    {
+        static_assert(
+            kSerialTextOutputIsBanned<T>,
+            "Serial output cannot be captured, so use the SharedRobotRuntime methods instead.");
+    }
 
     std::size_t write(std::uint8_t value) override
     {

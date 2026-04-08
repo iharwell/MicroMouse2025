@@ -66,23 +66,27 @@ public:
         InitializeWallSensorLedOffState();
         bool ok = true;
 #if defined(ARDUINO_TEENSY41)
-        Serial.println("IMU_FR disabled; using IMU_BL only");
+        (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine("IMU_FR disabled; using IMU_BL only");
 
         const bool imuBackLeftOk = _vehicle.IMU_BL.Begin();
         if (!imuBackLeftOk)
         {
-            Serial.print("IMU_BL init failed (");
-            Serial.print(_vehicle.IMU_BL.GetLastBeginFailureReasonName());
-            Serial.print("), WHO_AM_I=0x");
             const uint8_t whoAmI = _vehicle.IMU_BL.GetLastWhoAmI();
-            PrintHexByte(whoAmI);
-            Serial.print(", INT1_pullup=");
-            Serial.print(ReadDrivenLowPinWithPullup(Pins::IMU_INT_1B) == LOW ? "low" : "high");
-            Serial.print(", WHO_AM_I@mode3/400kHz=0x");
-            PrintHexByte(_vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE3));
-            Serial.print(", WHO_AM_I@mode0/400kHz=0x");
-            PrintHexByte(_vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE0));
-            Serial.println();
+            const uint8_t whoAmIMode3 = _vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE3);
+            const uint8_t whoAmIMode0 = _vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE0);
+            char whoAmIBuffer[3] = {};
+            char whoAmIMode3Buffer[3] = {};
+            char whoAmIMode0Buffer[3] = {};
+            FormatHexByte(whoAmI, whoAmIBuffer);
+            FormatHexByte(whoAmIMode3, whoAmIMode3Buffer);
+            FormatHexByte(whoAmIMode0, whoAmIMode0Buffer);
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+                "IMU_BL init failed (%s), WHO_AM_I=0x%s, INT1_pullup=%s, WHO_AM_I@mode3/400kHz=0x%s, WHO_AM_I@mode0/400kHz=0x%s",
+                _vehicle.IMU_BL.GetLastBeginFailureReasonName(),
+                whoAmIBuffer,
+                ReadDrivenLowPinWithPullup(Pins::IMU_INT_1B) == LOW ? "low" : "high",
+                whoAmIMode3Buffer,
+                whoAmIMode0Buffer);
         }
         ok = imuBackLeftOk && ok;
 #endif
@@ -810,23 +814,27 @@ public:
         _accelBiasInitialized = false;
         InitializeWallSensorLedOffState();
 #if defined(ARDUINO_TEENSY41)
-        Serial.println("IMU_FR disabled; using IMU_BL only");
+        (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine("IMU_FR disabled; using IMU_BL only");
 
         const bool imuBackLeftOk = _vehicle.IMU_BL.Begin();
         if (!imuBackLeftOk)
         {
-            Serial.print("IMU_BL init failed (");
-            Serial.print(_vehicle.IMU_BL.GetLastBeginFailureReasonName());
-            Serial.print("), WHO_AM_I=0x");
             const uint8_t whoAmI = _vehicle.IMU_BL.GetLastWhoAmI();
-            PrintHexByte(whoAmI);
-            Serial.print(", INT1_pullup=");
-            Serial.print(ReadDrivenLowPinWithPullup(Pins::IMU_INT_1B) == LOW ? "low" : "high");
-            Serial.print(", WHO_AM_I@mode3/400kHz=0x");
-            PrintHexByte(_vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE3));
-            Serial.print(", WHO_AM_I@mode0/400kHz=0x");
-            PrintHexByte(_vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE0));
-            Serial.println();
+            const uint8_t whoAmIMode3 = _vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE3);
+            const uint8_t whoAmIMode0 = _vehicle.IMU_BL.ReadWhoAmIWithSettings(400000UL, SPI_MODE0);
+            char whoAmIBuffer[3] = {};
+            char whoAmIMode3Buffer[3] = {};
+            char whoAmIMode0Buffer[3] = {};
+            FormatHexByte(whoAmI, whoAmIBuffer);
+            FormatHexByte(whoAmIMode3, whoAmIMode3Buffer);
+            FormatHexByte(whoAmIMode0, whoAmIMode0Buffer);
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+                "IMU_BL init failed (%s), WHO_AM_I=0x%s, INT1_pullup=%s, WHO_AM_I@mode3/400kHz=0x%s, WHO_AM_I@mode0/400kHz=0x%s",
+                _vehicle.IMU_BL.GetLastBeginFailureReasonName(),
+                whoAmIBuffer,
+                ReadDrivenLowPinWithPullup(Pins::IMU_INT_1B) == LOW ? "low" : "high",
+                whoAmIMode3Buffer,
+                whoAmIMode0Buffer);
         }
         ok = imuBackLeftOk && ok;
 #endif
