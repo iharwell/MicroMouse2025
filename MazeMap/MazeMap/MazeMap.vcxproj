@@ -220,7 +220,11 @@
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
     <ClInclude Include="MazeMapMissionModeHost.h" />
-    <ClInclude Include="MazeMapMissionModes.h" />
+    <ClInclude Include="MissionHostedModeBase.h" />
+    <ClInclude Include="MissionRunMode.h" />
+    <ClInclude Include="ManeuverFileTestMode.h" />
+    <ClInclude Include="CorridorRepeatabilityMode.h" />
+    <ClInclude Include="PositionAccuracyAuditMode.h" />
     <ClInclude Include="OpenFloorMeasurementSpec.h" />
     <ClInclude Include="MissionMazeExport.h" />
     <ClInclude Include="MissionStartPolicy.h" />
@@ -288,13 +292,29 @@
     </ClCompile>
     <ClCompile Include="MmLog.cpp" />
     <ClCompile Include="MouseUkfFacade.cpp" />
-    <ClCompile Include="MazeMapStandaloneModes.cpp">
+    <ClCompile Include="AuxMeasurementController.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="FrontWallCharacterizationController.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="WallSensorLedCalibrationController.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="DiagnosticController.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="OpenFloorMeasurementController.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MazeMapMissionController.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="MazeMapMissionModes.cpp" />
+    <ClCompile Include="MissionHostedModeBase.cpp" />
+    <ClCompile Include="MissionRunMode.cpp" />
+    <ClCompile Include="ManeuverFileTestMode.cpp" />
+    <ClCompile Include="CorridorRepeatabilityMode.cpp" />
+    <ClCompile Include="PositionAccuracyAuditMode.cpp" />
     <ClCompile Include="MazeMapSharedRuntime.cpp" />
     <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>

@@ -77,6 +77,12 @@ namespace MazeMap
             return kPhysicalModel;
         }
 
+        // Shared sustained lateral-acceleration reference used by both planning and estimator retunes.
+        static constexpr float GetSustainedLateralAccelerationReferenceMps2() noexcept
+        {
+            return 16.5f;
+        }
+
         static ImuExtrinsics GetBackLeftImuExtrinsics() noexcept;
         static SensorExtrinsics GetFrontLeftSensorExtrinsics() noexcept;
         static SensorExtrinsics GetFrontRightSensorExtrinsics() noexcept;

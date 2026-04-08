@@ -234,7 +234,19 @@
     <ClInclude Include="MazeMapMissionModeHost.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapMissionModes.h">
+    <ClInclude Include="MissionHostedModeBase.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="MissionRunMode.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="ManeuverFileTestMode.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="CorridorRepeatabilityMode.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="PositionAccuracyAuditMode.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="OpenFloorMeasurementSpec.h">
@@ -425,13 +437,37 @@
     <ClCompile Include="MouseUkfFacade.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapStandaloneModes.cpp">
+    <ClCompile Include="AuxMeasurementController.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="FrontWallCharacterizationController.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="WallSensorLedCalibrationController.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="DiagnosticController.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="OpenFloorMeasurementController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapMissionController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapMissionModes.cpp">
+    <ClCompile Include="MissionHostedModeBase.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="MissionRunMode.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="ManeuverFileTestMode.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="CorridorRepeatabilityMode.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="PositionAccuracyAuditMode.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapSharedRuntime.cpp">

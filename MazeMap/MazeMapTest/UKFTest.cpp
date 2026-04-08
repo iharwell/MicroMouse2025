@@ -7,6 +7,8 @@
 #include "..\MazeMap\SrUkfCore.h"
 #include "..\MazeMap\UKF.h"
 
+#include <cstdlib>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -177,6 +179,60 @@ namespace MazeMap
             return
                 (2.0f * PI_F * params.wheelRadiusM) /
                 (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
+        }
+
+        std::vector<std::pair<std::string, std::string>> CollectDebugDumpLines(const SrUkfCore& core)
+        {
+            std::vector<std::pair<std::string, std::string>> dumpLines;
+            const bool dumpOk = core.WriteDebugTextDump(
+                [&dumpLines](const char* type, const char* message) noexcept
+                {
+                    dumpLines.emplace_back(
+                        (type != nullptr) ? type : "",
+                        (message != nullptr) ? message : "");
+                    return true;
+                });
+            if (!dumpOk)
+            {
+                dumpLines.clear();
+            }
+            return dumpLines;
+        }
+
+        std::string FindProcessNoiseRowMessage(
+            const std::vector<std::pair<std::string, std::string>>& dumpLines,
+            const char* rowName)
+        {
+            const std::string rowToken = std::string("row=") + rowName;
+            for (const auto& line : dumpLines)
+            {
+                if (line.first == "ukf_dump_process_noise_sqrt_row" &&
+                    line.second.find(rowToken) != std::string::npos)
+                {
+                    return line.second;
+                }
+            }
+            return std::string();
+        }
+
+        float ExtractNamedFloat(const std::string& message, const char* fieldName)
+        {
+            const std::string token = std::string(fieldName) + "=";
+            const std::size_t start = message.find(token);
+            if (start == std::string::npos)
+            {
+                return std::numeric_limits<float>::quiet_NaN();
+            }
+
+            const char* valueStart = message.c_str() + start + token.size();
+            char* valueEnd = nullptr;
+            return std::strtof(valueStart, &valueEnd);
+        }
+
+        float FindProcessNoiseDiagonal(const SrUkfCore& core, const char* rowName)
+        {
+            const auto dumpLines = CollectDebugDumpLines(core);
+            return ExtractNamedFloat(FindProcessNoiseRowMessage(dumpLines, rowName), rowName);
         }
     }
 
@@ -634,8 +690,8 @@ namespace MazeMap
         {
             const VehicleState::StateMatrix covariance = SrUkfCore::BuildDefaultInitialCovariance();
 
-            Assert::AreEqual(1.0e-3f, covariance(VehicleState::kPx, VehicleState::kPx), 1.0e-9f);
-            Assert::AreEqual(1.0e-3f, covariance(VehicleState::kPy, VehicleState::kPy), 1.0e-9f);
+            Assert::AreEqual(1.0e-5f, covariance(VehicleState::kPx, VehicleState::kPx), 1.0e-9f);
+            Assert::AreEqual(1.0e-5f, covariance(VehicleState::kPy, VehicleState::kPy), 1.0e-9f);
             Assert::AreEqual(1.0e-3f, covariance(VehicleState::kPsi, VehicleState::kPsi), 1.0e-9f);
             Assert::AreEqual(1.0e-3f, covariance(VehicleState::kU, VehicleState::kU), 1.0e-9f);
             Assert::AreEqual(1.0e-3f, covariance(VehicleState::kV, VehicleState::kV), 1.0e-9f);
@@ -643,6 +699,116 @@ namespace MazeMap
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaL, VehicleState::kOmegaL), 1.0e-9f);
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaR, VehicleState::kOmegaR), 1.0e-9f);
             Assert::AreEqual(0.01f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-9f);
+        }
+
+        TEST_METHOD(SrUkfCorePredictSchedulesLateralProcessNoiseFromTurnSeverity)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+            ControlInput control{};
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            Assert::IsTrue(core.setState(
+                BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.01f,
+                    0.0f,
+                    12.0f,
+                    0.0f,
+                    0.0f),
+                BuildUkfCovariance()));
+            Assert::IsTrue(core.predict(0.01f, control));
+
+            const float guardedNoise = FindProcessNoiseDiagonal(core, "v_mps");
+            Assert::AreEqual(0.12f, guardedNoise, 1.0e-6f);
+
+            Assert::IsTrue(core.setState(
+                BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    2.0f,
+                    0.0f,
+                    10.0f,
+                    0.0f,
+                    0.0f),
+                BuildUkfCovariance()));
+            Assert::IsTrue(core.predict(0.01f, control));
+
+            const float rhoSustain = std::fabs(2.0f * 10.0f) / Vehicle::GetSustainedLateralAccelerationReferenceMps2();
+            const float expectedHighNoise = 2.50f + (4.00f * (rhoSustain - 1.00f));
+            const float scheduledHighNoise = FindProcessNoiseDiagonal(core, "v_mps");
+            Assert::AreEqual(expectedHighNoise, scheduledHighNoise, 1.0e-5f);
+            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(core, "px_m"), 1.0e-9f);
+            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(core, "py_m"), 1.0e-9f);
+        }
+
+        TEST_METHOD(SrUkfCoreStationaryYawConstraintUsesScheduledLateralResetVariance)
+        {
+            SrUkfCore core;
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                0.0f,
+                0.35f,
+                0.0f,
+                0.0f,
+                0.0f);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
+
+            ControlInput control{};
+            constexpr float dt = 0.001f;
+            Assert::IsTrue(core.predict(dt, control));
+
+            EncoderObs encoder{};
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
+            Assert::IsTrue(encoderResult.attempted);
+            Assert::IsTrue(encoderResult.accepted);
+
+            const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
+            Assert::IsTrue(yawResult.attempted);
+            Assert::IsTrue(yawResult.accepted);
+
+            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateMatrix covariance = core.covariance();
+            Assert::AreEqual(0.0f, state(VehicleState::kV), 1.0e-6f);
+            Assert::AreEqual(1.2e-4f, covariance(VehicleState::kV, VehicleState::kV), 1.0e-7f);
+        }
+
+        TEST_METHOD(SrUkfCoreHighUtilizationYawConstraintDoesNotZeroLateralVelocity)
+        {
+            SrUkfCore core;
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                2.0f,
+                0.40f,
+                9.0f,
+                0.0f,
+                0.0f);
+            Assert::IsTrue(core.reset(
+                initialState,
+                BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.05f, 0.30f, 0.03f)));
+
+            EncoderObs encoder{};
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.0f);
+            Assert::IsTrue(encoderResult.attempted);
+            Assert::IsTrue(encoderResult.accepted);
+
+            const MeasurementUpdateResult yawResult = core.updateYawRate(9.0f);
+            Assert::IsTrue(yawResult.attempted);
+            Assert::IsTrue(yawResult.accepted);
+
+            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateMatrix covariance = core.covariance();
+            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-6f);
+            Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kV)) > 0.10f);
+            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) > 1.0e-2f);
         }
 
         TEST_METHOD(SrUkfCoreDebugTextDumpIncludesStateCovarianceNoiseAndPlantConfiguration)

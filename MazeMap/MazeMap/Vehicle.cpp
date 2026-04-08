@@ -11,7 +11,6 @@ namespace
     // top-speed characterization runs are completed. The maneuver planner only uses the shared lateral limit here;
     // runtime yaw-rate ceilings are applied separately by the motion controller.
     constexpr float kVehiclePeakForwardAccelerationMps2 = 15.0f;
-    constexpr float kVehiclePeakLateralAccelerationMps2 = 16.5f;
     constexpr float kVehiclePeakRotationalVelocityRadps = 9.0f;
     constexpr float kVehiclePeakAngularAccelerationRadps2 = 45.0f;
     constexpr float kVehicleMaxSpeedMps = 4.0f;
@@ -96,7 +95,7 @@ namespace MazeMap
 {
     Vehicle::Vehicle()
         : _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
-        , _peakLateralAcceleration(kVehiclePeakLateralAccelerationMps2)
+        , _peakLateralAcceleration(GetSustainedLateralAccelerationReferenceMps2())
         , _peakRotationalVelocity(kVehiclePeakRotationalVelocityRadps)
         , _peakAngularAcceleration(kVehiclePeakAngularAccelerationRadps2)
         , _maxSpeed(kVehicleMaxSpeedMps)

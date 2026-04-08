@@ -38,6 +38,106 @@ namespace
         "side_range_m"
     };
 
+    struct LateralNoiseSchedule
+    {
+        float rhoSustain = 0.0f;
+        float sigmaAyMps2 = 0.12f;
+        float lambdaVInvS = 60.0f;
+        float vResetVarianceMps2 = 1.2e-4f;
+        bool enableVReset = true;
+    };
+
+    float ComputeRhoSustain(
+        const MazeMap::VehicleState::StateVector& state,
+        const MazeMap::PlantParams& params) noexcept
+    {
+        const float velocityEpsilonMps =
+            (std::isfinite(params.velocityEpsilonMps) && (params.velocityEpsilonMps > 0.0f)) ?
+            params.velocityEpsilonMps :
+            0.05f;
+        const float forwardVelocityMps = state(MazeMap::VehicleState::kU);
+        if (!std::isfinite(forwardVelocityMps) || (std::fabs(forwardVelocityMps) < velocityEpsilonMps))
+        {
+            return 0.0f;
+        }
+
+        const float yawRateRadps = state(MazeMap::VehicleState::kR);
+        if (!std::isfinite(yawRateRadps))
+        {
+            return 0.0f;
+        }
+
+        const float ayRefMps2 = MazeMap::Vehicle::GetSustainedLateralAccelerationReferenceMps2();
+        if (!(ayRefMps2 > 0.0f) || !std::isfinite(ayRefMps2))
+        {
+            return 0.0f;
+        }
+
+        return std::fabs(forwardVelocityMps * yawRateRadps) / ayRefMps2;
+    }
+
+    float ComputeSigmaAyMps2(const float rhoSustain) noexcept
+    {
+        if (rhoSustain <= 0.35f)
+        {
+            return 0.12f;
+        }
+        if (rhoSustain <= 0.75f)
+        {
+            const float t = (rhoSustain - 0.35f) / 0.40f;
+            return 0.12f + ((1.00f - 0.12f) * t);
+        }
+        if (rhoSustain <= 1.00f)
+        {
+            const float t = (rhoSustain - 0.75f) / 0.25f;
+            return 1.00f + ((2.50f - 1.00f) * t);
+        }
+
+        return (std::min)(2.50f + (4.00f * (rhoSustain - 1.00f)), 5.00f);
+    }
+
+    float ComputeLambdaVInvS(const float rhoSustain) noexcept
+    {
+        if (rhoSustain <= 0.85f)
+        {
+            return 60.0f;
+        }
+        if (rhoSustain >= 1.15f)
+        {
+            return 35.0f;
+        }
+
+        const float t = (rhoSustain - 0.85f) / 0.30f;
+        return 60.0f + ((35.0f - 60.0f) * t);
+    }
+
+    LateralNoiseSchedule BuildLateralNoiseSchedule(
+        const MazeMap::VehicleState::StateVector& state,
+        const MazeMap::PlantParams& params) noexcept
+    {
+        LateralNoiseSchedule schedule{};
+        schedule.rhoSustain = ComputeRhoSustain(state, params);
+        schedule.sigmaAyMps2 = ComputeSigmaAyMps2(schedule.rhoSustain);
+        schedule.lambdaVInvS = ComputeLambdaVInvS(schedule.rhoSustain);
+        const float sigmaVResetMps =
+            schedule.sigmaAyMps2 /
+            MazeMap::Math::Sqrtf(2.0f * schedule.lambdaVInvS);
+        schedule.vResetVarianceMps2 = sigmaVResetMps * sigmaVResetMps;
+        schedule.enableVReset = schedule.rhoSustain < 0.85f;
+        return schedule;
+    }
+
+    void UpdateLateralProcessNoiseDensityRoot(
+        MazeMap::SrUkfCore::StateMatrix& sqrtProcessNoiseDensity,
+        const MazeMap::VehicleState::StateVector& state,
+        const MazeMap::PlantParams& params) noexcept
+    {
+        const LateralNoiseSchedule schedule = BuildLateralNoiseSchedule(state, params);
+        sqrtProcessNoiseDensity(
+            MazeMap::VehicleState::kV,
+            MazeMap::VehicleState::kV) = schedule.sigmaAyMps2;
+    }
+
     Eigen::Vector2f HeadingUnitFromYaw(float yaw) noexcept
     {
         float s = 0.0f;
@@ -196,6 +296,7 @@ namespace MazeMap
         const StateMatrix processNoise = BuildDefaultProcessNoiseDensity();
         _sqrtProcessNoiseDensity = StateMatrix::Zero();
         _sqrtProcessNoiseDensity.diagonal() = processNoise.diagonal().cwiseSqrt();
+        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, initialState, _params);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _prePredictState = initialState;
 
@@ -465,6 +566,8 @@ namespace MazeMap
     SrUkfCore::StateMatrix SrUkfCore::BuildDefaultInitialCovariance() noexcept
     {
         StateMatrix covariance = StateMatrix::Identity() * 1.0e-3f;
+        covariance(VehicleState::kPx, VehicleState::kPx) = 1.0e-5f;
+        covariance(VehicleState::kPy, VehicleState::kPy) = 1.0e-5f;
         covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = 0.25f;
         covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = 0.25f;
         covariance(VehicleState::kBgz, VehicleState::kBgz) = 0.01f;
@@ -479,7 +582,7 @@ namespace MazeMap
             0.0f,
             0.0f,
             3.0e-4f,
-            3.0e-4f,
+            0.0f,
             6.0e-4f,
             4.0e-2f,
             4.0e-2f,
@@ -490,6 +593,8 @@ namespace MazeMap
     bool SrUkfCore::reset(const StateVector& state, const StateMatrix& covariance) noexcept
     {
         _filter.setState(state, covariance);
+        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, state, _params);
+        _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastControl = ControlInput{};
         _lastEncoderObs = EncoderObs{};
         _prePredictState = state;
@@ -500,6 +605,8 @@ namespace MazeMap
     bool SrUkfCore::setState(const StateVector& state, const StateMatrix& covariance) noexcept
     {
         _filter.setState(state, covariance);
+        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, state, _params);
+        _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _prePredictState = state;
         _havePredictionReference = false;
         return true;
@@ -614,6 +721,7 @@ namespace MazeMap
 
         _prePredictState = _filter.state();
         _havePredictionReference = true;
+        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, _prePredictState, _params);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity * MazeMap::Math::Sqrtf(dt));
         Eigen::Matrix<float, 3, 1> controlVector;
         controlVector << control.leftMotorCommand, control.rightMotorCommand, control.fanDutyCycle;
@@ -916,8 +1024,13 @@ namespace MazeMap
     void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
     {
         StateVector anchoredState = _filter.state();
+        const LateralNoiseSchedule lateralNoiseSchedule = BuildLateralNoiseSchedule(_prePredictState, _params);
+        const bool enableVReset = lateralNoiseSchedule.enableVReset;
         anchoredState(VehicleState::kU) = 0.0f;
-        anchoredState(VehicleState::kV) = 0.0f;
+        if (enableVReset)
+        {
+            anchoredState(VehicleState::kV) = 0.0f;
+        }
         anchoredState(VehicleState::kR) = 0.0f;
         anchoredState(VehicleState::kOmegaL) = 0.0f;
         anchoredState(VehicleState::kOmegaR) = 0.0f;
@@ -933,9 +1046,8 @@ namespace MazeMap
             (std::max)(kImuYawRateSigmaRadps * kImuYawRateSigmaRadps, 1.0e-12f);
         const float gyroBiasVarianceRadps2 = (std::max)(yawVarianceRadps2, 1.0e-8f);
 
-        const std::array<int, 5> constrainedIndices = {
+        const std::array<int, 4> constrainedIndices = {
             VehicleState::kU,
-            VehicleState::kV,
             VehicleState::kR,
             VehicleState::kOmegaL,
             VehicleState::kOmegaR
@@ -947,9 +1059,18 @@ namespace MazeMap
         }
         anchoredCovariance.row(VehicleState::kBgz).setZero();
         anchoredCovariance.col(VehicleState::kBgz).setZero();
+        if (enableVReset)
+        {
+            anchoredCovariance.row(VehicleState::kV).setZero();
+            anchoredCovariance.col(VehicleState::kV).setZero();
+        }
 
         anchoredCovariance(VehicleState::kU, VehicleState::kU) = linearVarianceMps2;
-        anchoredCovariance(VehicleState::kV, VehicleState::kV) = linearVarianceMps2;
+        if (enableVReset)
+        {
+            anchoredCovariance(VehicleState::kV, VehicleState::kV) =
+                (std::max)(lateralNoiseSchedule.vResetVarianceMps2, 1.0e-12f);
+        }
         anchoredCovariance(VehicleState::kR, VehicleState::kR) = yawVarianceRadps2;
         anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = wheelVarianceRadps2;
         anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = wheelVarianceRadps2;

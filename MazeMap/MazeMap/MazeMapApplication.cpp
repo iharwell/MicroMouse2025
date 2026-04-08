@@ -1,4 +1,5 @@
 #include "MazeMapApplicationPrivate.h"
+#include "MazeMapControllerRegistry.h"
 
 using MazeMap::App::Internal::IApplicationMode;
 using MazeMap::App::Internal::IMissionModeHost;
@@ -6,15 +7,6 @@ using MazeMap::App::Internal::MissionRunMode;
 using MazeMap::App::Internal::ManeuverFileTestMode;
 using MazeMap::App::Internal::CorridorRepeatabilityMode;
 using MazeMap::App::Internal::PositionAccuracyAuditMode;
-
-namespace MazeMap::App::Internal
-{
-    IApplicationMode& GetAuxMeasurementMode();
-    IApplicationMode& GetFrontWallCharacterizationMode();
-    IApplicationMode& GetWallSensorLedCalibrationMode();
-    IApplicationMode& GetDiagnosticMode();
-    IMissionModeHost& GetMissionModeHost();
-}
 
 namespace
 {
