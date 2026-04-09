@@ -14,7 +14,6 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, control_tick_sequence)       \
     X(std::uint32_t, dt_us)                       \
     X(std::uint32_t, section_id)                  \
-    X(std::uint16_t, logger_flags)                \
     X(std::uint32_t, control_start_us)            \
     X(std::uint32_t, control_end_us)              \
     X(std::uint32_t, pwm_latch_us)                \
@@ -59,19 +58,23 @@ MMLOG_DEFINE_ROW(OpenFloorTimingRow, OPEN_FLOOR_TIMING_FIELDS);
     X(std::uint8_t,  direction_id)                 \
     X(std::uint8_t,  phase_id)                     \
     X(std::uint8_t,  speed_bin)                    \
-    X(std::uint16_t, start_marker_id)              \
-    X(std::uint8_t,  mirrored)                     \
+    X(std::uint8_t,  start_marker_id)              \
     X(std::uint16_t, repeat_index)                 \
     X(float,         progress_norm)                \
     X(std::uint16_t, mode_flags)                   \
     X(std::uint32_t, clipping_flags)               \
     X(std::uint16_t, saturation_flags)             \
-    X(std::uint16_t, logger_flags)                 \
     X(std::uint16_t, watchdog_flags)               \
     X(std::uint16_t, measurement_flags)            \
-    X(float,         pose_x_m)                     \
-    X(float,         pose_y_m)                     \
-    X(float,         pose_yaw_rad)                 \
+    X(float,         ukf_state_px_m)               \
+    X(float,         ukf_state_py_m)               \
+    X(float,         ukf_state_psi_rad)            \
+    X(float,         ukf_state_u_mps)              \
+    X(float,         ukf_state_v_mps)              \
+    X(float,         ukf_state_r_radps)            \
+    X(float,         ukf_state_omega_l_radps)      \
+    X(float,         ukf_state_omega_r_radps)      \
+    X(float,         ukf_state_bgz_radps)          \
     X(float,         measured_linear_speed_mps)    \
     X(float,         measured_angular_speed_radps) \
     X(float,         cmd_linear_mps)               \
@@ -145,20 +148,6 @@ inline constexpr std::uint16_t kOpenFloorMeasurementFlagFrontLeftObsValid = 1u <
 inline constexpr std::uint16_t kOpenFloorMeasurementFlagFrontRightObsValid = 1u << 8;
 inline constexpr std::uint16_t kOpenFloorMeasurementFlagLeftObsValid = 1u << 9;
 inline constexpr std::uint16_t kOpenFloorMeasurementFlagRightObsValid = 1u << 10;
-
-inline std::uint16_t BuildOpenFloorLoggerFlags(bool overflowed, bool writeFailure)
-{
-    std::uint16_t flags = 0U;
-    if (overflowed)
-    {
-        flags |= kOpenFloorLoggerFlagOverflow;
-    }
-    if (writeFailure)
-    {
-        flags |= kOpenFloorLoggerFlagWriteFailure;
-    }
-    return flags;
-}
 
 inline std::uint16_t BuildOpenFloorMeasurementFlags(
     const OpenFloorMeasurementLabels& labels,
@@ -235,7 +224,8 @@ private:
     static constexpr uint16_t kWatchdogFlagTranslationStall = 1u << 0;
     static constexpr uint16_t kWatchdogFlagSectionTimeout = 1u << 1;
     static constexpr uint16_t kWatchdogFlagRecoveryTimeout = 1u << 2;
-    static constexpr unsigned long kMinimumFailureTimeoutMs = 60000UL;
+    // Policy: no watchdog timer in this codebase may trigger in under 90 seconds.
+    static constexpr unsigned long kMinimumFailureTimeoutMs = 90000UL;
 
     SharedRobotRuntime& _runtime;
     MazeMap::Vehicle& _vehicle;
@@ -468,7 +458,6 @@ bool OpenFloorMeasurementController::LogTimingSample(const OpenFloorMeasurementC
     row.control_tick_sequence = cycle.controlTickSequence;
     row.dt_us = cycle.dtUs;
     row.section_id = static_cast<std::uint32_t>(MazeMap::OpenFloorSectionId::Sec00Timing);
-    row.logger_flags = MazeMap::App::Internal::Runtime::BuildOpenFloorLoggerFlags(_timingOverflowed, _timingWriteFailed);
     row.control_start_us = cycle.controlTiming.controlStartUs;
     row.control_end_us = cycle.controlTiming.controlEndUs;
     row.pwm_latch_us = cycle.controlTiming.pwmLatchUs;
@@ -651,6 +640,7 @@ bool OpenFloorMeasurementController::LogMainSample(
     DriveBase::BuildLoggedFrontPairObservations(cycle.sensorSnapshot, maxRangeM, frontLeftObs, frontRightObs);
     const MazeMap::WallObs leftObs = DriveBase::BuildLoggedLeftSideObservation(cycle.sensorSnapshot, maxRangeM);
     const MazeMap::WallObs rightObs = DriveBase::BuildLoggedRightSideObservation(cycle.sensorSnapshot, maxRangeM);
+    const MazeMap::VehicleState::StateVector& estimatorState = _drive.GetEstimatorStateVector();
 
     OpenFloorMainRow row{};
     row.master_time_us = cycle.masterTimeUs;
@@ -662,14 +652,12 @@ bool OpenFloorMeasurementController::LogMainSample(
     row.direction_id = static_cast<std::uint8_t>(labels.directionId);
     row.phase_id = static_cast<std::uint8_t>(labels.phaseId);
     row.speed_bin = static_cast<std::uint8_t>(labels.speedBin);
-    row.start_marker_id = static_cast<std::uint16_t>(labels.startMarkerId);
-    row.mirrored = MazeMap::OpenFloorPrimitiveIsMirrored(labels.primitiveId) ? 1U : 0U;
+    row.start_marker_id = static_cast<std::uint8_t>(labels.startMarkerId);
     row.repeat_index = labels.repeatIndex;
     row.progress_norm = labels.progressNorm;
     row.mode_flags = cycle.driveTelemetry.modeFlags;
     row.clipping_flags = cycle.clippingFlags;
     row.saturation_flags = cycle.driveTelemetry.saturationFlags;
-    row.logger_flags = MazeMap::App::Internal::Runtime::BuildOpenFloorLoggerFlags(_mainOverflowed, _mainWriteFailed);
     row.watchdog_flags = cycle.watchdogFlags;
     row.measurement_flags = MazeMap::App::Internal::Runtime::BuildOpenFloorMeasurementFlags(
         labels,
@@ -680,9 +668,15 @@ bool OpenFloorMeasurementController::LogMainSample(
         frontRightObs,
         leftObs,
         rightObs);
-    row.pose_x_m = _drive.GetPose().xMeters;
-    row.pose_y_m = _drive.GetPose().yMeters;
-    row.pose_yaw_rad = _drive.GetPose().yawRad;
+    row.ukf_state_px_m = estimatorState(MazeMap::VehicleState::kPx);
+    row.ukf_state_py_m = estimatorState(MazeMap::VehicleState::kPy);
+    row.ukf_state_psi_rad = estimatorState(MazeMap::VehicleState::kPsi);
+    row.ukf_state_u_mps = estimatorState(MazeMap::VehicleState::kU);
+    row.ukf_state_v_mps = estimatorState(MazeMap::VehicleState::kV);
+    row.ukf_state_r_radps = estimatorState(MazeMap::VehicleState::kR);
+    row.ukf_state_omega_l_radps = estimatorState(MazeMap::VehicleState::kOmegaL);
+    row.ukf_state_omega_r_radps = estimatorState(MazeMap::VehicleState::kOmegaR);
+    row.ukf_state_bgz_radps = estimatorState(MazeMap::VehicleState::kBgz);
     row.measured_linear_speed_mps = cycle.measuredLinearSpeedMps;
     row.measured_angular_speed_radps = cycle.measuredAngularSpeedRadps;
     row.cmd_linear_mps = _drive.GetLastLinearCommandMps();

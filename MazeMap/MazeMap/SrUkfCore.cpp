@@ -759,13 +759,13 @@ namespace MazeMap
 
         Eigen::Matrix<float, 2, 1> z;
         z << measured.omegaLeftRadps, measured.omegaRightRadps;
-        if (HasExactZeroWheelObservation(measured))
+        /*if (HasExactZeroWheelObservation(measured))
         {
             applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
             result.accepted = true;
             result.nis = 0.0f;
             return result;
-        }
+        }*/
 
         const Eigen::Matrix<float, 2, 2> sqrtEncoderNoise = ComputeEncoderPairSqrtNoise(measured, _params);
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
@@ -785,7 +785,7 @@ namespace MazeMap
             invokeLoop);
         if (result.accepted)
         {
-            applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
+            //applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
         }
         result.nis = _filter.lastNis();
         return result;
@@ -801,14 +801,8 @@ namespace MazeMap
         }
 
         const MeasurementUpdateResult yawResult = updateYawRate(observation.gyroZRadps);
-        const ImuAccelObs accelObservation{
-            observation.valid,
-            observation.accelBodyXMps2,
-            observation.accelBodyYMps2
-        };
-        const MeasurementUpdateResult accelResult = updatePlanarAccel(accelObservation);
-        result.accepted = yawResult.accepted && accelResult.accepted;
-        result.nis = accelResult.attempted ? accelResult.nis : yawResult.nis;
+        result.accepted = yawResult.accepted;
+        result.nis = yawResult.nis;
         return result;
     }
 
@@ -871,35 +865,16 @@ namespace MazeMap
         void* loopHookContext,
         LoopHookInvoker loopHook) noexcept
     {
-        MeasurementUpdateResult result{};
-        result.attempted =
-            observation.valid &&
-            std::isfinite(observation.accelBodyXMps2) &&
-            std::isfinite(observation.accelBodyYMps2);
-        if (!result.attempted)
-        {
-            return result;
-        }
+        (void)observation;
+        (void)loopHookContext;
+        (void)loopHook;
 
-        Eigen::Matrix<float, 2, 1> z;
-        z << observation.accelBodyXMps2, observation.accelBodyYMps2;
-        Eigen::Matrix<float, 2, 2> sqrtNoise = Eigen::Matrix<float, 2, 2>::Zero();
-        sqrtNoise(0, 0) = _sqrtImuNoise(1, 1);
-        sqrtNoise(1, 1) = _sqrtImuNoise(2, 2);
-        const auto invokeLoop = [loopHookContext, loopHook]() noexcept
-        {
-            InvokeLoopHook(loopHookContext, loopHook);
-        };
-        result.accepted = _filter.Update<2>(
-            z,
-            sqrtNoise,
-            9.21034f,
-            [this](const StateVector& sigmaPoint) noexcept
-            {
-                return accelPredictionForState(sigmaPoint);
-            },
-            invokeLoop);
-        result.nis = _filter.lastNis();
+        // Intentionally disabled while the second IMU is offline. With only one IMU online,
+        // this planar-accel update feeds yaw-related state through the lever-arm model and has
+        // produced edge-case estimator failures. Do not reintroduce this path unless the
+        // multi-IMU measurement model is restored and revalidated end-to-end.
+        MeasurementUpdateResult result{};
+        result.accepted = true;
         return result;
     }
 
@@ -1082,14 +1057,6 @@ namespace MazeMap
     {
         const float normalizedConfidence = (std::clamp)(confidence, 0.0f, 1.0f);
         return minimumNoise + ((1.0f - normalizedConfidence) * 0.020f);
-    }
-
-    Eigen::Matrix<float, 2, 1> SrUkfCore::accelPredictionForState(const StateVector& sigmaPoint) const noexcept
-    {
-        Eigen::Matrix<float, 2, 1> prediction{};
-        const Eigen::Vector2f accel = _plantModel.imuPlanarAcceleration(sigmaPoint, _lastControl, _params);
-        prediction << accel.x(), accel.y();
-        return prediction;
     }
 
     float SrUkfCore::wallPredictionForSensor(

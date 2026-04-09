@@ -8,7 +8,7 @@
 namespace MazeMap
 {
     inline constexpr const char* kOpenFloorSelectedRoutineName = "open_floor_measurement";
-    inline constexpr const char* kOpenFloorFormatVersion = "open_floor_measurement_rev_d";
+    inline constexpr const char* kOpenFloorFormatVersion = "open_floor_measurement_rev_e";
     inline constexpr const char* kOpenFloorLoggingFormatRevision = "micromouse_logging_spec_rev_g";
     inline constexpr const char* kOpenFloorPrimitiveScheduleRevision = "open_floor_schedule_rev_d";
     inline constexpr const char* kOpenFloorPhaseBinningRevision = "open_floor_phase_bins_rev_d";

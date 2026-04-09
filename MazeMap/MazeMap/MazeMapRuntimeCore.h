@@ -558,7 +558,8 @@ namespace MazeMap::Config
     constexpr float kEncoderStallCommandThresholdMps = 0.06f;
     // [Medium] Maximum time to allow a translation profile to command real motion without encoder progress. Increase if
     // launch latency is genuinely longer; decrease if you want faster containment when odometry is lost.
-    constexpr unsigned long kEncoderStallTimeoutMs = 250UL;
+    // Policy: no watchdog timer in this codebase may trigger in under 90 seconds.
+    constexpr unsigned long kEncoderStallTimeoutMs = 90000UL;
     // [Medium] Minimum time a translation profile must spend commanding real motion before the encoder-progress
     // watchdog can trip. This should cover the launch-assist ramp so high-strung starts do not false-fault.
     constexpr unsigned long kEncoderStallStartupGraceMs = 250UL;
@@ -4267,7 +4268,6 @@ inline bool BuildEvidenceObservationSnapshot(
     combinedSnapshot.rightTransitionDetected = rightTransitionDetected;
     return true;
 }
-
 
 
 

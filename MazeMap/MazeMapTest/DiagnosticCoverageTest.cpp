@@ -33,6 +33,7 @@
 #include "..\MazeMap\WheelControlProfile.h"
 #include "..\MazeMap\ManeuverSet.h"
 
+#include "..\MazeMap\CoreConfig.h"
 #include <cstdio>
 #include <cmath>
 #include <cstring>
@@ -1905,6 +1906,11 @@ namespace MazeMap
 			Assert::IsFalse(IsEncoderProgressWatchdogArmed(0.05f, 0.050f, 500UL, 0.06f, 0.003f, 250UL));
 			Assert::IsFalse(IsEncoderProgressWatchdogArmed(0.10f, 0.002f, 500UL, 0.06f, 0.003f, 250UL));
 			Assert::IsFalse(IsEncoderProgressWatchdogArmed(std::numeric_limits<float>::quiet_NaN(), 0.050f, 500UL, 0.06f, 0.003f, 250UL));
+		}
+
+		TEST_METHOD(EncoderProgressWatchdogPolicyUsesAtLeastNinetySecondTimeout)
+		{
+			Assert::IsTrue(Config::kEncoderStallTimeoutMs >= 90000UL);
 		}
 
 		TEST_METHOD(ExportMazeSnapshotWritesMazeRowsToFile)

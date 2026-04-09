@@ -205,7 +205,6 @@ namespace MazeMap
         void anchorPoseToEncoderDelta(StateVector& anchoredState, const EncoderObs& measured) const noexcept;
         void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
-        Eigen::Matrix<float, 2, 1> accelPredictionForState(const StateVector& sigmaPoint) const noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
             const StateVector& sigmaPoint,
             const LocalMapView& map) const noexcept;

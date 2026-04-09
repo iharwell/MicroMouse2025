@@ -519,6 +519,11 @@ public:
         return _poseCache;
     }
 
+    const MazeMap::VehicleState::StateVector& GetEstimatorStateVector() const noexcept
+    {
+        return _ukf.ukf().state();
+    }
+
     bool HasEstimatorFault() const noexcept
     {
         return _estimatorFaulted;
