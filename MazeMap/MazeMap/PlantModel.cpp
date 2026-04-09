@@ -720,33 +720,20 @@ namespace MazeMap
             return state;
         }
 
-        const float maxStepS =
-            (std::isfinite(params.maxIntegrationStepS) && (params.maxIntegrationStepS > 0.0f)) ?
-            params.maxIntegrationStepS :
-            dt;
-        const int substepCount = (std::max)(1, static_cast<int>(std::ceil(dt / maxStepS)));
-        const float h = dt / static_cast<float>(substepCount);
+        const StateVector predictorState = state + (dt * forwardStep(state, control, params).stateDot);
+        StateVector implicitState = state + (dt * forwardStep(predictorState, control, params).stateDot);
+        implicitState(VehicleState::kPsi) = VehicleState::NormalizeAngle(implicitState(VehicleState::kPsi));
 
-        StateVector integratedState = state;
-        for (int step = 0; step < substepCount; ++step)
+        if (ShouldSnapToZero(implicitState, control, params))
         {
-            const PlantDerivatives k1 = forwardStep(integratedState, control, params);
-            const StateVector midpointState = integratedState + (0.5f * h * k1.stateDot);
-            const PlantDerivatives k2 = forwardStep(midpointState, control, params);
-            integratedState += h * k2.stateDot;
-            integratedState(VehicleState::kPsi) = VehicleState::NormalizeAngle(integratedState(VehicleState::kPsi));
-
-            if (ShouldSnapToZero(integratedState, control, params))
-            {
-                integratedState(VehicleState::kU) = 0.0f;
-                integratedState(VehicleState::kV) = 0.0f;
-                integratedState(VehicleState::kR) = 0.0f;
-                integratedState(VehicleState::kOmegaL) = 0.0f;
-                integratedState(VehicleState::kOmegaR) = 0.0f;
-            }
+            implicitState(VehicleState::kU) = 0.0f;
+            implicitState(VehicleState::kV) = 0.0f;
+            implicitState(VehicleState::kR) = 0.0f;
+            implicitState(VehicleState::kOmegaL) = 0.0f;
+            implicitState(VehicleState::kOmegaR) = 0.0f;
         }
 
-        return integratedState;
+        return implicitState;
     }
 
     DriveCommandSolution PlantModel::solveDriveCommands(
