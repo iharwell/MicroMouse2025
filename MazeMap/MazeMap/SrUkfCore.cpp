@@ -759,14 +759,6 @@ namespace MazeMap
 
         Eigen::Matrix<float, 2, 1> z;
         z << measured.omegaLeftRadps, measured.omegaRightRadps;
-        /*if (HasExactZeroWheelObservation(measured))
-        {
-            applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
-            result.accepted = true;
-            result.nis = 0.0f;
-            return result;
-        }*/
-
         const Eigen::Matrix<float, 2, 2> sqrtEncoderNoise = ComputeEncoderPairSqrtNoise(measured, _params);
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
@@ -785,7 +777,7 @@ namespace MazeMap
             invokeLoop);
         if (result.accepted)
         {
-            //applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
+            applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
         }
         result.nis = _filter.lastNis();
         return result;

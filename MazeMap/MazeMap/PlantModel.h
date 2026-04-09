@@ -27,7 +27,7 @@ namespace MazeMap
         std::array<ContactKinematics, 4> contacts{};
     };
 
-    // Requested longitudinal slip and lateral slip ratios for each tire contact.
+    // Diagnostic longitudinal slip and lateral slip ratios for each tire contact.
     struct SlipTargets
     {
         float kappaLeft = 0.0f;
@@ -35,13 +35,13 @@ namespace MazeMap
         std::array<float, 4> lateralRatio{};
     };
 
-    // Force request and saturation state for one tire contact patch.
+    // Force request and normalized traction utilization for one tire contact patch.
     struct ContactForce
     {
         float rightForceN = 0.0f;
         float forwardForceN = 0.0f;
         float normalForceN = 0.0f;
-        float saturation = 1.0f;
+        float saturation = 0.0f;
     };
 
     // Aggregate contact-force bundle for the four tire contact patches.
@@ -80,6 +80,13 @@ namespace MazeMap
         }
     };
 
+    enum class MotionRegime : uint8_t
+    {
+        StoppedHold = 0,
+        RollingAdherent = 1,
+        RollingSaturated = 2,
+    };
+
     // One evaluated plant derivative step plus the algebraic quantities used to produce it.
     struct PlantDerivatives
     {
@@ -92,6 +99,8 @@ namespace MazeMap
         float longitudinalAccelMps2 = 0.0f;
         float lateralAccelMps2 = 0.0f;
         float yawAccelRadps2 = 0.0f;
+        MotionRegime regime = MotionRegime::RollingAdherent;
+        float maxContactUtilization = 0.0f;
     };
 
     // Inverse-dynamics result for a requested body motion at the current operating point.
@@ -100,12 +109,26 @@ namespace MazeMap
         ControlInput control{};
         float leftSlipRatio = 0.0f;
         float rightSlipRatio = 0.0f;
+        // Validation operating-point wheel speeds, including the implied rolling-region slip needed for Fx.
         float leftWheelSpeedRadps = 0.0f;
         float rightWheelSpeedRadps = 0.0f;
+        // Pure rolling kinematic wheel speeds before adding the implied longitudinal slip offset.
+        float leftRollingWheelSpeedRadps = 0.0f;
+        float rightRollingWheelSpeedRadps = 0.0f;
+        // Required wheel-side drive torque, not just tire-contact torque.
         float leftWheelTorqueNm = 0.0f;
         float rightWheelTorqueNm = 0.0f;
+        // Requested bank angular accelerations implied by the desired body accelerations and used
+        // in the inverse wheel-torque balance. These are not guaranteed to match forwardStep()
+        // omega-dot at the returned slip-bearing operating point if the motor command clips.
         float leftWheelAccelRadps2 = 0.0f;
         float rightWheelAccelRadps2 = 0.0f;
+        float leftContactForceN = 0.0f;
+        float rightContactForceN = 0.0f;
+        float leftContactTorqueNm = 0.0f;
+        float rightContactTorqueNm = 0.0f;
+        float tractionScale = 1.0f;
+        bool tractionLimited = false;
         float longitudinalAccelErrorMps2 = 0.0f;
         float yawAccelErrorRadps2 = 0.0f;
         bool converged = false;
@@ -116,6 +139,7 @@ namespace MazeMap
     {
         float massKg;
         float effectiveLongitudinalMassKg;
+        float effectiveLateralMassKg = 0.0f;
         float yawInertiaKgM2;
         float trackWidthM;
         float contactPatchLongitudinalOffsetM;
@@ -138,13 +162,31 @@ namespace MazeMap
         float longitudinalTireStiffnessN = 6.0f;
         float corneringStiffnessFrontNPerRad = 18.0f;
         float corneringStiffnessRearNPerRad = 16.0f;
+        float lateralVelocityDampingNsPerM = 0.0f;
+        float yawRateDampingNmsPerRad = 0.0f;
         float muFront = 1.65f;
         float muRear = 1.65f;
+        float muFrontPeak = 0.0f;
+        float muRearPeak = 0.0f;
         float frontLoadFraction = 0.5f;
+        float frontLongitudinalForceSplit = 0.5f;
 
         float velocityEpsilonMps = 0.05f;
+        float stopEnterSpeedMps = 0.02f;
+        float stopExitSpeedMps = 0.05f;
+        float stopEnterYawRateRadps = 0.20f;
+        float stopExitYawRateRadps = 0.50f;
+        float stopEnterWheelSpeedRadps = 2.0f;
+        float stopExitWheelSpeedRadps = 5.0f;
+        float stopEnterCommand = 0.03f;
+        float stopExitCommand = 0.06f;
+        float rollingSpeedRegularizationMps = 0.15f;
+        float maxIntegrationStepS = 0.0005f;
         float forceEpsilonN = 1.0e-4f;
         float fanDownforceAtFullDutyN = 0.7f;
+        float combinedAccelSustainedMps2 = 16.5f;
+        float combinedAccelNominalMps2 = 17.5f;
+        float combinedAccelPeakMps2 = 20.1f;
 
         float noHitRangeM = 0.30f;
         std::array<Eigen::Vector2f, 4> contactPositionsBodyM = {
