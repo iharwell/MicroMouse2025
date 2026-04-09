@@ -9,3 +9,8 @@
 /codex_verify
 /codex_verify/arduino_build/firmware
 /MazeMap/MazeMapTest/x64
+/.vs
+/.tmp
+/TestResults
+/Maze Files Archive
+/scripts

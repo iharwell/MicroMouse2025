@@ -586,7 +586,7 @@ namespace MazeMap
             6.0e-4f,
             4.0e-2f,
             4.0e-2f,
-            2.0e-5f;
+            2.0e-8f;
         return processNoise;
     }
 
