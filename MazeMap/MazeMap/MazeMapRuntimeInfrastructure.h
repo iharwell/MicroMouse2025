@@ -203,7 +203,7 @@ namespace MazeMap::App::Internal::Runtime
                 MazeMap::kOpenFloorYawOmegaBinsRadps[1],
                 MazeMap::kOpenFloorYawOmegaBinsRadps[2]) &&
             writeConfig(
-                "open_floor_motion:smooth_v=%.3f,%.3f,%.3f;straight_a=%.3f;straight_d=%.3f;turn_max_w=%.3f;turn_a=%.3f;launch_ms=%lu",
+                "open_floor_motion:smooth_v=%.3f,%.3f,%.3f;straight_a=%.3f;straight_d=%.3f;turn_max_w=%.3f;turn_a=%.3f;launch_ms=%lu;launch_settle_ms=%lu",
                 MazeMap::kOpenFloorSmoothSpeedBinsMps[0],
                 MazeMap::kOpenFloorSmoothSpeedBinsMps[1],
                 MazeMap::kOpenFloorSmoothSpeedBinsMps[2],
@@ -211,7 +211,8 @@ namespace MazeMap::App::Internal::Runtime
                 DiagnosticConfig::kStraightDecelMps2,
                 DiagnosticConfig::kTurnMaxOmegaRadps,
                 DiagnosticConfig::kTurnAccelRadps2,
-                static_cast<unsigned long>(MazeMap::kOpenFloorLaunchPulseMs));
+                static_cast<unsigned long>(MazeMap::kOpenFloorLaunchPulseMs),
+                static_cast<unsigned long>(MazeMap::kOpenFloorLaunchSettleMs));
     }
 
     template <typename WriteEventFn>

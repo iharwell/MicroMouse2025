@@ -1063,10 +1063,12 @@ namespace MazeMap
             Assert::AreEqual(expectedSigmaRadps, SrUkfCore::ComputeStationaryEncoderOmegaSigmaRadps(params), 1.0e-9f);
         }
 
-        TEST_METHOD(ConfiguredGeneralImuSigmasMatchLatestOpenFloorLogTuning)
+        TEST_METHOD(ConfiguredMeasurementSigmasMatchLatestOpenFloorLogTuning)
         {
-            Assert::AreEqual(0.0028f, SrUkfCore::kImuYawRateSigmaRadps, 1.0e-9f);
-            Assert::AreEqual(0.0052f, SrUkfCore::kImuAccelSigmaMps2, 1.0e-9f);
+            Assert::AreEqual(0.0066f, SrUkfCore::kGeneralEncoderLinearSpeedSigmaMps, 1.0e-9f);
+            Assert::AreEqual(0.0484f, SrUkfCore::kGeneralEncoderYawRateSigmaRadps, 1.0e-9f);
+            Assert::AreEqual(0.0131f, SrUkfCore::kImuYawRateSigmaRadps, 1.0e-9f);
+            Assert::AreEqual(0.1305f, SrUkfCore::kImuAccelSigmaMps2, 1.0e-9f);
         }
 
         TEST_METHOD(BuildDefaultInitialCovariance_ReturnsCanonicalResetCovariance)

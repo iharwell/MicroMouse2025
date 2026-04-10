@@ -2,11 +2,12 @@
 #include "VehicleState.h"
 
 #include "PlantModel.h"
+#include "SrUkfCore.h"
 
 namespace
 {
-    constexpr float kUkfStationaryLinearSpeedThresholdMps = 1.76e-6f;
-    constexpr float kUkfStationaryYawRateThresholdRadps = 3.0f * 0.0028f;
+    constexpr float kUkfStationaryLinearSpeedThresholdMps = MazeMap::SrUkfCore::kStationaryEncoderVelocitySigmaMps;
+    constexpr float kUkfStationaryYawRateThresholdRadps = 3.0f * MazeMap::SrUkfCore::kImuYawRateSigmaRadps;
 
     Eigen::Vector2f HeadingUnitFromYaw(float yawRad) noexcept
     {

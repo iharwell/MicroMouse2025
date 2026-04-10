@@ -264,6 +264,9 @@ namespace MazeMap
     inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 3.0f, 6.0f, 9.0f };
     inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.25f, 0.35f, 0.45f };
     inline constexpr unsigned long kOpenFloorLaunchPulseMs = 200UL;
+    // After a launch pulse leaves the estimator's stationary regime, hold brake at the start marker
+    // for this long so the next repeat begins from a settled UKF state instead of launch transients.
+    inline constexpr unsigned long kOpenFloorLaunchSettleMs = 100UL;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.15f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.22f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.01f;

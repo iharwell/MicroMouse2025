@@ -33,5 +33,10 @@ namespace MazeMap
                     1.0e-6f);
             }
         }
+
+        TEST_METHOD(LaunchSettlingTimeIsConfigurableWithoutDisablingByDefault)
+        {
+            Assert::IsTrue(MazeMap::kOpenFloorLaunchSettleMs > 0UL);
+        }
     };
 }

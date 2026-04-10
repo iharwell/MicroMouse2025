@@ -1526,6 +1526,10 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
     const float launchBoundM = MazeMap::OpenFloorHalfStepMeters() + Config::kDistanceToleranceM;
     unsigned long launchOutOfBoundsStartMs = 0UL;
     bool launchOutOfBoundsActive = false;
+    MazeMap::VehicleState stationaryCheckState;
+    stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
+    bool previousStationary = stationaryCheckState.IsStationary();
+    bool launchFlippedStationary = false;
     while (static_cast<long>(pulseDeadline - millis()) > 0)
     {
         OpenFloorMeasurementCycle cycle{};
@@ -1562,6 +1566,13 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
             }
         }
         _drive.CommandOpenLoopRaw(signedDriveCommand, signedDriveCommand);
+        stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
+        const bool estimatorStationary = stationaryCheckState.IsStationary();
+        if (previousStationary && !estimatorStationary)
+        {
+            launchFlippedStationary = true;
+        }
+        previousStationary = estimatorStationary;
 
         if (!LogCycle(labels, cycle))
         {
@@ -1573,6 +1584,28 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
     if (!RecoverToMarker(labels, labels.startMarkerId, DiagnosticConfig::kCharacterizationRecoverySpeedMps, 2500UL))
     {
         return false;
+    }
+    if (launchFlippedStationary && (MazeMap::kOpenFloorLaunchSettleMs > 0UL))
+    {
+        OpenFloorMeasurementLabels settleLabels = labels;
+        settleLabels.primitiveId = MazeMap::OpenFloorPrimitiveId::Recovery;
+        settleLabels.directionId = MazeMap::OpenFloorDirectionId::None;
+        settleLabels.phaseId = MazeMap::OpenFloorPhaseId::Hold;
+        settleLabels.progressNorm = 1.0f;
+        const unsigned long settleDeadline = millis() + MazeMap::kOpenFloorLaunchSettleMs;
+        while (static_cast<long>(settleDeadline - millis()) > 0)
+        {
+            OpenFloorMeasurementCycle cycle{};
+            if (!CaptureCycle(true, cycle))
+            {
+                return HandleMeasurementCaptureFault(settleLabels, cycle);
+            }
+            _drive.Brake();
+            if (!LogCycle(settleLabels, cycle))
+            {
+                return false;
+            }
+        }
     }
     return EndMainSection(labels);
 }
