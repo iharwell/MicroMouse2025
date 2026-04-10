@@ -155,7 +155,7 @@ namespace MazeMap
         float gearRatio;
         uint16_t encoderCountsPerMotorRev;
 
-        float drivetrainEfficiency = 0.5f;
+        float drivetrainEfficiency = 1.0f;
         float rollingFrictionTorqueNm = 0.0035f;
         float viscousFrictionNmPerRadps = 2.5e-4f;
 
@@ -180,7 +180,7 @@ namespace MazeMap
         float stopExitWheelSpeedRadps = 5.0f;
         float stopEnterCommand = 0.03f;
         float stopExitCommand = 0.06f;
-        float rollingSpeedRegularizationMps = 0.15f;
+        float rollingSpeedRegularizationMps = 0.05f;
         float maxIntegrationStepS = 0.0005f;
         float forceEpsilonN = 1.0e-4f;
         float fanDownforceAtFullDutyN = 0.7f;

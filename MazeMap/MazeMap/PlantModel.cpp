@@ -430,6 +430,12 @@ namespace
         return blended;
     }
 
+    float LateralScrubMotionWeight(const PlantModel::StateVector& state) noexcept
+    {
+        const float lateralVelocityMps = state(VehicleState::kV);
+        return (std::isfinite(lateralVelocityMps) && (lateralVelocityMps != 0.0f)) ? 1.0f : 0.0f;
+    }
+
     PlantModel::StateVector BuildMotionState(
         float forwardVelocityMps,
         float yawRateRadps,
@@ -491,10 +497,11 @@ namespace MazeMap
     {
         PlantDerivatives derivatives{};
         const MotionMetrics metrics = EvaluateMotionMetrics(state, control, params);
+        const float motionWeight = (std::max)(metrics.rollWeight, LateralScrubMotionWeight(state));
         const WheelKinematics kinematics = wheelKinematics(state, params);
         SlipTargets rollingTargets{};
         RollingContactEvaluation rollingForces{};
-        if (metrics.rollWeight > 0.0f)
+        if (motionWeight > 0.0f)
         {
             rollingTargets = ComputeRollingSlipTargets(state, kinematics, params);
             rollingForces = EvaluateRollingContactForces(rollingTargets, control, params);
@@ -567,12 +574,12 @@ namespace MazeMap
             wheelInertiaKgM2;
         rollingStateDot(VehicleState::kBgz) = 0.0f;
 
-        derivatives.stateDot = metrics.rollWeight * rollingStateDot;
-        derivatives.contactForces = BlendContactForces(rollingForces.forces, metrics.rollWeight);
+        derivatives.stateDot = motionWeight * rollingStateDot;
+        derivatives.contactForces = BlendContactForces(rollingForces.forces, motionWeight);
         derivatives.wheelKinematics = kinematics;
-        derivatives.maxContactUtilization = metrics.rollWeight * rollingForces.maxUtilization;
+        derivatives.maxContactUtilization = motionWeight * rollingForces.maxUtilization;
 
-        if (metrics.rollWeight < 0.5f)
+        if (motionWeight < 0.5f)
         {
             derivatives.regime = MotionRegime::StoppedHold;
             derivatives.slipTargets = SlipTargets{};
@@ -695,8 +702,10 @@ namespace MazeMap
             return state;
         }
 
-        //const StateVector predictorState = state + (dt * forwardStep(state, control, params).stateDot);
-        StateVector implicitState = state + (dt * forwardStep(state, control, params).stateDot);
+        // This function runs once per UKF sigma point on the Teensy control path. The runtime budget
+        // cannot afford a second plant function evaluation, substeps, or a predictor/corrector pass here.
+        const PlantDerivatives derivatives = forwardStep(state, control, params);
+        StateVector implicitState = state + (dt * derivatives.stateDot);
         implicitState(VehicleState::kPsi) = VehicleState::NormalizeAngle(implicitState(VehicleState::kPsi));
 
         if (ShouldSnapToZero(implicitState, control, params))

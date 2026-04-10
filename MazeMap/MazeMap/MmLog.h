@@ -98,7 +98,7 @@ namespace MazeMap {
 
 /** Number of bytes to preallocate for the sidecar file on Teensy FIFO SDIO builds. */
 #ifndef MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES
-#  define MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES 0ULL
+#  define MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES 1024ULL*1024ULL
 #endif
 
 /** When nonzero, service() writes at most one 512-byte sector per file per call in Teensy FIFO SDIO mode. */

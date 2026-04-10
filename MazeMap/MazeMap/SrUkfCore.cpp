@@ -261,6 +261,7 @@ namespace MazeMap
         , _prePredictState(StateVector::Zero())
         , _prePredictCovariance(StateMatrix::Zero())
         , _havePredictionReference(false)
+        , _acceptedEncoderUpdateSincePredict(false)
         , _sqrtProcessNoiseDensity(StateMatrix::Zero())
         , _sqrtImuNoise(Eigen::Matrix<float, 3, 3>::Identity())
         , _sqrtFrontNoise(Eigen::Matrix<float, 2, 2>::Identity())
@@ -580,6 +581,7 @@ namespace MazeMap
         _prePredictState = _filter.state();
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
+        _acceptedEncoderUpdateSincePredict = false;
         return true;
     }
 
@@ -591,6 +593,7 @@ namespace MazeMap
         _prePredictState = _filter.state();
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
+        _acceptedEncoderUpdateSincePredict = false;
         return true;
     }
 
@@ -704,6 +707,7 @@ namespace MazeMap
         _prePredictState = _filter.state();
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = true;
+        _acceptedEncoderUpdateSincePredict = false;
         UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, _prePredictState, _params);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity * MazeMap::Math::Sqrtf(dt));
         Eigen::Matrix<float, 3, 1> controlVector;
@@ -738,7 +742,7 @@ namespace MazeMap
         result.attempted = true;
 
         const EncoderObs measured = observation;
-        _lastEncoderObs = measured;
+        _acceptedEncoderUpdateSincePredict = false;
 
         Eigen::Matrix<float, 2, 1> z;
         z << measured.omegaLeftRadps, measured.omegaRightRadps;
@@ -760,6 +764,8 @@ namespace MazeMap
             invokeLoop);
         if (result.accepted)
         {
+            _lastEncoderObs = measured;
+            _acceptedEncoderUpdateSincePredict = true;
             applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
         }
         result.nis = _filter.lastNis();
@@ -821,10 +827,10 @@ namespace MazeMap
         {
             VehicleState currentState;
             currentState.SetStateVector(_filter.state());
-            if (HasExactZeroWheelObservation(_lastEncoderObs) &&
+            if (_acceptedEncoderUpdateSincePredict &&
+                HasExactZeroWheelObservation(_lastEncoderObs) &&
                 (currentState.IsStationary() ||
-                 controlCommandsAreEffectivelyZero() ||
-                 (std::fabs(yawRateRadps) <= (3.0f * kImuYawRateSigmaRadps))))
+                 controlCommandsAreEffectivelyZero()))
             {
                 applyStationaryZeroMotionConstraint(yawRateRadps);
             }
@@ -896,6 +902,48 @@ namespace MazeMap
         return sigmaMps * sigmaMps;
     }
 
+    float SrUkfCore::ComputeMeasuredYawRateRadps(
+        const EncoderObs& observation,
+        const PlantParams& params) noexcept
+    {
+        if (!(params.wheelRadiusM > 0.0f) ||
+            !std::isfinite(params.wheelRadiusM) ||
+            !(params.trackWidthM > 0.0f) ||
+            !std::isfinite(params.trackWidthM))
+        {
+            return 0.0f;
+        }
+
+        return params.wheelRadiusM * (observation.omegaLeftRadps - observation.omegaRightRadps) / params.trackWidthM;
+    }
+
+    float SrUkfCore::ComputeMeasuredYawRateVarianceRadps2(
+        const EncoderObs& observation,
+        const PlantParams& params) noexcept
+    {
+        if (!(params.wheelRadiusM > 0.0f) ||
+            !std::isfinite(params.wheelRadiusM) ||
+            !(params.trackWidthM > 0.0f) ||
+            !std::isfinite(params.trackWidthM))
+        {
+            return 1.0f;
+        }
+
+        const Eigen::Matrix<float, 2, 2> wheelCovarianceRadps2 =
+            HasExactZeroWheelObservation(observation) ?
+            (Eigen::Matrix<float, 2, 2>::Identity() *
+                (ComputeStationaryEncoderOmegaSigmaRadps(params) *
+                 ComputeStationaryEncoderOmegaSigmaRadps(params))) :
+            ComputeGeneralEncoderPairCovarianceRadps(params);
+        const float yawScale = params.wheelRadiusM / params.trackWidthM;
+        const float variance =
+            (yawScale * yawScale) *
+            (wheelCovarianceRadps2(0, 0) +
+             wheelCovarianceRadps2(1, 1) -
+             (2.0f * wheelCovarianceRadps2(0, 1)));
+        return (std::isfinite(variance) && (variance > 0.0f)) ? variance : 1.0f;
+    }
+
     float SrUkfCore::ComputeMeasuredWheelVarianceRadps2(
         const EncoderObs& observation,
         const PlantParams& params) noexcept
@@ -962,12 +1010,17 @@ namespace MazeMap
         StateMatrix anchoredCovariance = _filter.covariance();
         anchoredCovariance.row(VehicleState::kU).setZero();
         anchoredCovariance.col(VehicleState::kU).setZero();
+        anchoredCovariance.row(VehicleState::kR).setZero();
+        anchoredCovariance.col(VehicleState::kR).setZero();
         anchoredCovariance.row(VehicleState::kOmegaL).setZero();
         anchoredCovariance.col(VehicleState::kOmegaL).setZero();
         anchoredCovariance.row(VehicleState::kOmegaR).setZero();
         anchoredCovariance.col(VehicleState::kOmegaR).setZero();
+        anchoredState(VehicleState::kR) = ComputeMeasuredYawRateRadps(measured, _params);
         anchoredCovariance(VehicleState::kU, VehicleState::kU) =
             (std::max)(ComputeMeasuredLinearSpeedVarianceMps2(measured), 1.0e-12f);
+        anchoredCovariance(VehicleState::kR, VehicleState::kR) =
+            (std::max)(ComputeMeasuredYawRateVarianceRadps2(measured, _params), 1.0e-12f);
         const float constrainedVariance = (std::max)(wheelVarianceRadps2, 1.0e-12f);
         anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
         anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;

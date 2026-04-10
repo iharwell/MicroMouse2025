@@ -183,6 +183,8 @@ namespace MazeMap
         static float ComputeDistancePerEncoderCountM(const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedMps(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedVarianceMps2(const EncoderObs& observation) noexcept;
+        static float ComputeMeasuredYawRateRadps(const EncoderObs& observation, const PlantParams& params) noexcept;
+        static float ComputeMeasuredYawRateVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredWheelVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept;
 
@@ -222,6 +224,7 @@ namespace MazeMap
         StateVector _prePredictState;
         StateMatrix _prePredictCovariance;
         bool _havePredictionReference;
+        bool _acceptedEncoderUpdateSincePredict;
         StateMatrix _sqrtProcessNoiseDensity;
         Eigen::Matrix<float, 3, 3> _sqrtImuNoise;
         Eigen::Matrix<float, 2, 2> _sqrtFrontNoise;
