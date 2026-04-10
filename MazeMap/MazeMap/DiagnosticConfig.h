@@ -46,27 +46,6 @@ namespace MazeMap::DiagnosticConfig
     constexpr uint8_t kLoopRepeats = 5U;
     // [Low] Half-width of the legacy diagnostic operating square. Retained for compatibility with shared helpers.
     constexpr float kBoundaryHalfSpanM = 0.34f;
-    // [High] Short straight distance used in the diagnostic battery. Increase for more steady-state straight data;
-    // decrease if you need to stay well inside the safety box or focus on launch/braking behavior.
-    constexpr float kShortStraightDistanceM = 0.18f;
-    // [High] Long straight distance used in the diagnostic battery. Increase if you need more data at higher speed;
-    // decrease if the robot approaches the boundary or cannot complete the profile cleanly.
-    constexpr float kLongStraightDistanceM = 0.27f;
-    // [High] Side length of the diagnostic square-loop test. Increase for more coupled straight/turn data; decrease
-    // if the loop approaches the boundary or you want to isolate turn behavior.
-    constexpr float kSquareLegDistanceM = 0.18f;
-    // [High] Arc length for each half-circle arc test. Increase for longer arc-tracking data; decrease if the circle
-    // grows too large for the available floor space or you want tighter curvature.
-    constexpr float kArcHalfCircleDistanceM = 0.20f;
-    // [High] Cruise speed for conservative diagnostic straights and square loops. Increase once low-speed data is
-    // boring and stable; decrease if you need cleaner low-dynamics identification data.
-    constexpr float kSlowStraightSpeedMps = 0.4f;
-    // [High] Mid-speed cruise used by the diagnostic circle sweep. Increase once the slower circle data is clean;
-    // decrease if the circle comparison already exposes the smooth-turn mismatch you need to correct.
-    constexpr float kCircleMediumSpeedMps = 0.6f;
-    // [High] Cruise speed for the longer diagnostic straight test. Increase to probe higher-speed behavior; decrease
-    // if braking distance, tracking error, or the safety boundary becomes problematic.
-    constexpr float kFastStraightSpeedMps = 0.8f;
     // [High] Straight-profile acceleration during diagnostics. Increase if you want stronger feedforward/traction data;
     // decrease if launches spin the tires or make the test less repeatable.
     constexpr float kStraightAccelMps2 = 6.50f;
@@ -84,46 +63,6 @@ namespace MazeMap::DiagnosticConfig
     constexpr float kDiagnosticWheelVelocityKpScale = Config::kNominalWheelVelocityKpScale;
     constexpr float kDiagnosticWheelVelocityKiScale = Config::kNominalWheelVelocityKiScale;
     constexpr float kDiagnosticWheelIntegralLimitScale = Config::kNominalWheelIntegralLimitScale;
-    // [High] Lowest raw drive command included in the kickoff sweep. Decrease to probe weaker launches; increase if
-    // the robot clearly does not move at very low values and you want a shorter sweep.
-    constexpr float kKickoffSweepMinDriveCommand = 0.05f;
-    // [High] Highest raw drive command included in the kickoff sweep. Increase to probe more aggressive launches;
-    // decrease if the sweep already reaches reliable breakaway or the robot moves too far per sample.
-    constexpr float kKickoffSweepMaxDriveCommand = 0.30f;
-    // [Medium] Step size between kickoff sweep commands. Decrease for finer resolution; increase for a faster sweep.
-    constexpr float kKickoffSweepStepDriveCommand = 0.01f;
-    // [High] Pulse length for each kickoff sample. Increase if static friction needs a longer shove to reveal the
-    // threshold; decrease if the robot moves too far before the recovery segment.
-    constexpr uint16_t kKickoffSweepPulseMs = 250U;
-    // [Medium] Minimum distance that counts as "moved" during the kickoff sweep. Increase if encoder noise causes false
-    // positives; decrease if real breakaway moves are being missed.
-    constexpr float kKickoffSweepMoveThresholdM = 0.03f;
-    // [Medium] Minimum peak speed that counts as "moved" during the kickoff sweep. Increase if noise spikes look like
-    // launches; decrease if the robot creeps but does not cross the distance threshold.
-    constexpr float kKickoffSweepMoveThresholdMps = 0.03f;
-    // [High] Raw kickoff command used ahead of each forward-hold sample. Raise it if the forward sweep still stalls at
-    // the start; lower it if the kickoff itself dominates the measurement too much.
-    constexpr float kForwardSweepKickoffDriveCommand = 0.35f;
-    // [Medium] Kickoff pulse length used before each forward-hold sample. Increase if the robot needs more time to
-    // break away; decrease if the kickoff contributes too much of the measured travel.
-    constexpr uint16_t kForwardSweepKickoffMs = 120U;
-    // [High] Lowest raw hold command included in the forward sweep. Decrease to probe weaker sustaining commands;
-    // increase if very low commands are obviously useless.
-    constexpr float kForwardSweepMinDriveCommand = 0.10f;
-    // [High] Highest raw hold command included in the forward sweep. Increase to extend the command-to-speed map;
-    // decrease if the sweep gets too aggressive for the available space.
-    constexpr float kForwardSweepMaxDriveCommand = 0.40f;
-    // [Medium] Step size between forward sweep commands. Decrease for finer resolution; increase for a shorter test.
-    constexpr float kForwardSweepStepDriveCommand = 0.01f;
-    // [High] Hold time for each forward sweep sample after the kickoff pulse. Increase for better steady-speed data;
-    // decrease if the robot travels too far before the recovery segment.
-    constexpr uint16_t kForwardSweepHoldMs = 220U;
-    // [Medium] Average hold speed that counts as "carried" during the forward sweep. Increase if tiny creeping speeds
-    // are not useful; decrease if the desired sustaining command is very gentle.
-    constexpr float kForwardSweepCarryThresholdMps = 0.05f;
-    // [Medium] Distance accumulated during the hold segment that counts as a meaningful carry. Increase to ignore tiny
-    // nudges; decrease if low-speed sustained motion is the target.
-    constexpr float kForwardSweepCarryThresholdM = 0.180f;
     // [Medium] Brake-and-settle window after each characterization sample. This now tracks the measured diagnostic
     // settling time instead of the earlier optimistic estimate.
     constexpr uint16_t kCharacterizationSettleMs = 350U;

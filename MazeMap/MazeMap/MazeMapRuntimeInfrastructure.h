@@ -3,6 +3,7 @@
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"
+#include "OpenFloorMeasurementSpec.h"
 #include "RuntimeBinaryLogSupport.h"
 
 // Private application infrastructure helpers for the MazeMap runtime.
@@ -107,8 +108,6 @@ namespace MazeMap::App::Internal::Runtime
     {
         const auto& driveModel = MazeMap::MotorEncoderDrive::GetSharedPhysicalModel();
         const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
-        static const MazeMap::Vehicle sharedVehicle{};
-        const MazeMap::InPlaceTurnProfile inPlaceTurnProfile = BuildSharedInPlaceTurnProfile(sharedVehicle);
         char message[256] = {};
         auto writeConfig = [&writeEvent, &message](const char* format, auto... args) -> bool
         {
@@ -176,29 +175,42 @@ namespace MazeMap::App::Internal::Runtime
                 DiagnosticConfig::kDiagnosticWheelVelocityKpScale,
                 DiagnosticConfig::kDiagnosticWheelVelocityKiScale) &&
             writeConfig(
-                "routine_cfg:startup_ms=%lu;baseline_ms=%lu;inter_ms=%lu;flush_ms=%lu;short_m=%.3f;long_m=%.3f",
+                "routine_cfg:startup_ms=%lu;baseline_ms=%lu;inter_ms=%lu;flush_ms=%lu;static_ms=%lu;recovery_v=%.3f",
                 static_cast<unsigned long>(DiagnosticConfig::kStartupSettleMs),
                 static_cast<unsigned long>(DiagnosticConfig::kBaselineHoldMs),
                 static_cast<unsigned long>(DiagnosticConfig::kInterTestHoldMs),
                 static_cast<unsigned long>(DiagnosticConfig::kLogFlushPeriodMs),
-                DiagnosticConfig::kShortStraightDistanceM,
-                DiagnosticConfig::kLongStraightDistanceM) &&
+                static_cast<unsigned long>(DiagnosticConfig::kStaticHoldMs),
+                DiagnosticConfig::kCharacterizationRecoverySpeedMps) &&
             writeConfig(
-                "characterization:square_leg_m=%.3f;arc_half_m=%.3f;slow_v=%.3f;circle_v=%.3f;fast_v=%.3f;straight_a=%.3f",
-                DiagnosticConfig::kSquareLegDistanceM,
-                DiagnosticConfig::kArcHalfCircleDistanceM,
-                DiagnosticConfig::kSlowStraightSpeedMps,
-                DiagnosticConfig::kCircleMediumSpeedMps,
-                DiagnosticConfig::kFastStraightSpeedMps,
-                DiagnosticConfig::kStraightAccelMps2) &&
+                "open_floor_repeats:launch=%u;straight=%u;yaw=%u;smooth=%u;loop=%u",
+                static_cast<unsigned>(DiagnosticConfig::kLaunchRepeatsPerMagnitude),
+                static_cast<unsigned>(DiagnosticConfig::kStraightRepeatsPerSpeed),
+                static_cast<unsigned>(DiagnosticConfig::kYawRepeatsPerPrimitiveSpeed),
+                static_cast<unsigned>(DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed),
+                static_cast<unsigned>(DiagnosticConfig::kLoopRepeats)) &&
             writeConfig(
-                "characterization2:straight_d=%.3f;turn_max_w=%.3f;turn_a=%.3f;kickoff_min=%.3f;kickoff_max=%.3f;kickoff_step=%.3f",
+                "open_floor_bins:launch_cmds=%.3f,%.3f,%.3f,%.3f;straight_v=%.3f,%.3f,%.3f;yaw_w=%.3f,%.3f,%.3f",
+                MazeMap::kOpenFloorLaunchDriveMagnitudes[0],
+                MazeMap::kOpenFloorLaunchDriveMagnitudes[1],
+                MazeMap::kOpenFloorLaunchDriveMagnitudes[2],
+                MazeMap::kOpenFloorLaunchDriveMagnitudes[3],
+                MazeMap::kOpenFloorStraightSpeedBinsMps[0],
+                MazeMap::kOpenFloorStraightSpeedBinsMps[1],
+                MazeMap::kOpenFloorStraightSpeedBinsMps[2],
+                MazeMap::kOpenFloorYawOmegaBinsRadps[0],
+                MazeMap::kOpenFloorYawOmegaBinsRadps[1],
+                MazeMap::kOpenFloorYawOmegaBinsRadps[2]) &&
+            writeConfig(
+                "open_floor_motion:smooth_v=%.3f,%.3f,%.3f;straight_a=%.3f;straight_d=%.3f;turn_max_w=%.3f;turn_a=%.3f;launch_ms=%lu",
+                MazeMap::kOpenFloorSmoothSpeedBinsMps[0],
+                MazeMap::kOpenFloorSmoothSpeedBinsMps[1],
+                MazeMap::kOpenFloorSmoothSpeedBinsMps[2],
+                DiagnosticConfig::kStraightAccelMps2,
                 DiagnosticConfig::kStraightDecelMps2,
-                inPlaceTurnProfile.maxAngularSpeedRadps,
-                inPlaceTurnProfile.angularAccelRadps2,
-                DiagnosticConfig::kKickoffSweepMinDriveCommand,
-                 DiagnosticConfig::kKickoffSweepMaxDriveCommand,
-                 DiagnosticConfig::kKickoffSweepStepDriveCommand);
+                DiagnosticConfig::kTurnMaxOmegaRadps,
+                DiagnosticConfig::kTurnAccelRadps2,
+                static_cast<unsigned long>(MazeMap::kOpenFloorLaunchPulseMs));
     }
 
     template <typename WriteEventFn>

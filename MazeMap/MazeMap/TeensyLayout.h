@@ -76,10 +76,9 @@ namespace MazeMap::Platform
     inline bool TryMountPreferredSdVolume()
     {
         // The production runtime now uses one mounted SD filesystem for logging.txt, primary .mmlog,
-        // and .sidecar files. Prefer DMA for that shared path before falling back to FIFO.
-        return TryMountSdioVolume(DMA_SDIO, 1U) ||
-               TryMountSdioVolume(DMA_SDIO, 0U) ||
-               TryMountSdioVolume(FIFO_SDIO, 1U) ||
+        // and .sidecar files. Keep the shared logging path on FIFO SDIO so service writes
+        // remain synchronous 512-byte sectors instead of DMA transfers with a separate busy window.
+        return TryMountSdioVolume(FIFO_SDIO, 1U) ||
                TryMountSdioVolume(FIFO_SDIO, 0U);
     }
 

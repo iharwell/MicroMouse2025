@@ -77,7 +77,6 @@ public:
         _runtime.Drive().Brake();
         _runtime.Drive().UseNominalWheelControlProfile();
         SetFanEnabled(false);
-        FlushLog();
         if (ok)
         {
             (void)_runtime.AppendTextLogFormatted("Auxiliary measurement complete, log saved to %s", GetLogFileName());
@@ -207,16 +206,10 @@ private:
         (void)_runtime.ServiceUtilityDataLog();
     }
 
-    void FlushLog()
-    {
-        (void)_runtime.FlushUtilityDataLog();
-        _runtime.FlushTextLog();
-    }
-
     void CloseLog()
     {
         (void)_runtime.CloseUtilityDataLog();
-        _runtime.FlushTextLog();
+        _runtime.CloseTextLog();
     }
 
     const char* GetLogFileName() const
@@ -512,10 +505,13 @@ private:
 
     void WaitForNextSample(uint32_t& timestampUs, uint32_t& dtUs)
     {
-        while ((micros() - _lastControlMicros) < AuxMeasurementConfig::kControlPeriodUs)
+        if ((micros() - _lastControlMicros) < AuxMeasurementConfig::kControlPeriodUs)
         {
             ServiceLog();
-            delayMicroseconds(50);
+            while ((micros() - _lastControlMicros) < AuxMeasurementConfig::kControlPeriodUs)
+            {
+                delayMicroseconds(50);
+            }
         }
 
         timestampUs = micros();

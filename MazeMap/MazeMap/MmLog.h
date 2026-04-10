@@ -91,6 +91,11 @@ namespace MazeMap {
 #  define MMLOG_TEENSY_SDIO_CONFIG SdioConfig(FIFO_SDIO)
 #endif
 
+/** Minimum Teensy preallocation for every SdFat-backed logger file. */
+#ifndef MMLOG_TEENSY_MIN_PREALLOCATE_BYTES
+#  define MMLOG_TEENSY_MIN_PREALLOCATE_BYTES (1024ULL * 1024ULL)
+#endif
+
 /** Number of bytes to preallocate for the primary file on Teensy FIFO SDIO builds. */
 #ifndef MMLOG_TEENSY_PRIMARY_PREALLOCATE_BYTES
 #  define MMLOG_TEENSY_PRIMARY_PREALLOCATE_BYTES (64ULL * 1024ULL * 1024ULL)
@@ -98,7 +103,7 @@ namespace MazeMap {
 
 /** Number of bytes to preallocate for the sidecar file on Teensy FIFO SDIO builds. */
 #ifndef MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES
-#  define MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES 1024ULL*1024ULL
+#  define MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES (1024ULL * 1024ULL)
 #endif
 
 /** When nonzero, service() writes at most one 512-byte sector per file per call in Teensy FIFO SDIO mode. */
@@ -138,6 +143,10 @@ namespace MazeMap {
             "MMLOG_PRIMARY_QUEUE_BYTES must be a multiple of 512 when MMLOG_ENABLE_TEENSY_FIFO_SDIO is enabled.");
         static_assert((MMLOG_SIDECAR_QUEUE_BYTES% kSdSectorBytes) == 0u,
             "MMLOG_SIDECAR_QUEUE_BYTES must be a multiple of 512 when MMLOG_ENABLE_TEENSY_FIFO_SDIO is enabled.");
+        static_assert(MMLOG_TEENSY_PRIMARY_PREALLOCATE_BYTES >= MMLOG_TEENSY_MIN_PREALLOCATE_BYTES,
+            "Primary mmlog files must be preallocated with at least 1 MiB on Teensy FIFO SDIO builds.");
+        static_assert(MMLOG_TEENSY_SIDECAR_PREALLOCATE_BYTES >= MMLOG_TEENSY_MIN_PREALLOCATE_BYTES,
+            "Sidecar files must be preallocated with at least 1 MiB on Teensy FIFO SDIO builds.");
 #endif
 
         // -----------------------------------------------------------------------------
@@ -671,6 +680,8 @@ namespace MazeMap {
             bool beginImpl(const char* header, std::size_t rowBytes, std::uint32_t schemaVersion, std::uint32_t schemaHash);
             bool attachStorage() noexcept;
             void releaseStorage() noexcept;
+            bool pushPrimaryQueue(const std::uint8_t* data, std::size_t len);
+            bool pushSidecarQueue(const std::uint8_t* data, std::size_t len);
             bool enqueuePrimary(const std::uint8_t* data, std::size_t len);
             bool enqueueSidecar(const std::uint8_t* data, std::size_t len);
             bool drainQueueToFile(StorageFileHandle& file, detail::ByteRing& queue, std::size_t budget, bool sectorAligned);

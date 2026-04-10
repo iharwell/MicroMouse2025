@@ -265,8 +265,7 @@ private:
         bool controlHalted,
         uint32_t extra0 = 0UL,
         uint32_t extra1 = 0UL);
-    void ServiceTimingLog();
-    void FlushTimingLog();
+    void ServiceLogs();
     void CloseTimingLog();
     void RecordTimingLogFailure() noexcept;
 
@@ -286,8 +285,6 @@ private:
     bool WriteMainEvent(const char* type, const char* message);
     bool WriteFaultDumpTextEntryAndFlush(const char* type, const char* message);
     bool DumpUkfFaultToTextLog(const char* reason);
-    void ServiceMainLog();
-    void FlushMainLog();
     void CloseMainLog();
     void RecordMainLogFailure() noexcept;
     bool FailLogSetupStep(const char* logName, const char* step);
@@ -530,21 +527,19 @@ bool OpenFloorMeasurementController::LogTimingFault(
     return _runtime.WriteTextLogEntry(micros(), "fault", message);
 }
 
-void OpenFloorMeasurementController::ServiceTimingLog()
+void OpenFloorMeasurementController::ServiceLogs()
 {
     if (!_runtime.ServiceUtilityDataLog())
     {
-        RecordTimingLogFailure();
+        if (_timingLogOpen)
+        {
+            RecordTimingLogFailure();
+        }
+        if (_mainLogOpen)
+        {
+            RecordMainLogFailure();
+        }
     }
-}
-
-void OpenFloorMeasurementController::FlushTimingLog()
-{
-    if (!_runtime.FlushUtilityDataLog())
-    {
-        RecordTimingLogFailure();
-    }
-    _runtime.FlushTextLog();
 }
 
 void OpenFloorMeasurementController::CloseTimingLog()
@@ -553,7 +548,6 @@ void OpenFloorMeasurementController::CloseTimingLog()
     {
         RecordTimingLogFailure();
     }
-    _runtime.FlushTextLog();
 }
 
 void OpenFloorMeasurementController::RecordTimingLogFailure() noexcept
@@ -868,30 +862,13 @@ bool OpenFloorMeasurementController::DumpUkfFaultToTextLog(const char* reason)
     return WriteFaultDumpTextEntryAndFlush("ukf_dump_end", "complete=true");
 }
 
-void OpenFloorMeasurementController::ServiceMainLog()
-{
-    if (!_runtime.ServiceUtilityDataLog())
-    {
-        RecordMainLogFailure();
-    }
-}
-
-void OpenFloorMeasurementController::FlushMainLog()
-{
-    if (!_runtime.FlushUtilityDataLog())
-    {
-        RecordMainLogFailure();
-    }
-    _runtime.FlushTextLog();
-}
-
 void OpenFloorMeasurementController::CloseMainLog()
 {
     if (!_runtime.CloseUtilityDataLog())
     {
         RecordMainLogFailure();
     }
-    _runtime.FlushTextLog();
+    _runtime.CloseTextLog();
 }
 
 void OpenFloorMeasurementController::RecordMainLogFailure() noexcept
@@ -987,13 +964,11 @@ void OpenFloorMeasurementController::Run()
     _drive.UseNominalWheelControlProfile();
     if (_timingLogOpen)
     {
-        FlushTimingLog();
         CloseTimingLog();
         _timingLogOpen = false;
     }
     if (_mainLogOpen)
     {
-        FlushMainLog();
         CloseMainLog();
         _mainLogOpen = false;
     }
@@ -1178,7 +1153,6 @@ bool OpenFloorMeasurementController::LogTimingFaultAndFail(
         {
             return Fail("Failed to write timing fault row");
         }
-        FlushTimingLog();
     }
     return Fail(message);
 }
@@ -1208,7 +1182,6 @@ bool OpenFloorMeasurementController::LogSectionFaultAndFail(
         {
             return Fail("Failed to write open-floor main fault row");
         }
-        FlushMainLog();
     }
     return Fail(message);
 }
@@ -1284,11 +1257,13 @@ float OpenFloorMeasurementController::ReadBoardTemperatureC(const DiagnosticSens
 
 bool OpenFloorMeasurementController::CaptureCycle(bool stationary, OpenFloorMeasurementCycle& cycle)
 {
-    while ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
+    if ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
     {
-        ServiceTimingLog();
-        ServiceMainLog();
-        delayMicroseconds(20);
+        ServiceLogs();
+        while ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
+        {
+            delayMicroseconds(20);
+        }
     }
 
     cycle.controlTiming.controlStartUs = micros();
@@ -1320,11 +1295,6 @@ bool OpenFloorMeasurementController::CaptureCycle(bool stationary, OpenFloorMeas
                 {
                     captureImu();
                 });
-        },
-        [this]() noexcept
-        {
-            FlushTimingLog();
-            FlushMainLog();
         });
     if (_drive.HasEstimatorFault())
     {
@@ -1356,11 +1326,7 @@ bool OpenFloorMeasurementController::LogCycle(const OpenFloorMeasurementLabels& 
     {
         return true;
     }
-    if (LogMainSample(labels, cycle))
-    {
-        return true;
-    }
-    return Fail("Failed to write open-floor main sample");
+    return LogMainSample(labels, cycle) ? true : Fail("Failed to write open-floor main sample");
 }
 
 bool OpenFloorMeasurementController::TraverseToMarker(
@@ -1554,7 +1520,7 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
         return Fail("Failed to write section start marker");
     }
 
-    const unsigned long pulseDeadline = millis() + DiagnosticConfig::kKickoffSweepPulseMs;
+    const unsigned long pulseDeadline = millis() + MazeMap::kOpenFloorLaunchPulseMs;
     const float launchBoundM = MazeMap::OpenFloorHalfStepMeters() + Config::kDistanceToleranceM;
     unsigned long launchOutOfBoundsStartMs = 0UL;
     bool launchOutOfBoundsActive = false;

@@ -90,6 +90,7 @@ namespace MazeMap::App::Internal
             unsigned long timestampUs,
             const char* name);
         void FlushTextLog();
+        void CloseTextLog();
 
         // Centralized top-level mode failure path: one optional mode-specific cleanup callback plus
         // one runtime-owned shutdown sequence for shared actuators and logs.

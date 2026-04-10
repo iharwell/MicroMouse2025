@@ -134,16 +134,14 @@ public:
             [](SensorSnapshot&, auto&&, auto&& captureImu) noexcept
             {
                 captureImu();
-            },
-            []() noexcept {});
+            });
     }
 
-    template <typename TEstimatorWork, typename TFlushLogs>
+    template <typename TEstimatorWork>
     SensorSnapshot Capture(
         bool stationary,
         const PoseEstimate& pose,
-        TEstimatorWork&& estimatorWork,
-        TFlushLogs&& flushLogs)
+        TEstimatorWork&& estimatorWork)
     {
         SensorSnapshot snapshot{};
         AsyncWallSensorSweepRead wallRead{};
@@ -182,7 +180,6 @@ public:
         serviceWallRead();
         if (wallRead.active)
         {
-            flushLogs();
             serviceWallRead();
             if (wallRead.active)
             {
@@ -866,16 +863,14 @@ public:
             [](DiagnosticSensorSnapshot&, auto&&, auto&& captureImu) noexcept
             {
                 captureImu();
-            },
-            []() noexcept {});
+            });
     }
 
-    template <typename TEstimatorWork, typename TFlushLogs>
+    template <typename TEstimatorWork>
     DiagnosticSensorSnapshot Capture(
         bool stationary,
         const PoseEstimate& pose,
-        TEstimatorWork&& estimatorWork,
-        TFlushLogs&& flushLogs)
+        TEstimatorWork&& estimatorWork)
     {
         DiagnosticSensorSnapshot snapshot{};
         AsyncWallSensorSweepRead wallRead{};
@@ -914,7 +909,6 @@ public:
         serviceWallRead();
         if (wallRead.active)
         {
-            flushLogs();
             serviceWallRead();
             if (wallRead.active)
             {
@@ -1342,7 +1336,6 @@ private:
         return ReadBackLeftGyroZRadpsRaw(_vehicle);
     }
 };
-
 
 
 

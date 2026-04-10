@@ -198,6 +198,7 @@ public:
         ShutdownTelemetryMode(false);
         AppendStartupTrace("maneuver_test:complete");
         (void)EmitMissionControllerLine("Maneuver file test complete");
+        CloseMissionTextLog();
     }
 
     bool BeginCorridorRepeatabilityMode() override
@@ -259,6 +260,7 @@ public:
             AppendStartupTrace("corridor_repeatability:complete");
             (void)EmitMissionControllerLine("Corridor repeatability sweep complete");
         }
+        CloseMissionTextLog();
     }
 
     bool BeginPositionAccuracyAuditMode() override
@@ -321,6 +323,7 @@ public:
             AppendStartupTrace("position_accuracy_audit:complete");
             (void)EmitMissionControllerLine("Position accuracy audit complete");
         }
+        CloseMissionTextLog();
     }
 
 private:
@@ -670,7 +673,6 @@ private:
 
     void FlushTelemetryLog()
     {
-        (void)_runtime.FlushUtilityDataLog();
         _runtime.FlushTextLog();
     }
 
@@ -886,7 +888,7 @@ private:
 
     void CloseMissionTextLog()
     {
-        _runtime.FlushTextLog();
+        _runtime.CloseTextLog();
     }
 
     bool WriteMissionTextLineIfEnabled(const char* message)
@@ -917,7 +919,6 @@ private:
             (void)_runtime.AppendTextLogFormatted("Mission text logging disabled: %s", traceLabel);
         }
 
-        FlushMissionTextLog();
         CloseMissionTextLog();
         _missionTextLoggingEnabled = false;
     }
@@ -4508,10 +4509,6 @@ private:
             [](DiagnosticSensorSnapshot&, auto&&, auto&& captureImu) noexcept
             {
                 captureImu();
-            },
-            [this]() noexcept
-            {
-                FlushTelemetryLog();
             });
         const DriveTelemetry telemetry = _drive.GetTelemetry();
         DiagnosticLogRow row{};
@@ -4563,10 +4560,13 @@ private:
 
     bool TickControl(bool stationary, float& dtSeconds, SensorSnapshot& snapshot)
     {
-        while ((micros() - _lastControlMicros) < Config::kControlPeriodUs)
+        if ((micros() - _lastControlMicros) < Config::kControlPeriodUs)
         {
             ServiceTelemetryLog();
-            delayMicroseconds(50);
+            while ((micros() - _lastControlMicros) < Config::kControlPeriodUs)
+            {
+                delayMicroseconds(50);
+            }
         }
 
         const unsigned long now = micros();
@@ -4590,10 +4590,6 @@ private:
                     {
                         captureImu();
                     });
-            },
-            [this]() noexcept
-            {
-                FlushTelemetryLog();
             });
         if (_drive.HasEstimatorFault())
         {

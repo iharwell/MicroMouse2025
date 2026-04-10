@@ -102,6 +102,7 @@ public:
         {
             (void)_runtime.AppendTextLogLine("Front wall characterization complete and persisted.");
         }
+        _runtime.CloseTextLog();
     }
 
 private:
@@ -372,11 +373,10 @@ private:
             }
         }
 
-        if (!_runtime.FlushUtilityDataLog() || !_runtime.CloseUtilityDataLog())
+        if (!_runtime.CloseUtilityDataLog())
         {
             return Fail("Front wall characterization log write failed");
         }
-        _runtime.FlushTextLog();
 
         char line[224] = {};
         snprintf(

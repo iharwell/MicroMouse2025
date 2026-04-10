@@ -322,17 +322,28 @@ namespace MazeMap {
             {
                 char line[kLineBufferChars]{};
                 const char* sidecarHeaderError = nullptr;
+                auto queueSidecarLine = [this](const char* const text) -> bool
+                {
+                    if (text == nullptr) {
+                        return false;
+                    }
+
+                    const std::size_t len = std::strlen(text);
+                    static constexpr std::uint8_t newline = '\n';
+                    return
+                        pushSidecarQueue(reinterpret_cast<const std::uint8_t*>(text), len) &&
+                        pushSidecarQueue(&newline, 1u);
+                };
 
                 std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
-                if (!writeLineDirect(m_sidecarFile, line)) {
-                    sidecarHeaderError = "Failed to write schema_version.";
+                if (!queueSidecarLine(line)) {
+                    sidecarHeaderError = "Failed to queue schema_version.";
                 }
-                m_sidecarDirty = true;
 
                 if (sidecarHeaderError == nullptr) {
                     std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes));
-                    if (!writeLineDirect(m_sidecarFile, line)) {
-                        sidecarHeaderError = "Failed to write row_bytes.";
+                    if (!queueSidecarLine(line)) {
+                        sidecarHeaderError = "Failed to queue row_bytes.";
                     }
                 }
 
@@ -344,28 +355,35 @@ namespace MazeMap {
                         sidecarHeaderError = "Metadata line too long.";
                         break;
                     }
-                    if (!writeLineDirect(m_sidecarFile, line)) {
-                        sidecarHeaderError = "Failed to write metadata line.";
+                    if (!queueSidecarLine(line)) {
+                        sidecarHeaderError = "Failed to queue metadata line.";
                         break;
                     }
                 }
 
-                if (sidecarHeaderError == nullptr && !writeLineDirect(m_sidecarFile, header)) {
-                    sidecarHeaderError = "Failed to write header line.";
-                }
-
-                if (sidecarHeaderError == nullptr && !syncStorageFile(m_sidecarFile)) {
-                    sidecarHeaderError = "Failed to flush sidecar header.";
+                if (sidecarHeaderError == nullptr && !queueSidecarLine(header)) {
+                    sidecarHeaderError = "Failed to queue header line.";
                 }
 
                 if (sidecarHeaderError != nullptr) {
                     return fail(sidecarHeaderError);
                 }
             }
-            m_sidecarDirty = false;
 
             {
                 const char* primaryError = nullptr;
+                auto queuePrimaryLine = [this](const char* const text) -> bool
+                {
+                    if (text == nullptr) {
+                        return false;
+                    }
+
+                    const std::size_t len = std::strlen(text);
+                    static constexpr std::uint8_t newline = '\n';
+                    return
+                        pushPrimaryQueue(reinterpret_cast<const std::uint8_t*>(text), len) &&
+                        pushPrimaryQueue(&newline, 1u);
+                };
 
                 if (!openPrimaryForWrite()) {
                     primaryError = (m_lastError[0] != '\0') ? m_lastError : "Failed to prepare primary file.";
@@ -375,8 +393,8 @@ namespace MazeMap {
                     if (std::snprintf(bindingLine, sizeof(bindingLine), "sidecar_file=%s", m_sidecarBinding) >= static_cast<int>(sizeof(bindingLine))) {
                         primaryError = "Sidecar binding line too long.";
                     }
-                    else if (!writeLineDirect(m_primaryFile, bindingLine)) {
-                        primaryError = "Failed to write primary sidecar binding line.";
+                    else if (!queuePrimaryLine(bindingLine)) {
+                        primaryError = "Failed to queue primary sidecar binding line.";
                     }
                 }
 
@@ -446,6 +464,8 @@ namespace MazeMap {
         }
 
         bool MmLogLogger::service() {
+            // SharedRobotRuntime owns cross-file servicing arbitration. This routine only
+            // arbitrates the logger-owned sidecar and primary streams when the runtime hub calls it.
             if (!m_isOpen || !m_isBegun) {
                 return true;
             }
@@ -453,22 +473,15 @@ namespace MazeMap {
                 return true;
             }
 
-            const bool prioritizeSidecar =
-                m_sidecarFile &&
-                m_sidecarQueue.size() >= kSdSectorBytes;
-
-            if (prioritizeSidecar) {
+            if (m_sidecarFile && m_sidecarQueue.size() >= kSdSectorBytes) {
                 if (!drainQueueToFile(m_sidecarFile, m_sidecarQueue, MMLOG_SERVICE_SIDECAR_BUDGET_BYTES, true)) {
                     return false;
                 }
                 return true;
             }
 
-            if (m_primaryFile && !drainQueueToFile(m_primaryFile, m_primaryQueue, MMLOG_SERVICE_PRIMARY_BUDGET_BYTES, true)) {
-                return false;
-            }
-            if (m_sidecarFile && !m_sidecarQueue.empty()) {
-                if (!drainQueueToFile(m_sidecarFile, m_sidecarQueue, MMLOG_SERVICE_SIDECAR_BUDGET_BYTES, true)) {
+            if (m_primaryFile && m_primaryQueue.size() >= kSdSectorBytes) {
+                if (!drainQueueToFile(m_primaryFile, m_primaryQueue, MMLOG_SERVICE_PRIMARY_BUDGET_BYTES, true)) {
                     return false;
                 }
             }
@@ -476,6 +489,8 @@ namespace MazeMap {
         }
 
         bool MmLogLogger::flush() {
+            // flush() keeps its conventional meaning: fully drain logger-owned queues.
+            // Control-loop service arbitration still belongs in SharedRobotRuntime.
             if (!m_isOpen) {
                 return true;
             }
@@ -550,25 +565,33 @@ namespace MazeMap {
             return ok;
         }
 
-        bool MmLogLogger::enqueuePrimary(const std::uint8_t* const data, const std::size_t len) {
-            if (!m_isBegun) {
-                return fail("Primary queue used before begin().");
-            }
+        bool MmLogLogger::pushPrimaryQueue(const std::uint8_t* const data, const std::size_t len) {
             if (!m_primaryQueue.push(data, len)) {
                 return fail("Primary queue overflow.");
             }
             return true;
         }
 
-        bool MmLogLogger::enqueueSidecar(const std::uint8_t* const data, const std::size_t len) {
-            if (!m_isBegun) {
-                return fail("Sidecar queue used before begin().");
-            }
+        bool MmLogLogger::pushSidecarQueue(const std::uint8_t* const data, const std::size_t len) {
             if (!m_sidecarQueue.push(data, len)) {
                 return fail("Sidecar queue overflow.");
             }
             m_sidecarDirty = true;
             return true;
+        }
+
+        bool MmLogLogger::enqueuePrimary(const std::uint8_t* const data, const std::size_t len) {
+            if (!m_isBegun) {
+                return fail("Primary queue used before begin().");
+            }
+            return pushPrimaryQueue(data, len);
+        }
+
+        bool MmLogLogger::enqueueSidecar(const std::uint8_t* const data, const std::size_t len) {
+            if (!m_isBegun) {
+                return fail("Sidecar queue used before begin().");
+            }
+            return pushSidecarQueue(data, len);
         }
 
         bool MmLogLogger::drainQueueToFile(
@@ -658,6 +681,7 @@ namespace MazeMap {
                     while (file.isBusy()) {
                     }
                 }
+
             }
 #endif
 

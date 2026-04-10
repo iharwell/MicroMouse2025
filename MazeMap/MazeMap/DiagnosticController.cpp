@@ -1,11 +1,39 @@
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
+#include "OpenFloorMeasurementSpec.h"
 #include "RuntimeBinaryLogSupport.h"
 #include "WallSensorLedCalibrationPhase.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
+
+namespace
+{
+    // This legacy controller is no longer registered as the primary diagnostic mode; keep
+    // its old sweep constants private so DiagnosticConfig only exposes active open-floor dials.
+    namespace LegacyDiagnosticConfig
+    {
+        constexpr float kShortStraightDistanceM = 0.18f;
+        constexpr float kLongStraightDistanceM = 0.27f;
+        constexpr float kSquareLegDistanceM = 0.18f;
+        constexpr float kArcHalfCircleDistanceM = 0.20f;
+        constexpr float kSlowStraightSpeedMps = 0.4f;
+        constexpr float kCircleMediumSpeedMps = 0.6f;
+        constexpr float kFastStraightSpeedMps = 0.8f;
+        constexpr float kKickoffSweepMoveThresholdM = 0.03f;
+        constexpr float kKickoffSweepMoveThresholdMps = 0.03f;
+        constexpr uint16_t kKickoffSweepPulseMs = 250U;
+        constexpr float kForwardSweepKickoffDriveCommand = 0.35f;
+        constexpr uint16_t kForwardSweepKickoffMs = 120U;
+        constexpr float kForwardSweepMinDriveCommand = 0.10f;
+        constexpr float kForwardSweepMaxDriveCommand = 0.40f;
+        constexpr float kForwardSweepStepDriveCommand = 0.01f;
+        constexpr uint16_t kForwardSweepHoldMs = 220U;
+        constexpr float kForwardSweepCarryThresholdMps = 0.05f;
+        constexpr float kForwardSweepCarryThresholdM = 0.180f;
+    }
+}
 
 class DiagnosticController : public IApplicationMode
 {
@@ -81,23 +109,23 @@ public:
         ok = ok && ExecuteTurnPhase("turn_cw_180", PI_F);
         ok = ok && ExecuteTurnPhase("turn_ccw_180", -PI_F);
         ok = ok && HoldPhase("turn_sweep_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        float shortReturnDistanceM = DiagnosticConfig::kShortStraightDistanceM;
-        ok = ok && ExecuteStraightPhase("straight_short_forward", DiagnosticConfig::kShortStraightDistanceM, DiagnosticConfig::kSlowStraightSpeedMps, &shortReturnDistanceM);
-        shortReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(DiagnosticConfig::kShortStraightDistanceM, shortReturnDistanceM);
+        float shortReturnDistanceM = LegacyDiagnosticConfig::kShortStraightDistanceM;
+        ok = ok && ExecuteStraightPhase("straight_short_forward", LegacyDiagnosticConfig::kShortStraightDistanceM, LegacyDiagnosticConfig::kSlowStraightSpeedMps, &shortReturnDistanceM);
+        shortReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(LegacyDiagnosticConfig::kShortStraightDistanceM, shortReturnDistanceM);
         ok = ok && ExecuteTurnPhase("straight_short_turnaround", PI_F);
-        ok = ok && ExecuteStraightPhase("straight_short_return", shortReturnDistanceM, DiagnosticConfig::kSlowStraightSpeedMps);
+        ok = ok && ExecuteStraightPhase("straight_short_return", shortReturnDistanceM, LegacyDiagnosticConfig::kSlowStraightSpeedMps);
         ok = ok && ExecuteTurnPhase("straight_short_reset_heading", PI_F);
         ok = ok && HoldPhase("straight_short_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        float longReturnDistanceM = DiagnosticConfig::kLongStraightDistanceM;
-        ok = ok && ExecuteStraightPhase("straight_long_forward", DiagnosticConfig::kLongStraightDistanceM, DiagnosticConfig::kFastStraightSpeedMps, &longReturnDistanceM);
-        longReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(DiagnosticConfig::kLongStraightDistanceM, longReturnDistanceM);
+        float longReturnDistanceM = LegacyDiagnosticConfig::kLongStraightDistanceM;
+        ok = ok && ExecuteStraightPhase("straight_long_forward", LegacyDiagnosticConfig::kLongStraightDistanceM, LegacyDiagnosticConfig::kFastStraightSpeedMps, &longReturnDistanceM);
+        longReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(LegacyDiagnosticConfig::kLongStraightDistanceM, longReturnDistanceM);
         ok = ok && ExecuteTurnPhase("straight_long_turnaround", PI_F);
-        ok = ok && ExecuteStraightPhase("straight_long_return", longReturnDistanceM, DiagnosticConfig::kFastStraightSpeedMps);
+        ok = ok && ExecuteStraightPhase("straight_long_return", longReturnDistanceM, LegacyDiagnosticConfig::kFastStraightSpeedMps);
         ok = ok && ExecuteTurnPhase("straight_long_reset_heading", PI_F);
         ok = ok && HoldPhase("straight_long_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        ok = ok && ExecuteCircleSpeedSweep("slow", DiagnosticConfig::kSlowStraightSpeedMps);
-        ok = ok && ExecuteCircleSpeedSweep("medium", DiagnosticConfig::kCircleMediumSpeedMps);
-        ok = ok && ExecuteCircleSpeedSweep("fast", DiagnosticConfig::kFastStraightSpeedMps);
+        ok = ok && ExecuteCircleSpeedSweep("slow", LegacyDiagnosticConfig::kSlowStraightSpeedMps);
+        ok = ok && ExecuteCircleSpeedSweep("medium", LegacyDiagnosticConfig::kCircleMediumSpeedMps);
+        ok = ok && ExecuteCircleSpeedSweep("fast", LegacyDiagnosticConfig::kFastStraightSpeedMps);
         ok = ok && ExecuteSquareLoop("square_cw", HALF_PI_F);
         ok = ok && HoldPhase("square_cw_settle", DiagnosticConfig::kInterTestHoldMs, true);
         ok = ok && ExecuteSquareLoop("square_ccw", -HALF_PI_F);
@@ -105,7 +133,6 @@ public:
 
         _drive.Brake();
         _drive.UseNominalWheelControlProfile();
-        FlushLog();
 
         if (ok)
         {
@@ -238,16 +265,10 @@ private:
         (void)_runtime.ServiceUtilityDataLog();
     }
 
-    void FlushLog()
-    {
-        (void)_runtime.FlushUtilityDataLog();
-        _runtime.FlushTextLog();
-    }
-
     void CloseLog()
     {
         (void)_runtime.CloseUtilityDataLog();
-        _runtime.FlushTextLog();
+        _runtime.CloseTextLog();
     }
 
     const char* GetLogFileName() const
@@ -473,10 +494,13 @@ private:
 
     bool TickControl(bool stationary, float& dtSeconds, uint32_t& timestampUs, DiagnosticSensorSnapshot& snapshot)
     {
-        while ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
+        if ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
         {
             ServiceLog();
-            delayMicroseconds(20);
+            while ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
+            {
+                delayMicroseconds(20);
+            }
         }
 
         timestampUs = micros();
@@ -501,10 +525,6 @@ private:
                     {
                         captureImu();
                     });
-            },
-            [this]() noexcept
-            {
-                FlushLog();
             });
         if (_drive.HasEstimatorFault())
         {
@@ -647,7 +667,7 @@ private:
     bool RecoverCharacterizationSample(const char* label, float traveledDistanceM)
     {
         char phaseName[48] = {};
-        if (traveledDistanceM <= DiagnosticConfig::kKickoffSweepMoveThresholdM)
+        if (traveledDistanceM <= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM)
         {
             snprintf(phaseName, sizeof(phaseName), "%s_settle", label);
             return HoldPhase(phaseName, DiagnosticConfig::kCharacterizationSettleMs, true);
@@ -693,7 +713,7 @@ private:
         }
 
         const float startDistanceM = _drive.GetAverageDistanceMeters();
-        const unsigned long pulseDeadlineMs = millis() + DiagnosticConfig::kKickoffSweepPulseMs;
+        const unsigned long pulseDeadlineMs = millis() + LegacyDiagnosticConfig::kKickoffSweepPulseMs;
         const unsigned long settleDeadlineMs = pulseDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
         const float travelLimitM = MazeMap::ComputeDiagnosticCharacterizationTravelLimitM(
             DiagnosticConfig::kBoundaryHalfSpanM,
@@ -759,8 +779,8 @@ private:
         _drive.Brake();
         const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
         const bool moved =
-            (traveledDistanceM >= DiagnosticConfig::kKickoffSweepMoveThresholdM) ||
-            (maxSpeedMps >= DiagnosticConfig::kKickoffSweepMoveThresholdMps);
+            (traveledDistanceM >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM) ||
+            (maxSpeedMps >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdMps);
 
         char message[192] = {};
         const int length = snprintf(
@@ -797,8 +817,8 @@ private:
         }
 
         const float startDistanceM = _drive.GetAverageDistanceMeters();
-        const unsigned long kickoffDeadlineMs = millis() + DiagnosticConfig::kForwardSweepKickoffMs;
-        const unsigned long holdDeadlineMs = kickoffDeadlineMs + DiagnosticConfig::kForwardSweepHoldMs;
+        const unsigned long kickoffDeadlineMs = millis() + LegacyDiagnosticConfig::kForwardSweepKickoffMs;
+        const unsigned long holdDeadlineMs = kickoffDeadlineMs + LegacyDiagnosticConfig::kForwardSweepHoldMs;
         const unsigned long settleDeadlineMs = holdDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
         const float travelLimitM = MazeMap::ComputeDiagnosticCharacterizationTravelLimitM(
             DiagnosticConfig::kBoundaryHalfSpanM,
@@ -842,8 +862,8 @@ private:
             else if (static_cast<long>(kickoffDeadlineMs - nowMs) > 0)
             {
                 _drive.CommandOpenLoopRaw(
-                    DiagnosticConfig::kForwardSweepKickoffDriveCommand,
-                    DiagnosticConfig::kForwardSweepKickoffDriveCommand);
+                    LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
+                    LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand);
             }
             else if (static_cast<long>(holdDeadlineMs - nowMs) > 0)
             {
@@ -897,8 +917,8 @@ private:
         const float holdDistanceM = holdStarted ? std::fabs(holdEndDistanceM - holdStartDistanceM) : 0.0f;
         const float averageHoldSpeedMps = (holdElapsedSeconds > 0.0f) ? (holdDistanceM / holdElapsedSeconds) : 0.0f;
         const bool carried =
-            (averageHoldSpeedMps >= DiagnosticConfig::kForwardSweepCarryThresholdMps) ||
-            (holdDistanceM >= DiagnosticConfig::kForwardSweepCarryThresholdM);
+            (averageHoldSpeedMps >= LegacyDiagnosticConfig::kForwardSweepCarryThresholdMps) ||
+            (holdDistanceM >= LegacyDiagnosticConfig::kForwardSweepCarryThresholdM);
 
         char message[224] = {};
         const int length = snprintf(
@@ -906,7 +926,7 @@ private:
             sizeof(message),
             "%s;kickoff=%.2f;hold=%.2f;hold_dist_m=%.4f;hold_avg_speed_mps=%.3f;total_dist_m=%.4f;max_speed_mps=%.3f;carried=%u;travel_limited=%u",
             label,
-            DiagnosticConfig::kForwardSweepKickoffDriveCommand,
+            LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
             forwardDriveCommand,
             holdDistanceM,
             averageHoldSpeedMps,
@@ -933,9 +953,7 @@ private:
             return false;
         }
 
-        for (float driveCommand = DiagnosticConfig::kKickoffSweepMinDriveCommand;
-            driveCommand <= (DiagnosticConfig::kKickoffSweepMaxDriveCommand + 0.0001f);
-            driveCommand += DiagnosticConfig::kKickoffSweepStepDriveCommand)
+        for (float driveCommand : MazeMap::kOpenFloorLaunchDriveMagnitudes)
         {
             if (!ExecuteKickoffCharacterizationSample(driveCommand))
             {
@@ -953,9 +971,9 @@ private:
             return false;
         }
 
-        for (float driveCommand = DiagnosticConfig::kForwardSweepMinDriveCommand;
-            driveCommand <= (DiagnosticConfig::kForwardSweepMaxDriveCommand + 0.0001f);
-            driveCommand += DiagnosticConfig::kForwardSweepStepDriveCommand)
+        for (float driveCommand = LegacyDiagnosticConfig::kForwardSweepMinDriveCommand;
+            driveCommand <= (LegacyDiagnosticConfig::kForwardSweepMaxDriveCommand + 0.0001f);
+            driveCommand += LegacyDiagnosticConfig::kForwardSweepStepDriveCommand)
         {
             if (!ExecuteForwardCharacterizationSample(driveCommand))
             {
@@ -1151,7 +1169,7 @@ private:
         char phaseName[48] = {};
 
         snprintf(phaseName, sizeof(phaseName), "circle_cw_%s", (speedLabel != nullptr) ? speedLabel : "speed");
-        if (!ExecuteArcCircle(phaseName, PI_F, DiagnosticConfig::kArcHalfCircleDistanceM, cruiseSpeedMps))
+        if (!ExecuteArcCircle(phaseName, PI_F, LegacyDiagnosticConfig::kArcHalfCircleDistanceM, cruiseSpeedMps))
         {
             return false;
         }
@@ -1163,7 +1181,7 @@ private:
         }
 
         snprintf(phaseName, sizeof(phaseName), "circle_ccw_%s", (speedLabel != nullptr) ? speedLabel : "speed");
-        if (!ExecuteArcCircle(phaseName, -PI_F, DiagnosticConfig::kArcHalfCircleDistanceM, cruiseSpeedMps))
+        if (!ExecuteArcCircle(phaseName, -PI_F, LegacyDiagnosticConfig::kArcHalfCircleDistanceM, cruiseSpeedMps))
         {
             return false;
         }
@@ -1179,7 +1197,7 @@ private:
         for (uint8_t leg = 0; leg < 4U; ++leg)
         {
             snprintf(phaseName, sizeof(phaseName), "%s_leg_%u", namePrefix, static_cast<unsigned>(leg + 1U));
-            if (!ExecuteStraightPhase(phaseName, DiagnosticConfig::kSquareLegDistanceM, DiagnosticConfig::kSlowStraightSpeedMps))
+            if (!ExecuteStraightPhase(phaseName, LegacyDiagnosticConfig::kSquareLegDistanceM, LegacyDiagnosticConfig::kSlowStraightSpeedMps))
             {
                 return false;
             }

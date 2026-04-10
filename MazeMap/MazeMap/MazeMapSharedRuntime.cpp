@@ -17,6 +17,9 @@ namespace
     static_assert((kTextLogQueueBytes % MazeMap::mmlog::kSdSectorBytes) == 0U);
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+    constexpr std::uint64_t kTextLogPreallocateBytes = MMLOG_TEENSY_MIN_PREALLOCATE_BYTES;
+    static_assert(kTextLogPreallocateBytes >= MMLOG_TEENSY_MIN_PREALLOCATE_BYTES);
+
     using TextLogFileHandle = FsFile;
 
     bool OpenFreshTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
@@ -26,13 +29,31 @@ namespace
         {
             return false;
         }
-        return file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_TRUNC);
+        if (!file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_TRUNC))
+        {
+            return false;
+        }
+        if (!file.preAllocate(kTextLogPreallocateBytes))
+        {
+            file.close();
+            return false;
+        }
+        return true;
     }
 
     bool OpenAppendTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
     {
         file.close();
-        return file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_AT_END);
+        if (!file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_AT_END))
+        {
+            return false;
+        }
+        if (file.fileSize() == 0U && !file.preAllocate(kTextLogPreallocateBytes))
+        {
+            file.close();
+            return false;
+        }
+        return true;
     }
 
     bool TextLogFileIsOpen(TextLogFileHandle& file) noexcept
@@ -380,6 +401,7 @@ namespace
         return true;
 #endif
     }
+
 }
 
 namespace MazeMap::App::Internal
@@ -789,6 +811,8 @@ namespace MazeMap::App::Internal
 
     void SharedRobotRuntime::FlushTextLog()
     {
+        // Explicit text flushes are complete writes. They are separate from normal
+        // per-cycle servicing, which is arbitrated only by ServiceUtilityDataLog.
         ClearLastRuntimeLogError();
         if (TextLogFileIsOpen(_impl->textLogFile))
         {
@@ -801,6 +825,28 @@ namespace MazeMap::App::Internal
                 CloseRuntimeLogsForFault();
             }
         }
+    }
+
+    void SharedRobotRuntime::CloseTextLog()
+    {
+        // Text-log close is a lifecycle/fault finalization path; normal control-loop
+        // dispatch remains centralized in ServiceUtilityDataLog.
+        ClearLastRuntimeLogError();
+        if (TextLogFileIsOpen(_impl->textLogFile))
+        {
+            if ((!_impl->textLogQueue.empty() &&
+                 !FlushTextLogQueueToFile(_impl->textLogFile, _impl->textLogQueue)) ||
+                !FlushTextLogFile(_impl->textLogFile))
+            {
+                SetLastRuntimeLogError("logging.txt close failed.");
+                _impl->textLogFaulted = true;
+                CloseTextLogFile(_impl->textLogFile);
+                _impl->textLogQueue.clear();
+                return;
+            }
+            CloseTextLogFile(_impl->textLogFile);
+        }
+        _impl->textLogQueue.clear();
     }
 
     bool SharedRobotRuntime::RegisterModeFaultHandler(
@@ -911,6 +957,10 @@ namespace MazeMap::App::Internal
 
     bool SharedRobotRuntime::ServiceUtilityDataLog()
     {
+        // This is the single runtime-owned file-service hub. Control loops call it only
+        // from per-cycle dead time; if there is no dead time, timing control wins. The hub
+        // arbitrates logging.txt first, then delegates sidecar/primary arbitration to the
+        // one runtime-owned MmLogLogger instance.
         ClearLastRuntimeLogError();
         if (_impl->runtimeLogsClosedForFault)
         {
@@ -946,6 +996,8 @@ namespace MazeMap::App::Internal
 
     bool SharedRobotRuntime::FlushUtilityDataLog()
     {
+        // Explicit flushes are lifecycle operations. Normal control-loop servicing goes
+        // through ServiceUtilityDataLog so all file arbitration stays in SharedRobotRuntime.
         ClearLastRuntimeLogError();
         const bool ok = UtilityDataLogger().flush();
         if (!ok)
@@ -957,6 +1009,8 @@ namespace MazeMap::App::Internal
 
     bool SharedRobotRuntime::CloseUtilityDataLog()
     {
+        // Close is the phase/fault finalization path for the runtime-owned mmlog files;
+        // it must not be replaced by mode-local file servicing.
         ClearLastRuntimeLogError();
         const bool ok = UtilityDataLogger().close();
         if (!ok)
@@ -977,12 +1031,7 @@ namespace MazeMap::App::Internal
 
         if (TextLogFileIsOpen(_impl->textLogFile))
         {
-            if (!_impl->textLogQueue.empty())
-            {
-                (void)FlushTextLogQueueToFile(_impl->textLogFile, _impl->textLogQueue);
-            }
-            (void)FlushTextLogFile(_impl->textLogFile);
-            CloseTextLogFile(_impl->textLogFile);
+            (void)CloseTextLog();
         }
         _impl->textLogQueue.clear();
 
