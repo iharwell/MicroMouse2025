@@ -191,11 +191,11 @@ namespace MazeMap::App::Internal::Runtime
                 static_cast<unsigned>(DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed),
                 static_cast<unsigned>(DiagnosticConfig::kLoopRepeats)) &&
             writeConfig(
-                "open_floor_bins:launch_cmds=%.3f,%.3f,%.3f,%.3f;straight_v=%.3f,%.3f,%.3f;yaw_w=%.3f,%.3f,%.3f",
-                MazeMap::kOpenFloorLaunchDriveMagnitudes[0],
-                MazeMap::kOpenFloorLaunchDriveMagnitudes[1],
-                MazeMap::kOpenFloorLaunchDriveMagnitudes[2],
-                MazeMap::kOpenFloorLaunchDriveMagnitudes[3],
+                "open_floor_bins:launch_cmd_start=%.3f;launch_cmd_end=%.3f;launch_cmd_step=%.3f;launch_cmd_count=%u;straight_v=%.3f,%.3f,%.3f;yaw_w=%.3f,%.3f,%.3f",
+                MazeMap::kOpenFloorLaunchDriveMagnitudeStart,
+                MazeMap::kOpenFloorLaunchDriveMagnitudeEnd,
+                MazeMap::kOpenFloorLaunchDriveMagnitudeStep,
+                static_cast<unsigned>(MazeMap::kOpenFloorLaunchDriveMagnitudeCount),
                 MazeMap::kOpenFloorStraightSpeedBinsMps[0],
                 MazeMap::kOpenFloorStraightSpeedBinsMps[1],
                 MazeMap::kOpenFloorStraightSpeedBinsMps[2],

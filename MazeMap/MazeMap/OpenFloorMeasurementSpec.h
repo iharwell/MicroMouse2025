@@ -9,8 +9,8 @@ namespace MazeMap
 {
     inline constexpr const char* kOpenFloorSelectedRoutineName = "open_floor_measurement";
     inline constexpr const char* kOpenFloorFormatVersion = "open_floor_measurement_rev_e";
-    inline constexpr const char* kOpenFloorLoggingFormatRevision = "micromouse_logging_spec_rev_g";
-    inline constexpr const char* kOpenFloorPrimitiveScheduleRevision = "open_floor_schedule_rev_e";
+    inline constexpr const char* kOpenFloorLoggingFormatRevision = "micromouse_logging_spec_rev_h";
+    inline constexpr const char* kOpenFloorPrimitiveScheduleRevision = "open_floor_schedule_rev_f";
     inline constexpr const char* kOpenFloorPhaseBinningRevision = "open_floor_phase_bins_rev_d";
     inline constexpr const char* kOpenFloorStartMarkerDefinitionsRevision = "open_floor_markers_rev_d";
     inline constexpr const char* kOpenFloorImuExtrinsicsRevision = "back_left_imu_extrinsics_v1";
@@ -263,9 +263,48 @@ namespace MazeMap
     inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { 0.25f, 0.40f, 0.55f };
     inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 3.0f, 6.0f, 9.0f };
     inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.25f, 0.35f, 0.45f };
-    inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
-    inline constexpr std::array<float, 4U> kOpenFloorLaunchDriveMagnitudes = { 0.05f, 0.08f, 0.12f, 0.15f };
+    inline constexpr unsigned long kOpenFloorLaunchPulseMs = 200UL;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.15f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.22f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.01f;
     inline constexpr unsigned long kOpenFloorOutOfBoundsGraceMs = 1UL;
+
+    inline constexpr std::size_t OpenFloorLaunchDriveMagnitudeCount() noexcept
+    {
+        return
+            (kOpenFloorLaunchDriveMagnitudeStep > 0.0f) &&
+            (kOpenFloorLaunchDriveMagnitudeEnd >= kOpenFloorLaunchDriveMagnitudeStart) ?
+            static_cast<std::size_t>(
+                ((kOpenFloorLaunchDriveMagnitudeEnd - kOpenFloorLaunchDriveMagnitudeStart) /
+                    kOpenFloorLaunchDriveMagnitudeStep) +
+                0.5f) +
+            1U :
+            0U;
+    }
+
+    template <std::size_t Count>
+    inline constexpr std::array<float, Count> BuildOpenFloorLaunchDriveMagnitudes() noexcept
+    {
+        std::array<float, Count> magnitudes{};
+        for (std::size_t index = 0U; index < Count; ++index)
+        {
+            magnitudes[index] =
+                ((index + 1U) == Count) ?
+                kOpenFloorLaunchDriveMagnitudeEnd :
+                (kOpenFloorLaunchDriveMagnitudeStart +
+                    (static_cast<float>(index) * kOpenFloorLaunchDriveMagnitudeStep));
+        }
+        return magnitudes;
+    }
+
+    inline constexpr std::size_t kOpenFloorLaunchDriveMagnitudeCount = OpenFloorLaunchDriveMagnitudeCount();
+    static_assert(kOpenFloorLaunchDriveMagnitudeStep > 0.0f, "Open-floor launch magnitude step must be positive.");
+    static_assert(
+        kOpenFloorLaunchDriveMagnitudeEnd >= kOpenFloorLaunchDriveMagnitudeStart,
+        "Open-floor launch magnitude range must be ordered.");
+    static_assert(kOpenFloorLaunchDriveMagnitudeCount > 0U, "Open-floor launch magnitude range must yield at least one sample.");
+    inline constexpr auto kOpenFloorLaunchDriveMagnitudes =
+        BuildOpenFloorLaunchDriveMagnitudes<kOpenFloorLaunchDriveMagnitudeCount>();
 
     inline constexpr float OpenFloorHalfStepMeters() noexcept
     {
