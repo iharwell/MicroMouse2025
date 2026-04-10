@@ -264,6 +264,7 @@ namespace MazeMap
     inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 3.0f, 6.0f, 9.0f };
     inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.25f, 0.35f, 0.45f };
     inline constexpr std::array<float, 4U> kOpenFloorLaunchDriveMagnitudes = { 0.18f, 0.24f, 0.30f, 0.36f };
+    inline constexpr unsigned long kOpenFloorOutOfBoundsGraceMs = 500UL;
 
     inline constexpr float OpenFloorHalfStepMeters() noexcept
     {
@@ -532,5 +533,12 @@ namespace MazeMap
             pose.yMeters >= -0.1f &&
             pose.xMeters <= maxMeters &&
             pose.yMeters <= maxMeters;
+    }
+
+    inline bool HasOpenFloorOutOfBoundsGraceElapsed(
+        unsigned long outsideBoundsStartMs,
+        unsigned long nowMs) noexcept
+    {
+        return static_cast<unsigned long>(nowMs - outsideBoundsStartMs) >= kOpenFloorOutOfBoundsGraceMs;
     }
 }

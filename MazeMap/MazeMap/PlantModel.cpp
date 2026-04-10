@@ -404,15 +404,15 @@ namespace
         const float uRefLeft = (std::max)(std::fabs(kinematics.leftBankForwardVelocityMps), regularizationMps);
         const float uRefRight = (std::max)(std::fabs(kinematics.rightBankForwardVelocityMps), regularizationMps);
         const float uRefBody = (std::max)(std::fabs(forwardVelocityMps), regularizationMps);
-        const float alphaFront = std::atan2(kinematics.contacts[kFrontLeft].rightVelocityMps, uRefBody);
-        const float alphaRear = std::atan2(kinematics.contacts[kRearLeft].rightVelocityMps, uRefBody);
+        const float frontLateralRatio = kinematics.contacts[kFrontLeft].rightVelocityMps / uRefBody;
+        const float rearLateralRatio = kinematics.contacts[kRearLeft].rightVelocityMps / uRefBody;
 
         targets.kappaLeft = (leftCircumferentialVelocityMps - kinematics.leftBankForwardVelocityMps) / uRefLeft;
         targets.kappaRight = (rightCircumferentialVelocityMps - kinematics.rightBankForwardVelocityMps) / uRefRight;
-        targets.lateralRatio[kFrontLeft] = std::tan(alphaFront);
-        targets.lateralRatio[kFrontRight] = std::tan(alphaFront);
-        targets.lateralRatio[kRearLeft] = std::tan(alphaRear);
-        targets.lateralRatio[kRearRight] = std::tan(alphaRear);
+        targets.lateralRatio[kFrontLeft] = frontLateralRatio;
+        targets.lateralRatio[kFrontRight] = frontLateralRatio;
+        targets.lateralRatio[kRearLeft] = rearLateralRatio;
+        targets.lateralRatio[kRearRight] = rearLateralRatio;
         return targets;
     }
 

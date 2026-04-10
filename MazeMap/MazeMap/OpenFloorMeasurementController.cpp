@@ -242,9 +242,11 @@ private:
     bool _timingLogOpen;
     bool _mainLogOpen;
     unsigned long _lastControlMicros;
+    unsigned long _workspaceOutOfBoundsStartMs;
     uint16_t _timingTickIndex;
     uint32_t _controlTickSequence;
     char _runId[24];
+    bool _workspaceOutOfBoundsActive;
 
     static MotionLimits MeasurementLimits(float maxSpeedMps);
     static void HandleRuntimeFault(void* context, const char* reason) noexcept;
@@ -309,6 +311,7 @@ private:
     bool HandleMeasurementCaptureFault(OpenFloorMeasurementLabels& labels, OpenFloorMeasurementCycle& cycle);
     void SeedPoseAtMarker(MazeMap::OpenFloorMarkerId markerId);
     bool IsWithinBoundary() const;
+    bool HasWorkspaceViolationFault();
     float ReadBatteryVoltage() const;
     float ReadBoardTemperatureC(const DiagnosticSensorSnapshot& snapshot) const;
     bool CaptureCycle(bool stationary, OpenFloorMeasurementCycle& cycle);
@@ -369,8 +372,10 @@ OpenFloorMeasurementController::OpenFloorMeasurementController(SharedRobotRuntim
     , _timingLogOpen(false)
     , _mainLogOpen(false)
     , _lastControlMicros(0UL)
+    , _workspaceOutOfBoundsStartMs(0UL)
     , _timingTickIndex(0U)
     , _controlTickSequence(0UL)
+    , _workspaceOutOfBoundsActive(false)
 {
     _runId[0] = '\0';
 }
@@ -922,6 +927,8 @@ bool OpenFloorMeasurementController::Begin()
 
     snprintf(_runId, sizeof(_runId), "ofm_%lu", static_cast<unsigned long>(micros()));
     _controlTickSequence = 0UL;
+    _workspaceOutOfBoundsStartMs = 0UL;
+    _workspaceOutOfBoundsActive = false;
     _pinsLatchedAtBoot = IsPrimaryDiagnosticModeRequested();
     _batteryVoltageStart = ReadBatteryVoltage();
     _fanDutyCycleStart = GetMissionFanDutyCycle();
@@ -1236,11 +1243,33 @@ void OpenFloorMeasurementController::SeedPoseAtMarker(MazeMap::OpenFloorMarkerId
         MazeMap::OpenFloorMarkerYMeters(markerId),
         DirectionToYawRad(MazeMap::GetOpenFloorMarker(markerId).heading));
     _lastControlMicros = micros();
+    _workspaceOutOfBoundsStartMs = 0UL;
+    _workspaceOutOfBoundsActive = false;
 }
 
 bool OpenFloorMeasurementController::IsWithinBoundary() const
 {
     return MazeMap::IsPoseInsideOpenFloorWorkspace(_drive.GetPose());
+}
+
+bool OpenFloorMeasurementController::HasWorkspaceViolationFault()
+{
+    if (IsWithinBoundary())
+    {
+        _workspaceOutOfBoundsStartMs = 0UL;
+        _workspaceOutOfBoundsActive = false;
+        return false;
+    }
+
+    const unsigned long nowMs = millis();
+    if (!_workspaceOutOfBoundsActive)
+    {
+        _workspaceOutOfBoundsStartMs = nowMs;
+        _workspaceOutOfBoundsActive = true;
+        return false;
+    }
+
+    return MazeMap::HasOpenFloorOutOfBoundsGraceElapsed(_workspaceOutOfBoundsStartMs, nowMs);
 }
 
 float OpenFloorMeasurementController::ReadBatteryVoltage() const
@@ -1309,7 +1338,7 @@ bool OpenFloorMeasurementController::CaptureCycle(bool stationary, OpenFloorMeas
     cycle.batteryVoltage = ReadBatteryVoltage();
     cycle.boardTemperatureC = ReadBoardTemperatureC(cycle.sensorSnapshot);
     cycle.fanDutyCycle = GetMissionFanDutyCycle();
-    cycle.workspaceViolation = !IsWithinBoundary();
+    cycle.workspaceViolation = HasWorkspaceViolationFault();
     return !cycle.workspaceViolation;
 }
 
@@ -1527,6 +1556,8 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
 
     const unsigned long pulseDeadline = millis() + DiagnosticConfig::kKickoffSweepPulseMs;
     const float launchBoundM = MazeMap::OpenFloorHalfStepMeters() + Config::kDistanceToleranceM;
+    unsigned long launchOutOfBoundsStartMs = 0UL;
+    bool launchOutOfBoundsActive = false;
     while (static_cast<long>(pulseDeadline - millis()) > 0)
     {
         OpenFloorMeasurementCycle cycle{};
@@ -1539,13 +1570,28 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
         const PoseEstimate pose = _drive.GetPose();
         const float dx = pose.xMeters - MazeMap::OpenFloorMarkerXMeters(labels.startMarkerId);
         const float dy = pose.yMeters - MazeMap::OpenFloorMarkerYMeters(labels.startMarkerId);
-        if (std::sqrt((dx * dx) + (dy * dy)) > launchBoundM)
+        const bool launchOutOfBounds = std::sqrt((dx * dx) + (dy * dy)) > launchBoundM;
+        if (!launchOutOfBounds)
         {
-            return LogSectionFaultAndFail(
-                labels,
-                cycle,
-                MazeMap::OpenFloorFaultCode::LaunchBoundExceeded,
-                "Launch bound exceeded");
+            launchOutOfBoundsStartMs = 0UL;
+            launchOutOfBoundsActive = false;
+        }
+        else
+        {
+            const unsigned long nowMs = millis();
+            if (!launchOutOfBoundsActive)
+            {
+                launchOutOfBoundsStartMs = nowMs;
+                launchOutOfBoundsActive = true;
+            }
+            else if (MazeMap::HasOpenFloorOutOfBoundsGraceElapsed(launchOutOfBoundsStartMs, nowMs))
+            {
+                return LogSectionFaultAndFail(
+                    labels,
+                    cycle,
+                    MazeMap::OpenFloorFaultCode::LaunchBoundExceeded,
+                    "Launch bound exceeded");
+            }
         }
         _drive.CommandOpenLoopRaw(signedDriveCommand, signedDriveCommand);
 

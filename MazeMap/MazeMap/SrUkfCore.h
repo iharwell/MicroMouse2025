@@ -220,6 +220,7 @@ namespace MazeMap
         ControlInput _lastControl;
         EncoderObs _lastEncoderObs;
         StateVector _prePredictState;
+        StateMatrix _prePredictCovariance;
         bool _havePredictionReference;
         StateMatrix _sqrtProcessNoiseDensity;
         Eigen::Matrix<float, 3, 3> _sqrtImuNoise;

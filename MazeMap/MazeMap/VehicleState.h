@@ -146,6 +146,19 @@ namespace MazeMap
             }
         }
 
+        bool IsStationary() const noexcept;
+
+        // Applies the stationary zero-motion constraint while preserving the caller-provided pose anchor block.
+        void ApplyStationaryZeroMotionConstraint(
+            const EncoderObs& encoderObservation,
+            float yawRateRadps,
+            bool resetLateralVelocity,
+            bool hasPoseReference,
+            const StateVector& poseReferenceState,
+            const StateMatrix& poseReferenceCovariance,
+            float distancePerEncoderCountM,
+            float trackWidthM) noexcept;
+
         void SetPosition(const Eigen::Vector2f& position) noexcept { _state(kPx) = position.x(); _state(kPy) = position.y(); }
         Eigen::Vector2f GetPosition() const noexcept { return Eigen::Vector2f(_state(kPx), _state(kPy)); }
         Eigen::Vector2f GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
@@ -302,6 +315,11 @@ namespace MazeMap
         }
 
     private:
+        static bool BuildConstrainedLowerTriangularSquareRoot(
+            const StateMatrix& covariance,
+            const std::array<bool, kDimension>& exactZeroMask,
+            StateMatrix& sqrtCovariance) noexcept;
+
         StateVector _state;
         StateMatrix _sqrtCovariance;
         float _time;
