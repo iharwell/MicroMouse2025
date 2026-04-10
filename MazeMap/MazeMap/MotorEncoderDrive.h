@@ -50,6 +50,8 @@ namespace MazeMap
             // March 22, 2026 low-speed straight-audit fit: aux001-aux003 speed_idx 0 still over-reported outbound
             // encoder distance by about 3.05 mm on the 0.72 m north-corridor run, so trim the shared wheel diameter
             // down by 0.42% to keep the fixed-distance phases from finishing short.
+            // Investigation note: the supplied tire OD is 25.000 mm. Revisit this rolling-diameter correction after
+            // the post-UKF encoder-distance audit instead of treating this as physical wheel geometry.
             0.025220f,
             0.01475f,
             4096U
@@ -586,6 +588,8 @@ namespace MazeMap
         int32_t consumeEncoderCount() noexcept
         {
             const int32_t count = getEncoderCount();
+            // The estimator consumes per-control-cycle encoder deltas. Do not remove this
+            // reset or the next cycle will replay cumulative counts and corrupt odometry.
             setEncoderCount(0);
             return count;
         }

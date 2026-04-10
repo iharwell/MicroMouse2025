@@ -43,10 +43,9 @@ namespace MazeMap
             0.14f, //Mass
             0.0842f, //Width
             0.1085f, //Length
-            // March 22, 2026 aux008 first fast IP180 fit from the clean early acceleration ramp gave an effective
-            // yaw inertia around 6.65e-4 kg*m^2. This is intentionally larger than the bare rectangular body estimate
-            // because it captures the drivetrain and tire-scrub dynamics the turn controller actually has to drive.
-            0.000665f, //Yaw inertia
+            // Physical yaw inertia estimate from the 140 g mass and measured body envelope. Tire scrub and drivetrain
+            // turn dynamics are plant/model effects, not construction facts owned by Vehicle.
+            0.000220f, //Yaw inertia
             0.056f,
             // March 22, 2026 aux008 latest completed fast IP180 audit pass fit 84.635 mm effective track width.
             0.084635f,
@@ -54,6 +53,8 @@ namespace MazeMap
             // scrub dynamics, so these remain informational rather than hard bounds.
             0.07004f,
             0.07868f,
+            // Investigation note: PlantParams currently places tire contacts from the effective track width. Split
+            // physical tire-contact geometry from kinematic track width when the next track-width audit is done.
             // March 22, 2026 aux006 short smooth-turn encoder/gyro fit before left-wall contact implied 96.49 mm
             // effective at the 63 mm nominal radius. The 153 mm point is scaled by the same 1.174285x factor as a
             // better starting point for the next wide-radius audit pass.

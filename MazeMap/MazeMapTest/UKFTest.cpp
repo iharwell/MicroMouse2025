@@ -927,6 +927,29 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
         }
 
+        TEST_METHOD(PlantModelSolveDriveCommandsSupportsHistoricalThreeMeterPerSecondEnvelope)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            // Earlier pre-UKF testing reached about 3 m/s in roughly 50 mm of real travel. Keep the plant
+            // drag/friction model from making that known envelope unreachable even though the current D: CSV
+            // launch capture only reaches the lower post-UKF retrofit speed.
+            const DriveCommandSolution solution =
+                plant.solveDriveCommands(
+                    3.0f,
+                    1.0f,
+                    0.0f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            Assert::IsFalse(solution.tractionLimited);
+            Assert::IsTrue(solution.converged);
+            Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) < 1.0f);
+            Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) < 1.0f);
+        }
+
         TEST_METHOD(PlantModelSolveDriveCommandsBeyondNominalReturnsClippedFiniteSolution)
         {
             PlantModel plant;
@@ -1706,6 +1729,90 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(state(VehicleState::kPy)) > 1.0e-2f);
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) > 1.0e-2f);
         }
+
+        TEST_METHOD(SrUkfCoreAcceptsLaunchEncoderDeltasWhenOpenLoopPredictionDisagrees)
+        {
+            struct LaunchEncoderSample
+            {
+                float dtSeconds;
+                float leftOmegaRadps;
+                float rightOmegaRadps;
+                float gyroRawRadps;
+            };
+
+            // D:\open_floor_main.csv, April 10, 2026, repeat 11 launch pulse.
+            // The raw launch command makes the open-loop plant prediction disagree
+            // with measured wheel rates; encoder deltas must still remain authoritative.
+            constexpr LaunchEncoderSample samples[] = {
+                { 0.001011f, 3.99f, 3.99f, -0.019f },
+                { 0.001015f, 9.67f, 15.20f, 0.002f },
+                { 0.001005f, 8.72f, 13.76f, 0.092f },
+                { 0.001020f, 6.49f, 12.05f, 0.203f },
+                { 0.001004f, 5.02f, 9.59f, 0.152f },
+                { 0.001019f, 4.64f, 8.35f, 0.149f },
+                { 0.001005f, 5.48f, 6.40f, 0.116f },
+                { 0.001000f, 6.49f, 6.49f, -0.006f },
+                { 0.001005f, 8.38f, 5.59f, -0.108f },
+                { 0.001000f, 10.19f, 6.95f, -0.156f },
+            };
+
+            const PlantParams params = PlantParams::Default();
+            const float distancePerCountM = DistancePerEncoderCountMeters(params);
+            const auto countsFromOmega = [distancePerCountM, &params](float omegaRadps, float dtSeconds) noexcept
+            {
+                const float counts =
+                    (omegaRadps * params.wheelRadiusM * dtSeconds) / distancePerCountM;
+                return static_cast<int32_t>((counts >= 0.0f) ? (counts + 0.5f) : (counts - 0.5f));
+            };
+
+            SrUkfCore core(params);
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.225f,
+                    0.225f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.08f;
+            control.rightMotorCommand = 0.08f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            for (int index = 0; index < static_cast<int>(sizeof(samples) / sizeof(samples[0])); ++index)
+            {
+                const LaunchEncoderSample& sample = samples[index];
+                Assert::IsTrue(core.predict(sample.dtSeconds, control));
+
+                EncoderObs encoder{};
+                encoder.totalLeftCounts = countsFromOmega(sample.leftOmegaRadps, sample.dtSeconds);
+                encoder.totalRightCounts = countsFromOmega(sample.rightOmegaRadps, sample.dtSeconds);
+                encoder.omegaLeftRadps = sample.leftOmegaRadps;
+                encoder.omegaRightRadps = sample.rightOmegaRadps;
+                const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, sample.dtSeconds);
+
+                Assert::IsTrue(encoderResult.attempted);
+                Assert::IsTrue(
+                    encoderResult.accepted,
+                    (std::wstring(L"Launch encoder update rejected at sample ") +
+                        std::to_wstring(index)).c_str());
+
+                const VehicleState::StateVector& encoderConstrainedState = core.state();
+                Assert::IsTrue(std::isfinite(encoderConstrainedState(VehicleState::kU)));
+                Assert::AreEqual(sample.leftOmegaRadps, encoderConstrainedState(VehicleState::kOmegaL), 1.0e-5f);
+                Assert::AreEqual(sample.rightOmegaRadps, encoderConstrainedState(VehicleState::kOmegaR), 1.0e-5f);
+
+                const MeasurementUpdateResult yawResult = core.updateYawRate(sample.gyroRawRadps);
+                Assert::IsTrue(yawResult.attempted);
+                Assert::IsTrue(yawResult.accepted);
+            }
+        }
+
         TEST_METHOD(SrUkfCoreEncoderArcUpdateUsesProjectTurnSignConventions)
         {
             const PlantParams params = PlantParams::Default();

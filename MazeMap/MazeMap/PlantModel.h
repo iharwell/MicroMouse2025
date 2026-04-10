@@ -144,7 +144,9 @@ namespace MazeMap
         float trackWidthM;
         float contactPatchLongitudinalOffsetM;
         float wheelRadiusM;
-        float equivalentWheelInertiaKgM2 = 4.8e-5f;
+        // April 10, 2026 D:\open_floor_main.csv 0.08 launch-pulse torque balance fit. This is the wheel-bank
+        // equivalent inertia used by the plant, not the bare Faulhaber rotor inertia.
+        float equivalentWheelInertiaKgM2 = 1.6e-5f;
 
         float supplyVoltageV;
         float driveResistanceOhms;
@@ -156,8 +158,12 @@ namespace MazeMap
         uint16_t encoderCountsPerMotorRev;
 
         float drivetrainEfficiency = 1.0f;
-        float rollingFrictionTorqueNm = 0.0035f;
-        float viscousFrictionNmPerRadps = 2.5e-4f;
+        // April 10, 2026 D:\open_floor_main.csv fit: 0.05 launch pulses stayed stuck,
+        // while the 0.08 launch pulse accelerated hard before impact. Earlier pre-UKF
+        // testing reached about 3 m/s in roughly 50 mm of real travel, so keep speed
+        // drag low enough that the model does not artificially cap that envelope.
+        float rollingFrictionTorqueNm = 0.0010f;
+        float viscousFrictionNmPerRadps = 3.0e-5f;
 
         float longitudinalTireStiffnessN = 6.0f;
         float corneringStiffnessFrontNPerRad = 18.0f;

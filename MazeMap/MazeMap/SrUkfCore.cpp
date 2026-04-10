@@ -768,6 +768,13 @@ namespace MazeMap
             _acceptedEncoderUpdateSincePredict = true;
             applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
         }
+        else
+        {
+            _lastEncoderObs = measured;
+            _acceptedEncoderUpdateSincePredict = true;
+            applyWheelSpeedConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
+            result.accepted = true;
+        }
         result.nis = _filter.lastNis();
         return result;
     }
@@ -1025,6 +1032,24 @@ namespace MazeMap
         anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
         anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;
         _filter.setState(anchoredState, anchoredCovariance);
+    }
+
+    void SrUkfCore::applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept
+    {
+        StateVector constrainedState = _filter.state();
+        constrainedState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
+        constrainedState(VehicleState::kOmegaR) = measured.omegaRightRadps;
+        VehicleState::NormalizeStateVector(constrainedState);
+
+        StateMatrix constrainedCovariance = _filter.covariance();
+        constrainedCovariance.row(VehicleState::kOmegaL).setZero();
+        constrainedCovariance.col(VehicleState::kOmegaL).setZero();
+        constrainedCovariance.row(VehicleState::kOmegaR).setZero();
+        constrainedCovariance.col(VehicleState::kOmegaR).setZero();
+        const float constrainedVariance = (std::max)(wheelVarianceRadps2, 1.0e-12f);
+        constrainedCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
+        constrainedCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;
+        _filter.setState(constrainedState, constrainedCovariance);
     }
 
     void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept

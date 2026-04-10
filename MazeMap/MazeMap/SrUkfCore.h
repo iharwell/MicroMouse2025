@@ -172,7 +172,6 @@ namespace MazeMap
         static Eigen::Matrix<float, 2, 2> ComputeEncoderPairSqrtNoise(
             const EncoderObs& observation,
             const PlantParams& params) noexcept;
-        static float ComputeEncoderPairNisThreshold(const EncoderObs& observation) noexcept;
 
     private:
         using LoopHookInvoker = void (*)(void*) noexcept;
@@ -186,6 +185,7 @@ namespace MazeMap
         static float ComputeMeasuredYawRateRadps(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredYawRateVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredWheelVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
+        static float ComputeEncoderPairNisThreshold(const EncoderObs& observation) noexcept;
         static float wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept;
 
         bool predictImpl(float dt, const ControlInput& control, void* loopHookContext, LoopHookInvoker loopHook) noexcept;
@@ -206,6 +206,7 @@ namespace MazeMap
         bool controlCommandsAreEffectivelyZero() const noexcept;
         void anchorPoseToEncoderDelta(StateVector& anchoredState, const EncoderObs& measured) const noexcept;
         void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
+        void applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
             const StateVector& sigmaPoint,

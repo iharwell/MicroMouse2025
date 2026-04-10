@@ -19,6 +19,7 @@
 #include "..\MazeMap\MotionTargetProjection.h"
 #include "..\MazeMap\CruiseSpeedFloor.h"
 #include "..\MazeMap\OpenLoopDriveCommand.h"
+#include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\RollingAverageWindow.h"
 #include "..\MazeMap\SearchRunPlanner.h"
 #include "..\MazeMap\SmoothTurnYawRateController.h"
@@ -247,7 +248,7 @@ namespace MazeMap
 			const VehiclePhysicalModel& model = Vehicle::GetPhysicalModel();
 			Assert::IsTrue(std::fabs(model.massKg - 0.14f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.lengthM - 0.1085f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.yawInertiaKgM2 - 0.000665f) < 1.0e-9f);
+			Assert::IsTrue(std::fabs(model.yawInertiaKgM2 - 0.000220f) < 1.0e-9f);
 			Assert::IsTrue(std::fabs(model.frontWallContactOffsetM - 0.056f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.trackWidthM - 0.084635f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMinM - 0.07004f) < 1.0e-6f);
@@ -271,6 +272,12 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(model.gearRatio - (56.0f / 17.0f)) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.wheelDiameterM - 0.025220f) < 1.0e-6f);
 			Assert::AreEqual(4096U, static_cast<unsigned>(model.pulsesPerRev));
+		}
+
+		TEST_METHOD(PlantParamsDefaultUsesLaunchFitWheelBankInertia)
+		{
+			const PlantParams params = PlantParams::Default();
+			Assert::IsTrue(std::fabs(params.equivalentWheelInertiaKgM2 - 1.6e-5f) < 1.0e-10f);
 		}
 
 		TEST_METHOD(MotorEncoderDriveDefaultFactoriesUseSharedModelAndHardwareMap)
