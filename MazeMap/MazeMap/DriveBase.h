@@ -1,5 +1,6 @@
 #pragma once
 // Defines the runtime drive controller that owns motor actuation, odometry, and closed-loop wheel control.
+#include "BootUtilityModeFramework.h"
 #include "InPlaceTurnProfile.h"
 #include "LaunchAssistProfile.h"
 #include "MazeMapRuntimeCore.h"
@@ -747,7 +748,7 @@ private:
 
         char traceLine[96] = {};
         std::snprintf(traceLine, sizeof(traceLine), "ukf_fault:%s", _estimatorFaultReason);
-        AppendStartupTrace(traceLine);
+        MazeMap::App::Internal::BootUtilityModeFramework::AppendStartupTrace(traceLine);
     }
 
     static MazeMap::ImuMergedObs BuildUkfImuObservation(const SensorSnapshot& snapshot) noexcept

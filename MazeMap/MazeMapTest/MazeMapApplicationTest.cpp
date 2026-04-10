@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CppUnitTest.h"
+#include "..\MazeMap\BootModeRegistry.h"
 #include "..\MazeMap\MazeMapApplication.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\WallSensorLedCalibrationPhase.h"
@@ -8,60 +9,133 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap::App
 {
+    namespace
+    {
+        constexpr std::size_t kTestBootSelectorCapacity = 8U;
+        bool gActiveBootSelectors[kTestBootSelectorCapacity] = {};
+
+        void ClearActiveBootSelectors()
+        {
+            for (std::size_t index = 0U; index < kTestBootSelectorCapacity; ++index)
+            {
+                gActiveBootSelectors[index] = false;
+            }
+        }
+
+        void ActivateBootSelector(uint8_t pinA, uint8_t pinB)
+        {
+            for (std::size_t index = 0U; index < GetBootModeRegistryEntryCount(); ++index)
+            {
+                const BootModeSelectorCondition& selector = GetBootModeRegistryEntry(index).selector;
+                if (index < kTestBootSelectorCapacity &&
+                    selector.kind == BootModeSelectorKind::PinPair &&
+                    selector.pinA == pinA &&
+                    selector.pinB == pinB)
+                {
+                    gActiveBootSelectors[index] = true;
+                }
+            }
+        }
+
+        bool ReadActiveBootSelector(const BootModeSelectorCondition& requested)
+        {
+            for (std::size_t index = 0U; index < GetBootModeRegistryEntryCount(); ++index)
+            {
+                const BootModeSelectorCondition& selector = GetBootModeRegistryEntry(index).selector;
+                if (selector.kind == requested.kind &&
+                    selector.pinA == requested.pinA &&
+                    selector.pinB == requested.pinB)
+                {
+                    return index < kTestBootSelectorCapacity && gActiveBootSelectors[index];
+                }
+            }
+            return false;
+        }
+    }
+
     TEST_CLASS(MazeMapApplicationTest)
     {
     public:
         TEST_METHOD_INITIALIZE(ResetHostPins)
         {
             HostResetDigitalPins();
+            ClearActiveBootSelectors();
         }
 
-        TEST_METHOD(ResolveStartupMode_DefaultsToMission)
+        TEST_METHOD(BootModeRegistry_ExposesCurrentInventory)
         {
-            const StartupModeRequests requests{};
-            Assert::IsTrue(ResolveStartupMode(requests) == StartupMode::Mission);
+            Assert::IsTrue(GetBootModeRegistryEntryCount() == 6U);
+            Assert::IsTrue(GetBootModeRegistryEntryCount() <= kTestBootSelectorCapacity);
+            Assert::IsTrue(GetBootModeRegistryEntry(0U).selector.pinA == 39U);
+            Assert::IsTrue(GetBootModeRegistryEntry(0U).selector.pinB == 40U);
+            Assert::IsTrue(GetBootModeRegistryEntry(1U).selector.pinA == 38U);
+            Assert::IsTrue(GetBootModeRegistryEntry(1U).selector.pinB == 39U);
+            Assert::IsTrue(GetBootModeRegistryEntry(2U).selector.pinA == 28U);
+            Assert::IsTrue(GetBootModeRegistryEntry(2U).selector.pinB == 29U);
+            Assert::IsTrue(GetBootModeRegistryEntry(3U).selector.pinA == 29U);
+            Assert::IsTrue(GetBootModeRegistryEntry(3U).selector.pinB == 30U);
+            Assert::IsTrue(GetBootModeRegistryEntry(4U).selector.pinA == 27U);
+            Assert::IsTrue(GetBootModeRegistryEntry(4U).selector.pinB == 28U);
+            Assert::IsTrue(GetBootModeRegistryEntry(5U).selector.kind == BootModeSelectorKind::Fallback);
         }
 
-        TEST_METHOD(ResolveStartupMode_PrefersFrontWallCharacterization)
+        TEST_METHOD(BootModeRegistry_DescriptorsAreAuthoritative)
         {
-            StartupModeRequests requests{};
-            requests.frontWallCharacterization = true;
-            requests.wallSensorLedCalibration = true;
-            requests.auxiliaryMeasurement = true;
-            requests.maneuverFileTest = true;
-            requests.primaryDiagnostic = true;
-
-            Assert::IsTrue(ResolveStartupMode(requests) == StartupMode::FrontWallCharacterization);
+            for (std::size_t index = 0U; index < GetBootModeRegistryEntryCount(); ++index)
+            {
+                const BootModeRegistryEntry& entry = GetBootModeRegistryEntry(index);
+                Assert::IsNotNull(entry.descriptor);
+                Assert::IsTrue(entry.descriptor->id == entry.id);
+                Assert::IsNotNull(entry.descriptor->stableId);
+                Assert::IsTrue(entry.descriptor->stableId[0] != '\0');
+                Assert::IsNotNull(entry.descriptor->entryPoint);
+                Assert::IsTrue(entry.descriptor->entryPoint[0] != '\0');
+                Assert::IsNotNull(entry.descriptor->implementationFile);
+                Assert::IsTrue(entry.descriptor->implementationFile[0] != '\0');
+            }
         }
 
-        TEST_METHOD(ResolveStartupMode_PrefersLedCalibrationOverLaterModes)
+        TEST_METHOD(BootModeRegistry_DefaultsToMission)
         {
-            StartupModeRequests requests{};
-            requests.wallSensorLedCalibration = true;
-            requests.auxiliaryMeasurement = true;
-            requests.maneuverFileTest = true;
-            requests.primaryDiagnostic = true;
-
-            Assert::IsTrue(ResolveStartupMode(requests) == StartupMode::WallSensorLedCalibration);
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::Mission);
         }
 
-        TEST_METHOD(ResolveStartupMode_PrefersAuxiliaryMeasurementOverMissionModes)
+        TEST_METHOD(BootModeRegistry_PrefersFrontWallCharacterization)
         {
-            StartupModeRequests requests{};
-            requests.auxiliaryMeasurement = true;
-            requests.maneuverFileTest = true;
-            requests.primaryDiagnostic = true;
+            ActivateBootSelector(39U, 40U);
+            ActivateBootSelector(38U, 39U);
+            ActivateBootSelector(28U, 29U);
+            ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(27U, 28U);
 
-            Assert::IsTrue(ResolveStartupMode(requests) == StartupMode::AuxiliaryMeasurement);
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::FrontWallCharacterization);
         }
 
-        TEST_METHOD(ResolveStartupMode_PrefersManeuverFileTestOverDiagnostic)
+        TEST_METHOD(BootModeRegistry_PrefersLedCalibrationOverLaterModes)
         {
-            StartupModeRequests requests{};
-            requests.maneuverFileTest = true;
-            requests.primaryDiagnostic = true;
+            ActivateBootSelector(38U, 39U);
+            ActivateBootSelector(28U, 29U);
+            ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(27U, 28U);
 
-            Assert::IsTrue(ResolveStartupMode(requests) == StartupMode::ManeuverFileTest);
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::WallSensorLedCalibration);
+        }
+
+        TEST_METHOD(BootModeRegistry_PrefersAuxiliarySelectorOverMissionModes)
+        {
+            ActivateBootSelector(28U, 29U);
+            ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(27U, 28U);
+
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == GetBootModeRegistryEntry(2U).descriptor->id);
+        }
+
+        TEST_METHOD(BootModeRegistry_PrefersManeuverFileTestOverDiagnostic)
+        {
+            ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(27U, 28U);
+
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::ManeuverFileTest);
         }
 
         TEST_METHOD(HostPinShortsDrivePullupInputsLowForTesting)

@@ -1,4 +1,5 @@
 #include "MazeMapApplicationPrivate.h"
+#include "BootModeDescriptor.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
@@ -580,6 +581,24 @@ private:
 
 namespace MazeMap::App::Internal
 {
+    const BootModeDescriptor& GetAuxMeasurementBootModeDescriptor()
+    {
+        static constexpr BootModeDescriptor descriptor{
+            BootModeId::AuxiliaryMeasurement,
+            BootModeCategory::Utility,
+            "auxiliary_measurement",
+            "Run the selected one-off auxiliary measurement routine.",
+            "logging.txt; auxiliary measurement mmlog",
+            "GetAuxMeasurementMode",
+            "AuxMeasurementController.cpp",
+            "startup settle; selected auxiliary routine; final log close",
+            "AuxMeasurementConfig; shared mission drive and sensor tuning",
+            "AuxMeasurementConfig::kRoutine selects the auxiliary scenario",
+            "aux%03u.mmlog or aux_measurement_log.mmlog",
+        };
+        return descriptor;
+    }
+
     IApplicationMode& GetAuxMeasurementMode()
     {
         static AuxMeasurementController mode(GetSharedRobotRuntime());

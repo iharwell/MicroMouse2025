@@ -7,10 +7,6 @@ namespace MazeMap::DiagnosticConfig
     // [Medium] sometimes adjusted as the diagnostic workflow matures.
     // [Low] usually fixed by wiring, safety limits, or operator workflow.
 
-    // [Low] Short pins 27 and 28 at boot to enter the open-floor measurement routine.
-    constexpr uint8_t kModeSelectPinA = 27U;
-    // [Low] Dedicated strap partner for open-floor measurement mode.
-    constexpr uint8_t kModeSelectPinB = 28U;
     // [Low] One half-step in the open-floor measurement workspace, in millimeters.
     constexpr float kHalfStepMm = 90.0f;
     // [Low] The open-floor workspace is a 5 x 5 half-step box in local coordinates.

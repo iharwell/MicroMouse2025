@@ -1,4 +1,5 @@
 #include "MazeMapApplicationPrivate.h"
+#include "BootModeDescriptor.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
@@ -48,14 +49,14 @@ public:
 private:
     static void BeginJumperMonitor()
     {
-        pinMode(LedCalibrationConfig::kModeSelectPinA, OUTPUT);
-        digitalWriteFast(LedCalibrationConfig::kModeSelectPinA, LOW);
-        pinMode(LedCalibrationConfig::kModeSelectPinB, INPUT_PULLUP);
+        pinMode(LedCalibrationConfig::kCalibrationJumperPinA, OUTPUT);
+        digitalWriteFast(LedCalibrationConfig::kCalibrationJumperPinA, LOW);
+        pinMode(LedCalibrationConfig::kCalibrationJumperPinB, INPUT_PULLUP);
     }
 
     static bool IsCalibrationJumperInstalled()
     {
-        return digitalReadFast(LedCalibrationConfig::kModeSelectPinB) == LOW;
+        return digitalReadFast(LedCalibrationConfig::kCalibrationJumperPinB) == LOW;
     }
 
     static void SetFrontLeds(bool enabled)
@@ -123,6 +124,24 @@ private:
 
 namespace MazeMap::App::Internal
 {
+    const BootModeDescriptor& GetWallSensorLedCalibrationBootModeDescriptor()
+    {
+        static constexpr BootModeDescriptor descriptor{
+            BootModeId::WallSensorLedCalibration,
+            BootModeCategory::Utility,
+            "wall_sensor_led_calibration",
+            "Drive front and side wall-sensor LEDs for optical calibration.",
+            "logging.txt; operator-visible LED square waves",
+            "GetWallSensorLedCalibrationMode",
+            "WallSensorLedCalibrationController.cpp",
+            "front LED calibration; side LED calibration",
+            "WallSensorLedCalibrationPhase and wall-sensor LED timing helpers",
+            "none",
+            "calibration frequency trace in logging.txt",
+        };
+        return descriptor;
+    }
+
     IApplicationMode& GetWallSensorLedCalibrationMode()
     {
         static WallSensorLedCalibrationController mode;

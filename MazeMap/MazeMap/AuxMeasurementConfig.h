@@ -18,11 +18,6 @@ namespace MazeMap::AuxMeasurementConfig
     // [Medium] sometimes adjusted to trade logging density against run time.
     // [Low] usually fixed by spare-pin availability and operator workflow.
 
-    // [Low] Short pins 28 and 29 at startup to enter auxiliary measurement mode. These pins are selector-only; they
-    // are not sampled as measurement inputs after boot.
-    constexpr uint8_t kModeSelectPinA = 28U;
-    // [Low] Dedicated strap partner for the auxiliary pin-measurement mode. Change with pin A.
-    constexpr uint8_t kModeSelectPinB = 29U;
     // [Medium] Selected one-off routine. Change this when you need a different internal measurement script without
     // disturbing the main characterization battery.
     constexpr Routine kRoutine = Routine::PositionAccuracyAudit;

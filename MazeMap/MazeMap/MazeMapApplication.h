@@ -2,55 +2,6 @@
 
 namespace MazeMap::App
 {
-    enum class StartupMode
-    {
-        FrontWallCharacterization,
-        WallSensorLedCalibration,
-        AuxiliaryMeasurement,
-        ManeuverFileTest,
-        PrimaryDiagnostic,
-        Mission
-    };
-
-    struct StartupModeRequests
-    {
-        bool frontWallCharacterization = false;
-        bool wallSensorLedCalibration = false;
-        bool auxiliaryMeasurement = false;
-        bool maneuverFileTest = false;
-        bool primaryDiagnostic = false;
-    };
-
-    inline StartupMode ResolveStartupMode(const StartupModeRequests& requests) noexcept
-    {
-        if (requests.frontWallCharacterization)
-        {
-            return StartupMode::FrontWallCharacterization;
-        }
-
-        if (requests.wallSensorLedCalibration)
-        {
-            return StartupMode::WallSensorLedCalibration;
-        }
-
-        if (requests.auxiliaryMeasurement)
-        {
-            return StartupMode::AuxiliaryMeasurement;
-        }
-
-        if (requests.maneuverFileTest)
-        {
-            return StartupMode::ManeuverFileTest;
-        }
-
-        if (requests.primaryDiagnostic)
-        {
-            return StartupMode::PrimaryDiagnostic;
-        }
-
-        return StartupMode::Mission;
-    }
-
     class Application final
     {
     public:

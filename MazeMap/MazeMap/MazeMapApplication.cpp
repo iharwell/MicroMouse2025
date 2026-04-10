@@ -1,5 +1,11 @@
-#include "MazeMapApplicationPrivate.h"
+#include "MazeMapApplication.h"
+
+#include "BootModeRegistry.h"
+#include "CorridorRepeatabilityMode.h"
+#include "ManeuverFileTestMode.h"
 #include "MazeMapControllerRegistry.h"
+#include "MissionRunMode.h"
+#include "PositionAccuracyAuditMode.h"
 
 using MazeMap::App::Internal::IApplicationMode;
 using MazeMap::App::Internal::IMissionModeHost;
@@ -43,47 +49,25 @@ namespace
         return controllers;
     }
 
-    MazeMap::App::StartupModeRequests ReadStartupModeRequests()
+    IApplicationMode& ResolveApplicationMode(ApplicationControllers& controllers, MazeMap::App::BootModeId bootModeId)
     {
-        MazeMap::App::StartupModeRequests requests{};
-        requests.frontWallCharacterization = IsFrontWallCharacterizationModeRequested();
-        requests.wallSensorLedCalibration = IsWallSensorLedCalibrationModeRequested();
-        requests.auxiliaryMeasurement = IsAuxiliaryMeasurementModeRequested();
-        requests.maneuverFileTest = IsManeuverTestModeRequested();
-        requests.primaryDiagnostic = IsPrimaryDiagnosticModeRequested();
-        return requests;
-    }
-
-    IApplicationMode& ResolveAuxiliaryMeasurementMode(ApplicationControllers& controllers)
-    {
-        if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::CorridorRepeatabilitySweep)
+        switch (bootModeId)
         {
-            return controllers.corridorRepeatabilityMode;
-        }
-
-        if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::PositionAccuracyAudit)
-        {
-            return controllers.positionAccuracyAuditMode;
-        }
-
-        return controllers.auxMeasurement;
-    }
-
-    IApplicationMode& ResolveApplicationMode(ApplicationControllers& controllers, MazeMap::App::StartupMode startupMode)
-    {
-        switch (startupMode)
-        {
-        case MazeMap::App::StartupMode::FrontWallCharacterization:
+        case MazeMap::App::BootModeId::FrontWallCharacterization:
             return controllers.frontWallCharacterization;
-        case MazeMap::App::StartupMode::WallSensorLedCalibration:
+        case MazeMap::App::BootModeId::WallSensorLedCalibration:
             return controllers.ledCalibration;
-        case MazeMap::App::StartupMode::AuxiliaryMeasurement:
-            return ResolveAuxiliaryMeasurementMode(controllers);
-        case MazeMap::App::StartupMode::ManeuverFileTest:
+        case MazeMap::App::BootModeId::AuxiliaryMeasurement:
+            return controllers.auxMeasurement;
+        case MazeMap::App::BootModeId::CorridorRepeatability:
+            return controllers.corridorRepeatabilityMode;
+        case MazeMap::App::BootModeId::PositionAccuracyAudit:
+            return controllers.positionAccuracyAuditMode;
+        case MazeMap::App::BootModeId::ManeuverFileTest:
             return controllers.maneuverFileTestMode;
-        case MazeMap::App::StartupMode::PrimaryDiagnostic:
+        case MazeMap::App::BootModeId::PrimaryDiagnostic:
             return controllers.diagnostic;
-        case MazeMap::App::StartupMode::Mission:
+        case MazeMap::App::BootModeId::Mission:
         default:
             return controllers.missionMode;
         }
@@ -95,7 +79,7 @@ namespace MazeMap::App::Internal
     IApplicationMode& ResolveActiveApplicationMode()
     {
         ApplicationControllers& controllers = GetApplicationControllers();
-        return ResolveApplicationMode(controllers, ResolveStartupMode(ReadStartupModeRequests()));
+        const MazeMap::App::BootModeRegistryEntry& selectedMode = MazeMap::App::ResolveSelectedBootMode();
+        return ResolveApplicationMode(controllers, selectedMode.descriptor->id);
     }
 }
-

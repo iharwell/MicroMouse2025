@@ -3,10 +3,6 @@
 
 namespace MazeMap::FrontWallCharacterizationConfig
 {
-    // [Low] Short pins 39 and 40 at startup to enter the persistent front-wall characterization routine. These pins
-    // are selector-only and are not sampled as part of the stored curve.
-    constexpr uint8_t kModeSelectPinA = 39U;
-    constexpr uint8_t kModeSelectPinB = 40U;
     // [Medium] Control period for the reverse characterization run. Keep this fast enough for smooth wheel control and
     // fine encoder-based spacing along the captured curve.
     constexpr unsigned long kControlPeriodUs = 1000UL;

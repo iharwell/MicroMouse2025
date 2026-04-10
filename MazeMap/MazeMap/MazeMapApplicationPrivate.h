@@ -3,6 +3,7 @@
 #include "MazeMapApplication.h"
 #include "MazeMapApplicationMode.h"
 #include "MazeMapApplicationRuntime.h"
+#include "BootUtilityModeFramework.h"
 #include "MissionRunMode.h"
 #include "ManeuverFileTestMode.h"
 #include "CorridorRepeatabilityMode.h"
@@ -65,6 +66,8 @@
 
 using MazeMap::App::Internal::IApplicationMode;
 using MazeMap::App::Internal::IMissionModeHost;
+using MazeMap::App::Internal::BootUtilityModeFramework::AppendStartupTrace;
+using MazeMap::App::Internal::BootUtilityModeFramework::ResetStartupTrace;
 using MazeMap::App::Internal::MissionRunMode;
 using MazeMap::App::Internal::ManeuverFileTestMode;
 using MazeMap::App::Internal::CorridorRepeatabilityMode;

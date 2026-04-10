@@ -60,6 +60,15 @@
     <ClInclude Include="AuxMeasurementConfig.h">
       <Filter>Header Files\AuxMeasurementConfig</Filter>
     </ClInclude>
+    <ClInclude Include="BootModeDescriptor.h">
+      <Filter>Header Files\App</Filter>
+    </ClInclude>
+    <ClInclude Include="BootModeRegistry.h">
+      <Filter>Header Files\App</Filter>
+    </ClInclude>
+    <ClInclude Include="BootUtilityModeFramework.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
     <ClInclude Include="Cell.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -294,6 +303,9 @@
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="PinPairStrap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Pins.h">
       <Filter>Header Files\Pins</Filter>
     </ClInclude>
@@ -430,6 +442,12 @@
     </ClCompile>
     <ClCompile Include="MazeMapApplicationEntry.cpp">
       <Filter>Source Files\App</Filter>
+    </ClCompile>
+    <ClCompile Include="BootModeRegistry.cpp">
+      <Filter>Source Files\App</Filter>
+    </ClCompile>
+    <ClCompile Include="BootUtilityModeFramework.cpp">
+      <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapApplication.cpp">
       <Filter>Source Files\App</Filter>

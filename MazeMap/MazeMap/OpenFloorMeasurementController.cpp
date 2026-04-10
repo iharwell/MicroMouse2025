@@ -1,4 +1,6 @@
 #include "MazeMapApplicationPrivate.h"
+#include "BootModeDescriptor.h"
+#include "BootModeRegistry.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
@@ -906,7 +908,7 @@ bool OpenFloorMeasurementController::Begin()
     _controlTickSequence = 0UL;
     _workspaceOutOfBoundsStartMs = 0UL;
     _workspaceOutOfBoundsActive = false;
-    _pinsLatchedAtBoot = IsPrimaryDiagnosticModeRequested();
+    _pinsLatchedAtBoot = MazeMap::App::IsBootModeSelectorActive(MazeMap::App::BootModeId::PrimaryDiagnostic);
     _batteryVoltageStart = ReadBatteryVoltage();
     _fanDutyCycleStart = GetMissionFanDutyCycle();
     char runStartMessage[256] = {};
@@ -2090,6 +2092,24 @@ bool OpenFloorMeasurementController::RunLoopSection(bool clockwise)
 
 namespace MazeMap::App::Internal
 {
+    const BootModeDescriptor& GetOpenFloorMeasurementBootModeDescriptor()
+    {
+        static constexpr BootModeDescriptor descriptor{
+            BootModeId::PrimaryDiagnostic,
+            BootModeCategory::Utility,
+            "primary_diagnostic",
+            "Run the open-floor measurement battery registered as the primary diagnostic boot mode.",
+            "logging.txt; open-floor timing mmlog; open-floor main mmlog",
+            "GetDiagnosticMode",
+            "OpenFloorMeasurementController.cpp",
+            "timing capture; static hold; launch; straight; yaw; smooth turn; loop clockwise; loop counter-clockwise",
+            "DiagnosticConfig; OpenFloorMeasurementSpec; shared mission drive and sensor tuning",
+            "open-floor workspace, section repeats, speed bins, and measurement primitives are diagnostic-local",
+            "open_floor_timing.mmlog; open_floor_main.mmlog",
+        };
+        return descriptor;
+    }
+
     IApplicationMode& GetDiagnosticMode()
     {
         static OpenFloorMeasurementController mode(GetSharedRobotRuntime());

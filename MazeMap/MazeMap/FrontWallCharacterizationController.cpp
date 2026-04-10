@@ -1,4 +1,5 @@
 #include "MazeMapApplicationPrivate.h"
+#include "BootModeDescriptor.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
@@ -418,6 +419,24 @@ private:
 
 namespace MazeMap::App::Internal
 {
+    const BootModeDescriptor& GetFrontWallCharacterizationBootModeDescriptor()
+    {
+        static constexpr BootModeDescriptor descriptor{
+            BootModeId::FrontWallCharacterization,
+            BootModeCategory::Utility,
+            "front_wall_characterization",
+            "Capture and persist the front-wall sensor response curve.",
+            "logging.txt; front-wall characterization mmlog; persisted front-wall curve",
+            "GetFrontWallCharacterizationMode",
+            "FrontWallCharacterizationController.cpp",
+            "startup settle; reverse capture; persist; SD export; post-capture settle",
+            "FrontWallCharacterizationConfig; shared mission drive and sensor tuning",
+            "reverse speed, max travel, sample spacing, and collapse threshold are local to this characterization",
+            "fwc%03u.mmlog or front_wall_characterization.mmlog; EEPROM front-wall storage",
+        };
+        return descriptor;
+    }
+
     IApplicationMode& GetFrontWallCharacterizationMode()
     {
         static FrontWallCharacterizationController mode(GetSharedRobotRuntime());

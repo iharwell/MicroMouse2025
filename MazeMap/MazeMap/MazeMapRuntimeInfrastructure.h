@@ -4,6 +4,7 @@
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"
 #include "OpenFloorMeasurementSpec.h"
+#include "PinPairStrap.h"
 #include "RuntimeBinaryLogSupport.h"
 
 // Private application infrastructure helpers for the MazeMap runtime.
@@ -307,83 +308,9 @@ namespace MazeMap::App::Internal::Runtime
     }
 }
 
-inline bool IsPinPairStrapped(uint8_t pinA, uint8_t pinB)
-{
-    pinMode(pinA, OUTPUT);
-    digitalWrite(pinA, LOW);
-    pinMode(pinB, INPUT_PULLUP);
-    delay(2);
-    const bool forwardSense = (digitalRead(pinB) == LOW);
-
-    pinMode(pinA, INPUT_PULLUP);
-    pinMode(pinB, OUTPUT);
-    digitalWrite(pinB, LOW);
-    delay(2);
-    const bool reverseSense = (digitalRead(pinA) == LOW);
-
-    pinMode(pinA, INPUT_PULLUP);
-    pinMode(pinB, INPUT_PULLUP);
-    return forwardSense && reverseSense;
-}
-
-inline bool IsPrimaryDiagnosticModeRequested()
-{
-    return IsPinPairStrapped(DiagnosticConfig::kModeSelectPinA, DiagnosticConfig::kModeSelectPinB);
-}
-
-inline bool IsManeuverTestModeRequested()
-{
-    return IsPinPairStrapped(29U, 30U);
-}
-
-inline bool IsAuxiliaryMeasurementModeRequested()
-{
-    return IsPinPairStrapped(AuxMeasurementConfig::kModeSelectPinA, AuxMeasurementConfig::kModeSelectPinB);
-}
-
-inline bool IsFrontWallCharacterizationModeRequested()
-{
-    return IsPinPairStrapped(
-        FrontWallCharacterizationConfig::kModeSelectPinA,
-        FrontWallCharacterizationConfig::kModeSelectPinB);
-}
-
 inline bool IsInterRunServiceJumperInstalled()
 {
     return IsPinPairStrapped(Config::kInterRunServicePinA, Config::kInterRunServicePinB);
-}
-
-inline bool IsWallSensorLedCalibrationModeRequested()
-{
-    return IsPinPairStrapped(LedCalibrationConfig::kModeSelectPinA, LedCalibrationConfig::kModeSelectPinB);
-}
-
-inline bool ResetStartupTrace(const char* firstLine)
-{
-    if (firstLine == nullptr || firstLine[0] == '\0')
-    {
-        return false;
-    }
-
-    return MazeMap::App::Internal::GetSharedRobotRuntime().WriteTextLogEntry(
-        "startup_trace",
-        micros(),
-        "begin",
-        firstLine);
-}
-
-inline bool AppendStartupTrace(const char* line)
-{
-    if (line == nullptr || line[0] == '\0')
-    {
-        return false;
-    }
-
-    return MazeMap::App::Internal::GetSharedRobotRuntime().WriteTextLogEntry(
-        "startup_trace",
-        micros(),
-        "trace",
-        line);
 }
 
 inline bool WritePersistedFrontWallCharacterization(

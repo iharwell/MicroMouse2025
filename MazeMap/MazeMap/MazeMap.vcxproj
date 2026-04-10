@@ -162,6 +162,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="AuxMeasurementConfig.h" />
+    <ClInclude Include="BootModeDescriptor.h" />
+    <ClInclude Include="BootModeRegistry.h" />
+    <ClInclude Include="BootUtilityModeFramework.h" />
     <ClInclude Include="Cell.h" />
     <ClInclude Include="CellCoordinates.h" />
     <ClInclude Include="CircularBuffer.h" />
@@ -240,6 +243,7 @@
     <ClInclude Include="PathFinder.h" />
     <ClInclude Include="PathPoint.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="PinPairStrap.h" />
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="RollingAverageWindow.h" />
@@ -287,6 +291,8 @@
     <ClCompile Include="Maze.cpp" />
     <ClCompile Include="MapEvidenceUpdater.cpp" />
     <ClCompile Include="MazeMapApplicationEntry.cpp" />
+    <ClCompile Include="BootModeRegistry.cpp" />
+    <ClCompile Include="BootUtilityModeFramework.cpp" />
     <ClCompile Include="MazeMapApplication.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
