@@ -3,8 +3,22 @@
 #include "Defines.h"
 #include "EigenCompat.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+
+#ifndef MAZEMAP_UKF_USE_CMSIS_DSP
+#if !defined(_MSC_VER) && (defined(CORE_TEENSY) || defined(ARDUINO_TEENSY40) || defined(ARDUINO_TEENSY41))
+#define MAZEMAP_UKF_USE_CMSIS_DSP 1
+#else
+#define MAZEMAP_UKF_USE_CMSIS_DSP 0
+#endif
+#endif
+
+#if MAZEMAP_UKF_USE_CMSIS_DSP
+#include "arm_math.h"
+#endif
 
 namespace MazeMap
 {
@@ -13,6 +27,146 @@ namespace MazeMap
     {
         void operator()() const noexcept {}
     };
+
+    namespace detail
+    {
+        template <int Rows, int Cols>
+        struct UkfStorageOrder
+        {
+            static constexpr int value =
+                (Rows == 1 && Cols != 1) ? Eigen::RowMajor : Eigen::ColMajor;
+        };
+
+        template <int Rows, int Cols>
+        using UkfMatrix = Eigen::Matrix<float, Rows, Cols, UkfStorageOrder<Rows, Cols>::value>;
+
+        struct UkfFloatOps
+        {
+            static void Fill(float* dst, int count, float value) noexcept
+            {
+#if MAZEMAP_UKF_USE_CMSIS_DSP
+                arm_fill_f32(value, dst, static_cast<uint32_t>(count));
+#else
+                for (int index = 0; index < count; ++index)
+                {
+                    dst[index] = value;
+                }
+#endif
+            }
+
+            static void Copy(const float* src, float* dst, int count) noexcept
+            {
+#if MAZEMAP_UKF_USE_CMSIS_DSP
+                arm_copy_f32(const_cast<float*>(src), dst, static_cast<uint32_t>(count));
+#else
+                for (int index = 0; index < count; ++index)
+                {
+                    dst[index] = src[index];
+                }
+#endif
+            }
+
+            static void Add(const float* lhs, const float* rhs, float* dst, int count) noexcept
+            {
+#if MAZEMAP_UKF_USE_CMSIS_DSP
+                arm_add_f32(
+                    const_cast<float*>(lhs),
+                    const_cast<float*>(rhs),
+                    dst,
+                    static_cast<uint32_t>(count));
+#else
+                for (int index = 0; index < count; ++index)
+                {
+                    dst[index] = lhs[index] + rhs[index];
+                }
+#endif
+            }
+
+            static void Sub(const float* lhs, const float* rhs, float* dst, int count) noexcept
+            {
+#if MAZEMAP_UKF_USE_CMSIS_DSP
+                arm_sub_f32(
+                    const_cast<float*>(lhs),
+                    const_cast<float*>(rhs),
+                    dst,
+                    static_cast<uint32_t>(count));
+#else
+                for (int index = 0; index < count; ++index)
+                {
+                    dst[index] = lhs[index] - rhs[index];
+                }
+#endif
+            }
+
+            static void Scale(const float* src, float scale, float* dst, int count) noexcept
+            {
+#if MAZEMAP_UKF_USE_CMSIS_DSP
+                arm_scale_f32(
+                    const_cast<float*>(src),
+                    scale,
+                    dst,
+                    static_cast<uint32_t>(count));
+#else
+                for (int index = 0; index < count; ++index)
+                {
+                    dst[index] = src[index] * scale;
+                }
+#endif
+            }
+
+            static float Dot(const float* lhs, const float* rhs, int count) noexcept
+            {
+#if MAZEMAP_UKF_USE_CMSIS_DSP
+                float result = 0.0f;
+                arm_dot_prod_f32(
+                    const_cast<float*>(lhs),
+                    const_cast<float*>(rhs),
+                    static_cast<uint32_t>(count),
+                    &result);
+                return result;
+#else
+                float result = 0.0f;
+                for (int index = 0; index < count; ++index)
+                {
+                    result += lhs[index] * rhs[index];
+                }
+                return result;
+#endif
+            }
+
+            static void Axpy(float alpha, const float* x, float* y, int count) noexcept
+            {
+                if (alpha == 0.0f)
+                {
+                    return;
+                }
+
+                for (int index = 0; index < count; ++index)
+                {
+                    y[index] += alpha * x[index];
+                }
+            }
+
+            static void RankOneAccumulate(
+                float* destinationColMajor,
+                int rows,
+                int cols,
+                const float* lhs,
+                const float* rhs,
+                float alpha) noexcept
+            {
+                if (alpha == 0.0f)
+                {
+                    return;
+                }
+
+                for (int col = 0; col < cols; ++col)
+                {
+                    Axpy(alpha * rhs[col], lhs, destinationColMajor + (col * rows), rows);
+                }
+            }
+        };
+    }
 
     // Tunable unscented-transform weights for a square-root UKF with a fixed state dimension.
     template <int NState>
@@ -60,11 +214,11 @@ namespace MazeMap
     template <int NState>
     struct SrUkfMath
     {
-        using Vector = Eigen::Matrix<float, NState, 1>;
-        using Matrix = Eigen::Matrix<float, NState, NState>;
+        using Vector = detail::UkfMatrix<NState, 1>;
+        using Matrix = detail::UkfMatrix<NState, NState>;
 
         template <int Cols>
-        using MatrixNxCols = Eigen::Matrix<float, NState, Cols>;
+        using MatrixNxCols = detail::UkfMatrix<NState, Cols>;
 
         static Matrix Symmetrize(const Matrix& input) noexcept
         {
@@ -222,7 +376,7 @@ namespace MazeMap
         {
             const Vector whitened =
                 innovationSqrt.template triangularView<Eigen::Lower>().solve(innovation);
-            return whitened.squaredNorm();
+            return detail::UkfFloatOps::Dot(whitened.data(), whitened.data(), NState);
         }
 
         template <int M>
@@ -232,7 +386,7 @@ namespace MazeMap
         {
             const Eigen::Matrix<float, M, 1> whitened =
                 innovationSqrt.template triangularView<Eigen::Lower>().solve(innovation);
-            return whitened.squaredNorm();
+            return detail::UkfFloatOps::Dot(whitened.data(), whitened.data(), M);
         }
     };
 
@@ -243,10 +397,10 @@ namespace MazeMap
     public:
         static constexpr int kSigmaCount = (2 * NState) + 1;
 
-        using StateVec = Eigen::Matrix<float, NState, 1>;
-        using StateMat = Eigen::Matrix<float, NState, NState>;
-        using ControlVec = Eigen::Matrix<float, NControl, 1>;
-        using SigmaMat = Eigen::Matrix<float, NState, kSigmaCount>;
+        using StateVec = detail::UkfMatrix<NState, 1>;
+        using StateMat = detail::UkfMatrix<NState, NState>;
+        using ControlVec = detail::UkfMatrix<NControl, 1>;
+        using SigmaMat = detail::UkfMatrix<NState, kSigmaCount>;
 
         UKF() noexcept
             : _weights()
@@ -331,7 +485,6 @@ namespace MazeMap
         bool Predict(float dt, const ControlVec& control, ProcessFn&& processFn, LoopHook&& loopHook) noexcept
         {
             const float gamma = _weights.gamma();
-            const float meanWeight0 = _weights.meanWeight(0);
             const float meanWeightOuter = _weights.meanWeight(1);
             const float covarianceWeight0 = _weights.covarianceWeight(0);
             const float covarianceWeightOuter = _weights.covarianceWeight(1);
@@ -339,46 +492,42 @@ namespace MazeMap
 
             SigmaMat priorSigma;
             makeSigmaPoints(_state, _sqrtCovariance, gamma, priorSigma);
+
             SigmaMat predictedSigma;
             for (int column = 0; column < kSigmaCount; ++column)
             {
                 loopHook();
                 predictedSigma.col(column) = processFn(priorSigma.col(column), control, dt);
-                StateVec normalizedSigma = predictedSigma.col(column);
-                normalizeState(normalizedSigma);
-                predictedSigma.col(column) = normalizedSigma;
+                normalizeSigmaColumn(predictedSigma, column);
             }
 
             StateVec predictedMean = predictedSigma.col(0);
-            StateVec meanDelta = StateVec::Zero();
-            {
-                StateVec centralDelta = predictedSigma.col(0) - predictedSigma.col(0);
-                normalizeState(centralDelta);
-                meanDelta += meanWeight0 * centralDelta;
-            }
+            StateVec meanDelta;
+            detail::UkfFloatOps::Fill(meanDelta.data(), NState, 0.0f);
             for (int column = 1; column < kSigmaCount; ++column)
             {
                 loopHook();
-                StateVec delta = predictedSigma.col(column) - predictedSigma.col(0);
-                normalizeState(delta);
-                meanDelta += meanWeightOuter * delta;
+                const StateVec delta = subtractAndNormalizeState(predictedSigma.col(column), predictedSigma.col(0));
+                detail::UkfFloatOps::Axpy(meanWeightOuter, delta.data(), meanDelta.data(), NState);
             }
-            predictedMean += meanDelta;
+            detail::UkfFloatOps::Axpy(1.0f, meanDelta.data(), predictedMean.data(), NState);
             normalizeState(predictedMean);
 
-            Eigen::Matrix<float, NState, (2 * NState) + NState> stacked;
+            detail::UkfMatrix<NState, (2 * NState) + NState> stacked;
             for (int column = 1; column < kSigmaCount; ++column)
             {
                 loopHook();
-                StateVec residual = predictedSigma.col(column) - predictedMean;
-                normalizeState(residual);
-                stacked.col(column - 1) = sqrtCovarianceWeightOuter * residual;
+                const StateVec residual = subtractAndNormalizeState(predictedSigma.col(column), predictedMean);
+                detail::UkfFloatOps::Scale(
+                    residual.data(),
+                    sqrtCovarianceWeightOuter,
+                    stacked.col(column - 1).data(),
+                    NState);
             }
             stacked.template rightCols<NState>() = _sqrtProcessNoise;
 
             StateMat predictedSqrt = SrUkfMath<NState>::template QrSquareRoot<(2 * NState) + NState>(stacked);
-            StateVec centralResidual = predictedSigma.col(0) - predictedMean;
-            normalizeState(centralResidual);
+            const StateVec centralResidual = subtractAndNormalizeState(predictedSigma.col(0), predictedMean);
             if (!SrUkfMath<NState>::CholUpdate(predictedSqrt, centralResidual, covarianceWeight0))
             {
                 const StateMat predictedCovariance = rebuildPredictedCovariance(predictedSigma, predictedMean);
@@ -431,33 +580,48 @@ namespace MazeMap
                 _sigmaMean = _state;
             }
 
-            Eigen::Matrix<float, M, kSigmaCount> measurementSigma;
+            detail::UkfMatrix<M, kSigmaCount> measurementSigma;
             for (int column = 0; column < kSigmaCount; ++column)
             {
                 loopHook();
                 measurementSigma.col(column) = measurementFn(_sigmaPoints.col(column));
             }
 
-            Eigen::Matrix<float, M, 1> predictedMeasurement = meanWeight0 * measurementSigma.col(0);
+            Eigen::Matrix<float, M, 1> predictedMeasurement;
+            detail::UkfFloatOps::Scale(
+                measurementSigma.col(0).data(),
+                meanWeight0,
+                predictedMeasurement.data(),
+                M);
             for (int column = 1; column < kSigmaCount; ++column)
             {
                 loopHook();
-                predictedMeasurement += meanWeightOuter * measurementSigma.col(column);
+                detail::UkfFloatOps::Axpy(
+                    meanWeightOuter,
+                    measurementSigma.col(column).data(),
+                    predictedMeasurement.data(),
+                    M);
             }
 
-            Eigen::Matrix<float, M, (2 * NState) + M> stacked;
+            detail::UkfMatrix<M, (2 * NState) + M> stacked;
             for (int column = 1; column < kSigmaCount; ++column)
             {
                 loopHook();
-                const Eigen::Matrix<float, M, 1> residual = measurementSigma.col(column) - predictedMeasurement;
-                stacked.col(column - 1) = sqrtCovarianceWeightOuter * residual;
+                const Eigen::Matrix<float, M, 1> residual =
+                    subtractMeasurement<M>(measurementSigma.col(column), predictedMeasurement);
+                detail::UkfFloatOps::Scale(
+                    residual.data(),
+                    sqrtCovarianceWeightOuter,
+                    stacked.col(column - 1).data(),
+                    M);
             }
             stacked.template rightCols<M>() = sqrtMeasurementNoise;
 
-            using MeasMat = Eigen::Matrix<float, M, M>;
+            using MeasMat = detail::UkfMatrix<M, M>;
             MeasMat innovationSqrt =
                 SrUkfMath<M>::template QrSquareRoot<(2 * NState) + M>(stacked);
-            const Eigen::Matrix<float, M, 1> centralMeasurementResidual = measurementSigma.col(0) - predictedMeasurement;
+            const Eigen::Matrix<float, M, 1> centralMeasurementResidual =
+                subtractMeasurement<M>(measurementSigma.col(0), predictedMeasurement);
             if (!SrUkfMath<M>::CholUpdate(innovationSqrt, centralMeasurementResidual, covarianceWeight0))
             {
                 const MeasMat innovationCovariance =
@@ -468,29 +632,42 @@ namespace MazeMap
                 }
             }
 
-            Eigen::Matrix<float, NState, M> crossCovariance = Eigen::Matrix<float, NState, M>::Zero();
+            detail::UkfMatrix<NState, M> crossCovariance;
+            detail::UkfFloatOps::Fill(crossCovariance.data(), NState * M, 0.0f);
             {
-                StateVec stateResidual = _sigmaPoints.col(0) - _sigmaMean;
-                normalizeState(stateResidual);
-                const Eigen::Matrix<float, M, 1> measurementResidual = measurementSigma.col(0) - predictedMeasurement;
-                crossCovariance += covarianceWeight0 * (stateResidual * measurementResidual.transpose());
+                const StateVec stateResidual = subtractAndNormalizeState(_sigmaPoints.col(0), _sigmaMean);
+                const Eigen::Matrix<float, M, 1> measurementResidual =
+                    subtractMeasurement<M>(measurementSigma.col(0), predictedMeasurement);
+                detail::UkfFloatOps::RankOneAccumulate(
+                    crossCovariance.data(),
+                    NState,
+                    M,
+                    stateResidual.data(),
+                    measurementResidual.data(),
+                    covarianceWeight0);
             }
             for (int column = 1; column < kSigmaCount; ++column)
             {
                 loopHook();
-                StateVec stateResidual = _sigmaPoints.col(column) - _sigmaMean;
-                normalizeState(stateResidual);
-                const Eigen::Matrix<float, M, 1> measurementResidual = measurementSigma.col(column) - predictedMeasurement;
-                crossCovariance += covarianceWeightOuter * (stateResidual * measurementResidual.transpose());
+                const StateVec stateResidual = subtractAndNormalizeState(_sigmaPoints.col(column), _sigmaMean);
+                const Eigen::Matrix<float, M, 1> measurementResidual =
+                    subtractMeasurement<M>(measurementSigma.col(column), predictedMeasurement);
+                detail::UkfFloatOps::RankOneAccumulate(
+                    crossCovariance.data(),
+                    NState,
+                    M,
+                    stateResidual.data(),
+                    measurementResidual.data(),
+                    covarianceWeightOuter);
             }
 
             const Eigen::Matrix<float, M, NState> solvedLower =
                 innovationSqrt.template triangularView<Eigen::Lower>().solve(crossCovariance.transpose());
             const Eigen::Matrix<float, M, NState> solvedUpper =
                 innovationSqrt.transpose().template triangularView<Eigen::Upper>().solve(solvedLower);
-            const Eigen::Matrix<float, NState, M> kalmanGain = solvedUpper.transpose();
+            const detail::UkfMatrix<NState, M> kalmanGain = solvedUpper.transpose();
 
-            const Eigen::Matrix<float, M, 1> innovation = measurement - predictedMeasurement;
+            const Eigen::Matrix<float, M, 1> innovation = subtractMeasurement<M>(measurement, predictedMeasurement);
             _lastNis = SrUkfMath<M>::ComputeNis(innovation, innovationSqrt);
             if (std::isfinite(nisThreshold) && (nisThreshold > 0.0f) && (_lastNis >= nisThreshold))
             {
@@ -501,7 +678,8 @@ namespace MazeMap
             normalizeState(_state);
 
             StateMat updatedSqrt = _sqrtCovariance;
-            const Eigen::Matrix<float, NState, M> updateColumns = kalmanGain * innovationSqrt;
+            const detail::UkfMatrix<NState, M> updateColumns =
+                multiplyRightLowerTriangular<M>(kalmanGain, innovationSqrt);
             for (int column = 0; column < M; ++column)
             {
                 loopHook();
@@ -522,6 +700,64 @@ namespace MazeMap
         }
 
     private:
+        template <typename LeftDerived, typename RightDerived>
+        StateVec subtractAndNormalizeState(
+            const Eigen::MatrixBase<LeftDerived>& lhs,
+            const Eigen::MatrixBase<RightDerived>& rhs) const noexcept
+        {
+            StateVec result;
+            detail::UkfFloatOps::Sub(lhs.derived().data(), rhs.derived().data(), result.data(), NState);
+            normalizeState(result);
+            return result;
+        }
+
+        template <int M, typename LeftDerived, typename RightDerived>
+        detail::UkfMatrix<M, 1> subtractMeasurement(
+            const Eigen::MatrixBase<LeftDerived>& lhs,
+            const Eigen::MatrixBase<RightDerived>& rhs) const noexcept
+        {
+            detail::UkfMatrix<M, 1> result;
+            detail::UkfFloatOps::Sub(lhs.derived().data(), rhs.derived().data(), result.data(), M);
+            return result;
+        }
+
+        template <int M>
+        detail::UkfMatrix<NState, M> multiplyRightLowerTriangular(
+            const detail::UkfMatrix<NState, M>& left,
+            const detail::UkfMatrix<M, M>& lowerTriangular) const noexcept
+        {
+            detail::UkfMatrix<NState, M> result;
+            detail::UkfFloatOps::Fill(result.data(), NState * M, 0.0f);
+            for (int column = 0; column < M; ++column)
+            {
+                for (int sourceColumn = column; sourceColumn < M; ++sourceColumn)
+                {
+                    const float scale = lowerTriangular(sourceColumn, column);
+                    if (scale != 0.0f)
+                    {
+                        detail::UkfFloatOps::Axpy(
+                            scale,
+                            left.col(sourceColumn).data(),
+                            result.col(column).data(),
+                            NState);
+                    }
+                }
+            }
+            return result;
+        }
+
+        void normalizeSigmaColumn(SigmaMat& sigmaPoints, int column) const noexcept
+        {
+            if (_stateNormalizer == nullptr)
+            {
+                return;
+            }
+
+            StateVec normalized = sigmaPoints.col(column);
+            _stateNormalizer(normalized);
+            detail::UkfFloatOps::Copy(normalized.data(), sigmaPoints.col(column).data(), NState);
+        }
+
         StateMat processNoiseCovariance() const noexcept
         {
             return SrUkfMath<NState>::Symmetrize(_sqrtProcessNoise * _sqrtProcessNoise.transpose());
@@ -532,25 +768,25 @@ namespace MazeMap
             StateMat covariance = processNoiseCovariance();
             for (int column = 0; column < kSigmaCount; ++column)
             {
-                StateVec residual = predictedSigma.col(column) - predictedMean;
-                normalizeState(residual);
+                const StateVec residual = subtractAndNormalizeState(predictedSigma.col(column), predictedMean);
                 covariance += _weights.covarianceWeight(column) * (residual * residual.transpose());
             }
             return SrUkfMath<NState>::Symmetrize(covariance);
         }
 
         template <int M>
-        Eigen::Matrix<float, M, M> rebuildInnovationCovariance(
-            const Eigen::Matrix<float, M, kSigmaCount>& measurementSigma,
+        detail::UkfMatrix<M, M> rebuildInnovationCovariance(
+            const detail::UkfMatrix<M, kSigmaCount>& measurementSigma,
             const Eigen::Matrix<float, M, 1>& predictedMeasurement,
             const Eigen::Matrix<float, M, M>& sqrtMeasurementNoise) const noexcept
         {
-            using MeasMat = Eigen::Matrix<float, M, M>;
+            using MeasMat = detail::UkfMatrix<M, M>;
             MeasMat covariance =
                 SrUkfMath<M>::Symmetrize(sqrtMeasurementNoise * sqrtMeasurementNoise.transpose());
             for (int column = 0; column < kSigmaCount; ++column)
             {
-                const Eigen::Matrix<float, M, 1> residual = measurementSigma.col(column) - predictedMeasurement;
+                const Eigen::Matrix<float, M, 1> residual =
+                    subtractMeasurement<M>(measurementSigma.col(column), predictedMeasurement);
                 covariance += _weights.covarianceWeight(column) * (residual * residual.transpose());
             }
             return SrUkfMath<M>::Symmetrize(covariance);
@@ -569,17 +805,28 @@ namespace MazeMap
             float gamma,
             SigmaMat& sigmaPoints) const noexcept
         {
-            sigmaPoints.col(0) = mean;
+            detail::UkfFloatOps::Copy(mean.data(), sigmaPoints.col(0).data(), NState);
+
+            StateVec columnDelta;
             for (int column = 0; column < NState; ++column)
             {
-                sigmaPoints.col(column + 1) = mean + (gamma * sqrtCovariance.col(column));
-                sigmaPoints.col(column + 1 + NState) = mean - (gamma * sqrtCovariance.col(column));
-                StateVec plusSigma = sigmaPoints.col(column + 1);
-                StateVec minusSigma = sigmaPoints.col(column + 1 + NState);
-                normalizeState(plusSigma);
-                normalizeState(minusSigma);
-                sigmaPoints.col(column + 1) = plusSigma;
-                sigmaPoints.col(column + 1 + NState) = minusSigma;
+                detail::UkfFloatOps::Scale(
+                    sqrtCovariance.col(column).data(),
+                    gamma,
+                    columnDelta.data(),
+                    NState);
+                detail::UkfFloatOps::Add(
+                    mean.data(),
+                    columnDelta.data(),
+                    sigmaPoints.col(column + 1).data(),
+                    NState);
+                detail::UkfFloatOps::Sub(
+                    mean.data(),
+                    columnDelta.data(),
+                    sigmaPoints.col(column + 1 + NState).data(),
+                    NState);
+                normalizeSigmaColumn(sigmaPoints, column + 1);
+                normalizeSigmaColumn(sigmaPoints, column + 1 + NState);
             }
         }
 

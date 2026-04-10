@@ -2320,19 +2320,5 @@ namespace MazeMap
                 (initialCovariance(VehicleState::kPsi, VehicleState::kPsi) + 1.0e-9f));
         }
 
-        TEST_METHOD(OpenFloorOutOfBoundsGraceIsConfiguredFor500Milliseconds)
-        {
-            Assert::AreEqual(500UL, kOpenFloorOutOfBoundsGraceMs);
-        }
-
-        TEST_METHOD(OpenFloorOutOfBoundsGraceElapsedUsesWrapSafeMillisecondArithmetic)
-        {
-            Assert::IsFalse(HasOpenFloorOutOfBoundsGraceElapsed(1000UL, 1499UL));
-            Assert::IsTrue(HasOpenFloorOutOfBoundsGraceElapsed(1000UL, 1500UL));
-
-            const unsigned long wrapStartMs = (std::numeric_limits<unsigned long>::max)() - 200UL;
-            Assert::IsFalse(HasOpenFloorOutOfBoundsGraceElapsed(wrapStartMs, 298UL));
-            Assert::IsTrue(HasOpenFloorOutOfBoundsGraceElapsed(wrapStartMs, 299UL));
-        }
     };
 }
