@@ -1648,7 +1648,7 @@ namespace MazeMap
                 std::fabs(first.omegaRightRadps - second.omegaRightRadps));
         }
 
-        TEST_METHOD(SrUkfCoreDoesNotLetControlInputCreateForwardMotionWithoutEncoderSupport)
+        TEST_METHOD(SrUkfCoreDoesNotLetControlInputCreateForwardMotionWithEncoderOpposition)
         {
             SrUkfCore core;
             const PlantParams params = PlantParams::Default();
@@ -1681,6 +1681,31 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-4f);
         }
 
+        TEST_METHOD(SrUkfCoreMustLetControlInputCreateForwardMotionWithNoEncoder)
+        {
+            SrUkfCore core;
+            const PlantParams params = PlantParams::Default();
+            ControlInput control{};
+            control.leftMotorCommand = 0.5f;
+            control.rightMotorCommand = 0.5f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+            EncoderObs encoder{};
+            constexpr float dt = 0.001f;
+
+            for (int step = 0; step < 200; ++step)
+            {
+                Assert::IsTrue(core.predict(dt, control));
+
+                const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
+                Assert::IsTrue(yawResult.attempted);
+                Assert::IsTrue(yawResult.accepted);
+            }
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kPy)) > 1.0e-2f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kU)) > 1.0e-2f);
+        }
         TEST_METHOD(SrUkfCoreEncoderArcUpdateUsesProjectTurnSignConventions)
         {
             const PlantParams params = PlantParams::Default();
@@ -2133,14 +2158,29 @@ namespace MazeMap
             Assert::IsTrue(finalYM > (first.poseYM - 0.005f));
         }
 
-        TEST_METHOD(SrUkfCoreDoesNotDriftUnderRepeatedZeroMotionMeasurements)
+        SrUkfCore RunUKFCycles(int numCycles)
         {
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f);
+            const VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.001f, 0.01f, 0.005f, 0.005f, 0.05f, 0.05f, 0.02f);
+
             SrUkfCore core;
+            core.reset(initialState, initialCovariance);
             ControlInput control{};
             EncoderObs encoder{};
-            constexpr float dt = 0.0005f;
+            constexpr float dt = 0.001f;
 
-            for (int step = 0; step < 2000; ++step)
+            for (int step = 0; step < numCycles; ++step)
             {
                 Assert::IsTrue(core.predict(dt, control));
 
@@ -2152,17 +2192,108 @@ namespace MazeMap
                 Assert::IsTrue(yawResult.attempted);
                 Assert::IsTrue(yawResult.accepted);
             }
+            return core;
+        }
+
+        TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsPoseX)
+        {
+			SrUkfCore core = RunUKFCycles(2000);
 
             const VehicleState::StateVector& state = core.state();
             Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < 1.0e-4f);
+
+
+			// If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
+            // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
+            // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
+			const auto covariance = core.covariance();
+            Assert::IsTrue(covariance(VehicleState::kPx, VehicleState::kPx) < 10.0f, L"Final x position variance was too high");
+        }
+        TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsPoseY)
+        {
+            SrUkfCore core = RunUKFCycles(2000);
+
+            const VehicleState::StateVector& state = core.state();
             Assert::IsTrue(std::fabs(state(VehicleState::kPy)) < 1.0e-4f);
+
+
+            // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
+            // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
+            // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
+            const auto covariance = core.covariance();
+            Assert::IsTrue(covariance(VehicleState::kPy, VehicleState::kPy) < 10.0f, L"Final y position variance was too high");
+        }
+        TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsForwardVelocity)
+        {
+            SrUkfCore core = RunUKFCycles(2000);
+
+            const VehicleState::StateVector& state = core.state();
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 1.0e-4f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 1.0e-4f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kR)) < 1.0e-4f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 1.0e-4f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-4f);
+
+
+            // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
+            // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
+            // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
+            const auto covariance = core.covariance();
+            Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) < 0.0001f, L"Final forward velocity variance was too high");
         }
 
+        TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsLateralVelocity)
+        {
+            SrUkfCore core = RunUKFCycles(2000);
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 1.0e-4f);
+
+
+            // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
+            // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
+            // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
+            const auto covariance = core.covariance();
+            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) < 0.000001f, L"Final lateral velocity variance was too high");
+        }
+        TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsYawRate)
+        {
+            SrUkfCore core = RunUKFCycles(2000);
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kR)) < 1.0e-4f);
+
+
+            // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
+            // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
+            // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
+            const auto covariance = core.covariance();
+            Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) < 0.0001f, L"Final yaw rate variance was too high");
+        }
+        TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsOmegaL)
+        {
+            SrUkfCore core = RunUKFCycles(2000);
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 1.0e-4f);
+
+
+            // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
+            // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
+            // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
+            const auto covariance = core.covariance();
+            Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) < 0.0001f, L"Final left wheel speed variance was too high");
+        }
+        TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsOmegaR)
+        {
+            SrUkfCore core = RunUKFCycles(2000);
+
+            const VehicleState::StateVector& state = core.state();
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-4f);
+
+
+            // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
+            // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
+            // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
+            const auto covariance = core.covariance();
+            Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) < 0.0001f, L"Final left wheel speed variance was too high");
+        }
         TEST_METHOD(SrUkfCoreRepeatedZeroEncoderUpdatesDriveYawRateVarianceExtremelyLow)
         {
             const VehicleState::StateVector initialState =
@@ -2246,9 +2377,8 @@ namespace MazeMap
             Assert::IsTrue(
                 finalLateralVelocityVarianceMps2 < 1.0e-4f,
                 (std::wstring(L"Final lateral-velocity variance was ") +
-                 std::to_wstring(finalLateralVelocityVarianceMps2)).c_str());
+                    std::to_wstring(finalLateralVelocityVarianceMps2)).c_str());
         }
-
         TEST_METHOD(SrUkfCoreRepeatedStationaryCyclesKeepMotionAndBiasCovarianceNearZeroWhilePoseRemainsBounded)
         {
             const VehicleState::StateVector initialState =

@@ -695,8 +695,8 @@ namespace MazeMap
             return state;
         }
 
-        const StateVector predictorState = state + (dt * forwardStep(state, control, params).stateDot);
-        StateVector implicitState = state + (dt * forwardStep(predictorState, control, params).stateDot);
+        //const StateVector predictorState = state + (dt * forwardStep(state, control, params).stateDot);
+        StateVector implicitState = state + (dt * forwardStep(state, control, params).stateDot);
         implicitState(VehicleState::kPsi) = VehicleState::NormalizeAngle(implicitState(VehicleState::kPsi));
 
         if (ShouldSnapToZero(implicitState, control, params))
