@@ -8,7 +8,8 @@ Default behavior:
 - Reads the sidecar referenced by the first line of each .mmlog.
 - Verifies schema_version / row_bytes and row-width consistency.
 - Decodes the fixed-width binary rows into CSV.
-- Writes one CSV next to each .mmlog file using the same stem.
+- Writes CSVs under TestResults/mmlog_decode_<timestamp>/, preserving relative paths.
+- Copies the bound .sidecar and associated logging.txt/logger.txt file into the same output folder.
 
 For s8/s16/s32 fields:
 - The CSV contains both the raw stored value (<field>__raw) and the decoded label (<field>).
@@ -19,8 +20,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import shutil
 import struct
 import sys
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
@@ -41,6 +44,7 @@ TYPE_INFO: Dict[str, Tuple[str, int]] = {
 
 FNV1A_32_OFFSET = 0x811C9DC5
 FNV1A_32_PRIME = 0x01000193
+DEFAULT_RESULTS_ROOT = Path(__file__).resolve().parent / "TestResults"
 
 
 class MMLogError(Exception):
@@ -202,6 +206,51 @@ def resolve_sidecar_path(mmlog_path: Path, sidecar_ref: str) -> Path:
     return (mmlog_path.parent / ref).resolve()
 
 
+def resolve_output_parent(mmlog_path: Path, output_dir: Path | None, root: Path) -> Path:
+    if output_dir is None:
+        return mmlog_path.parent
+
+    if root.is_dir():
+        try:
+            relative_parent = mmlog_path.parent.resolve().relative_to(root.resolve())
+        except ValueError:
+            relative_parent = Path()
+        destination = output_dir / relative_parent
+    else:
+        destination = output_dir
+
+    destination.mkdir(parents=True, exist_ok=True)
+    return destination
+
+
+def copy_artifact(source_path: Path, destination_path: Path, overwrite: bool) -> None:
+    if source_path.resolve() == destination_path.resolve():
+        return
+
+    if destination_path.exists():
+        if destination_path.read_bytes() == source_path.read_bytes():
+            return
+        if not overwrite:
+            raise MMLogError(f"Refusing to overwrite existing artifact: {destination_path}")
+
+    shutil.copy2(source_path, destination_path)
+
+
+def resolve_control_log_path(mmlog_path: Path, spec: SidecarSpec) -> Path | None:
+    control_log_ref = spec.metadata.get("control_log_file")
+    if control_log_ref:
+        candidate = resolve_sidecar_path(mmlog_path, control_log_ref)
+        if candidate.exists():
+            return candidate
+
+    for fallback_name in ("logging.txt", "logger.txt"):
+        candidate = (mmlog_path.parent / fallback_name).resolve()
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
 def read_mmlog_header_and_payload(mmlog_path: Path) -> Tuple[str, bytes]:
     with mmlog_path.open("rb") as f:
         first_line = f.readline()
@@ -335,6 +384,11 @@ def find_mmlog_files(root: Path) -> List[Path]:
     return sorted(files)
 
 
+def build_default_output_dir() -> Path:
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return DEFAULT_RESULTS_ROOT / f"mmlog_decode_{timestamp}"
+
+
 def decode_one_file(
     mmlog_path: Path,
     output_dir: Path | None,
@@ -347,19 +401,8 @@ def decode_one_file(
     sidecar_ref, payload = read_mmlog_header_and_payload(mmlog_path)
     sidecar_path = resolve_sidecar_path(mmlog_path, sidecar_ref)
     spec = parse_sidecar(sidecar_path, require_string_hash_metadata=require_string_hash_metadata)
-
-    if output_dir is None:
-        csv_path = mmlog_path.with_suffix(".csv")
-    else:
-        if root.is_dir():
-            try:
-                relative_parent = mmlog_path.parent.resolve().relative_to(root.resolve())
-            except ValueError:
-                relative_parent = Path()
-            csv_path = output_dir / relative_parent / f"{mmlog_path.stem}.csv"
-        else:
-            csv_path = output_dir / f"{mmlog_path.stem}.csv"
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
+    output_parent = resolve_output_parent(mmlog_path, output_dir, root)
+    csv_path = output_parent / f"{mmlog_path.stem}.csv"
 
     if csv_path.exists() and not overwrite:
         raise MMLogError(f"Refusing to overwrite existing CSV: {csv_path}")
@@ -372,6 +415,12 @@ def decode_one_file(
         string_mode=string_mode,
         collision_mode=collision_mode,
     )
+
+    copy_artifact(sidecar_path, output_parent / sidecar_path.name, overwrite)
+    control_log_path = resolve_control_log_path(mmlog_path, spec)
+    if control_log_path is not None:
+        copy_artifact(control_log_path, output_parent / control_log_path.name, overwrite)
+
     return csv_path, row_count
 
 
@@ -389,7 +438,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=None,
-        help="Optional directory where CSV files will be written. Default: next to each .mmlog file.",
+        help=(
+            "Optional directory where CSV files will be written. "
+            "Default: TestResults/mmlog_decode_<timestamp> under this repository."
+        ),
     )
     p.add_argument(
         "--string-mode",
@@ -423,15 +475,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
 
     root = Path(args.root)
-    output_dir = args.output_dir
-
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
 
     mmlog_files = find_mmlog_files(root)
     if not mmlog_files:
         print(f"No .mmlog files found under {root}", file=sys.stderr)
         return 1
+
+    output_dir = args.output_dir if args.output_dir is not None else build_default_output_dir()
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     failures = 0
     for mmlog_path in mmlog_files:

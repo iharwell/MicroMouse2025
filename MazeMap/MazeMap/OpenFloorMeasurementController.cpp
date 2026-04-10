@@ -3,6 +3,7 @@
 #include "BootModeRegistry.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
+#include "OpenFloorMeasurementSpec.h"
 #include "RuntimeBinaryLogSupport.h"
 #include "WallSensorLedCalibrationPhase.h"
 
@@ -1372,12 +1373,12 @@ bool OpenFloorMeasurementController::RecoverToMarker(
     const float targetX = MazeMap::OpenFloorMarkerXMeters(markerId);
     const float targetY = MazeMap::OpenFloorMarkerYMeters(markerId);
     const Eigen::Vector2f targetHeading = DirectionToUnitVector(marker.heading);
-    const Eigen::Vector2f leftUnit(-targetHeading.y(), targetHeading.x());
+    const MotionLimits limits = MeasurementLimits(maxSpeedMps);
     const unsigned long deadline = millis() + FailureTimeoutMs(timeoutMs);
     const PoseEstimate startPose = _drive.GetPose();
-    const float initialLongitudinalError = std::fabs(
-        ((targetX - startPose.xMeters) * targetHeading.x()) +
-        ((targetY - startPose.yMeters) * targetHeading.y()));
+    const float initialRecoveryDistanceOutsideZoneM = MazeMap::OpenFloorRecoveryDistanceOutsideAcceptanceZoneM(
+        targetX - startPose.xMeters,
+        targetY - startPose.yMeters);
 
     while (true)
     {
@@ -1390,18 +1391,27 @@ bool OpenFloorMeasurementController::RecoverToMarker(
         const PoseEstimate pose = _drive.GetPose();
         const float dx = targetX - pose.xMeters;
         const float dy = targetY - pose.yMeters;
-        const float longitudinalErrorM = (dx * targetHeading.x()) + (dy * targetHeading.y());
-        const float lateralErrorM = (dx * leftUnit.x()) + (dy * leftUnit.y());
-        const float headingErrorRad = HeadingErrorRad(targetHeading, pose.headingUnit);
+        const Eigen::Vector2f travelHeading = pose.headingUnit;
+        const float recoveryLongitudinalErrorM =
+            MazeMap::OpenFloorRecoverySignedLongitudinalDistanceToAcceptanceZoneM(travelHeading, dx, dy);
+        const float recoveryLateralErrorM =
+            MazeMap::OpenFloorRecoverySignedLateralMissToAcceptanceZoneM(travelHeading, dx, dy);
+        const float targetHeadingErrorRad = HeadingErrorRad(targetHeading, pose.headingUnit);
+        const bool positionArrived = MazeMap::OpenFloorRecoveryWithinAcceptanceRadius(dx, dy);
+        const float recoveryDistanceOutsideZoneM =
+            MazeMap::OpenFloorRecoveryDistanceOutsideAcceptanceZoneM(dx, dy);
         recoveryLabels.phaseId = MazeMap::OpenFloorPhaseId::Recovery;
-        recoveryLabels.progressNorm = (initialLongitudinalError > Config::kDistanceToleranceM) ?
-            (std::clamp)(1.0f - (std::fabs(longitudinalErrorM) / initialLongitudinalError), 0.0f, 1.0f) :
+        recoveryLabels.progressNorm = (initialRecoveryDistanceOutsideZoneM > 0.0f) ?
+            (std::clamp)(
+                1.0f - (recoveryDistanceOutsideZoneM / initialRecoveryDistanceOutsideZoneM),
+                0.0f,
+                1.0f) :
             1.0f;
 
-        if (std::fabs(longitudinalErrorM) <= Config::kDistanceToleranceM &&
-            std::fabs(lateralErrorM) <= Config::kDistanceToleranceM &&
+        if (positionArrived &&
+            std::fabs(targetHeadingErrorRad) <= MazeMap::kOpenFloorRecoveryArrivalHeadingToleranceRad &&
             std::fabs(pose.linearSpeedMps) <= Config::kSpeedToleranceMps &&
-            std::fabs(pose.angularSpeedRadps) <= 0.25f)
+            std::fabs(pose.angularSpeedRadps) <= Config::kAngularSpeedToleranceRadps)
         {
             _drive.Brake();
             return LogCycle(recoveryLabels, cycle);
@@ -1418,11 +1428,16 @@ bool OpenFloorMeasurementController::RecoverToMarker(
         }
 
         const float dtSeconds = static_cast<float>(cycle.dtUs) * 1.0e-6f;
-        const float linearCommandMps = (std::clamp)(4.0f * longitudinalErrorM, -maxSpeedMps, maxSpeedMps);
-        const float angularCommandRadps =
-            (Config::kStraightHeadingKp * headingErrorRad) -
-            (Config::kStraightYawD * pose.angularSpeedRadps) -
-            (3.0f * lateralErrorM);
+        const float linearCommandMps = positionArrived ?
+            0.0f :
+            (std::clamp)(4.0f * recoveryLongitudinalErrorM, -maxSpeedMps, maxSpeedMps);
+        float angularCommandRadps = positionArrived ?
+            ((Config::kStraightHeadingKp * targetHeadingErrorRad) - (Config::kStraightYawD * pose.angularSpeedRadps)) :
+            (-(3.0f * recoveryLateralErrorM) - (Config::kStraightYawD * pose.angularSpeedRadps));
+        angularCommandRadps = (std::clamp)(
+            angularCommandRadps,
+            -limits.maxAngularSpeedRadps,
+            limits.maxAngularSpeedRadps);
         _drive.CommandVelocity(linearCommandMps, angularCommandRadps, dtSeconds);
 
         if (!LogCycle(recoveryLabels, cycle))

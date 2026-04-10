@@ -260,17 +260,19 @@ namespace MazeMap
         "S180ELS_M",
     };
 
-    inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { 0.25f, 0.40f, 0.55f };
+    inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { 0.3f, 0.40f, 0.55f };
     inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 3.0f, 6.0f, 9.0f };
-    inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.25f, 0.35f, 0.45f };
-    inline constexpr unsigned long kOpenFloorLaunchPulseMs = 200UL;
+    inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.3f, 0.35f, 0.45f };
+    inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
     // After a launch pulse leaves the estimator's stationary regime, hold brake at the start marker
     // for this long so the next repeat begins from a settled UKF state instead of launch transients.
-    inline constexpr unsigned long kOpenFloorLaunchSettleMs = 100UL;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.15f;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.22f;
+    inline constexpr unsigned long kOpenFloorLaunchSettleMs = 200UL;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.17f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.25f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.01f;
     inline constexpr unsigned long kOpenFloorOutOfBoundsGraceMs = 1UL;
+    inline constexpr float kOpenFloorRecoveryAcceptanceRadiusM = 0.015f;
+    inline constexpr float kOpenFloorRecoveryArrivalHeadingToleranceRad = 1.0f * DEG_TO_RAD_F;
 
     inline constexpr std::size_t OpenFloorLaunchDriveMagnitudeCount() noexcept
     {
@@ -327,6 +329,89 @@ namespace MazeMap
     inline constexpr float OpenFloorStrEquivalentDistanceMeters(uint8_t halfSteps) noexcept
     {
         return OpenFloorHalfStepMeters() * static_cast<float>(halfSteps);
+    }
+
+    inline bool OpenFloorRecoveryWithinAcceptanceRadius(
+        float dxMeters,
+        float dyMeters) noexcept
+    {
+        if (!(std::isfinite(dxMeters) && std::isfinite(dyMeters)))
+        {
+            return false;
+        }
+        return ((dxMeters * dxMeters) + (dyMeters * dyMeters)) <=
+            (kOpenFloorRecoveryAcceptanceRadiusM * kOpenFloorRecoveryAcceptanceRadiusM);
+    }
+
+    inline float OpenFloorRecoveryDistanceOutsideAcceptanceZoneM(
+        float dxMeters,
+        float dyMeters) noexcept
+    {
+        if (!(std::isfinite(dxMeters) && std::isfinite(dyMeters)))
+        {
+            return 0.0f;
+        }
+        const float centerDistanceM = MazeMap::Math::Sqrtf((dxMeters * dxMeters) + (dyMeters * dyMeters));
+        return (centerDistanceM > kOpenFloorRecoveryAcceptanceRadiusM) ?
+            (centerDistanceM - kOpenFloorRecoveryAcceptanceRadiusM) :
+            0.0f;
+    }
+
+    inline float OpenFloorRecoverySignedLateralMissToAcceptanceZoneM(
+        const Eigen::Vector2f& travelHeading,
+        float dxMeters,
+        float dyMeters) noexcept
+    {
+        if (!(std::isfinite(dxMeters) && std::isfinite(dyMeters)))
+        {
+            return 0.0f;
+        }
+
+        const Eigen::Vector2f leftUnit(-travelHeading.y(), travelHeading.x());
+        const float lateralErrorM = (dxMeters * leftUnit.x()) + (dyMeters * leftUnit.y());
+        const float missAbsM = MazeMap::Math::Absf(lateralErrorM) - kOpenFloorRecoveryAcceptanceRadiusM;
+        if (!(missAbsM > 0.0f) || !std::isfinite(missAbsM))
+        {
+            return 0.0f;
+        }
+
+        return (lateralErrorM >= 0.0f) ? missAbsM : -missAbsM;
+    }
+
+    inline float OpenFloorRecoverySignedLongitudinalDistanceToAcceptanceZoneM(
+        const Eigen::Vector2f& travelHeading,
+        float dxMeters,
+        float dyMeters) noexcept
+    {
+        if (!(std::isfinite(dxMeters) && std::isfinite(dyMeters)))
+        {
+            return 0.0f;
+        }
+
+        const Eigen::Vector2f leftUnit(-travelHeading.y(), travelHeading.x());
+        const float longitudinalErrorM = (dxMeters * travelHeading.x()) + (dyMeters * travelHeading.y());
+        const float lateralErrorM = (dxMeters * leftUnit.x()) + (dyMeters * leftUnit.y());
+        const float lateralAbsM = MazeMap::Math::Absf(lateralErrorM);
+        if (!(std::isfinite(longitudinalErrorM) && std::isfinite(lateralAbsM)))
+        {
+            return 0.0f;
+        }
+
+        if (lateralAbsM >= kOpenFloorRecoveryAcceptanceRadiusM)
+        {
+            return longitudinalErrorM;
+        }
+
+        const float longitudinalInsideZoneM = MazeMap::Math::Sqrtf((std::max)(
+            0.0f,
+            (kOpenFloorRecoveryAcceptanceRadiusM * kOpenFloorRecoveryAcceptanceRadiusM) - (lateralErrorM * lateralErrorM)));
+        const float outsideAbsM = MazeMap::Math::Absf(longitudinalErrorM) - longitudinalInsideZoneM;
+        if (!(outsideAbsM > 0.0f) || !std::isfinite(outsideAbsM))
+        {
+            return 0.0f;
+        }
+
+        return (longitudinalErrorM >= 0.0f) ? outsideAbsM : -outsideAbsM;
     }
 
     inline const OpenFloorMarkerPose& GetOpenFloorMarker(OpenFloorMarkerId id)

@@ -1,5 +1,96 @@
+param(
+    [ValidateSet('Build', 'Rebuild')]
+    [string]$HostBuildTarget = 'Build',
+    [string]$LogFilePath
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $scriptRoot
+$runStamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+$defaultLogDirectory = Join-Path $scriptRoot 'logs'
+
+if ([string]::IsNullOrWhiteSpace($LogFilePath)) {
+    $LogFilePath = Join-Path $defaultLogDirectory ('verify_latest_build_' + $runStamp + '.txt')
+}
+elseif (-not [System.IO.Path]::IsPathRooted($LogFilePath)) {
+    $LogFilePath = Join-Path $repoRoot $LogFilePath
+}
+
+$LogFilePath = [System.IO.Path]::GetFullPath($LogFilePath)
+$logDirectory = Split-Path -Parent $LogFilePath
+if (-not [string]::IsNullOrWhiteSpace($logDirectory)) {
+    New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+}
+
+@(
+    'Verify latest build log'
+    ('Start time: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff zzz'))
+    ('Repository: ' + $repoRoot)
+    ''
+) | Set-Content -LiteralPath $LogFilePath -Encoding UTF8
+
+function Write-LogLine {
+    param(
+        [AllowEmptyString()]
+        [string]$Message = '',
+        [string]$Color
+    )
+
+    Add-Content -LiteralPath $LogFilePath -Value $Message -Encoding UTF8
+    if ($PSBoundParameters.ContainsKey('Color')) {
+        Write-Host $Message -ForegroundColor $Color
+    }
+    else {
+        Write-Host $Message
+    }
+}
+
+function Write-LogFileContents {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [string]$Color
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    Get-Content -LiteralPath $Path | ForEach-Object {
+        if ($PSBoundParameters.ContainsKey('Color')) {
+            Write-LogLine -Message $_ -Color $Color
+        }
+        else {
+            Write-LogLine -Message $_
+        }
+    }
+}
+
+function Append-FileToLog {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $content = [System.IO.File]::ReadAllText($Path)
+    if ([string]::IsNullOrEmpty($content)) {
+        return
+    }
+
+    [System.IO.File]::AppendAllText($LogFilePath, $content)
+    if (-not $content.EndsWith([Environment]::NewLine, [System.StringComparison]::Ordinal)) {
+        [System.IO.File]::AppendAllText($LogFilePath, [Environment]::NewLine)
+    }
+}
+
+Write-LogLine ("Verify log: {0}" -f $LogFilePath) 'DarkCyan'
 
 function Write-Step {
     param(
@@ -7,8 +98,8 @@ function Write-Step {
         [string]$Message
     )
 
-    Write-Host ''
-    Write-Host "==> $Message" -ForegroundColor Cyan
+    Write-LogLine ''
+    Write-LogLine "==> $Message" 'Cyan'
 }
 
 function Assert-PathExists {
@@ -32,10 +123,22 @@ function Invoke-External {
         [string[]]$Arguments
     )
 
-    Write-Host ($FilePath + ' ' + ($Arguments -join ' '))
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE."
+    Write-LogLine ($FilePath + ' ' + ($Arguments -join ' '))
+    $stdoutPath = [System.IO.Path]::GetTempFileName()
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        Append-FileToLog -Path $stdoutPath
+        Append-FileToLog -Path $stderrPath
+        if ($process.ExitCode -ne 0) {
+            Write-LogFileContents -Path $stdoutPath
+            Write-LogFileContents -Path $stderrPath -Color 'Red'
+            throw "Command failed with exit code $($process.ExitCode)."
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -45,10 +148,22 @@ function Invoke-CmdChain {
         [string]$CommandLine
     )
 
-    Write-Host ('cmd.exe /c ' + $CommandLine)
-    & cmd.exe /c $CommandLine
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE."
+    Write-LogLine ('cmd.exe /c ' + $CommandLine)
+    $stdoutPath = [System.IO.Path]::GetTempFileName()
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $CommandLine -Wait -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        Append-FileToLog -Path $stdoutPath
+        Append-FileToLog -Path $stderrPath
+        if ($process.ExitCode -ne 0) {
+            Write-LogFileContents -Path $stdoutPath
+            Write-LogFileContents -Path $stderrPath -Color 'Red'
+            throw "Command failed with exit code $($process.ExitCode)."
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -138,7 +253,46 @@ function Ensure-ArduinoEigenLibrary {
     return $LibraryRoot
 }
 
-function Assert-ArtifactFresh {
+function Get-LatestWriteTime {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Roots
+    )
+
+    $trackedExtensions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in @('.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx', '.inl', '.ixx', '.vcxproj', '.props', '.targets')) {
+        [void]$trackedExtensions.Add($extension)
+    }
+
+    $latestWriteTime = [datetime]::MinValue
+
+    foreach ($root in $Roots) {
+        Assert-PathExists -Path $root -Description 'Freshness root'
+
+        $items = if (Test-Path -LiteralPath $root -PathType Leaf) {
+            @(Get-Item -LiteralPath $root)
+        }
+        else {
+            Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
+                $trackedExtensions.Contains($_.Extension)
+            }
+        }
+
+        foreach ($item in $items) {
+            if ($item.LastWriteTime -gt $latestWriteTime) {
+                $latestWriteTime = $item.LastWriteTime
+            }
+        }
+    }
+
+    if ($latestWriteTime -eq [datetime]::MinValue) {
+        throw ('No tracked inputs were found under: ' + ($Roots -join ', '))
+    }
+
+    return $latestWriteTime
+}
+
+function Assert-ArtifactNotOlderThan {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
@@ -152,14 +306,11 @@ function Assert-ArtifactFresh {
 
     $item = Get-Item -LiteralPath $Path
     if ($item.LastWriteTime -lt $NotOlderThan) {
-        throw ("{0} was not rebuilt by this run. LastWriteTime={1}; expected at or after {2}." -f $Description, $item.LastWriteTime, $NotOlderThan)
+        throw ("{0} is stale. LastWriteTime={1}; expected at or after {2}." -f $Description, $item.LastWriteTime, $NotOlderThan)
     }
 
     return $item
 }
-
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Split-Path -Parent $scriptRoot
 
 $arduinoCli = 'C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe'
 $visualStudioRoot = 'C:\Program Files\Microsoft Visual Studio\18\Community'
@@ -171,16 +322,20 @@ $eigenIncludeDir = Join-Path $repoRoot 'MazeMap\eigen-5.0.0'
 $arduinoLibrariesDir = Join-Path $scriptRoot 'arduino_libraries'
 $arduinoEigenLibraryDir = Join-Path $arduinoLibrariesDir 'Eigen'
 $solutionPath = Join-Path $repoRoot 'MazeMap\MazeMap.sln'
-$runStamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
 $canonicalBuildPath = Join-Path $scriptRoot 'arduino_build'
 $buildPath = Join-Path $scriptRoot ('arduino_build_work_' + $runStamp)
 $firmwareOutputDir = Join-Path $canonicalBuildPath 'firmware'
 $hexPath = Join-Path $firmwareOutputDir 'MazeMap.ino.hex'
+$mazeMapDllPath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeMap.dll'
 $testDllPath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeMapTest.dll'
+$simulationExePath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeSimulation.exe'
 $fqbn = 'teensy:avr:teensy41'
 $teensyBoardOptions = @('opt=o2lto')
 $teensyOptimizationProfile = 'O2 + LTO'
 $runStartedAt = Get-Date
+$mazeMapSourceRoot = Join-Path $repoRoot 'MazeMap\MazeMap'
+$mazeMapTestSourceRoot = Join-Path $repoRoot 'MazeMap\MazeMapTest'
+$mazeSimulationSourceRoot = Join-Path $repoRoot 'MazeMap\MazeSimulation'
 
 Assert-PathExists -Path $arduinoCli -Description 'Arduino CLI'
 Assert-PathExists -Path $vsDevCmd -Description 'Visual Studio developer command script'
@@ -188,10 +343,16 @@ Assert-PathExists -Path $vstest -Description 'VSTest console'
 Assert-PathExists -Path $sketchDir -Description 'Arduino sketch directory'
 Assert-PathExists -Path $eigenIncludeDir -Description 'Shared Eigen include directory'
 Assert-PathExists -Path $solutionPath -Description 'MazeMap solution'
+Assert-PathExists -Path $mazeMapSourceRoot -Description 'MazeMap source root'
+Assert-PathExists -Path $mazeMapTestSourceRoot -Description 'MazeMapTest source root'
+Assert-PathExists -Path $mazeSimulationSourceRoot -Description 'MazeSimulation source root'
 
 $eigenIncludeDir = (Resolve-Path -LiteralPath $eigenIncludeDir).Path
 $arduinoLibrariesDir = Ensure-ArduinoEigenLibrary -LibraryRoot $arduinoLibrariesDir -EigenSourceRoot $eigenIncludeDir
 $arduinoEigenLibraryDir = (Resolve-Path -LiteralPath $arduinoEigenLibraryDir).Path
+$mazeMapSourceCutoff = Get-LatestWriteTime -Roots @($mazeMapSourceRoot)
+$mazeMapTestSourceCutoff = Get-LatestWriteTime -Roots @($mazeMapSourceRoot, $mazeMapTestSourceRoot)
+$mazeSimulationSourceCutoff = Get-LatestWriteTime -Roots @($mazeSimulationSourceRoot)
 
 Push-Location $repoRoot
 try {
@@ -202,7 +363,8 @@ try {
     New-Item -ItemType Directory -Path $firmwareOutputDir -Force | Out-Null
 
     Write-Step 'Compiling the Teensy sketch'
-    Write-Host ("Teensy compile profile: {0} ({1})" -f $teensyOptimizationProfile, ($teensyBoardOptions -join ', ')) -ForegroundColor DarkCyan
+    Write-LogLine ("Teensy compile profile: {0} ({1})" -f $teensyOptimizationProfile, ($teensyBoardOptions -join ', ')) 'DarkCyan'
+    $teensyBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Invoke-External -FilePath $arduinoCli -Arguments @(
         'compile',
         '--clean',
@@ -214,26 +376,46 @@ try {
         '--output-dir', $firmwareOutputDir,
         $sketchDir
     )
+    $teensyBuildStopwatch.Stop()
 
-    $firmwareImage = Assert-ArtifactFresh -Path $hexPath -Description 'Compiled firmware image' -NotOlderThan $runStartedAt
-    Write-Host ("Built {0} ({1}, {2} bytes)" -f $firmwareImage.FullName, $firmwareImage.LastWriteTime, $firmwareImage.Length) -ForegroundColor Green
+    $firmwareImage = Assert-ArtifactNotOlderThan -Path $hexPath -Description 'Compiled firmware image' -NotOlderThan $runStartedAt
+    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $firmwareImage.FullName, $firmwareImage.LastWriteTime, $firmwareImage.Length) 'Green'
+    Write-LogLine ("Teensy compile completed in {0:n1}s" -f $teensyBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
-    Write-Step 'Rebuilding the Release solution'
-    Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild "{1}" /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:m' -f $vsDevCmd, $solutionPath)
+    Write-Step 'Building the Release solution'
+    Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
+    $hostBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild "{1}" /t:{2} /p:Configuration=Release /p:Platform=x64 /v:m' -f $vsDevCmd, $solutionPath, $HostBuildTarget)
+    $hostBuildStopwatch.Stop()
 
-    $testDll = Assert-ArtifactFresh -Path $testDllPath -Description 'Release test binary' -NotOlderThan $runStartedAt
-    Write-Host ("Built {0} ({1}, {2} bytes)" -f $testDll.FullName, $testDll.LastWriteTime, $testDll.Length) -ForegroundColor Green
+    $mazeMapDll = Assert-ArtifactNotOlderThan -Path $mazeMapDllPath -Description 'Release MazeMap host binary' -NotOlderThan $mazeMapSourceCutoff
+    $simulationExe = Assert-ArtifactNotOlderThan -Path $simulationExePath -Description 'Release MazeSimulation host binary' -NotOlderThan $mazeSimulationSourceCutoff
+    $testDll = Assert-ArtifactNotOlderThan -Path $testDllPath -Description 'Release test binary' -NotOlderThan $mazeMapTestSourceCutoff
+    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $mazeMapDll.FullName, $mazeMapDll.LastWriteTime, $mazeMapDll.Length) 'Green'
+    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $testDll.FullName, $testDll.LastWriteTime, $testDll.Length) 'Green'
+    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $simulationExe.FullName, $simulationExe.LastWriteTime, $simulationExe.Length) 'Green'
+    Write-LogLine ("Host build completed in {0:n1}s" -f $hostBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
     Write-Step 'Running the Release unit tests'
+    $testStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     Invoke-External -FilePath $vstest -Arguments @($testDll.FullName)
+    $testStopwatch.Stop()
+    Write-LogLine ("Release tests completed in {0:n1}s" -f $testStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
     Remove-StaleArduinoBuildDirectories -ScriptRoot $scriptRoot -PreservePaths @($canonicalBuildPath)
     Remove-DirectoryIfPresent -Path $buildPath
 
     Write-Step 'Build and test completed'
-    Write-Host ("Latest firmware image: {0}" -f $firmwareImage.FullName) -ForegroundColor Green
-    Write-Host ("Release test binary: {0}" -f $testDll.FullName) -ForegroundColor Green
+    Write-LogLine ("Latest firmware image: {0}" -f $firmwareImage.FullName) 'Green'
+    Write-LogLine ("Release test binary: {0}" -f $testDll.FullName) 'Green'
+    Write-LogLine ("Verify log: {0}" -f $LogFilePath) 'Green'
+}
+catch {
+    Write-LogLine ("ERROR: {0}" -f $_.Exception.Message) 'Red'
+    throw
 }
 finally {
+    Add-Content -LiteralPath $LogFilePath -Value '' -Encoding UTF8
+    Add-Content -LiteralPath $LogFilePath -Value ('End time: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff zzz')) -Encoding UTF8
     Pop-Location
 }

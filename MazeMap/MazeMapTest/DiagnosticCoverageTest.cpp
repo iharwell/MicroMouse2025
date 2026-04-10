@@ -280,6 +280,13 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(params.equivalentWheelInertiaKgM2 - 1.6e-5f) < 1.0e-10f);
 		}
 
+		TEST_METHOD(PlantParamsDefaultMatchesLatestLaunchThresholdFit)
+		{
+			const PlantParams params = PlantParams::Default();
+			Assert::IsTrue(std::fabs(params.rollingFrictionTorqueNm - 0.00372f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(params.viscousFrictionNmPerRadps - 0.0f) < 1.0e-9f);
+		}
+
 		TEST_METHOD(MotorEncoderDriveDefaultFactoriesUseSharedModelAndHardwareMap)
 		{
 			const MotorEncoderDrivePhysicalModel& model = MotorEncoderDrive::GetSharedPhysicalModel();

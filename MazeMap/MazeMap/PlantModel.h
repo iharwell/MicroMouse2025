@@ -158,12 +158,12 @@ namespace MazeMap
         uint16_t encoderCountsPerMotorRev;
 
         float drivetrainEfficiency = 1.0f;
-        // April 10, 2026 D:\open_floor_main.csv fit: 0.05 launch pulses stayed stuck,
-        // while the 0.08 launch pulse accelerated hard before impact. Earlier pre-UKF
-        // testing reached about 3 m/s in roughly 50 mm of real travel, so keep speed
-        // drag low enough that the model does not artificially cap that envelope.
-        float rollingFrictionTorqueNm = 0.0010f;
-        float viscousFrictionNmPerRadps = 3.0e-5f;
+        // April 10, 2026 latest testing-area open-floor launch fit (run_id=ofm_10696927)
+        // put the observed launch-motion threshold at 0.17. The apparent viscous term from
+        // that single-bin fit was slightly negative, so keep the speed-proportional drag at
+        // a physical nonnegative floor and move the threshold correction into rolling drag.
+        float rollingFrictionTorqueNm = 0.00372f;
+        float viscousFrictionNmPerRadps = 0.0f;
 
         float longitudinalTireStiffnessN = 6.0f;
         float corneringStiffnessFrontNPerRad = 18.0f;

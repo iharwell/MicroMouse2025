@@ -38,5 +38,53 @@ namespace MazeMap
         {
             Assert::IsTrue(MazeMap::kOpenFloorLaunchSettleMs > 0UL);
         }
+
+        TEST_METHOD(RecoveryAcceptanceRadiusIsFifteenMillimeters)
+        {
+            Assert::AreEqual(0.015f, MazeMap::kOpenFloorRecoveryAcceptanceRadiusM, 1.0e-6f);
+        }
+
+        TEST_METHOD(RecoveryLongitudinalDistanceUsesAcceptanceZoneBoundary)
+        {
+            const Eigen::Vector2f travelHeading = DirectionToUnitVector(MazeMap::Up);
+            const float distanceM = MazeMap::OpenFloorRecoverySignedLongitudinalDistanceToAcceptanceZoneM(
+                travelHeading,
+                0.0f,
+                0.040f);
+
+            Assert::AreEqual(0.025f, distanceM, 1.0e-6f);
+        }
+
+        TEST_METHOD(RecoveryLongitudinalDistanceAllowsBackwardTravel)
+        {
+            const Eigen::Vector2f travelHeading = DirectionToUnitVector(MazeMap::Up);
+            const float distanceM = MazeMap::OpenFloorRecoverySignedLongitudinalDistanceToAcceptanceZoneM(
+                travelHeading,
+                0.0f,
+                -0.040f);
+
+            Assert::AreEqual(-0.025f, distanceM, 1.0e-6f);
+        }
+
+        TEST_METHOD(RecoveryAxisMissUsesOnlyExcessBeyondAcceptanceRadius)
+        {
+            const Eigen::Vector2f travelHeading = DirectionToUnitVector(MazeMap::Up);
+            const float insideMissM = MazeMap::OpenFloorRecoverySignedLateralMissToAcceptanceZoneM(
+                travelHeading,
+                0.010f,
+                0.0f);
+            const float outsideMissM = MazeMap::OpenFloorRecoverySignedLateralMissToAcceptanceZoneM(
+                travelHeading,
+                0.020f,
+                0.0f);
+
+            Assert::AreEqual(0.0f, insideMissM, 1.0e-6f);
+            Assert::AreEqual(-0.005f, outsideMissM, 1.0e-6f);
+        }
+
+        TEST_METHOD(RecoveryArrivalHeadingToleranceIsOneDegree)
+        {
+            Assert::AreEqual(1.0f * DEG_TO_RAD_F, MazeMap::kOpenFloorRecoveryArrivalHeadingToleranceRad, 1.0e-6f);
+        }
     };
 }
