@@ -278,11 +278,5 @@ namespace MazeMap
             const PlantParams& params) const noexcept;
         float driveFrictionTorque(float wheelBankSpeedRadps, const PlantParams& params) const noexcept;
 
-    private:
-        ContactForces tireForces(
-            const WheelKinematics& kinematics,
-            const SlipTargets& targets,
-            const ControlInput& control,
-            const PlantParams& params) const noexcept;
     };
 }
