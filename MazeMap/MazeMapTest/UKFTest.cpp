@@ -770,6 +770,49 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(state(VehicleState::kPsi)) < 0.01f);
         }
 
+        TEST_METHOD(PlantModelStaticFrictionHoldsSubthresholdDriveAtRest)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const float staticWindowRadps = params.staticFrictionMaxSpeedMps / params.wheelRadiusM;
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.25f;
+            control.rightMotorCommand = 0.25f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            const VehicleState::StateVector atRest = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f);
+            const PlantDerivatives derivativesAtRest = plant.forwardStep(atRest, control, params);
+            Assert::AreEqual(0.0f, derivativesAtRest.stateDot(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(0.0f, derivativesAtRest.stateDot(VehicleState::kOmegaR), 1.0e-6f);
+
+            Assert::AreEqual(
+                params.staticFrictionTorqueNm,
+                plant.driveFrictionTorque(0.5f * staticWindowRadps, 1.0f, params),
+                1.0e-6f);
+            Assert::AreEqual(
+                -params.staticFrictionTorqueNm,
+                plant.driveFrictionTorque(-0.5f * staticWindowRadps, -1.0f, params),
+                1.0e-6f);
+            Assert::AreEqual(
+                params.rollingFrictionTorqueNm,
+                plant.driveFrictionTorque(1.1f * staticWindowRadps, 1.0f, params),
+                1.0e-6f);
+            Assert::AreEqual(
+                -params.rollingFrictionTorqueNm,
+                plant.driveFrictionTorque(-1.1f * staticWindowRadps, -1.0f, params),
+                1.0e-6f);
+        }
+
         TEST_METHOD(PlantModelIntegrateSingleLargeStepRemainsFiniteAndSymmetric)
         {
             PlantModel plant;
@@ -849,11 +892,17 @@ namespace MazeMap
             const float expectedLeftTorqueNm =
                 solution.leftContactTorqueNm +
                 (params.equivalentWheelInertiaKgM2 * solution.leftWheelAccelRadps2) +
-                plant.driveFrictionTorque(solution.leftWheelSpeedRadps, params);
+                plant.driveFrictionTorque(
+                    solution.leftWheelSpeedRadps,
+                    solution.leftContactTorqueNm + (params.equivalentWheelInertiaKgM2 * solution.leftWheelAccelRadps2),
+                    params);
             const float expectedRightTorqueNm =
                 solution.rightContactTorqueNm +
                 (params.equivalentWheelInertiaKgM2 * solution.rightWheelAccelRadps2) +
-                plant.driveFrictionTorque(solution.rightWheelSpeedRadps, params);
+                plant.driveFrictionTorque(
+                    solution.rightWheelSpeedRadps,
+                    solution.rightContactTorqueNm + (params.equivalentWheelInertiaKgM2 * solution.rightWheelAccelRadps2),
+                    params);
 
             Assert::AreEqual(expectedLeftTorqueNm, solution.leftWheelTorqueNm, 1.0e-6f);
             Assert::AreEqual(expectedRightTorqueNm, solution.rightWheelTorqueNm, 1.0e-6f);
@@ -896,12 +945,46 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
             Assert::IsTrue(std::isfinite(achieved.longitudinalAccelMps2));
             Assert::IsTrue(std::isfinite(achieved.yawAccelRadps2));
+            Assert::AreEqual(achieved.longitudinalAccelMps2, solution.commandedLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(achieved.yawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-6f);
             Assert::AreEqual(desiredLongitudinalAccelMps2, achieved.longitudinalAccelMps2, 0.05f);
             Assert::AreEqual(desiredYawAccelRadps2, achieved.yawAccelRadps2, 0.20f);
             Assert::AreEqual(expectedLeftWheelAccelRadps2, solution.leftWheelAccelRadps2, 1.0e-5f);
             Assert::AreEqual(expectedRightWheelAccelRadps2, solution.rightWheelAccelRadps2, 1.0e-5f);
             Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaL)));
             Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaR)));
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetUsesFiveMillisecondResponseByDefault)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(1.20f, 1.215f, 0.40f, 0.420f, params);
+
+            Assert::IsFalse(solution.tractionLimited);
+            Assert::AreEqual(3.0f, solution.commandedLongitudinalAccelMps2, 0.05f);
+            Assert::AreEqual(4.0f, solution.commandedYawAccelRadps2, 0.20f);
+            Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) <= 1.0f);
+            Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
+        }
+
+        TEST_METHOD(PlantModelClosedLoopVelocityTargetKeepsTenPercentTractionReserveWhenLimited)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const DriveCommandSolution tractionLimited =
+                plant.solveDriveCommandsForVelocityTarget(0.0f, 0.20f, 0.0f, 0.0f, params);
+            const DriveCommandSolution reserved =
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(0.0f, 0.20f, 0.0f, 0.0f, params);
+
+            Assert::IsTrue(tractionLimited.tractionLimited);
+            Assert::IsFalse(reserved.tractionLimited);
+            Assert::IsTrue(reserved.commandedLongitudinalAccelMps2 < tractionLimited.commandedLongitudinalAccelMps2);
+            Assert::AreEqual(
+                0.90f * tractionLimited.commandedLongitudinalAccelMps2,
+                reserved.commandedLongitudinalAccelMps2,
+                0.25f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsDoesNotTractionLimitWellInsideNominalEnvelope)
@@ -968,6 +1051,21 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
             Assert::IsTrue(std::isfinite(achieved.longitudinalAccelMps2));
             Assert::IsTrue(std::fabs(achieved.longitudinalAccelMps2) <= (params.combinedAccelPeakMps2 + 1.0f));
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetTractionLimitsAggressiveStep)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const float requestedLongitudinalAccelMps2 = (0.20f - 0.0f) / 0.005f;
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(0.0f, 0.20f, 0.0f, 0.0f, params);
+
+            Assert::IsTrue(solution.tractionLimited);
+            Assert::IsTrue(solution.commandedLongitudinalAccelMps2 < requestedLongitudinalAccelMps2);
+            Assert::IsTrue(std::fabs(solution.commandedLongitudinalAccelMps2) <= (params.combinedAccelPeakMps2 + 1.0f));
+            Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) <= 1.0f);
+            Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsBeyondPeakRemainsStable)
@@ -1434,6 +1532,9 @@ namespace MazeMap
                            lastEncoderLine.find("omega_left_radps=1.2") != std::string::npos);
 
             Assert::IsFalse(findMessage("ukf_dump_params_mass_geometry").empty());
+            const std::string staticFrictionLine = findMessage("ukf_dump_params_static_friction");
+            Assert::IsTrue(staticFrictionLine.find("static_friction_torque_nm=") != std::string::npos);
+            Assert::IsTrue(staticFrictionLine.find("static_friction_max_speed_mps=0.005") != std::string::npos);
             Assert::IsFalse(findMessage("ukf_dump_imu_extrinsics").empty());
         }
 

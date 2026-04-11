@@ -429,6 +429,17 @@ namespace MazeMap
         if (!EmitDebugTextLine(
                 context,
                 sink,
+                "ukf_dump_params_static_friction",
+                "static_friction_torque_nm=%.9g;static_friction_max_speed_mps=%.9g",
+                static_cast<double>(_params.staticFrictionTorqueNm),
+                static_cast<double>(_params.staticFrictionMaxSpeedMps)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
                 "ukf_dump_params_misc",
                 "velocity_epsilon_mps=%.9g;force_epsilon_n=%.9g;fan_downforce_at_full_duty_n=%.9g;no_hit_range_m=%.9g",
                 static_cast<double>(_params.velocityEpsilonMps),

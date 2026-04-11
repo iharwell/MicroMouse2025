@@ -85,6 +85,24 @@ namespace
             params.supplyVoltageV;
     }
 
+    float ResolveVelocityTargetResponseTimeS(float responseTimeS) noexcept
+    {
+        return
+            (std::isfinite(responseTimeS) && (responseTimeS > 0.0f)) ?
+            responseTimeS :
+            MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS;
+    }
+
+    float ResolveClosedLoopTractionReserveScale(float tractionReserveScale) noexcept
+    {
+        return
+            (std::isfinite(tractionReserveScale) &&
+             (tractionReserveScale > 0.0f) &&
+             (tractionReserveScale <= 1.0f)) ?
+            tractionReserveScale :
+            MazeMap::PlantModel::kClosedLoopTractionReserveScale;
+    }
+
     float SignedDirection(float preferredValue, float fallbackValue) noexcept
     {
         if (preferredValue > 1.0e-6f)
@@ -125,6 +143,34 @@ namespace
             (std::isfinite(params.wheelRadiusM) && (params.wheelRadiusM > 0.0f)) ?
             params.wheelRadiusM :
             0.0f;
+    }
+
+    float StaticFrictionSpeedWindowMps(const PlantParams& params) noexcept
+    {
+        return
+            (std::isfinite(params.staticFrictionMaxSpeedMps) && (params.staticFrictionMaxSpeedMps > 0.0f)) ?
+            params.staticFrictionMaxSpeedMps :
+            0.0f;
+    }
+
+    float StaticFrictionSpeedThresholdRadps(const PlantParams& params) noexcept
+    {
+        const float wheelRadiusM = SafeWheelRadius(params);
+        const float speedWindowMps = StaticFrictionSpeedWindowMps(params);
+        return (wheelRadiusM > 0.0f) ? (speedWindowMps / wheelRadiusM) : 0.0f;
+    }
+
+    float ConfiguredStaticFrictionTorqueNm(const PlantParams& params) noexcept
+    {
+        return
+            (std::isfinite(params.staticFrictionTorqueNm) && (params.staticFrictionTorqueNm > 0.0f)) ?
+            params.staticFrictionTorqueNm :
+            0.0f;
+    }
+
+    bool IsWithinStaticFrictionWindow(float wheelBankSpeedRadps, const PlantParams& params) noexcept
+    {
+        return std::fabs(wheelBankSpeedRadps) <= StaticFrictionSpeedThresholdRadps(params);
     }
 
     float EffectiveLongitudinalMassKg(const PlantParams& params) noexcept
@@ -456,6 +502,7 @@ namespace MazeMap
     PlantParams PlantParams::Default() noexcept
     {
         PlantParams params{};
+        constexpr float kReliableLaunchDriveCommand = 0.30f;
         const VehiclePhysicalModel& physicalModel = Vehicle::GetPhysicalModel();
         const MotorEncoderDrivePhysicalModel& driveModel = MotorEncoderDrive::GetSharedPhysicalModel();
         params.massKg = physicalModel.massKg;
@@ -475,6 +522,28 @@ namespace MazeMap
             (params.driveResistanceOhms > 0.0f) ?
             (params.supplyVoltageV / params.driveResistanceOhms) :
             2.4f;
+        if ((params.driveResistanceOhms > 0.0f) &&
+            (params.torqueConstantNmPerA > 0.0f) &&
+            (params.gearRatio > 0.0f) &&
+            (params.supplyVoltageV > 0.0f))
+        {
+            float breakawayCurrentA =
+                (kReliableLaunchDriveCommand * params.supplyVoltageV) /
+                params.driveResistanceOhms;
+            if (params.motorCurrentLimitA > 0.0f)
+            {
+                breakawayCurrentA =
+                    (std::clamp)(breakawayCurrentA, -params.motorCurrentLimitA, params.motorCurrentLimitA);
+            }
+
+            const float breakawayLoadCurrentA =
+                (std::max)(0.0f, breakawayCurrentA - params.noLoadCurrentA);
+            params.staticFrictionTorqueNm =
+                params.torqueConstantNmPerA *
+                breakawayLoadCurrentA *
+                params.gearRatio *
+                params.drivetrainEfficiency;
+        }
         params.frontLeftSensor = Vehicle::GetFrontLeftSensorExtrinsics();
         params.frontRightSensor = Vehicle::GetFrontRightSensorExtrinsics();
         params.sideLeftSensor = Vehicle::GetSideLeftSensorExtrinsics();
@@ -545,8 +614,27 @@ namespace MazeMap
             driveTorqueFromCommand(control.leftMotorCommand, omegaLeftRadps, batteryVoltageV, params);
         const float rightDriveTorqueNm =
             driveTorqueFromCommand(control.rightMotorCommand, omegaRightRadps, batteryVoltageV, params);
-        const float leftFrictionTorqueNm = driveFrictionTorque(omegaLeftRadps, params);
-        const float rightFrictionTorqueNm = driveFrictionTorque(omegaRightRadps, params);
+        const float leftPreFrictionWheelTorqueNm = leftDriveTorqueNm - (wheelRadiusM * leftBankForwardForceN);
+        const float rightPreFrictionWheelTorqueNm = rightDriveTorqueNm - (wheelRadiusM * rightBankForwardForceN);
+        const float leftFrictionTorqueNm =
+            driveFrictionTorque(omegaLeftRadps, leftPreFrictionWheelTorqueNm, params);
+        const float rightFrictionTorqueNm =
+            driveFrictionTorque(omegaRightRadps, rightPreFrictionWheelTorqueNm, params);
+        const float staticFrictionTorqueNm = ConfiguredStaticFrictionTorqueNm(params);
+        float leftNetWheelTorqueNm = leftPreFrictionWheelTorqueNm - leftFrictionTorqueNm;
+        float rightNetWheelTorqueNm = rightPreFrictionWheelTorqueNm - rightFrictionTorqueNm;
+        if (IsWithinStaticFrictionWindow(omegaLeftRadps, params) &&
+            (std::fabs(leftPreFrictionWheelTorqueNm) <= staticFrictionTorqueNm) &&
+            (SignedDirection(leftPreFrictionWheelTorqueNm, 0.0f) != 0.0f))
+        {
+            leftNetWheelTorqueNm = 0.0f;
+        }
+        if (IsWithinStaticFrictionWindow(omegaRightRadps, params) &&
+            (std::fabs(rightPreFrictionWheelTorqueNm) <= staticFrictionTorqueNm) &&
+            (SignedDirection(rightPreFrictionWheelTorqueNm, 0.0f) != 0.0f))
+        {
+            rightNetWheelTorqueNm = 0.0f;
+        }
 
         StateVector rollingStateDot = StateVector::Zero();
         const Eigen::Vector2f heading = HeadingUnitFromYaw(psi);
@@ -566,12 +654,8 @@ namespace MazeMap
         rollingStateDot(VehicleState::kR) =
             (yawMomentNm / yawInertiaKgM2) -
             ((yawDampingNmPerRadps / yawInertiaKgM2) * yawRateRadps);
-        rollingStateDot(VehicleState::kOmegaL) =
-            (leftDriveTorqueNm - (wheelRadiusM * leftBankForwardForceN) - leftFrictionTorqueNm) /
-            wheelInertiaKgM2;
-        rollingStateDot(VehicleState::kOmegaR) =
-            (rightDriveTorqueNm - (wheelRadiusM * rightBankForwardForceN) - rightFrictionTorqueNm) /
-            wheelInertiaKgM2;
+        rollingStateDot(VehicleState::kOmegaL) = leftNetWheelTorqueNm / wheelInertiaKgM2;
+        rollingStateDot(VehicleState::kOmegaR) = rightNetWheelTorqueNm / wheelInertiaKgM2;
         rollingStateDot(VehicleState::kBgz) = 0.0f;
 
         derivatives.stateDot = motionWeight * rollingStateDot;
@@ -861,14 +945,18 @@ namespace MazeMap
              ((rightBankForceCommandN / longitudinalStiffnessSafeN) *
               (std::max)(std::fabs(rightBankForwardVelocityMps), rollingRegularizationMps))) /
             wheelRadiusM;
-        const float leftWheelTorqueNm =
+        const float leftWheelTorqueRequestNm =
             leftContactTorqueNm +
-            (wheelInertiaKgM2 * leftWheelAccelRadps2) +
-            driveFrictionTorque(leftWheelSpeedRadps, params);
-        const float rightWheelTorqueNm =
+            (wheelInertiaKgM2 * leftWheelAccelRadps2);
+        const float rightWheelTorqueRequestNm =
             rightContactTorqueNm +
-            (wheelInertiaKgM2 * rightWheelAccelRadps2) +
-            driveFrictionTorque(rightWheelSpeedRadps, params);
+            (wheelInertiaKgM2 * rightWheelAccelRadps2);
+        const float leftWheelTorqueNm =
+            leftWheelTorqueRequestNm +
+            driveFrictionTorque(leftWheelSpeedRadps, leftWheelTorqueRequestNm, params);
+        const float rightWheelTorqueNm =
+            rightWheelTorqueRequestNm +
+            driveFrictionTorque(rightWheelSpeedRadps, rightWheelTorqueRequestNm, params);
 
         solution.leftSlipRatio = leftBankForceCommandN / longitudinalStiffnessSafeN;
         solution.rightSlipRatio = rightBankForceCommandN / longitudinalStiffnessSafeN;
@@ -901,6 +989,8 @@ namespace MazeMap
         const StateVector validationState =
             BuildMotionState(forwardVelocityMps, yawRateRadps, leftWheelSpeedRadps, rightWheelSpeedRadps);
         const PlantDerivatives achievedDerivatives = forwardStep(validationState, solution.control, params);
+        solution.commandedLongitudinalAccelMps2 = achievedDerivatives.longitudinalAccelMps2;
+        solution.commandedYawAccelRadps2 = achievedDerivatives.yawAccelRadps2;
         solution.longitudinalAccelErrorMps2 =
             achievedDerivatives.longitudinalAccelMps2 - desiredLongitudinalAccelMps2;
         solution.yawAccelErrorRadps2 =
@@ -910,6 +1000,93 @@ namespace MazeMap
             (std::fabs(solution.longitudinalAccelErrorMps2) <= 0.05f) &&
             (std::fabs(solution.yawAccelErrorRadps2) <= 0.2f);
         return solution;
+    }
+
+    DriveCommandSolution PlantModel::solveDriveCommandsForVelocityTarget(
+        float currentForwardVelocityMps,
+        float targetForwardVelocityMps,
+        float currentYawRateRadps,
+        float targetYawRateRadps,
+        const PlantParams& params,
+        float fanDutyCycle,
+        float batteryVoltageV,
+        float responseTimeS) const noexcept
+    {
+        const float resolvedResponseTimeS = ResolveVelocityTargetResponseTimeS(responseTimeS);
+        const float desiredLongitudinalAccelMps2 =
+            (targetForwardVelocityMps - currentForwardVelocityMps) / resolvedResponseTimeS;
+        const float desiredYawAccelRadps2 =
+            (targetYawRateRadps - currentYawRateRadps) / resolvedResponseTimeS;
+        return solveDriveCommands(
+            currentForwardVelocityMps,
+            desiredLongitudinalAccelMps2,
+            currentYawRateRadps,
+            desiredYawAccelRadps2,
+            params,
+            fanDutyCycle,
+            batteryVoltageV);
+    }
+
+    DriveCommandSolution PlantModel::solveClosedLoopDriveCommands(
+        float forwardVelocityMps,
+        float desiredLongitudinalAccelMps2,
+        float yawRateRadps,
+        float desiredYawAccelRadps2,
+        const PlantParams& params,
+        float fanDutyCycle,
+        float batteryVoltageV,
+        float tractionReserveScale) const noexcept
+    {
+        const float resolvedReserveScale = ResolveClosedLoopTractionReserveScale(tractionReserveScale);
+        const DriveCommandSolution tractionLimitedSolution =
+            solveDriveCommands(
+                forwardVelocityMps,
+                desiredLongitudinalAccelMps2,
+                yawRateRadps,
+                desiredYawAccelRadps2,
+                params,
+                fanDutyCycle,
+                batteryVoltageV);
+        if (!tractionLimitedSolution.tractionLimited || (resolvedReserveScale >= 1.0f))
+        {
+            return tractionLimitedSolution;
+        }
+
+        return solveDriveCommands(
+            forwardVelocityMps,
+            resolvedReserveScale * tractionLimitedSolution.commandedLongitudinalAccelMps2,
+            yawRateRadps,
+            resolvedReserveScale * tractionLimitedSolution.commandedYawAccelRadps2,
+            params,
+            fanDutyCycle,
+            batteryVoltageV);
+    }
+
+    DriveCommandSolution PlantModel::solveClosedLoopDriveCommandsForVelocityTarget(
+        float currentForwardVelocityMps,
+        float targetForwardVelocityMps,
+        float currentYawRateRadps,
+        float targetYawRateRadps,
+        const PlantParams& params,
+        float fanDutyCycle,
+        float batteryVoltageV,
+        float responseTimeS,
+        float tractionReserveScale) const noexcept
+    {
+        const float resolvedResponseTimeS = ResolveVelocityTargetResponseTimeS(responseTimeS);
+        const float desiredLongitudinalAccelMps2 =
+            (targetForwardVelocityMps - currentForwardVelocityMps) / resolvedResponseTimeS;
+        const float desiredYawAccelRadps2 =
+            (targetYawRateRadps - currentYawRateRadps) / resolvedResponseTimeS;
+        return solveClosedLoopDriveCommands(
+            currentForwardVelocityMps,
+            desiredLongitudinalAccelMps2,
+            currentYawRateRadps,
+            desiredYawAccelRadps2,
+            params,
+            fanDutyCycle,
+            batteryVoltageV,
+            tractionReserveScale);
     }
 
     float PlantModel::driveTorqueFromCommand(
@@ -987,13 +1164,19 @@ namespace MazeMap
         return (std::clamp)(appliedVoltageV / appliedBatteryVoltageV, -1.0f, 1.0f);
     }
 
-    float PlantModel::driveFrictionTorque(float wheelBankSpeedRadps, const PlantParams& params) const noexcept
+    float PlantModel::driveFrictionTorque(
+        float wheelBankSpeedRadps,
+        float wheelTorqueRequestNm,
+        const PlantParams& params) const noexcept
     {
-        const float sign =
-            (wheelBankSpeedRadps > 0.0f) ? 1.0f :
-            (wheelBankSpeedRadps < 0.0f) ? -1.0f :
-            0.0f;
-        return (params.rollingFrictionTorqueNm * sign) +
-            (params.viscousFrictionNmPerRadps * wheelBankSpeedRadps);
+        const float viscousFrictionTorqueNm = params.viscousFrictionNmPerRadps * wheelBankSpeedRadps;
+        if (IsWithinStaticFrictionWindow(wheelBankSpeedRadps, params))
+        {
+            const float sign = SignedDirection(wheelTorqueRequestNm, wheelBankSpeedRadps);
+            return (ConfiguredStaticFrictionTorqueNm(params) * sign) + viscousFrictionTorqueNm;
+        }
+
+        const float sign = SignedDirection(wheelBankSpeedRadps, wheelTorqueRequestNm);
+        return (params.rollingFrictionTorqueNm * sign) + viscousFrictionTorqueNm;
     }
 }

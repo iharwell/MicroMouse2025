@@ -1563,23 +1563,6 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
             launchOutOfBoundsStartMs = 0UL;
             launchOutOfBoundsActive = false;
         }
-        else
-        {
-            const unsigned long nowMs = millis();
-            if (!launchOutOfBoundsActive)
-            {
-                launchOutOfBoundsStartMs = nowMs;
-                launchOutOfBoundsActive = true;
-            }
-            else if (MazeMap::HasOpenFloorOutOfBoundsGraceElapsed(launchOutOfBoundsStartMs, nowMs))
-            {
-                return LogSectionFaultAndFail(
-                    labels,
-                    cycle,
-                    MazeMap::OpenFloorFaultCode::LaunchBoundExceeded,
-                    "Launch bound exceeded");
-            }
-        }
         _drive.CommandOpenLoopRaw(signedDriveCommand, signedDriveCommand);
         stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
         const bool estimatorStationary = stationaryCheckState.IsStationary();
@@ -1596,10 +1579,6 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
     }
 
     _drive.Brake();
-    if (!RecoverToMarker(labels, labels.startMarkerId, DiagnosticConfig::kCharacterizationRecoverySpeedMps, 2500UL))
-    {
-        return false;
-    }
     if (launchFlippedStationary && (MazeMap::kOpenFloorLaunchSettleMs > 0UL))
     {
         OpenFloorMeasurementLabels settleLabels = labels;
@@ -1630,10 +1609,6 @@ bool OpenFloorMeasurementController::RunLaunchSection()
     OpenFloorMeasurementLabels transitionLabels{};
     transitionLabels.sectionId = MazeMap::OpenFloorSectionId::Sec20Launch;
     transitionLabels.startMarkerId = MazeMap::OpenFloorMarkerId::C;
-    if (!TraverseToMarker(transitionLabels, transitionLabels.startMarkerId))
-    {
-        return false;
-    }
     uint16_t repeatIndex = 0U;
     for (float magnitude : MazeMap::kOpenFloorLaunchDriveMagnitudes)
     {

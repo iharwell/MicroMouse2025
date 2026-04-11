@@ -284,6 +284,8 @@ namespace MazeMap
 		{
 			const PlantParams params = PlantParams::Default();
 			Assert::IsTrue(std::fabs(params.rollingFrictionTorqueNm - 0.00372f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(params.staticFrictionTorqueNm - 0.007028315f) < 1.0e-6f);
+			Assert::IsTrue(std::fabs(params.staticFrictionMaxSpeedMps - 0.005f) < 1.0e-9f);
 			Assert::IsTrue(std::fabs(params.viscousFrictionNmPerRadps - 0.0f) < 1.0e-9f);
 		}
 
@@ -2186,6 +2188,24 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ScaleWheelControlValue(1.50f, 0.0f) - 1.50f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ScaleWheelControlValue(0.25f, -1.0f) - 0.25f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ScaleWheelControlValue(std::numeric_limits<float>::quiet_NaN(), 2.0f)) < 1.0e-6f);
+		}
+
+		TEST_METHOD(ClampWheelDriveCommandUsesFiniteUnitRange)
+		{
+			Assert::AreEqual(0.40f, ClampWheelDriveCommand(0.40f), 1.0e-6f);
+			Assert::AreEqual(1.0f, ClampWheelDriveCommand(1.40f), 1.0e-6f);
+			Assert::AreEqual(-1.0f, ClampWheelDriveCommand(-1.40f), 1.0e-6f);
+			Assert::AreEqual(0.0f, ClampWheelDriveCommand(std::numeric_limits<float>::quiet_NaN()), 1.0e-6f);
+		}
+
+		TEST_METHOD(ShouldAccumulateWheelVelocityIntegralOnlyAllowsUnwindingAtSaturation)
+		{
+			Assert::IsTrue(ShouldAccumulateWheelVelocityIntegral(0.80f, 0.80f, 0.10f));
+			Assert::IsFalse(ShouldAccumulateWheelVelocityIntegral(1.20f, 1.0f, 0.10f));
+			Assert::IsTrue(ShouldAccumulateWheelVelocityIntegral(1.20f, 1.0f, -0.10f));
+			Assert::IsFalse(ShouldAccumulateWheelVelocityIntegral(-1.20f, -1.0f, -0.10f));
+			Assert::IsTrue(ShouldAccumulateWheelVelocityIntegral(-1.20f, -1.0f, 0.10f));
+			Assert::IsFalse(ShouldAccumulateWheelVelocityIntegral(std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.10f));
 		}
 
 		TEST_METHOD(MotorModelUnitConversionsMatch1717T006SRDatasheet)

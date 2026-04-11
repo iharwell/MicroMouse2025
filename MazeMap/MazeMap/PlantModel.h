@@ -129,6 +129,9 @@ namespace MazeMap
         float rightContactTorqueNm = 0.0f;
         float tractionScale = 1.0f;
         bool tractionLimited = false;
+        // Body accelerations validated from the returned control command at the solution operating point.
+        float commandedLongitudinalAccelMps2 = 0.0f;
+        float commandedYawAccelRadps2 = 0.0f;
         float longitudinalAccelErrorMps2 = 0.0f;
         float yawAccelErrorRadps2 = 0.0f;
         bool converged = false;
@@ -159,10 +162,14 @@ namespace MazeMap
 
         float drivetrainEfficiency = 1.0f;
         // April 10, 2026 latest testing-area open-floor launch fit (run_id=ofm_10696927)
-        // put the observed launch-motion threshold at 0.17. The apparent viscous term from
-        // that single-bin fit was slightly negative, so keep the speed-proportional drag at
-        // a physical nonnegative floor and move the threshold correction into rolling drag.
+        // left the rolling-region drag at about 0.00372 Nm once launch breakaway was split
+        // out into the explicit static-friction term below.
         float rollingFrictionTorqueNm = 0.00372f;
+        // April 11, 2026 initial breakaway estimate: assume about 0.30 normalized drive is
+        // needed to overcome stiction reliably. PlantModel converts the +/-0.005 m/s window
+        // into wheel-bank rad/s internally before applying this torque.
+        float staticFrictionTorqueNm = 0.0f;
+        float staticFrictionMaxSpeedMps = 0.005f;
         float viscousFrictionNmPerRadps = 0.0f;
 
         float longitudinalTireStiffnessN = 6.0f;
@@ -238,6 +245,8 @@ namespace MazeMap
     {
     public:
         using StateVector = VehicleState::StateVector;
+        static constexpr float kDefaultVelocityTargetResponseTimeS = 0.005f;
+        static constexpr float kClosedLoopTractionReserveScale = 0.90f;
 
         PlantDerivatives forwardStep(
             const StateVector& state,
@@ -272,6 +281,39 @@ namespace MazeMap
             const PlantParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) const noexcept;
+        // Returns the traction-limited control command that drives the current body rates toward the target
+        // body rates over the requested response horizon. The default horizon is 5 ms.
+        DriveCommandSolution solveDriveCommandsForVelocityTarget(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = 0.005f) const noexcept;
+        // Returns the issued closed-loop feedforward command. If the raw request reaches the traction limit,
+        // this backs the validated body accelerations off by the requested reserve scale so the outer PI loop
+        // retains command headroom.
+        DriveCommandSolution solveClosedLoopDriveCommands(
+            float forwardVelocityMps,
+            float desiredLongitudinalAccelMps2,
+            float yawRateRadps,
+            float desiredYawAccelRadps2,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float tractionReserveScale = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = 0.005f,
+            float tractionReserveScale = 0.90f) const noexcept;
         float driveTorqueFromCommand(
             float motorCommand,
             float wheelBankSpeedRadps,
@@ -282,7 +324,10 @@ namespace MazeMap
             float wheelBankSpeedRadps,
             float batteryVoltageV,
             const PlantParams& params) const noexcept;
-        float driveFrictionTorque(float wheelBankSpeedRadps, const PlantParams& params) const noexcept;
+        float driveFrictionTorque(
+            float wheelBankSpeedRadps,
+            float wheelTorqueRequestNm,
+            const PlantParams& params) const noexcept;
 
     };
 }

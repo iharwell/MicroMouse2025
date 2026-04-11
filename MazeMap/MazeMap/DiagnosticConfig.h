@@ -31,7 +31,7 @@ namespace MazeMap::DiagnosticConfig
     // increase it if flush overhead limits logging throughput.
     constexpr uint32_t kLogFlushPeriodMs = 250000U;
     // [Medium] Launch repeats per command magnitude and sign in SEC_20_LAUNCH.
-    constexpr uint8_t kLaunchRepeatsPerMagnitude = 5U;
+    constexpr uint8_t kLaunchRepeatsPerMagnitude = 10U;
     // [Medium] Straight repeats per speed bin and direction in SEC_30_STRAIGHT.
     constexpr uint8_t kStraightRepeatsPerSpeed = 3U;
     // [Medium] Yaw repeats per primitive-speed pair in SEC_40_YAW.

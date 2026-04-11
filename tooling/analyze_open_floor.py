@@ -20,6 +20,8 @@ from typing import Iterable
 
 from open_floor_plant_fit import TirePlantFitSummary
 from open_floor_plant_fit import summarize_tire_plant_fit
+from open_floor_launch_floor import LaunchFloorSummary
+from open_floor_launch_floor import summarize_launch_floor
 from open_floor_recovery import DEFAULT_CONTROL_LOG_NAME
 from open_floor_recovery import DistributionSummary
 from open_floor_recovery import IMU_POSITION_BODY_X_M
@@ -191,6 +193,7 @@ def analyze_main_csv(
 ) -> tuple[
     StationarySummary,
     list[LaunchMagnitudeSummary],
+    LaunchFloorSummary | None,
     RepeatabilitySummary,
     dict[str, float],
     TirePlantFitSummary | None,
@@ -358,6 +361,11 @@ def analyze_main_csv(
             )
         )
 
+    launch_floor_summary = summarize_launch_floor(
+        dict(launch_rows_by_repeat),
+        stationary_summary.accel_body_y.mean,
+    )
+
     series_means: dict[tuple[float, int], tuple[float, float]] = {}
     for key, values in launch_series_by_command_and_index.items():
         series_means[key] = (
@@ -407,6 +415,7 @@ def analyze_main_csv(
     return (
         stationary_summary,
         launch_summaries,
+        launch_floor_summary,
         repeatability_summary,
         suggestions,
         tire_plant_fit,
@@ -501,6 +510,7 @@ def main() -> int:
     (
         stationary,
         launch_summaries,
+        launch_floor_summary,
         repeatability,
         suggestions,
         tire_plant_fit,
@@ -541,6 +551,59 @@ def main() -> int:
             f"max_drift={summary.max_pose_drift_mm:.3f} mm"
         )
     print()
+
+    if launch_floor_summary is not None:
+        print("Launch floor summary")
+        print(
+            "method=LaunchPulse only; backlash candidates are repeats that never sustain encoder-derived body speed above the "
+            "quantized-speed floor long enough to count as chassis motion; clear motion also requires inertial agreement"
+        )
+        print(
+            f"speed_quantum_mps={launch_floor_summary.speed_quantum_mps:.6f}, "
+            f"sustained_speed_threshold_mps={launch_floor_summary.sustained_speed_threshold_mps:.6f}, "
+            f"clear_motion_min_time_s={launch_floor_summary.clear_motion_min_time_s:.3f}, "
+            f"backlash_repeats={launch_floor_summary.backlash_repeat_count}"
+        )
+        if launch_floor_summary.backlash_net_encoder_counts_stats is not None:
+            print_distribution_summary(
+                "backlash_net_encoder_counts",
+                launch_floor_summary.backlash_net_encoder_counts_stats,
+                "counts",
+            )
+        if launch_floor_summary.backlash_net_pose_drift_mm_stats is not None:
+            print_distribution_summary(
+                "backlash_net_pose_drift_mm",
+                launch_floor_summary.backlash_net_pose_drift_mm_stats,
+                "mm",
+            )
+        if launch_floor_summary.backlash_peak_inertial_speed_mps_stats is not None:
+            print_distribution_summary(
+                "backlash_peak_inertial_speed_mps",
+                launch_floor_summary.backlash_peak_inertial_speed_mps_stats,
+                "m/s",
+            )
+        if launch_floor_summary.backlash_peak_inertial_displacement_mm_stats is not None:
+            print_distribution_summary(
+                "backlash_peak_inertial_displacement_mm",
+                launch_floor_summary.backlash_peak_inertial_displacement_mm_stats,
+                "mm",
+            )
+        print(
+            f"observed_clear_breakaway_command={format_optional_float(launch_floor_summary.observed_clear_breakaway_command, 2)}, "
+            f"effective_launch_floor_command={format_optional_float(launch_floor_summary.effective_launch_floor_command, 2)}, "
+            f"nonmonotonic_clear_motion={int(launch_floor_summary.nonmonotonic_clear_motion)}"
+        )
+        for summary in launch_floor_summary.command_summaries:
+            print(
+                f"abs_cmd={summary.abs_command:.2f}: clear_motion={summary.clear_motion_count}/{summary.repeat_count}, "
+                f"median_peak_u={summary.median_peak_abs_linear_speed_mps:.4f} m/s, "
+                f"median_time_above_threshold_s={summary.median_time_above_sustained_speed_threshold_s:.4f}, "
+                f"median_counts={summary.median_net_signed_encoder_counts:.1f}, "
+                f"median_pose_drift={summary.median_net_signed_pose_drift_mm:.3f} mm, "
+                f"median_peak_inertial_speed={summary.median_peak_signed_inertial_speed_mps:.4f} m/s, "
+                f"median_peak_inertial_disp={summary.median_peak_signed_inertial_displacement_mm:.3f} mm"
+            )
+        print()
 
     print("Repeated-launch repeatability")
     print(

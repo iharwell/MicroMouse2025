@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <algorithm>
 
 namespace MazeMap
 {
@@ -38,5 +39,45 @@ namespace MazeMap
         }
 
         return baseValue * NormalizeWheelControlScale(scale);
+    }
+
+    inline float ClampWheelDriveCommand(float command) noexcept
+    {
+        if (!std::isfinite(command))
+        {
+            return 0.0f;
+        }
+
+        return (std::clamp)(command, -1.0f, 1.0f);
+    }
+
+    inline bool ShouldAccumulateWheelVelocityIntegral(
+        float unclampedCommand,
+        float clampedCommand,
+        float errorMps) noexcept
+    {
+        if (!std::isfinite(unclampedCommand) ||
+            !std::isfinite(clampedCommand) ||
+            !std::isfinite(errorMps))
+        {
+            return false;
+        }
+
+        if (std::fabs(unclampedCommand - clampedCommand) <= 1.0e-6f)
+        {
+            return true;
+        }
+
+        if (clampedCommand >= 1.0f)
+        {
+            return errorMps < 0.0f;
+        }
+
+        if (clampedCommand <= -1.0f)
+        {
+            return errorMps > 0.0f;
+        }
+
+        return true;
     }
 }

@@ -8,6 +8,8 @@ What it does:
 
 - Computes stationary-hold noise statistics from `SEC_10_STATIC` / `STATIC_HOLD`.
 - Computes launch-repeatability statistics from `SEC_20_LAUNCH` / `OPEN_LOOP_LAUNCH`.
+- Separates backlash-like launch twitches from sustained chassis motion using `LaunchPulse` only and reports:
+  the speed quantization floor, backlash envelopes, first clear breakaway command, effective launch floor, and per-command clear-launch hit rate.
 - Computes current-run launch-based tire-plant estimates when `logging.txt` is available:
   run ID, apparent equivalent wheel inertia, apparent rolling friction, apparent viscous drag, launch motion threshold, and whether the current card can identify lateral tire parameters at all.
 - Extracts recovery-turn geometry from raw sensors only:
@@ -23,6 +25,8 @@ What it does:
 Method notes:
 
 - Launch repeatability is computed from the nonzero-command window only.
+- Launch-floor classification derives a backlash envelope from repeats that never sustain encoder-derived body speed above the quantized speed floor for at least `10 ms`.
+- A launch only counts as clear chassis motion when that sustained-speed test agrees with both inertial evidence and encoder/pose drift beyond the backlash envelope.
 - Positive and negative launch passes are sign-normalized before comparison.
 - Repeats are aligned by sample index within each active launch window, then residual sigmas are measured against the per-command mean waveform.
 - Recovery-turn angle estimation explicitly excludes UKF pose and integrates an independently debiased raw gyro over a sensor-only turn window.
@@ -53,7 +57,8 @@ Typical use:
 2. Compare the suggested sigmas to the canonical owners in `SrUkfCore.h`.
 3. Use the recovery-turn summary to check the actual raw-sensor turn angle before trusting any nominal `180 deg` assumption.
 4. Use the per-command launch summary to decide whether a plant or launch-assist change is actually supported, or whether the run only justifies estimator-noise changes.
-5. Use the tire-plant section only to update parameters that the current card actually excites; treat any output marked unstable or not identifiable as diagnostic-only.
+5. Use the launch-floor section when you need a backlash-safe breakaway estimate; if the tool flags nonmonotonic clear motion, treat the reported floor as provisional and prefer another clean card before retuning launch thresholds.
+6. Use the tire-plant section only to update parameters that the current card actually excites; treat any output marked unstable or not identifiable as diagnostic-only.
 
 Caveats:
 

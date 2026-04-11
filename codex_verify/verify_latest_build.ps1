@@ -385,7 +385,7 @@ try {
     Write-Step 'Building the Release solution'
     Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
     $hostBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild "{1}" /t:{2} /p:Configuration=Release /p:Platform=x64 /v:m' -f $vsDevCmd, $solutionPath, $HostBuildTarget)
+    Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild "{1}" /m /t:{2} /p:Configuration=Release /p:Platform=x64 /v:m' -f $vsDevCmd, $solutionPath, $HostBuildTarget)
     $hostBuildStopwatch.Stop()
 
     $mazeMapDll = Assert-ArtifactNotOlderThan -Path $mazeMapDllPath -Description 'Release MazeMap host binary' -NotOlderThan $mazeMapSourceCutoff

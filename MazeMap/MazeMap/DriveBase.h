@@ -65,6 +65,7 @@ inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MotionLim
 class DriveBase
 {
 private:
+    struct ClosedLoopVelocityCommand;
     bool startSet = false;
 public:
     static constexpr uint16_t kModeClosedLoop = 1u << 0;
@@ -282,6 +283,10 @@ public:
         SyncPoseEstimate();
     }
 
+    // CommandVelocity assumes callers want the maximum acceleration the platform can support if no additional
+    // acceleration parameter is supplied. The default path asks PlantModel for the 90%-of-traction-limit
+    // closed-loop command that would hit the requested speed and yaw-rate targets over a 5 ms response horizon,
+    // evaluates the implied acceleration limit, and forwards through the desiredAcceleration_mps2 overload below.
     void CommandVelocity(float linearSpeedMps, float angularSpeedRadps, float dtSeconds)
     {
         if (_estimatorFaulted)
@@ -290,31 +295,45 @@ public:
             return;
         }
 
-        const float previousLinearCommandMps = _lastLinearCommandMps;
-        const float previousAngularCommandRadps = _lastAngularCommandRadps;
+        const ClosedLoopVelocityCommand command =
+            BuildClosedLoopVelocityCommandForVelocityTarget(linearSpeedMps, angularSpeedRadps);
+        const float desiredAccelerationMps2 =
+            (std::max)(std::fabs(command.leftTargetAccelMps2), std::fabs(command.rightTargetAccelMps2));
+        CommandVelocity(linearSpeedMps, angularSpeedRadps, desiredAccelerationMps2, dtSeconds);
+    }
+
+    void CommandVelocity(
+        float linearSpeedMps,
+        float angularSpeedRadps,
+        float desiredAccelerationMps2,
+        float dtSeconds)
+    {
+        if (_estimatorFaulted)
+        {
+            Brake();
+            return;
+        }
+
+        const ClosedLoopVelocityCommand command =
+            BuildClosedLoopVelocityCommand(
+                linearSpeedMps,
+                angularSpeedRadps,
+                desiredAccelerationMps2);
+        CommandVelocityInternal(linearSpeedMps, angularSpeedRadps, command, dtSeconds);
+    }
+
+    void CommandVelocityInternal(
+        float linearSpeedMps,
+        float angularSpeedRadps,
+        const ClosedLoopVelocityCommand& command,
+        float dtSeconds)
+    {
         _lastLinearCommandMps = linearSpeedMps;
         _lastAngularCommandRadps = angularSpeedRadps;
-        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(linearSpeedMps, angularSpeedRadps);
-        const float leftTargetMps = linearSpeedMps + (0.5f * effectiveTrackWidthM * angularSpeedRadps);
-        const float rightTargetMps = linearSpeedMps - (0.5f * effectiveTrackWidthM * angularSpeedRadps);
-        float linearTargetAccelMps2 = 0.0f;
-        float angularTargetAccelRadps2 = 0.0f;
-        float leftTargetAccelMps2 = 0.0f;
-        float rightTargetAccelMps2 = 0.0f;
-        if (_targetVelocityInitialized && (dtSeconds > 0.0f))
-        {
-            linearTargetAccelMps2 = (linearSpeedMps - previousLinearCommandMps) / dtSeconds;
-            angularTargetAccelRadps2 = (angularSpeedRadps - previousAngularCommandRadps) / dtSeconds;
-            const float previousEffectiveTrackWidthM =
-                MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(previousLinearCommandMps, previousAngularCommandRadps);
-            const float previousLeftTargetMps =
-                previousLinearCommandMps + (0.5f * previousEffectiveTrackWidthM * previousAngularCommandRadps);
-            const float previousRightTargetMps =
-                previousLinearCommandMps - (0.5f * previousEffectiveTrackWidthM * previousAngularCommandRadps);
-            leftTargetAccelMps2 = (leftTargetMps - previousLeftTargetMps) / dtSeconds;
-            rightTargetAccelMps2 = (rightTargetMps - previousRightTargetMps) / dtSeconds;
-        }
-        _targetVelocityInitialized = true;
+        const float leftTargetMps = command.leftTargetMps;
+        const float rightTargetMps = command.rightTargetMps;
+        const float leftTargetAccelMps2 = command.leftTargetAccelMps2;
+        const float rightTargetAccelMps2 = command.rightTargetAccelMps2;
         const float leftMeasuredMps = _leftEncoderVelocityMps;
         const float rightMeasuredMps = _rightEncoderVelocityMps;
         const unsigned long nowMs = millis();
@@ -323,46 +342,57 @@ public:
 
         const float leftErrorMps = leftTargetMps - leftMeasuredMps;
         const float rightErrorMps = rightTargetMps - rightMeasuredMps;
+        const float leftFeedforwardCommand = command.leftFeedforwardCommand;
+        const float rightFeedforwardCommand = command.rightFeedforwardCommand;
         const float integralLimit = GetWheelIntegralLimit();
-
-        _leftIntegral = (std::clamp)(_leftIntegral + (leftErrorMps * dtSeconds), -integralLimit, integralLimit);
-        _rightIntegral = (std::clamp)(_rightIntegral + (rightErrorMps * dtSeconds), -integralLimit, integralLimit);
-
-        const MazeMap::PlantParams& params = _ukf.ukf().params();
-        const MazeMap::VehicleState::StateVector& estimatedState = _ukf.ukf().state();
-        const MeasuredKinematics measured = GetMeasuredKinematics();
-        const float presentLinearSpeedMps =
-            std::isfinite(estimatedState(MazeMap::VehicleState::kU)) ?
-            estimatedState(MazeMap::VehicleState::kU) :
-            measured.linearSpeedMps;
-        const float presentYawRateRadps =
-            std::isfinite(estimatedState(MazeMap::VehicleState::kR)) ?
-            estimatedState(MazeMap::VehicleState::kR) :
-            measured.angularSpeedRadps;
-        MazeMap::PlantModel plantModel;
-        const MazeMap::DriveCommandSolution feedforwardSolution =
-            plantModel.solveDriveCommands(
-                presentLinearSpeedMps,
-                linearTargetAccelMps2,
-                presentYawRateRadps,
-                angularTargetAccelRadps2,
-                params,
-                GetMissionFanDutyCycle(),
-                0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage()));
-        const float leftFeedforwardCommand = feedforwardSolution.control.leftMotorCommand;
-        const float rightFeedforwardCommand = feedforwardSolution.control.rightMotorCommand;
-        float leftCommand = VelocityCommandFromError(
+        float leftCommandUnclamped = ComputeVelocityCommandFromErrorUnclamped(
             leftFeedforwardCommand,
             leftTargetMps,
             leftTargetAccelMps2,
             leftErrorMps,
             _leftIntegral);
-        float rightCommand = VelocityCommandFromError(
+        float rightCommandUnclamped = ComputeVelocityCommandFromErrorUnclamped(
             rightFeedforwardCommand,
             rightTargetMps,
             rightTargetAccelMps2,
             rightErrorMps,
             _rightIntegral);
+        float leftCommand = MazeMap::ClampWheelDriveCommand(leftCommandUnclamped);
+        float rightCommand = MazeMap::ClampWheelDriveCommand(rightCommandUnclamped);
+
+        // Freeze the wheel integrator when the wheel is already saturated in the same direction as the speed error.
+        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
+        {
+            if (MazeMap::ShouldAccumulateWheelVelocityIntegral(leftCommandUnclamped, leftCommand, leftErrorMps))
+            {
+                _leftIntegral = (std::clamp)(_leftIntegral + (leftErrorMps * dtSeconds), -integralLimit, integralLimit);
+                leftCommandUnclamped = ComputeVelocityCommandFromErrorUnclamped(
+                    leftFeedforwardCommand,
+                    leftTargetMps,
+                    leftTargetAccelMps2,
+                    leftErrorMps,
+                    _leftIntegral);
+                leftCommand = MazeMap::ClampWheelDriveCommand(leftCommandUnclamped);
+            }
+
+            if (MazeMap::ShouldAccumulateWheelVelocityIntegral(rightCommandUnclamped, rightCommand, rightErrorMps))
+            {
+                _rightIntegral = (std::clamp)(_rightIntegral + (rightErrorMps * dtSeconds), -integralLimit, integralLimit);
+                rightCommandUnclamped = ComputeVelocityCommandFromErrorUnclamped(
+                    rightFeedforwardCommand,
+                    rightTargetMps,
+                    rightTargetAccelMps2,
+                    rightErrorMps,
+                    _rightIntegral);
+                rightCommand = MazeMap::ClampWheelDriveCommand(rightCommandUnclamped);
+            }
+        }
+        else
+        {
+            _leftIntegral = (std::clamp)(_leftIntegral, -integralLimit, integralLimit);
+            _rightIntegral = (std::clamp)(_rightIntegral, -integralLimit, integralLimit);
+        }
+
         float leftLaunchAssistFloor = 0.0f;
         float rightLaunchAssistFloor = 0.0f;
         if (leftLaunchAssistActive)
@@ -467,7 +497,6 @@ public:
         _lastLinearCommandMps = 0.0f;
         _lastAngularCommandRadps = 0.0f;
         ResetLaunchAssist();
-        _targetVelocityInitialized = false;
         _lastLeftFeedforwardCommand = 0.0f;
         _lastRightFeedforwardCommand = 0.0f;
         _lastLeftFeedbackCommand = leftDriveCommand;
@@ -493,7 +522,6 @@ public:
         _lastLinearCommandMps = 0.0f;
         _lastAngularCommandRadps = 0.0f;
         ResetLaunchAssist();
-        _targetVelocityInitialized = false;
         _lastLeftFeedforwardCommand = 0.0f;
         _lastRightFeedforwardCommand = 0.0f;
         _lastLeftFeedbackCommand = 0.0f;
@@ -1078,8 +1106,16 @@ private:
     uint16_t _lastModeFlags = kModeBraking;
     uint16_t _lastSaturationFlags = 0u;
     bool _encoderObservationValid = false;
-    bool _targetVelocityInitialized = false;
     MazeMap::WheelControlProfile _wheelControlProfile;
+    struct ClosedLoopVelocityCommand
+    {
+        float leftTargetMps = 0.0f;
+        float rightTargetMps = 0.0f;
+        float leftTargetAccelMps2 = 0.0f;
+        float rightTargetAccelMps2 = 0.0f;
+        float leftFeedforwardCommand = 0.0f;
+        float rightFeedforwardCommand = 0.0f;
+    };
     struct WheelLaunchAssistState
     {
         bool active = false;
@@ -1091,7 +1127,118 @@ private:
     bool _estimatorFaulted = false;
     char _estimatorFaultReason[64] = {};
 
-    float VelocityCommandFromError(
+    void GetVelocityCommandOperatingPoint(
+        float& presentLinearSpeedMps,
+        float& presentYawRateRadps,
+        float& batteryVoltageV) const
+    {
+        const MazeMap::VehicleState::StateVector& estimatedState = _ukf.ukf().state();
+        const MeasuredKinematics measured = GetMeasuredKinematics();
+        presentLinearSpeedMps =
+            std::isfinite(estimatedState(MazeMap::VehicleState::kU)) ?
+            estimatedState(MazeMap::VehicleState::kU) :
+            measured.linearSpeedMps;
+        presentYawRateRadps =
+            std::isfinite(estimatedState(MazeMap::VehicleState::kR)) ?
+            estimatedState(MazeMap::VehicleState::kR) :
+            measured.angularSpeedRadps;
+        batteryVoltageV = 0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage());
+    }
+
+    ClosedLoopVelocityCommand BuildClosedLoopVelocityCommandFromSolution(
+        float linearSpeedMps,
+        float angularSpeedRadps,
+        const MazeMap::DriveCommandSolution& solution) const
+    {
+        ClosedLoopVelocityCommand command{};
+        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(linearSpeedMps, angularSpeedRadps);
+        command.leftTargetMps = linearSpeedMps + (0.5f * effectiveTrackWidthM * angularSpeedRadps);
+        command.rightTargetMps = linearSpeedMps - (0.5f * effectiveTrackWidthM * angularSpeedRadps);
+        command.leftTargetAccelMps2 =
+            solution.commandedLongitudinalAccelMps2 + (0.5f * effectiveTrackWidthM * solution.commandedYawAccelRadps2);
+        command.rightTargetAccelMps2 =
+            solution.commandedLongitudinalAccelMps2 - (0.5f * effectiveTrackWidthM * solution.commandedYawAccelRadps2);
+        command.leftFeedforwardCommand = solution.control.leftMotorCommand;
+        command.rightFeedforwardCommand = solution.control.rightMotorCommand;
+        return command;
+    }
+
+    ClosedLoopVelocityCommand BuildClosedLoopVelocityCommandForVelocityTarget(
+        float linearSpeedMps,
+        float angularSpeedRadps) const
+    {
+        float presentLinearSpeedMps = 0.0f;
+        float presentYawRateRadps = 0.0f;
+        float batteryVoltageV = 0.0f;
+        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+
+        MazeMap::PlantModel plantModel;
+        const MazeMap::DriveCommandSolution solution =
+            plantModel.solveClosedLoopDriveCommandsForVelocityTarget(
+                presentLinearSpeedMps,
+                linearSpeedMps,
+                presentYawRateRadps,
+                angularSpeedRadps,
+                _ukf.ukf().params(),
+                GetMissionFanDutyCycle(),
+                batteryVoltageV);
+        return BuildClosedLoopVelocityCommandFromSolution(linearSpeedMps, angularSpeedRadps, solution);
+    }
+
+    ClosedLoopVelocityCommand BuildClosedLoopVelocityCommand(
+        float linearSpeedMps,
+        float angularSpeedRadps,
+        float desiredAccelerationMps2) const
+    {
+        float presentLinearSpeedMps = 0.0f;
+        float presentYawRateRadps = 0.0f;
+        float batteryVoltageV = 0.0f;
+        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+
+        const MeasuredKinematics measured = GetMeasuredKinematics();
+        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(linearSpeedMps, angularSpeedRadps);
+        const float targetLeftMps = linearSpeedMps + (0.5f * effectiveTrackWidthM * angularSpeedRadps);
+        const float targetRightMps = linearSpeedMps - (0.5f * effectiveTrackWidthM * angularSpeedRadps);
+        const float accelerationLimitMps2 =
+            (std::isfinite(desiredAccelerationMps2) && (desiredAccelerationMps2 > 0.0f)) ?
+            desiredAccelerationMps2 :
+            0.0f;
+        float leftTargetAccelMps2 = 0.0f;
+        float rightTargetAccelMps2 = 0.0f;
+        if ((effectiveTrackWidthM > 0.0f) && (accelerationLimitMps2 > 0.0f))
+        {
+            leftTargetAccelMps2 =
+                (std::clamp)(
+                    (targetLeftMps - measured.leftVelocityMps) / MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS,
+                    -accelerationLimitMps2,
+                    accelerationLimitMps2);
+            rightTargetAccelMps2 =
+                (std::clamp)(
+                    (targetRightMps - measured.rightVelocityMps) / MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS,
+                    -accelerationLimitMps2,
+                    accelerationLimitMps2);
+        }
+
+        const float desiredLongitudinalAccelMps2 = 0.5f * (leftTargetAccelMps2 + rightTargetAccelMps2);
+        const float desiredYawAccelRadps2 =
+            (effectiveTrackWidthM > 0.0f) ?
+            ((leftTargetAccelMps2 - rightTargetAccelMps2) / effectiveTrackWidthM) :
+            0.0f;
+
+        MazeMap::PlantModel plantModel;
+        const MazeMap::DriveCommandSolution solution =
+            plantModel.solveClosedLoopDriveCommands(
+                presentLinearSpeedMps,
+                desiredLongitudinalAccelMps2,
+                presentYawRateRadps,
+                desiredYawAccelRadps2,
+                _ukf.ukf().params(),
+                GetMissionFanDutyCycle(),
+                batteryVoltageV);
+        return BuildClosedLoopVelocityCommandFromSolution(linearSpeedMps, angularSpeedRadps, solution);
+    }
+
+    float ComputeVelocityCommandFromErrorUnclamped(
         float feedforwardCommand,
         float targetSpeedMps,
         float targetAccelMps2,
@@ -1107,7 +1254,7 @@ private:
         command += ComputeWheelAccelerationResponseCommand(targetAccelMps2, errorMps);
         command += GetWheelVelocityKp() * errorMps;
         command += GetWheelVelocityKi() * integral;
-        return (std::clamp)(command, -1.0f, 1.0f);
+        return command;
     }
 
     float ComputeWheelAccelerationResponseCommand(float targetAccelMps2, float errorMps) const
