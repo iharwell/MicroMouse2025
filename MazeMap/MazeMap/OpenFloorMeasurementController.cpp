@@ -1,3 +1,4 @@
+#include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 #include "BootModeDescriptor.h"
 #include "BootModeRegistry.h"

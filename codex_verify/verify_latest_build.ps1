@@ -1,6 +1,8 @@
 param(
     [ValidateSet('Build', 'Rebuild')]
     [string]$HostBuildTarget = 'Build',
+    [ValidateSet('Incremental', 'ProjectDefault')]
+    [string]$HostLtcgMode = 'Incremental',
     [string]$LogFilePath
 )
 
@@ -115,6 +117,45 @@ function Assert-PathExists {
     }
 }
 
+function Test-IsCodexShell {
+    return ($env:CODEX_SHELL -eq '1') -or (-not [string]::IsNullOrWhiteSpace($env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE))
+}
+
+function Assert-SupportedVerifyLauncher {
+    if (-not (Test-IsCodexShell)) {
+        return
+    }
+
+    if ($env:MM_VERIFY_LAUNCHED_FROM_CMD -eq '1') {
+        return
+    }
+
+    $wrapperPath = Join-Path $scriptRoot 'verify_latest_build.cmd'
+    throw ('ELEVATION_REQUIRED: Inside Codex, launch "' +
+        $wrapperPath +
+        '" and request elevation for that command. Do not invoke verify_latest_build.ps1 directly from Codex or bypass it with direct msbuild, arduino-cli, or vstest commands.')
+}
+
+function Assert-UnsandboxedVerifyEnvironment {
+    $microsoftSdksRoot = Join-Path $env:LOCALAPPDATA 'Microsoft SDKs'
+    Assert-PathExists -Path $microsoftSdksRoot -Description 'Microsoft SDKs directory'
+
+    try {
+        Get-ChildItem -LiteralPath $microsoftSdksRoot -Force -ErrorAction Stop | Select-Object -First 1 | Out-Null
+    }
+    catch {
+        $isAccessDenied = ($_.Exception -is [System.UnauthorizedAccessException]) -or
+            ($_.Exception.Message -match 'Access to the path .* is denied')
+        if ($isAccessDenied) {
+            throw ('ELEVATION_REQUIRED: verify_latest_build.ps1 must be run elevated outside the Codex sandbox because the sandbox blocks access to "' +
+                $microsoftSdksRoot +
+                '", which forces a full host rebuild. Re-run this verification through verify_latest_build.cmd with elevated permissions; do not bypass it with direct msbuild, arduino-cli, or vstest commands.')
+        }
+
+        throw
+    }
+}
+
 function Invoke-External {
     param(
         [Parameter(Mandatory = $true)]
@@ -165,6 +206,22 @@ function Invoke-CmdChain {
     finally {
         Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
+}
+
+function New-MsBuildArgumentString {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    return ($Arguments | ForEach-Object {
+        if ($_ -match '\s') {
+            '"' + $_ + '"'
+        }
+        else {
+            $_
+        }
+    }) -join ' '
 }
 
 function Remove-DirectoryIfPresent {
@@ -356,6 +413,14 @@ $mazeSimulationSourceCutoff = Get-LatestWriteTime -Roots @($mazeSimulationSource
 
 Push-Location $repoRoot
 try {
+    Write-Step 'Checking verify launcher'
+    Assert-SupportedVerifyLauncher
+    Write-LogLine 'Verify launcher check passed.' 'DarkCyan'
+
+    Write-Step 'Checking verify environment'
+    Assert-UnsandboxedVerifyEnvironment
+    Write-LogLine 'Host build environment access check passed.' 'DarkCyan'
+
     Remove-StaleArduinoBuildDirectories -ScriptRoot $scriptRoot -PreservePaths @($canonicalBuildPath)
     Remove-DirectoryIfPresent -Path $canonicalBuildPath
     Remove-DirectoryIfPresent -Path $buildPath
@@ -384,8 +449,20 @@ try {
 
     Write-Step 'Building the Release solution'
     Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
+    Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
+    $hostMsBuildArguments = @(
+        $solutionPath,
+        '/m',
+        ('/t:' + $HostBuildTarget),
+        '/p:Configuration=Release',
+        '/p:Platform=x64',
+        '/v:m'
+    )
+    if ($HostLtcgMode -eq 'Incremental') {
+        $hostMsBuildArguments += '/p:LinkTimeCodeGeneration=UseFastLinkTimeCodeGeneration'
+    }
     $hostBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild "{1}" /m /t:{2} /p:Configuration=Release /p:Platform=x64 /v:m' -f $vsDevCmd, $solutionPath, $HostBuildTarget)
+    Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild {1}' -f $vsDevCmd, (New-MsBuildArgumentString -Arguments $hostMsBuildArguments))
     $hostBuildStopwatch.Stop()
 
     $mazeMapDll = Assert-ArtifactNotOlderThan -Path $mazeMapDllPath -Description 'Release MazeMap host binary' -NotOlderThan $mazeMapSourceCutoff

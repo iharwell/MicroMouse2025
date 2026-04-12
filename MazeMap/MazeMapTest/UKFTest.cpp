@@ -252,6 +252,27 @@ namespace MazeMap
             const auto dumpLines = CollectDebugDumpLines(core);
             return ExtractNamedFloat(FindProcessNoiseRowMessage(dumpLines, rowName), rowName);
         }
+
+        std::size_t FindFirstDumpLineIndexContaining(
+            const std::vector<std::pair<std::string, std::string>>& dumpLines,
+            const char* token)
+        {
+            if (token == nullptr)
+            {
+                return dumpLines.size();
+            }
+
+            for (std::size_t index = 0; index < dumpLines.size(); ++index)
+            {
+                if ((dumpLines[index].first.find(token) != std::string::npos) ||
+                    (dumpLines[index].second.find(token) != std::string::npos))
+                {
+                    return index;
+                }
+            }
+
+            return dumpLines.size();
+        }
     }
 
     TEST_CLASS(UKFTest)
@@ -1490,17 +1511,10 @@ namespace MazeMap
                     }
                     return count;
                 };
-            auto findMessage =
-                [&dumpLines](const char* type)
+            auto findLineIndexContaining =
+                [&dumpLines](const char* token)
                 {
-                    for (const auto& line : dumpLines)
-                    {
-                        if (line.first == type)
-                        {
-                            return line.second;
-                        }
-                    }
-                    return std::string();
+                    return FindFirstDumpLineIndexContaining(dumpLines, token);
                 };
 
             Assert::IsTrue(dumpLines.size() >= 42U);
@@ -1511,31 +1525,54 @@ namespace MazeMap
             Assert::AreEqual(static_cast<std::size_t>(2U), countType("ukf_dump_front_noise_sqrt_row"));
             Assert::AreEqual(static_cast<std::size_t>(1U), countType("ukf_dump_side_noise_sqrt_row"));
 
-            const std::string stateLine = findMessage("ukf_dump_state");
-            Assert::IsTrue(stateLine.find("px_m=") != std::string::npos);
+            const std::size_t stateIndex = findLineIndexContaining("px_m=");
+            const std::size_t predictionReferenceIndex = findLineIndexContaining("have_prediction_reference=true");
+            const std::size_t lastControlIndex = findLineIndexContaining("left_motor_command=0.25");
+            const std::size_t lastEncoderIndex = findLineIndexContaining("total_left_counts=8");
+            const std::size_t massGeometryIndex = findLineIndexContaining("mass_kg=");
+            const std::size_t driveElectricalIndex = findLineIndexContaining("supply_voltage_v=");
+            const std::size_t tireFrictionIndex = findLineIndexContaining("rolling_friction_torque_nm=");
+            const std::size_t staticFrictionIndex = findLineIndexContaining("static_friction_torque_nm=");
+            const std::size_t imuExtrinsicsIndex = findLineIndexContaining("gyro_z_sign=");
+
+            Assert::IsTrue(stateIndex < dumpLines.size());
+            Assert::IsTrue(predictionReferenceIndex < dumpLines.size());
+            Assert::IsTrue(lastControlIndex < dumpLines.size());
+            Assert::IsTrue(lastEncoderIndex < dumpLines.size());
+            Assert::IsTrue(massGeometryIndex < dumpLines.size());
+            Assert::IsTrue(driveElectricalIndex < dumpLines.size());
+            Assert::IsTrue(tireFrictionIndex < dumpLines.size());
+            Assert::IsTrue(staticFrictionIndex < dumpLines.size());
+            Assert::IsTrue(imuExtrinsicsIndex < dumpLines.size());
+
+            Assert::IsTrue(stateIndex < predictionReferenceIndex);
+            Assert::IsTrue(predictionReferenceIndex < lastControlIndex);
+            Assert::IsTrue(lastControlIndex < lastEncoderIndex);
+            Assert::IsTrue(lastEncoderIndex < massGeometryIndex);
+            Assert::IsTrue(massGeometryIndex < driveElectricalIndex);
+            Assert::IsTrue(driveElectricalIndex < tireFrictionIndex);
+            Assert::IsTrue(tireFrictionIndex < staticFrictionIndex);
+            Assert::IsTrue(staticFrictionIndex < imuExtrinsicsIndex);
+
+            const std::string& stateLine = dumpLines[stateIndex].second;
             Assert::IsTrue(stateLine.find("bgz_radps=") != std::string::npos);
 
-            const std::string predictionReferenceLine = findMessage("ukf_dump_prediction_reference");
-            Assert::IsTrue(predictionReferenceLine.find("have_prediction_reference=true") != std::string::npos);
-
-            const std::string lastControlLine = findMessage("ukf_dump_last_control");
-            Assert::IsTrue(lastControlLine.find("left_motor_command=0.25") != std::string::npos);
+            const std::string& lastControlLine = dumpLines[lastControlIndex].second;
             Assert::IsTrue(lastControlLine.find("right_motor_command=0.349999994") != std::string::npos ||
                            lastControlLine.find("right_motor_command=0.35") != std::string::npos);
             Assert::IsTrue(lastControlLine.find("battery_voltage_v=7.94999981") != std::string::npos ||
                            lastControlLine.find("battery_voltage_v=7.95") != std::string::npos);
 
-            const std::string lastEncoderLine = findMessage("ukf_dump_last_encoder_obs");
-            Assert::IsTrue(lastEncoderLine.find("total_left_counts=8") != std::string::npos);
+            const std::string& lastEncoderLine = dumpLines[lastEncoderIndex].second;
             Assert::IsTrue(lastEncoderLine.find("total_right_counts=9") != std::string::npos);
             Assert::IsTrue(lastEncoderLine.find("omega_left_radps=1.20000005") != std::string::npos ||
                            lastEncoderLine.find("omega_left_radps=1.2") != std::string::npos);
 
-            Assert::IsFalse(findMessage("ukf_dump_params_mass_geometry").empty());
-            const std::string staticFrictionLine = findMessage("ukf_dump_params_static_friction");
-            Assert::IsTrue(staticFrictionLine.find("static_friction_torque_nm=") != std::string::npos);
-            Assert::IsTrue(staticFrictionLine.find("static_friction_max_speed_mps=0.005") != std::string::npos);
-            Assert::IsFalse(findMessage("ukf_dump_imu_extrinsics").empty());
+            const std::string& staticFrictionLine = dumpLines[staticFrictionIndex].second;
+            Assert::AreEqual(
+                0.005f,
+                ExtractNamedFloat(staticFrictionLine, "static_friction_max_speed_mps"),
+                1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCoreRejectsInvalidMergedImuUpdate)

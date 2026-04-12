@@ -195,7 +195,9 @@
     <ClCompile Include="HistoricalMazePathFinderTest.cpp" />
     <ClCompile Include="ManeuverPathFinderTest.cpp" />
     <ClCompile Include="MazeMapApplicationTest.cpp" />
-    <ClCompile Include="MazeMapRuntimeHelperTest.cpp" />
+    <ClCompile Include="MazeMapRuntimeHelperTest.cpp">
+      <ObjectFileName>$(IntDir)MazeMapRuntimeHelperTest.obj</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="MazeMapSharedRuntimeTest.cpp" />
     <ClCompile Include="..\MazeMap\MmLog.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -204,7 +206,9 @@
     <ClCompile Include="MazeMapTest.cpp" />
     <ClCompile Include="MazeMaskTest.cpp" />
     <ClCompile Include="MazeTest.cpp" />
-    <ClCompile Include="OpenFloorMeasurementSpecTest.cpp" />
+    <ClCompile Include="OpenFloorMeasurementSpecTest.cpp">
+      <ObjectFileName>$(IntDir)OpenFloorMeasurementSpecTest.obj</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="PathFinderTest.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
@@ -214,7 +218,9 @@
     </ClCompile>
     <ClCompile Include="RelativeDirectionalDistanceTest.cpp" />
     <ClCompile Include="SearchRunPlannerTest.cpp" />
-    <ClCompile Include="UKFTest.cpp" />
+    <ClCompile Include="UKFTest.cpp">
+      <ObjectFileName>$(IntDir)UKFTest.obj</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="Vector2fTest.cpp" />
   </ItemGroup>
   <ItemGroup>

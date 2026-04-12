@@ -307,22 +307,28 @@
     <ClCompile Include="MmLog.cpp" />
     <ClCompile Include="MouseUkfFacade.cpp" />
     <ClCompile Include="AuxMeasurementController.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ObjectFileName>$(IntDir)AuxMeasurementController.obj</ObjectFileName>
+      <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="FrontWallCharacterizationController.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ObjectFileName>$(IntDir)FrontWallCharacterizationController.obj</ObjectFileName>
+      <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="WallSensorLedCalibrationController.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ObjectFileName>$(IntDir)WallSensorLedCalibrationController.obj</ObjectFileName>
+      <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="DiagnosticController.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ObjectFileName>$(IntDir)DiagnosticController.obj</ObjectFileName>
+      <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="OpenFloorMeasurementController.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ObjectFileName>$(IntDir)OpenFloorMeasurementController.obj</ObjectFileName>
+      <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MazeMapMissionController.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ObjectFileName>$(IntDir)MazeMapMissionController.obj</ObjectFileName>
+      <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MissionHostedModeBase.cpp" />
     <ClCompile Include="MissionRunMode.cpp" />
