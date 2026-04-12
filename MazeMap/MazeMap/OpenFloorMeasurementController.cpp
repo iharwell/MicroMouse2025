@@ -1961,10 +1961,6 @@ bool OpenFloorMeasurementController::ExecuteSmoothTurn(
     {
         return Fail("Smooth-turn primitive mapping unavailable");
     }
-    if (!TraverseToMarker(labels, labels.startMarkerId))
-    {
-        return false;
-    }
     if (!BeginMainSection(labels))
     {
         return Fail("Failed to write section start marker");

@@ -9,8 +9,6 @@
 /.tmp/
 /.vs/
 /tooling/tmp*/
-/Maze Files Archive
-/scripts
 
 /codex_verify/arduino_build/
 /codex_verify/arduino_build_work_*/
@@ -22,6 +20,9 @@
 /codex_verify/vstest_blame/
 /codex_verify/*.exe
 /codex_verify/*.log
+
+/scripts
+/Maze Files Archive
 
 /build*.log
 /debug.log
