@@ -1202,14 +1202,6 @@ bool OpenFloorMeasurementController::HandleMeasurementCaptureFault(
             MazeMap::OpenFloorFaultCode::EstimatorFault,
             "Estimator fault during open-floor measurement");
     }
-    if (cycle.workspaceViolation)
-    {
-        return LogSectionFaultAndFail(
-            labels,
-            cycle,
-            MazeMap::OpenFloorFaultCode::WorkspaceViolation,
-            "Workspace violation during open-floor measurement");
-    }
     return Fail("Open-floor control-cycle capture failed");
 }
 
@@ -1467,13 +1459,6 @@ bool OpenFloorMeasurementController::RunTimingBlock()
                     MazeMap::OpenFloorFaultCode::EstimatorFault,
                     "Estimator fault during timing capture");
             }
-            if (cycle.workspaceViolation)
-            {
-                return LogTimingFaultAndFail(
-                    cycle,
-                    MazeMap::OpenFloorFaultCode::WorkspaceViolation,
-                    "Workspace violation during timing capture");
-            }
             return Fail("Open-floor timing capture failed");
         }
 
@@ -1714,7 +1699,8 @@ bool OpenFloorMeasurementController::ExecuteStraightDistance(
         labels.progressNorm = (std::clamp)(traveledM / distanceM, 0.0f, 1.0f);
         labels.phaseId = StraightPhaseForProgress(labels.progressNorm);
 
-        if ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
+        if ((remainingM <= Config::kDistanceToleranceM)
+            && (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
             _drive.Brake();
             if (!LogCycle(labels, cycle))

@@ -270,6 +270,9 @@
     <ClInclude Include="MmLog.h">
       <Filter>Header Files\MmLog</Filter>
     </ClInclude>
+    <ClInclude Include="LoopController.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
     <ClInclude Include="MotionTargetProjection.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -418,6 +421,9 @@
     </ClCompile>
     <ClCompile Include="Kinematics.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="LoopController.cpp">
+      <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="Maneuver.cpp">
       <Filter>Source Files</Filter>
