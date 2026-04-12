@@ -9,10 +9,16 @@
 /codex_verify
 /codex_verify/arduino_build/firmware
 /MazeMap/MazeMapTest/x64
+/TestResults
+/__pycache__
 /.vs
 /.tmp
 /TestResults
 /Maze Files Archive
 /scripts
+*.hex
+*.elf
+*.lst
+*.lib
 *.obj
 *.pch
