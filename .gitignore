@@ -15,12 +15,17 @@
 /codex_verify/arduino_build/
 /codex_verify/arduino_build_work_*/
 /codex_verify/arduino_data/
+/codex_verify/arduino_downloads/
 /codex_verify/edge_pdf_profile/
 /codex_verify/int/
 /codex_verify/logs/
 /codex_verify/vstest_blame/
 /codex_verify/*.exe
 /codex_verify/*.log
+
+/build*.log
+/debug.log
+/logging.txt
 
 *.VC.db
 *.dll.recipe
