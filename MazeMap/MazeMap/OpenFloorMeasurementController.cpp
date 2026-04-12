@@ -1580,25 +1580,62 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
     }
 
     _drive.Brake();
-    if (launchFlippedStationary && (MazeMap::kOpenFloorLaunchSettleMs > 0UL))
+    if (launchFlippedStationary)
     {
-        OpenFloorMeasurementLabels settleLabels = labels;
-        settleLabels.primitiveId = MazeMap::OpenFloorPrimitiveId::Recovery;
-        settleLabels.directionId = MazeMap::OpenFloorDirectionId::None;
-        settleLabels.phaseId = MazeMap::OpenFloorPhaseId::Hold;
-        settleLabels.progressNorm = 1.0f;
-        const unsigned long settleDeadline = millis() + MazeMap::kOpenFloorLaunchSettleMs;
-        while (static_cast<long>(settleDeadline - millis()) > 0)
+        enum class PostLaunchPhase
+        {
+            BrakeToStop,
+            HoldSettled,
+        };
+
+        PostLaunchPhase postLaunchPhase = PostLaunchPhase::BrakeToStop;
+        unsigned long settleStartMs = 0UL;
+
+        while (true)
         {
             OpenFloorMeasurementCycle cycle{};
-            if (!CaptureCycle(true, cycle))
+            if (!CaptureCycle(postLaunchPhase == PostLaunchPhase::HoldSettled, cycle))
             {
-                return HandleMeasurementCaptureFault(settleLabels, cycle);
+                return HandleMeasurementCaptureFault(labels, cycle);
             }
+
             _drive.Brake();
-            if (!LogCycle(settleLabels, cycle))
+            stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
+            const bool estimatorStationary = stationaryCheckState.IsStationary();
+            const unsigned long nowMs = millis();
+
+            if (!estimatorStationary)
+            {
+                postLaunchPhase = PostLaunchPhase::BrakeToStop;
+                settleStartMs = 0UL;
+                labels.phaseId = MazeMap::OpenFloorPhaseId::Brake;
+                labels.progressNorm = 0.0f;
+            }
+            else
+            {
+                if (postLaunchPhase != PostLaunchPhase::HoldSettled)
+                {
+                    postLaunchPhase = PostLaunchPhase::HoldSettled;
+                    settleStartMs = nowMs;
+                }
+                labels.phaseId = MazeMap::OpenFloorPhaseId::Hold;
+                labels.progressNorm = (MazeMap::kOpenFloorLaunchSettleMs > 0UL) ?
+                    (std::clamp)(
+                        static_cast<float>(nowMs - settleStartMs) /
+                            static_cast<float>(MazeMap::kOpenFloorLaunchSettleMs),
+                        0.0f,
+                        1.0f) :
+                    1.0f;
+            }
+
+            if (!LogCycle(labels, cycle))
             {
                 return false;
+            }
+
+            if (estimatorStationary && ((nowMs - settleStartMs) >= MazeMap::kOpenFloorLaunchSettleMs))
+            {
+                break;
             }
         }
     }
@@ -1649,10 +1686,6 @@ bool OpenFloorMeasurementController::ExecuteStraightDistance(
     labels.primitiveId = primitiveId;
     labels.repeatIndex = repeatIndex;
     labels.speedBin = speedBin;
-    if (snapToStartMarker && !TraverseToMarker(labels, markerId))
-    {
-        return false;
-    }
     if (emitSectionMarkers && !BeginMainSection(labels))
     {
         return Fail("Failed to write section start marker");
@@ -1780,10 +1813,6 @@ bool OpenFloorMeasurementController::ExecuteInPlaceTurn(
     labels.directionId = directionId;
     labels.repeatIndex = repeatIndex;
     labels.speedBin = speedBin;
-    if (snapToStartMarker && !TraverseToMarker(labels, labels.startMarkerId))
-    {
-        return false;
-    }
     if (emitSectionMarkers && !BeginMainSection(labels))
     {
         return Fail("Failed to write section start marker");

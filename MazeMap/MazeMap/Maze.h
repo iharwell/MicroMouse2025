@@ -14,7 +14,7 @@ namespace MazeMap
     {
     private:
         Cell _cells[16][16];
-        static const float _cellDimension;
+        static constexpr float _cellDimension = 0.18f;
         CellCoordinates _goal;
         MazeMask _reachable;
         bool _complete;
@@ -64,7 +64,7 @@ namespace MazeMap
         const Cell& Index(CellCoordinates coords) const;
 
         // Returns the size of a cell in meters.
-        static float GetCellDimension();
+		static constexpr float GetCellDimension() noexcept { return _cellDimension; }
 
         // Indicates whether the goal of the maze has been located.
         bool HasFoundGoal();

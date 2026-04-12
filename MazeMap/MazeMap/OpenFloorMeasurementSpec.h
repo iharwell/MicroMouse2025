@@ -266,9 +266,9 @@ namespace MazeMap
     inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
     // After a launch pulse leaves the estimator's stationary regime, hold brake at the start marker
     // for this long so the next repeat begins from a settled UKF state instead of launch transients.
-    inline constexpr unsigned long kOpenFloorLaunchSettleMs = 2000UL;
+    inline constexpr unsigned long kOpenFloorLaunchSettleMs = 200UL;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.2f;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.35f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.29f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.03f;
     inline constexpr unsigned long kOpenFloorOutOfBoundsGraceMs = 1UL;
     inline constexpr float kOpenFloorRecoveryAcceptanceRadiusM = 0.015f;

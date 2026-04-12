@@ -389,13 +389,6 @@ namespace MazeMap
 		return true;
 	}
 
-	const float Maze::_cellDimension = 18.0f;
-
-float Maze::GetCellDimension()
-{
-	return _cellDimension;
-}
-
 	Cell& Maze::Index(int x, int y)
 	{
 		return _cells[x][y];
