@@ -2015,7 +2015,6 @@ bool OpenFloorMeasurementController::ExecuteInPlaceTurn(
     const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(limits);
     const float targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
     const float targetMagnitude = std::fabs(angleRad);
-    float commandedOmegaRadps = 0.0f;
     const unsigned long timeoutMs = millis() + FailureTimeoutMs(3000UL);
     bool sectionComplete = false;
 
@@ -2069,9 +2068,7 @@ bool OpenFloorMeasurementController::ExecuteInPlaceTurn(
                     if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
                             errorRad,
                             state.estimate.angularSpeedRadps,
-                            state.dtSeconds,
                             turnProfile,
-                            commandedOmegaRadps,
                             angularCommandRadps))
                     {
                         (void)LogSectionFaultAndFail(

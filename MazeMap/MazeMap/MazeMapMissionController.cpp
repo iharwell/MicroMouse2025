@@ -3661,7 +3661,6 @@ private:
         const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(limits);
         const float targetSweepAngleRad = static_cast<float>(Config::kStartupWallCalibrationFrontSpinTurnCount) * TWO_PI_F;
         const float captureStepRad = Config::kStartupWallCalibrationFrontSpinCaptureStepRad;
-        float commandedOmegaRadps = 0.0f;
         float accumulatedSweepAngleRad = 0.0f;
         float lastStoredSweepAngleRad = -captureStepRad;
         float previousYawRad = _drive.GetPose().yawRad;
@@ -3732,9 +3731,7 @@ private:
             if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
                     remainingRad,
                     pose.angularSpeedRadps,
-                    dtSeconds,
                     turnProfile,
-                    commandedOmegaRadps,
                     angularCommandRadps))
             {
                 return Fail("Startup front calibration sweep profile became invalid");
@@ -6828,7 +6825,6 @@ private:
     {
         const float targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
         const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(limits);
-        float commandedOmegaRadps = 0.0f;
         const unsigned long expectedCompletionDeadlineMs = millis() + 2500UL;
         bool durationLogged = false;
 
@@ -6865,9 +6861,7 @@ private:
             if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
                     errorRad,
                     _drive.GetPose().angularSpeedRadps,
-                    dtSeconds,
                     turnProfile,
-                    commandedOmegaRadps,
                     angularCommandRadps))
             {
                 return Fail("Turn profile became invalid");

@@ -1050,7 +1050,6 @@ private:
 
         const float targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
         const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(_vehicle);
-        float commandedOmegaRadps = 0.0f;
         const unsigned long timeoutMs = millis() + 3000UL;
         TurnPhaseMetrics metrics{};
         bool phaseComplete = false;
@@ -1087,9 +1086,7 @@ private:
                         if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
                                 errorRad,
                                 state.estimate.angularSpeedRadps,
-                                state.dtSeconds,
                                 turnProfile,
-                                commandedOmegaRadps,
                                 angularCommandRadps))
                         {
                             services.Fault("Turn diagnostic phase profile became invalid");

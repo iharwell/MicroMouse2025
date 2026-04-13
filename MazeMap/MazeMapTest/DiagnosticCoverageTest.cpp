@@ -1529,17 +1529,23 @@ namespace MazeMap
 			Assert::IsFalse(IsInPlaceTurnComplete(1.00f * DEG_TO_RAD_F, 0.08f, profile));
 			Assert::IsFalse(IsInPlaceTurnComplete(0.50f * DEG_TO_RAD_F, 0.12f, profile));
 
-			float commandedOmegaRadps = 0.0f;
 			float angularCommandRadps = 0.0f;
 			Assert::IsTrue(TryComputeInPlaceTurnCommandRadps(
 				0.50f * PI_F,
 				0.0f,
-				0.010f,
 				profile,
-				commandedOmegaRadps,
 				angularCommandRadps));
-			Assert::IsTrue(commandedOmegaRadps > 0.0f);
 			Assert::IsTrue(angularCommandRadps > 0.0f);
+
+			Assert::IsTrue(TryComputeInPlaceTurnCommandRadps(
+				0.01f,
+				0.0f,
+				profile,
+				angularCommandRadps));
+			const float expectedSmallAngleCommandRadps =
+				sqrtf(2.0f * profile.angularAccelRadps2 * 0.01f) +
+				(profile.headingKp * 0.01f);
+			Assert::AreEqual(expectedSmallAngleCommandRadps, angularCommandRadps, 1.0e-6f);
 		}
 
 		TEST_METHOD(ApplyMinimumCruiseSpeedFloorRaisesOnlyNonzeroRequests)

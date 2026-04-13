@@ -50,30 +50,25 @@ namespace MazeMap
     inline bool TryComputeInPlaceTurnCommandRadps(
         float remainingRad,
         float angularSpeedRadps,
-        float dtSeconds,
         const InPlaceTurnProfile& profile,
-        float& commandedOmegaRadps,
         float& angularCommandRadps) noexcept
     {
         if (!IsInPlaceTurnProfileValid(profile) ||
             !std::isfinite(remainingRad) ||
             !std::isfinite(angularSpeedRadps) ||
-            !std::isfinite(dtSeconds) ||
-            !std::isfinite(commandedOmegaRadps) ||
-            dtSeconds <= 0.0f)
+            !std::isfinite(profile.angularAccelRadps2))
         {
             return false;
         }
 
-        const float accelLimitedOmega = (std::min)(
-            profile.maxAngularSpeedRadps,
-            (std::max)(0.0f, commandedOmegaRadps + (profile.angularAccelRadps2 * dtSeconds)));
+        // The turn helper owns only the heading-derived yaw-rate setpoint. DriveBase owns the
+        // present-state transition shaping through the shared velocity-target response path.
         const float decelLimitedOmega = sqrtf((std::max)(0.0f, 2.0f * profile.angularAccelRadps2 * std::fabs(remainingRad)));
-        commandedOmegaRadps = (std::min)(accelLimitedOmega, decelLimitedOmega);
+        const float desiredOmegaRadps = (std::min)(profile.maxAngularSpeedRadps, decelLimitedOmega);
 
         const float direction = (remainingRad >= 0.0f) ? 1.0f : -1.0f;
         angularCommandRadps =
-            (direction * commandedOmegaRadps) +
+            (direction * desiredOmegaRadps) +
             (profile.headingKp * remainingRad) -
             (profile.yawD * angularSpeedRadps);
         angularCommandRadps = (std::clamp)(
