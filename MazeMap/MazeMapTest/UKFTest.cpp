@@ -183,6 +183,16 @@ namespace MazeMap
                 (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
         }
 
+        float StationaryGyroBiasBlendFactor(float dtSeconds) noexcept
+        {
+            if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+            {
+                return 0.0f;
+            }
+
+            return 1.0f - std::exp(-dtSeconds / SrUkfCore::kStationaryGyroBiasTimeConstantS);
+        }
+
         float AbsoluteCovarianceCorrelation(
             const VehicleState::StateMatrix& covariance,
             int lhsIndex,
@@ -583,10 +593,8 @@ namespace MazeMap
             encoder.totalLeftCounts = 12;
             encoder.totalRightCounts = 8;
 
-            constexpr float measuredYawRateRadps = 0.013f;
             state.ApplyStationaryZeroMotionConstraint(
                 encoder,
-                measuredYawRateRadps,
                 true,
                 true,
                 poseReferenceState,
@@ -620,7 +628,7 @@ namespace MazeMap
             Assert::AreEqual(0.0f, constrainedState(VehicleState::kR), 1.0e-7f);
             Assert::AreEqual(0.0f, constrainedState(VehicleState::kOmegaL), 1.0e-7f);
             Assert::AreEqual(0.0f, constrainedState(VehicleState::kOmegaR), 1.0e-7f);
-            Assert::AreEqual(measuredYawRateRadps, constrainedState(VehicleState::kBgz), 1.0e-7f);
+            Assert::AreEqual(-0.02f, constrainedState(VehicleState::kBgz), 1.0e-7f);
             Assert::IsTrue(state.IsStationary());
 
             constexpr std::array<int, 3> kPoseIndices = {
@@ -644,7 +652,7 @@ namespace MazeMap
             Assert::IsTrue(constrainedCovariance(VehicleState::kR, VehicleState::kR) <= 1.0e-12f);
             Assert::IsTrue(constrainedCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) <= 1.0e-12f);
             Assert::IsTrue(constrainedCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) <= 1.0e-12f);
-            Assert::IsTrue(constrainedCovariance(VehicleState::kBgz, VehicleState::kBgz) <= 1.0e-12f);
+            Assert::AreEqual(0.06f * 0.06f, constrainedCovariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-7f);
         }
 
         TEST_METHOD(PlantModelComputesFiniteAlgebraicSlipAndForces)
@@ -1172,6 +1180,126 @@ namespace MazeMap
                 0.25f);
         }
 
+        TEST_METHOD(PlantModelClosedLoopVelocityTargetKeepsPositiveYawFeedforwardDirectionAtNonzeroYawRate)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const DriveCommandSolution solution =
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    0.0f,
+                    0.0f,
+                    0.35f,
+                    3.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            Logger::WriteMessage(
+                (std::wstring(L"positive yaw left/right command, wheel speeds, validated accel = ") +
+                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                    std::to_wstring(solution.control.rightMotorCommand) + L"," +
+                    std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
+                    std::to_wstring(solution.rightWheelSpeedRadps) + L"," +
+                    std::to_wstring(solution.commandedYawAccelRadps2)).c_str());
+            Assert::IsTrue(std::isfinite(solution.commandedYawAccelRadps2));
+            Assert::IsTrue(std::isfinite(solution.control.leftMotorCommand));
+            Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
+            Assert::IsTrue(std::isfinite(solution.leftWheelSpeedRadps));
+            Assert::IsTrue(std::isfinite(solution.rightWheelSpeedRadps));
+            Assert::IsTrue(solution.leftWheelSpeedRadps > solution.rightWheelSpeedRadps);
+            if (!(solution.control.leftMotorCommand > 0.0f) ||
+                !(solution.control.rightMotorCommand < 0.0f))
+            {
+                Assert::Fail(
+                    (std::wstring(L"positive yaw left/right command, wheel speeds, validated accel = ") +
+                        std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                        std::to_wstring(solution.control.rightMotorCommand) + L"," +
+                        std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
+                        std::to_wstring(solution.rightWheelSpeedRadps) + L"," +
+                        std::to_wstring(solution.commandedYawAccelRadps2)).c_str());
+            }
+        }
+
+        TEST_METHOD(PlantModelClosedLoopVelocityTargetKeepsNegativeYawFeedforwardDirectionAtNonzeroYawRate)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const DriveCommandSolution solution =
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    0.0f,
+                    0.0f,
+                    -0.35f,
+                    -3.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            Logger::WriteMessage(
+                (std::wstring(L"negative yaw left/right command, wheel speeds, validated accel = ") +
+                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                    std::to_wstring(solution.control.rightMotorCommand) + L"," +
+                    std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
+                    std::to_wstring(solution.rightWheelSpeedRadps) + L"," +
+                    std::to_wstring(solution.commandedYawAccelRadps2)).c_str());
+            Assert::IsTrue(std::isfinite(solution.commandedYawAccelRadps2));
+            Assert::IsTrue(std::isfinite(solution.control.leftMotorCommand));
+            Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
+            Assert::IsTrue(std::isfinite(solution.leftWheelSpeedRadps));
+            Assert::IsTrue(std::isfinite(solution.rightWheelSpeedRadps));
+            Assert::IsTrue(solution.leftWheelSpeedRadps < solution.rightWheelSpeedRadps);
+            if (!(solution.control.leftMotorCommand < 0.0f) ||
+                !(solution.control.rightMotorCommand > 0.0f))
+            {
+                Assert::Fail(
+                    (std::wstring(L"negative yaw left/right command, wheel speeds, validated accel = ") +
+                        std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                        std::to_wstring(solution.control.rightMotorCommand) + L"," +
+                        std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
+                        std::to_wstring(solution.rightWheelSpeedRadps) + L"," +
+                        std::to_wstring(solution.commandedYawAccelRadps2)).c_str());
+            }
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsValidationUsesFullCurrentState)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            PlantModel::StateVector currentState = PlantModel::StateVector::Zero();
+            currentState(VehicleState::kU) = 0.60f;
+            currentState(VehicleState::kV) = 0.25f;
+            currentState(VehicleState::kR) = 0.35f;
+
+            const float halfTrackWidthM = 0.5f * params.trackWidthM;
+            const float rollingLeftWheelSpeedRadps =
+                (currentState(VehicleState::kU) + (halfTrackWidthM * currentState(VehicleState::kR))) / params.wheelRadiusM;
+            const float rollingRightWheelSpeedRadps =
+                (currentState(VehicleState::kU) - (halfTrackWidthM * currentState(VehicleState::kR))) / params.wheelRadiusM;
+            currentState(VehicleState::kOmegaL) = rollingLeftWheelSpeedRadps + 2.0f;
+            currentState(VehicleState::kOmegaR) = rollingRightWheelSpeedRadps - 2.0f;
+
+            const DriveCommandSolution solution =
+                plant.solveDriveCommands(
+                    currentState,
+                    0.0f,
+                    8.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            PlantModel::StateVector validationState = currentState;
+            validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
+            validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
+            const PlantDerivatives achievedFull = plant.forwardStep(validationState, solution.control, params);
+
+            PlantModel::StateVector zeroLateralValidationState = validationState;
+            zeroLateralValidationState(VehicleState::kV) = 0.0f;
+            const PlantDerivatives achievedZeroLateral =
+                plant.forwardStep(zeroLateralValidationState, solution.control, params);
+
+            Assert::AreEqual(achievedFull.yawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-6f);
+            Assert::IsTrue(std::fabs(achievedFull.yawAccelRadps2 - achievedZeroLateral.yawAccelRadps2) > 0.01f);
+        }
+
         TEST_METHOD(PlantModelSolveDriveCommandsDoesNotTractionLimitWellInsideNominalEnvelope)
         {
             PlantModel plant;
@@ -1555,7 +1683,7 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(afterCovariance(VehicleState::kR, VehicleState::kOmegaR)));
         }
 
-        TEST_METHOD(SrUkfCoreStationaryYawConstraintRapidlyCollapsesStationaryMotionAndBiasCovariance)
+        TEST_METHOD(SrUkfCoreStationaryYawConstraintCollapsesMotionStateButPreservesSlowBiasDynamics)
         {
             SrUkfCore core;
             const VehicleState::StateVector initialState = BuildUkfState(
@@ -1595,7 +1723,8 @@ namespace MazeMap
             Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) <= 1.0e-12f);
             Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) <= 1.0e-12f);
             Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) <= 1.0e-12f);
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
+            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) > 1.0e-8f);
         }
 
         TEST_METHOD(SrUkfCoreHighUtilizationYawConstraintDoesNotZeroLateralVelocity)
@@ -1801,11 +1930,13 @@ namespace MazeMap
             const VehicleState::StateVector perturbedState = perturbedCore.state();
             const VehicleState::StateMatrix baselineCovariance = baselineCore.covariance();
             const VehicleState::StateMatrix perturbedCovariance = perturbedCore.covariance();
+            const float expectedBiasRadps =
+                StationaryGyroBiasBlendFactor(dt) * rawStationaryGyroRadps;
 
             Assert::IsTrue((baselineState - perturbedState).cwiseAbs().maxCoeff() <= 1.0e-7f);
             Assert::IsTrue((baselineCovariance - perturbedCovariance).cwiseAbs().maxCoeff() <= 1.0e-7f);
             Assert::AreEqual(0.0f, baselineState(VehicleState::kR), 1.0e-6f);
-            Assert::AreEqual(rawStationaryGyroRadps, baselineState(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(expectedBiasRadps, baselineState(VehicleState::kBgz), 1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCorePlanarAccelUpdateIsDisabledAndLeavesFilterStateUntouched)
@@ -1907,11 +2038,13 @@ namespace MazeMap
             Assert::IsTrue(yawResult.accepted);
 
             const VehicleState::StateVector& state = core.state();
+            const float expectedBiasRadps =
+                StationaryGyroBiasBlendFactor(dt) * rawStationaryGyroRadps;
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
-            Assert::AreEqual(rawStationaryGyroRadps, state(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(expectedBiasRadps, state(VehicleState::kBgz), 1.0e-6f);
         }
 
-        TEST_METHOD(SrUkfCoreStationaryGyroMeasurementDropsBiasVarianceNearZero)
+        TEST_METHOD(SrUkfCoreStationaryGyroMeasurementDoesNotCollapseBiasVarianceToZero)
         {
             SrUkfCore core;
             ControlInput control{};
@@ -1934,10 +2067,49 @@ namespace MazeMap
             Assert::IsTrue(yawResult.accepted);
 
             const VehicleState::StateMatrix covariance = core.covariance();
-            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) <= 1.0e-12f);
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
+            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) > 1.0e-8f);
             Assert::IsTrue(
                 covariance(VehicleState::kBgz, VehicleState::kBgz) <
                 beforeCovariance(VehicleState::kBgz, VehicleState::kBgz));
+        }
+
+        TEST_METHOD(SrUkfCoreStationaryGyroBiasDecaysToOneOverEAfterFifteenSecondsAtZeroRate)
+        {
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.12f);
+            SrUkfCore core;
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
+
+            ControlInput control{};
+            EncoderObs encoder{};
+            constexpr float dt = 1.0f;
+            constexpr int kSteps = 15;
+
+            for (int step = 0; step < kSteps; ++step)
+            {
+                Assert::IsTrue(core.predict(dt, control));
+
+                const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
+                Assert::IsTrue(encoderResult.attempted);
+                Assert::IsTrue(encoderResult.accepted);
+
+                const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
+                Assert::IsTrue(yawResult.attempted);
+                Assert::IsTrue(yawResult.accepted);
+            }
+
+            const float expectedBiasRadps = 0.12f * std::exp(-1.0f);
+            Assert::AreEqual(expectedBiasRadps, core.state()(VehicleState::kBgz), 5.0e-4f);
         }
 
         TEST_METHOD(SrUkfCoreLatestEncoderObservationPullsWheelRatesTowardLatestMeasurement)
@@ -2880,7 +3052,7 @@ namespace MazeMap
                 (std::wstring(L"Final lateral-velocity variance was ") +
                     std::to_wstring(finalLateralVelocityVarianceMps2)).c_str());
         }
-        TEST_METHOD(SrUkfCoreRepeatedStationaryCyclesKeepMotionAndBiasCovarianceNearZeroWhilePoseRemainsBounded)
+        TEST_METHOD(SrUkfCoreRepeatedStationaryCyclesKeepMotionZeroWhileBiasFollowsConfiguredTimeConstant)
         {
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -2903,6 +3075,7 @@ namespace MazeMap
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
+            float expectedGyroBiasRadps = initialState(VehicleState::kBgz);
 
             for (int step = 0; step < kSteps; ++step)
             {
@@ -2915,6 +3088,9 @@ namespace MazeMap
                 const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
                 Assert::IsTrue(yawResult.attempted);
                 Assert::IsTrue(yawResult.accepted);
+
+                const float blendFactor = StationaryGyroBiasBlendFactor(dt);
+                expectedGyroBiasRadps += blendFactor * (0.0f - expectedGyroBiasRadps);
             }
 
             const VehicleState::StateVector& state = core.state();
@@ -2928,14 +3104,15 @@ namespace MazeMap
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
             Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-6f);
             Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-6f);
-            Assert::AreEqual(0.0f, state(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(expectedGyroBiasRadps, state(VehicleState::kBgz), 1.0e-6f);
 
             Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) <= 1.0e-12f);
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) <= 1.0e-12f);
             Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) <= 1.0e-12f);
             Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) <= 1.0e-12f);
             Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) <= 1.0e-12f);
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
+            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) > 1.0e-8f);
 
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kPx, VehicleState::kPx)));
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kPy, VehicleState::kPy)));

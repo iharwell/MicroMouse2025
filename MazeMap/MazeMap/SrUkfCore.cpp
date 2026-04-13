@@ -116,6 +116,43 @@ namespace
             MazeMap::VehicleState::kV) = schedule.sigmaAyMps2;
     }
 
+    float ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept
+    {
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        {
+            return 0.0f;
+        }
+
+        const float timeConstantS = MazeMap::SrUkfCore::kStationaryGyroBiasTimeConstantS;
+        if (!(std::isfinite(timeConstantS) && (timeConstantS > 0.0f)))
+        {
+            return 0.0f;
+        }
+
+        return 1.0f - std::exp(-dtSeconds / timeConstantS);
+    }
+
+    float ComputeStationaryGyroBiasVarianceRadps2(
+        float priorVarianceRadps2,
+        float blendFactor) noexcept
+    {
+        const float resolvedPriorVarianceRadps2 =
+            (std::isfinite(priorVarianceRadps2) && (priorVarianceRadps2 > 0.0f)) ?
+            priorVarianceRadps2 :
+            0.0f;
+        const float resolvedBlendFactor =
+            (std::isfinite(blendFactor) && (blendFactor >= 0.0f) && (blendFactor <= 1.0f)) ?
+            blendFactor :
+            0.0f;
+        const float measurementVarianceRadps2 =
+            MazeMap::SrUkfCore::kImuYawRateSigmaRadps *
+            MazeMap::SrUkfCore::kImuYawRateSigmaRadps;
+        const float oneMinusBlendFactor = 1.0f - resolvedBlendFactor;
+        return
+            (oneMinusBlendFactor * oneMinusBlendFactor * resolvedPriorVarianceRadps2) +
+            (resolvedBlendFactor * resolvedBlendFactor * measurementVarianceRadps2);
+    }
+
     Eigen::Vector2f HeadingUnitFromYaw(float yaw) noexcept
     {
         float s = 0.0f;
@@ -258,6 +295,7 @@ namespace MazeMap
         , _filter()
         , _lastControl()
         , _lastEncoderObs()
+        , _lastEncoderDtSeconds(0.0f)
         , _prePredictState(StateVector::Zero())
         , _prePredictCovariance(StateMatrix::Zero())
         , _havePredictionReference(false)
@@ -589,6 +627,7 @@ namespace MazeMap
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastControl = ControlInput{};
         _lastEncoderObs = EncoderObs{};
+        _lastEncoderDtSeconds = 0.0f;
         _prePredictState = _filter.state();
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
@@ -601,6 +640,7 @@ namespace MazeMap
         _filter.setState(state, covariance);
         UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, state, _params);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
+        _lastEncoderDtSeconds = 0.0f;
         _prePredictState = _filter.state();
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
@@ -719,6 +759,7 @@ namespace MazeMap
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = true;
         _acceptedEncoderUpdateSincePredict = false;
+        _lastEncoderDtSeconds = 0.0f;
         UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, _prePredictState, _params);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity * MazeMap::Math::Sqrtf(dt));
         Eigen::Matrix<float, 3, 1> controlVector;
@@ -748,12 +789,15 @@ namespace MazeMap
         void* loopHookContext,
         LoopHookInvoker loopHook) noexcept
     {
-        (void)dt;
         MeasurementUpdateResult result{};
         result.attempted = true;
 
         const EncoderObs measured = observation;
         _acceptedEncoderUpdateSincePredict = false;
+        _lastEncoderDtSeconds =
+            (std::isfinite(dt) && (dt > 0.0f)) ?
+            dt :
+            0.0f;
 
         Eigen::Matrix<float, 2, 1> z;
         z << measured.omegaLeftRadps, measured.omegaRightRadps;
@@ -826,6 +870,12 @@ namespace MazeMap
         z << yawRateRadps;
         Eigen::Matrix<float, 1, 1> sqrtNoise;
         sqrtNoise(0, 0) = _sqrtImuNoise(0, 0);
+        const bool shouldApplyStationaryConstraint =
+            _acceptedEncoderUpdateSincePredict &&
+            HasExactZeroWheelObservation(_lastEncoderObs);
+        const float priorGyroBiasRadps = _filter.state()(VehicleState::kBgz);
+        const float priorGyroBiasVarianceRadps2 =
+            _filter.covariance()(VehicleState::kBgz, VehicleState::kBgz);
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
             InvokeLoopHook(loopHookContext, loopHook);
@@ -845,12 +895,14 @@ namespace MazeMap
         {
             VehicleState currentState;
             currentState.SetStateVector(_filter.state());
-            if (_acceptedEncoderUpdateSincePredict &&
-                HasExactZeroWheelObservation(_lastEncoderObs) &&
+            if (shouldApplyStationaryConstraint &&
                 (currentState.IsStationary() ||
                  controlCommandsAreEffectivelyZero()))
             {
-                applyStationaryZeroMotionConstraint(yawRateRadps);
+                applyStationaryZeroMotionConstraint(
+                    yawRateRadps,
+                    priorGyroBiasRadps,
+                    priorGyroBiasVarianceRadps2);
             }
         }
         result.nis = _filter.lastNis();
@@ -1063,7 +1115,10 @@ namespace MazeMap
         _filter.setState(constrainedState, constrainedCovariance);
     }
 
-    void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
+    void SrUkfCore::applyStationaryZeroMotionConstraint(
+        float yawRateRadps,
+        float priorGyroBiasRadps,
+        float priorGyroBiasVarianceRadps2) noexcept
     {
         const LateralNoiseSchedule lateralNoiseSchedule = BuildLateralNoiseSchedule(_prePredictState, _params);
         VehicleState constrainedState;
@@ -1071,13 +1126,25 @@ namespace MazeMap
         constrainedState.SetCovariance(_filter.covariance());
         constrainedState.ApplyStationaryZeroMotionConstraint(
             _lastEncoderObs,
-            yawRateRadps,
             lateralNoiseSchedule.enableVReset,
             _havePredictionReference,
             _prePredictState,
             _prePredictCovariance,
             ComputeDistancePerEncoderCountM(_params),
             _params.trackWidthM);
+        const float resolvedPriorGyroBiasRadps =
+            std::isfinite(priorGyroBiasRadps) ?
+            priorGyroBiasRadps :
+            constrainedState.GetGyroBiasZ();
+        const float blendFactor = ComputeStationaryGyroBiasBlendFactor(_lastEncoderDtSeconds);
+        const float constrainedGyroBiasRadps =
+            resolvedPriorGyroBiasRadps +
+            (blendFactor * (yawRateRadps - resolvedPriorGyroBiasRadps));
+        constrainedState.SetGyroBiasZ(constrainedGyroBiasRadps);
+        constrainedState.SetGyroBiasZVar(
+            ComputeStationaryGyroBiasVarianceRadps2(
+                priorGyroBiasVarianceRadps2,
+                blendFactor));
         _filter.setStateSquareRootCovariance(
             constrainedState.GetStateVector(),
             constrainedState.GetSqrtCovariance());

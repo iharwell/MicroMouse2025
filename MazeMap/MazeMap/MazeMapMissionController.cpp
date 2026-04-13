@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
+#include "DriveBase.h"
+#include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapSharedRuntime.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;

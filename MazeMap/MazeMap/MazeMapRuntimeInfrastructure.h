@@ -1,5 +1,6 @@
 #pragma once
 // Declares runtime logging, telemetry, and measurement-capture infrastructure for the MazeMap application runtime.
+#include "DriveBase.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"

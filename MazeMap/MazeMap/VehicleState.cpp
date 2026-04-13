@@ -122,7 +122,6 @@ namespace MazeMap
 
     void VehicleState::ApplyStationaryZeroMotionConstraint(
         const EncoderObs& encoderObservation,
-        float yawRateRadps,
         bool resetLateralVelocity,
         bool hasPoseReference,
         const StateVector& poseReferenceState,
@@ -155,7 +154,6 @@ namespace MazeMap
         constrainedState(kR) = 0.0f;
         constrainedState(kOmegaL) = 0.0f;
         constrainedState(kOmegaR) = 0.0f;
-        constrainedState(kBgz) = yawRateRadps;
         NormalizeStateVector(constrainedState);
 
         StateMatrix constrainedCovariance = GetCovariance();
@@ -177,8 +175,6 @@ namespace MazeMap
             constrainedCovariance.row(index).setZero();
             constrainedCovariance.col(index).setZero();
         }
-        constrainedCovariance.row(kBgz).setZero();
-        constrainedCovariance.col(kBgz).setZero();
         if (resetLateralVelocity)
         {
             constrainedCovariance.row(kV).setZero();
@@ -194,7 +190,6 @@ namespace MazeMap
         exactZeroMask[kR] = true;
         exactZeroMask[kOmegaL] = true;
         exactZeroMask[kOmegaR] = true;
-        exactZeroMask[kBgz] = true;
 
         StateMatrix constrainedSqrt = StateMatrix::Zero();
         if (BuildConstrainedLowerTriangularSquareRoot(

@@ -416,7 +416,8 @@ Reject the design and revise it if any of the following are true:
 
 ### Build
 
-- When building, use `verify_latest_build.cmd` or `verify_latest_build.ps`.
+- When building, use `build_and_verify_latest.cmd` or `build_and_verify_latest.ps1`.
+- If `build_and_verify_latest` reports `HOST_INTERMEDIATE_STATE_BROKEN`, stop immediately. Treat missing host-side Release intermediates as a broken incremental build state caused by prior artifact deletion; do not "fix" it with `Clean`, `Rebuild`, or more deletion. Human intervention is required.
 
 ---
 

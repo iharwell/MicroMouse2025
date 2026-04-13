@@ -109,7 +109,7 @@ namespace MazeMap
         ControlInput control{};
         float leftSlipRatio = 0.0f;
         float rightSlipRatio = 0.0f;
-        // Validation operating-point wheel speeds, including the implied rolling-region slip needed for Fx.
+        // Slip-bearing wheel speeds implied by the solved contact-force balance at the current body rates.
         float leftWheelSpeedRadps = 0.0f;
         float rightWheelSpeedRadps = 0.0f;
         // Pure rolling kinematic wheel speeds before adding the implied longitudinal slip offset.
@@ -129,7 +129,7 @@ namespace MazeMap
         float rightContactTorqueNm = 0.0f;
         float tractionScale = 1.0f;
         bool tractionLimited = false;
-        // Body accelerations validated from the returned control command at the solution operating point.
+        // Body accelerations validated from the returned control command at the current operating point.
         float commandedLongitudinalAccelMps2 = 0.0f;
         float commandedYawAccelRadps2 = 0.0f;
         float longitudinalAccelErrorMps2 = 0.0f;
@@ -274,6 +274,13 @@ namespace MazeMap
             float dt,
             const PlantParams& params) const noexcept;
         DriveCommandSolution solveDriveCommands(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f) const noexcept;
+        DriveCommandSolution solveDriveCommands(
             float forwardVelocityMps,
             float desiredLongitudinalAccelMps2,
             float yawRateRadps,
@@ -284,6 +291,14 @@ namespace MazeMap
         // Returns the traction-limited control command that drives the current body rates toward the target
         // body rates over the requested response horizon using the canonical default when none is supplied.
         DriveCommandSolution solveDriveCommandsForVelocityTarget(
+            const StateVector& currentState,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
+        DriveCommandSolution solveDriveCommandsForVelocityTarget(
             float currentForwardVelocityMps,
             float targetForwardVelocityMps,
             float currentYawRateRadps,
@@ -292,6 +307,12 @@ namespace MazeMap
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
+        void velocityTargetTechnicalLimits(
+            const StateVector& currentState,
+            const PlantParams& params,
+            float& maxLongitudinalAccelMps2,
+            float& maxYawAccelRadps2,
+            float fanDutyCycle = 0.80f) const noexcept;
         void velocityTargetTechnicalLimits(
             float forwardVelocityMps,
             float yawRateRadps,
@@ -303,6 +324,14 @@ namespace MazeMap
         // this backs the validated body accelerations off by the requested reserve scale so the outer PI loop
         // retains command headroom.
         DriveCommandSolution solveClosedLoopDriveCommands(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float tractionReserveScale = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommands(
             float forwardVelocityMps,
             float desiredLongitudinalAccelMps2,
             float yawRateRadps,
@@ -310,6 +339,15 @@ namespace MazeMap
             const PlantParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
+            float tractionReserveScale = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+            const StateVector& currentState,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
             float tractionReserveScale = 0.90f) const noexcept;
         DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
             float currentForwardVelocityMps,

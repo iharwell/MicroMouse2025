@@ -46,6 +46,7 @@ namespace MazeMap
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
         static constexpr float kImuYawRateSigmaRadps = 0.0131f;
         static constexpr float kImuAccelSigmaMps2 = 0.1305f;
+        static constexpr float kStationaryGyroBiasTimeConstantS = 15.0f;
 
         using StateVector = VehicleState::StateVector;
         using StateMatrix = VehicleState::StateMatrix;
@@ -208,7 +209,10 @@ namespace MazeMap
         void anchorPoseToEncoderDelta(StateVector& anchoredState, const EncoderObs& measured) const noexcept;
         void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
-        void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
+        void applyStationaryZeroMotionConstraint(
+            float yawRateRadps,
+            float priorGyroBiasRadps,
+            float priorGyroBiasVarianceRadps2) noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
             const StateVector& sigmaPoint,
             const LocalMapView& map) const noexcept;
@@ -223,6 +227,7 @@ namespace MazeMap
         UKF<VehicleState::kDimension, 3> _filter;
         ControlInput _lastControl;
         EncoderObs _lastEncoderObs;
+        float _lastEncoderDtSeconds;
         StateVector _prePredictState;
         StateMatrix _prePredictCovariance;
         bool _havePredictionReference;

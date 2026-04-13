@@ -2,6 +2,8 @@
 #include "MazeMapSharedRuntime.h"
 #include "TeensyLayout.h"
 #include "MazeMapApplicationPrivate.h"
+#include "DriveBase.h"
+#include "MazeMapRuntimeInfrastructure.h"
 #include "RuntimeBinaryLogSupport.h"
 
 #include <cstdarg>

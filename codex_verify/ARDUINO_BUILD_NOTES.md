@@ -7,9 +7,9 @@ The shared Eigen checkout now lives at:
 
 For Arduino / Teensy builds, use the repo helper:
 
-- `codex_verify/verify_latest_build.ps1`
+- `codex_verify/build_and_verify_latest.ps1`
 
-The `.cmd` wrapper at `codex_verify/verify_latest_build.cmd` just launches that PowerShell helper.
+The `.cmd` wrapper at `codex_verify/build_and_verify_latest.cmd` just launches that PowerShell helper.
 
 The helper keeps the fix repo-local. It does not modify the installed Teensy core under `AppData`.
 
@@ -43,13 +43,14 @@ For Arduino builds, `MazeMap/MazeMap/EigenCompat.h` also applies two repo-side c
 
 The required build path is:
 
-- `codex_verify/verify_latest_build.cmd --no-pause`
+- `codex_verify/build_and_verify_latest.cmd --no-pause`
 
 That wrapper runs the firmware build first, then the Release host rebuild, then the Release unit tests.
 The firmware build forces the Teensy 4.1 `Optimize` board option to `Faster with LTO` (`opt=o2lto`), which maps to `-O2` plus link-time optimization.
+The firmware build now compiles directly into the canonical repo-local output directory under `codex_verify/arduino_build/firmware` instead of staging the compile in a separate work directory first.
 
 The verified firmware artifacts are emitted to the canonical upload location:
 
 - `codex_verify/arduino_build/firmware`
 
-The helper removes stale `arduino_build*` directories so old Arduino outputs do not survive a successful verification run.
+Before compiling, the helper deletes only `codex_verify/arduino_build/firmware/MazeMap.ino.hex` so the upload path cannot reuse a stale firmware image if the new build fails.

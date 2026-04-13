@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 #include "BootModeDescriptor.h"
+#include "DriveBase.h"
+#include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"

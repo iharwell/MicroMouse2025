@@ -149,9 +149,9 @@ namespace MazeMap
         bool IsStationary() const noexcept;
 
         // Applies the stationary zero-motion constraint while preserving the caller-provided pose anchor block.
+        // Gyro-bias handling remains the caller's responsibility.
         void ApplyStationaryZeroMotionConstraint(
             const EncoderObs& encoderObservation,
-            float yawRateRadps,
             bool resetLateralVelocity,
             bool hasPoseReference,
             const StateVector& poseReferenceState,

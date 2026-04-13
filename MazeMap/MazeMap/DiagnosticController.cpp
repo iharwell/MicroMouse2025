@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
+#include "DriveBase.h"
+#include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
