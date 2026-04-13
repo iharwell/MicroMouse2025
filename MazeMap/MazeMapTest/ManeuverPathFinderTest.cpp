@@ -270,7 +270,7 @@ namespace MazeMap
 			AssertHalfStepPathAccessible(maze, directHalfPath);
 			AssertManeuverPathExecutable(maze, start, maneuverPath);
 			Assert::AreEqual(
-				maneuverPath.Cost(_vehicle, maze.GetCellDimension() / 100.0f),
+				maneuverPath.Cost(_vehicle, maze.GetCellDimension()),
 				finder.GetLastEstimatedTime(),
 				kTimeTolerance);
 			Assert::IsTrue(IsGoalCell(maze, maneuverPath.ExecutePath(start).GetLocation()));

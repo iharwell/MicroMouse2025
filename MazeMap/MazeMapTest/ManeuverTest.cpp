@@ -139,7 +139,7 @@ namespace MazeMap
 		}
 		float StraightDistanceMeters(ManeuverCode code)
 		{
-			return static_cast<float>(static_cast<uint8_t>(code)) * 0.5f * Maze::GetCellDimension() / 100.0f;
+			return static_cast<float>(static_cast<uint8_t>(code)) * 0.5f * Maze::GetCellDimension();
 		}
 
 		float ReachableStraightSpeed(const Vehicle& vehicle, float entrySpeed, ManeuverCode code)

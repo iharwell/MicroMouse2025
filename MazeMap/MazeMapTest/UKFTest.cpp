@@ -2,6 +2,7 @@
 #include "CppUnitTest.h"
 #include "Templates.h"
 
+#include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\OpenFloorMeasurementSpec.h"
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\SrUkfCore.h"
@@ -976,16 +977,162 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaR)));
         }
 
-        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetUsesFiveMillisecondResponseByDefault)
+        TEST_METHOD(ResolveVelocityTargetAsapAccelerationsUsesLongitudinalLimitForPureSpeedChange)
+        {
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
+                0.0f,
+                0.30f,
+                0.0f,
+                0.0f,
+                9.0f,
+                400.0f,
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            Assert::AreEqual(9.0f, desiredLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(0.0f, desiredYawAccelRadps2, 1.0e-6f);
+        }
+
+        TEST_METHOD(ResolveVelocityTargetAsapAccelerationsUsesYawLimitForPureYawChange)
+        {
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
+                0.0f,
+                0.0f,
+                0.0f,
+                8.0f,
+                9.0f,
+                400.0f,
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            Assert::AreEqual(0.0f, desiredLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
+        }
+
+        TEST_METHOD(ResolveVelocityTargetAsapAccelerationsBalancesCombinedRequestsToSharedArrivalScale)
+        {
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
+                0.0f,
+                0.06f,
+                0.0f,
+                8.0f,
+                9.0f,
+                400.0f,
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            Assert::AreEqual(3.0f, desiredLongitudinalAccelMps2, 1.0e-4f);
+            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
+        }
+
+        TEST_METHOD(PlantModelVelocityTargetTechnicalLimitsReportReachableEnvelope)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            float maxLongitudinalAccelMps2 = 0.0f;
+            float maxYawAccelRadps2 = 0.0f;
+
+            plant.velocityTargetTechnicalLimits(
+                0.0f,
+                0.0f,
+                params,
+                maxLongitudinalAccelMps2,
+                maxYawAccelRadps2);
+
+            Assert::IsTrue(maxLongitudinalAccelMps2 > 0.0f);
+            Assert::IsTrue(maxYawAccelRadps2 > 0.0f);
+
+            const DriveCommandSolution longitudinalSolution =
+                plant.solveDriveCommands(
+                    0.0f,
+                    0.95f * maxLongitudinalAccelMps2,
+                    0.0f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+            const DriveCommandSolution yawSolution =
+                plant.solveDriveCommands(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.95f * maxYawAccelRadps2,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            Assert::IsFalse(longitudinalSolution.tractionLimited);
+            Assert::IsFalse(yawSolution.tractionLimited);
+            Assert::AreEqual(
+                0.95f * maxLongitudinalAccelMps2,
+                longitudinalSolution.commandedLongitudinalAccelMps2,
+                0.10f);
+            Assert::AreEqual(
+                0.95f * maxYawAccelRadps2,
+                yawSolution.commandedYawAccelRadps2,
+                0.50f);
+        }
+
+        TEST_METHOD(PlantModelVelocityTargetTechnicalLimitsShrinkUnderCorneringLoad)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            float straightLongitudinalAccelMps2 = 0.0f;
+            float straightYawAccelRadps2 = 0.0f;
+            float loadedLongitudinalAccelMps2 = 0.0f;
+            float loadedYawAccelRadps2 = 0.0f;
+
+            plant.velocityTargetTechnicalLimits(
+                0.0f,
+                0.0f,
+                params,
+                straightLongitudinalAccelMps2,
+                straightYawAccelRadps2);
+            plant.velocityTargetTechnicalLimits(
+                2.0f,
+                4.0f,
+                params,
+                loadedLongitudinalAccelMps2,
+                loadedYawAccelRadps2);
+
+            Assert::IsTrue(loadedLongitudinalAccelMps2 < straightLongitudinalAccelMps2);
+            Assert::IsTrue(loadedYawAccelRadps2 < straightYawAccelRadps2);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetUsesCanonicalDefaultResponseTime)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(1.20f, 1.215f, 0.40f, 0.420f, params);
+            const DriveCommandSolution explicitDefaultSolution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    1.20f,
+                    1.215f,
+                    0.40f,
+                    0.420f,
+                    params,
+                    0.80f,
+                    0.0f,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
 
-            Assert::IsFalse(solution.tractionLimited);
-            Assert::AreEqual(3.0f, solution.commandedLongitudinalAccelMps2, 0.05f);
-            Assert::AreEqual(4.0f, solution.commandedYawAccelRadps2, 0.20f);
+            Assert::AreEqual(static_cast<int>(explicitDefaultSolution.tractionLimited), static_cast<int>(solution.tractionLimited));
+            Assert::AreEqual(explicitDefaultSolution.commandedLongitudinalAccelMps2, solution.commandedLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(explicitDefaultSolution.commandedYawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-6f);
+            Assert::AreEqual(explicitDefaultSolution.control.leftMotorCommand, solution.control.leftMotorCommand, 1.0e-6f);
+            Assert::AreEqual(explicitDefaultSolution.control.rightMotorCommand, solution.control.rightMotorCommand, 1.0e-6f);
             Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) <= 1.0f);
             Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
         }
@@ -994,10 +1141,27 @@ namespace MazeMap
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            constexpr float aggressiveResponseTimeS = 0.005f;
             const DriveCommandSolution tractionLimited =
-                plant.solveDriveCommandsForVelocityTarget(0.0f, 0.20f, 0.0f, 0.0f, params);
+                plant.solveDriveCommandsForVelocityTarget(
+                    0.0f,
+                    0.20f,
+                    0.0f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    0.0f,
+                    aggressiveResponseTimeS);
             const DriveCommandSolution reserved =
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(0.0f, 0.20f, 0.0f, 0.0f, params);
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    0.0f,
+                    0.20f,
+                    0.0f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    0.0f,
+                    aggressiveResponseTimeS);
 
             Assert::IsTrue(tractionLimited.tractionLimited);
             Assert::IsFalse(reserved.tractionLimited);
@@ -1074,13 +1238,23 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(achieved.longitudinalAccelMps2) <= (params.combinedAccelPeakMps2 + 1.0f));
         }
 
-        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetTractionLimitsAggressiveStep)
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetTractionLimitsExplicitAggressiveStep)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
-            const float requestedLongitudinalAccelMps2 = (0.20f - 0.0f) / 0.005f;
+            constexpr float aggressiveResponseTimeS = 0.005f;
+            const float requestedLongitudinalAccelMps2 =
+                (0.20f - 0.0f) / aggressiveResponseTimeS;
             const DriveCommandSolution solution =
-                plant.solveDriveCommandsForVelocityTarget(0.0f, 0.20f, 0.0f, 0.0f, params);
+                plant.solveDriveCommandsForVelocityTarget(
+                    0.0f,
+                    0.20f,
+                    0.0f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    0.0f,
+                    aggressiveResponseTimeS);
 
             Assert::IsTrue(solution.tractionLimited);
             Assert::IsTrue(solution.commandedLongitudinalAccelMps2 < requestedLongitudinalAccelMps2);

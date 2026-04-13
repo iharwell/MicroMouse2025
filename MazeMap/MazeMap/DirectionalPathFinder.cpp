@@ -246,7 +246,7 @@ namespace MazeMap
 	}
 	void DirectionalPathFinder::RadiateLocation(MazeLocation loc)
 	{
-		float cellDim = GetMaze().GetCellDimension() / 100;
+		float cellDim = GetMaze().GetCellDimension();
 		float fastestTurnSpeed = GetVehicle().GetFastestTurnSpeed(cellDim);
 		for (uint8_t i = 0; i < 8; i++)
 		{
@@ -264,11 +264,11 @@ namespace MazeMap
 				currentLoc = currentLoc >> (fromDir);
 				if (IsDiagonal(fromDir))
 				{
-					distance += GetMaze().GetCellDimension() / 100 * sqrtf(2.0f);
+					distance += GetMaze().GetCellDimension() * sqrtf(2.0f);
 				}
 				else
 				{
-					distance += GetMaze().GetCellDimension() / 100;
+					distance += GetMaze().GetCellDimension();
 				}
 				bool cost45Ready = false;
 				bool cost90Ready = false;

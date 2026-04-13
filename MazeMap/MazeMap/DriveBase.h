@@ -26,6 +26,92 @@ inline MazeMap::WheelControlProfile BuildMappingWheelControlProfile()
     return profile;
 }
 
+namespace MazeMap::Internal
+{
+    inline void ResolveVelocityTargetAsapAccelerations(
+        float currentForwardVelocityMps,
+        float targetForwardVelocityMps,
+        float currentYawRateRadps,
+        float targetYawRateRadps,
+        float longitudinalAccelLimitMps2,
+        float yawAccelLimitRadps2,
+        float responseTimeS,
+        float& desiredLongitudinalAccelMps2,
+        float& desiredYawAccelRadps2) noexcept
+    {
+        desiredLongitudinalAccelMps2 = 0.0f;
+        desiredYawAccelRadps2 = 0.0f;
+        const float resolvedLongitudinalAccelLimitMps2 =
+            (std::isfinite(longitudinalAccelLimitMps2) && (longitudinalAccelLimitMps2 > 0.0f)) ?
+            longitudinalAccelLimitMps2 :
+            0.0f;
+        const float resolvedYawAccelLimitRadps2 =
+            (std::isfinite(yawAccelLimitRadps2) && (yawAccelLimitRadps2 > 0.0f)) ?
+            yawAccelLimitRadps2 :
+            0.0f;
+
+        const float resolvedResponseTimeS =
+            (std::isfinite(responseTimeS) && (responseTimeS > 0.0f)) ?
+            responseTimeS :
+            MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS;
+        if (!(resolvedResponseTimeS > 0.0f) || !std::isfinite(resolvedResponseTimeS))
+        {
+            return;
+        }
+
+        if (std::isfinite(currentForwardVelocityMps) && std::isfinite(targetForwardVelocityMps))
+        {
+            desiredLongitudinalAccelMps2 =
+                (targetForwardVelocityMps - currentForwardVelocityMps) / resolvedResponseTimeS;
+        }
+        if (std::isfinite(currentYawRateRadps) && std::isfinite(targetYawRateRadps))
+        {
+            desiredYawAccelRadps2 =
+                (targetYawRateRadps - currentYawRateRadps) / resolvedResponseTimeS;
+        }
+
+        if (!(resolvedLongitudinalAccelLimitMps2 > 0.0f))
+        {
+            desiredLongitudinalAccelMps2 = 0.0f;
+        }
+        if (!(resolvedYawAccelLimitRadps2 > 0.0f))
+        {
+            desiredYawAccelRadps2 = 0.0f;
+        }
+
+        const float normalizedLongitudinalDemand =
+            (resolvedLongitudinalAccelLimitMps2 > 0.0f) ?
+            (std::fabs(desiredLongitudinalAccelMps2) / resolvedLongitudinalAccelLimitMps2) :
+            0.0f;
+        const float normalizedYawDemand =
+            (resolvedYawAccelLimitRadps2 > 0.0f) ?
+            (std::fabs(desiredYawAccelRadps2) / resolvedYawAccelLimitRadps2) :
+            0.0f;
+        const float balanceScale =
+            (std::max)(1.0f, (std::max)(normalizedLongitudinalDemand, normalizedYawDemand));
+
+        desiredLongitudinalAccelMps2 /= balanceScale;
+        desiredYawAccelRadps2 /= balanceScale;
+
+        if (resolvedLongitudinalAccelLimitMps2 > 0.0f)
+        {
+            desiredLongitudinalAccelMps2 =
+                (std::clamp)(
+                    desiredLongitudinalAccelMps2,
+                    -resolvedLongitudinalAccelLimitMps2,
+                    resolvedLongitudinalAccelLimitMps2);
+        }
+        if (resolvedYawAccelLimitRadps2 > 0.0f)
+        {
+            desiredYawAccelRadps2 =
+                (std::clamp)(
+                    desiredYawAccelRadps2,
+                    -resolvedYawAccelLimitRadps2,
+                    resolvedYawAccelLimitRadps2);
+        }
+    }
+}
+
 inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(float maxAngularSpeedRadps, float angularAccelRadps2)
 {
     MazeMap::InPlaceTurnProfile profile{};
@@ -66,6 +152,8 @@ class DriveBase
 {
 private:
     struct ClosedLoopVelocityCommand;
+    static constexpr float kDefaultCommandVelocityAsapLongitudinalAccelLimitMps2 = 9.0f;
+    static constexpr float kDefaultCommandVelocityAsapYawAccelLimitRadps2 = 400.0f;
     bool startSet = false;
 public:
     static constexpr uint16_t kModeClosedLoop = 1u << 0;
@@ -283,10 +371,10 @@ public:
         SyncPoseEstimate();
     }
 
-    // CommandVelocity assumes callers want the maximum acceleration the platform can support if no additional
-    // acceleration parameter is supplied. The default path asks PlantModel for the 90%-of-traction-limit
-    // closed-loop command that would hit the requested speed and yaw-rate targets over a 5 ms response horizon,
-    // evaluates the implied acceleration limit, and forwards through the desiredAcceleration_mps2 overload below.
+    // CommandVelocity assumes callers want the requested linear speed and yaw rate as soon as practical.
+    // The default path resolves the current operating point, applies the canonical default operating envelope
+    // subject to the smaller plant-reported technical limits, then forwards through the explicit envelope
+    // overload below so the plant feedforward carries nearly all of the transition effort.
     void CommandVelocity(float linearSpeedMps, float angularSpeedRadps, float dtSeconds)
     {
         if (_estimatorFaulted)
@@ -295,11 +383,55 @@ public:
             return;
         }
 
+        float presentLinearSpeedMps = 0.0f;
+        float presentYawRateRadps = 0.0f;
+        float batteryVoltageV = 0.0f;
+        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+        (void)batteryVoltageV;
+
+        float maxLongitudinalAccelMps2 = kDefaultCommandVelocityAsapLongitudinalAccelLimitMps2;
+        float maxYawAccelRadps2 = kDefaultCommandVelocityAsapYawAccelLimitRadps2;
+        ResolveDefaultVelocityTargetOperatingEnvelope(
+            presentLinearSpeedMps,
+            presentYawRateRadps,
+            maxLongitudinalAccelMps2,
+            maxYawAccelRadps2);
+        CommandVelocity(
+            linearSpeedMps,
+            angularSpeedRadps,
+            presentLinearSpeedMps,
+            presentYawRateRadps,
+            maxLongitudinalAccelMps2,
+            maxYawAccelRadps2,
+            dtSeconds);
+    }
+
+    // Explicit operating-envelope overload for callers that already know the present body rates and the
+    // acceleration envelope they want the plant feedforward to honor over the canonical response horizon.
+    void CommandVelocity(
+        float linearSpeedMps,
+        float angularSpeedRadps,
+        float presentLinearSpeedMps,
+        float presentYawRateRadps,
+        float maxLongitudinalAccelMps2,
+        float maxYawAccelRadps2,
+        float dtSeconds)
+    {
+        if (_estimatorFaulted)
+        {
+            Brake();
+            return;
+        }
+
         const ClosedLoopVelocityCommand command =
-            BuildClosedLoopVelocityCommandForVelocityTarget(linearSpeedMps, angularSpeedRadps);
-        const float desiredAccelerationMps2 =
-            9.0f;
-        CommandVelocity(linearSpeedMps, angularSpeedRadps, desiredAccelerationMps2, dtSeconds);
+            BuildClosedLoopVelocityCommandForVelocityTarget(
+                linearSpeedMps,
+                angularSpeedRadps,
+                presentLinearSpeedMps,
+                presentYawRateRadps,
+                maxLongitudinalAccelMps2,
+                maxYawAccelRadps2);
+        CommandVelocityInternal(linearSpeedMps, angularSpeedRadps, command, dtSeconds);
     }
 
     void CommandVelocity(
@@ -1163,22 +1295,69 @@ private:
         return command;
     }
 
+    void ResolveDefaultVelocityTargetOperatingEnvelope(
+        float presentLinearSpeedMps,
+        float presentYawRateRadps,
+        float& maxLongitudinalAccelMps2,
+        float& maxYawAccelRadps2) const
+    {
+        maxLongitudinalAccelMps2 = kDefaultCommandVelocityAsapLongitudinalAccelLimitMps2;
+        maxYawAccelRadps2 = kDefaultCommandVelocityAsapYawAccelLimitRadps2;
+
+        MazeMap::PlantModel plantModel;
+        float technicalLongitudinalAccelMps2 = 0.0f;
+        float technicalYawAccelRadps2 = 0.0f;
+        plantModel.velocityTargetTechnicalLimits(
+            presentLinearSpeedMps,
+            presentYawRateRadps,
+            _ukf.ukf().params(),
+            technicalLongitudinalAccelMps2,
+            technicalYawAccelRadps2,
+            GetMissionFanDutyCycle());
+
+        if (std::isfinite(technicalLongitudinalAccelMps2) && (technicalLongitudinalAccelMps2 > 0.0f))
+        {
+            maxLongitudinalAccelMps2 =
+                (std::min)(maxLongitudinalAccelMps2, technicalLongitudinalAccelMps2);
+        }
+        if (std::isfinite(technicalYawAccelRadps2) && (technicalYawAccelRadps2 > 0.0f))
+        {
+            maxYawAccelRadps2 =
+                (std::min)(maxYawAccelRadps2, technicalYawAccelRadps2);
+        }
+    }
+
     ClosedLoopVelocityCommand BuildClosedLoopVelocityCommandForVelocityTarget(
         float linearSpeedMps,
-        float angularSpeedRadps) const
+        float angularSpeedRadps,
+        float presentLinearSpeedMps,
+        float presentYawRateRadps,
+        float maxLongitudinalAccelMps2,
+        float maxYawAccelRadps2) const
     {
-        float presentLinearSpeedMps = 0.0f;
-        float presentYawRateRadps = 0.0f;
         float batteryVoltageV = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+        batteryVoltageV = 0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage());
+
+        float desiredLongitudinalAccelMps2 = 0.0f;
+        float desiredYawAccelRadps2 = 0.0f;
+        MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
+            presentLinearSpeedMps,
+            linearSpeedMps,
+            presentYawRateRadps,
+            angularSpeedRadps,
+            maxLongitudinalAccelMps2,
+            maxYawAccelRadps2,
+            MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS,
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
 
         MazeMap::PlantModel plantModel;
         const MazeMap::DriveCommandSolution solution =
-            plantModel.solveClosedLoopDriveCommandsForVelocityTarget(
+            plantModel.solveClosedLoopDriveCommands(
                 presentLinearSpeedMps,
-                linearSpeedMps,
+                desiredLongitudinalAccelMps2,
                 presentYawRateRadps,
-                angularSpeedRadps,
+                desiredYawAccelRadps2,
                 _ukf.ukf().params(),
                 GetMissionFanDutyCycle(),
                 batteryVoltageV);

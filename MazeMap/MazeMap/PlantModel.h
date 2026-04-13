@@ -282,7 +282,7 @@ namespace MazeMap
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) const noexcept;
         // Returns the traction-limited control command that drives the current body rates toward the target
-        // body rates over the requested response horizon. The default horizon is 5 ms.
+        // body rates over the requested response horizon using the canonical default when none is supplied.
         DriveCommandSolution solveDriveCommandsForVelocityTarget(
             float currentForwardVelocityMps,
             float targetForwardVelocityMps,
@@ -291,7 +291,14 @@ namespace MazeMap
             const PlantParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
-            float responseTimeS = 0.015f) const noexcept;
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
+        void velocityTargetTechnicalLimits(
+            float forwardVelocityMps,
+            float yawRateRadps,
+            const PlantParams& params,
+            float& maxLongitudinalAccelMps2,
+            float& maxYawAccelRadps2,
+            float fanDutyCycle = 0.80f) const noexcept;
         // Returns the issued closed-loop feedforward command. If the raw request reaches the traction limit,
         // this backs the validated body accelerations off by the requested reserve scale so the outer PI loop
         // retains command headroom.
@@ -312,7 +319,7 @@ namespace MazeMap
             const PlantParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
-            float responseTimeS = 0.005f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
             float tractionReserveScale = 0.90f) const noexcept;
         float driveTorqueFromCommand(
             float motorCommand,

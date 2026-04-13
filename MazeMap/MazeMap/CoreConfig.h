@@ -13,7 +13,7 @@ namespace MazeMap::Config
 
     // [Low] Maze cell size in meters. This is derived from the maze model and normally should not be edited here;
     // only change it if the robot is being adapted to a different maze standard.
-    const float kCellSizeM = MazeMap::Maze::GetCellDimension() / 100.0f;
+    const float kCellSizeM = MazeMap::Maze::GetCellDimension();
     // [Low] Physical wall thickness for the maze standard. Each neighboring cell contributes half of this thickness to
     // the occupied wall, so the open span inside one cell is smaller than the cell pitch.
     constexpr float kMazeWallThicknessM = 0.012f;

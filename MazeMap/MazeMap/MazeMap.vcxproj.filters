@@ -13,47 +13,53 @@
       <UniqueIdentifier>{67DA6AB6-F800-4C08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Header Files\App">
-      <UniqueIdentifier>{A0E4D0D1-1285-4945-A3FC-4029A0F16B12}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\App\Internal">
-      <UniqueIdentifier>{8BF4D7D0-06F9-4B13-8EA5-3D3FAD87FC8D}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\App\Internal\Runtime">
-      <UniqueIdentifier>{2E78370F-BE9E-4D4E-93F8-2DE343B3F7FE}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\Config">
-      <UniqueIdentifier>{290F74A9-1610-4836-B295-BD775C0E5E64}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\AuxMeasurementConfig">
-      <UniqueIdentifier>{A3B0C7D4-6D11-4EBA-9F66-2E9D9D8B1905}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\DiagnosticConfig">
-      <UniqueIdentifier>{8BC29779-AB5F-4903-BD4F-7A48A30D4907}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\FrontWallCharacterizationConfig">
-      <UniqueIdentifier>{F7A1766C-17D6-4350-B919-C29B6B3894F5}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\LedCalibrationConfig">
-      <UniqueIdentifier>{5D1A0D10-83D4-4F5E-9D23-4257F4EAB6AB}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\Pins">
-      <UniqueIdentifier>{9CF80D74-F175-49D1-8A29-C47AAB579EFA}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\HardwareConfig">
-      <UniqueIdentifier>{9F234DA9-47C8-4879-83E4-12062C5AF7A0}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\MmLog">
-      <UniqueIdentifier>{5F0128D3-6F47-4D29-B5CD-4D9284A2D4EA}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files\App">
-      <UniqueIdentifier>{D3E289D9-85F1-4980-BA70-E9136C763E29}</UniqueIdentifier>
+      <UniqueIdentifier>{B23B795D-92E2-B72D-0B44-E9CDCEFB1533}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\App\Internal">
-      <UniqueIdentifier>{6A11DDE5-17D7-4C28-BAB3-77B94EE19B21}</UniqueIdentifier>
+      <UniqueIdentifier>{33743099-4C24-18FC-BAF3-BB33244E8D37}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\App\Internal\BootUtilityModeFramework">
+      <UniqueIdentifier>{7D5E5EE6-2B86-5DEC-AC00-FBC9696FBE5D}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files\App\Internal\Runtime">
-      <UniqueIdentifier>{0BE00F63-381E-4846-BA85-2CE9D4594B85}</UniqueIdentifier>
+      <UniqueIdentifier>{5D3A3B5C-D556-A87C-B916-5506BAE8D5C9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\App">
+      <UniqueIdentifier>{1505E78A-88AC-CF6A-AFE4-3ECA52C4C818}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\App\Internal">
+      <UniqueIdentifier>{EA5A345E-3D34-18F4-2EB6-E168186F3C55}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\App\Internal\BootUtilityModeFramework">
+      <UniqueIdentifier>{BFA84A39-A36F-FA1D-30E0-25ABAC2A21D0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\App\Internal\Runtime">
+      <UniqueIdentifier>{33B07745-C2BC-ECCE-0D26-D3467CA6EBDE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\AuxMeasurementConfig">
+      <UniqueIdentifier>{50313AF2-1AB5-59BE-3CDD-53664A354550}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Config">
+      <UniqueIdentifier>{E394B4B1-6441-3120-4A58-C224A7E71233}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\DiagnosticConfig">
+      <UniqueIdentifier>{9DD1F0A2-D5D1-534A-9B23-1FE88266EE87}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\FrontWallCharacterizationConfig">
+      <UniqueIdentifier>{8021462B-91CE-736A-F7E5-CAAFDA9D5E9A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\HardwareConfig">
+      <UniqueIdentifier>{803345E2-DD92-1A58-CBBF-61550A6734AB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\LedCalibrationConfig">
+      <UniqueIdentifier>{D6D20517-E529-8DD0-90E4-2F3BDD9E817D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Pins">
+      <UniqueIdentifier>{45474D04-ED18-149C-ABD4-2BF9E0D27E76}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Platform">
+      <UniqueIdentifier>{F7ED3245-A357-FB46-99F1-18096E1E9B1D}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -67,7 +73,7 @@
       <Filter>Header Files\App</Filter>
     </ClInclude>
     <ClInclude Include="BootUtilityModeFramework.h">
-      <Filter>Header Files\App\Internal</Filter>
+      <Filter>Header Files\App\Internal\BootUtilityModeFramework</Filter>
     </ClInclude>
     <ClInclude Include="Cell.h">
       <Filter>Header Files</Filter>
@@ -103,7 +109,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="DiagnosticSensorSuite.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="DiagonalWallCentering.h">
       <Filter>Header Files</Filter>
@@ -118,7 +124,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="DriveBase.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="EigenCompat.h">
       <Filter>Header Files</Filter>
@@ -208,7 +214,7 @@
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapApplicationPrivate.h">
-      <Filter>Header Files\App\Internal</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapApplicationRuntime.h">
       <Filter>Header Files\App\Internal</Filter>
@@ -217,19 +223,19 @@
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapRuntimeCore.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapRuntimeInfrastructure.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapRuntimeMmLog.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapRuntimeSignalHelpers.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapRuntimeSensors.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapSharedRuntime.h">
       <Filter>Header Files\App\Internal</Filter>
@@ -268,7 +274,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MmLog.h">
-      <Filter>Header Files\MmLog</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="LoopController.h">
       <Filter>Header Files\App\Internal</Filter>
@@ -286,10 +292,10 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OpenFloorMeasurementCycle.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OpenFloorMeasurementLabels.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OpenLoopDriveCommand.h">
       <Filter>Header Files</Filter>
@@ -328,7 +334,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SensorSuite.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SmoothTurnYawRateController.h">
       <Filter>Header Files</Filter>
@@ -340,7 +346,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TeensyLayout.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\Platform</Filter>
     </ClInclude>
     <ClInclude Include="TrackWidthEstimate.h">
       <Filter>Header Files</Filter>
@@ -364,7 +370,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WallDistanceCalibration.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WallDetectionThresholds.h">
       <Filter>Header Files</Filter>
@@ -453,10 +459,13 @@
       <Filter>Source Files\App</Filter>
     </ClCompile>
     <ClCompile Include="BootUtilityModeFramework.cpp">
-      <Filter>Source Files\App\Internal</Filter>
+      <Filter>Source Files\App\Internal\BootUtilityModeFramework</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapApplication.cpp">
       <Filter>Source Files\App</Filter>
+    </ClCompile>
+    <ClCompile Include="MmLog.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MouseUkfFacade.cpp">
       <Filter>Source Files</Filter>
@@ -506,18 +515,6 @@
     <ClCompile Include="MazeMapCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PlantModel.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="SrUkfCore.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="WallGeometryModel.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="WallSensorPreprocessor.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="MazeMask.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -533,13 +530,22 @@
     <ClCompile Include="pch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PlantModel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SrUkfCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WallGeometryModel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WallSensorPreprocessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Vehicle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="VehicleState.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="MmLog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

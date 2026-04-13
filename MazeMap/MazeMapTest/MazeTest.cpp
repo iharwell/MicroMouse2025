@@ -226,7 +226,7 @@ namespace MazeMap
 		TEST_METHOD(TestConstructor)
 		{
 			Maze m = Maze();
-			Assert::AreEqual(m.GetCellDimension(), 18.0F);
+			Assert::AreEqual(0.18f, m.GetCellDimension(), 1.0e-6f);
 			for (int i = 0; i < m.GetXSize(); i++)
 			{
 				for (int j = 0; j < m.GetYSize(); j++)

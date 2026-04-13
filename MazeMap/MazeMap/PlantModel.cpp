@@ -1027,6 +1027,78 @@ namespace MazeMap
             batteryVoltageV);
     }
 
+    void PlantModel::velocityTargetTechnicalLimits(
+        float forwardVelocityMps,
+        float yawRateRadps,
+        const PlantParams& params,
+        float& maxLongitudinalAccelMps2,
+        float& maxYawAccelRadps2,
+        float fanDutyCycle) const noexcept
+    {
+        maxLongitudinalAccelMps2 = 0.0f;
+        maxYawAccelRadps2 = 0.0f;
+
+        if (!(std::isfinite(forwardVelocityMps) && std::isfinite(yawRateRadps)))
+        {
+            return;
+        }
+
+        constexpr float kLargeRequestedAccelMagnitude = 1.0e6f;
+
+        const DriveCommandSolution positiveLongitudinal =
+            solveDriveCommands(
+                forwardVelocityMps,
+                kLargeRequestedAccelMagnitude,
+                yawRateRadps,
+                0.0f,
+                params,
+                fanDutyCycle);
+        const DriveCommandSolution negativeLongitudinal =
+            solveDriveCommands(
+                forwardVelocityMps,
+                -kLargeRequestedAccelMagnitude,
+                yawRateRadps,
+                0.0f,
+                params,
+                fanDutyCycle);
+        const DriveCommandSolution positiveYaw =
+            solveDriveCommands(
+                forwardVelocityMps,
+                0.0f,
+                yawRateRadps,
+                kLargeRequestedAccelMagnitude,
+                params,
+                fanDutyCycle);
+        const DriveCommandSolution negativeYaw =
+            solveDriveCommands(
+                forwardVelocityMps,
+                0.0f,
+                yawRateRadps,
+                -kLargeRequestedAccelMagnitude,
+                params,
+                fanDutyCycle);
+
+        const float positiveLongitudinalLimitMps2 =
+            std::fabs(positiveLongitudinal.commandedLongitudinalAccelMps2);
+        const float negativeLongitudinalLimitMps2 =
+            std::fabs(negativeLongitudinal.commandedLongitudinalAccelMps2);
+        if (std::isfinite(positiveLongitudinalLimitMps2) && std::isfinite(negativeLongitudinalLimitMps2))
+        {
+            maxLongitudinalAccelMps2 =
+                (std::min)(positiveLongitudinalLimitMps2, negativeLongitudinalLimitMps2);
+        }
+
+        const float positiveYawLimitRadps2 =
+            std::fabs(positiveYaw.commandedYawAccelRadps2);
+        const float negativeYawLimitRadps2 =
+            std::fabs(negativeYaw.commandedYawAccelRadps2);
+        if (std::isfinite(positiveYawLimitRadps2) && std::isfinite(negativeYawLimitRadps2))
+        {
+            maxYawAccelRadps2 =
+                (std::min)(positiveYawLimitRadps2, negativeYawLimitRadps2);
+        }
+    }
+
     DriveCommandSolution PlantModel::solveClosedLoopDriveCommands(
         float forwardVelocityMps,
         float desiredLongitudinalAccelMps2,

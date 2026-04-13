@@ -46,7 +46,7 @@ namespace MazeMap
 
 		CalculateScores();
 		DescendGradient(start, startDirection, result);
-		_currentBest = result.Cost(GetVehicle(), GetMaze().GetCellDimension() / 100.0f);
+		_currentBest = result.Cost(GetVehicle(), GetMaze().GetCellDimension());
 	}
 	void ManeuverPathFinder::ManeuverPathToGoal(CellCoordinates start, Direction startDirection, ManeuverPath& result)
 	{
@@ -71,7 +71,7 @@ namespace MazeMap
 		}
 		CalculateScores();
 		DescendGradient(start, startDirection, result);
-		_currentBest = result.Cost(GetVehicle(), GetMaze().GetCellDimension() / 100.0f);
+		_currentBest = result.Cost(GetVehicle(), GetMaze().GetCellDimension());
 	}
 
 	float ManeuverPathFinder::GetCost(DirectionalLocation dirLoc)
@@ -89,14 +89,14 @@ namespace MazeMap
 		result.clear();
 		ManeuverPath path;
 		ManeuverPathToGoal(start, startDirection, path);
-		_currentBest = path.Cost(GetVehicle(), GetMaze().GetCellDimension() / 100.0f);
+		_currentBest = path.Cost(GetVehicle(), GetMaze().GetCellDimension());
 		path.ToHalfStepPath(DirectionalLocation(MazeLocation::CellCenter(start), startDirection), result);
 	}
 
 	void ManeuverPathFinder::CalculateScores()
 	{
 		ManeuverSet& ms = ManeuverSet::GetSet();
-		float cellDim = GetMaze().GetCellDimension() / 100;
+		float cellDim = GetMaze().GetCellDimension();
 		ms.SortByCost(GetVehicle(), cellDim);
 		_queue.SwapQueues();
 		while (_queue.GetCurrent().AnyFlags())
@@ -286,11 +286,11 @@ namespace MazeMap
 				UpdateScore(currentLoc, fromDir, ScoreData(static_cast<ManeuverCode>(straightDistance), fromVal.Cost + straightCost), true);
 				if (diag)
 				{
-					distance += GetMaze().GetCellDimension() / 100 * sqrtf(2.0f);
+					distance += GetMaze().GetCellDimension() * sqrtf(2.0f);
 				}
 				else
 				{
-					distance += GetMaze().GetCellDimension() / 100;
+					distance += GetMaze().GetCellDimension();
 				}
 				currentLoc = currentLoc >> fromDir;
 				++straightDistance;

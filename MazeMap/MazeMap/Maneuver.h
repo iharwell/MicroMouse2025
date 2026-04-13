@@ -451,12 +451,12 @@ namespace MazeMap
 		}
         virtual MAZEMAP_INLINE float GetVMax(const Vehicle& vehicle) const override
         {
-            const float cellSize = Maze::GetCellDimension() / 100.0f;
+            const float cellSize = Maze::GetCellDimension();
             return vehicle.GetTurnSpeed(GetRadiusInCells() * cellSize);
         }
         virtual MAZEMAP_INLINE float GetCost(const Vehicle& vehicle) const override
         {
-            const float cellSize = Maze::GetCellDimension() / 100.0f;
+            const float cellSize = Maze::GetCellDimension();
             float turnSpeed = vehicle.GetTurnSpeed(cellSize * _radius_in_cells);
             float turnCost = cellSize * GetTravelDistInCells() / turnSpeed;
             return turnCost;

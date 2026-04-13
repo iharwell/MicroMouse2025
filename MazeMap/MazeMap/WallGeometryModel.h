@@ -23,7 +23,7 @@ namespace MazeMap
     struct LocalMapView
     {
         const Maze* maze = nullptr;
-        float cellSizeM = Maze::GetCellDimension() / 100.0f;
+        float cellSizeM = Maze::GetCellDimension();
         float wallThicknessM = WALL_THICKNESS;
         float postHalfWidthM = 0.5f * WALL_THICKNESS;
         float noHitRangeM = 0.30f;
