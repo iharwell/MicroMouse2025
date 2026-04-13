@@ -150,6 +150,8 @@ namespace MazeMap::App::Internal
         _appliedControl = _queuedControl;
         _captureForNextTick = _config.defaultCapture;
         _faultReason = nullptr;
+        _tickStepContext = nullptr;
+        _tickStepCallback = nullptr;
         ResetLatchedRequests();
 
         const VehicleState initial = BuildInitialState();
@@ -246,7 +248,7 @@ namespace MazeMap::App::Internal
         const std::uint32_t availableComputeUs = ComputeRemainingBudgetUs(state.tickStartUs);
         ResetLatchedRequests();
         TickServices services(*this);
-        const ControlVector candidateControl = _mode->Step(availableComputeUs, state, services);
+        const ControlVector candidateControl = InvokeTickStep(availableComputeUs, state, services);
         RecordModeReturnTiming(state);
 
         SessionResult result{};
@@ -361,6 +363,8 @@ namespace MazeMap::App::Internal
         _sessionBegun = false;
         _runtime = nullptr;
         _mode = nullptr;
+        _tickStepContext = nullptr;
+        _tickStepCallback = nullptr;
     }
 
     bool LoopController::SessionActive() const noexcept
@@ -450,6 +454,19 @@ namespace MazeMap::App::Internal
         default:
             return candidate;
         }
+    }
+
+    LoopController::ControlVector LoopController::InvokeTickStep(
+        std::uint32_t availableComputeUs,
+        const VehicleState& state,
+        TickServices& services)
+    {
+        if (_tickStepCallback != nullptr)
+        {
+            return _tickStepCallback(_tickStepContext, availableComputeUs, state, services);
+        }
+
+        return _mode->Step(availableComputeUs, state, services);
     }
 
     void LoopController::ApplyControlAtTickStart(const ControlVector& control, float dtSeconds)
@@ -896,6 +913,8 @@ namespace MazeMap::App::Internal
         _captureOverrideActive = false;
         _resumePending = false;
         ResetLatchedRequests();
+        _tickStepContext = nullptr;
+        _tickStepCallback = nullptr;
         return result;
     }
 

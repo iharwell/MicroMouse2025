@@ -257,14 +257,6 @@ private:
     uint8_t _primaryDiagnosticSelectorSensePin;
     bool _primaryDiagnosticSelectorMonitorArmed;
     bool _primaryDiagnosticSelectorInactive;
-    using TickCallback = MazeMap::App::Internal::LoopController::ControlVector (*)(
-        void* context,
-        std::uint32_t availableComputeUs,
-        const MazeMap::App::Internal::LoopController::VehicleState& state,
-        OpenFloorMeasurementCycle& cycle,
-        MazeMap::App::Internal::LoopController::TickServices& services);
-    void* _tickCallbackContext;
-    TickCallback _tickCallback;
 
     static MotionLimits MeasurementLimits(float maxSpeedMps);
     static void HandleRuntimeFault(void* context, const char* reason) noexcept;
@@ -385,20 +377,17 @@ private:
     template <typename Callback>
     bool RunMeasurementTick(Callback&& callback)
     {
-        _tickCallbackContext = &callback;
-        _tickCallback = [](void* context,
-                           std::uint32_t availableComputeUs,
-                           const MazeMap::App::Internal::LoopController::VehicleState& state,
-                           OpenFloorMeasurementCycle& cycle,
-                           MazeMap::App::Internal::LoopController::TickServices& services)
-            -> MazeMap::App::Internal::LoopController::ControlVector
-        {
-            return (*static_cast<Callback*>(context))(availableComputeUs, state, cycle, services);
-        };
-
-        const MazeMap::App::Internal::LoopController::SessionResult result = _loopController.RunOneTick();
-        _tickCallbackContext = nullptr;
-        _tickCallback = nullptr;
+        const MazeMap::App::Internal::LoopController::SessionResult result =
+            _loopController.RunOneTickWithCallback(
+                [this, &callback](
+                    std::uint32_t availableComputeUs,
+                    const MazeMap::App::Internal::LoopController::VehicleState& state,
+                    MazeMap::App::Internal::LoopController::TickServices& services)
+                {
+                    OpenFloorMeasurementCycle cycle{};
+                    PopulateCycleFromState(state, cycle);
+                    return callback(availableComputeUs, state, cycle, services);
+                });
         return result.status == MazeMap::App::Internal::LoopController::SessionResult::Status::Running;
     }
 };
@@ -429,8 +418,6 @@ OpenFloorMeasurementController::OpenFloorMeasurementController(SharedRobotRuntim
     , _primaryDiagnosticSelectorInactive(false)
 {
     _runId[0] = '\0';
-    _tickCallbackContext = nullptr;
-    _tickCallback = nullptr;
 }
 
 bool OpenFloorMeasurementController::OnSessionBegin(
@@ -445,23 +432,16 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     const MazeMap::App::Internal::LoopController::VehicleState& state,
     MazeMap::App::Internal::LoopController::TickServices& services)
 {
-    if (_tickCallback == nullptr)
-    {
-        services.Fault("Open-floor measurement tick callback was not installed");
-        return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
-    }
-
-    OpenFloorMeasurementCycle cycle{};
-    PopulateCycleFromState(state, cycle);
-    return _tickCallback(_tickCallbackContext, availableComputeUs, state, cycle, services);
+    (void)availableComputeUs;
+    (void)state;
+    services.Fault("Open-floor measurement tick callback was not installed");
+    return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
 }
 
 void OpenFloorMeasurementController::OnSessionEnd(
     const MazeMap::App::Internal::LoopController::SessionResult& result)
 {
     (void)result;
-    _tickCallbackContext = nullptr;
-    _tickCallback = nullptr;
 }
 
 void OpenFloorMeasurementController::ServiceWaitState()

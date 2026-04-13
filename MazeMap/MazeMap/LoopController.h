@@ -4,6 +4,7 @@
 #include "MazeMapRuntimeCore.h"
 
 #include <cstdint>
+#include <type_traits>
 
 class DriveBase;
 class SensorSuite;
@@ -302,6 +303,35 @@ namespace MazeMap::App::Internal
 
         SessionResult Run();
         SessionResult RunOneTick();
+        template <typename Callback>
+        SessionResult RunOneTickWithCallback(Callback&& callback)
+        {
+            using CallbackType = std::remove_reference_t<Callback>;
+
+            if (_tickStepCallback != nullptr)
+            {
+                SessionResult result{};
+                result.status = SessionResult::Status::Faulted;
+                result.tickCount = _tickCount;
+                result.faultReason = "LoopController temporary tick callback already installed";
+                return _sessionActive ? FinishSession(result) : result;
+            }
+
+            _tickStepContext = const_cast<void*>(static_cast<const void*>(&callback));
+            _tickStepCallback = [](void* context,
+                                   std::uint32_t availableComputeUs,
+                                   const VehicleState& state,
+                                   TickServices& services)
+                -> ControlVector
+            {
+                return (*static_cast<CallbackType*>(context))(availableComputeUs, state, services);
+            };
+
+            const SessionResult result = RunOneTick();
+            _tickStepContext = nullptr;
+            _tickStepCallback = nullptr;
+            return result;
+        }
         void EndSession();
 
         bool SessionActive() const noexcept;
@@ -321,6 +351,12 @@ namespace MazeMap::App::Internal
             CaptureOptions nextCapture{};
         };
 
+        using TickStepCallback = ControlVector (*)(
+            void* context,
+            std::uint32_t availableComputeUs,
+            const VehicleState& state,
+            TickServices& services);
+
         static std::uint16_t RelativeTickUs(std::uint32_t tickStartUs, std::uint32_t timestampUs) noexcept;
         static bool IsZeroVelocityCommand(const ControlVector& command) noexcept;
         static bool IsFullCapture(const CaptureOptions& options) noexcept;
@@ -329,6 +365,10 @@ namespace MazeMap::App::Internal
         VehicleState BuildInitialState() const noexcept;
         ControlVector ResolveStartupCommand() const noexcept;
         ControlVector NormalizeQueuedControl(const ControlVector& candidate) const noexcept;
+        ControlVector InvokeTickStep(
+            std::uint32_t availableComputeUs,
+            const VehicleState& state,
+            TickServices& services);
         void ApplyControlAtTickStart(const ControlVector& control, float dtSeconds);
         void ApplyTerminalActuation() noexcept;
         void ApplyFaultActuation() noexcept;
@@ -366,5 +406,7 @@ namespace MazeMap::App::Internal
         CaptureOptions _captureForNextTick{};
         LatchedRequests _requests{};
         const char* _faultReason{};
+        void* _tickStepContext{};
+        TickStepCallback _tickStepCallback{};
     };
 }

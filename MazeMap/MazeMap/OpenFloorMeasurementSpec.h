@@ -261,15 +261,15 @@ namespace MazeMap
     };
 
     inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { 0.1f, 0.30f, 0.55f };
-    inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 3.0f, 6.0f, 9.0f };
+    inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 9.0f, 18.0f, 27.0f };
     inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.4f, 0.45f, 0.45f };
     inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
     // After a launch pulse leaves the estimator's stationary regime, hold brake at the start marker
     // for this long so the next repeat begins from a settled UKF state instead of launch transients.
     inline constexpr unsigned long kOpenFloorLaunchSettleMs = 200UL;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.2f;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.29f;
-    inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.03f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.25f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.35f;
+    inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.05f;
     inline constexpr unsigned long kOpenFloorSelectorRemovalFaultDelayMs = 500UL;
     inline constexpr float kOpenFloorRecoveryAcceptanceRadiusM = 0.015f;
     inline constexpr float kOpenFloorRecoveryArrivalHeadingToleranceRad = 1.0f * DEG_TO_RAD_F;

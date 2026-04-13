@@ -135,38 +135,22 @@ private:
         const MazeMap::App::Internal::LoopController::VehicleState& state,
         MazeMap::App::Internal::LoopController::TickServices& services) override
     {
-        if (_tickCallback == nullptr)
-        {
-            services.Fault("Front wall characterization tick callback was not installed");
-            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
-        }
-
-        return _tickCallback(_tickCallbackContext, availableComputeUs, state, services);
+        (void)availableComputeUs;
+        (void)state;
+        services.Fault("Front wall characterization tick callback was not installed");
+        return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
     }
 
     void OnSessionEnd(const MazeMap::App::Internal::LoopController::SessionResult& result) override
     {
         (void)result;
-        _tickCallbackContext = nullptr;
-        _tickCallback = nullptr;
     }
 
     template <typename Callback>
     bool RunControlTick(Callback&& callback)
     {
-        _tickCallbackContext = &callback;
-        _tickCallback = [](void* context,
-                           std::uint32_t availableComputeUs,
-                           const MazeMap::App::Internal::LoopController::VehicleState& state,
-                           MazeMap::App::Internal::LoopController::TickServices& services)
-            -> MazeMap::App::Internal::LoopController::ControlVector
-        {
-            return (*static_cast<Callback*>(context))(availableComputeUs, state, services);
-        };
-
-        const MazeMap::App::Internal::LoopController::SessionResult result = _loopController.RunOneTick();
-        _tickCallbackContext = nullptr;
-        _tickCallback = nullptr;
+        const MazeMap::App::Internal::LoopController::SessionResult result =
+            _loopController.RunOneTickWithCallback(callback);
         return result.status == MazeMap::App::Internal::LoopController::SessionResult::Status::Running;
     }
 
@@ -185,13 +169,6 @@ private:
     MazeMap::App::Internal::LoopController::RuntimeBundle _loopRuntime;
     DiagnosticSensorSuite& _sensors;
     DriveBase& _drive;
-    using TickCallback = MazeMap::App::Internal::LoopController::ControlVector (*)(
-        void* context,
-        std::uint32_t availableComputeUs,
-        const MazeMap::App::Internal::LoopController::VehicleState& state,
-        MazeMap::App::Internal::LoopController::TickServices& services);
-    void* _tickCallbackContext = nullptr;
-    TickCallback _tickCallback = nullptr;
 
     bool HoldStationary(const char* phaseName, uint16_t durationMs)
     {
