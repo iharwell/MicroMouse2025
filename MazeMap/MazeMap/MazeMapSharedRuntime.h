@@ -11,6 +11,10 @@
 class DriveBase;
 class SensorSuite;
 class DiagnosticSensorSuite;
+namespace MazeMap::App::Internal
+{
+    class LoopController;
+}
 
 namespace MazeMap
 {
@@ -130,6 +134,7 @@ namespace MazeMap::App::Internal
         void CaptureUtilityDataLogFailure(bool& overflowed, bool& writeFailed) const noexcept;
 
         DriveBase& Drive() noexcept;
+        LoopController& ControlLoop() noexcept;
         SensorSuite& MissionSensors() noexcept;
         DiagnosticSensorSuite& DiagnosticSensors() noexcept;
 

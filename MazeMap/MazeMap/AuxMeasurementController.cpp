@@ -2,6 +2,7 @@
 #include "MazeMapApplicationPrivate.h"
 #include "BootModeDescriptor.h"
 #include "DriveBase.h"
+#include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
@@ -11,16 +12,17 @@
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
-class AuxMeasurementController : public IApplicationMode
+class AuxMeasurementController : public IApplicationMode, public MazeMap::App::Internal::LoopController::IMode
 {
 public:
     explicit AuxMeasurementController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
+        , _loopController(runtime.ControlLoop())
+        , _loopRuntime{ runtime, runtime.Drive(), nullptr, &runtime.DiagnosticSensors(), nullptr, nullptr, nullptr, nullptr }
         , _faulted(false)
         , _fanEnabled(false)
         , _phaseId(0UL)
         , _sampleCount(0UL)
-        , _lastControlMicros(0UL)
     {
         _logFileName[0] = '\0';
     }
@@ -62,8 +64,18 @@ public:
         }
 
         _runtime.Drive().SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
-        _lastControlMicros = micros();
-        return true;
+        MazeMap::App::Internal::LoopController::SessionConfig loopConfig{};
+        loopConfig.bootModeId = MazeMap::App::BootModeId::AuxiliaryMeasurement;
+        loopConfig.sessionName = "aux_measurement";
+        loopConfig.controlPeriodUs = AuxMeasurementConfig::kControlPeriodUs;
+        loopConfig.startupCommandPolicy =
+            MazeMap::App::Internal::LoopController::SessionConfig::StartupCommandPolicy::Brake;
+        loopConfig.actuationPolicy =
+            MazeMap::App::Internal::LoopController::SessionConfig::ActuationPolicy::VelocityBrakeOpenLoop;
+        loopConfig.allowDynamicCaptureOverride = false;
+        loopConfig.serviceWaitState = true;
+        loopConfig.serviceSlackState = true;
+        return _loopController.BeginSession(loopConfig, _loopRuntime, *this);
     }
 
     void Run() override
@@ -81,6 +93,7 @@ public:
         _runtime.Drive().Brake();
         _runtime.Drive().UseNominalWheelControlProfile();
         SetFanEnabled(false);
+        _loopController.EndSession();
         if (ok)
         {
             (void)_runtime.AppendTextLogFormatted("Auxiliary measurement complete, log saved to %s", GetLogFileName());
@@ -88,7 +101,63 @@ public:
         CloseLog();
     }
 
+    bool OnSessionBegin(const MazeMap::App::Internal::LoopController::VehicleState& initial) override
+    {
+        (void)initial;
+        return true;
+    }
+
+    MazeMap::App::Internal::LoopController::ControlVector Step(
+        std::uint32_t availableComputeUs,
+        const MazeMap::App::Internal::LoopController::VehicleState& state,
+        MazeMap::App::Internal::LoopController::TickServices& services) override
+    {
+        if (_tickCallback == nullptr)
+        {
+            services.Fault("Aux measurement tick callback was not installed");
+            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+        }
+
+        return _tickCallback(_tickCallbackContext, availableComputeUs, state, services);
+    }
+
+    void OnSessionEnd(const MazeMap::App::Internal::LoopController::SessionResult& result) override
+    {
+        (void)result;
+        _tickCallbackContext = nullptr;
+        _tickCallback = nullptr;
+    }
+
+    void ServiceWaitState() override
+    {
+        ServiceLog();
+    }
+
+    void ServiceSlackState() override
+    {
+        ServiceLog();
+    }
+
 private:
+    template <typename Callback>
+    bool RunControlTick(Callback&& callback)
+    {
+        _tickCallbackContext = &callback;
+        _tickCallback = [](void* context,
+                           std::uint32_t availableComputeUs,
+                           const MazeMap::App::Internal::LoopController::VehicleState& state,
+                           MazeMap::App::Internal::LoopController::TickServices& services)
+            -> MazeMap::App::Internal::LoopController::ControlVector
+        {
+            return (*static_cast<Callback*>(context))(availableComputeUs, state, services);
+        };
+
+        const MazeMap::App::Internal::LoopController::SessionResult result = _loopController.RunOneTick();
+        _tickCallbackContext = nullptr;
+        _tickCallback = nullptr;
+        return result.status == MazeMap::App::Internal::LoopController::SessionResult::Status::Running;
+    }
+
     static void HandleRuntimeFault(void* context, const char* reason) noexcept
     {
         if (context == nullptr)
@@ -100,12 +169,20 @@ private:
     }
 
     SharedRobotRuntime& _runtime;
+    MazeMap::App::Internal::LoopController& _loopController;
+    MazeMap::App::Internal::LoopController::RuntimeBundle _loopRuntime;
     char _logFileName[64];
     bool _faulted;
     bool _fanEnabled;
     unsigned long _phaseId;
     unsigned long _sampleCount;
-    unsigned long _lastControlMicros;
+    using TickCallback = MazeMap::App::Internal::LoopController::ControlVector (*)(
+        void* context,
+        std::uint32_t availableComputeUs,
+        const MazeMap::App::Internal::LoopController::VehicleState& state,
+        MazeMap::App::Internal::LoopController::TickServices& services);
+    void* _tickCallbackContext = nullptr;
+    TickCallback _tickCallback = nullptr;
 
     bool BeginLog()
     {
@@ -276,181 +353,197 @@ private:
         float lastPlanarAccelMps2 = 0.0f;
         float lastCommandedOmegaRadps = 0.0f;
         float saturationReferenceSpeedMps = 0.0f;
+        bool phaseFinished = false;
+        bool phaseSucceeded = false;
 
-        while (!_faulted)
+        while (!_faulted && !phaseFinished)
         {
-            const unsigned long nowMs = millis();
-            if (static_cast<unsigned long>(nowMs - phaseStartMs) >= AuxMeasurementConfig::kTurningTractionSweepTimeoutMs)
-            {
-                _runtime.Drive().Brake();
-                return WriteTurningTractionResult(
-                    "timeout",
-                    false,
-                    static_cast<unsigned long>(nowMs - phaseStartMs),
-                    commandedSpeedMps,
-                    lastCommandedOmegaRadps,
-                    lastMetrics,
-                    lastPlanarAccelMps2);
-            }
-
-            uint32_t timestampUs = 0U;
-            uint32_t dtUs = 0U;
-            WaitForNextSample(timestampUs, dtUs);
-
-            const DiagnosticSensorSnapshot sensorSnapshot = _runtime.DiagnosticSensors().Capture(false, _runtime.Drive().GetPose());
-            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _runtime.Drive().UpdateOdometry(dtSeconds, sensorSnapshot);
-            if (_runtime.Drive().HasEstimatorFault())
-            {
-                return Fail(_runtime.Drive().GetEstimatorFaultReason());
-            }
-            if (!tighteningTurn)
-            {
-                commandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * dtSeconds;
-                if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
-                {
-                    commandedSpeedMps = (std::min)(AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps, commandedSpeedMps);
-                }
-                heldSpeedMps = commandedSpeedMps;
-            }
-            else
-            {
-                commandedSpeedMps = heldSpeedMps;
-                commandedCurvatureMInv += AuxMeasurementConfig::kTurningTractionCurvatureRampMInvPerSec * dtSeconds;
-            }
-
-            const float nominalOmegaRadps = directionSign * (commandedSpeedMps * commandedCurvatureMInv);
-            targetYawRad = WrapAngleRad(targetYawRad + (nominalOmegaRadps * dtSeconds));
-            lastCommandedOmegaRadps = MazeMap::ComputeTurningTractionAngularCommand(
-                nominalOmegaRadps,
-                targetYawRad,
-                _runtime.Drive().GetPose().yawRad,
-                _runtime.Drive().GetPose().angularSpeedRadps,
-                Config::kArcHeadingKp,
-                Config::kArcYawD,
-                AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps);
-            const float effectiveTrackWidthM =
-                MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(commandedSpeedMps, lastCommandedOmegaRadps);
-            if (static_cast<unsigned long>(nowMs - phaseStartMs) < AuxMeasurementConfig::kTurningTractionLaunchMs)
-            {
-                const MazeMap::TurningLaunchCommands launchCommands = MazeMap::ComputeTurningLaunchCommands(
-                    commandedSpeedMps,
-                    lastCommandedOmegaRadps,
-                    effectiveTrackWidthM,
-                    Config::kWheelRestLaunchDriveCommand);
-                _runtime.Drive().CommandOpenLoopRaw(launchCommands.leftCommand, launchCommands.rightCommand);
-            }
-            else
-            {
-                _runtime.Drive().CommandVelocity(commandedSpeedMps, lastCommandedOmegaRadps, dtSeconds);
-            }
-
-            const DriveTelemetry driveTelemetry = _runtime.Drive().GetTelemetry();
-            const float planarAccelMps2 = _runtime.DiagnosticSensors().GetPlanarAccelMps2(sensorSnapshot);
-            const MazeMap::TurningTractionMetrics metrics = MazeMap::ComputeTurningTractionMetrics(
-                driveTelemetry.leftVelocityMps,
-                driveTelemetry.rightVelocityMps,
-                effectiveTrackWidthM,
-                sensorSnapshot.gyroRadps,
-                planarAccelMps2);
-            lastMetrics = metrics;
-            lastPlanarAccelMps2 = planarAccelMps2;
-
-            if (!LogSample(
-                false,
-                _fanEnabled,
-                timestampUs,
-                dtUs,
-                _runtime.Drive().GetPose(),
-                _runtime.Drive(),
-                driveTelemetry,
-                sensorSnapshot,
-                planarAccelMps2))
-            {
-                return Fail("Failed to write turning traction sample");
-            }
-
-            const bool slipDetected = MazeMap::IsTurningTractionLossDetected(
-                metrics,
-                AuxMeasurementConfig::kTurningTractionSlipMinSpeedMps,
-                AuxMeasurementConfig::kTurningTractionSlipMinLatAccelMps2,
-                AuxMeasurementConfig::kTurningTractionSlipYawCoherenceFloor,
-                AuxMeasurementConfig::kTurningTractionSlipPlanarCoherenceFloor);
-            if (slipDetected)
-            {
-                if (!slipCandidateActive)
-                {
-                    slipCandidateStartMs = nowMs;
-                    slipCandidateActive = true;
-                }
-                else if (static_cast<unsigned long>(nowMs - slipCandidateStartMs) >= AuxMeasurementConfig::kTurningTractionSlipConfirmMs)
-                {
-                    _runtime.Drive().Brake();
-                    return WriteTurningTractionResult(
-                        "traction_loss",
-                        true,
-                        static_cast<unsigned long>(nowMs - phaseStartMs),
-                        commandedSpeedMps,
-                        lastCommandedOmegaRadps,
-                        metrics,
-                        planarAccelMps2);
-                }
-            }
-            else
-            {
-                slipCandidateActive = false;
-            }
-
-            const float maxWheelCommandMagnitude = (std::max)(
-                std::fabs(driveTelemetry.leftDriveCommand),
-                std::fabs(driveTelemetry.rightDriveCommand));
-            if (!tighteningTurn)
-            {
-                const bool actuatorLimited =
-                    (metrics.encoderLinearSpeedMps >= AuxMeasurementConfig::kTurningTractionPlateauMinSpeedMps) &&
-                    (maxWheelCommandMagnitude >= AuxMeasurementConfig::kTurningTractionActuatorCeilingCommand);
-
-                if (!actuatorLimited)
-                {
-                    saturationPlateauStartMs = 0UL;
-                    saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
-                }
-                else if (saturationPlateauStartMs == 0UL)
-                {
-                    saturationPlateauStartMs = nowMs;
-                    saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
-                }
-                else if (metrics.encoderLinearSpeedMps >= (saturationReferenceSpeedMps + AuxMeasurementConfig::kTurningTractionPlateauDeltaMps))
-                {
-                    saturationPlateauStartMs = nowMs;
-                    saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
-                }
-                else if (static_cast<unsigned long>(nowMs - saturationPlateauStartMs) >= AuxMeasurementConfig::kTurningTractionPlateauWindowMs)
-                {
-                    tighteningTurn = true;
-                    heldSpeedMps = (std::max)(commandedSpeedMps, metrics.encoderLinearSpeedMps);
-
-                    char message[160] = {};
-                    const int messageLength = snprintf(
-                        message,
-                        sizeof(message),
-                        "reason=speed_plateau;hold_v_mps=%.3f;curvature_m_inv=%.3f;outer_cmd=%.3f",
-                        heldSpeedMps,
-                        commandedCurvatureMInv,
-                        maxWheelCommandMagnitude);
-                    if (messageLength <= 0 || messageLength >= static_cast<int>(sizeof(message)))
+            if (!RunControlTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices& services)
                     {
-                        return Fail("Failed to format turning traction mode event");
-                    }
-                    if (!WriteEvent("turning_traction_mode", message))
-                    {
-                        return Fail("Failed to write turning traction mode event");
-                    }
-                }
+                        const unsigned long nowMs = millis();
+                        if (static_cast<unsigned long>(nowMs - phaseStartMs) >= AuxMeasurementConfig::kTurningTractionSweepTimeoutMs)
+                        {
+                            phaseSucceeded = WriteTurningTractionResult(
+                                "timeout",
+                                false,
+                                static_cast<unsigned long>(nowMs - phaseStartMs),
+                                commandedSpeedMps,
+                                lastCommandedOmegaRadps,
+                                lastMetrics,
+                                lastPlanarAccelMps2);
+                            if (!phaseSucceeded)
+                            {
+                                services.Fault("Failed to write turning traction timeout result");
+                            }
+                            phaseFinished = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        const float dtSeconds = state.dtSeconds;
+                        const DiagnosticSensorSnapshot& sensorSnapshot = state.diagnosticSensors;
+                        if (!tighteningTurn)
+                        {
+                            commandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * dtSeconds;
+                            if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
+                            {
+                                commandedSpeedMps = (std::min)(AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps, commandedSpeedMps);
+                            }
+                            heldSpeedMps = commandedSpeedMps;
+                        }
+                        else
+                        {
+                            commandedSpeedMps = heldSpeedMps;
+                            commandedCurvatureMInv += AuxMeasurementConfig::kTurningTractionCurvatureRampMInvPerSec * dtSeconds;
+                        }
+
+                        const float nominalOmegaRadps = directionSign * (commandedSpeedMps * commandedCurvatureMInv);
+                        targetYawRad = WrapAngleRad(targetYawRad + (nominalOmegaRadps * dtSeconds));
+                        lastCommandedOmegaRadps = MazeMap::ComputeTurningTractionAngularCommand(
+                            nominalOmegaRadps,
+                            targetYawRad,
+                            state.estimate.yawRad,
+                            state.estimate.angularSpeedRadps,
+                            Config::kArcHeadingKp,
+                            Config::kArcYawD,
+                            AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps);
+                        const float effectiveTrackWidthM =
+                            MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(commandedSpeedMps, lastCommandedOmegaRadps);
+                        const float planarAccelMps2 = _runtime.DiagnosticSensors().GetPlanarAccelMps2(sensorSnapshot);
+                        const MazeMap::TurningTractionMetrics metrics = MazeMap::ComputeTurningTractionMetrics(
+                            state.driveTelemetry.leftVelocityMps,
+                            state.driveTelemetry.rightVelocityMps,
+                            effectiveTrackWidthM,
+                            sensorSnapshot.gyroRadps,
+                            planarAccelMps2);
+                        lastMetrics = metrics;
+                        lastPlanarAccelMps2 = planarAccelMps2;
+
+                        if (!LogSample(
+                                false,
+                                _fanEnabled,
+                                state.tickStartUs,
+                                state.dtUs,
+                                state.estimate,
+                                _runtime.Drive(),
+                                state.driveTelemetry,
+                                sensorSnapshot,
+                                planarAccelMps2))
+                        {
+                            services.Fault("Failed to write turning traction sample");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        const bool slipDetected = MazeMap::IsTurningTractionLossDetected(
+                            metrics,
+                            AuxMeasurementConfig::kTurningTractionSlipMinSpeedMps,
+                            AuxMeasurementConfig::kTurningTractionSlipMinLatAccelMps2,
+                            AuxMeasurementConfig::kTurningTractionSlipYawCoherenceFloor,
+                            AuxMeasurementConfig::kTurningTractionSlipPlanarCoherenceFloor);
+                        if (slipDetected)
+                        {
+                            if (!slipCandidateActive)
+                            {
+                                slipCandidateStartMs = nowMs;
+                                slipCandidateActive = true;
+                            }
+                            else if (static_cast<unsigned long>(nowMs - slipCandidateStartMs) >= AuxMeasurementConfig::kTurningTractionSlipConfirmMs)
+                            {
+                                phaseSucceeded = WriteTurningTractionResult(
+                                    "traction_loss",
+                                    true,
+                                    static_cast<unsigned long>(nowMs - phaseStartMs),
+                                    commandedSpeedMps,
+                                    lastCommandedOmegaRadps,
+                                    metrics,
+                                    planarAccelMps2);
+                                if (!phaseSucceeded)
+                                {
+                                    services.Fault("Failed to write turning traction loss result");
+                                }
+                                phaseFinished = true;
+                                return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                            }
+                        }
+                        else
+                        {
+                            slipCandidateActive = false;
+                        }
+
+                        const float maxWheelCommandMagnitude = (std::max)(
+                            std::fabs(state.driveTelemetry.leftDriveCommand),
+                            std::fabs(state.driveTelemetry.rightDriveCommand));
+                        if (!tighteningTurn)
+                        {
+                            const bool actuatorLimited =
+                                (metrics.encoderLinearSpeedMps >= AuxMeasurementConfig::kTurningTractionPlateauMinSpeedMps) &&
+                                (maxWheelCommandMagnitude >= AuxMeasurementConfig::kTurningTractionActuatorCeilingCommand);
+
+                            if (!actuatorLimited)
+                            {
+                                saturationPlateauStartMs = 0UL;
+                                saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
+                            }
+                            else if (saturationPlateauStartMs == 0UL)
+                            {
+                                saturationPlateauStartMs = nowMs;
+                                saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
+                            }
+                            else if (metrics.encoderLinearSpeedMps >= (saturationReferenceSpeedMps + AuxMeasurementConfig::kTurningTractionPlateauDeltaMps))
+                            {
+                                saturationPlateauStartMs = nowMs;
+                                saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
+                            }
+                            else if (static_cast<unsigned long>(nowMs - saturationPlateauStartMs) >= AuxMeasurementConfig::kTurningTractionPlateauWindowMs)
+                            {
+                                tighteningTurn = true;
+                                heldSpeedMps = (std::max)(commandedSpeedMps, metrics.encoderLinearSpeedMps);
+
+                                char message[160] = {};
+                                const int messageLength = snprintf(
+                                    message,
+                                    sizeof(message),
+                                    "reason=speed_plateau;hold_v_mps=%.3f;curvature_m_inv=%.3f;outer_cmd=%.3f",
+                                    heldSpeedMps,
+                                    commandedCurvatureMInv,
+                                    maxWheelCommandMagnitude);
+                                if (messageLength <= 0 || messageLength >= static_cast<int>(sizeof(message)))
+                                {
+                                    services.Fault("Failed to format turning traction mode event");
+                                    return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                                }
+                                if (!WriteEvent("turning_traction_mode", message))
+                                {
+                                    services.Fault("Failed to write turning traction mode event");
+                                    return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                                }
+                            }
+                        }
+
+                        if (static_cast<unsigned long>(nowMs - phaseStartMs) < AuxMeasurementConfig::kTurningTractionLaunchMs)
+                        {
+                            const MazeMap::TurningLaunchCommands launchCommands = MazeMap::ComputeTurningLaunchCommands(
+                                commandedSpeedMps,
+                                lastCommandedOmegaRadps,
+                                effectiveTrackWidthM,
+                                Config::kWheelRestLaunchDriveCommand);
+                            return MazeMap::App::Internal::LoopController::ControlVector::OpenLoopCommand(
+                                launchCommands.leftCommand,
+                                launchCommands.rightCommand);
+                        }
+
+                        return MazeMap::App::Internal::LoopController::ControlVector::VelocityCommand(
+                            commandedSpeedMps,
+                            lastCommandedOmegaRadps);
+                    }))
+            {
+                return false;
             }
         }
 
-        return false;
+        return phaseSucceeded;
     }
 
     bool HoldPhase(const char* phaseName, uint16_t durationMs, bool stationary, bool fanEnabled)
@@ -464,32 +557,29 @@ private:
         const unsigned long startMs = millis();
         while (!_faulted && static_cast<unsigned long>(millis() - startMs) < durationMs)
         {
-            uint32_t timestampUs = 0U;
-            uint32_t dtUs = 0U;
-            WaitForNextSample(timestampUs, dtUs);
-
-            _runtime.Drive().Brake();
-            const DiagnosticSensorSnapshot sensorSnapshot = _runtime.DiagnosticSensors().Capture(stationary, _runtime.Drive().GetPose());
-            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _runtime.Drive().UpdateOdometry(dtSeconds, sensorSnapshot);
-            if (_runtime.Drive().HasEstimatorFault())
+            if (!RunControlTick(
+                    [&, stationary](std::uint32_t,
+                                    const MazeMap::App::Internal::LoopController::VehicleState& state,
+                                    MazeMap::App::Internal::LoopController::TickServices& services)
+                    {
+                        const float planarAccelMps2 = _runtime.DiagnosticSensors().GetPlanarAccelMps2(state.diagnosticSensors);
+                        if (!LogSample(
+                                stationary,
+                                _fanEnabled,
+                                state.tickStartUs,
+                                state.dtUs,
+                                state.estimate,
+                                _runtime.Drive(),
+                                state.driveTelemetry,
+                                state.diagnosticSensors,
+                                planarAccelMps2))
+                        {
+                            services.Fault("Failed to write auxiliary measurement sample");
+                        }
+                        return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                    }))
             {
-                return Fail(_runtime.Drive().GetEstimatorFaultReason());
-            }
-            const DriveTelemetry driveTelemetry = _runtime.Drive().GetTelemetry();
-            const float planarAccelMps2 = _runtime.DiagnosticSensors().GetPlanarAccelMps2(sensorSnapshot);
-            if (!LogSample(
-                stationary,
-                _fanEnabled,
-                timestampUs,
-                dtUs,
-                _runtime.Drive().GetPose(),
-                _runtime.Drive(),
-                driveTelemetry,
-                sensorSnapshot,
-                planarAccelMps2))
-            {
-                return Fail("Failed to write auxiliary measurement sample");
+                return false;
             }
         }
 
@@ -505,22 +595,6 @@ private:
 
         _fanEnabled = enabled;
         SetMissionLevelFanEnabled(enabled);
-    }
-
-    void WaitForNextSample(uint32_t& timestampUs, uint32_t& dtUs)
-    {
-        if ((micros() - _lastControlMicros) < AuxMeasurementConfig::kControlPeriodUs)
-        {
-            ServiceLog();
-            while ((micros() - _lastControlMicros) < AuxMeasurementConfig::kControlPeriodUs)
-            {
-                delayMicroseconds(50);
-            }
-        }
-
-        timestampUs = micros();
-        dtUs = static_cast<uint32_t>(timestampUs - _lastControlMicros);
-        _lastControlMicros = timestampUs;
     }
 
     bool WriteTurningTractionResult(

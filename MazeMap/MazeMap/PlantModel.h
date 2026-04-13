@@ -118,9 +118,8 @@ namespace MazeMap
         // Required wheel-side drive torque, not just tire-contact torque.
         float leftWheelTorqueNm = 0.0f;
         float rightWheelTorqueNm = 0.0f;
-        // Requested bank angular accelerations implied by the desired body accelerations and used
-        // in the inverse wheel-torque balance. These are not guaranteed to match forwardStep()
-        // omega-dot at the returned slip-bearing operating point if the motor command clips.
+        // Algebraic bank angular-acceleration demand implied by the predicted achieved body
+        // accelerations and used in the inverse wheel-torque balance.
         float leftWheelAccelRadps2 = 0.0f;
         float rightWheelAccelRadps2 = 0.0f;
         float leftContactForceN = 0.0f;
@@ -129,7 +128,8 @@ namespace MazeMap
         float rightContactTorqueNm = 0.0f;
         float tractionScale = 1.0f;
         bool tractionLimited = false;
-        // Body accelerations validated from the returned control command at the current operating point.
+        // Algebraically predicted achieved body accelerations at the returned operating point.
+        // Optional host/debug validation may overwrite these when inverse validation is enabled.
         float commandedLongitudinalAccelMps2 = 0.0f;
         float commandedYawAccelRadps2 = 0.0f;
         float longitudinalAccelErrorMps2 = 0.0f;
@@ -273,6 +273,8 @@ namespace MazeMap
             const ControlInput& control,
             float dt,
             const PlantParams& params) const noexcept;
+        // Algebraic traction-clamped inverse solve for the requested body accelerations at the
+        // current operating point. The normal path performs no iterative refinement.
         DriveCommandSolution solveDriveCommands(
             const StateVector& currentState,
             float desiredLongitudinalAccelMps2,

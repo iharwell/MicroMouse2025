@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
+#include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
@@ -38,11 +39,13 @@ namespace
     }
 }
 
-class DiagnosticController : public IApplicationMode
+class DiagnosticController : public IApplicationMode, public MazeMap::App::Internal::LoopController::IMode
 {
 public:
     explicit DiagnosticController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
+        , _loopController(runtime.ControlLoop())
+        , _loopRuntime{ runtime, runtime.Drive(), nullptr, &runtime.DiagnosticSensors(), nullptr, nullptr, nullptr, nullptr }
         , _vehicle(runtime.SpeedVehicle())
         , _sensors(runtime.DiagnosticSensors())
         , _drive(runtime.Drive())
@@ -51,7 +54,6 @@ public:
         , _faulted(false)
         , _phaseId(0UL)
         , _sampleCount(0UL)
-        , _lastControlMicros(0UL)
     {
         _logFileName[0] = '\0';
     }
@@ -88,14 +90,26 @@ public:
         _drive.SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
         _startX = _drive.GetPose().xMeters;
         _startY = _drive.GetPose().yMeters;
-        _lastControlMicros = micros();
-        return true;
+
+        MazeMap::App::Internal::LoopController::SessionConfig loopConfig{};
+        loopConfig.bootModeId = MazeMap::App::BootModeId::PrimaryDiagnostic;
+        loopConfig.sessionName = "legacy_diagnostic";
+        loopConfig.controlPeriodUs = DiagnosticConfig::kControlPeriodUs;
+        loopConfig.startupCommandPolicy =
+            MazeMap::App::Internal::LoopController::SessionConfig::StartupCommandPolicy::Brake;
+        loopConfig.actuationPolicy =
+            MazeMap::App::Internal::LoopController::SessionConfig::ActuationPolicy::VelocityBrakeOpenLoop;
+        loopConfig.allowDynamicCaptureOverride = false;
+        loopConfig.serviceWaitState = true;
+        loopConfig.serviceSlackState = true;
+        return _loopController.BeginSession(loopConfig, _loopRuntime, *this);
     }
 
     void Run() override
     {
         if (_faulted)
         {
+            _loopController.EndSession();
             return;
         }
 
@@ -136,6 +150,7 @@ public:
 
         _drive.Brake();
         _drive.UseNominalWheelControlProfile();
+        _loopController.EndSession();
 
         if (ok)
         {
@@ -148,6 +163,86 @@ public:
     }
 
 private:
+    bool OnSessionBegin(const MazeMap::App::Internal::LoopController::VehicleState& initial) override
+    {
+        (void)initial;
+        return true;
+    }
+
+    MazeMap::App::Internal::LoopController::ControlVector Step(
+        std::uint32_t availableComputeUs,
+        const MazeMap::App::Internal::LoopController::VehicleState& state,
+        MazeMap::App::Internal::LoopController::TickServices& services) override
+    {
+        if (_tickCallback == nullptr)
+        {
+            services.Fault("Diagnostic tick callback was not installed");
+            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+        }
+
+        return _tickCallback(_tickCallbackContext, availableComputeUs, state, services);
+    }
+
+    void OnSessionEnd(const MazeMap::App::Internal::LoopController::SessionResult& result) override
+    {
+        (void)result;
+        _tickCallbackContext = nullptr;
+        _tickCallback = nullptr;
+    }
+
+    void ServiceWaitState() override
+    {
+        ServiceLog();
+    }
+
+    void ServiceSlackState() override
+    {
+        ServiceLog();
+    }
+
+    template <typename Callback>
+    bool RunControlTick(Callback&& callback)
+    {
+        _tickCallbackContext = &callback;
+        _tickCallback = [](void* context,
+                           std::uint32_t availableComputeUs,
+                           const MazeMap::App::Internal::LoopController::VehicleState& state,
+                           MazeMap::App::Internal::LoopController::TickServices& services)
+            -> MazeMap::App::Internal::LoopController::ControlVector
+        {
+            return (*static_cast<Callback*>(context))(availableComputeUs, state, services);
+        };
+
+        const MazeMap::App::Internal::LoopController::SessionResult result = _loopController.RunOneTick();
+        _tickCallbackContext = nullptr;
+        _tickCallback = nullptr;
+        return result.status == MazeMap::App::Internal::LoopController::SessionResult::Status::Running;
+    }
+
+    template <typename Callback>
+    bool RunDiagnosticTick(Callback&& callback)
+    {
+        return RunControlTick(
+            [&](std::uint32_t availableComputeUs,
+                const MazeMap::App::Internal::LoopController::VehicleState& state,
+                MazeMap::App::Internal::LoopController::TickServices& services)
+            {
+                if (!state.estimatorHealthy)
+                {
+                    services.Fault((state.faultReason != nullptr) ? state.faultReason : "Diagnostic estimator fault");
+                    return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                }
+
+                if (!IsWithinBoundary(state.estimate))
+                {
+                    services.Fault("Diagnostic boundary exceeded");
+                    return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                }
+
+                return callback(availableComputeUs, state, services);
+            });
+    }
+
     static void HandleRuntimeFault(void* context, const char* reason) noexcept
     {
         if (context == nullptr)
@@ -159,6 +254,8 @@ private:
     }
 
     SharedRobotRuntime& _runtime;
+    MazeMap::App::Internal::LoopController& _loopController;
+    MazeMap::App::Internal::LoopController::RuntimeBundle _loopRuntime;
     struct StraightPhaseMetrics
     {
         float peakSpeedMps = 0.0f;
@@ -192,7 +289,13 @@ private:
     bool _faulted;
     unsigned long _phaseId;
     unsigned long _sampleCount;
-    unsigned long _lastControlMicros;
+    using TickCallback = MazeMap::App::Internal::LoopController::ControlVector (*)(
+        void* context,
+        std::uint32_t availableComputeUs,
+        const MazeMap::App::Internal::LoopController::VehicleState& state,
+        MazeMap::App::Internal::LoopController::TickServices& services);
+    void* _tickCallbackContext = nullptr;
+    TickCallback _tickCallback = nullptr;
 
     bool BeginLog()
     {
@@ -488,58 +591,10 @@ private:
         return Fail("Failed to write diagnostic phase marker");
     }
 
-    bool IsWithinBoundary() const
+    bool IsWithinBoundary(const PoseEstimate& pose) const
     {
-        const PoseEstimate& pose = _drive.GetPose();
         return (std::fabs(pose.xMeters - _startX) <= DiagnosticConfig::kBoundaryHalfSpanM) &&
             (std::fabs(pose.yMeters - _startY) <= DiagnosticConfig::kBoundaryHalfSpanM);
-    }
-
-    bool TickControl(bool stationary, float& dtSeconds, uint32_t& timestampUs, DiagnosticSensorSnapshot& snapshot)
-    {
-        if ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
-        {
-            ServiceLog();
-            while ((micros() - _lastControlMicros) < DiagnosticConfig::kControlPeriodUs)
-            {
-                delayMicroseconds(20);
-            }
-        }
-
-        timestampUs = micros();
-        dtSeconds = static_cast<float>(timestampUs - _lastControlMicros) * 1.0e-6f;
-        _lastControlMicros = timestampUs;
-
-        snapshot = _sensors.Capture(
-            stationary,
-            _drive.GetPose(),
-            [this, dtSeconds](DiagnosticSensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
-            {
-                _drive.UpdateOdometry(
-                    dtSeconds,
-                    captureSnapshot,
-                    nullptr,
-                    nullptr,
-                    [&serviceWallRead]() noexcept
-                    {
-                        serviceWallRead();
-                    },
-                    [&captureImu]() noexcept
-                    {
-                        captureImu();
-                    });
-            });
-        if (_drive.HasEstimatorFault())
-        {
-            return Fail(_drive.GetEstimatorFaultReason());
-        }
-
-        if (!IsWithinBoundary())
-        {
-            return Fail("Diagnostic boundary exceeded");
-        }
-
-        return true;
     }
 
     bool LogSample(bool stationary, uint32_t timestampUs, float dtSeconds, const DiagnosticSensorSnapshot& snapshot)
@@ -576,16 +631,18 @@ private:
         const unsigned long deadline = millis() + durationMs;
         while (static_cast<long>(deadline - millis()) > 0)
         {
-            float dtSeconds = 0.0f;
-            uint32_t timestampUs = 0UL;
-            DiagnosticSensorSnapshot snapshot{};
-            if (!TickControl(stationary, dtSeconds, timestampUs, snapshot))
-            {
-                return false;
-            }
+            if (!RunDiagnosticTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices& services)
+                    {
+                        if (!LogSample(stationary, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                        {
+                            services.Fault("Failed to write diagnostic sample");
+                        }
 
-            _drive.Brake();
-            if (!LogSample(true, timestampUs, dtSeconds, snapshot))
+                        return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                    }))
             {
                 return false;
             }
@@ -610,50 +667,60 @@ private:
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
         StraightPhaseMetrics metrics{};
+        bool phaseComplete = false;
 
-        while (true)
+        while (!phaseComplete)
         {
-            float dtSeconds = 0.0f;
-            uint32_t timestampUs = 0UL;
-            DiagnosticSensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, timestampUs, snapshot))
-            {
-                return false;
-            }
+            if (!RunDiagnosticTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices& services)
+                    {
+                        traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+                        const float remainingM = (std::max)(0.0f, distanceM - traveledM);
+                        metrics.peakSpeedMps = (std::max)(metrics.peakSpeedMps, std::fabs(state.estimate.linearSpeedMps));
+                        if ((remainingM <= Config::kDistanceToleranceM) &&
+                            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+                        {
+                            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                            {
+                                services.Fault("Failed to write diagnostic sample");
+                                return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                            }
 
-            traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            const float remainingM = (std::max)(0.0f, distanceM - traveledM);
-            metrics.peakSpeedMps = (std::max)(metrics.peakSpeedMps, std::fabs(_drive.GetPose().linearSpeedMps));
-            if ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
-            {
-                _drive.Brake();
-                if (!LogSample(false, timestampUs, dtSeconds, snapshot))
-                {
-                    return false;
-                }
-                break;
-            }
-            if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
-            {
-                _drive.Brake();
-                return Fail("Straight diagnostic encoder progress stalled");
-            }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
-            {
-                return Fail("Straight diagnostic phase timed out");
-            }
+                            phaseComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+                        if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
+                        {
+                            services.Fault("Straight diagnostic encoder progress stalled");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+                        if (static_cast<long>(timeoutMs - millis()) <= 0)
+                        {
+                            services.Fault("Straight diagnostic phase timed out");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
 
-            const float accelLimitedSpeedMps = (std::min)(limits.maxSpeedMps, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
-            const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
-            commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+                        const float accelLimitedSpeedMps = (std::min)(limits.maxSpeedMps, commandedSpeedMps + (limits.accelMps2 * state.dtSeconds));
+                        const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
+                        commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
-            const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
-            metrics.maxHeadingErrorRad = (std::max)(metrics.maxHeadingErrorRad, std::fabs(headingErrorRad));
-            float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps);
-            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+                        const float headingErrorRad = HeadingErrorRad(targetHeading, state.estimate.headingUnit);
+                        metrics.maxHeadingErrorRad = (std::max)(metrics.maxHeadingErrorRad, std::fabs(headingErrorRad));
+                        float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * state.estimate.angularSpeedRadps);
+                        angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
 
-            if (!LogSample(false, timestampUs, dtSeconds, snapshot))
+                        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                        {
+                            services.Fault("Failed to write diagnostic sample");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        return MazeMap::App::Internal::LoopController::ControlVector::VelocityCommand(
+                            commandedSpeedMps,
+                            angularCommandRadps);
+                    }))
             {
                 return false;
             }
@@ -698,7 +765,6 @@ private:
 
         const PoseEstimate& pose = _drive.GetPose();
         _drive.SetPose(pose.xMeters, pose.yMeters, DirectionToYawRad(MazeMap::Up));
-        _lastControlMicros = micros();
 
         snprintf(phaseName, sizeof(phaseName), "%s_settle", label);
         return HoldPhase(phaseName, DiagnosticConfig::kCharacterizationSettleMs, true);
@@ -724,58 +790,59 @@ private:
         float maxSpeedMps = 0.0f;
         bool travelLimited = false;
         unsigned long travelLimitSettleDeadlineMs = 0UL;
+        bool sampleComplete = false;
 
-        while (true)
+        while (!sampleComplete)
         {
-            float dtSeconds = 0.0f;
-            uint32_t timestampUs = 0UL;
-            DiagnosticSensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, timestampUs, snapshot))
+            if (!RunDiagnosticTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices& services)
+                    {
+                        const unsigned long nowMs = millis();
+                        const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+                        if (!travelLimited && travelLimitM > 0.0f && traveledDistanceM >= travelLimitM)
+                        {
+                            travelLimited = true;
+                            travelLimitSettleDeadlineMs = nowMs + DiagnosticConfig::kCharacterizationSettleMs;
+                        }
+
+                        const bool pulseActive = !travelLimited && static_cast<long>(pulseDeadlineMs - nowMs) > 0;
+                        const MazeMap::App::Internal::LoopController::ControlVector command =
+                            travelLimited ?
+                            MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand() :
+                            pulseActive ?
+                            MazeMap::App::Internal::LoopController::ControlVector::OpenLoopCommand(driveCommand, driveCommand) :
+                            MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+
+                        maxSpeedMps = (std::max)(maxSpeedMps, std::fabs(state.estimate.linearSpeedMps));
+                        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                        {
+                            services.Fault("Failed to write diagnostic sample");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        if (travelLimited &&
+                            static_cast<long>(travelLimitSettleDeadlineMs - nowMs) <= 0 &&
+                            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+                        {
+                            sampleComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        if (!travelLimited &&
+                            !pulseActive &&
+                            static_cast<long>(settleDeadlineMs - nowMs) <= 0 &&
+                            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+                        {
+                            sampleComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        return command;
+                    }))
             {
                 return false;
-            }
-
-            const unsigned long nowMs = millis();
-            const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            if (!travelLimited && travelLimitM > 0.0f && traveledDistanceM >= travelLimitM)
-            {
-                travelLimited = true;
-                travelLimitSettleDeadlineMs = nowMs + DiagnosticConfig::kCharacterizationSettleMs;
-            }
-
-            const bool pulseActive = !travelLimited && static_cast<long>(pulseDeadlineMs - nowMs) > 0;
-            if (travelLimited)
-            {
-                _drive.Brake();
-            }
-            else if (pulseActive)
-            {
-                _drive.CommandOpenLoopRaw(driveCommand, driveCommand);
-            }
-            else
-            {
-                _drive.Brake();
-            }
-
-            maxSpeedMps = (std::max)(maxSpeedMps, std::fabs(_drive.GetPose().linearSpeedMps));
-            if (!LogSample(false, timestampUs, dtSeconds, snapshot))
-            {
-                return false;
-            }
-
-            if (travelLimited &&
-                static_cast<long>(travelLimitSettleDeadlineMs - nowMs) <= 0 &&
-                (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
-            {
-                break;
-            }
-
-            if (!travelLimited &&
-                !pulseActive &&
-                static_cast<long>(settleDeadlineMs - nowMs) <= 0 &&
-                (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
-            {
-                break;
             }
         }
 
@@ -834,79 +901,89 @@ private:
         bool holdComplete = false;
         bool travelLimited = false;
         unsigned long travelLimitSettleDeadlineMs = 0UL;
+        bool sampleComplete = false;
 
-        while (true)
+        while (!sampleComplete)
         {
-            float dtSeconds = 0.0f;
-            uint32_t timestampUs = 0UL;
-            DiagnosticSensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, timestampUs, snapshot))
+            if (!RunDiagnosticTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices& services)
+                    {
+                        const unsigned long nowMs = millis();
+                        const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+                        if (!travelLimited && travelLimitM > 0.0f && traveledDistanceM >= travelLimitM)
+                        {
+                            travelLimited = true;
+                            travelLimitSettleDeadlineMs = nowMs + DiagnosticConfig::kCharacterizationSettleMs;
+                            if (holdStarted && !holdComplete)
+                            {
+                                holdComplete = true;
+                                holdEndDistanceM = _drive.GetAverageDistanceMeters();
+                            }
+                        }
+
+                        MazeMap::App::Internal::LoopController::ControlVector command =
+                            MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        if (travelLimited)
+                        {
+                            command = MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+                        else if (static_cast<long>(kickoffDeadlineMs - nowMs) > 0)
+                        {
+                            command = MazeMap::App::Internal::LoopController::ControlVector::OpenLoopCommand(
+                                LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
+                                LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand);
+                        }
+                        else if (static_cast<long>(holdDeadlineMs - nowMs) > 0)
+                        {
+                            if (!holdStarted)
+                            {
+                                holdStarted = true;
+                                holdStartDistanceM = _drive.GetAverageDistanceMeters();
+                            }
+                            holdElapsedSeconds += state.dtSeconds;
+                            command = MazeMap::App::Internal::LoopController::ControlVector::OpenLoopCommand(
+                                forwardDriveCommand,
+                                forwardDriveCommand);
+                        }
+                        else
+                        {
+                            if (!holdComplete)
+                            {
+                                holdComplete = true;
+                                holdEndDistanceM = _drive.GetAverageDistanceMeters();
+                            }
+                        }
+
+                        maxSpeedMps = (std::max)(maxSpeedMps, std::fabs(state.estimate.linearSpeedMps));
+                        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                        {
+                            services.Fault("Failed to write diagnostic sample");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        if (travelLimited &&
+                            static_cast<long>(travelLimitSettleDeadlineMs - nowMs) <= 0 &&
+                            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+                        {
+                            sampleComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        if (!travelLimited &&
+                            holdComplete &&
+                            static_cast<long>(settleDeadlineMs - nowMs) <= 0 &&
+                            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+                        {
+                            sampleComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        return command;
+                    }))
             {
                 return false;
-            }
-
-            const unsigned long nowMs = millis();
-            const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            if (!travelLimited && travelLimitM > 0.0f && traveledDistanceM >= travelLimitM)
-            {
-                travelLimited = true;
-                travelLimitSettleDeadlineMs = nowMs + DiagnosticConfig::kCharacterizationSettleMs;
-                if (holdStarted && !holdComplete)
-                {
-                    holdComplete = true;
-                    holdEndDistanceM = _drive.GetAverageDistanceMeters();
-                }
-            }
-
-            if (travelLimited)
-            {
-                _drive.Brake();
-            }
-            else if (static_cast<long>(kickoffDeadlineMs - nowMs) > 0)
-            {
-                _drive.CommandOpenLoopRaw(
-                    LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
-                    LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand);
-            }
-            else if (static_cast<long>(holdDeadlineMs - nowMs) > 0)
-            {
-                if (!holdStarted)
-                {
-                    holdStarted = true;
-                    holdStartDistanceM = _drive.GetAverageDistanceMeters();
-                }
-                holdElapsedSeconds += dtSeconds;
-                _drive.CommandOpenLoopRaw(forwardDriveCommand, forwardDriveCommand);
-            }
-            else
-            {
-                if (!holdComplete)
-                {
-                    holdComplete = true;
-                    holdEndDistanceM = _drive.GetAverageDistanceMeters();
-                }
-                _drive.Brake();
-            }
-
-            maxSpeedMps = (std::max)(maxSpeedMps, std::fabs(_drive.GetPose().linearSpeedMps));
-            if (!LogSample(false, timestampUs, dtSeconds, snapshot))
-            {
-                return false;
-            }
-
-            if (travelLimited &&
-                static_cast<long>(travelLimitSettleDeadlineMs - nowMs) <= 0 &&
-                (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
-            {
-                break;
-            }
-
-            if (!travelLimited &&
-                holdComplete &&
-                static_cast<long>(settleDeadlineMs - nowMs) <= 0 &&
-                (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
-            {
-                break;
             }
         }
 
@@ -999,49 +1076,59 @@ private:
         float commandedOmegaRadps = 0.0f;
         const unsigned long timeoutMs = millis() + 3000UL;
         TurnPhaseMetrics metrics{};
+        bool phaseComplete = false;
 
-        while (true)
+        while (!phaseComplete)
         {
-            float dtSeconds = 0.0f;
-            uint32_t timestampUs = 0UL;
-            DiagnosticSensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, timestampUs, snapshot))
-            {
-                return false;
-            }
+            if (!RunDiagnosticTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices& services)
+                    {
+                        const float errorRad = AngleErrorRad(targetYawRad, state.estimate.yawRad);
+                        const float remainingRad = std::fabs(errorRad);
+                        metrics.maxYawErrorRad = (std::max)(metrics.maxYawErrorRad, remainingRad);
+                        metrics.peakOmegaRadps = (std::max)(metrics.peakOmegaRadps, std::fabs(state.estimate.angularSpeedRadps));
+                        if (MazeMap::IsInPlaceTurnComplete(errorRad, state.estimate.angularSpeedRadps, turnProfile))
+                        {
+                            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                            {
+                                services.Fault("Failed to write diagnostic sample");
+                                return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                            }
 
-            const float errorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
-            const float remainingRad = std::fabs(errorRad);
-            metrics.maxYawErrorRad = (std::max)(metrics.maxYawErrorRad, remainingRad);
-            metrics.peakOmegaRadps = (std::max)(metrics.peakOmegaRadps, std::fabs(_drive.GetPose().angularSpeedRadps));
-            if (MazeMap::IsInPlaceTurnComplete(errorRad, _drive.GetPose().angularSpeedRadps, turnProfile))
-            {
-                _drive.Brake();
-                if (!LogSample(false, timestampUs, dtSeconds, snapshot))
-                {
-                    return false;
-                }
-                break;
-            }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
-            {
-                return Fail("Turn diagnostic phase timed out");
-            }
+                            phaseComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+                        if (static_cast<long>(timeoutMs - millis()) <= 0)
+                        {
+                            services.Fault("Turn diagnostic phase timed out");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
 
-            float angularCommandRadps = 0.0f;
-            if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
-                    errorRad,
-                    _drive.GetPose().angularSpeedRadps,
-                    dtSeconds,
-                    turnProfile,
-                    commandedOmegaRadps,
-                    angularCommandRadps))
-            {
-                return Fail("Turn diagnostic phase profile became invalid");
-            }
-            _drive.CommandVelocity(0.0f, angularCommandRadps, dtSeconds);
+                        float angularCommandRadps = 0.0f;
+                        if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
+                                errorRad,
+                                state.estimate.angularSpeedRadps,
+                                state.dtSeconds,
+                                turnProfile,
+                                commandedOmegaRadps,
+                                angularCommandRadps))
+                        {
+                            services.Fault("Turn diagnostic phase profile became invalid");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
 
-            if (!LogSample(false, timestampUs, dtSeconds, snapshot))
+                        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                        {
+                            services.Fault("Failed to write diagnostic sample");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        return MazeMap::App::Internal::LoopController::ControlVector::VelocityCommand(
+                            0.0f,
+                            angularCommandRadps);
+                    }))
             {
                 return false;
             }
@@ -1072,59 +1159,69 @@ private:
         EncoderProgressWatchdog translationWatchdog{};
         translationWatchdog.Reset(0.0f, millis());
         ArcPhaseMetrics metrics{};
+        bool phaseComplete = false;
 
-        while (true)
+        while (!phaseComplete)
         {
-            float dtSeconds = 0.0f;
-            uint32_t timestampUs = 0UL;
-            DiagnosticSensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, timestampUs, snapshot))
-            {
-                return false;
-            }
+            if (!RunDiagnosticTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices& services)
+                    {
+                        traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+                        const float remainingM = (std::max)(0.0f, distanceM - traveledM);
+                        metrics.peakSpeedMps = (std::max)(metrics.peakSpeedMps, std::fabs(state.estimate.linearSpeedMps));
+                        metrics.peakOmegaRadps = (std::max)(metrics.peakOmegaRadps, std::fabs(state.estimate.angularSpeedRadps));
+                        metrics.durationSeconds += state.dtSeconds;
+                        metrics.omegaIntegralRad += state.estimate.angularSpeedRadps * state.dtSeconds;
+                        metrics.speedIntegralMpsSeconds += std::fabs(state.estimate.linearSpeedMps) * state.dtSeconds;
+                        const float planarAccelMps2 = _sensors.GetPlanarAccelMps2(state.diagnosticSensors);
+                        metrics.planarAccelIntegralMps2Seconds += planarAccelMps2 * state.dtSeconds;
+                        metrics.peakPlanarAccelMps2 = (std::max)(metrics.peakPlanarAccelMps2, planarAccelMps2);
+                        if ((remainingM <= Config::kDistanceToleranceM) &&
+                            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+                        {
+                            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                            {
+                                services.Fault("Failed to write diagnostic sample");
+                                return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                            }
 
-            traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            const float remainingM = (std::max)(0.0f, distanceM - traveledM);
-            metrics.peakSpeedMps = (std::max)(metrics.peakSpeedMps, std::fabs(_drive.GetPose().linearSpeedMps));
-            metrics.peakOmegaRadps = (std::max)(metrics.peakOmegaRadps, std::fabs(_drive.GetPose().angularSpeedRadps));
-            metrics.durationSeconds += dtSeconds;
-            metrics.omegaIntegralRad += _drive.GetPose().angularSpeedRadps * dtSeconds;
-            metrics.speedIntegralMpsSeconds += std::fabs(_drive.GetPose().linearSpeedMps) * dtSeconds;
-            const float planarAccelMps2 = _sensors.GetPlanarAccelMps2(snapshot);
-            metrics.planarAccelIntegralMps2Seconds += planarAccelMps2 * dtSeconds;
-            metrics.peakPlanarAccelMps2 = (std::max)(metrics.peakPlanarAccelMps2, planarAccelMps2);
-            if ((remainingM <= Config::kDistanceToleranceM) && (std::fabs(_drive.GetPose().linearSpeedMps) <= Config::kSpeedToleranceMps))
-            {
-                _drive.Brake();
-                if (!LogSample(false, timestampUs, dtSeconds, snapshot))
-                {
-                    return false;
-                }
-                break;
-            }
-            if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
-            {
-                _drive.Brake();
-                return Fail("Arc diagnostic encoder progress stalled");
-            }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
-            {
-                return Fail("Arc diagnostic phase timed out");
-            }
+                            phaseComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+                        if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
+                        {
+                            services.Fault("Arc diagnostic encoder progress stalled");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+                        if (static_cast<long>(timeoutMs - millis()) <= 0)
+                        {
+                            services.Fault("Arc diagnostic phase timed out");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
 
-            const float accelLimitedSpeedMps = (std::min)(cruiseSpeedMps, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
-            const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
-            commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+                        const float accelLimitedSpeedMps = (std::min)(cruiseSpeedMps, commandedSpeedMps + (limits.accelMps2 * state.dtSeconds));
+                        const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
+                        commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
-            const float progress = (std::clamp)(traveledM / distanceM, 0.0f, 1.0f);
-            const float phaseTargetYawRad = WrapAngleRad(startYawRad + (angleRad * progress));
-            const float headingErrorRad = AngleErrorRad(phaseTargetYawRad, _drive.GetPose().yawRad);
-            metrics.maxHeadingErrorRad = (std::max)(metrics.maxHeadingErrorRad, std::fabs(headingErrorRad));
-            float angularCommandRadps = (curvature * commandedSpeedMps) + (Config::kArcHeadingKp * headingErrorRad) - (Config::kArcYawD * _drive.GetPose().angularSpeedRadps);
-            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+                        const float progress = (std::clamp)(traveledM / distanceM, 0.0f, 1.0f);
+                        const float phaseTargetYawRad = WrapAngleRad(startYawRad + (angleRad * progress));
+                        const float headingErrorRad = AngleErrorRad(phaseTargetYawRad, state.estimate.yawRad);
+                        metrics.maxHeadingErrorRad = (std::max)(metrics.maxHeadingErrorRad, std::fabs(headingErrorRad));
+                        float angularCommandRadps = (curvature * commandedSpeedMps) + (Config::kArcHeadingKp * headingErrorRad) - (Config::kArcYawD * state.estimate.angularSpeedRadps);
+                        angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
 
-            if (!LogSample(false, timestampUs, dtSeconds, snapshot))
+                        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+                        {
+                            services.Fault("Failed to write diagnostic sample");
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        return MazeMap::App::Internal::LoopController::ControlVector::VelocityCommand(
+                            commandedSpeedMps,
+                            angularCommandRadps);
+                    }))
             {
                 return false;
             }

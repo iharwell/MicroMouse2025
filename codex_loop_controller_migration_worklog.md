@@ -1,0 +1,54 @@
+# LoopController Migration Work Log
+
+## 2026-04-13
+
+- Read `F:\Downloads\LoopController_Actionable_Design_Note_v3.md`.
+- Confirmed current `MazeMap\MazeMap\LoopController.h/.cpp` is only a timing gate with `WaitForNextTick()`, not the controller-owned session pipeline described by the spec.
+- Read `loop_controller_inventory.md` and confirmed five legacy loop families are cataloged there:
+  - `MazeMapMissionController.cpp`
+  - `DiagnosticController.cpp`
+  - `OpenFloorMeasurementController.cpp`
+  - `AuxMeasurementController.cpp`
+  - `FrontWallCharacterizationController.cpp`
+- Verified mode-local `_lastControlMicros` timing ownership still exists in each of those files.
+- Inspected the concrete loop bodies and runtime owners in:
+  - `MazeMapSharedRuntime.h/.cpp`
+  - `DriveBase.h`
+  - `MazeMapRuntimeCore.h`
+  - `MazeMapRuntimeSensors.h`
+  - the four application-mode controllers above
+- Working migration boundary:
+  - implement the new runtime-owned `LoopController` in `SharedRobotRuntime`,
+  - migrate the four boot/application-mode controllers (`DiagnosticController`, `OpenFloorMeasurementController`, `AuxMeasurementController`, `FrontWallCharacterizationController`) onto it,
+  - leave `MazeMapMissionController.cpp` for a follow-on migration outside this requested four-file slice.
+- Planned compatibility approach for the four controllers:
+  - each controller will implement `LoopController::IMode`,
+  - each controller will use a per-tick callback bridge into `RunOneTick()` so the outer phase loops can stay mostly intact while command selection moves into `Step(...)`,
+  - sensor capture / odometry / timing ownership moves into `LoopController`,
+  - controller-local `_lastControlMicros` state and the old tick helpers get deleted.
+- Migrated `MazeMap\MazeMap\FrontWallCharacterizationController.cpp` onto the runtime-owned loop:
+  - `Begin()` now starts a `LoopController` session for `BootModeId::FrontWallCharacterization`,
+  - `Run()` now closes the session through `EndSession()`,
+  - `HoldStationary(...)` and `CaptureCurve(...)` now run through the per-tick callback bridge and return `ControlVector`s for the next tick,
+  - the legacy `WaitForNextSample(...)` helper and all `_lastControlMicros` usage are removed from that controller.
+- Migrated `MazeMap\MazeMap\DiagnosticController.cpp` onto the runtime-owned loop:
+  - the controller now implements `LoopController::IMode`,
+  - `Begin()` starts a `LoopController` session and `Run()` closes it,
+  - the legacy `TickControl(...)` helper and all `_lastControlMicros` state are removed,
+  - `HoldPhase(...)`, `ExecuteStraightPhase(...)`, `ExecuteKickoffCharacterizationSample(...)`, `ExecuteForwardCharacterizationSample(...)`, `ExecuteTurnPhase(...)`, and `ExecuteArcPhase(...)` now choose their next-tick command from inside the loop callback and use controller-owned sensor/odometry timing.
+- Corrected `LoopController` estimator-fault handling to match the spec’s state-vector model:
+  - estimator faults are now surfaced in `VehicleState` (`estimatorHealthy = false`, `faultReason` set),
+  - the loop no longer aborts before `Step(...)` on estimator-health failure,
+  - mode code now decides how to log/end the session on estimator faults.
+- Migrated `MazeMap\MazeMap\OpenFloorMeasurementController.cpp` onto the runtime-owned loop:
+  - the controller now implements `LoopController::IMode` and starts/closes a `LoopController` session in `Begin()` / `Run()`,
+  - the legacy `CaptureCycle(...)` helper and all `_lastControlMicros` state are removed,
+  - `RunTimingBlock(...)`, `RunStaticSection(...)`, `RecoverToMarker(...)`, `ExecuteLaunchPulse(...)`, `ExecuteStraightDistance(...)`, `ExecuteInPlaceTurn(...)`, and `ExecuteSmoothTurn(...)` now execute through the callback bridge and return one next-tick `ControlVector` per tick,
+  - open-floor timing/main fault logging still runs in the mode, but it now runs from the controller-owned tick callback before the loop session is ended.
+- Verification pass:
+  - first elevated `build_and_verify_latest.cmd --no-pause` run caught a Teensy compile error in `LoopController.h` from the defaulted `PauseRequest` reference parameter,
+  - fixed that by splitting `TickServices::RequestPauseForHeavyWork(...)` into a no-arg overload plus the explicit `const PauseRequest&` overload,
+  - reran the approved elevated build-and-verify flow successfully on 2026-04-13,
+  - Teensy firmware compiled successfully,
+  - host `Release|x64` build completed successfully,
+  - `MazeMapTest.dll` release tests passed: 470/470.

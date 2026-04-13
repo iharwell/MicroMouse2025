@@ -2,6 +2,7 @@
 #include "MazeMapApplicationPrivate.h"
 #include "BootModeDescriptor.h"
 #include "DriveBase.h"
+#include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
@@ -23,14 +24,15 @@ using MazeMap::App::Internal::SharedRobotRuntime;
 
 MMLOG_DEFINE_ROW(FrontWallCharacterizationLogRow, FRONT_WALL_CHARACTERIZATION_LOG_FIELDS);
 
-class FrontWallCharacterizationController : public IApplicationMode
+class FrontWallCharacterizationController : public IApplicationMode, public MazeMap::App::Internal::LoopController::IMode
 {
 public:
     explicit FrontWallCharacterizationController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
+        , _loopController(runtime.ControlLoop())
+        , _loopRuntime{ runtime, runtime.Drive(), nullptr, &runtime.DiagnosticSensors(), nullptr, nullptr, nullptr, nullptr }
         , _sensors(runtime.DiagnosticSensors())
         , _drive(runtime.Drive())
-        , _lastControlMicros(0UL)
     {
     }
 
@@ -62,7 +64,6 @@ public:
         const bool driveOk = _drive.Begin();
         const bool sensorsOk = _sensors.Begin(FrontWallCharacterizationConfig::kControlPeriodUs);
         _drive.UseNominalWheelControlProfile();
-        _lastControlMicros = micros();
 
         MazeMap::FrontWallCharacterizationStorage storedCurve{};
         if (TryReadPersistedFrontWallCharacterization(storedCurve))
@@ -87,7 +88,19 @@ public:
         {
             return Fail("Sensor initialization failed");
         }
-        return true;
+
+        MazeMap::App::Internal::LoopController::SessionConfig loopConfig{};
+        loopConfig.bootModeId = MazeMap::App::BootModeId::FrontWallCharacterization;
+        loopConfig.sessionName = "front_wall_characterization";
+        loopConfig.controlPeriodUs = FrontWallCharacterizationConfig::kControlPeriodUs;
+        loopConfig.startupCommandPolicy =
+            MazeMap::App::Internal::LoopController::SessionConfig::StartupCommandPolicy::Brake;
+        loopConfig.actuationPolicy =
+            MazeMap::App::Internal::LoopController::SessionConfig::ActuationPolicy::VelocityBrake;
+        loopConfig.allowDynamicCaptureOverride = false;
+        loopConfig.serviceWaitState = false;
+        loopConfig.serviceSlackState = false;
+        return _loopController.BeginSession(loopConfig, _loopRuntime, *this);
     }
 
     void Run() override
@@ -102,6 +115,7 @@ public:
 
         _drive.Brake();
         SetMissionLevelFanEnabled(false);
+        _loopController.EndSession();
         if (ok)
         {
             (void)_runtime.AppendTextLogLine("Front wall characterization complete and persisted.");
@@ -110,6 +124,52 @@ public:
     }
 
 private:
+    bool OnSessionBegin(const MazeMap::App::Internal::LoopController::VehicleState& initial) override
+    {
+        (void)initial;
+        return true;
+    }
+
+    MazeMap::App::Internal::LoopController::ControlVector Step(
+        std::uint32_t availableComputeUs,
+        const MazeMap::App::Internal::LoopController::VehicleState& state,
+        MazeMap::App::Internal::LoopController::TickServices& services) override
+    {
+        if (_tickCallback == nullptr)
+        {
+            services.Fault("Front wall characterization tick callback was not installed");
+            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+        }
+
+        return _tickCallback(_tickCallbackContext, availableComputeUs, state, services);
+    }
+
+    void OnSessionEnd(const MazeMap::App::Internal::LoopController::SessionResult& result) override
+    {
+        (void)result;
+        _tickCallbackContext = nullptr;
+        _tickCallback = nullptr;
+    }
+
+    template <typename Callback>
+    bool RunControlTick(Callback&& callback)
+    {
+        _tickCallbackContext = &callback;
+        _tickCallback = [](void* context,
+                           std::uint32_t availableComputeUs,
+                           const MazeMap::App::Internal::LoopController::VehicleState& state,
+                           MazeMap::App::Internal::LoopController::TickServices& services)
+            -> MazeMap::App::Internal::LoopController::ControlVector
+        {
+            return (*static_cast<Callback*>(context))(availableComputeUs, state, services);
+        };
+
+        const MazeMap::App::Internal::LoopController::SessionResult result = _loopController.RunOneTick();
+        _tickCallbackContext = nullptr;
+        _tickCallback = nullptr;
+        return result.status == MazeMap::App::Internal::LoopController::SessionResult::Status::Running;
+    }
+
     static void HandleRuntimeFault(void* context, const char* reason) noexcept
     {
         if (context == nullptr)
@@ -121,9 +181,17 @@ private:
     }
 
     SharedRobotRuntime& _runtime;
+    MazeMap::App::Internal::LoopController& _loopController;
+    MazeMap::App::Internal::LoopController::RuntimeBundle _loopRuntime;
     DiagnosticSensorSuite& _sensors;
     DriveBase& _drive;
-    unsigned long _lastControlMicros;
+    using TickCallback = MazeMap::App::Internal::LoopController::ControlVector (*)(
+        void* context,
+        std::uint32_t availableComputeUs,
+        const MazeMap::App::Internal::LoopController::VehicleState& state,
+        MazeMap::App::Internal::LoopController::TickServices& services);
+    void* _tickCallbackContext = nullptr;
+    TickCallback _tickCallback = nullptr;
 
     bool HoldStationary(const char* phaseName, uint16_t durationMs)
     {
@@ -137,14 +205,16 @@ private:
         const unsigned long startMs = millis();
         while (static_cast<unsigned long>(millis() - startMs) < durationMs)
         {
-            uint32_t timestampUs = 0U;
-            uint32_t dtUs = 0U;
-            WaitForNextSample(timestampUs, dtUs);
-            (void)timestampUs;
-            const DiagnosticSensorSnapshot snapshot = _sensors.Capture(true, _drive.GetPose());
-            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, snapshot);
-            _drive.Brake();
+            if (!RunControlTick(
+                    [](std::uint32_t,
+                       const MazeMap::App::Internal::LoopController::VehicleState&,
+                       MazeMap::App::Internal::LoopController::TickServices&)
+                    {
+                        return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                    }))
+            {
+                return false;
+            }
         }
 
         return true;
@@ -172,87 +242,101 @@ private:
                     (std::max)(FrontWallCharacterizationConfig::kReverseSpeedMps, 0.01f)));
         bool elapsedBudgetLogged = false;
         const char* completionReason = "unknown";
+        bool initialSampleStored = false;
+        bool captureComplete = false;
 
-        while (true)
+        while (!captureComplete)
         {
-            uint32_t timestampUs = 0U;
-            uint32_t dtUs = 0U;
-            WaitForNextSample(timestampUs, dtUs);
-            (void)timestampUs;
+            if (!RunControlTick(
+                    [&](std::uint32_t,
+                        const MazeMap::App::Internal::LoopController::VehicleState& state,
+                        MazeMap::App::Internal::LoopController::TickServices&)
+                    {
+                        const DiagnosticSensorSnapshot& snapshot = state.diagnosticSensors;
+                        if (!initialSampleStored)
+                        {
+                            StoreCurveSample(storage, 0.0f, snapshot);
+                            initialSampleStored = true;
+                        }
 
-            const DiagnosticSensorSnapshot snapshot = _sensors.Capture(false, _drive.GetPose());
-            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _drive.UpdateOdometry(dtSeconds, snapshot);
+                        const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
+                        if ((storage.sampleCount < MazeMap::kFrontWallCharacterizationMaxStoredSamples) &&
+                            ((traveledDistanceM + Config::kDistanceToleranceM) >= nextStoredDistanceM))
+                        {
+                            StoreCurveSample(storage, traveledDistanceM, snapshot);
+                            nextStoredDistanceM += FrontWallCharacterizationConfig::kStoredDistanceStepM;
+                        }
 
-            const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            if ((storage.sampleCount < MazeMap::kFrontWallCharacterizationMaxStoredSamples) &&
-                ((traveledDistanceM + Config::kDistanceToleranceM) >= nextStoredDistanceM))
+                        const bool collapsedToZero =
+                            (snapshot.frontLeft.differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold) &&
+                            (snapshot.frontRight.differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold);
+                        if (traveledDistanceM >= FrontWallCharacterizationConfig::kMinimumTravelBeforeCollapseCheckM && collapsedToZero)
+                        {
+                            ++collapsedConsecutiveSamples;
+                        }
+                        else
+                        {
+                            collapsedConsecutiveSamples = 0U;
+                        }
+
+                        if (storage.sampleCount >= MazeMap::kFrontWallCharacterizationMaxStoredSamples)
+                        {
+                            completionReason = "storage_full";
+                            storage.terminalDistanceM = traveledDistanceM;
+                            captureComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        if (collapsedConsecutiveSamples >= FrontWallCharacterizationConfig::kCollapsedConsecutiveSamples)
+                        {
+                            completionReason = "collapsed_to_zero";
+                            storage.terminalDistanceM = traveledDistanceM;
+                            captureComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        if (traveledDistanceM >= FrontWallCharacterizationConfig::kMaxReverseTravelM)
+                        {
+                            completionReason = "max_reverse_travel";
+                            storage.terminalDistanceM = traveledDistanceM;
+                            captureComplete = true;
+                            return MazeMap::App::Internal::LoopController::ControlVector::BrakeCommand();
+                        }
+
+                        if (!elapsedBudgetLogged &&
+                            static_cast<unsigned long>(millis() - startMs) >= timeoutMs)
+                        {
+                            char timeoutLine[192] = {};
+                            snprintf(
+                                timeoutLine,
+                                sizeof(timeoutLine),
+                                "front_wall_characterization:elapsed_budget_reached,travel_m=%.4f,samples=%u,timeout_ms=%lu",
+                                traveledDistanceM,
+                                static_cast<unsigned>(storage.sampleCount),
+                                timeoutMs);
+                            AppendStartupTrace(timeoutLine);
+                            elapsedBudgetLogged = true;
+                        }
+
+                        commandedSpeedMps = (std::min)(
+                            FrontWallCharacterizationConfig::kReverseSpeedMps,
+                            commandedSpeedMps + (FrontWallCharacterizationConfig::kReverseAccelMps2 * state.dtSeconds));
+
+                        const float headingErrorRad = HeadingErrorRad(targetHeading, state.estimate.headingUnit);
+                        float angularCommandRadps =
+                            (Config::kStraightHeadingKp * headingErrorRad) -
+                            (Config::kStraightYawD * state.estimate.angularSpeedRadps);
+                        angularCommandRadps = (std::clamp)(
+                            angularCommandRadps,
+                            -FrontWallCharacterizationConfig::kMaxAngularCommandRadps,
+                            FrontWallCharacterizationConfig::kMaxAngularCommandRadps);
+                        return MazeMap::App::Internal::LoopController::ControlVector::VelocityCommand(
+                            -commandedSpeedMps,
+                            angularCommandRadps);
+                    }))
             {
-                StoreCurveSample(storage, traveledDistanceM, snapshot);
-                nextStoredDistanceM += FrontWallCharacterizationConfig::kStoredDistanceStepM;
+                return false;
             }
-
-            const bool collapsedToZero =
-                (snapshot.frontLeft.differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold) &&
-                (snapshot.frontRight.differentialLight <= FrontWallCharacterizationConfig::kCollapsedDifferentialLightThreshold);
-            if (traveledDistanceM >= FrontWallCharacterizationConfig::kMinimumTravelBeforeCollapseCheckM && collapsedToZero)
-            {
-                ++collapsedConsecutiveSamples;
-            }
-            else
-            {
-                collapsedConsecutiveSamples = 0U;
-            }
-
-            if (storage.sampleCount >= MazeMap::kFrontWallCharacterizationMaxStoredSamples)
-            {
-                completionReason = "storage_full";
-                storage.terminalDistanceM = traveledDistanceM;
-                break;
-            }
-
-            if (collapsedConsecutiveSamples >= FrontWallCharacterizationConfig::kCollapsedConsecutiveSamples)
-            {
-                completionReason = "collapsed_to_zero";
-                storage.terminalDistanceM = traveledDistanceM;
-                break;
-            }
-
-            if (traveledDistanceM >= FrontWallCharacterizationConfig::kMaxReverseTravelM)
-            {
-                completionReason = "max_reverse_travel";
-                storage.terminalDistanceM = traveledDistanceM;
-                break;
-            }
-
-            if (!elapsedBudgetLogged &&
-                static_cast<unsigned long>(millis() - startMs) >= timeoutMs)
-            {
-                char timeoutLine[192] = {};
-                snprintf(
-                    timeoutLine,
-                    sizeof(timeoutLine),
-                    "front_wall_characterization:elapsed_budget_reached,travel_m=%.4f,samples=%u,timeout_ms=%lu",
-                    traveledDistanceM,
-                    static_cast<unsigned>(storage.sampleCount),
-                    timeoutMs);
-                AppendStartupTrace(timeoutLine);
-                elapsedBudgetLogged = true;
-            }
-
-            commandedSpeedMps = (std::min)(
-                FrontWallCharacterizationConfig::kReverseSpeedMps,
-                commandedSpeedMps + (FrontWallCharacterizationConfig::kReverseAccelMps2 * dtSeconds));
-
-            const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
-            float angularCommandRadps =
-                (Config::kStraightHeadingKp * headingErrorRad) -
-                (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps);
-            angularCommandRadps = (std::clamp)(
-                angularCommandRadps,
-                -FrontWallCharacterizationConfig::kMaxAngularCommandRadps,
-                FrontWallCharacterizationConfig::kMaxAngularCommandRadps);
-            _drive.CommandVelocity(-commandedSpeedMps, angularCommandRadps, dtSeconds);
         }
 
         _drive.Brake();
@@ -392,18 +476,6 @@ private:
         AppendStartupTrace(line);
         (void)_runtime.AppendTextLogLine(line);
         return true;
-    }
-
-    void WaitForNextSample(uint32_t& timestampUs, uint32_t& dtUs)
-    {
-        while ((micros() - _lastControlMicros) < FrontWallCharacterizationConfig::kControlPeriodUs)
-        {
-            delayMicroseconds(50);
-        }
-
-        timestampUs = micros();
-        dtUs = static_cast<uint32_t>(timestampUs - _lastControlMicros);
-        _lastControlMicros = timestampUs;
     }
 
     bool Fail(const char* reason)

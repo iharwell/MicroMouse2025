@@ -8,6 +8,10 @@
 #include <cmath>
 #include <limits>
 
+#ifndef MAZEMAP_PLANTMODEL_VALIDATE_INVERSE
+#define MAZEMAP_PLANTMODEL_VALIDATE_INVERSE 0
+#endif
+
 namespace
 {
     using MazeMap::ContactForce;
@@ -288,6 +292,27 @@ namespace
         return (std::max)(std::fabs(params.contactPatchLongitudinalOffsetM), 0.5f * SafeTrackWidth(params));
     }
 
+    float FixedSplitBankForwardCapacityN(
+        float frontCapacityN,
+        float rearCapacityN,
+        float lambdaFront,
+        float lambdaRear,
+        float forceEpsilonN) noexcept
+    {
+        float capacityN = (std::numeric_limits<float>::infinity)();
+
+        if (lambdaFront > forceEpsilonN)
+        {
+            capacityN = (std::min)(capacityN, frontCapacityN / lambdaFront);
+        }
+        if (lambdaRear > forceEpsilonN)
+        {
+            capacityN = (std::min)(capacityN, rearCapacityN / lambdaRear);
+        }
+
+        return std::isfinite(capacityN) ? (std::max)(0.0f, capacityN) : 0.0f;
+    }
+
     MotionMetrics EvaluateMotionMetrics(
         const PlantModel::StateVector& state,
         const ControlInput& control,
@@ -397,6 +422,12 @@ namespace
         const float rawMagnitudeN =
             MazeMap::Math::Sqrtf((rawForwardForceN * rawForwardForceN) + (rawRightForceN * rawRightForceN));
         const float maxForceN = (std::max)(0.0f, peakMu * normalForceN);
+        // This is the actual traction-limit clamp for each contact patch. With the current default
+        // plant (`combinedAccelPeakMps2 = 20.1`, `massKg = 0.14`, `frontLoadFraction = 0.5`),
+        // pure-lateral saturation occurs at about 0.0391 rad / 2.24 deg front and
+        // 0.0440 rad / 2.52 deg rear because the per-contact linear lateral force
+        // (`corneringStiffness*alpha`) reaches `peakMu*normalForce`. Any simultaneous
+        // longitudinal force demand reduces that slip-angle limit through this friction circle.
         const float forceScale = maxForceN / (std::max)(rawMagnitudeN, forceEpsilonN);
         const float scale = (forceScale < 1.0f) ? forceScale : 1.0f;
         const float saturationDenominatorN = (maxForceN > forceEpsilonN) ? maxForceN : forceEpsilonN;
@@ -911,6 +942,7 @@ namespace MazeMap
         const float longitudinalStiffnessN = params.longitudinalTireStiffnessN;
         const float longitudinalOffsetM = std::fabs(params.contactPatchLongitudinalOffsetM);
         const float lateralDampingNPerM = (std::max)(0.0f, params.lateralVelocityDampingNsPerM);
+        const float yawDampingNmPerRadps = (std::max)(0.0f, params.yawRateDampingNmsPerRad);
 
         if (!(std::isfinite(desiredLongitudinalAccelMps2) &&
             std::isfinite(desiredYawAccelRadps2) &&
@@ -954,7 +986,9 @@ namespace MazeMap
                 -availableLongitudinalAccelMps2,
                 availableLongitudinalAccelMps2);
         const float totalForwardForceCommandN = longitudinalMassKg * clippedLongitudinalAccelMps2;
-        const float totalYawMomentCommandNm = yawInertiaKgM2 * desiredYawAccelRadps2;
+        const float totalYawMomentCommandNm =
+            (yawInertiaKgM2 * desiredYawAccelRadps2) +
+            (yawDampingNmPerRadps * yawRateRadps);
         const float longitudinalYawMomentCommandNm = totalYawMomentCommandNm - baselineYawMomentNm;
         const float leftBankForceUnclippedN =
             (0.5f * totalForwardForceCommandN) + (longitudinalYawMomentCommandNm / trackWidthM);
@@ -963,6 +997,11 @@ namespace MazeMap
 
         const ContactLoads loads = BuildContactLoads(solution.control.fanDutyCycle, params);
         const PeakFrictionCoefficients peak = BuildPeakFrictionCoefficients(loads, params);
+        const float lambdaFront =
+            (std::isfinite(params.frontLongitudinalForceSplit) ?
+                 (std::clamp)(params.frontLongitudinalForceSplit, 0.0f, 1.0f) :
+                 0.5f);
+        const float lambdaRear = 1.0f - lambdaFront;
         const float flPeakForceN = peak.front * loads.flN;
         const float frPeakForceN = peak.front * loads.frN;
         const float rlPeakForceN = peak.rear * loads.rlN;
@@ -971,20 +1010,28 @@ namespace MazeMap
         const float frRightForceN = baselineForces.forces.contacts[kFrontRight].rightForceN;
         const float rlRightForceN = baselineForces.forces.contacts[kRearLeft].rightForceN;
         const float rrRightForceN = baselineForces.forces.contacts[kRearRight].rightForceN;
+        const float flForwardCapacityN =
+            MazeMap::Math::Sqrtf((std::max)(0.0f, (flPeakForceN * flPeakForceN) - (flRightForceN * flRightForceN)));
+        const float frForwardCapacityN =
+            MazeMap::Math::Sqrtf((std::max)(0.0f, (frPeakForceN * frPeakForceN) - (frRightForceN * frRightForceN)));
+        const float rlForwardCapacityN =
+            MazeMap::Math::Sqrtf((std::max)(0.0f, (rlPeakForceN * rlPeakForceN) - (rlRightForceN * rlRightForceN)));
+        const float rrForwardCapacityN =
+            MazeMap::Math::Sqrtf((std::max)(0.0f, (rrPeakForceN * rrPeakForceN) - (rrRightForceN * rrRightForceN)));
         const float leftBankForwardCapacityN =
-            MazeMap::Math::Sqrtf((std::max)(
-                0.0f,
-                (flPeakForceN * flPeakForceN) - (flRightForceN * flRightForceN))) +
-            MazeMap::Math::Sqrtf((std::max)(
-                0.0f,
-                (rlPeakForceN * rlPeakForceN) - (rlRightForceN * rlRightForceN)));
+            FixedSplitBankForwardCapacityN(
+                flForwardCapacityN,
+                rlForwardCapacityN,
+                lambdaFront,
+                lambdaRear,
+                forceEpsilonN);
         const float rightBankForwardCapacityN =
-            MazeMap::Math::Sqrtf((std::max)(
-                0.0f,
-                (frPeakForceN * frPeakForceN) - (frRightForceN * frRightForceN))) +
-            MazeMap::Math::Sqrtf((std::max)(
-                0.0f,
-                (rrPeakForceN * rrPeakForceN) - (rrRightForceN * rrRightForceN)));
+            FixedSplitBankForwardCapacityN(
+                frForwardCapacityN,
+                rrForwardCapacityN,
+                lambdaFront,
+                lambdaRear,
+                forceEpsilonN);
 
         float tractionScale = 1.0f;
         tractionScale =
@@ -1006,7 +1053,7 @@ namespace MazeMap
         const float totalForwardForceCommandScaledN = tractionScale * totalForwardForceCommandN;
         const float halfScaledTotalForwardForceN = 0.5f * totalForwardForceCommandScaledN;
         const float requestedLongitudinalYawMomentNm =
-            0.5f * trackWidthM * ((tractionScale * leftBankForceUnclippedN) - (tractionScale * rightBankForceUnclippedN));
+            tractionScale * longitudinalYawMomentCommandNm;
         const float minLongitudinalYawMomentNm =
             (std::max)(
                 trackWidthM * (-leftBankForwardCapacityN - halfScaledTotalForwardForceN),
@@ -1015,7 +1062,7 @@ namespace MazeMap
             (std::min)(
                 trackWidthM * (leftBankForwardCapacityN - halfScaledTotalForwardForceN),
                 trackWidthM * (halfScaledTotalForwardForceN + rightBankForwardCapacityN));
-        float refinedLongitudinalYawMomentNm =
+        const float refinedLongitudinalYawMomentNm =
             (minLongitudinalYawMomentNm <= maxLongitudinalYawMomentNm) ?
             (std::clamp)(
                 requestedLongitudinalYawMomentNm,
@@ -1026,98 +1073,13 @@ namespace MazeMap
         const float rightBankForwardVelocityMps = forwardVelocityMps - (halfTrackWidthM * yawRateRadps);
         const float leftRollingWheelSpeedRadps = leftBankForwardVelocityMps / wheelRadiusM;
         const float rightRollingWheelSpeedRadps = rightBankForwardVelocityMps / wheelRadiusM;
+        const float achievedYawMomentNm = baselineYawMomentNm + refinedLongitudinalYawMomentNm;
+        const float achievedYawAccelRadps2 =
+            (achievedYawMomentNm - (yawDampingNmPerRadps * yawRateRadps)) / yawInertiaKgM2;
         const float leftWheelAccelRadps2 =
-            (clippedLongitudinalAccelMps2 + (halfTrackWidthM * desiredYawAccelRadps2)) / wheelRadiusM;
+            (clippedLongitudinalAccelMps2 + (halfTrackWidthM * achievedYawAccelRadps2)) / wheelRadiusM;
         const float rightWheelAccelRadps2 =
-            (clippedLongitudinalAccelMps2 - (halfTrackWidthM * desiredYawAccelRadps2)) / wheelRadiusM;
-        auto evaluateYawCandidate =
-            [&](float candidateLongitudinalYawMomentNm, PlantDerivatives& achievedDerivatives) -> float
-        {
-            const float clampedMomentNm =
-                (minLongitudinalYawMomentNm <= maxLongitudinalYawMomentNm) ?
-                (std::clamp)(
-                    candidateLongitudinalYawMomentNm,
-                    minLongitudinalYawMomentNm,
-                    maxLongitudinalYawMomentNm) :
-                candidateLongitudinalYawMomentNm;
-            const float candidateLeftBankForceCommandN =
-                halfScaledTotalForwardForceN + (clampedMomentNm / trackWidthM);
-            const float candidateRightBankForceCommandN =
-                halfScaledTotalForwardForceN - (clampedMomentNm / trackWidthM);
-            const float candidateLeftWheelSpeedRadps =
-                (leftBankForwardVelocityMps +
-                 ((candidateLeftBankForceCommandN / longitudinalStiffnessSafeN) *
-                  (std::max)(std::fabs(leftBankForwardVelocityMps), rollingRegularizationMps))) /
-                wheelRadiusM;
-            const float candidateRightWheelSpeedRadps =
-                (rightBankForwardVelocityMps +
-                 ((candidateRightBankForceCommandN / longitudinalStiffnessSafeN) *
-                  (std::max)(std::fabs(rightBankForwardVelocityMps), rollingRegularizationMps))) /
-                wheelRadiusM;
-            const StateVector validationState =
-                BuildDriveCommandValidationState(
-                    operatingState,
-                    candidateLeftWheelSpeedRadps,
-                    candidateRightWheelSpeedRadps,
-                    params);
-            achievedDerivatives = forwardStep(validationState, solution.control, params);
-            return clampedMomentNm;
-        };
-
-        PlantDerivatives achievedDerivatives{};
-        float previousMomentNm = refinedLongitudinalYawMomentNm;
-        float previousYawErrorRadps2 = 0.0f;
-        bool havePreviousYawSample = false;
-        float bestLongitudinalYawMomentNm = refinedLongitudinalYawMomentNm;
-        float bestYawErrorMagnitudeRadps2 = (std::numeric_limits<float>::infinity)();
-        for (int iteration = 0; iteration < 4; ++iteration)
-        {
-            refinedLongitudinalYawMomentNm = evaluateYawCandidate(refinedLongitudinalYawMomentNm, achievedDerivatives);
-            const float yawErrorRadps2 = desiredYawAccelRadps2 - achievedDerivatives.yawAccelRadps2;
-            const float yawErrorMagnitudeRadps2 = std::fabs(yawErrorRadps2);
-            if (yawErrorMagnitudeRadps2 < bestYawErrorMagnitudeRadps2)
-            {
-                bestYawErrorMagnitudeRadps2 = yawErrorMagnitudeRadps2;
-                bestLongitudinalYawMomentNm = refinedLongitudinalYawMomentNm;
-            }
-            if (std::fabs(yawErrorRadps2) <= 0.2f)
-            {
-                break;
-            }
-
-            float nextMomentNm =
-                refinedLongitudinalYawMomentNm + (yawInertiaKgM2 * yawErrorRadps2);
-            if (havePreviousYawSample)
-            {
-                const float yawErrorDeltaRadps2 = yawErrorRadps2 - previousYawErrorRadps2;
-                const float momentDeltaNm = refinedLongitudinalYawMomentNm - previousMomentNm;
-                if (std::fabs(yawErrorDeltaRadps2) > 1.0e-6f)
-                {
-                    nextMomentNm =
-                        refinedLongitudinalYawMomentNm -
-                        (yawErrorRadps2 * momentDeltaNm / yawErrorDeltaRadps2);
-                }
-            }
-
-            if (minLongitudinalYawMomentNm <= maxLongitudinalYawMomentNm)
-            {
-                nextMomentNm =
-                    (std::clamp)(
-                        nextMomentNm,
-                        minLongitudinalYawMomentNm,
-                        maxLongitudinalYawMomentNm);
-            }
-            if (std::fabs(nextMomentNm - refinedLongitudinalYawMomentNm) <= 1.0e-6f)
-            {
-                break;
-            }
-
-            previousMomentNm = refinedLongitudinalYawMomentNm;
-            previousYawErrorRadps2 = yawErrorRadps2;
-            havePreviousYawSample = true;
-            refinedLongitudinalYawMomentNm = nextMomentNm;
-        }
-        refinedLongitudinalYawMomentNm = bestLongitudinalYawMomentNm;
+            (clippedLongitudinalAccelMps2 - (halfTrackWidthM * achievedYawAccelRadps2)) / wheelRadiusM;
 
         const float leftBankForceCommandN =
             halfScaledTotalForwardForceN + (refinedLongitudinalYawMomentNm / trackWidthM);
@@ -1176,13 +1138,25 @@ namespace MazeMap
                 solution.control.batteryVoltageV,
                 params);
 
+        solution.commandedLongitudinalAccelMps2 = clippedLongitudinalAccelMps2;
+        solution.commandedYawAccelRadps2 = achievedYawAccelRadps2;
+        solution.longitudinalAccelErrorMps2 =
+            solution.commandedLongitudinalAccelMps2 - desiredLongitudinalAccelMps2;
+        solution.yawAccelErrorRadps2 =
+            solution.commandedYawAccelRadps2 - desiredYawAccelRadps2;
+        solution.converged =
+            !solution.tractionLimited &&
+            (std::fabs(solution.longitudinalAccelErrorMps2) <= 0.05f) &&
+            (std::fabs(solution.yawAccelErrorRadps2) <= 0.2f);
+
+#if MAZEMAP_PLANTMODEL_VALIDATE_INVERSE
         const StateVector validationState =
             BuildDriveCommandValidationState(
                 operatingState,
                 leftWheelSpeedRadps,
                 rightWheelSpeedRadps,
                 params);
-        achievedDerivatives = forwardStep(validationState, solution.control, params);
+        const PlantDerivatives achievedDerivatives = forwardStep(validationState, solution.control, params);
         solution.commandedLongitudinalAccelMps2 = achievedDerivatives.longitudinalAccelMps2;
         solution.commandedYawAccelRadps2 = achievedDerivatives.yawAccelRadps2;
         solution.longitudinalAccelErrorMps2 =
@@ -1193,6 +1167,7 @@ namespace MazeMap
             !solution.tractionLimited &&
             (std::fabs(solution.longitudinalAccelErrorMps2) <= 0.05f) &&
             (std::fabs(solution.yawAccelErrorRadps2) <= 0.2f);
+#endif
         return solution;
     }
 

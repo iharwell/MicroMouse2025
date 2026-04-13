@@ -3,6 +3,7 @@
 #include "TeensyLayout.h"
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
+#include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "RuntimeBinaryLogSupport.h"
 
@@ -419,6 +420,7 @@ namespace MazeMap::App::Internal
             , speedPathFinder(maze, speedVehicle)
             , wallBeliefMap()
             , drive()
+            , controlLoop()
             , missionSensors(speedVehicle, gWallDistanceCalibration)
             , diagnosticSensors(speedVehicle, gWallDistanceCalibration)
             , dataLogger()
@@ -455,6 +457,7 @@ namespace MazeMap::App::Internal
         MazeMap::ManeuverPathFinder speedPathFinder;
         MazeMap::WallBeliefMap wallBeliefMap;
         DriveBase drive;
+        LoopController controlLoop;
         SensorSuite missionSensors;
         DiagnosticSensorSuite diagnosticSensors;
         MazeMap::mmlog::MmLogLogger dataLogger;
@@ -1057,6 +1060,11 @@ namespace MazeMap::App::Internal
     DriveBase& SharedRobotRuntime::Drive() noexcept
     {
         return _impl->drive;
+    }
+
+    LoopController& SharedRobotRuntime::ControlLoop() noexcept
+    {
+        return _impl->controlLoop;
     }
 
     SensorSuite& SharedRobotRuntime::MissionSensors() noexcept

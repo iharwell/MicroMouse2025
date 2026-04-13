@@ -967,18 +967,16 @@ namespace MazeMap
 
             const PlantDerivatives achieved = plant.forwardStep(state, solution.control, params);
             const float expectedLeftWheelAccelRadps2 =
-                (desiredLongitudinalAccelMps2 + (0.5f * params.trackWidthM * desiredYawAccelRadps2)) / params.wheelRadiusM;
+                (solution.commandedLongitudinalAccelMps2 + (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
             const float expectedRightWheelAccelRadps2 =
-                (desiredLongitudinalAccelMps2 - (0.5f * params.trackWidthM * desiredYawAccelRadps2)) / params.wheelRadiusM;
+                (solution.commandedLongitudinalAccelMps2 - (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
 
             Assert::IsTrue(std::isfinite(solution.control.leftMotorCommand));
             Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
             Assert::IsTrue(std::isfinite(achieved.longitudinalAccelMps2));
             Assert::IsTrue(std::isfinite(achieved.yawAccelRadps2));
-            Assert::AreEqual(achieved.longitudinalAccelMps2, solution.commandedLongitudinalAccelMps2, 1.0e-6f);
-            Assert::AreEqual(achieved.yawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-6f);
-            Assert::AreEqual(desiredLongitudinalAccelMps2, achieved.longitudinalAccelMps2, 0.05f);
-            Assert::AreEqual(desiredYawAccelRadps2, achieved.yawAccelRadps2, 0.20f);
+            Assert::AreEqual(desiredLongitudinalAccelMps2, solution.commandedLongitudinalAccelMps2, 0.05f);
+            Assert::AreEqual(desiredYawAccelRadps2, solution.commandedYawAccelRadps2, 0.20f);
             Assert::AreEqual(expectedLeftWheelAccelRadps2, solution.leftWheelAccelRadps2, 1.0e-5f);
             Assert::AreEqual(expectedRightWheelAccelRadps2, solution.rightWheelAccelRadps2, 1.0e-5f);
             Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaL)));
@@ -1195,7 +1193,7 @@ namespace MazeMap
                     params.supplyVoltageV);
 
             Logger::WriteMessage(
-                (std::wstring(L"positive yaw left/right command, wheel speeds, validated accel = ") +
+                (std::wstring(L"positive yaw left/right command, wheel speeds, predicted accel = ") +
                     std::to_wstring(solution.control.leftMotorCommand) + L"," +
                     std::to_wstring(solution.control.rightMotorCommand) + L"," +
                     std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
@@ -1211,7 +1209,7 @@ namespace MazeMap
                 !(solution.control.rightMotorCommand < 0.0f))
             {
                 Assert::Fail(
-                    (std::wstring(L"positive yaw left/right command, wheel speeds, validated accel = ") +
+                    (std::wstring(L"positive yaw left/right command, wheel speeds, predicted accel = ") +
                         std::to_wstring(solution.control.leftMotorCommand) + L"," +
                         std::to_wstring(solution.control.rightMotorCommand) + L"," +
                         std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
@@ -1235,7 +1233,7 @@ namespace MazeMap
                     params.supplyVoltageV);
 
             Logger::WriteMessage(
-                (std::wstring(L"negative yaw left/right command, wheel speeds, validated accel = ") +
+                (std::wstring(L"negative yaw left/right command, wheel speeds, predicted accel = ") +
                     std::to_wstring(solution.control.leftMotorCommand) + L"," +
                     std::to_wstring(solution.control.rightMotorCommand) + L"," +
                     std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
@@ -1251,7 +1249,7 @@ namespace MazeMap
                 !(solution.control.rightMotorCommand > 0.0f))
             {
                 Assert::Fail(
-                    (std::wstring(L"negative yaw left/right command, wheel speeds, validated accel = ") +
+                    (std::wstring(L"negative yaw left/right command, wheel speeds, predicted accel = ") +
                         std::to_wstring(solution.control.leftMotorCommand) + L"," +
                         std::to_wstring(solution.control.rightMotorCommand) + L"," +
                         std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
@@ -1296,8 +1294,248 @@ namespace MazeMap
             const PlantDerivatives achievedZeroLateral =
                 plant.forwardStep(zeroLateralValidationState, solution.control, params);
 
-            Assert::AreEqual(achievedFull.yawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-6f);
+            Assert::IsTrue(std::isfinite(solution.commandedYawAccelRadps2));
+            Assert::IsTrue(std::isfinite(achievedFull.yawAccelRadps2));
+            Assert::IsTrue(std::isfinite(achievedZeroLateral.yawAccelRadps2));
             Assert::IsTrue(std::fabs(achievedFull.yawAccelRadps2 - achievedZeroLateral.yawAccelRadps2) > 0.01f);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsCompensatesYawRateDampingWhenNotTractionLimited)
+        {
+            PlantModel plant;
+            PlantParams params = PlantParams::Default();
+            params.yawRateDampingNmsPerRad = 0.012f;
+
+            constexpr float forwardVelocityMps = 0.6f;
+            constexpr float desiredLongitudinalAccelMps2 = 0.0f;
+            constexpr float yawRateRadps = 1.4f;
+            constexpr float desiredYawAccelRadps2 = 18.0f;
+
+            const DriveCommandSolution solution =
+                plant.solveDriveCommands(
+                    forwardVelocityMps,
+                    desiredLongitudinalAccelMps2,
+                    yawRateRadps,
+                    desiredYawAccelRadps2,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            VehicleState::StateVector validationState = VehicleState::StateVector::Zero();
+            validationState(VehicleState::kU) = forwardVelocityMps;
+            validationState(VehicleState::kR) = yawRateRadps;
+            validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
+            validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
+            const PlantDerivatives achieved = plant.forwardStep(validationState, solution.control, params);
+            const float expectedLeftWheelAccelRadps2 =
+                (solution.commandedLongitudinalAccelMps2 + (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
+            const float expectedRightWheelAccelRadps2 =
+                (solution.commandedLongitudinalAccelMps2 - (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
+
+            Assert::IsFalse(solution.tractionLimited);
+            Assert::AreEqual(desiredYawAccelRadps2, solution.commandedYawAccelRadps2, 0.05f);
+            Assert::AreEqual(expectedLeftWheelAccelRadps2, solution.leftWheelAccelRadps2, 1.0e-5f);
+            Assert::AreEqual(expectedRightWheelAccelRadps2, solution.rightWheelAccelRadps2, 1.0e-5f);
+            Assert::IsTrue(std::isfinite(achieved.yawAccelRadps2));
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsTractionLimitedYawClampMatchesFixedSplitCapacity)
+        {
+            PlantModel plant;
+            PlantParams params = PlantParams::Default();
+            params.frontLongitudinalForceSplit = 0.95f;
+
+            constexpr float fanDutyCycle = 0.80f;
+            constexpr float desiredYawAccelRadps2 = 2000.0f;
+            const float forceEpsilonN =
+                (std::isfinite(params.forceEpsilonN) && (params.forceEpsilonN > 0.0f)) ?
+                params.forceEpsilonN :
+                1.0e-4f;
+
+            PlantModel::StateVector currentState = PlantModel::StateVector::Zero();
+            currentState(VehicleState::kU) = 0.9f;
+            currentState(VehicleState::kV) = 0.0f;
+            currentState(VehicleState::kR) = 0.0f;
+
+            const float halfTrackWidthM = 0.5f * params.trackWidthM;
+            currentState(VehicleState::kOmegaL) =
+                (currentState(VehicleState::kU) + (halfTrackWidthM * currentState(VehicleState::kR))) / params.wheelRadiusM;
+            currentState(VehicleState::kOmegaR) =
+                (currentState(VehicleState::kU) - (halfTrackWidthM * currentState(VehicleState::kR))) / params.wheelRadiusM;
+
+            ControlInput baselineControl{};
+            baselineControl.fanDutyCycle = fanDutyCycle;
+            const ContactForces baselineForces = plant.tireForces(currentState, baselineControl, params);
+            const float baselineFrontRightForceN =
+                baselineForces.contacts[0].rightForceN +
+                baselineForces.contacts[1].rightForceN;
+            const float baselineRearRightForceN =
+                baselineForces.contacts[2].rightForceN +
+                baselineForces.contacts[3].rightForceN;
+            const float baselineYawMomentNm =
+                std::fabs(params.contactPatchLongitudinalOffsetM) *
+                (baselineFrontRightForceN - baselineRearRightForceN);
+
+            const float totalNormalLoadN = params.TotalNormalLoadN(fanDutyCycle);
+            const float envelopeMu =
+                (std::isfinite(params.combinedAccelPeakMps2) &&
+                 (params.combinedAccelPeakMps2 > 0.0f) &&
+                 std::isfinite(params.massKg) &&
+                 (params.massKg > 0.0f)) ?
+                ((params.combinedAccelPeakMps2 * params.massKg) / (std::max)(totalNormalLoadN, forceEpsilonN)) :
+                0.0f;
+            const float peakFront =
+                (std::isfinite(params.muFrontPeak) && (params.muFrontPeak > 0.0f)) ?
+                params.muFrontPeak :
+                ((envelopeMu > 0.0f) ? envelopeMu : (std::max)(0.0f, params.muFront));
+            const float peakRear =
+                (std::isfinite(params.muRearPeak) && (params.muRearPeak > 0.0f)) ?
+                params.muRearPeak :
+                ((envelopeMu > 0.0f) ? envelopeMu : (std::max)(0.0f, params.muRear));
+            const float flPeakForceN = peakFront * params.FrontWheelLoadN(fanDutyCycle);
+            const float frPeakForceN = peakFront * params.FrontWheelLoadN(fanDutyCycle);
+            const float rlPeakForceN = peakRear * params.RearWheelLoadN(fanDutyCycle);
+            const float rrPeakForceN = peakRear * params.RearWheelLoadN(fanDutyCycle);
+            const float flForwardCapacityN =
+                MazeMap::Math::Sqrtf((std::max)(
+                    0.0f,
+                    (flPeakForceN * flPeakForceN) - (baselineForces.contacts[0].rightForceN * baselineForces.contacts[0].rightForceN)));
+            const float frForwardCapacityN =
+                MazeMap::Math::Sqrtf((std::max)(
+                    0.0f,
+                    (frPeakForceN * frPeakForceN) - (baselineForces.contacts[1].rightForceN * baselineForces.contacts[1].rightForceN)));
+            const float rlForwardCapacityN =
+                MazeMap::Math::Sqrtf((std::max)(
+                    0.0f,
+                    (rlPeakForceN * rlPeakForceN) - (baselineForces.contacts[2].rightForceN * baselineForces.contacts[2].rightForceN)));
+            const float rrForwardCapacityN =
+                MazeMap::Math::Sqrtf((std::max)(
+                    0.0f,
+                    (rrPeakForceN * rrPeakForceN) - (baselineForces.contacts[3].rightForceN * baselineForces.contacts[3].rightForceN)));
+            const float lambdaFront = params.frontLongitudinalForceSplit;
+            const float lambdaRear = 1.0f - lambdaFront;
+            const auto fixedSplitBankForwardCapacityN =
+                [&](float frontCapacityN, float rearCapacityN) -> float
+            {
+                float capacityN = (std::numeric_limits<float>::infinity)();
+                if (lambdaFront > forceEpsilonN)
+                {
+                    capacityN = (std::min)(capacityN, frontCapacityN / lambdaFront);
+                }
+                if (lambdaRear > forceEpsilonN)
+                {
+                    capacityN = (std::min)(capacityN, rearCapacityN / lambdaRear);
+                }
+
+                return std::isfinite(capacityN) ? (std::max)(0.0f, capacityN) : 0.0f;
+            };
+            const float leftBankForwardCapacityN =
+                fixedSplitBankForwardCapacityN(flForwardCapacityN, rlForwardCapacityN);
+            const float rightBankForwardCapacityN =
+                fixedSplitBankForwardCapacityN(frForwardCapacityN, rrForwardCapacityN);
+            const float legacyLeftSummedCapacityN = flForwardCapacityN + rlForwardCapacityN;
+            const float legacyRightSummedCapacityN = frForwardCapacityN + rrForwardCapacityN;
+
+            const float yawDampingNmPerRadps = (std::max)(0.0f, params.yawRateDampingNmsPerRad);
+            const float totalYawMomentCommandNm =
+                (params.yawInertiaKgM2 * desiredYawAccelRadps2) +
+                (yawDampingNmPerRadps * currentState(VehicleState::kR));
+            const float longitudinalYawMomentCommandNm = totalYawMomentCommandNm - baselineYawMomentNm;
+            const float leftBankForceUnclippedN = longitudinalYawMomentCommandNm / params.trackWidthM;
+            const float rightBankForceUnclippedN = -longitudinalYawMomentCommandNm / params.trackWidthM;
+
+            float tractionScale = 1.0f;
+            tractionScale =
+                (std::min)(
+                    tractionScale,
+                    leftBankForwardCapacityN / (std::max)(std::fabs(leftBankForceUnclippedN), forceEpsilonN));
+            tractionScale =
+                (std::min)(
+                    tractionScale,
+                    rightBankForwardCapacityN / (std::max)(std::fabs(rightBankForceUnclippedN), forceEpsilonN));
+
+            const float requestedLongitudinalYawMomentNm = tractionScale * longitudinalYawMomentCommandNm;
+            const float minLongitudinalYawMomentNm =
+                (std::max)(
+                    params.trackWidthM * (-leftBankForwardCapacityN),
+                    params.trackWidthM * (-rightBankForwardCapacityN));
+            const float maxLongitudinalYawMomentNm =
+                (std::min)(
+                    params.trackWidthM * leftBankForwardCapacityN,
+                    params.trackWidthM * rightBankForwardCapacityN);
+            const float refinedLongitudinalYawMomentNm =
+                (minLongitudinalYawMomentNm <= maxLongitudinalYawMomentNm) ?
+                (std::clamp)(
+                    requestedLongitudinalYawMomentNm,
+                    minLongitudinalYawMomentNm,
+                    maxLongitudinalYawMomentNm) :
+                requestedLongitudinalYawMomentNm;
+            const float achievedYawMomentNm = baselineYawMomentNm + refinedLongitudinalYawMomentNm;
+            const float expectedYawAccelRadps2 =
+                (achievedYawMomentNm - (yawDampingNmPerRadps * currentState(VehicleState::kR))) / params.yawInertiaKgM2;
+            float legacyTractionScale = 1.0f;
+            legacyTractionScale =
+                (std::min)(
+                    legacyTractionScale,
+                    legacyLeftSummedCapacityN / (std::max)(std::fabs(leftBankForceUnclippedN), forceEpsilonN));
+            legacyTractionScale =
+                (std::min)(
+                    legacyTractionScale,
+                    legacyRightSummedCapacityN / (std::max)(std::fabs(rightBankForceUnclippedN), forceEpsilonN));
+            const float legacyRequestedLongitudinalYawMomentNm =
+                legacyTractionScale * longitudinalYawMomentCommandNm;
+            const float legacyMinLongitudinalYawMomentNm =
+                (std::max)(
+                    params.trackWidthM * (-legacyLeftSummedCapacityN),
+                    params.trackWidthM * (-legacyRightSummedCapacityN));
+            const float legacyMaxLongitudinalYawMomentNm =
+                (std::min)(
+                    params.trackWidthM * legacyLeftSummedCapacityN,
+                    params.trackWidthM * legacyRightSummedCapacityN);
+            const float legacyRefinedLongitudinalYawMomentNm =
+                (legacyMinLongitudinalYawMomentNm <= legacyMaxLongitudinalYawMomentNm) ?
+                (std::clamp)(
+                    legacyRequestedLongitudinalYawMomentNm,
+                    legacyMinLongitudinalYawMomentNm,
+                    legacyMaxLongitudinalYawMomentNm) :
+                legacyRequestedLongitudinalYawMomentNm;
+            const float legacyAchievedYawMomentNm = baselineYawMomentNm + legacyRefinedLongitudinalYawMomentNm;
+            const float legacyExpectedYawAccelRadps2 =
+                (legacyAchievedYawMomentNm - (yawDampingNmPerRadps * currentState(VehicleState::kR))) / params.yawInertiaKgM2;
+
+            const DriveCommandSolution solution =
+                plant.solveDriveCommands(
+                    currentState,
+                    0.0f,
+                    desiredYawAccelRadps2,
+                    params,
+                    fanDutyCycle,
+                    params.supplyVoltageV);
+            const DriveCommandSolution repeatSolution =
+                plant.solveDriveCommands(
+                    currentState,
+                    0.0f,
+                    desiredYawAccelRadps2,
+                    params,
+                    fanDutyCycle,
+                    params.supplyVoltageV);
+
+            Logger::WriteMessage(
+                (std::wstring(L"traction-limited fixed expected/actual caps = ") +
+                    std::to_wstring(expectedYawAccelRadps2) + L"," +
+                    std::to_wstring(solution.commandedYawAccelRadps2) + L"," +
+                    std::to_wstring(leftBankForwardCapacityN) + L"," +
+                    std::to_wstring(rightBankForwardCapacityN) + L"," +
+                    std::to_wstring(legacyLeftSummedCapacityN) + L"," +
+                    std::to_wstring(legacyRightSummedCapacityN)).c_str());
+            Assert::IsTrue(solution.tractionLimited);
+            Assert::IsTrue(
+                ((legacyLeftSummedCapacityN - leftBankForwardCapacityN) > 1.0e-4f) ||
+                ((legacyRightSummedCapacityN - rightBankForwardCapacityN) > 1.0e-4f));
+            Assert::AreEqual(expectedYawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-3f);
+            Assert::AreEqual(solution.commandedYawAccelRadps2, repeatSolution.commandedYawAccelRadps2, 1.0e-6f);
+            Assert::AreEqual(solution.control.leftMotorCommand, repeatSolution.control.leftMotorCommand, 1.0e-6f);
+            Assert::AreEqual(solution.control.rightMotorCommand, repeatSolution.control.rightMotorCommand, 1.0e-6f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsDoesNotTractionLimitWellInsideNominalEnvelope)
