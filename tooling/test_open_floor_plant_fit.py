@@ -96,6 +96,73 @@ class OpenFloorPlantFitTest(unittest.TestCase):
         self.assertFalse(summary.can_identify_peak_friction)
         self.assertIsNotNone(summary.lateral_identifiability_reason)
 
+    def test_summarize_feedforward_alignment_inverts_configured_command(self) -> None:
+        command = 0.30
+        dt_us = 10000
+        encoder_omega_radps = [1.0] * 7
+        measured_speed_mps = [0.0, 0.00008, 0.00016, 0.00024, 0.00032, 0.00040, 0.00048]
+
+        launch_rows_by_repeat: dict[int, list[dict[str, str]]] = {}
+        for repeat_index in (0, 1):
+            launch_rows_by_repeat[repeat_index] = [
+                self.make_launch_row(dt_us, command, speed_mps, omega_radps)
+                for speed_mps, omega_radps in zip(measured_speed_mps, encoder_omega_radps)
+            ]
+
+        control_log_path = TEST_TEMP_ROOT / "_open_floor_plant_fit_test_alignment_logging.txt"
+        self.addCleanup(lambda: control_log_path.unlink(missing_ok=True))
+        control_log_path.write_text(
+            "\n".join(
+                [
+                    "open_floor_measurement [1] run_start: run_id=ofm_alignment_test;fan_duty_cycle_start=0.8",
+                    (
+                        "open_floor_main [2] ukf_dump_params_mass_geometry: "
+                        "mass_kg=10.0;effective_longitudinal_mass_kg=10.0;yaw_inertia_kg_m2=0.001;"
+                        "track_width_m=0.1;contact_patch_longitudinal_offset_m=0.0;wheel_radius_m=0.1;"
+                        "equivalent_wheel_inertia_kg_m2=0.0001"
+                    ),
+                    (
+                        "open_floor_main [3] ukf_dump_params_drive_electrical: "
+                        "supply_voltage_v=8.0;drive_resistance_ohms=4.0;torque_constant_nm_per_a=0.01;"
+                        "speed_constant_radps_per_volt=1000000000.0;no_load_current_a=0.0;motor_current_limit_a=2.0;"
+                        "gear_ratio=1.0"
+                    ),
+                    (
+                        "open_floor_main [4] ukf_dump_params_tire_friction: "
+                        "drivetrain_efficiency=1.0;rolling_friction_torque_nm=0.002;"
+                        "viscous_friction_nm_per_radps=0.0;longitudinal_tire_stiffness_n=6.0"
+                    ),
+                    (
+                        "open_floor_main [5] ukf_dump_params_static_friction: "
+                        "static_friction_torque_nm=0.0;static_friction_max_speed_mps=0.005"
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        summary = open_floor_plant_fit.summarize_feedforward_alignment(
+            launch_rows_by_repeat=launch_rows_by_repeat,
+            control_log_path=control_log_path,
+        )
+
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertEqual(summary.run_id, "ofm_alignment_test")
+        self.assertEqual(summary.command_bin_count, 1)
+        self.assertEqual(summary.sample_count, 5)
+        self.assertAlmostEqual(summary.overall_mean_command_error, 0.0, delta=1.0e-9)
+        self.assertAlmostEqual(summary.overall_rmse_command_error, 0.0, delta=1.0e-9)
+        self.assertEqual(len(summary.command_summaries), 1)
+        command_summary = summary.command_summaries[0]
+        self.assertEqual(command_summary.sample_count, 5)
+        self.assertAlmostEqual(command_summary.required_command_p10, command, delta=1.0e-9)
+        self.assertAlmostEqual(command_summary.required_command_median, command, delta=1.0e-9)
+        self.assertAlmostEqual(command_summary.required_command_p90, command, delta=1.0e-9)
+        self.assertAlmostEqual(command_summary.steady_required_command_median or 0.0, command, delta=1.0e-9)
+        self.assertAlmostEqual(command_summary.mean_command_error, 0.0, delta=1.0e-9)
+        self.assertAlmostEqual(command_summary.rmse_command_error, 0.0, delta=1.0e-9)
+
 
 if __name__ == "__main__":
     unittest.main()

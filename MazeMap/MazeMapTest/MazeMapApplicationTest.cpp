@@ -3,6 +3,7 @@
 #include "..\MazeMap\BootModeRegistry.h"
 #include "..\MazeMap\MazeMapApplication.h"
 #include "..\MazeMap\Defines.h"
+#include "..\MazeMap\PinPairStrap.h"
 #include "..\MazeMap\WallSensorLedCalibrationPhase.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -153,6 +154,18 @@ namespace MazeMap::App
 
             HostSetPinShort(38U, 39U, false);
             Assert::AreEqual(HIGH, digitalRead(38U));
+        }
+
+        TEST_METHOD(PinPairStrapMonitorDetectsLiveRemoval)
+        {
+            HostSetPinShort(27U, 28U);
+            BeginPinPairStrapMonitor(27U, 28U);
+            Assert::IsTrue(IsPinPairStrapMonitorClosed(28U));
+
+            HostSetPinShort(27U, 28U, false);
+            Assert::IsFalse(IsPinPairStrapMonitorClosed(28U));
+
+            EndPinPairStrapMonitor(27U, 28U);
         }
 
         TEST_METHOD(AdvanceWallSensorLedCalibrationPhase_CompletesAfterSideCapture)

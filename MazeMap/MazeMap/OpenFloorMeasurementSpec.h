@@ -121,7 +121,7 @@ namespace MazeMap
         MainLogOpenFailed,
         MainLogWriteFailed,
         EstimatorFault,
-        WorkspaceViolation,
+        SelectorJumperRemoved,
         RecoveryTimedOut,
         LaunchBoundExceeded,
         StraightWatchdogStall,
@@ -270,7 +270,7 @@ namespace MazeMap
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.2f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.29f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.03f;
-    inline constexpr unsigned long kOpenFloorOutOfBoundsGraceMs = 1UL;
+    inline constexpr unsigned long kOpenFloorSelectorRemovalFaultDelayMs = 500UL;
     inline constexpr float kOpenFloorRecoveryAcceptanceRadiusM = 0.015f;
     inline constexpr float kOpenFloorRecoveryArrivalHeadingToleranceRad = 1.0f * DEG_TO_RAD_F;
 
@@ -316,19 +316,16 @@ namespace MazeMap
         return Maze::GetCellDimension() * 0.5f;
     }
 
-    inline constexpr float OpenFloorWorkspaceMaxHalfSteps() noexcept
-    {
-        return static_cast<float>(DiagnosticConfig::kWorkspaceSizeHalfSteps);
-    }
-
-    inline constexpr float OpenFloorWorkspaceMaxMeters() noexcept
-    {
-        return OpenFloorWorkspaceMaxHalfSteps() * OpenFloorHalfStepMeters();
-    }
-
     inline constexpr float OpenFloorStrEquivalentDistanceMeters(uint8_t halfSteps) noexcept
     {
         return Maze::GetCellDimension() * 0.5f * static_cast<float>(halfSteps);
+    }
+
+    inline bool HasOpenFloorSelectorRemovalFaultDelayElapsed(
+        unsigned long inactiveSinceMs,
+        unsigned long nowMs) noexcept
+    {
+        return static_cast<unsigned long>(nowMs - inactiveSinceMs) >= kOpenFloorSelectorRemovalFaultDelayMs;
     }
 
     inline bool OpenFloorRecoveryWithinAcceptanceRadius(
@@ -600,8 +597,8 @@ namespace MazeMap
             return "MAIN_LOG_WRITE_FAILED";
         case OpenFloorFaultCode::EstimatorFault:
             return "ESTIMATOR_FAULT";
-        case OpenFloorFaultCode::WorkspaceViolation:
-            return "WORKSPACE_VIOLATION";
+        case OpenFloorFaultCode::SelectorJumperRemoved:
+            return "SELECTOR_JUMPER_REMOVED";
         case OpenFloorFaultCode::RecoveryTimedOut:
             return "RECOVERY_TIMED_OUT";
         case OpenFloorFaultCode::LaunchBoundExceeded:
@@ -652,21 +649,4 @@ namespace MazeMap
         return meters / halfStepM;
     }
 
-    inline bool IsPoseInsideOpenFloorWorkspace(const PoseEstimate& pose)
-    {
-        const float maxMeters = OpenFloorWorkspaceMaxMeters();
-        return std::isfinite(pose.xMeters) &&
-            std::isfinite(pose.yMeters) &&
-            pose.xMeters >= -0.1f &&
-            pose.yMeters >= -0.1f &&
-            pose.xMeters <= maxMeters &&
-            pose.yMeters <= maxMeters;
-    }
-
-    inline bool HasOpenFloorOutOfBoundsGraceElapsed(
-        unsigned long outsideBoundsStartMs,
-        unsigned long nowMs) noexcept
-    {
-        return static_cast<unsigned long>(nowMs - outsideBoundsStartMs) >= kOpenFloorOutOfBoundsGraceMs;
-    }
 }

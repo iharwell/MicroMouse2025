@@ -9,8 +9,6 @@ namespace MazeMap::DiagnosticConfig
 
     // [Low] One half-step in the open-floor measurement workspace, in millimeters.
     constexpr float kHalfStepMm = 90.0f;
-    // [Low] The open-floor workspace is a 5 x 5 half-step box in local coordinates.
-    constexpr uint8_t kWorkspaceSizeHalfSteps = 5U;
     // [Medium] Diagnostic control/log period. Shorten it only if SD logging, sensor reads, and control math still meet
     // the deadline; lengthen it if you see dropped samples or write stalls.
     constexpr unsigned long kControlPeriodUs = 1000UL;

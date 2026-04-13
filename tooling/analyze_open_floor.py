@@ -19,6 +19,8 @@ from typing import DefaultDict
 from typing import Iterable
 
 from open_floor_plant_fit import TirePlantFitSummary
+from open_floor_plant_fit import FeedforwardAlignmentSummary
+from open_floor_plant_fit import summarize_feedforward_alignment
 from open_floor_plant_fit import summarize_tire_plant_fit
 from open_floor_launch_floor import LaunchFloorSummary
 from open_floor_launch_floor import summarize_launch_floor
@@ -197,6 +199,7 @@ def analyze_main_csv(
     RepeatabilitySummary,
     dict[str, float],
     TirePlantFitSummary | None,
+    FeedforwardAlignmentSummary | None,
     list[RecoveryTurnSummary],
     RecoveryAggregateSummary | None,
 ]:
@@ -403,6 +406,10 @@ def analyze_main_csv(
         control_log_path,
         available_section_ids,
     )
+    feedforward_alignment = summarize_feedforward_alignment(
+        dict(launch_rows_by_repeat),
+        control_log_path,
+    )
 
     recovery_summaries, recovery_aggregate = summarize_recovery_segments(
         recovery_segments,
@@ -419,6 +426,7 @@ def analyze_main_csv(
         repeatability_summary,
         suggestions,
         tire_plant_fit,
+        feedforward_alignment,
         recovery_summaries,
         recovery_aggregate,
     )
@@ -514,6 +522,7 @@ def main() -> int:
         repeatability,
         suggestions,
         tire_plant_fit,
+        feedforward_alignment,
         recovery_summaries,
         recovery_aggregate,
     ) = analyze_main_csv(args.main, control_log_path)
@@ -665,6 +674,39 @@ def main() -> int:
         )
         if tire_plant_fit.lateral_identifiability_reason is not None:
             print(f"lateral_identifiability_reason={tire_plant_fit.lateral_identifiability_reason}")
+
+    if feedforward_alignment is not None:
+        print()
+        print("Feedforward alignment summary")
+        print(
+            "method=invert the configured launch-region wheel command model on SEC_20_LAUNCH mean traces and "
+            "compare the required normalized drive command against the logged launch command bin"
+        )
+        print(
+            f"run_id={'unknown' if feedforward_alignment.run_id is None else feedforward_alignment.run_id}, "
+            f"command_bins={feedforward_alignment.command_bin_count}, "
+            f"samples={feedforward_alignment.sample_count}, "
+            f"configured_effective_longitudinal_mass_kg={feedforward_alignment.configured_effective_longitudinal_mass_kg:.9f}, "
+            f"configured_equivalent_wheel_inertia_kg_m2={feedforward_alignment.configured_equivalent_wheel_inertia_kg_m2:.9f}, "
+            f"configured_rolling_friction_torque_nm={feedforward_alignment.configured_rolling_friction_torque_nm:.9f}, "
+            f"configured_static_friction_torque_nm={feedforward_alignment.configured_static_friction_torque_nm:.9f}, "
+            f"configured_static_friction_max_speed_mps={feedforward_alignment.configured_static_friction_max_speed_mps:.9f}, "
+            f"configured_viscous_friction_nm_per_radps={feedforward_alignment.configured_viscous_friction_nm_per_radps:.9f}"
+        )
+        print(
+            f"overall_mean_command_error={feedforward_alignment.overall_mean_command_error:+.6f}, "
+            f"overall_rmse_command_error={feedforward_alignment.overall_rmse_command_error:.6f}"
+        )
+        for summary in feedforward_alignment.command_summaries:
+            print(
+                f"abs_cmd={summary.abs_command:.2f}: samples={summary.sample_count}, "
+                f"required_cmd_p10={summary.required_command_p10:.4f}, "
+                f"required_cmd_median={summary.required_command_median:.4f}, "
+                f"required_cmd_p90={summary.required_command_p90:.4f}, "
+                f"steady_required_cmd_median={format_optional_float(summary.steady_required_command_median, 4)}, "
+                f"mean_command_error={summary.mean_command_error:+.4f}, "
+                f"rmse_command_error={summary.rmse_command_error:.4f}"
+            )
 
     if recovery_summaries:
         print()

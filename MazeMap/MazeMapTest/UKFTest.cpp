@@ -2399,7 +2399,6 @@ namespace MazeMap
 
             Assert::IsTrue(maxStepDxM < 0.01f);
             Assert::IsTrue(maxAbsDxFromStartM < 0.01f);
-            Assert::IsTrue(finalXM < OpenFloorWorkspaceMaxMeters());
             Assert::IsTrue(std::fabs(finalXM - first.poseXM) < 0.01f);
             Assert::IsTrue(std::fabs(finalXM - first.poseXM) < (encoderForwardTravelM + 0.005f));
             Assert::IsTrue(finalYM > (first.poseYM - 0.005f));

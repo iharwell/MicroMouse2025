@@ -5,6 +5,7 @@
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
+#include "PinPairStrap.h"
 #include "RuntimeBinaryLogSupport.h"
 #include "WallSensorLedCalibrationPhase.h"
 
@@ -142,7 +143,7 @@ inline constexpr std::uint16_t kOpenFloorLoggerFlagOverflow = 1u << 0;
 inline constexpr std::uint16_t kOpenFloorLoggerFlagWriteFailure = 1u << 1;
 
 inline constexpr std::uint16_t kOpenFloorMeasurementFlagAbortMarker = 1u << 0;
-inline constexpr std::uint16_t kOpenFloorMeasurementFlagWorkspaceViolation = 1u << 1;
+// Keep bit 1 unused so historic open-floor logs remain layout-compatible.
 inline constexpr std::uint16_t kOpenFloorMeasurementFlagEstimatorFault = 1u << 2;
 inline constexpr std::uint16_t kOpenFloorMeasurementFlagFanEnabled = 1u << 3;
 inline constexpr std::uint16_t kOpenFloorMeasurementFlagEncoderValid = 1u << 4;
@@ -167,10 +168,6 @@ inline std::uint16_t BuildOpenFloorMeasurementFlags(
     if (labels.abortMarker)
     {
         flags |= kOpenFloorMeasurementFlagAbortMarker;
-    }
-    if (cycle.workspaceViolation)
-    {
-        flags |= kOpenFloorMeasurementFlagWorkspaceViolation;
     }
     if (cycle.estimatorFault)
     {
@@ -246,11 +243,14 @@ private:
     bool _timingLogOpen;
     bool _mainLogOpen;
     unsigned long _lastControlMicros;
-    unsigned long _workspaceOutOfBoundsStartMs;
+    unsigned long _primaryDiagnosticSelectorInactiveStartMs;
     uint16_t _timingTickIndex;
     uint32_t _controlTickSequence;
     char _runId[24];
-    bool _workspaceOutOfBoundsActive;
+    uint8_t _primaryDiagnosticSelectorDrivePin;
+    uint8_t _primaryDiagnosticSelectorSensePin;
+    bool _primaryDiagnosticSelectorMonitorArmed;
+    bool _primaryDiagnosticSelectorInactive;
 
     static MotionLimits MeasurementLimits(float maxSpeedMps);
     static void HandleRuntimeFault(void* context, const char* reason) noexcept;
@@ -311,8 +311,9 @@ private:
         uint32_t extra1 = 0UL);
     bool HandleMeasurementCaptureFault(OpenFloorMeasurementLabels& labels, OpenFloorMeasurementCycle& cycle);
     void SeedPoseAtMarker(MazeMap::OpenFloorMarkerId markerId);
-    bool IsWithinBoundary() const;
-    bool HasWorkspaceViolationFault();
+    void ConfigurePrimaryDiagnosticSelectorMonitor() noexcept;
+    void ReleasePrimaryDiagnosticSelectorMonitor() noexcept;
+    bool HasPrimaryDiagnosticSelectorRemovalFault() noexcept;
     float ReadBatteryVoltage() const;
     float ReadBoardTemperatureC(const DiagnosticSensorSnapshot& snapshot) const;
     bool CaptureCycle(bool stationary, OpenFloorMeasurementCycle& cycle);
@@ -373,10 +374,13 @@ OpenFloorMeasurementController::OpenFloorMeasurementController(SharedRobotRuntim
     , _timingLogOpen(false)
     , _mainLogOpen(false)
     , _lastControlMicros(0UL)
-    , _workspaceOutOfBoundsStartMs(0UL)
+    , _primaryDiagnosticSelectorInactiveStartMs(0UL)
     , _timingTickIndex(0U)
     , _controlTickSequence(0UL)
-    , _workspaceOutOfBoundsActive(false)
+    , _primaryDiagnosticSelectorDrivePin(0U)
+    , _primaryDiagnosticSelectorSensePin(0U)
+    , _primaryDiagnosticSelectorMonitorArmed(false)
+    , _primaryDiagnosticSelectorInactive(false)
 {
     _runId[0] = '\0';
 }
@@ -908,9 +912,8 @@ bool OpenFloorMeasurementController::Begin()
 
     snprintf(_runId, sizeof(_runId), "ofm_%lu", static_cast<unsigned long>(micros()));
     _controlTickSequence = 0UL;
-    _workspaceOutOfBoundsStartMs = 0UL;
-    _workspaceOutOfBoundsActive = false;
     _pinsLatchedAtBoot = MazeMap::App::IsBootModeSelectorActive(MazeMap::App::BootModeId::PrimaryDiagnostic);
+    ConfigurePrimaryDiagnosticSelectorMonitor();
     _batteryVoltageStart = ReadBatteryVoltage();
     _fanDutyCycleStart = GetMissionFanDutyCycle();
     char runStartMessage[256] = {};
@@ -976,6 +979,7 @@ void OpenFloorMeasurementController::Run()
         CloseMainLog();
         _mainLogOpen = false;
     }
+    ReleasePrimaryDiagnosticSelectorMonitor();
     if (ok)
     {
         AppendStartupTrace("open_floor_measurement:complete");
@@ -1124,6 +1128,7 @@ void OpenFloorMeasurementController::HandleRuntimeFault(void* context, const cha
 void OpenFloorMeasurementController::OnRuntimeFault(const char* message) noexcept
 {
     _faulted = true;
+    ReleasePrimaryDiagnosticSelectorMonitor();
     if (message != nullptr && message[0] != '\0')
     {
         AppendStartupTrace(message);
@@ -1202,6 +1207,17 @@ bool OpenFloorMeasurementController::HandleMeasurementCaptureFault(
             MazeMap::OpenFloorFaultCode::EstimatorFault,
             "Estimator fault during open-floor measurement");
     }
+    if (cycle.selectorJumperRemoved)
+    {
+        return LogSectionFaultAndFail(
+            labels,
+            cycle,
+            MazeMap::OpenFloorFaultCode::SelectorJumperRemoved,
+            "Primary diagnostic selector jumper removed during open-floor measurement",
+            0U,
+            0U,
+            static_cast<uint32_t>(MazeMap::kOpenFloorSelectorRemovalFaultDelayMs));
+    }
     return Fail("Open-floor control-cycle capture failed");
 }
 
@@ -1212,33 +1228,68 @@ void OpenFloorMeasurementController::SeedPoseAtMarker(MazeMap::OpenFloorMarkerId
         MazeMap::OpenFloorMarkerYMeters(markerId),
         DirectionToYawRad(MazeMap::GetOpenFloorMarker(markerId).heading));
     _lastControlMicros = micros();
-    _workspaceOutOfBoundsStartMs = 0UL;
-    _workspaceOutOfBoundsActive = false;
 }
 
-bool OpenFloorMeasurementController::IsWithinBoundary() const
+void OpenFloorMeasurementController::ConfigurePrimaryDiagnosticSelectorMonitor() noexcept
 {
-    return MazeMap::IsPoseInsideOpenFloorWorkspace(_drive.GetPose());
-}
-
-bool OpenFloorMeasurementController::HasWorkspaceViolationFault()
-{
-    if (IsWithinBoundary())
+    ReleasePrimaryDiagnosticSelectorMonitor();
+    if (!_pinsLatchedAtBoot)
     {
-        _workspaceOutOfBoundsStartMs = 0UL;
-        _workspaceOutOfBoundsActive = false;
+        return;
+    }
+
+    const MazeMap::App::BootModeRegistryEntry* const entry =
+        MazeMap::App::FindBootModeRegistryEntry(MazeMap::App::BootModeId::PrimaryDiagnostic);
+    if (entry == nullptr || entry->selector.kind != MazeMap::App::BootModeSelectorKind::PinPair)
+    {
+        return;
+    }
+
+    _primaryDiagnosticSelectorDrivePin = entry->selector.pinA;
+    _primaryDiagnosticSelectorSensePin = entry->selector.pinB;
+    BeginPinPairStrapMonitor(_primaryDiagnosticSelectorDrivePin, _primaryDiagnosticSelectorSensePin);
+    _primaryDiagnosticSelectorMonitorArmed = true;
+}
+
+void OpenFloorMeasurementController::ReleasePrimaryDiagnosticSelectorMonitor() noexcept
+{
+    if (_primaryDiagnosticSelectorMonitorArmed)
+    {
+        EndPinPairStrapMonitor(_primaryDiagnosticSelectorDrivePin, _primaryDiagnosticSelectorSensePin);
+    }
+
+    _primaryDiagnosticSelectorInactiveStartMs = 0UL;
+    _primaryDiagnosticSelectorDrivePin = 0U;
+    _primaryDiagnosticSelectorSensePin = 0U;
+    _primaryDiagnosticSelectorMonitorArmed = false;
+    _primaryDiagnosticSelectorInactive = false;
+}
+
+bool OpenFloorMeasurementController::HasPrimaryDiagnosticSelectorRemovalFault() noexcept
+{
+    if (!_primaryDiagnosticSelectorMonitorArmed)
+    {
+        return false;
+    }
+
+    if (IsPinPairStrapMonitorClosed(_primaryDiagnosticSelectorSensePin))
+    {
+        _primaryDiagnosticSelectorInactiveStartMs = 0UL;
+        _primaryDiagnosticSelectorInactive = false;
         return false;
     }
 
     const unsigned long nowMs = millis();
-    if (!_workspaceOutOfBoundsActive)
+    if (!_primaryDiagnosticSelectorInactive)
     {
-        _workspaceOutOfBoundsStartMs = nowMs;
-        _workspaceOutOfBoundsActive = true;
+        _primaryDiagnosticSelectorInactiveStartMs = nowMs;
+        _primaryDiagnosticSelectorInactive = true;
         return false;
     }
 
-    return MazeMap::HasOpenFloorOutOfBoundsGraceElapsed(_workspaceOutOfBoundsStartMs, nowMs);
+    return MazeMap::HasOpenFloorSelectorRemovalFaultDelayElapsed(
+        _primaryDiagnosticSelectorInactiveStartMs,
+        nowMs);
 }
 
 float OpenFloorMeasurementController::ReadBatteryVoltage() const
@@ -1304,8 +1355,15 @@ bool OpenFloorMeasurementController::CaptureCycle(bool stationary, OpenFloorMeas
     cycle.batteryVoltage = ReadBatteryVoltage();
     cycle.boardTemperatureC = ReadBoardTemperatureC(cycle.sensorSnapshot);
     cycle.fanDutyCycle = GetMissionFanDutyCycle();
-    cycle.workspaceViolation = HasWorkspaceViolationFault();
-    return !cycle.workspaceViolation;
+    cycle.selectorJumperRemoved = HasPrimaryDiagnosticSelectorRemovalFault();
+    if (cycle.selectorJumperRemoved)
+    {
+        return false;
+    }
+    // Open-floor mode has no authoritative pose anchor. Estimated position drift is useful for logs,
+    // but it is not reliable enough to halt the run or raise a fault. Do not reintroduce pose-derived
+    // boundary failures here unless the mode gains a real external reference.
+    return true;
 }
 
 void OpenFloorMeasurementController::FinalizeCycle(OpenFloorMeasurementCycle& cycle)
@@ -1459,6 +1517,14 @@ bool OpenFloorMeasurementController::RunTimingBlock()
                     MazeMap::OpenFloorFaultCode::EstimatorFault,
                     "Estimator fault during timing capture");
             }
+            if (cycle.selectorJumperRemoved)
+            {
+                return LogTimingFaultAndFail(
+                    cycle,
+                    MazeMap::OpenFloorFaultCode::SelectorJumperRemoved,
+                    "Primary diagnostic selector jumper removed during timing capture",
+                    static_cast<uint32_t>(MazeMap::kOpenFloorSelectorRemovalFaultDelayMs));
+            }
             return Fail("Open-floor timing capture failed");
         }
 
@@ -1524,9 +1590,6 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
     }
 
     const unsigned long pulseDeadline = millis() + MazeMap::kOpenFloorLaunchPulseMs;
-    const float launchBoundM = MazeMap::OpenFloorHalfStepMeters() + Config::kDistanceToleranceM;
-    unsigned long launchOutOfBoundsStartMs = 0UL;
-    bool launchOutOfBoundsActive = false;
     MazeMap::VehicleState stationaryCheckState;
     stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
     bool previousStationary = stationaryCheckState.IsStationary();
@@ -1540,15 +1603,8 @@ bool OpenFloorMeasurementController::ExecuteLaunchPulse(float signedDriveCommand
         }
 
         labels.phaseId = MazeMap::OpenFloorPhaseId::LaunchPulse;
-        const PoseEstimate pose = _drive.GetPose();
-        const float dx = pose.xMeters - MazeMap::OpenFloorMarkerXMeters(labels.startMarkerId);
-        const float dy = pose.yMeters - MazeMap::OpenFloorMarkerYMeters(labels.startMarkerId);
-        const bool launchOutOfBounds = std::sqrt((dx * dx) + (dy * dy)) > launchBoundM;
-        if (!launchOutOfBounds)
-        {
-            launchOutOfBoundsStartMs = 0UL;
-            launchOutOfBoundsActive = false;
-        }
+        // The launch pulse is bounded by time and the stationary recovery that follows. Do not promote
+        // pose drift into a launch fault here: open-floor pose remains intentionally non-authoritative.
         _drive.CommandOpenLoopRaw(signedDriveCommand, signedDriveCommand);
         stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
         const bool estimatorStationary = stationaryCheckState.IsStationary();
@@ -1677,9 +1733,13 @@ bool OpenFloorMeasurementController::ExecuteStraightDistance(
     }
 
     const MotionLimits limits = MeasurementLimits(cruiseSpeedMps);
+    const float straightDirectionSign =
+        (directionId == MazeMap::OpenFloorDirectionId::Southbound) ?
+        -1.0f :
+        1.0f;
     const float startDistanceM = _drive.GetAverageDistanceMeters();
     const Eigen::Vector2f targetHeading = _drive.GetPose().headingUnit;
-    float commandedSpeedMps = 0.0f;
+    float commandedSpeedMagnitudeMps = 0.0f;
     EncoderProgressWatchdog translationWatchdog{};
     translationWatchdog.Reset(0.0f, millis());
     const unsigned long timeoutMs = millis() +
@@ -1709,7 +1769,7 @@ bool OpenFloorMeasurementController::ExecuteStraightDistance(
             }
             break;
         }
-        if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
+        if (translationWatchdog.Stalled(traveledM, commandedSpeedMagnitudeMps, remainingM, millis()))
         {
             cycle.watchdogFlags |= kWatchdogFlagTranslationStall;
         }
@@ -1723,12 +1783,13 @@ bool OpenFloorMeasurementController::ExecuteStraightDistance(
                 kWatchdogFlagSectionTimeout);
         }
 
-        const float accelLimitedSpeedMps = (std::min)(cruiseSpeedMps, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
+        const float accelLimitedSpeedMps =
+            (std::min)(cruiseSpeedMps, commandedSpeedMagnitudeMps + (limits.accelMps2 * dtSeconds));
         const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
-        commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+        commandedSpeedMagnitudeMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
         const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
         const float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps);
-        _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+        _drive.CommandVelocity(straightDirectionSign * commandedSpeedMagnitudeMps, angularCommandRadps, dtSeconds);
 
         if (!LogCycle(labels, cycle))
         {

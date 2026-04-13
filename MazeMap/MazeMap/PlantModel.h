@@ -245,7 +245,7 @@ namespace MazeMap
     {
     public:
         using StateVector = VehicleState::StateVector;
-        static constexpr float kDefaultVelocityTargetResponseTimeS = 0.005f;
+        static constexpr float kDefaultVelocityTargetResponseTimeS = 0.015f;
         static constexpr float kClosedLoopTractionReserveScale = 0.90f;
 
         PlantDerivatives forwardStep(
@@ -291,7 +291,7 @@ namespace MazeMap
             const PlantParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
-            float responseTimeS = 0.005f) const noexcept;
+            float responseTimeS = 0.015f) const noexcept;
         // Returns the issued closed-loop feedforward command. If the raw request reaches the traction limit,
         // this backs the validated body accelerations off by the requested reserve scale so the outer PI loop
         // retains command headroom.

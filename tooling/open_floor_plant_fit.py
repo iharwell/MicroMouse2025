@@ -23,12 +23,15 @@ DRAG_FIT_MIN_ABS_WHEEL_SPEED_RADPS = 0.2
 LONGITUDINAL_STIFFNESS_MIN_ABS_KAPPA = 0.01
 LONGITUDINAL_STIFFNESS_STABILITY_RATIO_LIMIT = 2.5
 MOTION_THRESHOLD_END_SPEED_MPS = 0.02
+FEEDFORWARD_ALIGNMENT_STEADY_MIN_ABS_WHEEL_SPEED_RADPS = 0.5
+FEEDFORWARD_ALIGNMENT_STEADY_MAX_ABS_WHEEL_ACCEL_RADPS2 = 20.0
 
 
 @dataclass
 class LaunchMeanTracePoint:
     sample_index: int
     abs_command: float
+    logged_command: float
     measured_linear_speed_mps: float
     average_encoder_omega_radps: float
     gyro_raw_radps: float
@@ -43,6 +46,34 @@ class LongitudinalStiffnessCommandFit:
     sample_count: int
     end_speed_mps: float
     apparent_longitudinal_tire_stiffness_n: float | None
+
+
+@dataclass
+class FeedforwardAlignmentCommandSummary:
+    abs_command: float
+    sample_count: int
+    required_command_p10: float
+    required_command_median: float
+    required_command_p90: float
+    steady_required_command_median: float | None
+    mean_command_error: float
+    rmse_command_error: float
+
+
+@dataclass
+class FeedforwardAlignmentSummary:
+    run_id: str | None
+    command_bin_count: int
+    sample_count: int
+    configured_effective_longitudinal_mass_kg: float
+    configured_equivalent_wheel_inertia_kg_m2: float
+    configured_rolling_friction_torque_nm: float
+    configured_static_friction_torque_nm: float
+    configured_static_friction_max_speed_mps: float
+    configured_viscous_friction_nm_per_radps: float
+    overall_mean_command_error: float
+    overall_rmse_command_error: float
+    command_summaries: list[FeedforwardAlignmentCommandSummary]
 
 
 @dataclass
@@ -71,6 +102,13 @@ class TirePlantFitSummary:
 class LaunchFitParameters:
     drive: RunPlantParameters
     effective_longitudinal_mass_kg: float
+    equivalent_wheel_inertia_kg_m2: float
+    rolling_friction_torque_nm: float
+    static_friction_torque_nm: float
+    static_friction_max_speed_mps: float
+    viscous_friction_nm_per_radps: float
+    drivetrain_efficiency: float
+    motor_current_limit_a: float
 
 
 def load_run_id(path: Path | None) -> str | None:
@@ -96,22 +134,80 @@ def load_launch_fit_parameters(path: Path | None) -> LaunchFitParameters | None:
         return None
     effective_longitudinal_mass_kg: float | None = None
     mass_kg: float | None = None
+    equivalent_wheel_inertia_kg_m2 = 0.0
+    rolling_friction_torque_nm = 0.0
+    static_friction_torque_nm = 0.0
+    static_friction_max_speed_mps = 0.0
+    viscous_friction_nm_per_radps = 0.0
+    drivetrain_efficiency = 1.0
+    motor_current_limit_a: float | None = None
     with path.open(encoding="utf-8", errors="replace") as control_log:
         for line in control_log:
             if "ukf_dump_params_mass_geometry:" not in line:
+                if "ukf_dump_params_drive_electrical:" in line:
+                    fields = parse_key_value_fields(
+                        line.split("ukf_dump_params_drive_electrical:", 1)[1].strip()
+                    )
+                    motor_current_limit_a = fields.get("motor_current_limit_a", motor_current_limit_a)
+                elif "ukf_dump_params_tire_friction:" in line:
+                    fields = parse_key_value_fields(
+                        line.split("ukf_dump_params_tire_friction:", 1)[1].strip()
+                    )
+                    rolling_friction_torque_nm = fields.get(
+                        "rolling_friction_torque_nm",
+                        rolling_friction_torque_nm,
+                    )
+                    viscous_friction_nm_per_radps = fields.get(
+                        "viscous_friction_nm_per_radps",
+                        viscous_friction_nm_per_radps,
+                    )
+                    drivetrain_efficiency = fields.get(
+                        "drivetrain_efficiency",
+                        drivetrain_efficiency,
+                    )
+                elif "ukf_dump_params_static_friction:" in line:
+                    fields = parse_key_value_fields(
+                        line.split("ukf_dump_params_static_friction:", 1)[1].strip()
+                    )
+                    static_friction_torque_nm = fields.get(
+                        "static_friction_torque_nm",
+                        static_friction_torque_nm,
+                    )
+                    static_friction_max_speed_mps = fields.get(
+                        "static_friction_max_speed_mps",
+                        static_friction_max_speed_mps,
+                    )
                 continue
             fields = parse_key_value_fields(
                 line.split("ukf_dump_params_mass_geometry:", 1)[1].strip()
             )
             effective_longitudinal_mass_kg = fields.get("effective_longitudinal_mass_kg")
             mass_kg = fields.get("mass_kg")
-            break
+            equivalent_wheel_inertia_kg_m2 = fields.get(
+                "equivalent_wheel_inertia_kg_m2",
+                equivalent_wheel_inertia_kg_m2,
+            )
     chosen_mass_kg = effective_longitudinal_mass_kg if effective_longitudinal_mass_kg is not None else mass_kg
     if chosen_mass_kg is None or chosen_mass_kg <= 0.0:
         return None
     return LaunchFitParameters(
         drive=drive,
         effective_longitudinal_mass_kg=chosen_mass_kg,
+        equivalent_wheel_inertia_kg_m2=equivalent_wheel_inertia_kg_m2,
+        rolling_friction_torque_nm=rolling_friction_torque_nm,
+        static_friction_torque_nm=static_friction_torque_nm,
+        static_friction_max_speed_mps=static_friction_max_speed_mps,
+        viscous_friction_nm_per_radps=viscous_friction_nm_per_radps,
+        drivetrain_efficiency=drivetrain_efficiency,
+        motor_current_limit_a=(
+            motor_current_limit_a
+            if motor_current_limit_a is not None
+            else (
+                drive.battery_voltage_v / drive.drive_resistance_ohms
+                if drive.drive_resistance_ohms > 0.0
+                else 0.0
+            )
+        ),
     )
 
 
@@ -123,6 +219,7 @@ def mean_trace_point_from_rows(
     return LaunchMeanTracePoint(
         sample_index=sample_index,
         abs_command=abs_command,
+        logged_command=abs_command,
         measured_linear_speed_mps=statistics.fmean(parse_float(row["measured_linear_speed_mps"]) for row in rows),
         average_encoder_omega_radps=statistics.fmean(
             0.5 * (parse_float(row["left_encoder_omega_radps"]) + parse_float(row["right_encoder_omega_radps"]))
@@ -218,6 +315,206 @@ def fit_affine(x_values: list[float], y_values: list[float]) -> tuple[float, flo
     slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(x_values, y_values)) / denominator
     intercept = mean_y - (slope * mean_x)
     return intercept, slope
+
+
+def signed_direction(preferred_value: float, fallback_value: float = 0.0) -> float:
+    if preferred_value > 1.0e-6:
+        return 1.0
+    if preferred_value < -1.0e-6:
+        return -1.0
+    if fallback_value > 1.0e-6:
+        return 1.0
+    if fallback_value < -1.0e-6:
+        return -1.0
+    return 0.0
+
+
+def interpolated_percentile(sorted_values: list[float], fraction: float) -> float:
+    if not sorted_values:
+        raise ValueError("percentile requires at least one value")
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    index = max(0.0, min(fraction, 1.0)) * (len(sorted_values) - 1)
+    low_index = math.floor(index)
+    high_index = math.ceil(index)
+    if low_index == high_index:
+        return sorted_values[low_index]
+    high_fraction = index - low_index
+    low_fraction = 1.0 - high_fraction
+    return (
+        sorted_values[low_index] * low_fraction +
+        sorted_values[high_index] * high_fraction
+    )
+
+
+def static_friction_speed_threshold_radps(params: LaunchFitParameters) -> float:
+    if params.drive.wheel_radius_m <= 0.0:
+        return 0.0
+    return params.static_friction_max_speed_mps / params.drive.wheel_radius_m
+
+
+def drive_friction_torque_nm(
+    wheel_bank_speed_radps: float,
+    wheel_torque_request_nm: float,
+    params: LaunchFitParameters,
+) -> float:
+    viscous_friction_torque_nm = params.viscous_friction_nm_per_radps * wheel_bank_speed_radps
+    if abs(wheel_bank_speed_radps) <= static_friction_speed_threshold_radps(params):
+        friction_sign = signed_direction(wheel_torque_request_nm, wheel_bank_speed_radps)
+        return (params.static_friction_torque_nm * friction_sign) + viscous_friction_torque_nm
+    friction_sign = signed_direction(wheel_bank_speed_radps, wheel_torque_request_nm)
+    return (params.rolling_friction_torque_nm * friction_sign) + viscous_friction_torque_nm
+
+
+def drive_command_from_wheel_torque(
+    wheel_torque_nm: float,
+    wheel_bank_speed_radps: float,
+    params: LaunchFitParameters,
+) -> float:
+    drive_gain = params.drive.gear_ratio * params.drivetrain_efficiency
+    if not (
+        math.isfinite(wheel_torque_nm) and
+        math.isfinite(wheel_bank_speed_radps) and
+        (params.drive.battery_voltage_v > 0.0) and
+        (drive_gain > 0.0) and
+        (params.drive.torque_constant_nm_per_a > 0.0)
+    ):
+        return 0.0
+    motor_torque_nm = wheel_torque_nm / drive_gain
+    no_load_direction = signed_direction(motor_torque_nm, wheel_bank_speed_radps)
+    armature_current_a = (
+        motor_torque_nm / params.drive.torque_constant_nm_per_a
+    ) + (no_load_direction * params.drive.no_load_current_a)
+    if params.motor_current_limit_a > 0.0:
+        armature_current_a = max(
+            -params.motor_current_limit_a,
+            min(params.motor_current_limit_a, armature_current_a),
+        )
+    motor_speed_radps = wheel_bank_speed_radps * params.drive.gear_ratio
+    back_emf_voltage_v = (
+        motor_speed_radps / params.drive.speed_constant_radps_per_volt
+        if params.drive.speed_constant_radps_per_volt > 0.0
+        else 0.0
+    )
+    applied_voltage_v = (armature_current_a * params.drive.drive_resistance_ohms) + back_emf_voltage_v
+    return max(-1.0, min(1.0, applied_voltage_v / params.drive.battery_voltage_v))
+
+
+def summarize_feedforward_alignment_trace_groups(
+    trace_groups: dict[float, list[list[LaunchMeanTracePoint]]],
+    params: LaunchFitParameters,
+    run_id: str | None,
+) -> FeedforwardAlignmentSummary | None:
+    if not trace_groups:
+        return None
+
+    command_summaries: list[FeedforwardAlignmentCommandSummary] = []
+    overall_required_commands: list[float] = []
+    overall_logged_commands: list[float] = []
+    for abs_command, traces in sorted(trace_groups.items()):
+        required_commands: list[float] = []
+        logged_commands: list[float] = []
+        steady_required_commands: list[float] = []
+        for trace in traces:
+            for index in range(1, len(trace) - 1):
+                previous = trace[index - 1]
+                point = trace[index]
+                next_point = trace[index + 1]
+                longitudinal_accel_mps2 = central_derivative(previous, point, next_point, "measured_linear_speed_mps")
+                wheel_accel_radps2 = central_derivative(previous, point, next_point, "average_encoder_omega_radps")
+                contact_force_bank_n = 0.5 * params.effective_longitudinal_mass_kg * longitudinal_accel_mps2
+                wheel_torque_request_nm = (
+                    (params.equivalent_wheel_inertia_kg_m2 * wheel_accel_radps2) +
+                    (params.drive.wheel_radius_m * contact_force_bank_n)
+                )
+                required_command = drive_command_from_wheel_torque(
+                    wheel_torque_request_nm + drive_friction_torque_nm(
+                        point.average_encoder_omega_radps,
+                        wheel_torque_request_nm,
+                        params,
+                    ),
+                    point.average_encoder_omega_radps,
+                    params,
+                )
+                if not math.isfinite(required_command):
+                    continue
+                required_commands.append(required_command)
+                logged_commands.append(point.logged_command)
+                overall_required_commands.append(required_command)
+                overall_logged_commands.append(point.logged_command)
+                if (
+                    point.average_encoder_omega_radps >= FEEDFORWARD_ALIGNMENT_STEADY_MIN_ABS_WHEEL_SPEED_RADPS and
+                    abs(wheel_accel_radps2) <= FEEDFORWARD_ALIGNMENT_STEADY_MAX_ABS_WHEEL_ACCEL_RADPS2
+                ):
+                    steady_required_commands.append(required_command)
+        if not required_commands:
+            continue
+        sorted_required_commands = sorted(required_commands)
+        command_summaries.append(
+            FeedforwardAlignmentCommandSummary(
+                abs_command=abs_command,
+                sample_count=len(required_commands),
+                required_command_p10=interpolated_percentile(sorted_required_commands, 0.10),
+                required_command_median=statistics.median(sorted_required_commands),
+                required_command_p90=interpolated_percentile(sorted_required_commands, 0.90),
+                steady_required_command_median=(
+                    statistics.median(steady_required_commands)
+                    if steady_required_commands
+                    else None
+                ),
+                mean_command_error=statistics.fmean(
+                    required_command - logged_command
+                    for required_command, logged_command in zip(required_commands, logged_commands)
+                ),
+                rmse_command_error=math.sqrt(
+                    statistics.fmean(
+                        (required_command - logged_command) * (required_command - logged_command)
+                        for required_command, logged_command in zip(required_commands, logged_commands)
+                    )
+                ),
+            )
+        )
+    if not command_summaries:
+        return None
+    return FeedforwardAlignmentSummary(
+        run_id=run_id,
+        command_bin_count=len(command_summaries),
+        sample_count=len(overall_required_commands),
+        configured_effective_longitudinal_mass_kg=params.effective_longitudinal_mass_kg,
+        configured_equivalent_wheel_inertia_kg_m2=params.equivalent_wheel_inertia_kg_m2,
+        configured_rolling_friction_torque_nm=params.rolling_friction_torque_nm,
+        configured_static_friction_torque_nm=params.static_friction_torque_nm,
+        configured_static_friction_max_speed_mps=params.static_friction_max_speed_mps,
+        configured_viscous_friction_nm_per_radps=params.viscous_friction_nm_per_radps,
+        overall_mean_command_error=statistics.fmean(
+            required_command - logged_command
+            for required_command, logged_command in zip(overall_required_commands, overall_logged_commands)
+        ),
+        overall_rmse_command_error=math.sqrt(
+            statistics.fmean(
+                (required_command - logged_command) * (required_command - logged_command)
+                for required_command, logged_command in zip(overall_required_commands, overall_logged_commands)
+            )
+        ),
+        command_summaries=command_summaries,
+    )
+
+
+def summarize_feedforward_alignment(
+    launch_rows_by_repeat: dict[int, list[dict[str, str]]],
+    control_log_path: Path | None,
+) -> FeedforwardAlignmentSummary | None:
+    params = load_launch_fit_parameters(control_log_path)
+    if params is None:
+        return None
+    traces = build_launch_mean_traces(launch_rows_by_repeat)
+    if not traces:
+        return None
+    return summarize_feedforward_alignment_trace_groups(
+        {abs_command: [trace] for abs_command, trace in traces.items()},
+        params,
+        load_run_id(control_log_path),
+    )
 
 
 def fit_apparent_drive_drag(

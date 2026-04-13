@@ -23,7 +23,7 @@ struct OpenFloorMeasurementCycle
     float fanDutyCycle = 0.0f;
     uint16_t clippingFlags = 0U;
     uint16_t watchdogFlags = 0U;
-    bool workspaceViolation = false;
+    bool selectorJumperRemoved = false;
     bool estimatorFault = false;
 };
 

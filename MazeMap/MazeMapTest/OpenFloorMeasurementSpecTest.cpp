@@ -39,6 +39,13 @@ namespace MazeMap
             Assert::IsTrue(MazeMap::kOpenFloorLaunchSettleMs > 0UL);
         }
 
+        TEST_METHOD(SelectorRemovalFaultRequiresHalfSecondOfContinuousLoss)
+        {
+            Assert::AreEqual(500UL, MazeMap::kOpenFloorSelectorRemovalFaultDelayMs);
+            Assert::IsFalse(MazeMap::HasOpenFloorSelectorRemovalFaultDelayElapsed(1000UL, 1499UL));
+            Assert::IsTrue(MazeMap::HasOpenFloorSelectorRemovalFaultDelayElapsed(1000UL, 1500UL));
+        }
+
         TEST_METHOD(RecoveryAcceptanceRadiusIsFifteenMillimeters)
         {
             Assert::AreEqual(0.015f, MazeMap::kOpenFloorRecoveryAcceptanceRadiusM, 1.0e-6f);

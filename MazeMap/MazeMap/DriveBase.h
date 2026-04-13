@@ -298,7 +298,7 @@ public:
         const ClosedLoopVelocityCommand command =
             BuildClosedLoopVelocityCommandForVelocityTarget(linearSpeedMps, angularSpeedRadps);
         const float desiredAccelerationMps2 =
-            (std::max)(std::fabs(command.leftTargetAccelMps2), std::fabs(command.rightTargetAccelMps2));
+            9.0f;
         CommandVelocity(linearSpeedMps, angularSpeedRadps, desiredAccelerationMps2, dtSeconds);
     }
 
