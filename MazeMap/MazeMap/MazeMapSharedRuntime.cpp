@@ -480,6 +480,7 @@ namespace MazeMap::App::Internal
     SharedRobotRuntime::SharedRobotRuntime()
         : _impl(std::make_unique<Implementation>())
     {
+        _impl->controlLoop.AttachRuntime(*this);
     }
 
     SharedRobotRuntime::~SharedRobotRuntime()

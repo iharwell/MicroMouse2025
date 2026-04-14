@@ -16,10 +16,30 @@ namespace MazeMap::App::Internal
         constexpr float kZeroVelocityThresholdMps = 1.0e-4f;
         constexpr float kZeroYawThresholdRadps = 1.0e-4f;
         constexpr std::uint16_t kTickTimingSaturatedUs = 0xFFFFU;
+        constexpr float kDefaultPauseLinearThresholdMps = 0.01f;
+        constexpr float kDefaultPauseAngularThresholdRadps = 0.05f;
+        constexpr std::uint8_t kDefaultPauseSettledTicks = 2U;
 
-        bool IsFinitePositive(float value) noexcept
+        inline std::uint32_t NowUs() noexcept
+        {
+            return static_cast<std::uint32_t>(micros());
+        }
+
+        inline bool IsFinitePositive(const float value) noexcept
         {
             return std::isfinite(value) && (value > 0.0f);
+        }
+
+        inline void WaitUntilUs(const std::uint32_t absoluteDeadlineUs) noexcept
+        {
+            while (static_cast<std::int32_t>(absoluteDeadlineUs - NowUs()) > 0)
+            {
+                const std::uint32_t remainingUs = static_cast<std::uint32_t>(absoluteDeadlineUs - NowUs());
+                if (remainingUs > 10U)
+                {
+                    delayMicroseconds(5U);
+                }
+            }
         }
     }
 
@@ -34,8 +54,8 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector LoopController::ControlVector::VelocityCommand(
-        float linearTarget,
-        float angularTarget) noexcept
+        const float linearTarget,
+        const float angularTarget) noexcept
     {
         ControlVector control{};
         control.kind = Kind::Velocity;
@@ -45,8 +65,8 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector LoopController::ControlVector::OpenLoopCommand(
-        float leftCommand,
-        float rightCommand) noexcept
+        const float leftCommand,
+        const float rightCommand) noexcept
     {
         ControlVector control{};
         control.kind = Kind::OpenLoopRaw;
@@ -62,23 +82,23 @@ namespace MazeMap::App::Internal
         return control;
     }
 
-    LoopController::HeavyWorkResult LoopController::HeavyWorkResult::Resume() noexcept
+    LoopController::PauseDisposition LoopController::PauseDisposition::Resume() noexcept
     {
-        return HeavyWorkResult{};
+        return PauseDisposition{};
     }
 
-    LoopController::HeavyWorkResult LoopController::HeavyWorkResult::Complete() noexcept
+    LoopController::PauseDisposition LoopController::PauseDisposition::Complete() noexcept
     {
-        HeavyWorkResult result{};
+        PauseDisposition result{};
         result.action = Action::Complete;
         return result;
     }
 
-    LoopController::HeavyWorkResult LoopController::HeavyWorkResult::Fault(const char* reason) noexcept
+    LoopController::PauseDisposition LoopController::PauseDisposition::StopByRuntime(const char* reason) noexcept
     {
-        HeavyWorkResult result{};
-        result.action = Action::Fault;
-        result.faultReason = reason;
+        PauseDisposition result{};
+        result.action = Action::StopByRuntime;
+        result.stopReason = reason;
         return result;
     }
 
@@ -87,26 +107,32 @@ namespace MazeMap::App::Internal
     {
     }
 
-    void LoopController::TickServices::Fault(const char* reason)
+    void LoopController::TickServices::Fault(const char* reason) noexcept
     {
-        if (_owner != nullptr)
+        if ((_owner != nullptr) && (_owner->_requests.runtimeStopReason == nullptr))
         {
-            _owner->_requests.faultReason = reason;
+            _owner->_requests.runtimeStopReason = reason;
         }
     }
 
-    void LoopController::TickServices::RequestPauseForHeavyWork() noexcept
+    void LoopController::TickServices::RequestPause(const PauseRequest& request) noexcept
     {
-        RequestPauseForHeavyWork(PauseRequest{});
-    }
-
-    void LoopController::TickServices::RequestPauseForHeavyWork(const PauseRequest& request) noexcept
-    {
-        if (_owner != nullptr)
+        if (_owner == nullptr)
         {
-            _owner->_requests.pauseRequested = true;
-            _owner->_requests.pauseRequest = request;
+            return;
         }
+
+        if (request.onPauseGranted == nullptr)
+        {
+            if (_owner->_requests.runtimeStopReason == nullptr)
+            {
+                _owner->_requests.runtimeStopReason = "LoopController pause request missing callback";
+            }
+            return;
+        }
+
+        _owner->_requests.pauseRequested = true;
+        _owner->_requests.pauseRequest = request;
     }
 
     void LoopController::TickServices::RequestEndLoop() noexcept
@@ -117,231 +143,225 @@ namespace MazeMap::App::Internal
         }
     }
 
-    void LoopController::TickServices::SetNextTickCaptureOptions(const CaptureOptions& options) noexcept
+    void LoopController::TickServices::SetNextModeWorkCallback(const ModeWorkCallback callback) noexcept
     {
-        if (_owner != nullptr)
+        if ((_owner != nullptr) && (callback != nullptr))
         {
-            _owner->_requests.captureOverrideRequested = true;
-            _owner->_requests.nextCapture = options;
+            _owner->_requests.nextModeWorkRequested = true;
+            _owner->_requests.nextModeWorkCallback = callback;
         }
     }
 
-    bool LoopController::BeginSession(
-        const SessionConfig& config,
-        RuntimeBundle& runtime,
-        IMode& mode)
+    bool LoopController::BeginSession(const SessionOptions& options, const ModeCallbacks& callbacks)
     {
-        if (_sessionActive || _sessionBegun || !ValidateSessionConfig(config))
+        if ((_runtime == nullptr) ||
+            _sessionActive ||
+            _sessionBegun ||
+            (callbacks.onModeWork == nullptr) ||
+            !ValidateSessionOptions(options))
         {
             return false;
         }
 
-        _config = config;
-        _runtime = &runtime;
-        _mode = &mode;
+        _options = options;
+        _callbacks = callbacks;
+        _activeModeWorkCallback = callbacks.onModeWork;
         _sessionBegun = true;
         _sessionActive = true;
-        _sessionEndNotified = false;
-        _captureOverrideActive = false;
         _resumePending = false;
+        _publishedTimingValid = false;
         _tickCount = 0U;
-        _lastTickStartUs = micros();
-        _queuedControl = ResolveStartupCommand();
-        _appliedControl = _queuedControl;
-        _captureForNextTick = _config.defaultCapture;
-        _faultReason = nullptr;
-        _tickStepContext = nullptr;
-        _tickStepCallback = nullptr;
+        const std::uint32_t nowUs = NowUs();
+        _lastTickStartUs = nowUs - _options.controlPeriodUs;
+        _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
+        _queuedControl = ControlVector::BrakeCommand();
+        _appliedControl = ControlVector::BrakeCommand();
+        _publishedTimingIndex = 0U;
+        _workingTimingIndex = 1U;
+        _timingBuffers[0] = TimingDiagnostics{};
+        _timingBuffers[1] = TimingDiagnostics{};
+        _observedScratch = ObservedTickState{};
+        _pauseContextScratch = PauseContext{};
+        _deferredTerminalOutcome = DeferredTerminalOutcome::None;
+        _deferredTerminalReason = nullptr;
         ResetLatchedRequests();
-
-        const VehicleState initial = BuildInitialState();
-        if (!_mode->OnSessionBegin(initial))
-        {
-            _sessionActive = false;
-            _sessionBegun = false;
-            _mode = nullptr;
-            _runtime = nullptr;
-            return false;
-        }
-
         return true;
     }
 
     LoopController::SessionResult LoopController::Run()
     {
-        if (!_sessionActive)
+        SessionResult result{};
+        result.tickCount = _tickCount;
+
+        if (!_sessionActive || (_runtime == nullptr) || (_activeModeWorkCallback == nullptr))
         {
-            return SessionResult{};
+            result.status = SessionResult::Status::StoppedByRuntime;
+            return result;
         }
 
         while (_sessionActive)
         {
-            const SessionResult result = RunOneTick();
-            if (result.status != SessionResult::Status::Running)
+            if (_deferredTerminalOutcome != DeferredTerminalOutcome::None)
             {
-                return result;
-            }
-        }
+                const std::uint32_t nowUs = NowUs();
+                const std::uint32_t dtUs = nowUs - _lastTickStartUs;
+                const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
+                _lastTickStartUs = nowUs;
+                _appliedControl = ControlVector::BrakeCommand();
+                _queuedControl = _appliedControl;
+                ApplyControlAtTickStart(_appliedControl, dtSeconds);
 
-        return SessionResult{};
-    }
-
-    LoopController::SessionResult LoopController::RunOneTick()
-    {
-        if (!_sessionActive || _runtime == nullptr || _mode == nullptr)
-        {
-            SessionResult result{};
-            result.status = SessionResult::Status::Faulted;
-            result.faultReason = "LoopController session is not active";
-            return result;
-        }
-
-        if (!WaitForTickBoundaryAndService())
-        {
-            SessionResult result{};
-            result.status = SessionResult::Status::Faulted;
-            result.tickCount = _tickCount;
-            result.faultReason = (_faultReason != nullptr) ? _faultReason : "LoopController boundary wait failed";
-            return FinishSession(result);
-        }
-
-        VehicleState state{};
-        state.tickStartUs = micros();
-        state.dtUs = static_cast<std::uint32_t>(state.tickStartUs - _lastTickStartUs);
-        state.dtSeconds = static_cast<float>(state.dtUs) * 1.0e-6f;
-        _lastTickStartUs = state.tickStartUs;
-
-        ++_tickCount;
-        state.sequence = _config.maintainTickSequence ? _tickCount : 0U;
-        state.captureUsed = _captureForNextTick;
-        state.timing.tickStartUs = state.tickStartUs;
-        state.timing.dtUs = state.dtUs;
-        state.timing.flags = _captureOverrideActive ? kTimingFlagCaptureOverride : 0U;
-        if (_resumePending)
-        {
-            state.resumedFromPause = true;
-            state.timing.flags |= kTimingFlagResumedFromPause;
-            _resumePending = false;
-        }
-
-        _appliedControl = NormalizeQueuedControl(_queuedControl);
-        ApplyControlAtTickStart(_appliedControl, state.dtSeconds);
-        state.appliedControl = _appliedControl;
-        state.timing.tActuationAppliedUs = RelativeTickUs(state.tickStartUs, micros());
-
-        if (_config.snapshotDriveTelemetry)
-        {
-            state.driveTelemetry = _runtime->driveBase.GetTelemetry();
-        }
-
-        if (!CaptureTickState(state))
-        {
-            _faultReason = (state.faultReason != nullptr) ? state.faultReason : "LoopController capture failed";
-            SessionResult result{};
-            result.status = SessionResult::Status::Faulted;
-            result.tickCount = _tickCount;
-            result.faultReason = _faultReason;
-            ApplyFaultActuation();
-            return FinishSession(result);
-        }
-
-        const std::uint32_t availableComputeUs = ComputeRemainingBudgetUs(state.tickStartUs);
-        ResetLatchedRequests();
-        TickServices services(*this);
-        const ControlVector candidateControl = InvokeTickStep(availableComputeUs, state, services);
-        RecordModeReturnTiming(state);
-
-        SessionResult result{};
-        result.status = SessionResult::Status::Running;
-        result.tickCount = _tickCount;
-        result.resumedFromPause = state.resumedFromPause;
-
-        if (_requests.faultReason != nullptr)
-        {
-            _faultReason = _requests.faultReason;
-            ApplyFaultActuation();
-            result.status = SessionResult::Status::Faulted;
-            result.faultReason = _faultReason;
-        }
-        else if (_requests.pauseRequested)
-        {
-            result.pauseGranted = true;
-        }
-        else if (_requests.endRequested)
-        {
-            ApplyTerminalActuation();
-            result.status = SessionResult::Status::Completed;
-        }
-        else
-        {
-            _queuedControl = NormalizeQueuedControl(candidateControl);
-            if (_requests.captureOverrideRequested)
-            {
-                if (!SupportsCaptureOptions(_requests.nextCapture))
+                result.tickCount = _tickCount;
+                if (_deferredTerminalOutcome == DeferredTerminalOutcome::Complete)
                 {
-                    _faultReason = "Unsupported capture override requested";
-                    ApplyFaultActuation();
-                    result.status = SessionResult::Status::Faulted;
-                    result.faultReason = _faultReason;
+                    result.status = SessionResult::Status::Completed;
                 }
                 else
                 {
-                    _captureForNextTick = _requests.nextCapture;
-                    _captureOverrideActive = true;
+                    if (_runtime != nullptr)
+                    {
+                        (void)_runtime->FailActiveMode(_deferredTerminalReason);
+                    }
+                    result.status = SessionResult::Status::StoppedByRuntime;
                 }
+
+                ResetSessionState();
+                return result;
+            }
+
+            const std::uint32_t tickStartUs = NowUs();
+            const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
+            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
+            _lastTickStartUs = tickStartUs;
+            ++_tickCount;
+
+            ResetWorkingTiming(_tickCount, tickStartUs, dtUs);
+            TimingDiagnostics& timing = WorkingTiming();
+            timing.controlTiming.controlStartUs = tickStartUs;
+            timing.controlTiming.cycleCounterStart = ReadCycleCounter();
+            if (_resumePending)
+            {
+                timing.flags |= kTimingFlagResumedFromPause;
+                _resumePending = false;
+            }
+
+            const std::uint32_t loopEndTimeUs = _nextSyncTargetUs;
+
+            _appliedControl = NormalizeQueuedControl(_queuedControl);
+            ApplyControlAtTickStart(_appliedControl, dtSeconds);
+            timing.tActuationAppliedUs = RelativeTickUs(tickStartUs, NowUs());
+
+            _observedScratch = ObservedTickState{};
+            _observedScratch.sequence = _tickCount;
+            _observedScratch.tickStartUs = tickStartUs;
+            _observedScratch.dtUs = dtUs;
+            _observedScratch.dtSeconds = dtSeconds;
+
+            ResetLatchedRequests();
+
+            if (!ExecuteSensingUpdate(_observedScratch, timing))
+            {
+                _queuedControl = ControlVector::BrakeCommand();
+                timing.flags |= kTimingFlagRuntimeStopPending;
+                _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
+                _deferredTerminalReason =
+                    (_observedScratch.faultReason != nullptr) ?
+                    _observedScratch.faultReason :
+                    "LoopController sensing update failed";
+
+                ServiceRuntimeLogsForFaultPath();
+                RecordPostServiceTiming(tickStartUs);
+                FinalizeTiming(tickStartUs);
+                PublishWorkingTiming();
+                WaitUntilUs(loopEndTimeUs);
+                _nextSyncTargetUs += _options.controlPeriodUs;
+                continue;
+            }
+
+            const std::uint32_t projectionAnchorUs =
+                (timing.controlTiming.ukfUpdateEndUs != 0U) ?
+                timing.controlTiming.ukfUpdateEndUs :
+                tickStartUs;
+            const bool overrunBeforeModeWork = (ComputeRemainingSlackUs(loopEndTimeUs) == 0U);
+            const ModeState modeState =
+                BuildModeState(_observedScratch, projectionAnchorUs, loopEndTimeUs, overrunBeforeModeWork);
+
+            TickServices services(*this);
+            const ControlVector candidateControl =
+                _activeModeWorkCallback(_callbacks.context, loopEndTimeUs, modeState, services);
+            RecordModeReturnTiming(tickStartUs);
+
+            if (_requests.nextModeWorkRequested && (_requests.nextModeWorkCallback != nullptr))
+            {
+                _activeModeWorkCallback = _requests.nextModeWorkCallback;
+            }
+
+            bool faultPathFlushRequired = false;
+            if (_requests.runtimeStopReason != nullptr)
+            {
+                _queuedControl = ControlVector::BrakeCommand();
+                timing.flags |= kTimingFlagRuntimeStopPending;
+                _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
+                _deferredTerminalReason = _requests.runtimeStopReason;
+                faultPathFlushRequired = true;
+            }
+            else if (_requests.endRequested)
+            {
+                _queuedControl = ControlVector::BrakeCommand();
+                _deferredTerminalOutcome = DeferredTerminalOutcome::Complete;
+            }
+            else if (_requests.pauseRequested)
+            {
+                _queuedControl = ControlVector::BrakeCommand();
+                timing.flags |= kTimingFlagPausePending;
             }
             else
             {
-                _captureForNextTick = _config.defaultCapture;
-                _captureOverrideActive = false;
+                _queuedControl = NormalizeQueuedControl(candidateControl);
             }
-        }
 
-        ServiceSlackState();
-        RecordPostServiceTiming(state);
-
-        if (result.status == SessionResult::Status::Running && !result.pauseGranted)
-        {
-            const unsigned long deadlineUs = state.tickStartUs + _config.controlPeriodUs;
-            while (static_cast<unsigned long>(micros() - state.tickStartUs) < _config.controlPeriodUs)
+            if (faultPathFlushRequired)
             {
-                ServiceSlackState();
-                const unsigned long nowUs = micros();
-                if (static_cast<unsigned long>(nowUs - state.tickStartUs) >= _config.controlPeriodUs)
+                ServiceRuntimeLogsForFaultPath();
+            }
+            else if (ComputeRemainingSlackUs(loopEndTimeUs) > 0U)
+            {
+                if (!ServiceRuntimeLogsNormal())
                 {
-                    break;
-                }
-
-                const unsigned long remainingUs = deadlineUs - nowUs;
-                if (_config.idleSleepUs > 0U && remainingUs > _config.idleSleepUs)
-                {
-                    delayMicroseconds(static_cast<unsigned int>(_config.idleSleepUs));
+                    const char* const runtimeReason =
+                        (_runtime != nullptr) ? _runtime->LastRuntimeLogError() : nullptr;
+                    _queuedControl = ControlVector::BrakeCommand();
+                    timing.flags |= kTimingFlagRuntimeStopPending;
+                    _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
+                    _deferredTerminalReason =
+                        ((runtimeReason != nullptr) && (runtimeReason[0] != '\0')) ?
+                        runtimeReason :
+                        "LoopController runtime log service failed";
+                    ServiceRuntimeLogsForFaultPath();
                 }
             }
-        }
 
-        RecordOverrun(state);
+            RecordPostServiceTiming(tickStartUs);
+            FinalizeTiming(tickStartUs);
+            PublishWorkingTiming();
 
-        if (result.pauseGranted)
-        {
-            if (!ResolvePauseRequest(result))
+            WaitUntilUs(loopEndTimeUs);
+            _nextSyncTargetUs += _options.controlPeriodUs;
+
+            if (_requests.pauseRequested && (_deferredTerminalOutcome == DeferredTerminalOutcome::None))
             {
-                return FinishSession(result);
-            }
-
-            if (result.status == SessionResult::Status::Completed ||
-                result.status == SessionResult::Status::Faulted)
-            {
-                return FinishSession(result);
+                result.tickCount = _tickCount;
+                if (!ResolvePauseRequest(result))
+                {
+                    ResetSessionState();
+                    return result;
+                }
             }
         }
 
-        if (result.status == SessionResult::Status::Running)
-        {
-            return result;
-        }
-
-        return FinishSession(result);
+        result.status = SessionResult::Status::Completed;
+        result.tickCount = _tickCount;
+        return result;
     }
 
     void LoopController::EndSession()
@@ -351,20 +371,12 @@ namespace MazeMap::App::Internal
             return;
         }
 
-        if (_sessionActive)
+        if (_runtime != nullptr)
         {
-            SessionResult result{};
-            result.status = SessionResult::Status::Completed;
-            result.tickCount = _tickCount;
-            (void)FinishSession(result);
-            return;
+            _runtime->Drive().Brake();
         }
 
-        _sessionBegun = false;
-        _runtime = nullptr;
-        _mode = nullptr;
-        _tickStepContext = nullptr;
-        _tickStepCallback = nullptr;
+        ResetSessionState();
     }
 
     bool LoopController::SessionActive() const noexcept
@@ -372,9 +384,19 @@ namespace MazeMap::App::Internal
         return _sessionActive;
     }
 
+    const LoopController::TimingDiagnostics& LoopController::LastDiagnostics() const noexcept
+    {
+        return PublishedTiming();
+    }
+
+    const LoopController::ControlVector& LoopController::LastAppliedCommand() const noexcept
+    {
+        return _appliedControl;
+    }
+
     std::uint16_t LoopController::RelativeTickUs(
-        std::uint32_t tickStartUs,
-        std::uint32_t timestampUs) noexcept
+        const std::uint32_t tickStartUs,
+        const std::uint32_t timestampUs) noexcept
     {
         if (timestampUs <= tickStartUs)
         {
@@ -392,84 +414,90 @@ namespace MazeMap::App::Internal
             (std::fabs(command.angularTarget) <= kZeroYawThresholdRadps);
     }
 
-    bool LoopController::IsFullCapture(const CaptureOptions& options) noexcept
+    bool LoopController::IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept
     {
-        return (options.walls == CaptureOptions::WallMask::All) &&
-            options.readGyro &&
-            options.readAccel;
+        return (workPlan.wallMask == WallMask::All) &&
+            workPlan.readEncoders &&
+            workPlan.readImuBundle &&
+            workPlan.useEncoderUpdate &&
+            workPlan.useGyroUpdate &&
+            workPlan.useAccelUpdate &&
+            workPlan.useWallUpdates;
     }
 
-    bool LoopController::ValidateSessionConfig(const SessionConfig& config) const noexcept
+    std::uint32_t LoopController::ReadCycleCounter() noexcept
     {
-        return (config.controlPeriodUs > 0U) && SupportsCaptureOptions(config.defaultCapture);
+#if defined(ARDUINO_TEENSY41)
+        return ARM_DWT_CYCCNT;
+#else
+        return 0UL;
+#endif
     }
 
-    LoopController::VehicleState LoopController::BuildInitialState() const noexcept
+    PoseEstimate LoopController::ProjectEstimate(
+        const PoseEstimate& estimate,
+        const std::uint32_t projectionAnchorUs,
+        const std::uint32_t commandApplyTimeUs) noexcept
     {
-        VehicleState initial{};
-        if (_runtime != nullptr)
+        PoseEstimate projected = estimate;
+        const std::int32_t deltaUsSigned = static_cast<std::int32_t>(commandApplyTimeUs - projectionAnchorUs);
+        if (deltaUsSigned <= 0)
         {
-            initial.captureUsed = _captureForNextTick;
-            initial.appliedControl = _appliedControl;
-            initial.estimate = _runtime->driveBase.GetPose();
-            const DriveBase::MeasuredKinematics measured = _runtime->driveBase.GetMeasuredKinematics();
-            initial.measured.leftVelocityMps = measured.leftVelocityMps;
-            initial.measured.rightVelocityMps = measured.rightVelocityMps;
-            initial.measured.linearSpeedMps = measured.linearSpeedMps;
-            initial.measured.angularSpeedRadps = measured.angularSpeedRadps;
-            initial.driveTelemetry = _runtime->driveBase.GetTelemetry();
-            initial.hasDiagnosticSensors = (_runtime->diagnosticSensors != nullptr);
+            projected.headingUnit = HeadingUnitFromYawRad(projected.yawRad);
+            return projected;
         }
-        return initial;
+
+        const float dtSeconds = static_cast<float>(deltaUsSigned) * 1.0e-6f;
+        if (!std::isfinite(dtSeconds) || (dtSeconds <= 0.0f))
+        {
+            projected.headingUnit = HeadingUnitFromYawRad(projected.yawRad);
+            return projected;
+        }
+
+        const float linearSpeedMps = std::isfinite(projected.linearSpeedMps) ? projected.linearSpeedMps : 0.0f;
+        const float angularSpeedRadps = std::isfinite(projected.angularSpeedRadps) ? projected.angularSpeedRadps : 0.0f;
+        const float midYawRad = WrapAngleRad(projected.yawRad + (0.5f * angularSpeedRadps * dtSeconds));
+        const Eigen::Vector2f midHeading = HeadingUnitFromYawRad(midYawRad);
+        projected.xMeters += linearSpeedMps * midHeading.x() * dtSeconds;
+        projected.yMeters += linearSpeedMps * midHeading.y() * dtSeconds;
+        projected.yawRad = WrapAngleRad(projected.yawRad + (angularSpeedRadps * dtSeconds));
+        projected.headingUnit = HeadingUnitFromYawRad(projected.yawRad);
+        return projected;
     }
 
-    LoopController::ControlVector LoopController::ResolveStartupCommand() const noexcept
+    void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
-        switch (_config.startupCommandPolicy)
-        {
-        case SessionConfig::StartupCommandPolicy::UseProvidedInitialCommand:
-            return NormalizeQueuedControl(_config.initialCommand);
-        case SessionConfig::StartupCommandPolicy::HoldZeroVelocity:
-            return ControlVector::HoldZeroVelocityCommand();
-        case SessionConfig::StartupCommandPolicy::Brake:
-        default:
-            return ControlVector::BrakeCommand();
-        }
+        _runtime = &runtime;
+    }
+
+    bool LoopController::ValidateSessionOptions(const SessionOptions& options) const noexcept
+    {
+        return (options.controlPeriodUs > 0U) && SupportsSensorWorkPlan(options.workPlan);
+    }
+
+    bool LoopController::SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept
+    {
+        // Preserve the current interlaced diagnostic capture/update ordering exactly.
+        // Widen selective sensor/update support only when the lower-level runtime tie-in supports it.
+        return IsFullSensorWorkPlan(workPlan);
+    }
+
+    void LoopController::ResetLatchedRequests() noexcept
+    {
+        _requests = LatchedRequests{};
     }
 
     LoopController::ControlVector LoopController::NormalizeQueuedControl(const ControlVector& candidate) const noexcept
     {
-        switch (candidate.kind)
+        if (candidate.kind == ControlVector::Kind::NoChange)
         {
-        case ControlVector::Kind::NoChange:
             return _appliedControl;
-        case ControlVector::Kind::OpenLoopRaw:
-            if (_config.actuationPolicy == SessionConfig::ActuationPolicy::VelocityBrakeOpenLoop)
-            {
-                return candidate;
-            }
-            return ControlVector::BrakeCommand();
-        case ControlVector::Kind::Velocity:
-        case ControlVector::Kind::Brake:
-        default:
-            return candidate;
-        }
-    }
-
-    LoopController::ControlVector LoopController::InvokeTickStep(
-        std::uint32_t availableComputeUs,
-        const VehicleState& state,
-        TickServices& services)
-    {
-        if (_tickStepCallback != nullptr)
-        {
-            return _tickStepCallback(_tickStepContext, availableComputeUs, state, services);
         }
 
-        return _mode->Step(availableComputeUs, state, services);
+        return candidate;
     }
 
-    void LoopController::ApplyControlAtTickStart(const ControlVector& control, float dtSeconds)
+    void LoopController::ApplyControlAtTickStart(const ControlVector& control, const float dtSeconds)
     {
         if (_runtime == nullptr)
         {
@@ -480,401 +508,405 @@ namespace MazeMap::App::Internal
         switch (resolvedControl.kind)
         {
         case ControlVector::Kind::OpenLoopRaw:
-            _runtime->driveBase.CommandOpenLoopRaw(resolvedControl.leftOpenLoop, resolvedControl.rightOpenLoop);
+            _runtime->Drive().CommandOpenLoopRaw(resolvedControl.leftOpenLoop, resolvedControl.rightOpenLoop);
             break;
+
         case ControlVector::Kind::Velocity:
-            _runtime->driveBase.CommandVelocity(resolvedControl.linearTarget, resolvedControl.angularTarget, dtSeconds);
+            _runtime->Drive().CommandVelocity(resolvedControl.linearTarget, resolvedControl.angularTarget, dtSeconds);
             break;
+
         case ControlVector::Kind::Brake:
         case ControlVector::Kind::NoChange:
         default:
-            _runtime->driveBase.Brake();
+            _runtime->Drive().Brake();
             break;
         }
     }
 
-    void LoopController::ApplyTerminalActuation() noexcept
+    bool LoopController::ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing)
     {
-        if (_runtime == nullptr)
-        {
-            return;
-        }
-
-        if (_config.actuationPolicy == SessionConfig::ActuationPolicy::VelocityBrakeOpenLoop)
-        {
-            _runtime->driveBase.Brake();
-            return;
-        }
-
-        _runtime->driveBase.CommandVelocity(0.0f, 0.0f, 0.0f);
-    }
-
-    void LoopController::ApplyFaultActuation() noexcept
-    {
-        if (_runtime != nullptr)
-        {
-            _runtime->driveBase.Brake();
-        }
-    }
-
-    bool LoopController::WaitForTickBoundaryAndService()
-    {
-        if (_runtime == nullptr)
+        if (!CaptureSelectedTickState(observed, timing))
         {
             return false;
         }
 
-        while (static_cast<unsigned long>(micros() - _lastTickStartUs) < _config.controlPeriodUs)
+        observed.estimate = _runtime->Drive().GetPose();
+        observed.driveTelemetry = _runtime->Drive().GetTelemetry();
+
+        const float measuredYawRateRadps =
+            observed.hasDiagnosticSensors ? observed.diagnosticSensors.gyroRadps : observed.sensors.gyroRadps;
+        const DriveBase::MeasuredKinematics measured = _runtime->Drive().GetMeasuredKinematics(measuredYawRateRadps);
+        observed.measured.linearSpeedMps = measured.linearSpeedMps;
+        observed.measured.angularSpeedRadps = measured.angularSpeedRadps;
+
+        if (_runtime->Drive().HasEstimatorFault())
         {
-            ServiceBackgroundWork(_config.serviceWaitState);
-
-            const unsigned long nowUs = micros();
-            if (static_cast<unsigned long>(nowUs - _lastTickStartUs) >= _config.controlPeriodUs)
-            {
-                break;
-            }
-
-            if (_config.idleSleepUs > 0U)
-            {
-                const unsigned long remainingUs = (_lastTickStartUs + _config.controlPeriodUs) - nowUs;
-                if (remainingUs > _config.idleSleepUs)
-                {
-                    delayMicroseconds(static_cast<unsigned int>(_config.idleSleepUs));
-                }
-            }
+            observed.estimatorHealthy = false;
+            observed.faultReason = _runtime->Drive().GetEstimatorFaultReason();
         }
 
         return true;
     }
 
-    void LoopController::ServiceBackgroundWork(bool waitState) noexcept
+    bool LoopController::CaptureMissionTickState(ObservedTickState& observed, TimingDiagnostics& timing)
     {
         if (_runtime == nullptr)
         {
-            return;
-        }
-
-        (void)_runtime->shared.ServiceUtilityDataLog();
-        if (waitState && _mode != nullptr)
-        {
-            _mode->ServiceWaitState();
-        }
-    }
-
-    void LoopController::ServiceSlackState() noexcept
-    {
-        if (_runtime == nullptr)
-        {
-            return;
-        }
-
-        (void)_runtime->shared.ServiceUtilityDataLog();
-        if (_config.serviceSlackState && _mode != nullptr)
-        {
-            _mode->ServiceSlackState();
-        }
-    }
-
-    bool LoopController::CaptureTickState(VehicleState& state)
-    {
-        state.captureUsed = _captureForNextTick;
-        const bool captured = CaptureSelectedTickState(state);
-        if (!captured)
-        {
+            observed.faultReason = "LoopController runtime unavailable";
             return false;
         }
 
-        state.estimate = _runtime->driveBase.GetPose();
-        if (!_config.snapshotDriveTelemetry)
+        const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
+        timing.controlTiming.encoderLatchUs = NowUs();
+        observed.hasDiagnosticSensors = false;
+        observed.sensors = _runtime->MissionSensors().Capture(
+            stationaryHint,
+            _runtime->Drive().GetPose(),
+            [this, &observed, &timing](SensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
+            {
+                timing.controlTiming.encoderReadDoneUs = NowUs();
+                _runtime->Drive().UpdateOdometry(
+                    observed.dtSeconds,
+                    captureSnapshot,
+                    &_runtime->Maze(),
+                    &timing.controlTiming,
+                    [this, &serviceWallRead]() noexcept
+                    {
+                        if (_runtime != nullptr)
+                        {
+                            (void)_runtime->ServiceUtilityDataLog();
+                        }
+                        serviceWallRead();
+                    },
+                    [this, &captureImu]() noexcept
+                    {
+                        if (_runtime != nullptr)
+                        {
+                            (void)_runtime->ServiceUtilityDataLog();
+                        }
+                        captureImu();
+                    });
+            });
+        return true;
+    }
+
+    bool LoopController::CaptureDiagnosticTickState(ObservedTickState& observed, TimingDiagnostics& timing)
+    {
+        if (_runtime == nullptr)
         {
-            state.driveTelemetry = _runtime->driveBase.GetTelemetry();
+            observed.faultReason = "LoopController runtime unavailable";
+            return false;
         }
 
-        if (state.hasDiagnosticSensors)
+        const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
+        timing.controlTiming.encoderLatchUs = NowUs();
+        observed.hasDiagnosticSensors = true;
+        observed.diagnosticSensors = _runtime->DiagnosticSensors().Capture(
+            stationaryHint,
+            _runtime->Drive().GetPose(),
+            [this, &observed, &timing](
+                DiagnosticSensorSnapshot& captureSnapshot,
+                auto&& serviceWallRead,
+                auto&& captureImu) noexcept
+            {
+                timing.controlTiming.encoderReadDoneUs = NowUs();
+                _runtime->Drive().UpdateOdometry(
+                    observed.dtSeconds,
+                    captureSnapshot,
+                    &_runtime->Maze(),
+                    &timing.controlTiming,
+                    [this, &serviceWallRead]() noexcept
+                    {
+                        if (_runtime != nullptr)
+                        {
+                            (void)_runtime->ServiceUtilityDataLog();
+                        }
+                        serviceWallRead();
+                    },
+                    [this, &captureImu]() noexcept
+                    {
+                        if (_runtime != nullptr)
+                        {
+                            (void)_runtime->ServiceUtilityDataLog();
+                        }
+                        captureImu();
+                    });
+            });
+
+        observed.sensors = SensorSnapshot{};
+        observed.sensors.frontLeftDistanceM = observed.diagnosticSensors.frontLeft.distanceM;
+        observed.sensors.frontRightDistanceM = observed.diagnosticSensors.frontRight.distanceM;
+        observed.sensors.frontLeftDifferentialLight = observed.diagnosticSensors.frontLeft.differentialLight;
+        observed.sensors.frontRightDifferentialLight = observed.diagnosticSensors.frontRight.differentialLight;
+        observed.sensors.sideLeftDistanceM = observed.diagnosticSensors.sideLeft.distanceM;
+        observed.sensors.sideRightDistanceM = observed.diagnosticSensors.sideRight.distanceM;
+        observed.sensors.sideLeftDifferentialLight = observed.diagnosticSensors.sideLeft.differentialLight;
+        observed.sensors.sideRightDifferentialLight = observed.diagnosticSensors.sideRight.differentialLight;
+        observed.sensors.corridorErrorM = observed.diagnosticSensors.corridorErrorM;
+        observed.sensors.frontSkewM = observed.diagnosticSensors.frontSkewM;
+        observed.sensors.accelBodyXMps2 = observed.diagnosticSensors.accelBodyXMps2;
+        observed.sensors.accelBodyYMps2 = observed.diagnosticSensors.accelBodyYMps2;
+        observed.sensors.planarAccelMps2 = _runtime->DiagnosticSensors().GetPlanarAccelMps2(observed.diagnosticSensors);
+        observed.sensors.gyroRawRadps = observed.diagnosticSensors.gyroRawRadps;
+        observed.sensors.gyroBiasRadps = observed.diagnosticSensors.gyroBiasRadps;
+        observed.sensors.gyroRadps = observed.diagnosticSensors.gyroRadps;
+        observed.sensors.accelBiasValid = observed.diagnosticSensors.accelBiasValid;
+        observed.sensors.frontWall = observed.diagnosticSensors.frontWall;
+        observed.sensors.frontLeftWall = observed.diagnosticSensors.frontLeft.wall;
+        observed.sensors.frontRightWall = observed.diagnosticSensors.frontRight.wall;
+        observed.sensors.leftWall = observed.diagnosticSensors.leftWall;
+        observed.sensors.rightWall = observed.diagnosticSensors.rightWall;
+        observed.sensors.leftDistanceValidForControl = observed.diagnosticSensors.leftDistanceValidForControl;
+        observed.sensors.rightDistanceValidForControl = observed.diagnosticSensors.rightDistanceValidForControl;
+
+        timing.frontTiming = observed.diagnosticSensors.frontTiming;
+        timing.leftTiming = observed.diagnosticSensors.leftTiming;
+        timing.rightTiming = observed.diagnosticSensors.rightTiming;
+        timing.imuTiming = observed.diagnosticSensors.imuTiming;
+        return true;
+    }
+
+    bool LoopController::CaptureSelectedTickState(ObservedTickState& observed, TimingDiagnostics& timing)
+    {
+        return CaptureDiagnosticTickState(observed, timing);
+    }
+
+    LoopController::ModeState LoopController::BuildModeState(
+        const ObservedTickState& observed,
+        const std::uint32_t projectionAnchorUs,
+        const std::uint32_t commandApplyTimeUs,
+        const bool overrunBeforeModeWork) const noexcept
+    {
+        ModeState state{};
+        state.sequence = observed.sequence;
+        state.tickStartUs = observed.tickStartUs;
+        state.commandApplyTimeUs = commandApplyTimeUs;
+        state.dtUs = observed.dtUs;
+        state.dtSeconds = observed.dtSeconds;
+        state.estimate = ProjectEstimate(observed.estimate, projectionAnchorUs, commandApplyTimeUs);
+        state.measured = observed.measured;
+        state.driveTelemetry = observed.driveTelemetry;
+        state.sensors = observed.sensors;
+        state.diagnosticSensors = observed.diagnosticSensors;
+        state.hasDiagnosticSensors = observed.hasDiagnosticSensors;
+        state.estimatorHealthy = observed.estimatorHealthy;
+        state.overrun = overrunBeforeModeWork || observed.overrun;
+        state.faultReason = observed.faultReason;
+        return state;
+    }
+
+    void LoopController::ResetWorkingTiming(
+        const std::uint32_t sequence,
+        const std::uint32_t tickStartUs,
+        const std::uint32_t dtUs) noexcept
+    {
+        TimingDiagnostics& timing = WorkingTiming();
+        timing = TimingDiagnostics{};
+        timing.sequence = sequence;
+        timing.tickStartUs = tickStartUs;
+        timing.dtUs = dtUs;
+    }
+
+    LoopController::TimingDiagnostics& LoopController::WorkingTiming() noexcept
+    {
+        return _timingBuffers[_workingTimingIndex];
+    }
+
+    const LoopController::TimingDiagnostics& LoopController::PublishedTiming() const noexcept
+    {
+        return _timingBuffers[_publishedTimingIndex];
+    }
+
+    void LoopController::PublishWorkingTiming() noexcept
+    {
+        _publishedTimingIndex = _workingTimingIndex;
+        _workingTimingIndex = static_cast<std::uint8_t>(1U - _workingTimingIndex);
+        _publishedTimingValid = true;
+    }
+
+    void LoopController::RecordModeReturnTiming(const std::uint32_t tickStartUs) noexcept
+    {
+        WorkingTiming().tModeReturnUs = RelativeTickUs(tickStartUs, NowUs());
+    }
+
+    void LoopController::RecordPostServiceTiming(const std::uint32_t tickStartUs) noexcept
+    {
+        WorkingTiming().tPostServiceDoneUs = RelativeTickUs(tickStartUs, NowUs());
+    }
+
+    void LoopController::FinalizeTiming(const std::uint32_t tickStartUs) noexcept
+    {
+        TimingDiagnostics& timing = WorkingTiming();
+        const std::uint32_t finalizeUs = NowUs();
+        timing.controlTiming.pwmLatchUs = finalizeUs;
+        timing.controlTiming.controlEndUs = finalizeUs;
+        timing.controlTiming.cycleCounterEnd = ReadCycleCounter();
+        if (finalizeUs <= _nextSyncTargetUs)
         {
-            const DriveBase::MeasuredKinematics measured =
-                _runtime->driveBase.GetMeasuredKinematics(state.diagnosticSensors.gyroRadps);
-            state.measured.leftVelocityMps = measured.leftVelocityMps;
-            state.measured.rightVelocityMps = measured.rightVelocityMps;
-            state.measured.linearSpeedMps = measured.linearSpeedMps;
-            state.measured.angularSpeedRadps = measured.angularSpeedRadps;
-            state.timing.tFrontReadyUs = RelativeTickUs(state.tickStartUs, state.diagnosticSensors.frontTiming.observationReadyUs);
-            state.timing.tLeftReadyUs = RelativeTickUs(state.tickStartUs, state.diagnosticSensors.leftTiming.observationReadyUs);
-            state.timing.tRightReadyUs = RelativeTickUs(state.tickStartUs, state.diagnosticSensors.rightTiming.observationReadyUs);
-            state.timing.tImuDoneUs = RelativeTickUs(state.tickStartUs, state.diagnosticSensors.imuTiming.readDoneUs);
+            timing.overrunUs = 0U;
         }
         else
         {
-            const DriveBase::MeasuredKinematics measured =
-                _runtime->driveBase.GetMeasuredKinematics(state.sensors.gyroRadps);
-            state.measured.leftVelocityMps = measured.leftVelocityMps;
-            state.measured.rightVelocityMps = measured.rightVelocityMps;
-            state.measured.linearSpeedMps = measured.linearSpeedMps;
-            state.measured.angularSpeedRadps = measured.angularSpeedRadps;
+            timing.overrunUs = static_cast<std::uint16_t>((std::min)(
+                finalizeUs - _nextSyncTargetUs,
+                static_cast<std::uint32_t>(kTickTimingSaturatedUs)));
         }
-
-        state.timing.tEncoderDoneUs = RelativeTickUs(state.tickStartUs, state.controlCycleTiming.encoderReadDoneUs);
-        state.timing.tEstimatorDoneUs = RelativeTickUs(state.tickStartUs, state.controlCycleTiming.ukfUpdateEndUs);
-
-        if (_runtime->driveBase.HasEstimatorFault())
-        {
-            state.estimatorHealthy = false;
-            state.faultReason = _runtime->driveBase.GetEstimatorFaultReason();
-        }
-
-        return true;
+        (void)tickStartUs;
     }
 
-    bool LoopController::CaptureMissionTickState(VehicleState& state)
+    bool LoopController::ServiceRuntimeLogsNormal() noexcept
     {
-        if (_runtime == nullptr || _runtime->missionSensors == nullptr)
-        {
-            state.faultReason = "LoopController mission sensor pipeline unavailable";
-            return false;
-        }
-
-        const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
-        state.hasDiagnosticSensors = false;
-        state.controlCycleTiming.controlStartUs = state.tickStartUs;
-        state.controlCycleTiming.encoderLatchUs = micros();
-        state.sensors = _runtime->missionSensors->Capture(
-            stationaryHint,
-            _runtime->driveBase.GetPose(),
-            [this, &state](SensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
-            {
-                state.controlCycleTiming.encoderReadDoneUs = micros();
-                _runtime->driveBase.UpdateOdometry(
-                    state.dtSeconds,
-                    captureSnapshot,
-                    _runtime->maze,
-                    &state.controlCycleTiming,
-                    [this, &serviceWallRead]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->shared.ServiceUtilityDataLog();
-                        }
-                        serviceWallRead();
-                    },
-                    [this, &captureImu]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->shared.ServiceUtilityDataLog();
-                        }
-                        captureImu();
-                    });
-            });
-        return true;
+        return (_runtime != nullptr) ? _runtime->ServiceUtilityDataLog() : false;
     }
 
-    bool LoopController::CaptureDiagnosticTickState(VehicleState& state)
-    {
-        if (_runtime == nullptr || _runtime->diagnosticSensors == nullptr)
-        {
-            state.faultReason = "LoopController diagnostic sensor pipeline unavailable";
-            return false;
-        }
-
-        const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
-        state.hasDiagnosticSensors = true;
-        state.controlCycleTiming.controlStartUs = state.tickStartUs;
-        state.controlCycleTiming.encoderLatchUs = micros();
-        state.diagnosticSensors = _runtime->diagnosticSensors->Capture(
-            stationaryHint,
-            _runtime->driveBase.GetPose(),
-            [this, &state](DiagnosticSensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
-            {
-                state.controlCycleTiming.encoderReadDoneUs = micros();
-                _runtime->driveBase.UpdateOdometry(
-                    state.dtSeconds,
-                    captureSnapshot,
-                    _runtime->maze,
-                    &state.controlCycleTiming,
-                    [this, &serviceWallRead]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->shared.ServiceUtilityDataLog();
-                        }
-                        serviceWallRead();
-                    },
-                    [this, &captureImu]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->shared.ServiceUtilityDataLog();
-                        }
-                        captureImu();
-                    });
-            });
-
-        state.sensors.frontLeftDistanceM = state.diagnosticSensors.frontLeft.distanceM;
-        state.sensors.frontRightDistanceM = state.diagnosticSensors.frontRight.distanceM;
-        state.sensors.frontLeftDifferentialLight = state.diagnosticSensors.frontLeft.differentialLight;
-        state.sensors.frontRightDifferentialLight = state.diagnosticSensors.frontRight.differentialLight;
-        state.sensors.sideLeftDistanceM = state.diagnosticSensors.sideLeft.distanceM;
-        state.sensors.sideRightDistanceM = state.diagnosticSensors.sideRight.distanceM;
-        state.sensors.sideLeftDifferentialLight = state.diagnosticSensors.sideLeft.differentialLight;
-        state.sensors.sideRightDifferentialLight = state.diagnosticSensors.sideRight.differentialLight;
-        state.sensors.corridorErrorM = state.diagnosticSensors.corridorErrorM;
-        state.sensors.frontSkewM = state.diagnosticSensors.frontSkewM;
-        state.sensors.accelBodyXMps2 = state.diagnosticSensors.accelBodyXMps2;
-        state.sensors.accelBodyYMps2 = state.diagnosticSensors.accelBodyYMps2;
-        state.sensors.planarAccelMps2 = 0.0f;
-        state.sensors.gyroRawRadps = state.diagnosticSensors.gyroRawRadps;
-        state.sensors.gyroBiasRadps = state.diagnosticSensors.gyroBiasRadps;
-        state.sensors.gyroRadps = state.diagnosticSensors.gyroRadps;
-        state.sensors.accelBiasValid = state.diagnosticSensors.accelBiasValid;
-        state.sensors.frontWall = state.diagnosticSensors.frontWall;
-        state.sensors.leftWall = state.diagnosticSensors.leftWall;
-        state.sensors.rightWall = state.diagnosticSensors.rightWall;
-        state.sensors.leftDistanceValidForControl = state.diagnosticSensors.leftDistanceValidForControl;
-        state.sensors.rightDistanceValidForControl = state.diagnosticSensors.rightDistanceValidForControl;
-        return true;
-    }
-
-    bool LoopController::CaptureSelectedTickState(VehicleState& state)
+    void LoopController::ServiceRuntimeLogsForFaultPath() noexcept
     {
         if (_runtime == nullptr)
         {
-            state.faultReason = "LoopController runtime bundle unavailable";
-            return false;
+            return;
         }
 
-        if (_runtime->diagnosticSensors != nullptr)
+        if (!_runtime->ServiceUtilityDataLog() && (_deferredTerminalReason == nullptr))
         {
-            return CaptureDiagnosticTickState(state);
+            const char* const runtimeReason = _runtime->LastRuntimeLogError();
+            if ((runtimeReason != nullptr) && (runtimeReason[0] != '\0'))
+            {
+                _deferredTerminalReason = runtimeReason;
+            }
         }
-
-        if (_runtime->missionSensors != nullptr)
-        {
-            return CaptureMissionTickState(state);
-        }
-
-        state.faultReason = "LoopController has no configured sensor pipeline";
-        return false;
     }
 
-    bool LoopController::CaptureTickStateWithResolvedSensors(VehicleState& state, bool stationaryHint)
+    std::uint32_t LoopController::ComputeRemainingSlackUs(const std::uint32_t absoluteDeadlineUs) const noexcept
     {
-        (void)state;
-        (void)stationaryHint;
-        return false;
+        const std::int32_t remainingUs = static_cast<std::int32_t>(absoluteDeadlineUs - NowUs());
+        return (remainingUs > 0) ? static_cast<std::uint32_t>(remainingUs) : 0U;
     }
 
-    bool LoopController::SupportsCaptureOptions(const CaptureOptions& options) const noexcept
+    bool LoopController::ShouldTreatAppliedControlAsStationary() const noexcept
     {
-        // The current shared sensor pipelines still execute the full capture contract.
-        // Land the controller-owned loop first, then widen selective capture support on top.
-        return IsFullCapture(options);
+        return (_appliedControl.kind == ControlVector::Kind::Brake) || IsZeroVelocityCommand(_appliedControl);
     }
 
     bool LoopController::ResolvePauseRequest(SessionResult& result)
     {
-        VehicleState settledState{};
+        ModeState settledState{};
         if (!WaitForPauseSettlement(_requests.pauseRequest, settledState))
         {
-            result.status = SessionResult::Status::Faulted;
-            result.faultReason = (_faultReason != nullptr) ? _faultReason : "LoopController pause settlement failed";
+            if (_runtime != nullptr)
+            {
+                (void)_runtime->FailActiveMode(_deferredTerminalReason);
+            }
+            result.status = SessionResult::Status::StoppedByRuntime;
+            result.tickCount = _tickCount;
             return false;
         }
 
-        PauseContext pause{};
-        pause.stateEstimate = settledState;
-        pause.reason = _requests.pauseRequest.reason;
-        const HeavyWorkResult heavyWork = _mode->OnPauseGranted(pause);
-        switch (heavyWork.action)
+        _pauseContextScratch.stateEstimate = settledState;
+        _pauseContextScratch.reason = _requests.pauseRequest.reason;
+        const PauseDisposition disposition =
+            _requests.pauseRequest.onPauseGranted(_callbacks.context, _pauseContextScratch);
+        switch (disposition.action)
         {
-        case HeavyWorkResult::Action::Fault:
-            _faultReason = (heavyWork.faultReason != nullptr) ? heavyWork.faultReason : "LoopController heavy work faulted";
-            ApplyFaultActuation();
-            result.status = SessionResult::Status::Faulted;
-            result.faultReason = _faultReason;
-            return false;
-
-        case HeavyWorkResult::Action::Complete:
-            ApplyTerminalActuation();
+        case PauseDisposition::Action::Complete:
             result.status = SessionResult::Status::Completed;
+            result.tickCount = _tickCount;
             return false;
 
-        case HeavyWorkResult::Action::Resume:
-        default:
-            if (heavyWork.resetClockOnResume || _requests.pauseRequest.resetClockOnResume)
+        case PauseDisposition::Action::StopByRuntime:
+            if (_runtime != nullptr)
             {
-                _lastTickStartUs = micros();
+                (void)_runtime->FailActiveMode(disposition.stopReason);
             }
+            result.status = SessionResult::Status::StoppedByRuntime;
+            result.tickCount = _tickCount;
+            return false;
+
+        case PauseDisposition::Action::Resume:
+        default:
+        {
+            if (disposition.resetClockOnResume || _requests.pauseRequest.resetClockOnResume)
+            {
+                const std::uint32_t nowUs = NowUs();
+                _lastTickStartUs = nowUs - _options.controlPeriodUs;
+                _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
+            }
+            _queuedControl = ControlVector::BrakeCommand();
+            _appliedControl = ControlVector::BrakeCommand();
             _resumePending = true;
-            result.resumedFromPause = true;
-            result.pauseGranted = false;
-            result.status = SessionResult::Status::Running;
-            _captureForNextTick = _config.defaultCapture;
-            _captureOverrideActive = false;
+            result.tickCount = _tickCount;
             return true;
+        }
         }
     }
 
-    bool LoopController::WaitForPauseSettlement(
-        const PauseRequest& request,
-        VehicleState& settledState)
+    bool LoopController::WaitForPauseSettlement(const PauseRequest& request, ModeState& settledState)
     {
         if (_runtime == nullptr)
         {
-            _faultReason = "LoopController pause settlement missing runtime";
+            _deferredTerminalReason = "LoopController pause settlement missing runtime";
             return false;
         }
 
         const float linearThreshold =
             IsFinitePositive(request.maxAbsLinearSpeed) ?
             request.maxAbsLinearSpeed :
-            _config.pauseDefaults.maxAbsLinearSpeed;
+            kDefaultPauseLinearThresholdMps;
         const float angularThreshold =
             IsFinitePositive(request.maxAbsAngularSpeed) ?
             request.maxAbsAngularSpeed :
-            _config.pauseDefaults.maxAbsAngularSpeed;
+            kDefaultPauseAngularThresholdRadps;
         const std::uint8_t settledTicks =
             (request.consecutiveSettledTicks > 0U) ?
             request.consecutiveSettledTicks :
-            _config.pauseDefaults.consecutiveSettledTicks;
+            kDefaultPauseSettledTicks;
 
         std::uint8_t settledCount = 0U;
-        const ControlVector settleControl =
-            (_config.pauseDefaults.settleActuation == SessionConfig::PauseDefaults::SettleActuation::HoldZeroVelocity) ?
-            ControlVector::HoldZeroVelocityCommand() :
-            ControlVector::BrakeCommand();
-
         while (settledCount < settledTicks)
         {
-            if (!WaitForTickBoundaryAndService())
-            {
-                _faultReason = "LoopController pause boundary wait failed";
-                return false;
-            }
-
-            settledState = {};
-            settledState.tickStartUs = micros();
-            settledState.dtUs = static_cast<std::uint32_t>(settledState.tickStartUs - _lastTickStartUs);
-            settledState.dtSeconds = static_cast<float>(settledState.dtUs) * 1.0e-6f;
-            _lastTickStartUs = settledState.tickStartUs;
+            const std::uint32_t tickStartUs = NowUs();
+            const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
+            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
+            const std::uint32_t deadlineUs = tickStartUs + _options.controlPeriodUs;
+            _lastTickStartUs = tickStartUs;
+            _nextSyncTargetUs = deadlineUs;
             ++_tickCount;
-            settledState.sequence = _config.maintainTickSequence ? _tickCount : 0U;
-            settledState.captureUsed = _config.defaultCapture;
-            settledState.timing.tickStartUs = settledState.tickStartUs;
-            settledState.timing.dtUs = settledState.dtUs;
-            settledState.timing.flags = kTimingFlagPausePending;
-            ApplyControlAtTickStart(settleControl, settledState.dtSeconds);
-            settledState.appliedControl = settleControl;
-            settledState.timing.tActuationAppliedUs = RelativeTickUs(settledState.tickStartUs, micros());
 
-            if (!CaptureTickState(settledState))
+            ResetWorkingTiming(_tickCount, tickStartUs, dtUs);
+            TimingDiagnostics& timing = WorkingTiming();
+            timing.flags = kTimingFlagPausePending;
+            timing.controlTiming.controlStartUs = tickStartUs;
+            timing.controlTiming.cycleCounterStart = ReadCycleCounter();
+
+            _appliedControl = ControlVector::BrakeCommand();
+            _queuedControl = _appliedControl;
+            ApplyControlAtTickStart(_appliedControl, dtSeconds);
+            timing.tActuationAppliedUs = RelativeTickUs(tickStartUs, NowUs());
+
+            _observedScratch = ObservedTickState{};
+            _observedScratch.sequence = _tickCount;
+            _observedScratch.tickStartUs = tickStartUs;
+            _observedScratch.dtUs = dtUs;
+            _observedScratch.dtSeconds = dtSeconds;
+
+            if (!ExecuteSensingUpdate(_observedScratch, timing))
             {
-                _faultReason = (settledState.faultReason != nullptr) ? settledState.faultReason : "LoopController pause capture failed";
+                _deferredTerminalReason =
+                    (_observedScratch.faultReason != nullptr) ?
+                    _observedScratch.faultReason :
+                    "LoopController pause settlement capture failed";
+                ServiceRuntimeLogsForFaultPath();
                 return false;
             }
 
-            if (request.flushServicesBeforeGrant || _config.pauseDefaults.flushServicesBeforeGrant)
+            const std::uint32_t projectionAnchorUs =
+                (timing.controlTiming.ukfUpdateEndUs != 0U) ?
+                timing.controlTiming.ukfUpdateEndUs :
+                tickStartUs;
+            settledState = BuildModeState(_observedScratch, projectionAnchorUs, projectionAnchorUs, false);
+
+            if (request.flushLogsBeforeGrant)
             {
-                (void)_runtime->shared.ServiceUtilityDataLog();
+                ServiceRuntimeLogsForFaultPath();
             }
 
             const bool settled =
@@ -883,76 +915,33 @@ namespace MazeMap::App::Internal
                 settledState.estimatorHealthy;
             settledCount = settled ? static_cast<std::uint8_t>(settledCount + 1U) : 0U;
 
-            ServiceSlackState();
+            RecordPostServiceTiming(tickStartUs);
+            FinalizeTiming(tickStartUs);
+            PublishWorkingTiming();
+            WaitUntilUs(deadlineUs);
         }
 
         return true;
     }
 
-    LoopController::SessionResult LoopController::FinishSession(SessionResult result)
+    void LoopController::ResetSessionState() noexcept
     {
-        if (!_sessionEndNotified && _mode != nullptr)
-        {
-            if (result.status == SessionResult::Status::Faulted)
-            {
-                ApplyFaultActuation();
-            }
-            else
-            {
-                ApplyTerminalActuation();
-            }
-
-            _mode->OnSessionEnd(result);
-            _sessionEndNotified = true;
-        }
-
-        _sessionActive = false;
+        _options = SessionOptions{};
+        _callbacks = ModeCallbacks{};
+        _activeModeWorkCallback = nullptr;
         _sessionBegun = false;
-        _runtime = nullptr;
-        _mode = nullptr;
-        _captureOverrideActive = false;
+        _sessionActive = false;
         _resumePending = false;
-        ResetLatchedRequests();
-        _tickStepContext = nullptr;
-        _tickStepCallback = nullptr;
-        return result;
-    }
-
-    std::uint32_t LoopController::ComputeRemainingBudgetUs(std::uint32_t tickStartUs) const noexcept
-    {
-        const std::uint32_t elapsedUs = static_cast<std::uint32_t>(micros() - tickStartUs);
-        return (elapsedUs >= _config.controlPeriodUs) ? 0U : (_config.controlPeriodUs - elapsedUs);
-    }
-
-    bool LoopController::ShouldTreatAppliedControlAsStationary() const noexcept
-    {
-        return (_appliedControl.kind == ControlVector::Kind::Brake) || IsZeroVelocityCommand(_appliedControl);
-    }
-
-    void LoopController::ResetLatchedRequests() noexcept
-    {
+        _publishedTimingValid = false;
+        _tickCount = 0U;
+        _lastTickStartUs = 0U;
+        _nextSyncTargetUs = 0U;
+        _queuedControl = ControlVector::BrakeCommand();
+        _appliedControl = ControlVector::BrakeCommand();
         _requests = LatchedRequests{};
-    }
-
-    void LoopController::RecordModeReturnTiming(VehicleState& state) const noexcept
-    {
-        state.timing.tModeReturnUs = RelativeTickUs(state.tickStartUs, micros());
-    }
-
-    void LoopController::RecordPostServiceTiming(VehicleState& state) const noexcept
-    {
-        state.timing.tPostServiceDoneUs = RelativeTickUs(state.tickStartUs, micros());
-    }
-
-    void LoopController::RecordOverrun(VehicleState& state) const noexcept
-    {
-        const std::uint32_t elapsedUs = static_cast<std::uint32_t>(micros() - state.tickStartUs);
-        if (elapsedUs > _config.controlPeriodUs)
-        {
-            state.overrun = true;
-            state.timing.overrunUs = static_cast<std::uint16_t>((std::min)(
-                elapsedUs - _config.controlPeriodUs,
-                static_cast<std::uint32_t>(kTickTimingSaturatedUs)));
-        }
+        _deferredTerminalOutcome = DeferredTerminalOutcome::None;
+        _deferredTerminalReason = nullptr;
+        _observedScratch = ObservedTickState{};
+        _pauseContextScratch = PauseContext{};
     }
 }
