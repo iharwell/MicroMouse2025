@@ -238,6 +238,7 @@ namespace MazeMap::App::Internal
             std::uint32_t projectionAnchorUs,
             std::uint32_t commandApplyTimeUs) noexcept;
 
+        void RunSessionStartWallSensorAdcProbe() noexcept;
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
@@ -284,6 +285,7 @@ namespace MazeMap::App::Internal
         std::uint32_t _nextSyncTargetUs{};
         ControlVector _queuedControl{};
         ControlVector _appliedControl{};
+        bool _sessionStartWallSensorAdcProbePending{};
         TimingDiagnostics _timingBuffers[2]{};
         std::uint8_t _publishedTimingIndex{ 0U };
         std::uint8_t _workingTimingIndex{ 1U };

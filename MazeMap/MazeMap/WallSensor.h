@@ -60,6 +60,8 @@ namespace MazeMap
             pinMode(_wallSensorInPin, INPUT);
             pinMode(_ledOutPin, OUTPUT);
             digitalWrite(_ledOutPin, LOW);
+            _hasDedicatedWallSensorAdc1Channel =
+                MazeMap::Platform::ResolveWallSensorAdc1Channel(_wallSensorInPin, _wallSensorAdc1Channel);
         }
 
         uint8_t GetWallSensorInPin() const { return _wallSensorInPin; }
@@ -72,10 +74,24 @@ namespace MazeMap
             digitalWrite(_ledOutPin, enabled ? HIGH : LOW);
         }
 
+        uint16_t ReadAdcCode() const
+        {
+            if (_hasDedicatedWallSensorAdc1Channel)
+            {
+                return MazeMap::Platform::ReadWallSensorAdcCodeFromConfiguredChannel(_wallSensorAdc1Channel);
+            }
+
+            return MazeMap::Platform::ReadWallSensorAdcCode(_wallSensorInPin);
+        }
+
+        float AdcCodeToLightLevel(uint16_t adcReading) const
+        {
+            return AdcToLightLevel(adcReading);
+        }
+
         float ReadLightLevel() const
         {
-            const uint16_t adcReading = MazeMap::Platform::ReadWallSensorAdcCode(_wallSensorInPin);
-            return AdcToLightLevel(adcReading);
+            return AdcCodeToLightLevel(ReadAdcCode());
         }
 
         static float DifferentialLightLevel(float ambientLightLevel, float litLightLevel)
@@ -110,6 +126,8 @@ namespace MazeMap
 
         uint8_t _wallSensorInPin;
         uint8_t _ledOutPin;
+        uint8_t _wallSensorAdc1Channel = 0U;
+        bool _hasDedicatedWallSensorAdc1Channel = false;
         Eigen::Vector2f _position;
         Eigen::Vector2f _facingDirection;
         std::array<float, 8> _adcToLightTable;

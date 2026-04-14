@@ -234,6 +234,29 @@ namespace
             !((std::isfinite(rightVelocityMps)) && (rightVelocityMps != 0.0f));
     }
 
+    inline bool ShouldSnapToZeroFast(
+        float forwardVelocityMps,
+        float rightVelocityMps,
+        float yawRateRadps,
+        float omegaLeftRadps,
+        float omegaRightRadps,
+        float commandNorm,
+        const PreparedParams& params) noexcept
+    {
+        return
+            (ComputeSpeedNormMps(
+                forwardVelocityMps,
+                rightVelocityMps,
+                yawRateRadps,
+                omegaLeftRadps,
+                omegaRightRadps,
+                params) < params.stopEnterSpeedMps) &&
+            (std::fabs(yawRateRadps) < params.stopEnterYawRateRadps) &&
+            (std::fabs(omegaLeftRadps) < params.stopEnterWheelSpeedRadps) &&
+            (std::fabs(omegaRightRadps) < params.stopEnterWheelSpeedRadps) &&
+            (commandNorm < params.stopEnterCommand);
+    }
+
     inline bool ShouldReportStoppedDiagnosticsFast(
         float forwardVelocityMps,
         float rightVelocityMps,
@@ -1215,7 +1238,7 @@ namespace MazeMap
 
         const float commandNorm =
             (std::max)(std::fabs(control.leftMotorCommand), std::fabs(control.rightMotorCommand));
-        if (IsStoppedFast(
+        if (ShouldSnapToZeroFast(
             implicitState(VehicleState::kU),
             implicitState(VehicleState::kV),
             implicitState(VehicleState::kR),

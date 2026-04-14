@@ -773,6 +773,12 @@ struct DiagnosticSensorSnapshot
     OpticalObservationTiming frontTiming;
     OpticalObservationTiming leftTiming;
     OpticalObservationTiming rightTiming;
+    std::uint32_t wallSensorAdcCfgBeforeStart = 0U;
+    std::uint32_t wallSensorAdcGcBeforeStart = 0U;
+    std::uint32_t wallSensorAdcCfgAfterStart = 0U;
+    std::uint32_t wallSensorAdcGcAfterStart = 0U;
+    std::uint32_t wallSensorAdcTargetCfg = 0U;
+    std::uint32_t wallSensorAdcIpgClockHz = 0U;
     ImuTelemetry imuFrontRight;
     ImuTelemetry imuBackLeft;
     ImuObservationTiming imuTiming;
@@ -816,6 +822,8 @@ enum class WallTouchOutcome : uint8_t
 
 struct RawWallSensorSample
 {
+    uint16_t ambientAdcCode = 0U;
+    uint16_t litAdcCode = 0U;
     float ambientLight = 0.0f;
     float litLight = 0.0f;
     float differentialLight = 0.0f;
@@ -3186,11 +3194,13 @@ inline void StartAsyncWallSensorPairRead(
     read.firstSample.timing.ledOffCommandUs = ledOffCommandUs;
     read.secondSample.timing.ledOffCommandUs = ledOffCommandUs;
 
-    read.firstSample.ambientLight = firstSensor.ReadLightLevel();
-    read.secondSample.ambientLight = secondSensor.ReadLightLevel();
+    read.firstSample.ambientAdcCode = firstSensor.ReadAdcCode();
+    read.secondSample.ambientAdcCode = secondSensor.ReadAdcCode();
     const uint32_t ambientSampleUs = micros();
     read.firstSample.timing.adcOffSampleUs = ambientSampleUs;
     read.secondSample.timing.adcOffSampleUs = ambientSampleUs;
+    read.firstSample.ambientLight = firstSensor.AdcCodeToLightLevel(read.firstSample.ambientAdcCode);
+    read.secondSample.ambientLight = secondSensor.AdcCodeToLightLevel(read.secondSample.ambientAdcCode);
 
     const uint32_t ledOnCommandUs = micros();
     read.firstSample.timing.ledOnCommandUs = ledOnCommandUs;
@@ -3215,11 +3225,13 @@ inline bool TryCompleteAsyncWallSensorPairRead(AsyncWallSensorPairRead& read) no
         return false;
     }
 
-    read.firstSample.litLight = read.firstSensor->ReadLightLevel();
-    read.secondSample.litLight = read.secondSensor->ReadLightLevel();
+    read.firstSample.litAdcCode = read.firstSensor->ReadAdcCode();
+    read.secondSample.litAdcCode = read.secondSensor->ReadAdcCode();
     const uint32_t litSampleUs = micros();
     read.firstSample.timing.adcOnSampleUs = litSampleUs;
     read.secondSample.timing.adcOnSampleUs = litSampleUs;
+    read.firstSample.litLight = read.firstSensor->AdcCodeToLightLevel(read.firstSample.litAdcCode);
+    read.secondSample.litLight = read.secondSensor->AdcCodeToLightLevel(read.secondSample.litAdcCode);
 
     read.firstSample.differentialLight =
         MazeMap::WallSensor::DifferentialLightLevel(read.firstSample.ambientLight, read.firstSample.litLight);
@@ -3252,16 +3264,18 @@ inline void PrimeAsyncWallSensorDarkSample(
 {
     sample = RawWallSensorSample{};
     sample.timing.ledOffCommandUs = ledOffCommandUs;
-    sample.ambientLight = sensor.ReadLightLevel();
+    sample.ambientAdcCode = sensor.ReadAdcCode();
     sample.timing.adcOffSampleUs = micros();
+    sample.ambientLight = sensor.AdcCodeToLightLevel(sample.ambientAdcCode);
 }
 
 inline void FinalizeAsyncWallSensorLitSample(
     const MazeMap::WallSensor& sensor,
     RawWallSensorSample& sample) noexcept
 {
-    sample.litLight = sensor.ReadLightLevel();
+    sample.litAdcCode = sensor.ReadAdcCode();
     sample.timing.adcOnSampleUs = micros();
+    sample.litLight = sensor.AdcCodeToLightLevel(sample.litAdcCode);
     sample.differentialLight = MazeMap::WallSensor::DifferentialLightLevel(sample.ambientLight, sample.litLight);
     sample.rawDistanceM = sensor.DistanceFromDifferentialLight(sample.differentialLight);
 }
@@ -3443,14 +3457,16 @@ inline RawWallSensorSample SampleWallSensorRaw(WallSensorId sensorId, const Maze
     sample.timing.ledOffCommandUs = micros();
     sensor.SetLedEnabled(false);
     delayMicroseconds(WallSensorAmbientSettleTimeUs(sensorId));
+    sample.ambientAdcCode = sensor.ReadAdcCode();
     sample.timing.adcOffSampleUs = micros();
-    sample.ambientLight = sensor.ReadLightLevel();
+    sample.ambientLight = sensor.AdcCodeToLightLevel(sample.ambientAdcCode);
 
     sample.timing.ledOnCommandUs = micros();
     sensor.SetLedEnabled(true);
     delayMicroseconds(WallSensorLitSettleTimeUs(sensorId));
+    sample.litAdcCode = sensor.ReadAdcCode();
     sample.timing.adcOnSampleUs = micros();
-    sample.litLight = sensor.ReadLightLevel();
+    sample.litLight = sensor.AdcCodeToLightLevel(sample.litAdcCode);
     sample.differentialLight = MazeMap::WallSensor::DifferentialLightLevel(sample.ambientLight, sample.litLight);
     sample.rawDistanceM = sensor.DistanceFromDifferentialLight(sample.differentialLight);
     sample.timing.observationReadyUs = micros();
@@ -3471,20 +3487,24 @@ inline void SampleWallSensorPairRaw(
     firstSample.timing.ledOffCommandUs = micros();
     secondSample.timing.ledOffCommandUs = firstSample.timing.ledOffCommandUs;
     delayMicroseconds((std::max)(WallSensorAmbientSettleTimeUs(firstSensorId), WallSensorAmbientSettleTimeUs(secondSensorId)));
-    firstSample.ambientLight = firstSensor.ReadLightLevel();
-    secondSample.ambientLight = secondSensor.ReadLightLevel();
+    firstSample.ambientAdcCode = firstSensor.ReadAdcCode();
+    secondSample.ambientAdcCode = secondSensor.ReadAdcCode();
     firstSample.timing.adcOffSampleUs = micros();
     secondSample.timing.adcOffSampleUs = firstSample.timing.adcOffSampleUs;
+    firstSample.ambientLight = firstSensor.AdcCodeToLightLevel(firstSample.ambientAdcCode);
+    secondSample.ambientLight = secondSensor.AdcCodeToLightLevel(secondSample.ambientAdcCode);
 
     firstSample.timing.ledOnCommandUs = micros();
     secondSample.timing.ledOnCommandUs = firstSample.timing.ledOnCommandUs;
     firstSensor.SetLedEnabled(true);
     secondSensor.SetLedEnabled(true);
     delayMicroseconds((std::max)(WallSensorLitSettleTimeUs(firstSensorId), WallSensorLitSettleTimeUs(secondSensorId)));
-    firstSample.litLight = firstSensor.ReadLightLevel();
+    firstSample.litAdcCode = firstSensor.ReadAdcCode();
+    secondSample.litAdcCode = secondSensor.ReadAdcCode();
+    firstSample.litLight = firstSensor.AdcCodeToLightLevel(firstSample.litAdcCode);
     firstSample.differentialLight = MazeMap::WallSensor::DifferentialLightLevel(firstSample.ambientLight, firstSample.litLight);
     firstSample.rawDistanceM = firstSensor.DistanceFromDifferentialLight(firstSample.differentialLight);
-    secondSample.litLight = secondSensor.ReadLightLevel();
+    secondSample.litLight = secondSensor.AdcCodeToLightLevel(secondSample.litAdcCode);
     secondSample.differentialLight = MazeMap::WallSensor::DifferentialLightLevel(secondSample.ambientLight, secondSample.litLight);
     secondSample.rawDistanceM = secondSensor.DistanceFromDifferentialLight(secondSample.differentialLight);
     firstSample.timing.adcOnSampleUs = micros();

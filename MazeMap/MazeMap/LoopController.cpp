@@ -1,10 +1,13 @@
 #include "pch.h"
 #include "LoopController.h"
 
+#include "Defines.h"
 #include "DriveBase.h"
 #include "DiagnosticSensorSuite.h"
+#include "HardwareConfig.h"
 #include "MazeMapSharedRuntime.h"
 #include "SensorSuite.h"
+#include "Vehicle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -163,6 +166,9 @@ namespace MazeMap::App::Internal
             return false;
         }
 
+        _sessionStartWallSensorAdcProbePending = true;
+        RunSessionStartWallSensorAdcProbe();
+
         _options = options;
         _callbacks = callbacks;
         _activeModeWorkCallback = callbacks.onModeWork;
@@ -250,6 +256,11 @@ namespace MazeMap::App::Internal
             _appliedControl = NormalizeQueuedControl(_queuedControl);
             ApplyControlAtTickStart(_appliedControl, dtSeconds);
             timing.tActuationAppliedUs = RelativeTickUs(tickStartUs, NowUs());
+
+            if (_sessionStartWallSensorAdcProbePending)
+            {
+                RunSessionStartWallSensorAdcProbe();
+            }
 
             _observedScratch = ObservedTickState{};
             _observedScratch.sequence = _tickCount;
@@ -468,6 +479,55 @@ namespace MazeMap::App::Internal
     void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
+    }
+
+    void LoopController::RunSessionStartWallSensorAdcProbe() noexcept
+    {
+        if (_runtime == nullptr)
+        {
+            return;
+        }
+
+        if (!_runtime->TextLogIsOpen())
+        {
+            _sessionStartWallSensorAdcProbePending = true;
+            return;
+        }
+
+        const uint32_t targetCfg = MazeMap::Platform::GetWallSensorAdcRuntimeMode();
+        MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
+            "session_pre_write",
+            targetCfg,
+            MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
+            MazeMap::Platform::GetWallSensorAdcCurrentGc());
+        MazeMap::Platform::PrepareWallSensorAdcForRead();
+        MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
+            "session_post_write",
+            targetCfg,
+            MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
+            MazeMap::Platform::GetWallSensorAdcCurrentGc());
+
+        uint8_t probeChannel = 0U;
+        const uint8_t probePin = _runtime->SpeedVehicle().FrontLeft.GetWallSensorInPin();
+        if (MazeMap::Platform::ResolveWallSensorAdc1Channel(probePin, probeChannel))
+        {
+            (void)MazeMap::Platform::ReadSingleWallSensorAdcCodeFromConfiguredChannel(probeChannel);
+            MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
+                "session_post_sample",
+                targetCfg,
+                MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
+                MazeMap::Platform::GetWallSensorAdcCurrentGc());
+        }
+        else
+        {
+            MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
+                "session_probe_unresolved",
+                targetCfg,
+                MazeMap::Platform::GetWallSensorAdcCurrentCfg(),
+                MazeMap::Platform::GetWallSensorAdcCurrentGc());
+        }
+
+        _sessionStartWallSensorAdcProbePending = false;
     }
 
     bool LoopController::ValidateSessionOptions(const SessionOptions& options) const noexcept
@@ -938,6 +998,7 @@ namespace MazeMap::App::Internal
         _nextSyncTargetUs = 0U;
         _queuedControl = ControlVector::BrakeCommand();
         _appliedControl = ControlVector::BrakeCommand();
+        _sessionStartWallSensorAdcProbePending = false;
         _requests = LatchedRequests{};
         _deferredTerminalOutcome = DeferredTerminalOutcome::None;
         _deferredTerminalReason = nullptr;

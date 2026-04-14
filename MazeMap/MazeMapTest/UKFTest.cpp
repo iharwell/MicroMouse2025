@@ -842,6 +842,36 @@ namespace MazeMap
             Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-7f);
         }
 
+        TEST_METHOD(PlantModelPreparedNearZeroLateralPerturbationsSnapBackToRest)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            VehicleState::StateVector state = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                0.0f,
+                0.001f,
+                0.05f,
+                0.8f,
+                -0.7f);
+
+            ControlInput control{};
+            control.batteryVoltageV = params.supplyVoltageV;
+            constexpr float dt = 0.001f;
+            for (int step = 0; step < 25; ++step)
+            {
+                state = plant.integrate(state, control, dt, prepared);
+            }
+
+            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kV), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-7f);
+        }
+
         TEST_METHOD(VehicleStateIsStationaryUsesCurrentUkfThresholds)
         {
             const PlantParams params = PlantParams::Default();

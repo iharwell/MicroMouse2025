@@ -500,6 +500,7 @@ inline int analogRead(uint8_t) { return 0; }
 inline void analogReference(uint8_t) {}
 inline void analogWriteResolution(int) {}
 inline void analogReadResolution(int) {}
+inline void analogReadAveraging(unsigned int) {}
 inline void analogWriteFrequency(uint8_t, uint32_t) {}
 
 inline void tone(uint8_t, unsigned int) {}
@@ -1135,6 +1136,15 @@ inline int atexit(void (*)()) { return 0; }
 
 #include <cmath>
 
+namespace MazeMap::App::Internal
+{
+    EXPORT void LogWallSensorAdcRegisterWrite(
+        const char* phase,
+        uint32_t expectedCfg,
+        uint32_t readCfg,
+        uint32_t readGc) noexcept;
+}
+
 namespace MazeMap
 {
     namespace Platform
@@ -1180,51 +1190,256 @@ namespace MazeMap
             }
         }
 
+        inline uint32_t GetWallSensorAdcRuntimeMode() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            constexpr uint32_t kAdcCfgAdiclkIpgDiv2 = (1U << 0);
+            constexpr uint32_t kAdcCfgMode12Bit = (2U << 2);
+            constexpr uint32_t kAdcCfgAdivDiv1 = (0U << 5);
+            constexpr uint32_t kAdcCfgAdivDiv2 = (1U << 5);
+            constexpr uint32_t kAdcCfgAdivDiv4 = (2U << 5);
+            constexpr uint32_t kAdcCfgAdivDiv8 = (3U << 5);
+            constexpr uint32_t kAdcCfgAdhsc = (1U << 10);
+            // Runtime wall-sensor reads target the fastest 12-bit single-sample path the RT1062 ADC
+            // supports in high-speed mode. Use the IPG-derived clock tree instead of the async ADC
+            // clock so ADCK stays near, but does not exceed, the 40 MHz datasheet ceiling.
+            constexpr uint32_t kMaxWallSensorAdcClockHz = 40000000U;
+            uint32_t clockMode = kAdcCfgAdivDiv1;
+            const uint32_t ipgClockHz = static_cast<uint32_t>(F_BUS_ACTUAL);
+            if (ipgClockHz > (kMaxWallSensorAdcClockHz * 8U))
+            {
+                clockMode = kAdcCfgAdivDiv8 | kAdcCfgAdiclkIpgDiv2;
+            }
+            else if (ipgClockHz > (kMaxWallSensorAdcClockHz * 4U))
+            {
+                clockMode = kAdcCfgAdivDiv4 | kAdcCfgAdiclkIpgDiv2;
+            }
+            else if (ipgClockHz > (kMaxWallSensorAdcClockHz * 2U))
+            {
+                clockMode = kAdcCfgAdivDiv2 | kAdcCfgAdiclkIpgDiv2;
+            }
+            else if (ipgClockHz > kMaxWallSensorAdcClockHz)
+            {
+                clockMode = kAdcCfgAdivDiv1 | kAdcCfgAdiclkIpgDiv2;
+            }
+
+            return kAdcCfgMode12Bit | clockMode | kAdcCfgAdhsc;
+#else
+            return 0U;
+#endif
+        }
+
+        inline uint32_t ReadWallSensorMmio32(uint32_t address) noexcept;
+        inline uint32_t WriteWallSensorMmio32(uint32_t address, uint32_t value) noexcept;
+
+        inline uint32_t GetWallSensorAdcCurrentCfg() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            return ReadWallSensorMmio32(0x400C4044UL);
+#else
+            return 0U;
+#endif
+        }
+
+        inline uint32_t GetWallSensorAdcCurrentGc() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            return ReadWallSensorMmio32(0x400C4048UL);
+#else
+            return 0U;
+#endif
+        }
+
+        inline uint32_t GetWallSensorAdcIpgClockHz() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            return static_cast<uint32_t>(F_BUS_ACTUAL);
+#else
+            return 0U;
+#endif
+        }
+
+        inline uint32_t ReadWallSensorMmio32(uint32_t address) noexcept
+        {
+#if defined(ARDUINO_TEENSY41) && defined(__arm__)
+            uint32_t value = 0U;
+            asm volatile(
+                "ldr %0, [%1]\n"
+                : "=&r"(value)
+                : "r"(address)
+                : "memory");
+            return value;
+#else
+            return *reinterpret_cast<volatile uint32_t*>(address);
+#endif
+        }
+
+        inline uint32_t WriteWallSensorMmio32(uint32_t address, uint32_t value) noexcept
+        {
+#if defined(ARDUINO_TEENSY41) && defined(__arm__)
+            uint32_t readback = 0U;
+            asm volatile(
+                "str %2, [%1]\n"
+                "dsb sy\n"
+                "ldr %0, [%1]\n"
+                : "=&r"(readback)
+                : "r"(address), "r"(value)
+                : "memory");
+            return readback;
+#else
+            *reinterpret_cast<volatile uint32_t*>(address) = value;
+            return *reinterpret_cast<volatile uint32_t*>(address);
+#endif
+        }
+
+        inline void WaitForWallSensorAdcIdle() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            constexpr uint32_t kAdcGsAdact = (1U << 0);
+            while ((ReadWallSensorMmio32(0x400C404CUL) & kAdcGsAdact) != 0U)
+            {
+            }
+#endif
+        }
+
+        inline uint32_t EnableWallSensorAdcClock() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            constexpr uint32_t kCcmCcgr1Address = 0x400FC06CUL;
+            constexpr uint32_t kAdc1ClockGateMask = (3U << 16);
+            const uint32_t ccgr1 = ReadWallSensorMmio32(kCcmCcgr1Address) | kAdc1ClockGateMask;
+            return WriteWallSensorMmio32(kCcmCcgr1Address, ccgr1);
+#else
+            return 0U;
+#endif
+        }
+
+        inline uint32_t WriteWallSensorAdcCfgRegister(uint32_t value) noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            return WriteWallSensorMmio32(0x400C4044UL, value);
+#else
+            (void)value;
+            return 0U;
+#endif
+        }
+
+        inline uint32_t WriteWallSensorAdcGcRegister(uint32_t value) noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            return WriteWallSensorMmio32(0x400C4048UL, value);
+#else
+            (void)value;
+            return 0U;
+#endif
+        }
+
+        inline uint32_t WriteWallSensorAdcHc0Register(uint32_t value) noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            return WriteWallSensorMmio32(0x400C4000UL, value);
+#else
+            (void)value;
+            return 0U;
+#endif
+        }
+
+        inline void ApplyWallSensorAdcRuntimeMode() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            const uint32_t cfg = GetWallSensorAdcRuntimeMode();
+            const uint32_t cfgReadback = WriteWallSensorAdcCfgRegister(cfg);
+            const uint32_t gcReadback = WriteWallSensorAdcGcRegister(0U);
+            MazeMap::App::Internal::LogWallSensorAdcRegisterWrite("apply", cfg, cfgReadback, gcReadback);
+#endif
+        }
+
         inline void ConfigureWallSensorAdc() noexcept
         {
-#if defined(ARDUINO_TEENSY41) && defined(ADC1_CFG) && defined(ADC1_GC) && defined(ADC_GC_CAL) && defined(ADC_GC_AVGE) && defined(ADC_GC_AVGS) && defined(ADC_CFG_MODE) && defined(ADC_CFG_ADSTS) && defined(ADC_CFG_ADLSMP) && defined(ADC_CFG_ADIV) && defined(ADC_CFG_ADICLK) && defined(ADC_CFG_ADHSC) && defined(CCM_CCGR1) && defined(CCM_CCGR1_ADC1) && defined(CCM_CCGR_ON)
-            static bool configured = false;
-            if (configured)
+#if defined(ARDUINO_TEENSY41)
+            constexpr uint32_t kAdcGcCal = (1U << 7);
+            static bool calibrated = false;
+
+            (void)EnableWallSensorAdcClock();
+            WaitForWallSensorAdcIdle();
+            if (!calibrated)
             {
-                return;
+                ApplyWallSensorAdcRuntimeMode();
+                (void)WriteWallSensorAdcGcRegister(kAdcGcCal);
+                while ((ReadWallSensorMmio32(0x400C4048UL) & kAdcGcCal) != 0U)
+                {
+                }
+
+                calibrated = true;
             }
 
-            // Keep the wall-sensor hot path on calibrated ADC1 with the same 12-bit async/high-speed
-            // settings PJRC uses, but without hardware averaging.
-            constexpr uint32_t kWallSensorAdcMode =
-                ADC_CFG_MODE(2) |
-                ADC_CFG_ADSTS(3) |
-                ADC_CFG_ADLSMP |
-                ADC_CFG_ADIV(1) |
-                ADC_CFG_ADICLK(3) |
-                ADC_CFG_ADHSC;
+            // Reassert the runtime fast mode in case generic ADC users or the core reconfigured ADC1.
+            WaitForWallSensorAdcIdle();
+            ApplyWallSensorAdcRuntimeMode();
+#endif
+        }
 
-            CCM_CCGR1 |= CCM_CCGR1_ADC1(CCM_CCGR_ON);
-            ADC1_CFG = kWallSensorAdcMode;
-            ADC1_GC = ADC_GC_AVGE | ADC_GC_AVGS(0) | ADC_GC_CAL;
-            while ((ADC1_GC & ADC_GC_CAL) != 0U)
+        inline void PrepareWallSensorAdcForRead() noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            constexpr uint32_t kAdcHcStopChannel = 31U;
+            (void)WriteWallSensorAdcHc0Register(kAdcHcStopChannel);
+#endif
+            WaitForWallSensorAdcIdle();
+            ConfigureWallSensorAdc();
+        }
+
+        inline uint16_t ReadSingleWallSensorAdcCodeFromConfiguredChannel(uint8_t channel) noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            constexpr uint32_t kAdcHsCoco0 = (1U << 0);
+            (void)WriteWallSensorAdcHc0Register(static_cast<uint32_t>(channel & 0x1FU));
+            while ((ReadWallSensorMmio32(0x400C4020UL) & kAdcHsCoco0) == 0U)
             {
             }
 
-            ADC1_CFG = kWallSensorAdcMode;
-            ADC1_GC = 0U;
-            configured = true;
+            const uint16_t result = static_cast<uint16_t>(ReadWallSensorMmio32(0x400C4024UL));
+            MazeMap::App::Internal::LogWallSensorAdcRegisterWrite(
+                "post_conversion",
+                GetWallSensorAdcRuntimeMode(),
+                GetWallSensorAdcCurrentCfg(),
+                GetWallSensorAdcCurrentGc());
+            return result;
+#else
+            (void)channel;
+            return 0U;
+#endif
+        }
+
+        inline uint16_t ReadWallSensorAdcCodeFromConfiguredChannel(uint8_t channel) noexcept
+        {
+#if defined(ARDUINO_TEENSY41)
+            // Force ADC1 idle, then reassert the wall-sensor runtime mode immediately before the
+            // conversion burst. The timing logs showed ADC1 staying in PJRC's stock slow mode even
+            // after the higher-level setup path had nominally configured the fast wall-sensor mode.
+            PrepareWallSensorAdcForRead();
+
+            // Read the same channel three times back-to-back:
+            // 1. sacrificial read to absorb mux-switch charge inflow,
+            // 2. and 3. averaged to reduce residual settling error.
+            const uint16_t throwawayCode = ReadSingleWallSensorAdcCodeFromConfiguredChannel(channel);
+            const uint16_t secondCode = ReadSingleWallSensorAdcCodeFromConfiguredChannel(channel);
+            const uint16_t thirdCode = ReadSingleWallSensorAdcCodeFromConfiguredChannel(channel);
+            (void)throwawayCode;
+            return static_cast<uint16_t>((static_cast<uint32_t>(secondCode) + static_cast<uint32_t>(thirdCode) + 1U) >> 1U);
+#else
+            (void)channel;
+            return 0U;
 #endif
         }
 
         inline uint16_t ReadWallSensorAdcCode(uint8_t pin) noexcept
         {
-#if defined(ARDUINO_TEENSY41) && defined(ADC1_HC0) && defined(ADC1_HS) && defined(ADC_HS_COCO0) && defined(ADC1_R0)
+#if defined(ARDUINO_TEENSY41)
             uint8_t channel = 0U;
             if (ResolveWallSensorAdc1Channel(pin, channel))
             {
-                ConfigureWallSensorAdc();
-                ADC1_HC0 = channel;
-                while ((ADC1_HS & ADC_HS_COCO0) == 0U)
-                {
-                }
-
-                return static_cast<uint16_t>(ADC1_R0);
+                return ReadWallSensorAdcCodeFromConfiguredChannel(channel);
             }
 #endif
 

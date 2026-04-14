@@ -149,7 +149,6 @@ static void ConfigureDigitalOutputLow(uint8_t pin)
 inline bool SetupHardware()
 {
     // ADC / PWM global resolution setup.
-    analogReadResolution(HardwareConfig::kAdcBits);
     analogWriteResolution(HardwareConfig::kPwmBits);
 
     // Main motor outputs.

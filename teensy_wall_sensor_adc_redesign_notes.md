@@ -8,7 +8,7 @@ Scope: observations and implementation guidance only. This note does not change 
 
 The current control loop does apply motor actuation at tick start, but the timing logs do not expose that accurately. The large pre-UKF timing block is not an encoder transaction. It is mostly wall-sensor and instrumentation work.
 
-The largest avoidable cost is that the wall-sensor dark samples are currently taken with generic `analogRead()` calls before UKF predict begins, and each wall-sensor sample path does two `analogRead()` calls. On Teensy 4.x, the stock PJRC `analogRead()` path is configured conservatively for noise and generality, not for minimum latency. With the current code shape, that means:
+The largest avoidable cost is that the wall-sensor dark samples are currently taken with generic `analogRead()` calls before UKF predict begins, and each wall-sensor sample path does two `analogRead()` calls. On Teensy 4.x, the stock PJRC `analogRead()` path is configured conservatively for noise and generality, not for minimum latency. It is not configured for a `3-4 us` per-sensor sample budget. With the current code shape, that means:
 
 - four dark samples are read before UKF predict starts,
 - each dark sample performs two blocking ADC calls,
@@ -200,7 +200,39 @@ Important consequence:
 - the current repo never overrides the average count for the wall-sensor path,
 - the current wall-sensor code also performs a throwaway conversion before the real one.
 
-### 4. Practical timing estimate for the current path
+### 4. Verified lower bound: the current setup is not aimed at `3-4 us`
+
+This conclusion can be established without guessing the exact ADC clock actually chosen by the PJRC core.
+
+The NXP RT1060 datasheet gives 12-bit conversion time at `Fadc = 40 MHz`:
+
+- short sample, longest `ADSTS`: about `0.85 us`
+- long sample, longest `ADSTS`: about `1.25 us`
+
+The PJRC Teensy 4.x core currently configures the stock `analogRead()` path for:
+
+- 12-bit resolution,
+- long sample enabled,
+- `ADSTS = 3`,
+- hardware averaging enabled with `analog_num_average = 4`.
+
+That means even in the best possible case, if the ADC were running at the datasheet's top 12-bit high-speed rate of `40 MHz`, one `analogRead()` still has a hard lower bound of approximately:
+
+- `4 averaged conversions x 1.25 us = 5.0 us`
+
+before software overhead.
+
+`WallSensor::ReadLightLevel()` performs two `analogRead()` calls, so one wall-sensor sample has a hard lower bound of approximately:
+
+- `2 x 5.0 us = 10.0 us`
+
+before software overhead.
+
+That is already more than `2x` the requested `3-4 us` budget, even under a best-case assumption for ADC clocking and with zero extra software cost.
+
+So the current setup is not merely "not optimized" for `3-4 us`. It is structurally incompatible with that target.
+
+### 5. Practical timing estimate for the current path
 
 This is an estimate, not a measured claim, but it is directionally important.
 
@@ -221,9 +253,10 @@ That matches the observed fact that the pre-UKF bucket is much larger than a "si
 Even if the exact ADC clock differs, the architectural conclusion does not change:
 
 - the current path is far slower than the `3-4 us` per sensor budget,
+- the current setup is not aimed at that budget,
 - and it is slow because of the chosen software path, not because the RT1062 ADC hardware is incapable.
 
-### 5. Optical settle limits are real and currently explicit
+### 6. Optical settle limits are real and currently explicit
 
 The repo currently defines:
 
@@ -297,12 +330,13 @@ Total active ADC time target:
 
 - about `24-32 us` per full sweep
 
-This is realistic on the current board if:
+This is realistic on the current board only with a different ADC path than the current stock `analogRead()` configuration. Specifically:
 
-- the code stops using `analogRead()` for this hot path,
-- hardware averaging is disabled for the runtime sweep,
+- the code stops using stock `analogRead()` for this hot path,
+- runtime hardware averaging is disabled,
 - the throwaway conversion is removed,
-- the ADC is driven through a direct `ADC1` register path with calibrated fixed settings.
+- the ADC is driven through a direct `ADC1` register path with calibrated fixed settings,
+- and the front-end is validated to show that one direct conversion after the mux switch is accurate enough.
 
 ### Hard limit imposed by current optical settle constants
 
@@ -479,18 +513,26 @@ The recommended starting point is:
 - calibrated at boot
 - 12-bit resolution
 - high-speed enabled
-- asynchronous ADC clock path
+- asynchronous ADC clock path or another validated fast clock source
 - hardware averaging disabled
-- long sample enabled initially
+- start with long sample only if required by measured source impedance behavior
+- otherwise prefer the shortest validated sample period that still preserves measurement accuracy
 - sample period chosen so the total per-channel time stays inside the `3-4 us` budget
 
-Why start with 12-bit long sample:
+Why not blindly keep the stock long-sample setup:
 
 - it gives the best chance of preserving accuracy with a single conversion after a mux switch,
-- it likely fits the time budget if hardware averaging and the dummy read are removed,
-- it is the lowest-risk first implementation.
+- but it is not automatically required,
+- and it should be kept only if measured front-end settling actually needs it.
 
-If validation shows the front-end drives the ADC sample capacitor cleanly, the sample period can be shortened later.
+The target here is not to copy the stock `analogRead()` configuration minus averaging. The target is to find the shortest validated ADC setup that still preserves wall-sensor fidelity.
+
+Recommended order:
+
+1. start with a direct single-conversion path and no averaging,
+2. measure wall-sensor repeatability and inter-channel memory effects,
+3. shorten sample time until error becomes unacceptable,
+4. back off to the fastest stable setting.
 
 ### Why hardware averaging should be disabled in the runtime sweep
 

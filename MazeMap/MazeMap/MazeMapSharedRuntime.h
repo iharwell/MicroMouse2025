@@ -152,6 +152,11 @@ namespace MazeMap::App::Internal
         std::unique_ptr<Implementation> _impl;
     };
 
+    EXPORT void LogWallSensorAdcRegisterWrite(
+        const char* phase,
+        std::uint32_t expectedCfg,
+        std::uint32_t readCfg,
+        std::uint32_t readGc) noexcept;
     EXPORT SharedRobotRuntime& GetSharedRobotRuntime();
 }
 

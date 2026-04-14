@@ -864,6 +864,10 @@ public:
         TEstimatorWork&& estimatorWork)
     {
         DiagnosticSensorSnapshot snapshot{};
+        snapshot.wallSensorAdcCfgBeforeStart = MazeMap::Platform::GetWallSensorAdcCurrentCfg();
+        snapshot.wallSensorAdcGcBeforeStart = MazeMap::Platform::GetWallSensorAdcCurrentGc();
+        snapshot.wallSensorAdcTargetCfg = MazeMap::Platform::GetWallSensorAdcRuntimeMode();
+        snapshot.wallSensorAdcIpgClockHz = MazeMap::Platform::GetWallSensorAdcIpgClockHz();
         AsyncWallSensorSweepRead wallRead{};
         StartAsyncWallSensorSweepRead(
             _vehicle.FrontLeft,
@@ -875,6 +879,8 @@ public:
             _vehicle.SideRight,
             _sideRightLedOffCommandUs,
             wallRead);
+        snapshot.wallSensorAdcCfgAfterStart = MazeMap::Platform::GetWallSensorAdcCurrentCfg();
+        snapshot.wallSensorAdcGcAfterStart = MazeMap::Platform::GetWallSensorAdcCurrentGc();
 
         bool imuCaptured = false;
         auto serviceWallRead = [&wallRead]() noexcept

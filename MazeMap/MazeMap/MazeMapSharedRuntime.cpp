@@ -10,6 +10,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace
@@ -1086,6 +1087,59 @@ namespace MazeMap::App::Internal
     const MazeMap::mmlog::MmLogLogger& SharedRobotRuntime::UtilityDataLogger() const noexcept
     {
         return _impl->dataLogger;
+    }
+
+    void LogWallSensorAdcRegisterWrite(
+        const char* phase,
+        std::uint32_t expectedCfg,
+        std::uint32_t readCfg,
+        std::uint32_t readGc) noexcept
+    {
+#if defined(ARDUINO_TEENSY41)
+        static bool loggedFirstNominalApply = false;
+        static std::uint32_t lastLoggedReadCfg = std::numeric_limits<std::uint32_t>::max();
+        static std::uint32_t lastLoggedReadGc = std::numeric_limits<std::uint32_t>::max();
+        static char lastLoggedPhase[32] = {};
+
+        SharedRobotRuntime& runtime = GetSharedRobotRuntime();
+        if (!runtime.TextLogIsOpen())
+        {
+            return;
+        }
+
+        const char* const resolvedPhase = ((phase != nullptr) && (phase[0] != '\0')) ? phase : "unknown";
+        const bool nominal = (readCfg == expectedCfg) && (readGc == 0U);
+        if (nominal && (std::strcmp(resolvedPhase, "apply") == 0))
+        {
+            if (loggedFirstNominalApply)
+            {
+                return;
+            }
+
+            loggedFirstNominalApply = true;
+        }
+        else if ((readCfg == lastLoggedReadCfg) &&
+            (readGc == lastLoggedReadGc) &&
+            (std::strncmp(lastLoggedPhase, resolvedPhase, sizeof(lastLoggedPhase) - 1U) == 0))
+        {
+            return;
+        }
+
+        lastLoggedReadCfg = readCfg;
+        lastLoggedReadGc = readGc;
+        std::snprintf(lastLoggedPhase, sizeof(lastLoggedPhase), "%s", resolvedPhase);
+        (void)runtime.AppendTextLogFormatted(
+            "wall_adc_%s expected_cfg=%lu read_cfg=%lu read_gc=%lu",
+            resolvedPhase,
+            static_cast<unsigned long>(expectedCfg),
+            static_cast<unsigned long>(readCfg),
+            static_cast<unsigned long>(readGc));
+#else
+        (void)phase;
+        (void)expectedCfg;
+        (void)readCfg;
+        (void)readGc;
+#endif
     }
 
     SharedRobotRuntime& GetSharedRobotRuntime()
