@@ -1998,6 +1998,99 @@ namespace MazeMap
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) > 1.0e-2f);
         }
 
+        TEST_METHOD(SrUkfCoreYawRateUpdateAppliesGripPseudoMeasurementForCredibleRollingGrip)
+        {
+            const PlantParams params = PlantParams::Default();
+            const float forwardVelocityMps = 1.0f;
+            const float yawRateRadps = 1.0f;
+            const float halfTrackWidthM = 0.5f * params.trackWidthM;
+            const float leftWheelSpeedRadps =
+                (forwardVelocityMps + (halfTrackWidthM * yawRateRadps)) / params.wheelRadiusM;
+            const float rightWheelSpeedRadps =
+                (forwardVelocityMps - (halfTrackWidthM * yawRateRadps)) / params.wheelRadiusM;
+
+            SrUkfCore core;
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                forwardVelocityMps,
+                0.20f,
+                yawRateRadps,
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps,
+                0.0f);
+            Assert::IsTrue(core.reset(
+                initialState,
+                BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.10f, 0.30f, 0.03f)));
+
+            EncoderObs encoder{};
+            encoder.omegaLeftRadps = leftWheelSpeedRadps;
+            encoder.omegaRightRadps = rightWheelSpeedRadps;
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.001f);
+            Assert::IsTrue(encoderResult.attempted);
+            Assert::IsTrue(encoderResult.accepted);
+
+            const float initialLateralVelocityMps = core.state()(VehicleState::kV);
+            const float initialLateralVarianceMps2 = core.covariance()(VehicleState::kV, VehicleState::kV);
+            const float expectedSigmaMps = 0.003f + (0.05f * forwardVelocityMps);
+
+            const MeasurementUpdateResult yawResult = core.updateYawRate(yawRateRadps);
+            Assert::IsTrue(yawResult.attempted);
+            Assert::IsTrue(yawResult.accepted);
+
+            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateMatrix covariance = core.covariance();
+            Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 0.02f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kV)) < std::fabs(initialLateralVelocityMps));
+            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) < initialLateralVarianceMps2);
+            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) <= ((expectedSigmaMps * expectedSigmaMps) + 1.0e-5f));
+        }
+
+        TEST_METHOD(SrUkfCoreYawRateUpdateInflatesLateralVarianceWhenRollingGripIsNotCredible)
+        {
+            const PlantParams params = PlantParams::Default();
+            const float forwardVelocityMps = 2.0f;
+            const float yawRateRadps = 8.0f;
+            const float halfTrackWidthM = 0.5f * params.trackWidthM;
+            const float leftWheelSpeedRadps =
+                (forwardVelocityMps + (halfTrackWidthM * yawRateRadps)) / params.wheelRadiusM;
+            const float rightWheelSpeedRadps =
+                (forwardVelocityMps - (halfTrackWidthM * yawRateRadps)) / params.wheelRadiusM;
+
+            SrUkfCore core;
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                forwardVelocityMps,
+                0.20f,
+                yawRateRadps,
+                leftWheelSpeedRadps,
+                rightWheelSpeedRadps,
+                0.0f);
+            Assert::IsTrue(core.reset(
+                initialState,
+                BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.001f, 0.05f, 0.30f, 0.03f)));
+
+            EncoderObs encoder{};
+            encoder.omegaLeftRadps = leftWheelSpeedRadps;
+            encoder.omegaRightRadps = rightWheelSpeedRadps;
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.001f);
+            Assert::IsTrue(encoderResult.attempted);
+            Assert::IsTrue(encoderResult.accepted);
+
+            const MeasurementUpdateResult yawResult = core.updateYawRate(yawRateRadps);
+            Assert::IsTrue(yawResult.attempted);
+            Assert::IsTrue(yawResult.accepted);
+
+            const float expectedSigmaMps = 0.003f + (0.05f * forwardVelocityMps);
+            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateMatrix covariance = core.covariance();
+            Assert::IsTrue(std::fabs(state(VehicleState::kV)) > 0.10f);
+            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) >= ((expectedSigmaMps * expectedSigmaMps) - 1.0e-6f));
+        }
+
         TEST_METHOD(SrUkfCoreDebugTextDumpIncludesStateCovarianceNoiseAndPlantConfiguration)
         {
             SrUkfCore core;

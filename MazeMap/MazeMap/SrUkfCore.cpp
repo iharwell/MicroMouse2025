@@ -45,6 +45,9 @@ namespace
         bool enableVReset = true;
     };
 
+    constexpr float kGripLateralVelocityBaseSigmaMps = 0.003f;
+    constexpr float kGripLateralVelocitySigmaPerForwardSpeed = 0.05f;
+
     float ComputeRhoSustain(
         const MazeMap::VehicleState::StateVector& state,
         const MazeMap::PlantParams& params) noexcept
@@ -92,6 +95,19 @@ namespace
         }
 
         return (std::min)(2.50f + (4.00f * (rhoSustain - 1.00f)), 5.00f);
+    }
+
+    float ComputeGripLateralVelocitySigmaMps(
+        const MazeMap::VehicleState::StateVector& state) noexcept
+    {
+        const float forwardVelocityMps = state(MazeMap::VehicleState::kU);
+        const float resolvedForwardSpeedMps =
+            std::isfinite(forwardVelocityMps) ?
+            std::fabs(forwardVelocityMps) :
+            0.0f;
+        return
+            kGripLateralVelocityBaseSigmaMps +
+            (kGripLateralVelocitySigmaPerForwardSpeed * resolvedForwardSpeedMps);
     }
 
     LateralNoiseSchedule BuildLateralNoiseSchedule(
@@ -891,6 +907,7 @@ namespace MazeMap
                 return prediction;
             },
             invokeLoop);
+        const float yawMeasurementNis = _filter.lastNis();
         if (result.accepted)
         {
             VehicleState currentState;
@@ -904,8 +921,15 @@ namespace MazeMap
                     priorGyroBiasRadps,
                     priorGyroBiasVarianceRadps2);
             }
+            else if (_acceptedEncoderUpdateSincePredict && !HasExactZeroWheelObservation(_lastEncoderObs))
+            {
+                (void)applyGripLateralVelocityConstraint(
+                    yawRateRadps,
+                    loopHookContext,
+                    loopHook);
+            }
         }
-        result.nis = _filter.lastNis();
+        result.nis = yawMeasurementNis;
         return result;
     }
 
@@ -1034,6 +1058,75 @@ namespace MazeMap
         return
             (std::fabs(_lastControl.leftMotorCommand) <= 1.0e-6f) &&
             (std::fabs(_lastControl.rightMotorCommand) <= 1.0e-6f);
+    }
+
+    bool SrUkfCore::applyGripLateralVelocityConstraint(
+        float yawRateRadps,
+        void* loopHookContext,
+        LoopHookInvoker loopHook) noexcept
+    {
+        StateVector gripReferenceState = _filter.state();
+        const float estimatedGyroBiasRadps = gripReferenceState(VehicleState::kBgz);
+        if (std::isfinite(yawRateRadps) && std::isfinite(estimatedGyroBiasRadps))
+        {
+            gripReferenceState(VehicleState::kR) = yawRateRadps - estimatedGyroBiasRadps;
+        }
+
+        const float sigmaMps = ComputeGripLateralVelocitySigmaMps(gripReferenceState);
+        if (!(std::isfinite(sigmaMps) && (sigmaMps > 0.0f)))
+        {
+            return false;
+        }
+
+        const LateralNoiseSchedule lateralNoiseSchedule = BuildLateralNoiseSchedule(gripReferenceState, _params);
+        if (!lateralNoiseSchedule.enableVReset)
+        {
+            inflateLateralVelocityVariance(sigmaMps);
+            return false;
+        }
+
+        Eigen::Matrix<float, 1, 1> z;
+        z << 0.0f;
+        Eigen::Matrix<float, 1, 1> sqrtNoise;
+        sqrtNoise(0, 0) = sigmaMps;
+        const auto invokeLoop = [loopHookContext, loopHook]() noexcept
+        {
+            InvokeLoopHook(loopHookContext, loopHook);
+        };
+        const bool accepted = _filter.Update<1>(
+            z,
+            sqrtNoise,
+            std::numeric_limits<float>::infinity(),
+            [](const StateVector& sigmaPoint) noexcept
+            {
+                Eigen::Matrix<float, 1, 1> prediction;
+                prediction << sigmaPoint(VehicleState::kV);
+                return prediction;
+            },
+            invokeLoop);
+        if (!accepted)
+        {
+            inflateLateralVelocityVariance(sigmaMps);
+        }
+        return accepted;
+    }
+
+    void SrUkfCore::inflateLateralVelocityVariance(float minimumSigmaMps) noexcept
+    {
+        if (!(std::isfinite(minimumSigmaMps) && (minimumSigmaMps > 0.0f)))
+        {
+            return;
+        }
+
+        const float minimumVarianceMps2 = minimumSigmaMps * minimumSigmaMps;
+        StateMatrix covariance = _filter.covariance();
+        if (covariance(VehicleState::kV, VehicleState::kV) >= minimumVarianceMps2)
+        {
+            return;
+        }
+
+        covariance(VehicleState::kV, VehicleState::kV) = minimumVarianceMps2;
+        _filter.setState(_filter.state(), covariance);
     }
 
     void SrUkfCore::anchorPoseToEncoderDelta(

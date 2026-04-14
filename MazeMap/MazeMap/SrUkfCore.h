@@ -206,6 +206,11 @@ namespace MazeMap
             LoopHookInvoker loopHook) noexcept;
 
         bool controlCommandsAreEffectivelyZero() const noexcept;
+        bool applyGripLateralVelocityConstraint(
+            float yawRateRadps,
+            void* loopHookContext,
+            LoopHookInvoker loopHook) noexcept;
+        void inflateLateralVelocityVariance(float minimumSigmaMps) noexcept;
         void anchorPoseToEncoderDelta(StateVector& anchoredState, const EncoderObs& measured) const noexcept;
         void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;

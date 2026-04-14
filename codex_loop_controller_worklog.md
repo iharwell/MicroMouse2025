@@ -107,3 +107,62 @@ without changing the control/sensor/UKF operation ordering.
   - verification log: `codex_verify/logs/build_and_verify_latest_20260413_234917_816.txt`.
 - Remaining spec gap after this checkpoint:
   - `DiagnosticController.cpp` still uses per-phase `RunPhaseSession(...)` boundaries and remains the only known controller in this migration slice that still ends and restarts the loop between phases instead of handing off inside one continuous session.
+
+## 2026-04-14 Diagnostic Migration Kickoff
+
+- Re-read the current target design before editing `DiagnosticController.cpp`.
+- Design lines driving this refactor:
+  - `codex_loop_controller_target_design.md:454-457`
+    - `BeginSession()` copies callbacks by value and the callback targets plus durable mode `context` must remain valid for the full active session.
+  - `codex_loop_controller_target_design.md:459-463`
+    - mode logic should advance between phase handlers without reconfiguring the whole session.
+  - `codex_loop_controller_target_design.md:507-510`
+    - `TickServices` is limited to end-of-session, pause, next-callback retargeting, and runtime-stop forwarding.
+  - `codex_loop_controller_target_design.md:539-542`
+    - leaving the strict periodic loop must be explicit rather than happening through silent caller-driven gaps between ticks.
+- Current `DiagnosticController.cpp` audit:
+  - `Run()` still sequences the diagnostic schedule by repeatedly calling `HoldPhase(...)`, `ExecuteStraightPhase(...)`, `ExecuteTurnPhase(...)`, `ExecuteArcPhase(...)`, and characterization helpers that each invoke `RunPhaseSession(...)`.
+  - That means the strict loop is still ending and restarting between every diagnostic phase instead of remaining active for the full scenario.
+- Intended convergence for this task:
+  - keep `LoopController` untouched unless a code/spec mismatch is proven,
+  - migrate `DiagnosticController` onto one durable session,
+  - keep the mode as the owner of the diagnostic schedule, metrics, summaries, and schema,
+  - move phase transitions to controller-owned in-session state handoff instead of per-phase session restarts.
+
+## 2026-04-14 Diagnostic Continuous-Session Checkpoint
+
+- `MazeMap/MazeMap/DiagnosticController.cpp` now starts one `LoopController` session in `Run()` and drives the full diagnostic scenario through controller-owned `ScenarioStep` handoff.
+- Removed the per-phase `RunPhaseSession(...)` restart path from `DiagnosticController`.
+- The controller now keeps the diagnostic schedule inside one durable mode instance and advances between:
+  - hold phases,
+  - kickoff and forward characterization samples plus recovery,
+  - turn sweeps,
+  - short/long straight sequences,
+  - circle sweeps,
+  - square loops,
+  - final idle.
+- Result/event emission stayed mode-owned:
+  - straight/turn/arc/circle/square result summaries are still written by `DiagnosticController`,
+  - characterization result events still stay in the mode,
+  - the mode still owns the diagnostic schema and sample logging.
+- `LoopController` was not modified in this slice because the controller migration could be completed using the existing durable-session contract without finding a code/spec mismatch that required loop changes.
+- Next step: verify the current source against the repo’s release build/test flow after checking that the active artifacts are not stale relative to this edit.
+- First verification run after the refactor failed in Teensy compile with a local refactor mistake:
+  - `_pendingReturnDistanceM` was added to the constructor and phase logic but the member declaration was missing.
+  - Fix applied immediately in `DiagnosticController.cpp`; rerun of the same approved build-and-verify flow is next.
+- Second verification attempt behavior:
+  - Teensy compile completed and the host `MazeMap.dll` timestamp advanced,
+  - but the `build_and_verify_latest` flow stopped emitting log output immediately after launching the host `msbuild` command,
+  - and the spawned host-build `cmd` process remained resident long past the expected step duration.
+- Recovery action in progress:
+  - terminate that stuck verification process,
+  - rerun the same approved `build_and_verify_latest.cmd --no-pause` flow once with a longer timeout to distinguish a real hang from a slow host build/test phase.
+- Final verification result for this slice:
+  - reran `build_and_verify_latest.cmd --no-pause` with a longer timeout,
+  - Teensy compile succeeded,
+  - host `Release|x64` build completed,
+  - release unit tests completed successfully,
+  - verification log: `codex_verify/logs/build_and_verify_latest_20260414_005542_079.txt`.
+- Observed verification nuance:
+  - the host release build step was much slower than expected in this environment but did complete successfully when allowed to run long enough,
+  - no `LoopController` source changes were required to complete the `DiagnosticController` migration.

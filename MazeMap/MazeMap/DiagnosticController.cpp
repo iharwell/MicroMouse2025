@@ -53,6 +53,7 @@ public:
         , _faulted(false)
         , _phaseId(0UL)
         , _sampleCount(0UL)
+        , _pendingReturnDistanceM(0.0f)
     {
         _logFileName[0] = '\0';
     }
@@ -101,40 +102,28 @@ public:
             return;
         }
 
-        bool ok = true;
-        ok = ok && HoldPhase("startup_settle", DiagnosticConfig::kStartupSettleMs, true);
-        ok = ok && HoldPhase("baseline_idle", DiagnosticConfig::kBaselineHoldMs, true);
-        ok = ok && ExecuteKickoffSweep();
-        ok = ok && ExecuteForwardSweep();
-        ok = ok && HoldPhase("characterization_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        ok = ok && ExecuteTurnPhase("turn_cw_90_1", HALF_PI_F);
-        ok = ok && ExecuteTurnPhase("turn_ccw_90_1", -HALF_PI_F);
-        ok = ok && ExecuteTurnPhase("turn_cw_90_2", HALF_PI_F);
-        ok = ok && ExecuteTurnPhase("turn_ccw_90_2", -HALF_PI_F);
-        ok = ok && ExecuteTurnPhase("turn_cw_180", PI_F);
-        ok = ok && ExecuteTurnPhase("turn_ccw_180", -PI_F);
-        ok = ok && HoldPhase("turn_sweep_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        float shortReturnDistanceM = LegacyDiagnosticConfig::kShortStraightDistanceM;
-        ok = ok && ExecuteStraightPhase("straight_short_forward", LegacyDiagnosticConfig::kShortStraightDistanceM, LegacyDiagnosticConfig::kSlowStraightSpeedMps, &shortReturnDistanceM);
-        shortReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(LegacyDiagnosticConfig::kShortStraightDistanceM, shortReturnDistanceM);
-        ok = ok && ExecuteTurnPhase("straight_short_turnaround", PI_F);
-        ok = ok && ExecuteStraightPhase("straight_short_return", shortReturnDistanceM, LegacyDiagnosticConfig::kSlowStraightSpeedMps);
-        ok = ok && ExecuteTurnPhase("straight_short_reset_heading", PI_F);
-        ok = ok && HoldPhase("straight_short_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        float longReturnDistanceM = LegacyDiagnosticConfig::kLongStraightDistanceM;
-        ok = ok && ExecuteStraightPhase("straight_long_forward", LegacyDiagnosticConfig::kLongStraightDistanceM, LegacyDiagnosticConfig::kFastStraightSpeedMps, &longReturnDistanceM);
-        longReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(LegacyDiagnosticConfig::kLongStraightDistanceM, longReturnDistanceM);
-        ok = ok && ExecuteTurnPhase("straight_long_turnaround", PI_F);
-        ok = ok && ExecuteStraightPhase("straight_long_return", longReturnDistanceM, LegacyDiagnosticConfig::kFastStraightSpeedMps);
-        ok = ok && ExecuteTurnPhase("straight_long_reset_heading", PI_F);
-        ok = ok && HoldPhase("straight_long_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        ok = ok && ExecuteCircleSpeedSweep("slow", LegacyDiagnosticConfig::kSlowStraightSpeedMps);
-        ok = ok && ExecuteCircleSpeedSweep("medium", LegacyDiagnosticConfig::kCircleMediumSpeedMps);
-        ok = ok && ExecuteCircleSpeedSweep("fast", LegacyDiagnosticConfig::kFastStraightSpeedMps);
-        ok = ok && ExecuteSquareLoop("square_cw", HALF_PI_F);
-        ok = ok && HoldPhase("square_cw_settle", DiagnosticConfig::kInterTestHoldMs, true);
-        ok = ok && ExecuteSquareLoop("square_ccw", -HALF_PI_F);
-        ok = ok && HoldPhase("final_idle", DiagnosticConfig::kBaselineHoldMs / 2U, true);
+        bool ok = StartScenarioStep(ScenarioStep::StartupSettle);
+        if (ok)
+        {
+            LoopController::ModeCallbacks callbacks{};
+            callbacks.onModeWork = &DiagnosticController::ModeWorkThunk;
+            callbacks.context = this;
+            if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
+            {
+                _phaseFn = nullptr;
+                ok = Fail("Diagnostic loop session start failed");
+            }
+            else
+            {
+                const LoopController::SessionResult result = _loopController.Run();
+                _phaseFn = nullptr;
+                ok = (result.status == LoopController::SessionResult::Status::Completed) && !_faulted;
+            }
+        }
+        else
+        {
+            _phaseFn = nullptr;
+        }
 
         _drive.Brake();
         _drive.UseNominalWheelControlProfile();
@@ -155,6 +144,76 @@ private:
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
         LoopController::TickServices& services);
+
+    enum class ScenarioStep : std::uint8_t
+    {
+        None,
+        StartupSettle,
+        BaselineIdle,
+        KickoffSweepPrep,
+        KickoffSweepSample,
+        RecoveryTurnaround,
+        RecoveryReturn,
+        RecoveryResetHeading,
+        RecoverySettle,
+        ForwardSweepPrep,
+        ForwardSweepSample,
+        CharacterizationSettle,
+        TurnCw90_1,
+        TurnCcw90_1,
+        TurnCw90_2,
+        TurnCcw90_2,
+        TurnCw180,
+        TurnCcw180,
+        TurnSweepSettle,
+        StraightShortForward,
+        StraightShortTurnaround,
+        StraightShortReturn,
+        StraightShortResetHeading,
+        StraightShortSettle,
+        StraightLongForward,
+        StraightLongTurnaround,
+        StraightLongReturn,
+        StraightLongResetHeading,
+        StraightLongSettle,
+        CircleSlowCwHalf1,
+        CircleSlowCwHalf2,
+        CircleSlowCwSettle,
+        CircleSlowCcwHalf1,
+        CircleSlowCcwHalf2,
+        CircleSlowSettle,
+        CircleMediumCwHalf1,
+        CircleMediumCwHalf2,
+        CircleMediumCwSettle,
+        CircleMediumCcwHalf1,
+        CircleMediumCcwHalf2,
+        CircleMediumSettle,
+        CircleFastCwHalf1,
+        CircleFastCwHalf2,
+        CircleFastCwSettle,
+        CircleFastCcwHalf1,
+        CircleFastCcwHalf2,
+        CircleFastSettle,
+        SquareCwLeg1,
+        SquareCwTurn1,
+        SquareCwLeg2,
+        SquareCwTurn2,
+        SquareCwLeg3,
+        SquareCwTurn3,
+        SquareCwLeg4,
+        SquareCwTurn4,
+        SquareCwSettle,
+        SquareCcwLeg1,
+        SquareCcwTurn1,
+        SquareCcwLeg2,
+        SquareCcwTurn2,
+        SquareCcwLeg3,
+        SquareCcwTurn3,
+        SquareCcwLeg4,
+        SquareCcwTurn4,
+        FinalIdle,
+        Complete
+    };
 
     static void HandleRuntimeFault(void* context, const char* reason) noexcept
     {
@@ -207,7 +266,7 @@ private:
     {
         bool stationary{};
         unsigned long deadlineMs{};
-        bool started{};
+        ScenarioStep nextStep{ ScenarioStep::None };
     } _holdPhaseState{};
 
     struct StraightPhaseState final
@@ -222,8 +281,8 @@ private:
         unsigned long timeoutMs{};
         EncoderProgressWatchdog translationWatchdog{};
         StraightPhaseMetrics metrics{};
-        float* outTraveledDistanceM{};
-        bool started{};
+        ScenarioStep nextStep{ ScenarioStep::None };
+        bool selectReturnDistance{};
     } _straightPhaseState{};
 
     struct KickoffPhaseState final
@@ -237,8 +296,12 @@ private:
         float maxSpeedMps{};
         bool travelLimited{};
         unsigned long travelLimitSettleDeadlineMs{};
-        bool started{};
     } _kickoffPhaseState{};
+
+    struct KickoffSweepSequenceState final
+    {
+        std::size_t nextMagnitudeIndex{};
+    } _kickoffSweepSequenceState{};
 
     struct ForwardPhaseState final
     {
@@ -257,8 +320,12 @@ private:
         bool holdComplete{};
         bool travelLimited{};
         unsigned long travelLimitSettleDeadlineMs{};
-        bool started{};
     } _forwardPhaseState{};
+
+    struct ForwardSweepSequenceState final
+    {
+        std::uint16_t nextSampleIndex{};
+    } _forwardSweepSequenceState{};
 
     struct TurnPhaseState final
     {
@@ -268,7 +335,8 @@ private:
         MazeMap::InPlaceTurnProfile turnProfile{};
         unsigned long timeoutMs{};
         TurnPhaseMetrics metrics{};
-        bool started{};
+        ScenarioStep nextStep{ ScenarioStep::None };
+        bool writeSquareClosure{};
     } _turnPhaseState{};
 
     struct ArcPhaseState final
@@ -277,7 +345,6 @@ private:
         float distanceM{};
         float angleRad{};
         float cruiseSpeedMps{};
-        ArcPhaseMetrics* outMetrics{};
         MotionLimits limits{};
         float startDistanceM{};
         float startYawRad{};
@@ -288,8 +355,33 @@ private:
         unsigned long timeoutMs{};
         EncoderProgressWatchdog translationWatchdog{};
         ArcPhaseMetrics metrics{};
-        bool started{};
+        ScenarioStep nextStep{ ScenarioStep::None };
+        bool writeCircleSummary{};
     } _arcPhaseState{};
+
+    struct CharacterizationRecoveryState final
+    {
+        char label[24]{};
+        float traveledDistanceM{};
+        ScenarioStep nextStep{ ScenarioStep::None };
+    } _characterizationRecoveryState{};
+
+    struct CircleSequenceState final
+    {
+        char namePrefix[48]{};
+        float cruiseSpeedMps{};
+        PoseEstimate startPose{};
+        DriveTelemetry startTelemetry{};
+        ArcPhaseMetrics totalMetrics{};
+    } _circleSequenceState{};
+
+    struct SquareSequenceState final
+    {
+        char namePrefix[24]{};
+        PoseEstimate startPose{};
+    } _squareSequenceState{};
+
+    float _pendingReturnDistanceM;
 
     LoopController::SessionOptions BuildLoopOptions() const
     {
@@ -326,22 +418,735 @@ private:
         return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
     }
 
-    bool RunPhaseSession(PhaseFn phase)
+    bool AdvanceToNextStep(
+        const ScenarioStep nextStep,
+        LoopController::TickServices& services,
+        const char* const failureMessage)
     {
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &DiagnosticController::ModeWorkThunk;
-        callbacks.context = this;
-        _phaseFn = phase;
-
-        if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
+        if (nextStep == ScenarioStep::Complete)
         {
-            _phaseFn = nullptr;
-            return Fail("Diagnostic loop session start failed");
+            services.RequestEndLoop();
+            return true;
         }
 
-        const LoopController::SessionResult result = _loopController.Run();
-        _phaseFn = nullptr;
-        return (result.status == LoopController::SessionResult::Status::Completed) && !_faulted;
+        if (StartScenarioStep(nextStep))
+        {
+            return true;
+        }
+
+        services.Fault(failureMessage);
+        return false;
+    }
+
+    bool StartHoldPhase(
+        const char* const phaseName,
+        const uint16_t durationMs,
+        const bool stationary,
+        const ScenarioStep nextStep)
+    {
+        if (!StartPhase(phaseName))
+        {
+            return false;
+        }
+
+        _holdPhaseState = HoldPhaseState{};
+        _holdPhaseState.stationary = stationary;
+        _holdPhaseState.deadlineMs = millis() + durationMs;
+        _holdPhaseState.nextStep = nextStep;
+        _phaseFn = &DiagnosticController::HoldPhaseTick;
+        return true;
+    }
+
+    bool StartStraightPhase(
+        const char* const phaseName,
+        const float distanceM,
+        const float cruiseSpeedMps,
+        const ScenarioStep nextStep,
+        const bool selectReturnDistance = false)
+    {
+        if (!StartPhase(phaseName))
+        {
+            return false;
+        }
+
+        _straightPhaseState = StraightPhaseState{};
+        _straightPhaseState.phaseName = phaseName;
+        _straightPhaseState.distanceM = distanceM;
+        _straightPhaseState.cruiseSpeedMps = cruiseSpeedMps;
+        _straightPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+        _straightPhaseState.targetHeading = _drive.GetPose().headingUnit;
+        _straightPhaseState.timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (6000.0f * distanceM));
+        _straightPhaseState.translationWatchdog.Reset(0.0f, millis());
+        _straightPhaseState.nextStep = nextStep;
+        _straightPhaseState.selectReturnDistance = selectReturnDistance;
+        _phaseFn = &DiagnosticController::StraightPhaseTick;
+        return true;
+    }
+
+    bool StartKickoffCharacterizationSample(const float driveCommand)
+    {
+        char label[24] = {};
+        char phaseName[48] = {};
+        BuildDriveCommandLabel("kickoff", driveCommand, label, sizeof(label));
+        snprintf(phaseName, sizeof(phaseName), "%s_probe", label);
+        if (!StartPhase(phaseName))
+        {
+            return false;
+        }
+
+        _kickoffPhaseState = KickoffPhaseState{};
+        snprintf(_kickoffPhaseState.label, sizeof(_kickoffPhaseState.label), "%s", label);
+        _kickoffPhaseState.driveCommand = driveCommand;
+        _kickoffPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+        _kickoffPhaseState.pulseDeadlineMs = millis() + LegacyDiagnosticConfig::kKickoffSweepPulseMs;
+        _kickoffPhaseState.settleDeadlineMs = _kickoffPhaseState.pulseDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
+        _kickoffPhaseState.travelLimitM = MazeMap::ComputeDiagnosticCharacterizationTravelLimitM(
+            DiagnosticConfig::kBoundaryHalfSpanM,
+            DiagnosticConfig::kCharacterizationBoundaryReserveM);
+        _phaseFn = &DiagnosticController::KickoffCharacterizationTick;
+        return true;
+    }
+
+    bool StartNextKickoffCharacterizationSample()
+    {
+        if (_kickoffSweepSequenceState.nextMagnitudeIndex >= MazeMap::kOpenFloorLaunchDriveMagnitudes.size())
+        {
+            return StartScenarioStep(ScenarioStep::ForwardSweepPrep);
+        }
+
+        const float driveCommand = MazeMap::kOpenFloorLaunchDriveMagnitudes[_kickoffSweepSequenceState.nextMagnitudeIndex];
+        ++_kickoffSweepSequenceState.nextMagnitudeIndex;
+        return StartKickoffCharacterizationSample(driveCommand);
+    }
+
+    bool FinishKickoffCharacterizationSample()
+    {
+        const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _kickoffPhaseState.startDistanceM);
+        const bool moved =
+            (traveledDistanceM >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM) ||
+            (_kickoffPhaseState.maxSpeedMps >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdMps);
+
+        char message[192] = {};
+        const int length = snprintf(
+            message,
+            sizeof(message),
+            "%s;cmd=%.2f;dist_m=%.4f;max_speed_mps=%.3f;moved=%u;travel_limited=%u",
+            _kickoffPhaseState.label,
+            _kickoffPhaseState.driveCommand,
+            traveledDistanceM,
+            _kickoffPhaseState.maxSpeedMps,
+            moved ? 1U : 0U,
+            _kickoffPhaseState.travelLimited ? 1U : 0U);
+        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        {
+            return Fail("Failed to format kickoff characterization result");
+        }
+        if (!WriteEventOrFail("kickoff_result", message, "Failed to write kickoff characterization result"))
+        {
+            return false;
+        }
+
+        return StartCharacterizationRecovery(
+            _kickoffPhaseState.label,
+            traveledDistanceM,
+            ScenarioStep::KickoffSweepSample);
+    }
+
+    bool StartForwardCharacterizationSample(const float forwardDriveCommand)
+    {
+        char label[24] = {};
+        char phaseName[48] = {};
+        BuildDriveCommandLabel("forward", forwardDriveCommand, label, sizeof(label));
+        snprintf(phaseName, sizeof(phaseName), "%s_probe", label);
+        if (!StartPhase(phaseName))
+        {
+            return false;
+        }
+
+        _forwardPhaseState = ForwardPhaseState{};
+        snprintf(_forwardPhaseState.label, sizeof(_forwardPhaseState.label), "%s", label);
+        _forwardPhaseState.forwardDriveCommand = forwardDriveCommand;
+        _forwardPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+        _forwardPhaseState.kickoffDeadlineMs = millis() + LegacyDiagnosticConfig::kForwardSweepKickoffMs;
+        _forwardPhaseState.holdDeadlineMs = _forwardPhaseState.kickoffDeadlineMs + LegacyDiagnosticConfig::kForwardSweepHoldMs;
+        _forwardPhaseState.settleDeadlineMs = _forwardPhaseState.holdDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
+        _forwardPhaseState.travelLimitM = MazeMap::ComputeDiagnosticCharacterizationTravelLimitM(
+            DiagnosticConfig::kBoundaryHalfSpanM,
+            DiagnosticConfig::kCharacterizationBoundaryReserveM);
+        _phaseFn = &DiagnosticController::ForwardCharacterizationTick;
+        return true;
+    }
+
+    bool StartNextForwardCharacterizationSample()
+    {
+        const float driveCommand =
+            LegacyDiagnosticConfig::kForwardSweepMinDriveCommand +
+            (LegacyDiagnosticConfig::kForwardSweepStepDriveCommand * static_cast<float>(_forwardSweepSequenceState.nextSampleIndex));
+        if (driveCommand > (LegacyDiagnosticConfig::kForwardSweepMaxDriveCommand + 0.0001f))
+        {
+            return StartScenarioStep(ScenarioStep::CharacterizationSettle);
+        }
+
+        ++_forwardSweepSequenceState.nextSampleIndex;
+        return StartForwardCharacterizationSample(driveCommand);
+    }
+
+    bool FinishForwardCharacterizationSample()
+    {
+        if (!_forwardPhaseState.holdComplete)
+        {
+            _forwardPhaseState.holdComplete = true;
+            _forwardPhaseState.holdEndDistanceM = _drive.GetAverageDistanceMeters();
+        }
+
+        const float totalDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _forwardPhaseState.startDistanceM);
+        const float holdDistanceM =
+            _forwardPhaseState.holdStarted ?
+            std::fabs(_forwardPhaseState.holdEndDistanceM - _forwardPhaseState.holdStartDistanceM) :
+            0.0f;
+        const float averageHoldSpeedMps =
+            (_forwardPhaseState.holdElapsedSeconds > 0.0f) ?
+            (holdDistanceM / _forwardPhaseState.holdElapsedSeconds) :
+            0.0f;
+        const bool carried =
+            (averageHoldSpeedMps >= LegacyDiagnosticConfig::kForwardSweepCarryThresholdMps) ||
+            (holdDistanceM >= LegacyDiagnosticConfig::kForwardSweepCarryThresholdM);
+
+        char message[224] = {};
+        const int length = snprintf(
+            message,
+            sizeof(message),
+            "%s;kickoff=%.2f;hold=%.2f;hold_dist_m=%.4f;hold_avg_speed_mps=%.3f;total_dist_m=%.4f;max_speed_mps=%.3f;carried=%u;travel_limited=%u",
+            _forwardPhaseState.label,
+            LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
+            _forwardPhaseState.forwardDriveCommand,
+            holdDistanceM,
+            averageHoldSpeedMps,
+            totalDistanceM,
+            _forwardPhaseState.maxSpeedMps,
+            carried ? 1U : 0U,
+            _forwardPhaseState.travelLimited ? 1U : 0U);
+        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        {
+            return Fail("Failed to format forward characterization result");
+        }
+        if (!WriteEventOrFail("forward_result", message, "Failed to write forward characterization result"))
+        {
+            return false;
+        }
+
+        return StartCharacterizationRecovery(
+            _forwardPhaseState.label,
+            totalDistanceM,
+            ScenarioStep::ForwardSweepSample);
+    }
+
+    bool StartTurnPhase(
+        const char* const phaseName,
+        const float angleRad,
+        const ScenarioStep nextStep,
+        const bool writeSquareClosure = false)
+    {
+        if (!StartPhase(phaseName))
+        {
+            return false;
+        }
+
+        _turnPhaseState = TurnPhaseState{};
+        _turnPhaseState.phaseName = phaseName;
+        _turnPhaseState.angleRad = angleRad;
+        _turnPhaseState.targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
+        _turnPhaseState.turnProfile = BuildSharedInPlaceTurnProfile(_vehicle);
+        _turnPhaseState.timeoutMs = millis() + 3000UL;
+        _turnPhaseState.nextStep = nextStep;
+        _turnPhaseState.writeSquareClosure = writeSquareClosure;
+        _phaseFn = &DiagnosticController::TurnPhaseTick;
+        return true;
+    }
+
+    bool StartArcPhase(
+        const char* const phaseName,
+        const float distanceM,
+        const float angleRad,
+        const float cruiseSpeedMps,
+        const ScenarioStep nextStep,
+        const bool writeCircleSummary)
+    {
+        if (distanceM <= 0.0f)
+        {
+            return Fail("Diagnostic arc distance must be positive");
+        }
+        if (!StartPhase(phaseName))
+        {
+            return false;
+        }
+
+        _arcPhaseState = ArcPhaseState{};
+        _arcPhaseState.phaseName = phaseName;
+        _arcPhaseState.distanceM = distanceM;
+        _arcPhaseState.angleRad = angleRad;
+        _arcPhaseState.cruiseSpeedMps = cruiseSpeedMps;
+        _arcPhaseState.limits = DiagnosticLimits(cruiseSpeedMps);
+        _arcPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+        _arcPhaseState.startYawRad = _drive.GetPose().yawRad;
+        _arcPhaseState.targetYawRad = WrapAngleRad(_arcPhaseState.startYawRad + angleRad);
+        _arcPhaseState.curvature = angleRad / distanceM;
+        _arcPhaseState.timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceM));
+        _arcPhaseState.translationWatchdog.Reset(0.0f, millis());
+        _arcPhaseState.nextStep = nextStep;
+        _arcPhaseState.writeCircleSummary = writeCircleSummary;
+        _phaseFn = &DiagnosticController::ArcPhaseTick;
+        return true;
+    }
+
+    void ResetCircleSequence(const char* const namePrefix, const float cruiseSpeedMps)
+    {
+        _circleSequenceState = CircleSequenceState{};
+        snprintf(_circleSequenceState.namePrefix, sizeof(_circleSequenceState.namePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
+        _circleSequenceState.cruiseSpeedMps = cruiseSpeedMps;
+        _circleSequenceState.startPose = _drive.GetPose();
+        _circleSequenceState.startTelemetry = _drive.GetTelemetry();
+    }
+
+    void ResetSquareSequence(const char* const namePrefix)
+    {
+        _squareSequenceState = SquareSequenceState{};
+        snprintf(_squareSequenceState.namePrefix, sizeof(_squareSequenceState.namePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
+        _squareSequenceState.startPose = _drive.GetPose();
+    }
+
+    bool StartCharacterizationRecovery(
+        const char* const label,
+        const float traveledDistanceM,
+        const ScenarioStep nextStepAfterRecovery)
+    {
+        _characterizationRecoveryState = CharacterizationRecoveryState{};
+        snprintf(
+            _characterizationRecoveryState.label,
+            sizeof(_characterizationRecoveryState.label),
+            "%s",
+            (label != nullptr) ? label : "");
+        _characterizationRecoveryState.traveledDistanceM = traveledDistanceM;
+        _characterizationRecoveryState.nextStep = nextStepAfterRecovery;
+
+        if (traveledDistanceM <= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM)
+        {
+            return StartScenarioStep(ScenarioStep::RecoverySettle);
+        }
+
+        return StartScenarioStep(ScenarioStep::RecoveryTurnaround);
+    }
+
+    bool StartScenarioStep(const ScenarioStep step)
+    {
+        char phaseName[48] = {};
+        switch (step)
+        {
+        case ScenarioStep::StartupSettle:
+            return StartHoldPhase(
+                "startup_settle",
+                DiagnosticConfig::kStartupSettleMs,
+                true,
+                ScenarioStep::BaselineIdle);
+
+        case ScenarioStep::BaselineIdle:
+            return StartHoldPhase(
+                "baseline_idle",
+                DiagnosticConfig::kBaselineHoldMs,
+                true,
+                ScenarioStep::KickoffSweepPrep);
+
+        case ScenarioStep::KickoffSweepPrep:
+            _kickoffSweepSequenceState = KickoffSweepSequenceState{};
+            return StartHoldPhase(
+                "kickoff_sweep_prep",
+                DiagnosticConfig::kCharacterizationSettleMs,
+                true,
+                ScenarioStep::KickoffSweepSample);
+
+        case ScenarioStep::KickoffSweepSample:
+            return StartNextKickoffCharacterizationSample();
+
+        case ScenarioStep::RecoveryTurnaround:
+            snprintf(phaseName, sizeof(phaseName), "%s_turnaround", _characterizationRecoveryState.label);
+            return StartTurnPhase(phaseName, PI_F, ScenarioStep::RecoveryReturn);
+
+        case ScenarioStep::RecoveryReturn:
+            snprintf(phaseName, sizeof(phaseName), "%s_return", _characterizationRecoveryState.label);
+            return StartStraightPhase(
+                phaseName,
+                _characterizationRecoveryState.traveledDistanceM,
+                DiagnosticConfig::kCharacterizationRecoverySpeedMps,
+                ScenarioStep::RecoveryResetHeading);
+
+        case ScenarioStep::RecoveryResetHeading:
+            snprintf(phaseName, sizeof(phaseName), "%s_reset_heading", _characterizationRecoveryState.label);
+            return StartTurnPhase(phaseName, PI_F, ScenarioStep::RecoverySettle);
+
+        case ScenarioStep::RecoverySettle:
+            snprintf(phaseName, sizeof(phaseName), "%s_settle", _characterizationRecoveryState.label);
+            return StartHoldPhase(
+                phaseName,
+                DiagnosticConfig::kCharacterizationSettleMs,
+                true,
+                _characterizationRecoveryState.nextStep);
+
+        case ScenarioStep::ForwardSweepPrep:
+            _forwardSweepSequenceState = ForwardSweepSequenceState{};
+            return StartHoldPhase(
+                "forward_sweep_prep",
+                DiagnosticConfig::kCharacterizationSettleMs,
+                true,
+                ScenarioStep::ForwardSweepSample);
+
+        case ScenarioStep::ForwardSweepSample:
+            return StartNextForwardCharacterizationSample();
+
+        case ScenarioStep::CharacterizationSettle:
+            return StartHoldPhase(
+                "characterization_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::TurnCw90_1);
+
+        case ScenarioStep::TurnCw90_1:
+            return StartTurnPhase("turn_cw_90_1", HALF_PI_F, ScenarioStep::TurnCcw90_1);
+
+        case ScenarioStep::TurnCcw90_1:
+            return StartTurnPhase("turn_ccw_90_1", -HALF_PI_F, ScenarioStep::TurnCw90_2);
+
+        case ScenarioStep::TurnCw90_2:
+            return StartTurnPhase("turn_cw_90_2", HALF_PI_F, ScenarioStep::TurnCcw90_2);
+
+        case ScenarioStep::TurnCcw90_2:
+            return StartTurnPhase("turn_ccw_90_2", -HALF_PI_F, ScenarioStep::TurnCw180);
+
+        case ScenarioStep::TurnCw180:
+            return StartTurnPhase("turn_cw_180", PI_F, ScenarioStep::TurnCcw180);
+
+        case ScenarioStep::TurnCcw180:
+            return StartTurnPhase("turn_ccw_180", -PI_F, ScenarioStep::TurnSweepSettle);
+
+        case ScenarioStep::TurnSweepSettle:
+            return StartHoldPhase(
+                "turn_sweep_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::StraightShortForward);
+
+        case ScenarioStep::StraightShortForward:
+            return StartStraightPhase(
+                "straight_short_forward",
+                LegacyDiagnosticConfig::kShortStraightDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::StraightShortTurnaround,
+                true);
+
+        case ScenarioStep::StraightShortTurnaround:
+            return StartTurnPhase("straight_short_turnaround", PI_F, ScenarioStep::StraightShortReturn);
+
+        case ScenarioStep::StraightShortReturn:
+            return StartStraightPhase(
+                "straight_short_return",
+                _pendingReturnDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::StraightShortResetHeading);
+
+        case ScenarioStep::StraightShortResetHeading:
+            return StartTurnPhase("straight_short_reset_heading", PI_F, ScenarioStep::StraightShortSettle);
+
+        case ScenarioStep::StraightShortSettle:
+            return StartHoldPhase(
+                "straight_short_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::StraightLongForward);
+
+        case ScenarioStep::StraightLongForward:
+            return StartStraightPhase(
+                "straight_long_forward",
+                LegacyDiagnosticConfig::kLongStraightDistanceM,
+                LegacyDiagnosticConfig::kFastStraightSpeedMps,
+                ScenarioStep::StraightLongTurnaround,
+                true);
+
+        case ScenarioStep::StraightLongTurnaround:
+            return StartTurnPhase("straight_long_turnaround", PI_F, ScenarioStep::StraightLongReturn);
+
+        case ScenarioStep::StraightLongReturn:
+            return StartStraightPhase(
+                "straight_long_return",
+                _pendingReturnDistanceM,
+                LegacyDiagnosticConfig::kFastStraightSpeedMps,
+                ScenarioStep::StraightLongResetHeading);
+
+        case ScenarioStep::StraightLongResetHeading:
+            return StartTurnPhase("straight_long_reset_heading", PI_F, ScenarioStep::StraightLongSettle);
+
+        case ScenarioStep::StraightLongSettle:
+            return StartHoldPhase(
+                "straight_long_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::CircleSlowCwHalf1);
+
+        case ScenarioStep::CircleSlowCwHalf1:
+            ResetCircleSequence("circle_cw_slow", LegacyDiagnosticConfig::kSlowStraightSpeedMps);
+            return StartArcPhase(
+                "circle_cw_slow_half_1",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                PI_F,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::CircleSlowCwHalf2,
+                false);
+
+        case ScenarioStep::CircleSlowCwHalf2:
+            return StartArcPhase(
+                "circle_cw_slow_half_2",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                PI_F,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::CircleSlowCwSettle,
+                true);
+
+        case ScenarioStep::CircleSlowCwSettle:
+            return StartHoldPhase(
+                "circle_cw_slow_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::CircleSlowCcwHalf1);
+
+        case ScenarioStep::CircleSlowCcwHalf1:
+            ResetCircleSequence("circle_ccw_slow", LegacyDiagnosticConfig::kSlowStraightSpeedMps);
+            return StartArcPhase(
+                "circle_ccw_slow_half_1",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                -PI_F,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::CircleSlowCcwHalf2,
+                false);
+
+        case ScenarioStep::CircleSlowCcwHalf2:
+            return StartArcPhase(
+                "circle_ccw_slow_half_2",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                -PI_F,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::CircleSlowSettle,
+                true);
+
+        case ScenarioStep::CircleSlowSettle:
+            return StartHoldPhase(
+                "circle_slow_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::CircleMediumCwHalf1);
+
+        case ScenarioStep::CircleMediumCwHalf1:
+            ResetCircleSequence("circle_cw_medium", LegacyDiagnosticConfig::kCircleMediumSpeedMps);
+            return StartArcPhase(
+                "circle_cw_medium_half_1",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                PI_F,
+                LegacyDiagnosticConfig::kCircleMediumSpeedMps,
+                ScenarioStep::CircleMediumCwHalf2,
+                false);
+
+        case ScenarioStep::CircleMediumCwHalf2:
+            return StartArcPhase(
+                "circle_cw_medium_half_2",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                PI_F,
+                LegacyDiagnosticConfig::kCircleMediumSpeedMps,
+                ScenarioStep::CircleMediumCwSettle,
+                true);
+
+        case ScenarioStep::CircleMediumCwSettle:
+            return StartHoldPhase(
+                "circle_cw_medium_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::CircleMediumCcwHalf1);
+
+        case ScenarioStep::CircleMediumCcwHalf1:
+            ResetCircleSequence("circle_ccw_medium", LegacyDiagnosticConfig::kCircleMediumSpeedMps);
+            return StartArcPhase(
+                "circle_ccw_medium_half_1",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                -PI_F,
+                LegacyDiagnosticConfig::kCircleMediumSpeedMps,
+                ScenarioStep::CircleMediumCcwHalf2,
+                false);
+
+        case ScenarioStep::CircleMediumCcwHalf2:
+            return StartArcPhase(
+                "circle_ccw_medium_half_2",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                -PI_F,
+                LegacyDiagnosticConfig::kCircleMediumSpeedMps,
+                ScenarioStep::CircleMediumSettle,
+                true);
+
+        case ScenarioStep::CircleMediumSettle:
+            return StartHoldPhase(
+                "circle_medium_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::CircleFastCwHalf1);
+
+        case ScenarioStep::CircleFastCwHalf1:
+            ResetCircleSequence("circle_cw_fast", LegacyDiagnosticConfig::kFastStraightSpeedMps);
+            return StartArcPhase(
+                "circle_cw_fast_half_1",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                PI_F,
+                LegacyDiagnosticConfig::kFastStraightSpeedMps,
+                ScenarioStep::CircleFastCwHalf2,
+                false);
+
+        case ScenarioStep::CircleFastCwHalf2:
+            return StartArcPhase(
+                "circle_cw_fast_half_2",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                PI_F,
+                LegacyDiagnosticConfig::kFastStraightSpeedMps,
+                ScenarioStep::CircleFastCwSettle,
+                true);
+
+        case ScenarioStep::CircleFastCwSettle:
+            return StartHoldPhase(
+                "circle_cw_fast_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::CircleFastCcwHalf1);
+
+        case ScenarioStep::CircleFastCcwHalf1:
+            ResetCircleSequence("circle_ccw_fast", LegacyDiagnosticConfig::kFastStraightSpeedMps);
+            return StartArcPhase(
+                "circle_ccw_fast_half_1",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                -PI_F,
+                LegacyDiagnosticConfig::kFastStraightSpeedMps,
+                ScenarioStep::CircleFastCcwHalf2,
+                false);
+
+        case ScenarioStep::CircleFastCcwHalf2:
+            return StartArcPhase(
+                "circle_ccw_fast_half_2",
+                LegacyDiagnosticConfig::kArcHalfCircleDistanceM,
+                -PI_F,
+                LegacyDiagnosticConfig::kFastStraightSpeedMps,
+                ScenarioStep::CircleFastSettle,
+                true);
+
+        case ScenarioStep::CircleFastSettle:
+            return StartHoldPhase(
+                "circle_fast_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::SquareCwLeg1);
+
+        case ScenarioStep::SquareCwLeg1:
+            ResetSquareSequence("square_cw");
+            return StartStraightPhase(
+                "square_cw_leg_1",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCwTurn1);
+
+        case ScenarioStep::SquareCwTurn1:
+            return StartTurnPhase("square_cw_turn_1", HALF_PI_F, ScenarioStep::SquareCwLeg2);
+
+        case ScenarioStep::SquareCwLeg2:
+            return StartStraightPhase(
+                "square_cw_leg_2",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCwTurn2);
+
+        case ScenarioStep::SquareCwTurn2:
+            return StartTurnPhase("square_cw_turn_2", HALF_PI_F, ScenarioStep::SquareCwLeg3);
+
+        case ScenarioStep::SquareCwLeg3:
+            return StartStraightPhase(
+                "square_cw_leg_3",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCwTurn3);
+
+        case ScenarioStep::SquareCwTurn3:
+            return StartTurnPhase("square_cw_turn_3", HALF_PI_F, ScenarioStep::SquareCwLeg4);
+
+        case ScenarioStep::SquareCwLeg4:
+            return StartStraightPhase(
+                "square_cw_leg_4",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCwTurn4);
+
+        case ScenarioStep::SquareCwTurn4:
+            return StartTurnPhase("square_cw_turn_4", HALF_PI_F, ScenarioStep::SquareCwSettle, true);
+
+        case ScenarioStep::SquareCwSettle:
+            return StartHoldPhase(
+                "square_cw_settle",
+                DiagnosticConfig::kInterTestHoldMs,
+                true,
+                ScenarioStep::SquareCcwLeg1);
+
+        case ScenarioStep::SquareCcwLeg1:
+            ResetSquareSequence("square_ccw");
+            return StartStraightPhase(
+                "square_ccw_leg_1",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCcwTurn1);
+
+        case ScenarioStep::SquareCcwTurn1:
+            return StartTurnPhase("square_ccw_turn_1", -HALF_PI_F, ScenarioStep::SquareCcwLeg2);
+
+        case ScenarioStep::SquareCcwLeg2:
+            return StartStraightPhase(
+                "square_ccw_leg_2",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCcwTurn2);
+
+        case ScenarioStep::SquareCcwTurn2:
+            return StartTurnPhase("square_ccw_turn_2", -HALF_PI_F, ScenarioStep::SquareCcwLeg3);
+
+        case ScenarioStep::SquareCcwLeg3:
+            return StartStraightPhase(
+                "square_ccw_leg_3",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCcwTurn3);
+
+        case ScenarioStep::SquareCcwTurn3:
+            return StartTurnPhase("square_ccw_turn_3", -HALF_PI_F, ScenarioStep::SquareCcwLeg4);
+
+        case ScenarioStep::SquareCcwLeg4:
+            return StartStraightPhase(
+                "square_ccw_leg_4",
+                LegacyDiagnosticConfig::kSquareLegDistanceM,
+                LegacyDiagnosticConfig::kSlowStraightSpeedMps,
+                ScenarioStep::SquareCcwTurn4);
+
+        case ScenarioStep::SquareCcwTurn4:
+            return StartTurnPhase("square_ccw_turn_4", -HALF_PI_F, ScenarioStep::FinalIdle, true);
+
+        case ScenarioStep::FinalIdle:
+            return StartHoldPhase(
+                "final_idle",
+                DiagnosticConfig::kBaselineHoldMs / 2U,
+                true,
+                ScenarioStep::Complete);
+
+        case ScenarioStep::Complete:
+        case ScenarioStep::None:
+        default:
+            return false;
+        }
     }
 
     bool BeginLog()
@@ -411,11 +1216,6 @@ private:
     {
         ++_phaseId;
         return _runtime.WriteTextLogPhase(_phaseId, micros(), name);
-    }
-
-    void ServiceLog()
-    {
-        (void)_runtime.ServiceUtilityDataLog();
     }
 
     void CloseLog()
@@ -668,19 +1468,6 @@ private:
         return Fail("Failed to write diagnostic sample");
     }
 
-    bool HoldPhase(const char* phaseName, uint16_t durationMs, bool stationary)
-    {
-        if (!StartPhase(phaseName))
-        {
-            return false;
-        }
-
-        _holdPhaseState = HoldPhaseState{};
-        _holdPhaseState.stationary = stationary;
-        _holdPhaseState.deadlineMs = millis() + durationMs;
-        return RunPhaseSession(&DiagnosticController::HoldPhaseTick);
-    }
-
     LoopController::ControlVector HoldPhaseTick(
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
@@ -695,45 +1482,13 @@ private:
 
         if (static_cast<long>(_holdPhaseState.deadlineMs - millis()) <= 0)
         {
-            services.RequestEndLoop();
+            (void)AdvanceToNextStep(
+                _holdPhaseState.nextStep,
+                services,
+                "Failed to advance diagnostic hold phase");
         }
 
         return LoopController::ControlVector::BrakeCommand();
-    }
-
-    bool ExecuteStraightPhase(const char* phaseName, float distanceM, float cruiseSpeedMps, float* outTraveledDistanceM = nullptr)
-    {
-        if (!StartPhase(phaseName))
-        {
-            return false;
-        }
-
-        _straightPhaseState = StraightPhaseState{};
-        _straightPhaseState.phaseName = phaseName;
-        _straightPhaseState.distanceM = distanceM;
-        _straightPhaseState.cruiseSpeedMps = cruiseSpeedMps;
-        _straightPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
-        _straightPhaseState.targetHeading = _drive.GetPose().headingUnit;
-        _straightPhaseState.timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (6000.0f * distanceM));
-        _straightPhaseState.translationWatchdog.Reset(0.0f, millis());
-        _straightPhaseState.outTraveledDistanceM = outTraveledDistanceM;
-        if (!RunPhaseSession(&DiagnosticController::StraightPhaseTick))
-        {
-            return false;
-        }
-
-        if (outTraveledDistanceM != nullptr)
-        {
-            *outTraveledDistanceM = _straightPhaseState.traveledM;
-        }
-
-        return WriteStraightResult(
-            phaseName,
-            distanceM,
-            cruiseSpeedMps,
-            _straightPhaseState.traveledM,
-            _straightPhaseState.targetHeading,
-            _straightPhaseState.metrics);
     }
 
     LoopController::ControlVector StraightPhaseTick(
@@ -758,7 +1513,27 @@ private:
                 return LoopController::ControlVector::BrakeCommand();
             }
 
-            services.RequestEndLoop();
+            if (_straightPhaseState.selectReturnDistance)
+            {
+                _pendingReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(
+                    _straightPhaseState.distanceM,
+                    _straightPhaseState.traveledM);
+            }
+            if (!WriteStraightResult(
+                    _straightPhaseState.phaseName,
+                    _straightPhaseState.distanceM,
+                    _straightPhaseState.cruiseSpeedMps,
+                    _straightPhaseState.traveledM,
+                    _straightPhaseState.targetHeading,
+                    _straightPhaseState.metrics))
+            {
+                services.Fault("Failed to write straight diagnostic result");
+                return LoopController::ControlVector::BrakeCommand();
+            }
+            (void)AdvanceToNextStep(
+                _straightPhaseState.nextStep,
+                services,
+                "Failed to advance diagnostic straight phase");
             return LoopController::ControlVector::BrakeCommand();
         }
         if (_straightPhaseState.translationWatchdog.Stalled(
@@ -805,96 +1580,6 @@ private:
             angularCommandRadps);
     }
 
-    bool RecoverCharacterizationSample(const char* label, float traveledDistanceM)
-    {
-        char phaseName[48] = {};
-        if (traveledDistanceM <= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM)
-        {
-            snprintf(phaseName, sizeof(phaseName), "%s_settle", label);
-            return HoldPhase(phaseName, DiagnosticConfig::kCharacterizationSettleMs, true);
-        }
-
-        snprintf(phaseName, sizeof(phaseName), "%s_turnaround", label);
-        if (!ExecuteTurnPhase(phaseName, PI_F))
-        {
-            return false;
-        }
-
-        // Recover characterization samples with the same forward-drive path used elsewhere in diagnostics.
-        // This avoids the poorly controlled reverse leg that can drift far past the available space.
-        snprintf(phaseName, sizeof(phaseName), "%s_return", label);
-        if (!ExecuteStraightPhase(phaseName, traveledDistanceM, DiagnosticConfig::kCharacterizationRecoverySpeedMps))
-        {
-            return false;
-        }
-
-        snprintf(phaseName, sizeof(phaseName), "%s_reset_heading", label);
-        if (!ExecuteTurnPhase(phaseName, PI_F))
-        {
-            return false;
-        }
-
-        const PoseEstimate& pose = _drive.GetPose();
-        _drive.SetPose(pose.xMeters, pose.yMeters, DirectionToYawRad(MazeMap::Up));
-
-        snprintf(phaseName, sizeof(phaseName), "%s_settle", label);
-        return HoldPhase(phaseName, DiagnosticConfig::kCharacterizationSettleMs, true);
-    }
-
-    bool ExecuteKickoffCharacterizationSample(float driveCommand)
-    {
-        char label[24] = {};
-        char phaseName[48] = {};
-        BuildDriveCommandLabel("kickoff", driveCommand, label, sizeof(label));
-        snprintf(phaseName, sizeof(phaseName), "%s_probe", label);
-        if (!StartPhase(phaseName))
-        {
-            return false;
-        }
-
-        _kickoffPhaseState = KickoffPhaseState{};
-        snprintf(_kickoffPhaseState.label, sizeof(_kickoffPhaseState.label), "%s", label);
-        _kickoffPhaseState.driveCommand = driveCommand;
-        _kickoffPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
-        _kickoffPhaseState.pulseDeadlineMs = millis() + LegacyDiagnosticConfig::kKickoffSweepPulseMs;
-        _kickoffPhaseState.settleDeadlineMs = _kickoffPhaseState.pulseDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
-        _kickoffPhaseState.travelLimitM = MazeMap::ComputeDiagnosticCharacterizationTravelLimitM(
-            DiagnosticConfig::kBoundaryHalfSpanM,
-            DiagnosticConfig::kCharacterizationBoundaryReserveM);
-        if (!RunPhaseSession(&DiagnosticController::KickoffCharacterizationTick))
-        {
-            return false;
-        }
-
-        _drive.Brake();
-        const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _kickoffPhaseState.startDistanceM);
-        const bool moved =
-            (traveledDistanceM >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM) ||
-            (_kickoffPhaseState.maxSpeedMps >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdMps);
-
-        char message[192] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "%s;cmd=%.2f;dist_m=%.4f;max_speed_mps=%.3f;moved=%u;travel_limited=%u",
-            label,
-            driveCommand,
-            traveledDistanceM,
-            _kickoffPhaseState.maxSpeedMps,
-            moved ? 1U : 0U,
-            _kickoffPhaseState.travelLimited ? 1U : 0U);
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return Fail("Failed to format kickoff characterization result");
-        }
-        if (!WriteEventOrFail("kickoff_result", message, "Failed to write kickoff characterization result"))
-        {
-            return false;
-        }
-
-        return RecoverCharacterizationSample(label, traveledDistanceM);
-    }
-
     LoopController::ControlVector KickoffCharacterizationTick(
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
@@ -937,7 +1622,10 @@ private:
             (static_cast<long>(_kickoffPhaseState.travelLimitSettleDeadlineMs - nowMs) <= 0) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            services.RequestEndLoop();
+            if (!FinishKickoffCharacterizationSample())
+            {
+                services.Fault("Failed to complete kickoff characterization sample");
+            }
             return LoopController::ControlVector::BrakeCommand();
         }
 
@@ -946,83 +1634,14 @@ private:
             (static_cast<long>(_kickoffPhaseState.settleDeadlineMs - nowMs) <= 0) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            services.RequestEndLoop();
+            if (!FinishKickoffCharacterizationSample())
+            {
+                services.Fault("Failed to complete kickoff characterization sample");
+            }
             return LoopController::ControlVector::BrakeCommand();
         }
 
         return command;
-    }
-
-    bool ExecuteForwardCharacterizationSample(float forwardDriveCommand)
-    {
-        char label[24] = {};
-        char phaseName[48] = {};
-        BuildDriveCommandLabel("forward", forwardDriveCommand, label, sizeof(label));
-        snprintf(phaseName, sizeof(phaseName), "%s_probe", label);
-        if (!StartPhase(phaseName))
-        {
-            return false;
-        }
-
-        _forwardPhaseState = ForwardPhaseState{};
-        snprintf(_forwardPhaseState.label, sizeof(_forwardPhaseState.label), "%s", label);
-        _forwardPhaseState.forwardDriveCommand = forwardDriveCommand;
-        _forwardPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
-        _forwardPhaseState.kickoffDeadlineMs = millis() + LegacyDiagnosticConfig::kForwardSweepKickoffMs;
-        _forwardPhaseState.holdDeadlineMs = _forwardPhaseState.kickoffDeadlineMs + LegacyDiagnosticConfig::kForwardSweepHoldMs;
-        _forwardPhaseState.settleDeadlineMs = _forwardPhaseState.holdDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
-        _forwardPhaseState.travelLimitM = MazeMap::ComputeDiagnosticCharacterizationTravelLimitM(
-            DiagnosticConfig::kBoundaryHalfSpanM,
-            DiagnosticConfig::kCharacterizationBoundaryReserveM);
-        if (!RunPhaseSession(&DiagnosticController::ForwardCharacterizationTick))
-        {
-            return false;
-        }
-
-        _drive.Brake();
-        if (!_forwardPhaseState.holdComplete)
-        {
-            _forwardPhaseState.holdEndDistanceM = _drive.GetAverageDistanceMeters();
-        }
-
-        const float totalDistanceM =
-            std::fabs(_drive.GetAverageDistanceMeters() - _forwardPhaseState.startDistanceM);
-        const float holdDistanceM =
-            _forwardPhaseState.holdStarted ?
-            std::fabs(_forwardPhaseState.holdEndDistanceM - _forwardPhaseState.holdStartDistanceM) :
-            0.0f;
-        const float averageHoldSpeedMps =
-            (_forwardPhaseState.holdElapsedSeconds > 0.0f) ?
-            (holdDistanceM / _forwardPhaseState.holdElapsedSeconds) :
-            0.0f;
-        const bool carried =
-            (averageHoldSpeedMps >= LegacyDiagnosticConfig::kForwardSweepCarryThresholdMps) ||
-            (holdDistanceM >= LegacyDiagnosticConfig::kForwardSweepCarryThresholdM);
-
-        char message[224] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "%s;kickoff=%.2f;hold=%.2f;hold_dist_m=%.4f;hold_avg_speed_mps=%.3f;total_dist_m=%.4f;max_speed_mps=%.3f;carried=%u;travel_limited=%u",
-            label,
-            LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
-            forwardDriveCommand,
-            holdDistanceM,
-            averageHoldSpeedMps,
-            totalDistanceM,
-            _forwardPhaseState.maxSpeedMps,
-            carried ? 1U : 0U,
-            _forwardPhaseState.travelLimited ? 1U : 0U);
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return Fail("Failed to format forward characterization result");
-        }
-        if (!WriteEventOrFail("forward_result", message, "Failed to write forward characterization result"))
-        {
-            return false;
-        }
-
-        return RecoverCharacterizationSample(label, totalDistanceM);
     }
 
     LoopController::ControlVector ForwardCharacterizationTick(
@@ -1089,7 +1708,10 @@ private:
             (static_cast<long>(_forwardPhaseState.travelLimitSettleDeadlineMs - nowMs) <= 0) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            services.RequestEndLoop();
+            if (!FinishForwardCharacterizationSample())
+            {
+                services.Fault("Failed to complete forward characterization sample");
+            }
             return LoopController::ControlVector::BrakeCommand();
         }
 
@@ -1098,74 +1720,14 @@ private:
             (static_cast<long>(_forwardPhaseState.settleDeadlineMs - nowMs) <= 0) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            services.RequestEndLoop();
+            if (!FinishForwardCharacterizationSample())
+            {
+                services.Fault("Failed to complete forward characterization sample");
+            }
             return LoopController::ControlVector::BrakeCommand();
         }
 
         return command;
-    }
-
-    bool ExecuteKickoffSweep()
-    {
-        if (!HoldPhase("kickoff_sweep_prep", DiagnosticConfig::kCharacterizationSettleMs, true))
-        {
-            return false;
-        }
-
-        for (float driveCommand : MazeMap::kOpenFloorLaunchDriveMagnitudes)
-        {
-            if (!ExecuteKickoffCharacterizationSample(driveCommand))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    bool ExecuteForwardSweep()
-    {
-        if (!HoldPhase("forward_sweep_prep", DiagnosticConfig::kCharacterizationSettleMs, true))
-        {
-            return false;
-        }
-
-        for (float driveCommand = LegacyDiagnosticConfig::kForwardSweepMinDriveCommand;
-            driveCommand <= (LegacyDiagnosticConfig::kForwardSweepMaxDriveCommand + 0.0001f);
-            driveCommand += LegacyDiagnosticConfig::kForwardSweepStepDriveCommand)
-        {
-            if (!ExecuteForwardCharacterizationSample(driveCommand))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    bool ExecuteTurnPhase(const char* phaseName, float angleRad)
-    {
-        if (!StartPhase(phaseName))
-        {
-            return false;
-        }
-
-        _turnPhaseState = TurnPhaseState{};
-        _turnPhaseState.phaseName = phaseName;
-        _turnPhaseState.angleRad = angleRad;
-        _turnPhaseState.targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
-        _turnPhaseState.turnProfile = BuildSharedInPlaceTurnProfile(_vehicle);
-        _turnPhaseState.timeoutMs = millis() + 3000UL;
-        if (!RunPhaseSession(&DiagnosticController::TurnPhaseTick))
-        {
-            return false;
-        }
-
-        return WriteTurnResult(
-            phaseName,
-            angleRad,
-            _turnPhaseState.metrics,
-            _turnPhaseState.targetYawRad);
     }
 
     LoopController::ControlVector TurnPhaseTick(
@@ -1188,7 +1750,34 @@ private:
                 return LoopController::ControlVector::BrakeCommand();
             }
 
-            services.RequestEndLoop();
+            if (!WriteTurnResult(
+                    _turnPhaseState.phaseName,
+                    _turnPhaseState.angleRad,
+                    _turnPhaseState.metrics,
+                    _turnPhaseState.targetYawRad))
+            {
+                services.Fault("Failed to write turn diagnostic result");
+                return LoopController::ControlVector::BrakeCommand();
+            }
+            if (_turnPhaseState.nextStep == ScenarioStep::RecoverySettle)
+            {
+                const PoseEstimate& pose = _drive.GetPose();
+                _drive.SetPose(pose.xMeters, pose.yMeters, DirectionToYawRad(MazeMap::Up));
+            }
+            if (_turnPhaseState.writeSquareClosure &&
+                !WriteClosureResult(
+                    "square_result",
+                    _squareSequenceState.namePrefix,
+                    _squareSequenceState.startPose,
+                    "Failed to write square diagnostic result"))
+            {
+                services.Fault("Failed to write square diagnostic result");
+                return LoopController::ControlVector::BrakeCommand();
+            }
+            (void)AdvanceToNextStep(
+                _turnPhaseState.nextStep,
+                services,
+                "Failed to advance diagnostic turn phase");
             return LoopController::ControlVector::BrakeCommand();
         }
         if (static_cast<long>(_turnPhaseState.timeoutMs - millis()) <= 0)
@@ -1215,48 +1804,6 @@ private:
         }
 
         return LoopController::ControlVector::VelocityCommand(0.0f, angularCommandRadps);
-    }
-
-    bool ExecuteArcPhase(const char* phaseName, float distanceM, float angleRad, float cruiseSpeedMps, ArcPhaseMetrics* outMetrics = nullptr)
-    {
-        if (distanceM <= 0.0f)
-        {
-            return Fail("Diagnostic arc distance must be positive");
-        }
-        if (!StartPhase(phaseName))
-        {
-            return false;
-        }
-
-        _arcPhaseState = ArcPhaseState{};
-        _arcPhaseState.phaseName = phaseName;
-        _arcPhaseState.distanceM = distanceM;
-        _arcPhaseState.angleRad = angleRad;
-        _arcPhaseState.cruiseSpeedMps = cruiseSpeedMps;
-        _arcPhaseState.outMetrics = outMetrics;
-        _arcPhaseState.limits = DiagnosticLimits(cruiseSpeedMps);
-        _arcPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
-        _arcPhaseState.startYawRad = _drive.GetPose().yawRad;
-        _arcPhaseState.targetYawRad = WrapAngleRad(_arcPhaseState.startYawRad + angleRad);
-        _arcPhaseState.curvature = angleRad / distanceM;
-        _arcPhaseState.timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceM));
-        _arcPhaseState.translationWatchdog.Reset(0.0f, millis());
-        if (!RunPhaseSession(&DiagnosticController::ArcPhaseTick))
-        {
-            return false;
-        }
-
-        if (outMetrics != nullptr)
-        {
-            *outMetrics = _arcPhaseState.metrics;
-        }
-        return WriteArcResult(
-            phaseName,
-            distanceM,
-            angleRad,
-            _arcPhaseState.traveledM,
-            _arcPhaseState.targetYawRad,
-            _arcPhaseState.metrics);
     }
 
     LoopController::ControlVector ArcPhaseTick(
@@ -1290,7 +1837,43 @@ private:
                 return LoopController::ControlVector::BrakeCommand();
             }
 
-            services.RequestEndLoop();
+            AccumulateArcMetrics(_circleSequenceState.totalMetrics, _arcPhaseState.metrics);
+            if (!WriteArcResult(
+                    _arcPhaseState.phaseName,
+                    _arcPhaseState.distanceM,
+                    _arcPhaseState.angleRad,
+                    _arcPhaseState.traveledM,
+                    _arcPhaseState.targetYawRad,
+                    _arcPhaseState.metrics))
+            {
+                services.Fault("Failed to write arc diagnostic result");
+                return LoopController::ControlVector::BrakeCommand();
+            }
+            if (_arcPhaseState.writeCircleSummary)
+            {
+                if (!WriteCircleResult(
+                        _circleSequenceState.namePrefix,
+                        _circleSequenceState.cruiseSpeedMps,
+                        _circleSequenceState.startTelemetry,
+                        _circleSequenceState.totalMetrics))
+                {
+                    services.Fault("Failed to write circle diagnostic result");
+                    return LoopController::ControlVector::BrakeCommand();
+                }
+                if (!WriteClosureResult(
+                        "arc_circle_result",
+                        _circleSequenceState.namePrefix,
+                        _circleSequenceState.startPose,
+                        "Failed to write arc circle diagnostic result"))
+                {
+                    services.Fault("Failed to write arc circle diagnostic result");
+                    return LoopController::ControlVector::BrakeCommand();
+                }
+            }
+            (void)AdvanceToNextStep(
+                _arcPhaseState.nextStep,
+                services,
+                "Failed to advance diagnostic arc phase");
             return LoopController::ControlVector::BrakeCommand();
         }
         if (_arcPhaseState.translationWatchdog.Stalled(
@@ -1341,82 +1924,5 @@ private:
             angularCommandRadps);
     }
 
-    bool ExecuteArcCircle(const char* namePrefix, float halfCircleAngleRad, float halfCircleDistanceM, float cruiseSpeedMps)
-    {
-        char phaseName[48] = {};
-        const PoseEstimate startPose = _drive.GetPose();
-        const DriveTelemetry startTelemetry = _drive.GetTelemetry();
-        ArcPhaseMetrics totalMetrics{};
-        ArcPhaseMetrics segmentMetrics{};
-
-        snprintf(phaseName, sizeof(phaseName), "%s_half_1", (namePrefix != nullptr) ? namePrefix : "arc_circle");
-        if (!ExecuteArcPhase(phaseName, halfCircleDistanceM, halfCircleAngleRad, cruiseSpeedMps, &segmentMetrics))
-        {
-            return false;
-        }
-        AccumulateArcMetrics(totalMetrics, segmentMetrics);
-
-        snprintf(phaseName, sizeof(phaseName), "%s_half_2", (namePrefix != nullptr) ? namePrefix : "arc_circle");
-        if (!ExecuteArcPhase(phaseName, halfCircleDistanceM, halfCircleAngleRad, cruiseSpeedMps, &segmentMetrics))
-        {
-            return false;
-        }
-        AccumulateArcMetrics(totalMetrics, segmentMetrics);
-
-        if (!WriteCircleResult(namePrefix, cruiseSpeedMps, startTelemetry, totalMetrics))
-        {
-            return false;
-        }
-
-        return WriteClosureResult("arc_circle_result", namePrefix, startPose, "Failed to write arc circle diagnostic result");
-    }
-
-    bool ExecuteCircleSpeedSweep(const char* speedLabel, float cruiseSpeedMps)
-    {
-        char phaseName[48] = {};
-
-        snprintf(phaseName, sizeof(phaseName), "circle_cw_%s", (speedLabel != nullptr) ? speedLabel : "speed");
-        if (!ExecuteArcCircle(phaseName, PI_F, LegacyDiagnosticConfig::kArcHalfCircleDistanceM, cruiseSpeedMps))
-        {
-            return false;
-        }
-
-        snprintf(phaseName, sizeof(phaseName), "circle_cw_%s_settle", (speedLabel != nullptr) ? speedLabel : "speed");
-        if (!HoldPhase(phaseName, DiagnosticConfig::kInterTestHoldMs, true))
-        {
-            return false;
-        }
-
-        snprintf(phaseName, sizeof(phaseName), "circle_ccw_%s", (speedLabel != nullptr) ? speedLabel : "speed");
-        if (!ExecuteArcCircle(phaseName, -PI_F, LegacyDiagnosticConfig::kArcHalfCircleDistanceM, cruiseSpeedMps))
-        {
-            return false;
-        }
-
-        snprintf(phaseName, sizeof(phaseName), "circle_%s_settle", (speedLabel != nullptr) ? speedLabel : "speed");
-        return HoldPhase(phaseName, DiagnosticConfig::kInterTestHoldMs, true);
-    }
-
-    bool ExecuteSquareLoop(const char* namePrefix, float turnAngleRad)
-    {
-        char phaseName[48] = {};
-        const PoseEstimate startPose = _drive.GetPose();
-        for (uint8_t leg = 0; leg < 4U; ++leg)
-        {
-            snprintf(phaseName, sizeof(phaseName), "%s_leg_%u", namePrefix, static_cast<unsigned>(leg + 1U));
-            if (!ExecuteStraightPhase(phaseName, LegacyDiagnosticConfig::kSquareLegDistanceM, LegacyDiagnosticConfig::kSlowStraightSpeedMps))
-            {
-                return false;
-            }
-
-            snprintf(phaseName, sizeof(phaseName), "%s_turn_%u", namePrefix, static_cast<unsigned>(leg + 1U));
-            if (!ExecuteTurnPhase(phaseName, turnAngleRad))
-            {
-                return false;
-            }
-        }
-
-        return WriteClosureResult("square_result", namePrefix, startPose, "Failed to write square diagnostic result");
-    }
 };
 
