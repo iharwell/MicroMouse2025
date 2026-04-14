@@ -89,6 +89,19 @@ namespace
             kSideRightWallSensorLedPin,
             MazeMap::Vehicle::GetSideRightSensorExtrinsics());
     }
+
+    const MazeMap::PlantParams& GetDefaultProgressPlantParams()
+    {
+        static const MazeMap::PlantParams kParams = MazeMap::PlantParams::Default();
+        return kParams;
+    }
+
+    const MazeMap::PlantModel::PreparedParams& GetDefaultProgressPreparedPlantParams()
+    {
+        static const MazeMap::PlantModel::PreparedParams kPrepared =
+            MazeMap::PlantModel::Prepare(GetDefaultProgressPlantParams());
+        return kPrepared;
+    }
 }
 
 namespace MazeMap
@@ -154,7 +167,6 @@ namespace MazeMap
     void Vehicle::ProgressVehicleState(const VehicleState& previousState, VehicleState& projectedState, float timeDelta)
     {
         PlantModel plantModel;
-        const PlantParams params = PlantParams::Default();
         projectedState.SetTime(previousState.GetTime() + timeDelta);
         projectedState.SetControlInput(previousState.GetControlInput());
         projectedState.SetStateVector(
@@ -162,7 +174,7 @@ namespace MazeMap
                 previousState.GetStateVector(),
                 previousState.GetControlInput(),
                 timeDelta,
-                params));
+                GetDefaultProgressPreparedPlantParams()));
         projectedState.SetSqrtCovariance(previousState.GetSqrtCovariance());
     }
 

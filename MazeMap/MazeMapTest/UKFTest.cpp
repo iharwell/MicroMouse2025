@@ -264,6 +264,110 @@ namespace MazeMap
             return ExtractNamedFloat(FindProcessNoiseRowMessage(dumpLines, rowName), rowName);
         }
 
+        void AssertStateVectorNear(
+            const VehicleState::StateVector& expected,
+            const VehicleState::StateVector& actual,
+            float tolerance)
+        {
+            for (int index = 0; index < expected.size(); ++index)
+            {
+                Assert::AreEqual(expected(index), actual(index), tolerance);
+            }
+        }
+
+        void AssertWheelKinematicsNear(
+            const WheelKinematics& expected,
+            const WheelKinematics& actual,
+            float tolerance)
+        {
+            Assert::AreEqual(expected.leftBankForwardVelocityMps, actual.leftBankForwardVelocityMps, tolerance);
+            Assert::AreEqual(expected.rightBankForwardVelocityMps, actual.rightBankForwardVelocityMps, tolerance);
+            for (std::size_t index = 0; index < expected.contacts.size(); ++index)
+            {
+                Assert::AreEqual(expected.contacts[index].rightVelocityMps, actual.contacts[index].rightVelocityMps, tolerance);
+                Assert::AreEqual(expected.contacts[index].forwardVelocityMps, actual.contacts[index].forwardVelocityMps, tolerance);
+            }
+        }
+
+        void AssertSlipTargetsNear(
+            const SlipTargets& expected,
+            const SlipTargets& actual,
+            float tolerance)
+        {
+            Assert::AreEqual(expected.kappaLeft, actual.kappaLeft, tolerance);
+            Assert::AreEqual(expected.kappaRight, actual.kappaRight, tolerance);
+            for (std::size_t index = 0; index < expected.lateralRatio.size(); ++index)
+            {
+                Assert::AreEqual(expected.lateralRatio[index], actual.lateralRatio[index], tolerance);
+            }
+        }
+
+        void AssertContactForcesNear(
+            const ContactForces& expected,
+            const ContactForces& actual,
+            float tolerance)
+        {
+            for (std::size_t index = 0; index < expected.contacts.size(); ++index)
+            {
+                Assert::AreEqual(expected.contacts[index].rightForceN, actual.contacts[index].rightForceN, tolerance);
+                Assert::AreEqual(expected.contacts[index].forwardForceN, actual.contacts[index].forwardForceN, tolerance);
+                Assert::AreEqual(expected.contacts[index].normalForceN, actual.contacts[index].normalForceN, tolerance);
+                Assert::AreEqual(expected.contacts[index].saturation, actual.contacts[index].saturation, tolerance);
+            }
+        }
+
+        void AssertPlantDerivativesNear(
+            const PlantDerivatives& expected,
+            const PlantDerivatives& actual,
+            float tolerance)
+        {
+            AssertStateVectorNear(expected.stateDot, actual.stateDot, tolerance);
+            AssertContactForcesNear(expected.contactForces, actual.contactForces, tolerance);
+            AssertWheelKinematicsNear(expected.wheelKinematics, actual.wheelKinematics, tolerance);
+            AssertSlipTargetsNear(expected.slipTargets, actual.slipTargets, tolerance);
+            Assert::AreEqual(expected.originAccelBodyMps2.x(), actual.originAccelBodyMps2.x(), tolerance);
+            Assert::AreEqual(expected.originAccelBodyMps2.y(), actual.originAccelBodyMps2.y(), tolerance);
+            Assert::AreEqual(expected.imuAccelBodyMps2.x(), actual.imuAccelBodyMps2.x(), tolerance);
+            Assert::AreEqual(expected.imuAccelBodyMps2.y(), actual.imuAccelBodyMps2.y(), tolerance);
+            Assert::AreEqual(expected.longitudinalAccelMps2, actual.longitudinalAccelMps2, tolerance);
+            Assert::AreEqual(expected.lateralAccelMps2, actual.lateralAccelMps2, tolerance);
+            Assert::AreEqual(expected.yawAccelRadps2, actual.yawAccelRadps2, tolerance);
+            Assert::AreEqual(static_cast<int>(expected.regime), static_cast<int>(actual.regime));
+            Assert::AreEqual(expected.maxContactUtilization, actual.maxContactUtilization, tolerance);
+        }
+
+        void AssertDriveCommandSolutionNear(
+            const DriveCommandSolution& expected,
+            const DriveCommandSolution& actual,
+            float tolerance)
+        {
+            Assert::AreEqual(expected.control.leftMotorCommand, actual.control.leftMotorCommand, tolerance);
+            Assert::AreEqual(expected.control.rightMotorCommand, actual.control.rightMotorCommand, tolerance);
+            Assert::AreEqual(expected.control.fanDutyCycle, actual.control.fanDutyCycle, tolerance);
+            Assert::AreEqual(expected.control.batteryVoltageV, actual.control.batteryVoltageV, tolerance);
+            Assert::AreEqual(expected.leftSlipRatio, actual.leftSlipRatio, tolerance);
+            Assert::AreEqual(expected.rightSlipRatio, actual.rightSlipRatio, tolerance);
+            Assert::AreEqual(expected.leftWheelSpeedRadps, actual.leftWheelSpeedRadps, tolerance);
+            Assert::AreEqual(expected.rightWheelSpeedRadps, actual.rightWheelSpeedRadps, tolerance);
+            Assert::AreEqual(expected.leftRollingWheelSpeedRadps, actual.leftRollingWheelSpeedRadps, tolerance);
+            Assert::AreEqual(expected.rightRollingWheelSpeedRadps, actual.rightRollingWheelSpeedRadps, tolerance);
+            Assert::AreEqual(expected.leftWheelTorqueNm, actual.leftWheelTorqueNm, tolerance);
+            Assert::AreEqual(expected.rightWheelTorqueNm, actual.rightWheelTorqueNm, tolerance);
+            Assert::AreEqual(expected.leftWheelAccelRadps2, actual.leftWheelAccelRadps2, tolerance);
+            Assert::AreEqual(expected.rightWheelAccelRadps2, actual.rightWheelAccelRadps2, tolerance);
+            Assert::AreEqual(expected.leftContactForceN, actual.leftContactForceN, tolerance);
+            Assert::AreEqual(expected.rightContactForceN, actual.rightContactForceN, tolerance);
+            Assert::AreEqual(expected.leftContactTorqueNm, actual.leftContactTorqueNm, tolerance);
+            Assert::AreEqual(expected.rightContactTorqueNm, actual.rightContactTorqueNm, tolerance);
+            Assert::AreEqual(expected.tractionScale, actual.tractionScale, tolerance);
+            Assert::AreEqual(static_cast<int>(expected.tractionLimited), static_cast<int>(actual.tractionLimited));
+            Assert::AreEqual(expected.commandedLongitudinalAccelMps2, actual.commandedLongitudinalAccelMps2, tolerance);
+            Assert::AreEqual(expected.commandedYawAccelRadps2, actual.commandedYawAccelRadps2, tolerance);
+            Assert::AreEqual(expected.longitudinalAccelErrorMps2, actual.longitudinalAccelErrorMps2, tolerance);
+            Assert::AreEqual(expected.yawAccelErrorRadps2, actual.yawAccelErrorRadps2, tolerance);
+            Assert::AreEqual(static_cast<int>(expected.converged), static_cast<int>(actual.converged));
+        }
+
         std::size_t FindFirstDumpLineIndexContaining(
             const std::vector<std::pair<std::string, std::string>>& dumpLines,
             const char* token)
@@ -453,10 +557,232 @@ namespace MazeMap
             Assert::AreEqual(0.0f, derivatives.stateDot(VehicleState::kR), 1.0e-4f);
         }
 
+        TEST_METHOD(PlantModelPreparedOverloadsMatchRawOverloads)
+        {
+            PlantModel plant;
+            PlantParams params = PlantParams::Default();
+            params.corneringStiffnessFrontNPerRad = 19.5f;
+            params.corneringStiffnessRearNPerRad = 17.25f;
+            params.staticFrictionTorqueNm = 0.012f;
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+
+            const VehicleState::StateVector state = BuildUkfState(
+                0.18f,
+                0.27f,
+                0.14f,
+                1.85f,
+                -0.21f,
+                2.7f,
+                60.0f,
+                47.0f,
+                -0.03f);
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.38f;
+            control.rightMotorCommand = 0.23f;
+            control.fanDutyCycle = 0.72f;
+            control.batteryVoltageV = params.supplyVoltageV - 0.35f;
+
+            const WheelKinematics rawKinematics = plant.wheelKinematics(state, params);
+            const WheelKinematics preparedKinematics = plant.wheelKinematics(state, prepared);
+            AssertWheelKinematicsNear(rawKinematics, preparedKinematics, 1.0e-6f);
+
+            const SlipTargets rawSlip = plant.slipTargets(state, rawKinematics, params);
+            const SlipTargets preparedSlip = plant.slipTargets(state, preparedKinematics, prepared);
+            AssertSlipTargetsNear(rawSlip, preparedSlip, 1.0e-6f);
+            AssertSlipTargetsNear(plant.slipTargets(state, params), plant.slipTargets(state, prepared), 1.0e-6f);
+
+            AssertContactForcesNear(
+                plant.tireForces(state, params),
+                plant.tireForces(state, prepared),
+                1.0e-6f);
+            AssertContactForcesNear(
+                plant.tireForces(state, control, params),
+                plant.tireForces(state, control, prepared),
+                1.0e-6f);
+
+            AssertPlantDerivativesNear(
+                plant.forwardStep(state, control, params),
+                plant.forwardStep(state, control, prepared),
+                1.0e-6f);
+
+            Assert::AreEqual(
+                plant.imuPlanarAcceleration(state, control, params).x(),
+                plant.imuPlanarAcceleration(state, control, prepared).x(),
+                1.0e-6f);
+            Assert::AreEqual(
+                plant.imuPlanarAcceleration(state, control, params).y(),
+                plant.imuPlanarAcceleration(state, control, prepared).y(),
+                1.0e-6f);
+
+            AssertStateVectorNear(
+                plant.integrate(state, control, 0.0015f, params),
+                plant.integrate(state, control, 0.0015f, prepared),
+                1.0e-6f);
+
+            AssertDriveCommandSolutionNear(
+                plant.solveDriveCommands(state, 1.25f, 3.75f, params, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveDriveCommands(state, 1.25f, 3.75f, prepared, control.fanDutyCycle, control.batteryVoltageV),
+                1.0e-6f);
+            AssertDriveCommandSolutionNear(
+                plant.solveDriveCommands(
+                    state(VehicleState::kU),
+                    1.25f,
+                    state(VehicleState::kR),
+                    3.75f,
+                    params,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                plant.solveDriveCommands(
+                    state(VehicleState::kU),
+                    1.25f,
+                    state(VehicleState::kR),
+                    3.75f,
+                    prepared,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                1.0e-6f);
+
+            AssertDriveCommandSolutionNear(
+                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, params, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, prepared, control.fanDutyCycle, control.batteryVoltageV),
+                1.0e-6f);
+            AssertDriveCommandSolutionNear(
+                plant.solveDriveCommandsForVelocityTarget(
+                    state(VehicleState::kU),
+                    2.05f,
+                    state(VehicleState::kR),
+                    2.95f,
+                    params,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                plant.solveDriveCommandsForVelocityTarget(
+                    state(VehicleState::kU),
+                    2.05f,
+                    state(VehicleState::kR),
+                    2.95f,
+                    prepared,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                1.0e-6f);
+
+            float rawMaxLongitudinalAccelMps2 = 0.0f;
+            float rawMaxYawAccelRadps2 = 0.0f;
+            float preparedMaxLongitudinalAccelMps2 = 0.0f;
+            float preparedMaxYawAccelRadps2 = 0.0f;
+            plant.velocityTargetTechnicalLimits(
+                state,
+                params,
+                rawMaxLongitudinalAccelMps2,
+                rawMaxYawAccelRadps2,
+                control.fanDutyCycle);
+            plant.velocityTargetTechnicalLimits(
+                state,
+                prepared,
+                preparedMaxLongitudinalAccelMps2,
+                preparedMaxYawAccelRadps2,
+                control.fanDutyCycle);
+            Assert::AreEqual(rawMaxLongitudinalAccelMps2, preparedMaxLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
+
+            rawMaxLongitudinalAccelMps2 = 0.0f;
+            rawMaxYawAccelRadps2 = 0.0f;
+            preparedMaxLongitudinalAccelMps2 = 0.0f;
+            preparedMaxYawAccelRadps2 = 0.0f;
+            plant.velocityTargetTechnicalLimits(
+                state(VehicleState::kU),
+                state(VehicleState::kR),
+                params,
+                rawMaxLongitudinalAccelMps2,
+                rawMaxYawAccelRadps2,
+                control.fanDutyCycle);
+            plant.velocityTargetTechnicalLimits(
+                state(VehicleState::kU),
+                state(VehicleState::kR),
+                prepared,
+                preparedMaxLongitudinalAccelMps2,
+                preparedMaxYawAccelRadps2,
+                control.fanDutyCycle);
+            Assert::AreEqual(rawMaxLongitudinalAccelMps2, preparedMaxLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
+
+            AssertDriveCommandSolutionNear(
+                plant.solveClosedLoopDriveCommands(state, 1.25f, 3.75f, params, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveClosedLoopDriveCommands(state, 1.25f, 3.75f, prepared, control.fanDutyCycle, control.batteryVoltageV),
+                1.0e-6f);
+            AssertDriveCommandSolutionNear(
+                plant.solveClosedLoopDriveCommands(
+                    state(VehicleState::kU),
+                    1.25f,
+                    state(VehicleState::kR),
+                    3.75f,
+                    params,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                plant.solveClosedLoopDriveCommands(
+                    state(VehicleState::kU),
+                    1.25f,
+                    state(VehicleState::kR),
+                    3.75f,
+                    prepared,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                1.0e-6f);
+
+            AssertDriveCommandSolutionNear(
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    state,
+                    2.05f,
+                    2.95f,
+                    params,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    state,
+                    2.05f,
+                    2.95f,
+                    prepared,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                1.0e-6f);
+            AssertDriveCommandSolutionNear(
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    state(VehicleState::kU),
+                    2.05f,
+                    state(VehicleState::kR),
+                    2.95f,
+                    params,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    state(VehicleState::kU),
+                    2.05f,
+                    state(VehicleState::kR),
+                    2.95f,
+                    prepared,
+                    control.fanDutyCycle,
+                    control.batteryVoltageV),
+                1.0e-6f);
+
+            Assert::AreEqual(
+                plant.driveTorqueFromCommand(control.leftMotorCommand, state(VehicleState::kOmegaL), control.batteryVoltageV, params),
+                plant.driveTorqueFromCommand(control.leftMotorCommand, state(VehicleState::kOmegaL), control.batteryVoltageV, prepared),
+                1.0e-6f);
+            Assert::AreEqual(
+                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), control.batteryVoltageV, params),
+                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), control.batteryVoltageV, prepared),
+                1.0e-6f);
+            Assert::AreEqual(
+                plant.driveFrictionTorque(state(VehicleState::kOmegaL), 0.018f, params),
+                plant.driveFrictionTorque(state(VehicleState::kOmegaL), 0.018f, prepared),
+                1.0e-6f);
+        }
+
         TEST_METHOD(PlantModelExactRestHoldKeepsMotionStateAtZero)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             VehicleState::StateVector state = BuildUkfState(
                 0.03f,
                 0.09f,
@@ -473,7 +799,7 @@ namespace MazeMap
             constexpr float dt = 0.001f;
             for (int step = 0; step < 1000; ++step)
             {
-                state = plant.integrate(state, control, dt, params);
+                state = plant.integrate(state, control, dt, prepared);
             }
 
             Assert::AreEqual(0.03f, state(VehicleState::kPx), 1.0e-7f);
@@ -763,6 +1089,7 @@ namespace MazeMap
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             VehicleState::StateVector state = BuildUkfState(
                 0.0f,
                 0.09f,
@@ -783,7 +1110,7 @@ namespace MazeMap
             constexpr int kSteps = 25;
             for (int step = 0; step < kSteps; ++step)
             {
-                state = plant.integrate(state, control, dt, params);
+                state = plant.integrate(state, control, dt, prepared);
             }
 
             const float totalTimeS = dt * static_cast<float>(kSteps);

@@ -71,6 +71,11 @@ namespace MazeMap
             return _params;
         }
 
+        const PlantModel::PreparedParams& preparedParams() const noexcept
+        {
+            return _preparedParams;
+        }
+
         bool WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept;
 
         template <typename Sink>
@@ -229,6 +234,7 @@ namespace MazeMap
         PlantModel _plantModel;
         WallGeometryModel _geometryModel;
         PlantParams _params;
+        PlantModel::PreparedParams _preparedParams;
         UKF<VehicleState::kDimension, 3> _filter;
         ControlInput _lastControl;
         EncoderObs _lastEncoderObs;

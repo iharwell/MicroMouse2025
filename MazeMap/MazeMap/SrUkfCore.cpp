@@ -308,6 +308,7 @@ namespace MazeMap
         : _plantModel(plantModel)
         , _geometryModel()
         , _params(params)
+        , _preparedParams(PlantModel::Prepare(_params))
         , _filter()
         , _lastControl()
         , _lastEncoderObs()
@@ -789,7 +790,7 @@ namespace MazeMap
             controlVector,
             [this, &control](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
             {
-                return _plantModel.integrate(sigmaPoint, control, sigmaDt, _params);
+                return _plantModel.integrate(sigmaPoint, control, sigmaDt, _preparedParams);
             },
             invokeLoop);
     }

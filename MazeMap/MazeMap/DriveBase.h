@@ -1360,7 +1360,7 @@ private:
         float technicalYawAccelRadps2 = 0.0f;
         plantModel.velocityTargetTechnicalLimits(
             presentState,
-            _ukf.ukf().params(),
+            _ukf.ukf().preparedParams(),
             technicalLongitudinalAccelMps2,
             technicalYawAccelRadps2,
             GetMissionFanDutyCycle());
@@ -1408,7 +1408,7 @@ private:
                 presentState,
                 desiredLongitudinalAccelMps2,
                 desiredYawAccelRadps2,
-                _ukf.ukf().params(),
+                _ukf.ukf().preparedParams(),
                 GetMissionFanDutyCycle(),
                 batteryVoltageV);
         return BuildClosedLoopVelocityCommandFromSolution(
@@ -1485,7 +1485,7 @@ private:
                 presentState,
                 desiredLongitudinalAccelMps2,
                 desiredYawAccelRadps2,
-                _ukf.ukf().params(),
+                _ukf.ukf().preparedParams(),
                 GetMissionFanDutyCycle(),
                 batteryVoltageV);
         return BuildClosedLoopVelocityCommandFromSolution(
