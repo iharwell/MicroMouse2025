@@ -1154,6 +1154,83 @@ namespace MazeMap
             return pin != kInvalidPin;
         }
 
+        inline bool ResolveWallSensorAdc1Channel(uint8_t pin, uint8_t& channel) noexcept
+        {
+            switch (pin)
+            {
+            case 20U:
+                channel = 15U;
+                return true;
+
+            case 21U:
+                channel = 0U;
+                return true;
+
+            case 22U:
+                channel = 13U;
+                return true;
+
+            case 23U:
+                channel = 14U;
+                return true;
+
+            default:
+                channel = 0U;
+                return false;
+            }
+        }
+
+        inline void ConfigureWallSensorAdc() noexcept
+        {
+#if defined(ARDUINO_TEENSY41) && defined(ADC1_CFG) && defined(ADC1_GC) && defined(ADC_GC_CAL) && defined(ADC_GC_AVGE) && defined(ADC_GC_AVGS) && defined(ADC_CFG_MODE) && defined(ADC_CFG_ADSTS) && defined(ADC_CFG_ADLSMP) && defined(ADC_CFG_ADIV) && defined(ADC_CFG_ADICLK) && defined(ADC_CFG_ADHSC) && defined(CCM_CCGR1) && defined(CCM_CCGR1_ADC1) && defined(CCM_CCGR_ON)
+            static bool configured = false;
+            if (configured)
+            {
+                return;
+            }
+
+            // Keep the wall-sensor hot path on calibrated ADC1 with the same 12-bit async/high-speed
+            // settings PJRC uses, but without hardware averaging.
+            constexpr uint32_t kWallSensorAdcMode =
+                ADC_CFG_MODE(2) |
+                ADC_CFG_ADSTS(3) |
+                ADC_CFG_ADLSMP |
+                ADC_CFG_ADIV(1) |
+                ADC_CFG_ADICLK(3) |
+                ADC_CFG_ADHSC;
+
+            CCM_CCGR1 |= CCM_CCGR1_ADC1(CCM_CCGR_ON);
+            ADC1_CFG = kWallSensorAdcMode;
+            ADC1_GC = ADC_GC_AVGE | ADC_GC_AVGS(0) | ADC_GC_CAL;
+            while ((ADC1_GC & ADC_GC_CAL) != 0U)
+            {
+            }
+
+            ADC1_CFG = kWallSensorAdcMode;
+            ADC1_GC = 0U;
+            configured = true;
+#endif
+        }
+
+        inline uint16_t ReadWallSensorAdcCode(uint8_t pin) noexcept
+        {
+#if defined(ARDUINO_TEENSY41) && defined(ADC1_HC0) && defined(ADC1_HS) && defined(ADC_HS_COCO0) && defined(ADC1_R0)
+            uint8_t channel = 0U;
+            if (ResolveWallSensorAdc1Channel(pin, channel))
+            {
+                ConfigureWallSensorAdc();
+                ADC1_HC0 = channel;
+                while ((ADC1_HS & ADC_HS_COCO0) == 0U)
+                {
+                }
+
+                return static_cast<uint16_t>(ADC1_R0);
+            }
+#endif
+
+            return static_cast<uint16_t>(analogRead(pin));
+        }
+
         inline void ConfigureMotorPwmPin(uint8_t pin)
         {
             if (!IsAssignedPin(pin))

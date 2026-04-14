@@ -957,6 +957,16 @@ struct AveragedWallSensorInputWindow
     OpticalObservationTiming latestTiming{};
 };
 
+template <uint8_t WindowCycles>
+inline WallSensorCalibrationInput UseCompletedWallSensorInputOrAverage(
+    const WallSensorCalibrationInput& input,
+    AveragedWallSensorInputWindow<WindowCycles>& averageWindow) noexcept
+{
+    return input.timing.observationReadyUs != 0UL ?
+        averageWindow.PushAndAverage(input) :
+        averageWindow.Average();
+}
+
 #if defined(ARDUINO_TEENSY41)
 inline bool ConfigureLoopMatchedBackLeftImu(
     MazeMap::Vehicle::ImuBackLeft& imu,
@@ -3302,92 +3312,129 @@ inline void StartAsyncWallSensorSweepRead(
 
 inline bool ServiceAsyncWallSensorSweepRead(AsyncWallSensorSweepRead& read) noexcept
 {
+    if (!read.active)
+    {
+        return true;
+    }
+
+    const uint32_t nowUs = micros();
+    if (static_cast<int32_t>(nowUs - read.stageReadyUs) < 0)
+    {
+        return false;
+    }
+
+    switch (read.stage)
+    {
+    case AsyncWallSensorSweepStage::Front:
+    {
+        FinalizeAsyncWallSensorLitSample(*read.frontLeftSensor, read.frontLeftSample);
+        FinalizeAsyncWallSensorLitSample(*read.frontRightSensor, read.frontRightSample);
+        const uint32_t ledOffCommandUs = micros();
+        read.frontLeftSensor->SetLedEnabled(false);
+        read.frontRightSensor->SetLedEnabled(false);
+        read.frontLeftSample.timing.observationReadyUs = ledOffCommandUs;
+        read.frontRightSample.timing.observationReadyUs = ledOffCommandUs;
+        read.nextFrontLeftLedOffCommandUs = ledOffCommandUs;
+        read.nextFrontRightLedOffCommandUs = ledOffCommandUs;
+        read.latestLedOffUs = ledOffCommandUs;
+
+        const uint32_t leftLedOnCommandUs = micros();
+        read.sideLeftSample.timing.ledOnCommandUs = leftLedOnCommandUs;
+        read.sideLeftSensor->SetLedEnabled(true);
+        read.stageReadyUs = leftLedOnCommandUs + WallSensorLitSettleTimeUs(WallSensorId::SideLeft);
+        read.stage = AsyncWallSensorSweepStage::Left;
+        return false;
+    }
+
+    case AsyncWallSensorSweepStage::Left:
+    {
+        FinalizeAsyncWallSensorLitSample(*read.sideLeftSensor, read.sideLeftSample);
+        const uint32_t ledOffCommandUs = micros();
+        read.sideLeftSensor->SetLedEnabled(false);
+        read.sideLeftSample.timing.observationReadyUs = ledOffCommandUs;
+        read.nextSideLeftLedOffCommandUs = ledOffCommandUs;
+        read.latestLedOffUs = ledOffCommandUs;
+
+        const uint32_t rightLedOnCommandUs = micros();
+        read.sideRightSample.timing.ledOnCommandUs = rightLedOnCommandUs;
+        read.sideRightSensor->SetLedEnabled(true);
+        read.stageReadyUs = rightLedOnCommandUs + WallSensorLitSettleTimeUs(WallSensorId::SideRight);
+        read.stage = AsyncWallSensorSweepStage::Right;
+        return false;
+    }
+
+    case AsyncWallSensorSweepStage::Right:
+    {
+        FinalizeAsyncWallSensorLitSample(*read.sideRightSensor, read.sideRightSample);
+        const uint32_t ledOffCommandUs = micros();
+        read.sideRightSensor->SetLedEnabled(false);
+        read.sideRightSample.timing.observationReadyUs = ledOffCommandUs;
+        read.nextSideRightLedOffCommandUs = ledOffCommandUs;
+        read.latestLedOffUs = ledOffCommandUs;
+        read.stage = AsyncWallSensorSweepStage::Complete;
+        read.active = false;
+        return true;
+    }
+
+    case AsyncWallSensorSweepStage::Complete:
+    default:
+        read.active = false;
+        return true;
+    }
+}
+
+inline void AwaitAsyncWallSensorSweepRead(AsyncWallSensorSweepRead& read) noexcept
+{
     while (read.active)
     {
-        const uint32_t nowUs = micros();
-        if (static_cast<int32_t>(nowUs - read.stageReadyUs) < 0)
+        if (ServiceAsyncWallSensorSweepRead(read))
         {
-            return false;
+            return;
         }
 
-        switch (read.stage)
+        const int32_t remainingUs = static_cast<int32_t>(read.stageReadyUs - micros());
+        if (remainingUs > 0)
         {
-        case AsyncWallSensorSweepStage::Front:
-        {
-            FinalizeAsyncWallSensorLitSample(*read.frontLeftSensor, read.frontLeftSample);
-            FinalizeAsyncWallSensorLitSample(*read.frontRightSensor, read.frontRightSample);
-            const uint32_t ledOffCommandUs = micros();
-            read.frontLeftSensor->SetLedEnabled(false);
-            read.frontRightSensor->SetLedEnabled(false);
-            read.frontLeftSample.timing.observationReadyUs = ledOffCommandUs;
-            read.frontRightSample.timing.observationReadyUs = ledOffCommandUs;
-            read.nextFrontLeftLedOffCommandUs = ledOffCommandUs;
-            read.nextFrontRightLedOffCommandUs = ledOffCommandUs;
-            read.latestLedOffUs = ledOffCommandUs;
-
-            const uint32_t leftLedOnCommandUs = micros();
-            read.sideLeftSample.timing.ledOnCommandUs = leftLedOnCommandUs;
-            read.sideLeftSensor->SetLedEnabled(true);
-            read.stageReadyUs = leftLedOnCommandUs + WallSensorLitSettleTimeUs(WallSensorId::SideLeft);
-            read.stage = AsyncWallSensorSweepStage::Left;
-            break;
-        }
-
-        case AsyncWallSensorSweepStage::Left:
-        {
-            FinalizeAsyncWallSensorLitSample(*read.sideLeftSensor, read.sideLeftSample);
-            const uint32_t ledOffCommandUs = micros();
-            read.sideLeftSensor->SetLedEnabled(false);
-            read.sideLeftSample.timing.observationReadyUs = ledOffCommandUs;
-            read.nextSideLeftLedOffCommandUs = ledOffCommandUs;
-            read.latestLedOffUs = ledOffCommandUs;
-
-            const uint32_t rightLedOnCommandUs = micros();
-            read.sideRightSample.timing.ledOnCommandUs = rightLedOnCommandUs;
-            read.sideRightSensor->SetLedEnabled(true);
-            read.stageReadyUs = rightLedOnCommandUs + WallSensorLitSettleTimeUs(WallSensorId::SideRight);
-            read.stage = AsyncWallSensorSweepStage::Right;
-            break;
-        }
-
-        case AsyncWallSensorSweepStage::Right:
-        {
-            FinalizeAsyncWallSensorLitSample(*read.sideRightSensor, read.sideRightSample);
-            const uint32_t ledOffCommandUs = micros();
-            read.sideRightSensor->SetLedEnabled(false);
-            read.sideRightSample.timing.observationReadyUs = ledOffCommandUs;
-            read.nextSideRightLedOffCommandUs = ledOffCommandUs;
-            read.latestLedOffUs = ledOffCommandUs;
-            read.stage = AsyncWallSensorSweepStage::Complete;
-            read.active = false;
-            return true;
-        }
-
-        case AsyncWallSensorSweepStage::Complete:
-        default:
-            read.active = false;
-            return true;
+            delayMicroseconds(static_cast<unsigned int>(remainingUs));
         }
     }
-
-    return true;
 }
 
-inline void CompleteAsyncWallSensorSweepRead(AsyncWallSensorSweepRead& read) noexcept
+inline void AbortAsyncWallSensorSweepRead(AsyncWallSensorSweepRead& read) noexcept
 {
-    while (!ServiceAsyncWallSensorSweepRead(read))
+    if (!read.active)
     {
-        delayMicroseconds(5);
+        return;
     }
-}
 
-inline uint32_t NextAsyncWallSensorSweepAmbientReadyUs(const AsyncWallSensorSweepRead& read) noexcept
-{
-    return
-        read.latestLedOffUs +
-        (std::max)(
-            WallSensorAmbientSettleTimeUs(WallSensorId::FrontLeft),
-            WallSensorAmbientSettleTimeUs(WallSensorId::FrontRight));
+    const uint32_t ledOffCommandUs = micros();
+    switch (read.stage)
+    {
+    case AsyncWallSensorSweepStage::Front:
+        read.frontLeftSensor->SetLedEnabled(false);
+        read.frontRightSensor->SetLedEnabled(false);
+        read.nextFrontLeftLedOffCommandUs = ledOffCommandUs;
+        read.nextFrontRightLedOffCommandUs = ledOffCommandUs;
+        break;
+
+    case AsyncWallSensorSweepStage::Left:
+        read.sideLeftSensor->SetLedEnabled(false);
+        read.nextSideLeftLedOffCommandUs = ledOffCommandUs;
+        break;
+
+    case AsyncWallSensorSweepStage::Right:
+        read.sideRightSensor->SetLedEnabled(false);
+        read.nextSideRightLedOffCommandUs = ledOffCommandUs;
+        break;
+
+    case AsyncWallSensorSweepStage::Complete:
+    default:
+        break;
+    }
+
+    read.latestLedOffUs = ledOffCommandUs;
+    read.stage = AsyncWallSensorSweepStage::Complete;
+    read.active = false;
 }
 
 inline RawWallSensorSample SampleWallSensorRaw(WallSensorId sensorId, const MazeMap::WallSensor& sensor)
@@ -4267,4 +4314,3 @@ inline bool BuildEvidenceObservationSnapshot(
     combinedSnapshot.rightTransitionDetected = rightTransitionDetected;
     return true;
 }
-

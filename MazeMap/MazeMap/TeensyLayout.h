@@ -183,6 +183,7 @@ inline bool SetupHardware()
     pinMode(Pins::WS_Forward_Left, INPUT);
     pinMode(Pins::WS_Side_Right, INPUT);
     pinMode(Pins::WS_Side_Left, INPUT);
+    MazeMap::Platform::ConfigureWallSensorAdc();
 
     // Wall sensor LED control outputs default off.
     ConfigureDigitalOutputLow(Pins::LED_Ctrl_Forward_Right);

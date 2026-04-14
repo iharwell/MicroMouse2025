@@ -74,8 +74,7 @@ namespace MazeMap
 
         float ReadLightLevel() const
         {
-            (void)analogRead(_wallSensorInPin);
-            const uint16_t adcReading = static_cast<uint16_t>(analogRead(_wallSensorInPin));
+            const uint16_t adcReading = MazeMap::Platform::ReadWallSensorAdcCode(_wallSensorInPin);
             return AdcToLightLevel(adcReading);
         }
 

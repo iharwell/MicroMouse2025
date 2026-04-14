@@ -10,6 +10,7 @@
 #include "..\MazeMap\RuntimeBinaryLogSupport.h"
 
 #include <cstdio>
+#include <array>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -30,6 +31,23 @@ namespace MazeMap::App
     TEST_CLASS(MazeMapRuntimeHelperTest)
     {
     public:
+        static MazeMap::WallSensor MakeTestWallSensor(
+            uint8_t wallSensorPin,
+            uint8_t ledPin,
+            const Eigen::Vector2f& position,
+            const Eigen::Vector2f& facingDirection)
+        {
+            const std::array<float, 8> adcToLightTable = { 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+            const MazeMap::WallSensor::DistanceModel distanceModel = { 1.0f, 1.0f, 0.05f, 10.0f };
+            return MazeMap::WallSensor(
+                wallSensorPin,
+                ledPin,
+                position,
+                facingDirection,
+                adcToLightTable,
+                distanceModel);
+        }
+
         static std::string ReadAllBytes(const std::string& path)
         {
             std::ifstream file(path, std::ios::binary);
@@ -99,6 +117,50 @@ namespace MazeMap::App
             Assert::AreEqual(0.02f, ComputeCorridorError(0.12f, 0.09f, true, false, 0.10f), 1.0e-6f);
             Assert::AreEqual(0.03f, ComputeCorridorError(0.12f, 0.07f, false, true, 0.10f), 1.0e-6f);
             Assert::AreEqual(0.0f, ComputeCorridorError(0.12f, 0.07f, false, false, 0.10f), 1.0e-6f);
+        }
+
+        TEST_METHOD(AsyncWallSensorSweepAwaitCompletesOutstandingStages)
+        {
+            HostResetDigitalPins();
+
+            MazeMap::WallSensor frontLeft = MakeTestWallSensor(20U, 40U, Eigen::Vector2f(-0.01f, 0.02f), Eigen::Vector2f(0.0f, 1.0f));
+            MazeMap::WallSensor frontRight = MakeTestWallSensor(21U, 41U, Eigen::Vector2f(0.01f, 0.02f), Eigen::Vector2f(0.0f, 1.0f));
+            MazeMap::WallSensor sideLeft = MakeTestWallSensor(22U, 42U, Eigen::Vector2f(-0.02f, 0.0f), Eigen::Vector2f(-1.0f, 0.0f));
+            MazeMap::WallSensor sideRight = MakeTestWallSensor(23U, 43U, Eigen::Vector2f(0.02f, 0.0f), Eigen::Vector2f(1.0f, 0.0f));
+
+            ::AsyncWallSensorSweepRead read{};
+            const uint32_t initialLedOffUs = micros();
+            ::StartAsyncWallSensorSweepRead(
+                frontLeft,
+                initialLedOffUs,
+                frontRight,
+                initialLedOffUs,
+                sideLeft,
+                initialLedOffUs,
+                sideRight,
+                initialLedOffUs,
+                read);
+
+            Assert::IsTrue(read.active);
+            Assert::AreEqual(HIGH, digitalRead(frontLeft.GetLedOutPin()));
+            Assert::AreEqual(HIGH, digitalRead(frontRight.GetLedOutPin()));
+
+            ::AwaitAsyncWallSensorSweepRead(read);
+
+            Assert::IsFalse(read.active);
+            Assert::AreEqual(static_cast<int>(::AsyncWallSensorSweepStage::Complete), static_cast<int>(read.stage));
+            Assert::IsTrue(read.frontLeftSample.timing.observationReadyUs != 0UL);
+            Assert::IsTrue(read.frontRightSample.timing.observationReadyUs != 0UL);
+            Assert::IsTrue(read.sideLeftSample.timing.observationReadyUs != 0UL);
+            Assert::IsTrue(read.sideRightSample.timing.observationReadyUs != 0UL);
+            Assert::AreEqual(LOW, digitalRead(frontLeft.GetLedOutPin()));
+            Assert::AreEqual(LOW, digitalRead(frontRight.GetLedOutPin()));
+            Assert::AreEqual(LOW, digitalRead(sideLeft.GetLedOutPin()));
+            Assert::AreEqual(LOW, digitalRead(sideRight.GetLedOutPin()));
+            Assert::IsTrue(read.nextFrontLeftLedOffCommandUs >= initialLedOffUs);
+            Assert::IsTrue(read.nextFrontRightLedOffCommandUs >= initialLedOffUs);
+            Assert::IsTrue(read.nextSideLeftLedOffCommandUs >= initialLedOffUs);
+            Assert::IsTrue(read.nextSideRightLedOffCommandUs >= initialLedOffUs);
         }
 
         TEST_METHOD(SelectSequentialRuntimeFileName_UsesExplicitNameWhenProvided)
@@ -288,4 +350,3 @@ namespace MazeMap::App
 
     };
 }
-

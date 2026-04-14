@@ -159,16 +159,17 @@ public:
         bool imuCaptured = false;
         auto serviceWallRead = [&wallRead]() noexcept
         {
-            (void)ServiceAsyncWallSensorSweepRead(wallRead);
+            return ServiceAsyncWallSensorSweepRead(wallRead);
         };
         auto captureImu = [&]() noexcept
         {
+            (void)serviceWallRead();
             if (!imuCaptured)
             {
                 CaptureInertialSnapshot(stationary, snapshot);
                 imuCaptured = true;
             }
-            serviceWallRead();
+            (void)serviceWallRead();
         };
 
         estimatorWork(snapshot, serviceWallRead, captureImu);
@@ -177,26 +178,16 @@ public:
             captureImu();
         }
 
-        serviceWallRead();
+        (void)serviceWallRead();
         if (wallRead.active)
         {
-            serviceWallRead();
-            if (wallRead.active)
-            {
-                CompleteAsyncWallSensorSweepRead(wallRead);
-            }
+            AwaitAsyncWallSensorSweepRead(wallRead);
         }
 
         _frontLeftLedOffCommandUs = wallRead.nextFrontLeftLedOffCommandUs;
         _frontRightLedOffCommandUs = wallRead.nextFrontRightLedOffCommandUs;
         _sideLeftLedOffCommandUs = wallRead.nextSideLeftLedOffCommandUs;
         _sideRightLedOffCommandUs = wallRead.nextSideRightLedOffCommandUs;
-
-        const uint32_t nextAmbientReadyUs = NextAsyncWallSensorSweepAmbientReadyUs(wallRead);
-        while (static_cast<int32_t>(micros() - nextAmbientReadyUs) < 0)
-        {
-            delayMicroseconds(5);
-        }
 
         const WallSensorCalibrationInput frontLeftRawInput =
             BuildWallSensorCalibrationInput(WallSensorId::FrontLeft, wallRead.frontLeftSample);
@@ -888,16 +879,17 @@ public:
         bool imuCaptured = false;
         auto serviceWallRead = [&wallRead]() noexcept
         {
-            (void)ServiceAsyncWallSensorSweepRead(wallRead);
+            return ServiceAsyncWallSensorSweepRead(wallRead);
         };
         auto captureImu = [&]() noexcept
         {
+            (void)serviceWallRead();
             if (!imuCaptured)
             {
                 CaptureInertialSnapshot(stationary, snapshot);
                 imuCaptured = true;
             }
-            serviceWallRead();
+            (void)serviceWallRead();
         };
 
         estimatorWork(snapshot, serviceWallRead, captureImu);
@@ -906,26 +898,16 @@ public:
             captureImu();
         }
 
-        serviceWallRead();
+        (void)serviceWallRead();
         if (wallRead.active)
         {
-            serviceWallRead();
-            if (wallRead.active)
-            {
-                CompleteAsyncWallSensorSweepRead(wallRead);
-            }
+            AwaitAsyncWallSensorSweepRead(wallRead);
         }
 
         _frontLeftLedOffCommandUs = wallRead.nextFrontLeftLedOffCommandUs;
         _frontRightLedOffCommandUs = wallRead.nextFrontRightLedOffCommandUs;
         _sideLeftLedOffCommandUs = wallRead.nextSideLeftLedOffCommandUs;
         _sideRightLedOffCommandUs = wallRead.nextSideRightLedOffCommandUs;
-
-        const uint32_t nextAmbientReadyUs = NextAsyncWallSensorSweepAmbientReadyUs(wallRead);
-        while (static_cast<int32_t>(micros() - nextAmbientReadyUs) < 0)
-        {
-            delayMicroseconds(5);
-        }
 
         const WallSensorCalibrationInput frontLeftRawInput =
             BuildWallSensorCalibrationInput(WallSensorId::FrontLeft, wallRead.frontLeftSample);
@@ -1336,6 +1318,3 @@ private:
         return ReadBackLeftGyroZRadpsRaw(_vehicle);
     }
 };
-
-
-
