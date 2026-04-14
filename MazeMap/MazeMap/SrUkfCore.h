@@ -5,6 +5,8 @@
 #include "WallGeometryModel.h"
 #include "UKF.h"
 
+#include <array>
+#include <cstdint>
 #include <type_traits>
 
 namespace MazeMap
@@ -36,6 +38,14 @@ namespace MazeMap
     class EXPORT SrUkfCore
     {
     public:
+        enum class OperatingMode : std::uint8_t
+        {
+            StationaryCertified = 0U,
+            LaunchOrReversalTransient = 1U,
+            GripLinear = 2U,
+            InconsistentOrSaturated = 3U
+        };
+
         // April 10, 2026 D:\open_floor_main.csv tuning from tooling/analyze_open_floor.py:
         // - SEC_10_STATIC / STATIC_HOLD set the IMU yaw noise floor,
         // - SEC_20_LAUNCH / OPEN_LOOP_LAUNCH repeatability set the moving encoder noise floor,
@@ -46,7 +56,7 @@ namespace MazeMap
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
         static constexpr float kImuYawRateSigmaRadps = 0.0131f;
         static constexpr float kImuAccelSigmaMps2 = 0.1305f;
-        static constexpr float kStationaryGyroBiasTimeConstantS = 15.0f;
+        static constexpr float kStationaryGyroBiasTimeConstantS = 0.50f;
 
         using StateVector = VehicleState::StateVector;
         using StateMatrix = VehicleState::StateMatrix;
@@ -75,6 +85,67 @@ namespace MazeMap
         {
             return _preparedParams;
         }
+
+        OperatingMode operatingMode() const noexcept { return _operatingMode; }
+        std::uint8_t operatingModeId() const noexcept { return static_cast<std::uint8_t>(_operatingMode); }
+        float gyroBiasAnchorRadps() const noexcept { return _gyroBiasAnchorRadps; }
+        float yawConsistencyLowPassRadps() const noexcept { return _yawConsistencyLowPassRadps; }
+        float yawWindowMismatchRad() const noexcept { return _yawWindowMismatchRad; }
+        float nhcSigmaMps() const noexcept { return _nhcSigmaMps; }
+        float nhcResidualMps() const noexcept { return _nhcResidualMps; }
+        float nhcResidualSigma() const noexcept { return _nhcResidualSigma; }
+        bool nonholonomicConstraintEnabled() const noexcept { return _nonholonomicConstraintEnabled; }
+        bool yawValidForFeedforward() const noexcept { return _yawValidForFeedforward; }
+        bool biasUpdateEnabled() const noexcept { return _biasUpdateEnabled; }
+
+        void setRuntimeContext(
+            float commandedLinearMps,
+            float commandedAngularRadps,
+            std::uint16_t saturationFlags,
+            float leftLaunchAssistFloor,
+            float rightLaunchAssistFloor,
+            bool accelBiasValid,
+            float accelBodyXMps2,
+            float accelBodyYMps2) noexcept;
+        float resolveYawRateForFeedforward(float yawRateRawRadps) const noexcept;
+
+        static float ComputeNonholonomicSigmaMps(float absForwardSpeedMps) noexcept;
+        static bool IsStationaryCandidate(
+            const ControlInput& control,
+            float commandedLinearMps,
+            float commandedAngularRadps,
+            const EncoderObs& observation,
+            float gyroRawRadps,
+            float gyroBiasAnchorRadps,
+            float accelBodyXMps2,
+            float accelBodyYMps2,
+            std::uint16_t saturationFlags) noexcept;
+        static bool HasLaunchOrReversalTrigger(
+            float forwardSpeedMps,
+            float leftDriveCommand,
+            float rightDriveCommand,
+            float leftLaunchAssistFloor,
+            float rightLaunchAssistFloor,
+            bool recentCommandSignFlip,
+            bool recentStationaryExit) noexcept;
+        static bool HasInconsistentOrSaturatedTrigger(
+            std::uint16_t saturationFlags,
+            float yawConsistencyLowPassRadps,
+            float yawWindowMismatchRad,
+            bool nhcEnabled,
+            float nhcResidualSigma) noexcept;
+        static OperatingMode ClassifyOperatingMode(
+            bool stationaryCertified,
+            bool launchOrReversalActive,
+            bool inconsistentOrSaturatedActive) noexcept;
+        static bool IsYawValidForFeedforward(
+            OperatingMode mode,
+            float bgzRadps,
+            float gyroBiasAnchorRadps,
+            float yawConsistencyLowPassRadps,
+            bool nhcEnabled,
+            float lateralVelocityMps,
+            float nhcSigmaMps) noexcept;
 
         bool WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept;
 
@@ -185,7 +256,7 @@ namespace MazeMap
 
         static void InvokeLoopHook(void* context, LoopHookInvoker loopHook) noexcept;
         static bool HasExactZeroWheelObservation(const EncoderObs& observation) noexcept;
-        static StateMatrix BuildDefaultProcessNoiseDensity() noexcept;
+        static StateMatrix BuildProcessNoiseSquareRootForMode(OperatingMode mode) noexcept;
         static float ComputeDistancePerEncoderCountM(const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedMps(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedVarianceMps2(const EncoderObs& observation) noexcept;
@@ -194,6 +265,9 @@ namespace MazeMap
         static float ComputeMeasuredWheelVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeEncoderPairNisThreshold(const EncoderObs& observation) noexcept;
         static float wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept;
+        static void ZeroGyroBiasDynamicCrossCovariances(StateMatrix& covariance) noexcept;
+        static float ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept;
+        static float ComputeStationaryGyroBiasVarianceRadps2(float priorVarianceRadps2, float blendFactor) noexcept;
 
         bool predictImpl(float dt, const ControlInput& control, void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         MeasurementUpdateResult updateEncoderPairImpl(
@@ -212,17 +286,27 @@ namespace MazeMap
 
         bool controlCommandsAreEffectivelyZero() const noexcept;
         bool applyGripLateralVelocityConstraint(
-            float yawRateRadps,
             void* loopHookContext,
             LoopHookInvoker loopHook) noexcept;
-        void inflateLateralVelocityVariance(float minimumSigmaMps) noexcept;
+        void updateNonholonomicDiagnostics(bool constraintEnabled) noexcept;
         void anchorPoseToEncoderDelta(StateVector& anchoredState, const EncoderObs& measured) const noexcept;
         void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
-        void applyStationaryZeroMotionConstraint(
-            float yawRateRadps,
-            float priorGyroBiasRadps,
-            float priorGyroBiasVarianceRadps2) noexcept;
+        void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
+        void updateCommandSignFlipWindow(float dtSeconds) noexcept;
+        void updateStationaryCertification(float yawRateRadps) noexcept;
+        void pushYawWindowContribution(float dtSeconds, float ukfYawRateRadps, float gyroYawRateRadps) noexcept;
+        void updateYawConsistencyMetrics(float yawRateRadps) noexcept;
+        void updateOperatingMode(float dtSeconds) noexcept;
+        void updateProcessNoiseForMode() noexcept;
+        bool shouldEnableNonholonomicConstraint() const noexcept;
+        float correctedYawRateRadps(float yawRateRawRadps) const noexcept;
+        void synchronizeGyroBiasStateToAnchor(
+            bool zeroDynamicCrossCovariances,
+            float maxGyroBiasStdRadps,
+            float minimumYawRateStdRadps) noexcept;
+        void enforceVarianceFloors(OperatingMode mode) noexcept;
+        void sanitizeLaunchRecoveryIfNeeded(OperatingMode previousMode, OperatingMode newMode) noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
             const StateVector& sigmaPoint,
             const LocalMapView& map) const noexcept;
@@ -247,5 +331,38 @@ namespace MazeMap
         Eigen::Matrix<float, 3, 3> _sqrtImuNoise;
         Eigen::Matrix<float, 2, 2> _sqrtFrontNoise;
         Eigen::Matrix<float, 1, 1> _sqrtSideNoise;
+        OperatingMode _operatingMode;
+        float _gyroBiasAnchorRadps;
+        float _gyroBiasAnchorVarianceRadps2;
+        float _commandedLinearMps;
+        float _commandedAngularRadps;
+        std::uint16_t _saturationFlags;
+        float _leftLaunchAssistFloor;
+        float _rightLaunchAssistFloor;
+        float _accelBodyXMps2;
+        float _accelBodyYMps2;
+        float _stationaryCandidateDwellS;
+        bool _stationaryCertified;
+        float _timeSinceStationaryExitS;
+        float _timeSinceCommandSignFlipS;
+        float _previousAverageDriveCommandSign;
+        float _launchHoldRemainingS;
+        float _inconsistentHoldRemainingS;
+        float _nhcReenableDelayRemainingS;
+        float _yawConsistencyLowPassRadps;
+        float _yawWindowMismatchRad;
+        float _yawConsistencyExceedDwellS;
+        float _nhcSigmaMps;
+        float _nhcResidualMps;
+        float _nhcResidualSigma;
+        bool _nonholonomicConstraintEnabled;
+        bool _yawValidForFeedforward;
+        bool _biasUpdateEnabled;
+        std::array<float, 128> _yawWindowDtSeconds;
+        std::array<float, 128> _yawWindowUkfIntegralRad;
+        std::array<float, 128> _yawWindowGyroIntegralRad;
+        std::size_t _yawWindowHead;
+        std::size_t _yawWindowSize;
+        float _yawWindowSpanS;
     };
 }

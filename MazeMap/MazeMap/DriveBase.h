@@ -738,6 +738,17 @@ public:
         telemetry.rightEncoderOmegaRadps = _lastEncoderObservation.omegaRightRadps;
         telemetry.modeFlags = _lastModeFlags;
         telemetry.saturationFlags = _lastSaturationFlags;
+        telemetry.ukfModeId = _ukf.ukf().operatingModeId();
+        telemetry.ukfYawValidForFeedforward = _ukf.ukf().yawValidForFeedforward() ? 1U : 0U;
+        telemetry.ukfBiasUpdateEnabled = _ukf.ukf().biasUpdateEnabled() ? 1U : 0U;
+        telemetry.ukfNhcEnabled = _ukf.ukf().nonholonomicConstraintEnabled() ? 1U : 0U;
+        telemetry.ukfGyroBiasAnchorRadps = _ukf.ukf().gyroBiasAnchorRadps();
+        telemetry.ukfYawConsistencyLowPassRadps = _ukf.ukf().yawConsistencyLowPassRadps();
+        telemetry.ukfYawWindowMismatchRad = _ukf.ukf().yawWindowMismatchRad();
+        telemetry.ukfNhcSigmaMps = _ukf.ukf().nhcSigmaMps();
+        telemetry.ukfNhcResidualMps = _ukf.ukf().nhcResidualMps();
+        telemetry.ukfNhcResidualSigma = _ukf.ukf().nhcResidualSigma();
+        telemetry.ukfFeedforwardYawRateRadps = _ukf.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
         telemetry.encoderObservationValid = _encoderObservationValid;
         return telemetry;
     }
@@ -1111,6 +1122,16 @@ private:
         control.rightMotorCommand = _rightMotor.getDriveCommand();
         control.fanDutyCycle = GetMissionFanDutyCycle();
         control.batteryVoltageV = 0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage());
+        _lastGyroRawRadps = snapshot.gyroRawRadps;
+        _ukf.ukf().setRuntimeContext(
+            _lastLinearCommandMps,
+            _lastAngularCommandRadps,
+            _lastSaturationFlags,
+            _lastLeftLaunchAssistFloor,
+            _lastRightLaunchAssistFloor,
+            snapshot.accelBiasValid,
+            snapshot.accelBodyXMps2,
+            snapshot.accelBodyYMps2);
         const EncoderCycleSample encoderSample = ConsumeEncoderCycleSample(dtSeconds, params);
 
         if (timing != nullptr)
@@ -1236,6 +1257,7 @@ private:
     float _rightEncoderDistanceMeters = 0.0f;
     float _leftEncoderVelocityMps = 0.0f;
     float _rightEncoderVelocityMps = 0.0f;
+    float _lastGyroRawRadps = 0.0f;
     MazeMap::EncoderObs _lastEncoderObservation{};
     uint16_t _lastModeFlags = kModeBraking;
     uint16_t _lastSaturationFlags = 0u;
@@ -1299,6 +1321,11 @@ private:
         if (!std::isfinite(presentState(MazeMap::VehicleState::kR)))
         {
             presentState(MazeMap::VehicleState::kR) = measured.angularSpeedRadps;
+        }
+        const float feedforwardYawRateRadps = _ukf.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
+        if (std::isfinite(feedforwardYawRateRadps))
+        {
+            presentState(MazeMap::VehicleState::kR) = feedforwardYawRateRadps;
         }
         if (!std::isfinite(presentState(MazeMap::VehicleState::kOmegaL)))
         {

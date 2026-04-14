@@ -160,6 +160,11 @@ namespace MazeMap
         if (hasPoseReference)
         {
             constexpr std::array<int, 3> poseIndices = { kPx, kPy, kPsi };
+            for (const int poseIndex : poseIndices)
+            {
+                constrainedCovariance.row(poseIndex).setZero();
+                constrainedCovariance.col(poseIndex).setZero();
+            }
             for (const int row : poseIndices)
             {
                 for (const int col : poseIndices)

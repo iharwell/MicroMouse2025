@@ -82,6 +82,9 @@ MMLOG_DEFINE_ROW(OpenFloorTimingRow, OPEN_FLOOR_TIMING_FIELDS);
     X(std::uint16_t, saturation_flags)             \
     X(std::uint16_t, watchdog_flags)               \
     X(std::uint16_t, measurement_flags)            \
+    X(std::uint8_t,  ukf_mode_id)                  \
+    X(std::uint8_t,  ukf_yaw_valid_for_feedforward)\
+    X(std::uint8_t,  bias_update_enabled)          \
     X(float,         ukf_state_px_m)               \
     X(float,         ukf_state_py_m)               \
     X(float,         ukf_state_psi_rad)            \
@@ -91,6 +94,12 @@ MMLOG_DEFINE_ROW(OpenFloorTimingRow, OPEN_FLOOR_TIMING_FIELDS);
     X(float,         ukf_state_omega_l_radps)      \
     X(float,         ukf_state_omega_r_radps)      \
     X(float,         ukf_state_bgz_radps)          \
+    X(float,         gyro_bias_anchor_radps)       \
+    X(float,         yaw_consistency_lp_radps)     \
+    X(float,         yaw_window_mismatch_rad)      \
+    X(float,         nhc_sigma_mps)                \
+    X(float,         nhc_residual_mps)             \
+    X(float,         nhc_residual_sigma)           \
     X(float,         measured_linear_speed_mps)    \
     X(float,         measured_angular_speed_radps) \
     X(float,         cmd_linear_mps)               \
@@ -1084,6 +1093,9 @@ bool OpenFloorMeasurementController::LogMainSample(
         frontRightObs,
         leftObs,
         rightObs);
+    row.ukf_mode_id = cycle.driveTelemetry.ukfModeId;
+    row.ukf_yaw_valid_for_feedforward = cycle.driveTelemetry.ukfYawValidForFeedforward;
+    row.bias_update_enabled = cycle.driveTelemetry.ukfBiasUpdateEnabled;
     row.ukf_state_px_m = estimatorState(MazeMap::VehicleState::kPx);
     row.ukf_state_py_m = estimatorState(MazeMap::VehicleState::kPy);
     row.ukf_state_psi_rad = estimatorState(MazeMap::VehicleState::kPsi);
@@ -1093,6 +1105,12 @@ bool OpenFloorMeasurementController::LogMainSample(
     row.ukf_state_omega_l_radps = estimatorState(MazeMap::VehicleState::kOmegaL);
     row.ukf_state_omega_r_radps = estimatorState(MazeMap::VehicleState::kOmegaR);
     row.ukf_state_bgz_radps = estimatorState(MazeMap::VehicleState::kBgz);
+    row.gyro_bias_anchor_radps = cycle.driveTelemetry.ukfGyroBiasAnchorRadps;
+    row.yaw_consistency_lp_radps = cycle.driveTelemetry.ukfYawConsistencyLowPassRadps;
+    row.yaw_window_mismatch_rad = cycle.driveTelemetry.ukfYawWindowMismatchRad;
+    row.nhc_sigma_mps = cycle.driveTelemetry.ukfNhcSigmaMps;
+    row.nhc_residual_mps = cycle.driveTelemetry.ukfNhcResidualMps;
+    row.nhc_residual_sigma = cycle.driveTelemetry.ukfNhcResidualSigma;
     row.measured_linear_speed_mps = cycle.measuredLinearSpeedMps;
     row.measured_angular_speed_radps = cycle.measuredAngularSpeedRadps;
     row.cmd_linear_mps = _drive.GetLastLinearCommandMps();

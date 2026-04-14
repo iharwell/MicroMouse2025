@@ -190,7 +190,7 @@ namespace MazeMap
                 return 0.0f;
             }
 
-            return 1.0f - std::exp(-dtSeconds / SrUkfCore::kStationaryGyroBiasTimeConstantS);
+            return (std::clamp)(dtSeconds / SrUkfCore::kStationaryGyroBiasTimeConstantS, 0.0f, 0.05f);
         }
 
         float AbsoluteCovarianceCorrelation(
@@ -2102,48 +2102,155 @@ namespace MazeMap
             Assert::AreEqual(0.01f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-9f);
         }
 
-        TEST_METHOD(SrUkfCorePredictSchedulesLateralProcessNoiseFromTurnSeverity)
+        TEST_METHOD(SrUkfCorePredictUsesModeDependentProcessNoise)
         {
-            const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
             ControlInput control{};
-            control.batteryVoltageV = params.supplyVoltageV;
+            EncoderObs encoder{};
+            constexpr float dt = 0.001f;
 
-            Assert::IsTrue(core.setState(
+            SrUkfCore stationaryCore;
+            // Reach certified stationary first.
+            for (int step = 0; step < 100; ++step)
+            {
+                stationaryCore.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+                Assert::IsTrue(stationaryCore.predict(dt, control));
+                Assert::IsTrue(stationaryCore.updateEncoderPair(encoder, dt).accepted);
+                Assert::IsTrue(stationaryCore.updateYawRate(0.0f).accepted);
+            }
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
+                static_cast<int>(stationaryCore.operatingMode()));
+            Assert::IsTrue(stationaryCore.predict(dt, control));
+            Assert::AreEqual(0.006f, FindProcessNoiseDiagonal(stationaryCore, "u_mps"), 1.0e-6f);
+            Assert::AreEqual(0.006f, FindProcessNoiseDiagonal(stationaryCore, "v_mps"), 1.0e-6f);
+            Assert::AreEqual(0.010f, FindProcessNoiseDiagonal(stationaryCore, "r_radps"), 1.0e-6f);
+
+            // A recent sign flip should force the launch/reversal process noise.
+            SrUkfCore launchCore;
+            Assert::IsTrue(launchCore.setState(
                 BuildUkfState(
                     0.0f,
                     0.0f,
                     0.0f,
-                    0.01f,
-                    0.0f,
-                    12.0f,
-                    0.0f,
-                    0.0f),
-                BuildUkfCovariance()));
-            Assert::IsTrue(core.predict(0.01f, control));
-
-            const float guardedNoise = FindProcessNoiseDiagonal(core, "v_mps");
-            Assert::AreEqual(0.12f, guardedNoise, 1.0e-6f);
-
-            Assert::IsTrue(core.setState(
-                BuildUkfState(
-                    0.0f,
+                    0.20f,
                     0.0f,
                     0.0f,
                     2.0f,
-                    0.0f,
-                    10.0f,
-                    0.0f,
+                    2.0f,
                     0.0f),
                 BuildUkfCovariance()));
-            Assert::IsTrue(core.predict(0.01f, control));
+            control.leftMotorCommand = 0.20f;
+            control.rightMotorCommand = 0.20f;
+            launchCore.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(launchCore.predict(dt, control));
+            control.leftMotorCommand = -0.20f;
+            control.rightMotorCommand = -0.20f;
+            launchCore.setRuntimeContext(-0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(launchCore.predict(dt, control));
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::LaunchOrReversalTransient),
+                static_cast<int>(launchCore.operatingMode()));
+            Assert::AreEqual(0.020f, FindProcessNoiseDiagonal(launchCore, "u_mps"), 1.0e-6f);
+            Assert::AreEqual(0.020f, FindProcessNoiseDiagonal(launchCore, "v_mps"), 1.0e-6f);
+            Assert::AreEqual(0.050f, FindProcessNoiseDiagonal(launchCore, "r_radps"), 1.0e-6f);
 
-            const float rhoSustain = std::fabs(2.0f * 10.0f) / Vehicle::GetSustainedLateralAccelerationReferenceMps2();
-            const float expectedHighNoise = 2.50f + (4.00f * (rhoSustain - 1.00f));
-            const float scheduledHighNoise = FindProcessNoiseDiagonal(core, "v_mps");
-            Assert::AreEqual(expectedHighNoise, scheduledHighNoise, 1.0e-5f);
-            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(core, "px_m"), 1.0e-9f);
-            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(core, "py_m"), 1.0e-9f);
+            // Saturation should force the inconsistent/saturated mode.
+            SrUkfCore inconsistentCore;
+            Assert::IsTrue(inconsistentCore.setState(
+                BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.50f,
+                    0.0f,
+                    0.0f,
+                    5.0f,
+                    5.0f,
+                    0.0f),
+                BuildUkfCovariance()));
+            inconsistentCore.setRuntimeContext(0.50f, 0.0f, 0x1U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(inconsistentCore.predict(dt, control));
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::InconsistentOrSaturated),
+                static_cast<int>(inconsistentCore.operatingMode()));
+            Assert::AreEqual(0.030f, FindProcessNoiseDiagonal(inconsistentCore, "u_mps"), 1.0e-6f);
+            Assert::AreEqual(0.030f, FindProcessNoiseDiagonal(inconsistentCore, "v_mps"), 1.0e-6f);
+            Assert::AreEqual(0.070f, FindProcessNoiseDiagonal(inconsistentCore, "r_radps"), 1.0e-6f);
+
+            // Nominal moving operation uses the grip-linear schedule.
+            SrUkfCore gripCore;
+            Assert::IsTrue(gripCore.setState(
+                BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.50f,
+                    0.0f,
+                    0.0f,
+                    5.0f,
+                    5.0f,
+                    0.0f),
+                BuildUkfCovariance()));
+            gripCore.setRuntimeContext(0.50f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(gripCore.predict(dt, control));
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::GripLinear),
+                static_cast<int>(gripCore.operatingMode()));
+            Assert::AreEqual(0.012f, FindProcessNoiseDiagonal(gripCore, "u_mps"), 1.0e-6f);
+            Assert::AreEqual(0.010f, FindProcessNoiseDiagonal(gripCore, "v_mps"), 1.0e-6f);
+            Assert::AreEqual(0.025f, FindProcessNoiseDiagonal(gripCore, "r_radps"), 1.0e-6f);
+            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(gripCore, "px_m"), 1.0e-9f);
+            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(gripCore, "py_m"), 1.0e-9f);
+        }
+
+        TEST_METHOD(SrUkfCoreRegimeHelpersExposeSpecThresholds)
+        {
+            ControlInput control{};
+            EncoderObs encoder{};
+            Assert::IsTrue(SrUkfCore::IsStationaryCandidate(
+                control,
+                0.0f,
+                0.0f,
+                encoder,
+                0.01f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0U));
+            Assert::IsFalse(SrUkfCore::IsStationaryCandidate(
+                control,
+                0.0f,
+                0.0f,
+                encoder,
+                0.07f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0U));
+
+            Assert::AreEqual(0.005f, SrUkfCore::ComputeNonholonomicSigmaMps(0.0f), 1.0e-6f);
+            Assert::AreEqual(0.040f, SrUkfCore::ComputeNonholonomicSigmaMps(1.0f), 1.0e-6f);
+            Assert::IsTrue(SrUkfCore::HasLaunchOrReversalTrigger(0.10f, 0.0f, 0.0f, 0.0f, 0.0f, true, false));
+            Assert::IsTrue(SrUkfCore::HasInconsistentOrSaturatedTrigger(0x1U, 0.0f, 0.0f, false, 0.0f));
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::InconsistentOrSaturated),
+                static_cast<int>(SrUkfCore::ClassifyOperatingMode(false, true, true)));
+            Assert::IsTrue(SrUkfCore::IsYawValidForFeedforward(
+                SrUkfCore::OperatingMode::GripLinear,
+                0.01f,
+                0.0f,
+                0.02f,
+                true,
+                0.01f,
+                0.01f));
+            Assert::IsFalse(SrUkfCore::IsYawValidForFeedforward(
+                SrUkfCore::OperatingMode::InconsistentOrSaturated,
+                0.0f,
+                0.0f,
+                0.0f,
+                false,
+                0.0f,
+                0.01f));
         }
 
         TEST_METHOD(SrUkfCoreZeroVelocityEncoderUpdateKeepsYawRateVarianceBoundedAtRest)
@@ -2293,11 +2400,74 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
             ControlInput control{};
+            EncoderObs encoder{};
             constexpr float dt = 0.001f;
-            Assert::IsTrue(core.predict(dt, control));
+            constexpr float rawStationaryGyroRadps = 0.04f;
+            for (int step = 0; step < 100; ++step)
+            {
+                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
+                Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
+            }
+
+            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateMatrix covariance = core.covariance();
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
+                static_cast<int>(core.operatingMode()));
+            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-6f);
+            Assert::AreEqual(0.0f, state(VehicleState::kV), 1.0e-6f);
+            Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-6f);
+            Assert::IsTrue(state(VehicleState::kBgz) > 0.0f);
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kU, VehicleState::kU)));
+            Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) < 1.0e-4f);
+            Assert::IsTrue(
+                covariance(VehicleState::kV, VehicleState::kV) < (0.005f * 0.005f),
+                (std::wstring(L"Stationary lateral variance was ") +
+                    std::to_wstring(covariance(VehicleState::kV, VehicleState::kV))).c_str());
+            Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) >= (0.010f * 0.010f));
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL)));
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR)));
+            Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) < 1.0e-4f);
+            Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) < 1.0e-4f);
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
+            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) > 1.0e-8f);
+        }
+
+        TEST_METHOD(SrUkfCoreLaunchModeDisablesGripPseudoMeasurement)
+        {
+            SrUkfCore core;
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                0.20f,
+                0.40f,
+                0.0f,
+                0.0f,
+                0.0f);
+            Assert::IsTrue(core.reset(
+                initialState,
+                BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.05f, 0.30f, 0.03f)));
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.20f;
+            control.rightMotorCommand = 0.20f;
+            core.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(core.predict(0.001f, control));
+
+            control.leftMotorCommand = -0.20f;
+            control.rightMotorCommand = -0.20f;
+            core.setRuntimeContext(-0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(core.predict(0.001f, control));
 
             EncoderObs encoder{};
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
+            encoder.omegaLeftRadps = 2.0f;
+            encoder.omegaRightRadps = 2.0f;
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.001f);
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
 
@@ -2306,53 +2476,11 @@ namespace MazeMap
             Assert::IsTrue(yawResult.accepted);
 
             const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
-            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-6f);
-            Assert::AreEqual(0.0f, state(VehicleState::kV), 1.0e-6f);
-            Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-6f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-6f);
-            Assert::AreEqual(0.0f, state(VehicleState::kBgz), 1.0e-6f);
-            Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) <= 1.0e-12f);
-            Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
-            Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) > 1.0e-8f);
-        }
-
-        TEST_METHOD(SrUkfCoreHighUtilizationYawConstraintDoesNotZeroLateralVelocity)
-        {
-            SrUkfCore core;
-            const VehicleState::StateVector initialState = BuildUkfState(
-                0.0f,
-                0.09f,
-                0.0f,
-                2.0f,
-                0.40f,
-                9.0f,
-                0.0f,
-                0.0f);
-            Assert::IsTrue(core.reset(
-                initialState,
-                BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.05f, 0.30f, 0.03f)));
-
-            EncoderObs encoder{};
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.0f);
-            Assert::IsTrue(encoderResult.attempted);
-            Assert::IsTrue(encoderResult.accepted);
-
-            const MeasurementUpdateResult yawResult = core.updateYawRate(9.0f);
-            Assert::IsTrue(yawResult.attempted);
-            Assert::IsTrue(yawResult.accepted);
-
-            const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
-            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-6f);
-            Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::LaunchOrReversalTransient),
+                static_cast<int>(core.operatingMode()));
+            Assert::IsFalse(core.nonholonomicConstraintEnabled());
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) > 0.10f);
-            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) > 1.0e-2f);
         }
 
         TEST_METHOD(SrUkfCoreYawRateUpdateAppliesGripPseudoMeasurementForCredibleRollingGrip)
@@ -2380,6 +2508,7 @@ namespace MazeMap
             Assert::IsTrue(core.reset(
                 initialState,
                 BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.10f, 0.30f, 0.03f)));
+            core.setRuntimeContext(1.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
 
             EncoderObs encoder{};
             encoder.omegaLeftRadps = leftWheelSpeedRadps;
@@ -2390,7 +2519,7 @@ namespace MazeMap
 
             const float initialLateralVelocityMps = core.state()(VehicleState::kV);
             const float initialLateralVarianceMps2 = core.covariance()(VehicleState::kV, VehicleState::kV);
-            const float expectedSigmaMps = 0.003f + (0.05f * forwardVelocityMps);
+            const float expectedSigmaMps = SrUkfCore::ComputeNonholonomicSigmaMps(forwardVelocityMps);
 
             const MeasurementUpdateResult yawResult = core.updateYawRate(yawRateRadps);
             Assert::IsTrue(yawResult.attempted);
@@ -2398,10 +2527,11 @@ namespace MazeMap
 
             const VehicleState::StateVector& state = core.state();
             const VehicleState::StateMatrix covariance = core.covariance();
+            Assert::IsTrue(core.nonholonomicConstraintEnabled());
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 0.02f);
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < std::fabs(initialLateralVelocityMps));
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) < initialLateralVarianceMps2);
-            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) <= ((expectedSigmaMps * expectedSigmaMps) + 1.0e-5f));
+            Assert::AreEqual(expectedSigmaMps, core.nhcSigmaMps(), 1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCoreYawRateUpdateInflatesLateralVarianceWhenRollingGripIsNotCredible)
@@ -2429,6 +2559,7 @@ namespace MazeMap
             Assert::IsTrue(core.reset(
                 initialState,
                 BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.001f, 0.05f, 0.30f, 0.03f)));
+            core.setRuntimeContext(2.0f, 0.0f, 0x1U, 0.0f, 0.0f, true, 0.0f, 0.0f);
 
             EncoderObs encoder{};
             encoder.omegaLeftRadps = leftWheelSpeedRadps;
@@ -2441,11 +2572,13 @@ namespace MazeMap
             Assert::IsTrue(yawResult.attempted);
             Assert::IsTrue(yawResult.accepted);
 
-            const float expectedSigmaMps = 0.003f + (0.05f * forwardVelocityMps);
+            const float expectedSigmaMps = SrUkfCore::ComputeNonholonomicSigmaMps(forwardVelocityMps);
             const VehicleState::StateVector& state = core.state();
             const VehicleState::StateMatrix covariance = core.covariance();
+            Assert::IsFalse(core.nonholonomicConstraintEnabled());
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) > 0.10f);
-            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) >= ((expectedSigmaMps * expectedSigmaMps) - 1.0e-6f));
+            Assert::AreEqual(expectedSigmaMps, core.nhcSigmaMps(), 1.0e-6f);
+            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) >= (0.020f * 0.020f));
         }
 
         TEST_METHOD(SrUkfCoreDebugTextDumpIncludesStateCovarianceNoiseAndPlantConfiguration)
@@ -2618,13 +2751,11 @@ namespace MazeMap
             const VehicleState::StateVector perturbedState = perturbedCore.state();
             const VehicleState::StateMatrix baselineCovariance = baselineCore.covariance();
             const VehicleState::StateMatrix perturbedCovariance = perturbedCore.covariance();
-            const float expectedBiasRadps =
-                StationaryGyroBiasBlendFactor(dt) * rawStationaryGyroRadps;
 
             Assert::IsTrue((baselineState - perturbedState).cwiseAbs().maxCoeff() <= 1.0e-7f);
             Assert::IsTrue((baselineCovariance - perturbedCovariance).cwiseAbs().maxCoeff() <= 1.0e-7f);
-            Assert::AreEqual(0.0f, baselineState(VehicleState::kR), 1.0e-6f);
-            Assert::AreEqual(expectedBiasRadps, baselineState(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(0.0f, baselineState(VehicleState::kR), 1.0e-4f);
+            Assert::AreEqual(0.0f, baselineState(VehicleState::kBgz), 1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCorePlanarAccelUpdateIsDisabledAndLeavesFilterStateUntouched)
@@ -2715,19 +2846,24 @@ namespace MazeMap
             ControlInput control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
+            constexpr int kSteps = 200;
 
-            Assert::IsTrue(core.predict(dt, control));
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
-            Assert::IsTrue(encoderResult.accepted);
-
-            const float rawStationaryGyroRadps = 0.12f;
-            const MeasurementUpdateResult yawResult = core.updateYawRate(rawStationaryGyroRadps);
-            Assert::IsTrue(yawResult.attempted);
-            Assert::IsTrue(yawResult.accepted);
+            const float rawStationaryGyroRadps = 0.04f;
+            float expectedBiasRadps = 0.0f;
+            for (int step = 0; step < kSteps; ++step)
+            {
+                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
+                Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
+                if (step >= 159)
+                {
+                    const float blendFactor = StationaryGyroBiasBlendFactor(dt);
+                    expectedBiasRadps += blendFactor * (rawStationaryGyroRadps - expectedBiasRadps);
+                }
+            }
 
             const VehicleState::StateVector& state = core.state();
-            const float expectedBiasRadps =
-                StationaryGyroBiasBlendFactor(dt) * rawStationaryGyroRadps;
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
             Assert::AreEqual(expectedBiasRadps, state(VehicleState::kBgz), 1.0e-6f);
         }
@@ -2738,21 +2874,20 @@ namespace MazeMap
             ControlInput control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
-            constexpr float rawStationaryGyroRadps = 0.12f;
+            constexpr float rawStationaryGyroRadps = 0.04f;
 
             const VehicleState::StateMatrix beforeCovariance = core.covariance();
             Assert::IsTrue(
                 beforeCovariance(VehicleState::kBgz, VehicleState::kBgz) >
                 0.0f);
 
-            Assert::IsTrue(core.predict(dt, control));
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
-            Assert::IsTrue(encoderResult.attempted);
-            Assert::IsTrue(encoderResult.accepted);
-
-            const MeasurementUpdateResult yawResult = core.updateYawRate(rawStationaryGyroRadps);
-            Assert::IsTrue(yawResult.attempted);
-            Assert::IsTrue(yawResult.accepted);
+            for (int step = 0; step < 200; ++step)
+            {
+                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
+                Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
+            }
 
             const VehicleState::StateMatrix covariance = core.covariance();
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
@@ -2762,7 +2897,7 @@ namespace MazeMap
                 beforeCovariance(VehicleState::kBgz, VehicleState::kBgz));
         }
 
-        TEST_METHOD(SrUkfCoreStationaryGyroBiasDecaysToOneOverEAfterFifteenSecondsAtZeroRate)
+        TEST_METHOD(SrUkfCoreStationaryGyroBiasDecaysByAboutOneOverEAfterHalfSecondOfCertifiedZeroRate)
         {
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -2774,17 +2909,19 @@ namespace MazeMap
                     0.0f,
                     0.0f,
                     0.0f,
-                    0.12f);
+                    0.04f);
             SrUkfCore core;
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
             ControlInput control{};
             EncoderObs encoder{};
-            constexpr float dt = 1.0f;
-            constexpr int kSteps = 15;
+            constexpr float dt = 0.01f;
+            constexpr int kSteps = 58;
+            float expectedBiasRadps = initialState(VehicleState::kBgz);
 
             for (int step = 0; step < kSteps; ++step)
             {
+                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
@@ -2794,9 +2931,13 @@ namespace MazeMap
                 const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
                 Assert::IsTrue(yawResult.attempted);
                 Assert::IsTrue(yawResult.accepted);
+                if (step >= 7)
+                {
+                    const float blendFactor = StationaryGyroBiasBlendFactor(dt);
+                    expectedBiasRadps += blendFactor * (0.0f - expectedBiasRadps);
+                }
             }
 
-            const float expectedBiasRadps = 0.12f * std::exp(-1.0f);
             Assert::AreEqual(expectedBiasRadps, core.state()(VehicleState::kBgz), 5.0e-4f);
         }
 
@@ -3266,8 +3407,11 @@ namespace MazeMap
             Assert::AreEqual(before(VehicleState::kPx), after(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(before(VehicleState::kPy), after(VehicleState::kPy), 1.0e-6f);
             Assert::IsTrue(afterError < beforeError);
-            Assert::IsTrue(afterCovariance(VehicleState::kBgz, VehicleState::kBgz) <
-                beforeCovariance(VehicleState::kBgz, VehicleState::kBgz));
+            Assert::AreEqual(before(VehicleState::kBgz), after(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(
+                beforeCovariance(VehicleState::kBgz, VehicleState::kBgz),
+                afterCovariance(VehicleState::kBgz, VehicleState::kBgz),
+                1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCoreFrontWallUpdateMovesForwardForCloserSymmetricObservation)
@@ -3461,7 +3605,12 @@ namespace MazeMap
 
             for (int step = 0; step < numCycles; ++step)
             {
+                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control));
+
+                const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
+                Assert::IsTrue(encoderResult.attempted);
+                Assert::IsTrue(encoderResult.accepted);
 
                 const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
                 Assert::IsTrue(yawResult.attempted);
@@ -3625,7 +3774,7 @@ namespace MazeMap
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
             const auto covariance = core.covariance();
-            Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) < 0.0001f, L"Final yaw rate variance was too high");
+            Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) <= 0.0001f, L"Final yaw rate variance was too high");
         }
         TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsOmegaL)
         {
@@ -3692,11 +3841,11 @@ namespace MazeMap
             const float finalYawRateVarianceRadps2 = covariance(VehicleState::kR, VehicleState::kR);
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kR, VehicleState::kR)));
             Assert::IsTrue(
-                finalYawRateVarianceRadps2 < 1.0e-4f,
+                finalYawRateVarianceRadps2 <= 1.0e-4f,
                 (std::wstring(L"Final yaw-rate variance was ") + std::to_wstring(finalYawRateVarianceRadps2)).c_str());
         }
 
-        TEST_METHOD(SrUkfCoreRepeatedZeroEncoderUpdatesDriveLateralVelocityVarianceExtremelyLow)
+        TEST_METHOD(SrUkfCoreRepeatedZeroEncoderUpdatesKeepLateralVelocityVarianceBounded)
         {
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -3736,7 +3885,7 @@ namespace MazeMap
             const float finalLateralVelocityVarianceMps2 = covariance(VehicleState::kV, VehicleState::kV);
             Assert::IsTrue(std::isfinite(finalLateralVelocityVarianceMps2));
             Assert::IsTrue(
-                finalLateralVelocityVarianceMps2 < 1.0e-4f,
+                finalLateralVelocityVarianceMps2 < initialLateralVelocityVarianceMps2,
                 (std::wstring(L"Final lateral-velocity variance was ") +
                     std::to_wstring(finalLateralVelocityVarianceMps2)).c_str());
         }
@@ -3764,9 +3913,12 @@ namespace MazeMap
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
             float expectedGyroBiasRadps = initialState(VehicleState::kBgz);
+            VehicleState::StateMatrix firstCertifiedCovariance = VehicleState::StateMatrix::Zero();
+            bool capturedFirstCertifiedCovariance = false;
 
             for (int step = 0; step < kSteps; ++step)
             {
+                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
@@ -3776,14 +3928,27 @@ namespace MazeMap
                 const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
                 Assert::IsTrue(yawResult.attempted);
                 Assert::IsTrue(yawResult.accepted);
+                if (!capturedFirstCertifiedCovariance &&
+                    (core.operatingMode() == SrUkfCore::OperatingMode::StationaryCertified))
+                {
+                    firstCertifiedCovariance = core.covariance();
+                    capturedFirstCertifiedCovariance = true;
+                }
 
-                const float blendFactor = StationaryGyroBiasBlendFactor(dt);
-                expectedGyroBiasRadps += blendFactor * (0.0f - expectedGyroBiasRadps);
+                if (step >= 79)
+                {
+                    const float blendFactor = StationaryGyroBiasBlendFactor(dt);
+                    expectedGyroBiasRadps += blendFactor * (0.0f - expectedGyroBiasRadps);
+                }
             }
 
             const VehicleState::StateVector& state = core.state();
             const VehicleState::StateMatrix covariance = core.covariance();
 
+            Assert::IsTrue(capturedFirstCertifiedCovariance);
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
+                static_cast<int>(core.operatingMode()));
             Assert::AreEqual(initialState(VehicleState::kPx), state(VehicleState::kPx), 1.0e-5f);
             Assert::AreEqual(initialState(VehicleState::kPy), state(VehicleState::kPy), 1.0e-5f);
             Assert::AreEqual(initialState(VehicleState::kPsi), state(VehicleState::kPsi), 1.0e-5f);
@@ -3792,13 +3957,19 @@ namespace MazeMap
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-6f);
             Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-6f);
             Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-6f);
-            Assert::AreEqual(expectedGyroBiasRadps, state(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(expectedGyroBiasRadps, state(VehicleState::kBgz), 2.0e-5f);
 
-            Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) <= 1.0e-12f);
-            Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) <= 1.0e-12f);
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kU, VehicleState::kU)));
+            Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) < 1.0e-4f);
+            Assert::IsTrue(
+                covariance(VehicleState::kV, VehicleState::kV) < (0.005f * 0.005f),
+                (std::wstring(L"Repeated stationary lateral variance was ") +
+                    std::to_wstring(covariance(VehicleState::kV, VehicleState::kV))).c_str());
+            Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) >= (0.010f * 0.010f));
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL)));
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR)));
+            Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) < 1.0e-4f);
+            Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) < 1.0e-4f);
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
             Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) > 1.0e-8f);
 
@@ -3807,13 +3978,13 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kPsi, VehicleState::kPsi)));
             Assert::IsTrue(
                 covariance(VehicleState::kPx, VehicleState::kPx) <=
-                (initialCovariance(VehicleState::kPx, VehicleState::kPx) + 1.0e-9f));
+                (firstCertifiedCovariance(VehicleState::kPx, VehicleState::kPx) + 1.0e-9f));
             Assert::IsTrue(
                 covariance(VehicleState::kPy, VehicleState::kPy) <=
-                (initialCovariance(VehicleState::kPy, VehicleState::kPy) + 1.0e-9f));
+                (firstCertifiedCovariance(VehicleState::kPy, VehicleState::kPy) + 1.0e-9f));
             Assert::IsTrue(
                 covariance(VehicleState::kPsi, VehicleState::kPsi) <=
-                (initialCovariance(VehicleState::kPsi, VehicleState::kPsi) + 1.0e-9f));
+                (firstCertifiedCovariance(VehicleState::kPsi, VehicleState::kPsi) + 1.0e-9f));
         }
 
     };

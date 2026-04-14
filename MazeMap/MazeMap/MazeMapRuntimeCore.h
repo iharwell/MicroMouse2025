@@ -650,6 +650,17 @@ struct DriveTelemetry
     float rightEncoderOmegaRadps = 0.0f;
     uint16_t modeFlags = 0U;
     uint16_t saturationFlags = 0U;
+    std::uint8_t ukfModeId = 0U;
+    std::uint8_t ukfYawValidForFeedforward = 1U;
+    std::uint8_t ukfBiasUpdateEnabled = 0U;
+    std::uint8_t ukfNhcEnabled = 0U;
+    float ukfGyroBiasAnchorRadps = 0.0f;
+    float ukfYawConsistencyLowPassRadps = 0.0f;
+    float ukfYawWindowMismatchRad = 0.0f;
+    float ukfNhcSigmaMps = 0.0f;
+    float ukfNhcResidualMps = 0.0f;
+    float ukfNhcResidualSigma = 0.0f;
+    float ukfFeedforwardYawRateRadps = 0.0f;
     bool encoderObservationValid = false;
 };
 

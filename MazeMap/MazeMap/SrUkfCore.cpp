@@ -38,135 +38,102 @@ namespace
         "side_range_m"
     };
 
-    struct LateralNoiseSchedule
+    constexpr float kStationaryCertificationDwellS = 0.080f;
+    constexpr float kStationaryCandidateMaxLinearCommandMps = 0.03f;
+    constexpr float kStationaryCandidateMaxAngularCommandRadps = 0.15f;
+    constexpr float kStationaryCandidateMaxDriveCommand = 0.08f;
+    constexpr float kStationaryCandidateMaxEncoderOmegaRadps = 1.0f;
+    constexpr float kStationaryCandidateMaxCorrectedGyroRadps = 0.06f;
+    constexpr float kStationaryCandidateMaxAccelMps2 = 0.6f;
+
+    constexpr float kCommandSignFlipWindowS = 0.025f;
+    constexpr float kStationaryExitLaunchWindowS = 0.060f;
+    constexpr float kLaunchHoldS = 0.030f;
+    constexpr float kLaunchLowSpeedThresholdMps = 0.25f;
+    constexpr float kLaunchDriveCommandDeltaThreshold = 0.75f;
+
+    constexpr float kInconsistentHoldS = 0.080f;
+    constexpr float kYawConsistencyLowPassTauS = 0.025f;
+    constexpr float kYawConsistencyLowPassThresholdRadps = 0.08f;
+    constexpr float kYawConsistencyExceedDwellS = 0.025f;
+    constexpr float kYawWindowDurationS = 0.080f;
+    constexpr float kYawWindowMismatchThresholdRad = 0.03f;
+    constexpr float kNhcResidualTripSigma = 3.0f;
+
+    constexpr float kNhcMinimumEnableForwardSpeedMps = 0.08f;
+    constexpr float kNhcDisableForwardSpeedMps = 0.05f;
+    constexpr float kNhcMaxDriveCommandDelta = 0.60f;
+    constexpr float kRecoveryNhcReenableDelayS = 0.025f;
+
+    constexpr float kMovingGyroBiasStdCapRadps = 0.020f;
+    constexpr float kRecoveryYawRateStdFloorRadps = 0.030f;
+    constexpr float kYawValidityBiasDeltaMaxRadps = 0.02f;
+
+    struct ModeProcessNoiseConfig
     {
-        float rhoSustain = 0.0f;
-        float sigmaAyMps2 = 0.12f;
-        bool enableVReset = true;
+        float sigmaUSqrtQ = 0.0f;
+        float sigmaVSqrtQ = 0.0f;
+        float sigmaRSqrtQ = 0.0f;
+        float sigmaOmegaSqrtQ = 0.0f;
+        float sigmaBgzSqrtQ = 0.0f;
+        float stdRMin = 0.0f;
+        float stdVMin = 0.0f;
     };
 
-    constexpr float kGripLateralVelocityBaseSigmaMps = 0.003f;
-    constexpr float kGripLateralVelocitySigmaPerForwardSpeed = 0.05f;
+    constexpr ModeProcessNoiseConfig kStationaryCertifiedProcessNoise{
+        0.006f,
+        0.006f,
+        0.010f,
+        0.050f,
+        0.00010f,
+        0.010f,
+        0.0f
+    };
 
-    float ComputeRhoSustain(
-        const MazeMap::VehicleState::StateVector& state,
-        const MazeMap::PlantParams& params) noexcept
+    constexpr ModeProcessNoiseConfig kLaunchOrReversalProcessNoise{
+        0.020f,
+        0.020f,
+        0.050f,
+        0.250f,
+        0.000001f,
+        0.030f,
+        0.010f
+    };
+
+    constexpr ModeProcessNoiseConfig kGripLinearProcessNoise{
+        0.012f,
+        0.010f,
+        0.025f,
+        0.100f,
+        0.000001f,
+        0.020f,
+        0.006f
+    };
+
+    constexpr ModeProcessNoiseConfig kInconsistentOrSaturatedProcessNoise{
+        0.030f,
+        0.030f,
+        0.070f,
+        0.350f,
+        0.000001f,
+        0.050f,
+        0.020f
+    };
+
+    const ModeProcessNoiseConfig& GetModeProcessNoiseConfig(const MazeMap::SrUkfCore::OperatingMode mode) noexcept
     {
-        const float velocityEpsilonMps =
-            (std::isfinite(params.velocityEpsilonMps) && (params.velocityEpsilonMps > 0.0f)) ?
-            params.velocityEpsilonMps :
-            0.05f;
-        const float forwardVelocityMps = state(MazeMap::VehicleState::kU);
-        if (!std::isfinite(forwardVelocityMps) || (std::fabs(forwardVelocityMps) < velocityEpsilonMps))
+        switch (mode)
         {
-            return 0.0f;
+        case MazeMap::SrUkfCore::OperatingMode::StationaryCertified:
+            return kStationaryCertifiedProcessNoise;
+        case MazeMap::SrUkfCore::OperatingMode::LaunchOrReversalTransient:
+            return kLaunchOrReversalProcessNoise;
+        case MazeMap::SrUkfCore::OperatingMode::InconsistentOrSaturated:
+            return kInconsistentOrSaturatedProcessNoise;
+        case MazeMap::SrUkfCore::OperatingMode::GripLinear:
+        default:
+            return kGripLinearProcessNoise;
         }
-
-        const float yawRateRadps = state(MazeMap::VehicleState::kR);
-        if (!std::isfinite(yawRateRadps))
-        {
-            return 0.0f;
-        }
-
-        const float ayRefMps2 = MazeMap::Vehicle::GetSustainedLateralAccelerationReferenceMps2();
-        if (!(ayRefMps2 > 0.0f) || !std::isfinite(ayRefMps2))
-        {
-            return 0.0f;
-        }
-
-        return std::fabs(forwardVelocityMps * yawRateRadps) / ayRefMps2;
-    }
-
-    float ComputeSigmaAyMps2(const float rhoSustain) noexcept
-    {
-        if (rhoSustain <= 0.35f)
-        {
-            return 0.12f;
-        }
-        if (rhoSustain <= 0.75f)
-        {
-            const float t = (rhoSustain - 0.35f) / 0.40f;
-            return 0.12f + ((1.00f - 0.12f) * t);
-        }
-        if (rhoSustain <= 1.00f)
-        {
-            const float t = (rhoSustain - 0.75f) / 0.25f;
-            return 1.00f + ((2.50f - 1.00f) * t);
-        }
-
-        return (std::min)(2.50f + (4.00f * (rhoSustain - 1.00f)), 5.00f);
-    }
-
-    float ComputeGripLateralVelocitySigmaMps(
-        const MazeMap::VehicleState::StateVector& state) noexcept
-    {
-        const float forwardVelocityMps = state(MazeMap::VehicleState::kU);
-        const float resolvedForwardSpeedMps =
-            std::isfinite(forwardVelocityMps) ?
-            std::fabs(forwardVelocityMps) :
-            0.0f;
-        return
-            kGripLateralVelocityBaseSigmaMps +
-            (kGripLateralVelocitySigmaPerForwardSpeed * resolvedForwardSpeedMps);
-    }
-
-    LateralNoiseSchedule BuildLateralNoiseSchedule(
-        const MazeMap::VehicleState::StateVector& state,
-        const MazeMap::PlantParams& params) noexcept
-    {
-        LateralNoiseSchedule schedule{};
-        schedule.rhoSustain = ComputeRhoSustain(state, params);
-        schedule.sigmaAyMps2 = ComputeSigmaAyMps2(schedule.rhoSustain);
-        schedule.enableVReset = schedule.rhoSustain < 0.85f;
-        return schedule;
-    }
-
-    void UpdateLateralProcessNoiseDensityRoot(
-        MazeMap::SrUkfCore::StateMatrix& sqrtProcessNoiseDensity,
-        const MazeMap::VehicleState::StateVector& state,
-        const MazeMap::PlantParams& params) noexcept
-    {
-        const LateralNoiseSchedule schedule = BuildLateralNoiseSchedule(state, params);
-        sqrtProcessNoiseDensity(
-            MazeMap::VehicleState::kV,
-            MazeMap::VehicleState::kV) = schedule.sigmaAyMps2;
-    }
-
-    float ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept
-    {
-        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
-        {
-            return 0.0f;
-        }
-
-        const float timeConstantS = MazeMap::SrUkfCore::kStationaryGyroBiasTimeConstantS;
-        if (!(std::isfinite(timeConstantS) && (timeConstantS > 0.0f)))
-        {
-            return 0.0f;
-        }
-
-        return 1.0f - std::exp(-dtSeconds / timeConstantS);
-    }
-
-    float ComputeStationaryGyroBiasVarianceRadps2(
-        float priorVarianceRadps2,
-        float blendFactor) noexcept
-    {
-        const float resolvedPriorVarianceRadps2 =
-            (std::isfinite(priorVarianceRadps2) && (priorVarianceRadps2 > 0.0f)) ?
-            priorVarianceRadps2 :
-            0.0f;
-        const float resolvedBlendFactor =
-            (std::isfinite(blendFactor) && (blendFactor >= 0.0f) && (blendFactor <= 1.0f)) ?
-            blendFactor :
-            0.0f;
-        const float measurementVarianceRadps2 =
-            MazeMap::SrUkfCore::kImuYawRateSigmaRadps *
-            MazeMap::SrUkfCore::kImuYawRateSigmaRadps;
-        const float oneMinusBlendFactor = 1.0f - resolvedBlendFactor;
-        return
-            (oneMinusBlendFactor * oneMinusBlendFactor * resolvedPriorVarianceRadps2) +
-            (resolvedBlendFactor * resolvedBlendFactor * measurementVarianceRadps2);
     }
 
     Eigen::Vector2f HeadingUnitFromYaw(float yaw) noexcept
@@ -321,6 +288,39 @@ namespace MazeMap
         , _sqrtImuNoise(Eigen::Matrix<float, 3, 3>::Identity())
         , _sqrtFrontNoise(Eigen::Matrix<float, 2, 2>::Identity())
         , _sqrtSideNoise(Eigen::Matrix<float, 1, 1>::Identity())
+        , _operatingMode(OperatingMode::GripLinear)
+        , _gyroBiasAnchorRadps(0.0f)
+        , _gyroBiasAnchorVarianceRadps2(0.01f)
+        , _commandedLinearMps(0.0f)
+        , _commandedAngularRadps(0.0f)
+        , _saturationFlags(0U)
+        , _leftLaunchAssistFloor(0.0f)
+        , _rightLaunchAssistFloor(0.0f)
+        , _accelBodyXMps2(0.0f)
+        , _accelBodyYMps2(0.0f)
+        , _stationaryCandidateDwellS(0.0f)
+        , _stationaryCertified(false)
+        , _timeSinceStationaryExitS(std::numeric_limits<float>::infinity())
+        , _timeSinceCommandSignFlipS(std::numeric_limits<float>::infinity())
+        , _previousAverageDriveCommandSign(0.0f)
+        , _launchHoldRemainingS(0.0f)
+        , _inconsistentHoldRemainingS(0.0f)
+        , _nhcReenableDelayRemainingS(0.0f)
+        , _yawConsistencyLowPassRadps(0.0f)
+        , _yawWindowMismatchRad(0.0f)
+        , _yawConsistencyExceedDwellS(0.0f)
+        , _nhcSigmaMps(ComputeNonholonomicSigmaMps(0.0f))
+        , _nhcResidualMps(0.0f)
+        , _nhcResidualSigma(0.0f)
+        , _nonholonomicConstraintEnabled(false)
+        , _yawValidForFeedforward(true)
+        , _biasUpdateEnabled(false)
+        , _yawWindowDtSeconds{}
+        , _yawWindowUkfIntegralRad{}
+        , _yawWindowGyroIntegralRad{}
+        , _yawWindowHead(0U)
+        , _yawWindowSize(0U)
+        , _yawWindowSpanS(0.0f)
     {
         _filter.setStateNormalizer(&VehicleState::NormalizeStateVector);
 
@@ -328,10 +328,9 @@ namespace MazeMap
         const StateMatrix initialCovariance = BuildDefaultInitialCovariance();
         _filter.setState(initialState, initialCovariance);
 
-        const StateMatrix processNoise = BuildDefaultProcessNoiseDensity();
-        _sqrtProcessNoiseDensity = StateMatrix::Zero();
-        _sqrtProcessNoiseDensity.diagonal() = processNoise.diagonal().cwiseSqrt();
-        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, initialState, _params);
+        _gyroBiasAnchorRadps = initialState(VehicleState::kBgz);
+        _gyroBiasAnchorVarianceRadps2 = initialCovariance(VehicleState::kBgz, VehicleState::kBgz);
+        _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _prePredictState = initialState;
         _prePredictCovariance = _filter.covariance();
@@ -342,6 +341,174 @@ namespace MazeMap
         _sqrtFrontNoise(0, 0) = 0.010f;
         _sqrtFrontNoise(1, 1) = 0.010f;
         _sqrtSideNoise(0, 0) = 0.012f;
+        synchronizeGyroBiasStateToAnchor(true, kMovingGyroBiasStdCapRadps, GetModeProcessNoiseConfig(_operatingMode).stdRMin);
+        enforceVarianceFloors(_operatingMode);
+    }
+
+    void SrUkfCore::setRuntimeContext(
+        float commandedLinearMps,
+        float commandedAngularRadps,
+        std::uint16_t saturationFlags,
+        float leftLaunchAssistFloor,
+        float rightLaunchAssistFloor,
+        bool accelBiasValid,
+        float accelBodyXMps2,
+        float accelBodyYMps2) noexcept
+    {
+        _commandedLinearMps = commandedLinearMps;
+        _commandedAngularRadps = commandedAngularRadps;
+        _saturationFlags = saturationFlags;
+        _leftLaunchAssistFloor = leftLaunchAssistFloor;
+        _rightLaunchAssistFloor = rightLaunchAssistFloor;
+        _accelBodyXMps2 = accelBiasValid ? accelBodyXMps2 : std::numeric_limits<float>::quiet_NaN();
+        _accelBodyYMps2 = accelBiasValid ? accelBodyYMps2 : std::numeric_limits<float>::quiet_NaN();
+    }
+
+    float SrUkfCore::resolveYawRateForFeedforward(float yawRateRawRadps) const noexcept
+    {
+        return _yawValidForFeedforward ? _filter.state()(VehicleState::kR) : correctedYawRateRadps(yawRateRawRadps);
+    }
+
+    float SrUkfCore::ComputeNonholonomicSigmaMps(float absForwardSpeedMps) noexcept
+    {
+        const float resolvedForwardSpeedMps =
+            (std::isfinite(absForwardSpeedMps) && (absForwardSpeedMps > 0.0f)) ?
+            absForwardSpeedMps :
+            0.0f;
+        const float sigmaMps =
+            MazeMap::Math::Sqrtf(
+                (0.005f * 0.005f) +
+                ((0.05f * resolvedForwardSpeedMps) * (0.05f * resolvedForwardSpeedMps)));
+        return (std::clamp)(sigmaMps, 0.005f, 0.040f);
+    }
+
+    bool SrUkfCore::IsStationaryCandidate(
+        const ControlInput& control,
+        float commandedLinearMps,
+        float commandedAngularRadps,
+        const EncoderObs& observation,
+        float gyroRawRadps,
+        float gyroBiasAnchorRadps,
+        float accelBodyXMps2,
+        float accelBodyYMps2,
+        std::uint16_t saturationFlags) noexcept
+    {
+        return
+            std::isfinite(commandedLinearMps) &&
+            std::fabs(commandedLinearMps) < kStationaryCandidateMaxLinearCommandMps &&
+            std::isfinite(commandedAngularRadps) &&
+            std::fabs(commandedAngularRadps) < kStationaryCandidateMaxAngularCommandRadps &&
+            std::isfinite(control.leftMotorCommand) &&
+            std::fabs(control.leftMotorCommand) < kStationaryCandidateMaxDriveCommand &&
+            std::isfinite(control.rightMotorCommand) &&
+            std::fabs(control.rightMotorCommand) < kStationaryCandidateMaxDriveCommand &&
+            std::isfinite(observation.omegaLeftRadps) &&
+            std::fabs(observation.omegaLeftRadps) < kStationaryCandidateMaxEncoderOmegaRadps &&
+            std::isfinite(observation.omegaRightRadps) &&
+            std::fabs(observation.omegaRightRadps) < kStationaryCandidateMaxEncoderOmegaRadps &&
+            std::isfinite(gyroRawRadps) &&
+            std::isfinite(gyroBiasAnchorRadps) &&
+            std::fabs(gyroRawRadps - gyroBiasAnchorRadps) < kStationaryCandidateMaxCorrectedGyroRadps &&
+            std::isfinite(accelBodyXMps2) &&
+            std::fabs(accelBodyXMps2) < kStationaryCandidateMaxAccelMps2 &&
+            std::isfinite(accelBodyYMps2) &&
+            std::fabs(accelBodyYMps2) < kStationaryCandidateMaxAccelMps2 &&
+            (saturationFlags == 0U);
+    }
+
+    bool SrUkfCore::HasLaunchOrReversalTrigger(
+        float forwardSpeedMps,
+        float leftDriveCommand,
+        float rightDriveCommand,
+        float leftLaunchAssistFloor,
+        float rightLaunchAssistFloor,
+        bool recentCommandSignFlip,
+        bool recentStationaryExit) noexcept
+    {
+        return
+            recentCommandSignFlip ||
+            (leftLaunchAssistFloor > 0.0f) ||
+            (rightLaunchAssistFloor > 0.0f) ||
+            (std::isfinite(forwardSpeedMps) &&
+                (std::fabs(forwardSpeedMps) < kLaunchLowSpeedThresholdMps) &&
+                std::isfinite(leftDriveCommand) &&
+                std::isfinite(rightDriveCommand) &&
+                (std::fabs(leftDriveCommand - rightDriveCommand) > kLaunchDriveCommandDeltaThreshold)) ||
+            recentStationaryExit;
+    }
+
+    bool SrUkfCore::HasInconsistentOrSaturatedTrigger(
+        std::uint16_t saturationFlags,
+        float yawConsistencyLowPassRadps,
+        float yawWindowMismatchRad,
+        bool nhcEnabled,
+        float nhcResidualSigma) noexcept
+    {
+        return
+            (saturationFlags != 0U) ||
+            (std::isfinite(yawConsistencyLowPassRadps) &&
+                (yawConsistencyLowPassRadps > kYawConsistencyLowPassThresholdRadps)) ||
+            (std::isfinite(yawWindowMismatchRad) &&
+                (yawWindowMismatchRad > kYawWindowMismatchThresholdRad)) ||
+            (nhcEnabled &&
+                std::isfinite(nhcResidualSigma) &&
+                (std::fabs(nhcResidualSigma) > kNhcResidualTripSigma));
+    }
+
+    SrUkfCore::OperatingMode SrUkfCore::ClassifyOperatingMode(
+        bool stationaryCertified,
+        bool launchOrReversalActive,
+        bool inconsistentOrSaturatedActive) noexcept
+    {
+        if (stationaryCertified)
+        {
+            return OperatingMode::StationaryCertified;
+        }
+        if (inconsistentOrSaturatedActive)
+        {
+            return OperatingMode::InconsistentOrSaturated;
+        }
+        if (launchOrReversalActive)
+        {
+            return OperatingMode::LaunchOrReversalTransient;
+        }
+        return OperatingMode::GripLinear;
+    }
+
+    bool SrUkfCore::IsYawValidForFeedforward(
+        OperatingMode mode,
+        float bgzRadps,
+        float gyroBiasAnchorRadps,
+        float yawConsistencyLowPassRadps,
+        bool nhcEnabled,
+        float lateralVelocityMps,
+        float nhcSigmaMps) noexcept
+    {
+        if (mode == OperatingMode::InconsistentOrSaturated)
+        {
+            return false;
+        }
+        if (!std::isfinite(bgzRadps) ||
+            !std::isfinite(gyroBiasAnchorRadps) ||
+            (std::fabs(bgzRadps - gyroBiasAnchorRadps) >= kYawValidityBiasDeltaMaxRadps))
+        {
+            return false;
+        }
+        if (!std::isfinite(yawConsistencyLowPassRadps) ||
+            (yawConsistencyLowPassRadps >= kYawConsistencyLowPassThresholdRadps))
+        {
+            return false;
+        }
+        if (nhcEnabled)
+        {
+            if (!(std::isfinite(nhcSigmaMps) && (nhcSigmaMps > 0.0f)) ||
+                !std::isfinite(lateralVelocityMps) ||
+                (std::fabs(lateralVelocityMps) >= (kNhcResidualTripSigma * nhcSigmaMps)))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     bool SrUkfCore::WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept
@@ -601,13 +768,42 @@ namespace MazeMap
             }
         }
 
-        return EmitNamedMatrixRowLine(
+        if (!EmitNamedMatrixRowLine(
+                context,
+                sink,
+                "ukf_dump_side_noise_sqrt_row",
+                kUkfSideNoiseFieldNames,
+                _sqrtSideNoise,
+                0))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_mode",
+                "mode_id=%u;stationary_certified=%s;bias_update_enabled=%s;nhc_enabled=%s;yaw_valid_for_feedforward=%s",
+                static_cast<unsigned>(operatingModeId()),
+                _stationaryCertified ? "true" : "false",
+                _biasUpdateEnabled ? "true" : "false",
+                _nonholonomicConstraintEnabled ? "true" : "false",
+                _yawValidForFeedforward ? "true" : "false"))
+        {
+            return false;
+        }
+
+        return EmitDebugTextLine(
             context,
             sink,
-            "ukf_dump_side_noise_sqrt_row",
-            kUkfSideNoiseFieldNames,
-            _sqrtSideNoise,
-            0);
+            "ukf_dump_consistency",
+            "gyro_bias_anchor_radps=%.9g;yaw_consistency_lp_radps=%.9g;yaw_window_mismatch_rad=%.9g;nhc_sigma_mps=%.9g;nhc_residual_mps=%.9g;nhc_residual_sigma=%.9g",
+            static_cast<double>(_gyroBiasAnchorRadps),
+            static_cast<double>(_yawConsistencyLowPassRadps),
+            static_cast<double>(_yawWindowMismatchRad),
+            static_cast<double>(_nhcSigmaMps),
+            static_cast<double>(_nhcResidualMps),
+            static_cast<double>(_nhcResidualSigma));
     }
 
     SrUkfCore::StateMatrix SrUkfCore::BuildDefaultInitialCovariance() noexcept
@@ -621,26 +817,60 @@ namespace MazeMap
         return covariance;
     }
 
-    SrUkfCore::StateMatrix SrUkfCore::BuildDefaultProcessNoiseDensity() noexcept
+    SrUkfCore::StateMatrix SrUkfCore::BuildProcessNoiseSquareRootForMode(const OperatingMode mode) noexcept
     {
-        StateMatrix processNoise = StateMatrix::Zero();
-        processNoise.diagonal() <<
+        const ModeProcessNoiseConfig& config = GetModeProcessNoiseConfig(mode);
+        StateMatrix sqrtNoise = StateMatrix::Zero();
+        sqrtNoise.diagonal() <<
             0.0f,
             0.0f,
             0.0f,
-            3.0e-4f,
-            0.0f,
-            6.0e-4f,
-            4.0e-2f,
-            4.0e-2f,
-            2.0e-8f;
-        return processNoise;
+            config.sigmaUSqrtQ,
+            config.sigmaVSqrtQ,
+            config.sigmaRSqrtQ,
+            config.sigmaOmegaSqrtQ,
+            config.sigmaOmegaSqrtQ,
+            config.sigmaBgzSqrtQ;
+        return sqrtNoise;
     }
 
     bool SrUkfCore::reset(const StateVector& state, const StateMatrix& covariance) noexcept
     {
         _filter.setState(state, covariance);
-        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, state, _params);
+        _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
+        _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
+        _commandedLinearMps = 0.0f;
+        _commandedAngularRadps = 0.0f;
+        _saturationFlags = 0U;
+        _leftLaunchAssistFloor = 0.0f;
+        _rightLaunchAssistFloor = 0.0f;
+        _accelBodyXMps2 = 0.0f;
+        _accelBodyYMps2 = 0.0f;
+        _stationaryCandidateDwellS = 0.0f;
+        _stationaryCertified = false;
+        _timeSinceStationaryExitS = std::numeric_limits<float>::infinity();
+        _timeSinceCommandSignFlipS = std::numeric_limits<float>::infinity();
+        _previousAverageDriveCommandSign = 0.0f;
+        _launchHoldRemainingS = 0.0f;
+        _inconsistentHoldRemainingS = 0.0f;
+        _nhcReenableDelayRemainingS = 0.0f;
+        _yawConsistencyLowPassRadps = 0.0f;
+        _yawWindowMismatchRad = 0.0f;
+        _yawConsistencyExceedDwellS = 0.0f;
+        _nhcSigmaMps = ComputeNonholonomicSigmaMps(std::fabs(state(VehicleState::kU)));
+        _nhcResidualMps = state(VehicleState::kV);
+        _nhcResidualSigma = 0.0f;
+        _nonholonomicConstraintEnabled = false;
+        _operatingMode = OperatingMode::GripLinear;
+        _yawValidForFeedforward = true;
+        _biasUpdateEnabled = false;
+        _yawWindowDtSeconds.fill(0.0f);
+        _yawWindowUkfIntegralRad.fill(0.0f);
+        _yawWindowGyroIntegralRad.fill(0.0f);
+        _yawWindowHead = 0U;
+        _yawWindowSize = 0U;
+        _yawWindowSpanS = 0.0f;
+        _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastControl = ControlInput{};
         _lastEncoderObs = EncoderObs{};
@@ -649,19 +879,56 @@ namespace MazeMap
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
         _acceptedEncoderUpdateSincePredict = false;
+        synchronizeGyroBiasStateToAnchor(true, kMovingGyroBiasStdCapRadps, GetModeProcessNoiseConfig(_operatingMode).stdRMin);
+        enforceVarianceFloors(_operatingMode);
         return true;
     }
 
     bool SrUkfCore::setState(const StateVector& state, const StateMatrix& covariance) noexcept
     {
         _filter.setState(state, covariance);
-        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, state, _params);
+        _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
+        _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
+        _commandedLinearMps = 0.0f;
+        _commandedAngularRadps = 0.0f;
+        _saturationFlags = 0U;
+        _leftLaunchAssistFloor = 0.0f;
+        _rightLaunchAssistFloor = 0.0f;
+        _accelBodyXMps2 = 0.0f;
+        _accelBodyYMps2 = 0.0f;
+        _stationaryCandidateDwellS = 0.0f;
+        _stationaryCertified = false;
+        _timeSinceStationaryExitS = std::numeric_limits<float>::infinity();
+        _timeSinceCommandSignFlipS = std::numeric_limits<float>::infinity();
+        _previousAverageDriveCommandSign = 0.0f;
+        _launchHoldRemainingS = 0.0f;
+        _inconsistentHoldRemainingS = 0.0f;
+        _nhcReenableDelayRemainingS = 0.0f;
+        _yawConsistencyLowPassRadps = 0.0f;
+        _yawWindowMismatchRad = 0.0f;
+        _yawConsistencyExceedDwellS = 0.0f;
+        _nhcSigmaMps = ComputeNonholonomicSigmaMps(std::fabs(state(VehicleState::kU)));
+        _nhcResidualMps = state(VehicleState::kV);
+        _nhcResidualSigma = 0.0f;
+        _nonholonomicConstraintEnabled = false;
+        _operatingMode = OperatingMode::GripLinear;
+        _yawValidForFeedforward = true;
+        _biasUpdateEnabled = false;
+        _yawWindowDtSeconds.fill(0.0f);
+        _yawWindowUkfIntegralRad.fill(0.0f);
+        _yawWindowGyroIntegralRad.fill(0.0f);
+        _yawWindowHead = 0U;
+        _yawWindowSize = 0U;
+        _yawWindowSpanS = 0.0f;
+        _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastEncoderDtSeconds = 0.0f;
         _prePredictState = _filter.state();
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
         _acceptedEncoderUpdateSincePredict = false;
+        synchronizeGyroBiasStateToAnchor(true, kMovingGyroBiasStdCapRadps, GetModeProcessNoiseConfig(_operatingMode).stdRMin);
+        enforceVarianceFloors(_operatingMode);
         return true;
     }
 
@@ -777,7 +1044,9 @@ namespace MazeMap
         _havePredictionReference = true;
         _acceptedEncoderUpdateSincePredict = false;
         _lastEncoderDtSeconds = 0.0f;
-        UpdateLateralProcessNoiseDensityRoot(_sqrtProcessNoiseDensity, _prePredictState, _params);
+        updateCommandSignFlipWindow(dt);
+        updateOperatingMode(dt);
+        updateProcessNoiseForMode();
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity * MazeMap::Math::Sqrtf(dt));
         Eigen::Matrix<float, 3, 1> controlVector;
         controlVector << control.leftMotorCommand, control.rightMotorCommand, control.fanDutyCycle;
@@ -785,7 +1054,7 @@ namespace MazeMap
         {
             InvokeLoopHook(loopHookContext, loopHook);
         };
-        return _filter.Predict(
+        const bool predicted = _filter.Predict(
             dt,
             controlVector,
             [this, &control](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
@@ -793,6 +1062,15 @@ namespace MazeMap
                 return _plantModel.integrate(sigmaPoint, control, sigmaDt, _preparedParams);
             },
             invokeLoop);
+        if (predicted)
+        {
+            synchronizeGyroBiasStateToAnchor(
+                true,
+                kMovingGyroBiasStdCapRadps,
+                GetModeProcessNoiseConfig(_operatingMode).stdRMin);
+            enforceVarianceFloors(_operatingMode);
+        }
+        return predicted;
     }
 
     MeasurementUpdateResult SrUkfCore::updateEncoderPair(const EncoderObs& observation, float dt) noexcept
@@ -890,9 +1168,6 @@ namespace MazeMap
         const bool shouldApplyStationaryConstraint =
             _acceptedEncoderUpdateSincePredict &&
             HasExactZeroWheelObservation(_lastEncoderObs);
-        const float priorGyroBiasRadps = _filter.state()(VehicleState::kBgz);
-        const float priorGyroBiasVarianceRadps2 =
-            _filter.covariance()(VehicleState::kBgz, VehicleState::kBgz);
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
             InvokeLoopHook(loopHookContext, loopHook);
@@ -901,34 +1176,48 @@ namespace MazeMap
             z,
             sqrtNoise,
             std::numeric_limits<float>::infinity(),
-            [](const StateVector& sigmaPoint) noexcept
+            [this](const StateVector& sigmaPoint) noexcept
             {
                 Eigen::Matrix<float, 1, 1> prediction;
-                prediction << sigmaPoint(VehicleState::kR) + sigmaPoint(VehicleState::kBgz);
+                prediction << sigmaPoint(VehicleState::kR) + _gyroBiasAnchorRadps;
                 return prediction;
             },
             invokeLoop);
         const float yawMeasurementNis = _filter.lastNis();
         if (result.accepted)
         {
-            VehicleState currentState;
-            currentState.SetStateVector(_filter.state());
+            updateStationaryCertification(yawRateRadps);
+            updateYawConsistencyMetrics(yawRateRadps);
+            const OperatingMode previousMode = _operatingMode;
+            updateOperatingMode(_lastEncoderDtSeconds);
             if (shouldApplyStationaryConstraint &&
-                (currentState.IsStationary() ||
-                 controlCommandsAreEffectivelyZero()))
+                _stationaryCertified)
             {
-                applyStationaryZeroMotionConstraint(
-                    yawRateRadps,
-                    priorGyroBiasRadps,
-                    priorGyroBiasVarianceRadps2);
+                applyStationaryZeroMotionConstraint(yawRateRadps);
             }
             else if (_acceptedEncoderUpdateSincePredict && !HasExactZeroWheelObservation(_lastEncoderObs))
             {
-                (void)applyGripLateralVelocityConstraint(
-                    yawRateRadps,
-                    loopHookContext,
-                    loopHook);
+                (void)applyGripLateralVelocityConstraint(loopHookContext, loopHook);
             }
+            else
+            {
+                updateNonholonomicDiagnostics(false);
+            }
+            updateOperatingMode(0.0f);
+            sanitizeLaunchRecoveryIfNeeded(previousMode, _operatingMode);
+            synchronizeGyroBiasStateToAnchor(
+                _operatingMode != OperatingMode::StationaryCertified,
+                kMovingGyroBiasStdCapRadps,
+                GetModeProcessNoiseConfig(_operatingMode).stdRMin);
+            enforceVarianceFloors(_operatingMode);
+            _yawValidForFeedforward = IsYawValidForFeedforward(
+                _operatingMode,
+                _filter.state()(VehicleState::kBgz),
+                _gyroBiasAnchorRadps,
+                _yawConsistencyLowPassRadps,
+                _nonholonomicConstraintEnabled,
+                _filter.state()(VehicleState::kV),
+                _nhcSigmaMps);
         }
         result.nis = yawMeasurementNis;
         return result;
@@ -1058,38 +1347,25 @@ namespace MazeMap
     {
         return
             (std::fabs(_lastControl.leftMotorCommand) <= 1.0e-6f) &&
-            (std::fabs(_lastControl.rightMotorCommand) <= 1.0e-6f);
+            (std::fabs(_lastControl.rightMotorCommand) <= 1.0e-6f) &&
+            (std::fabs(_commandedLinearMps) <= kStationaryCandidateMaxLinearCommandMps) &&
+            (std::fabs(_commandedAngularRadps) <= kStationaryCandidateMaxAngularCommandRadps);
     }
 
     bool SrUkfCore::applyGripLateralVelocityConstraint(
-        float yawRateRadps,
         void* loopHookContext,
         LoopHookInvoker loopHook) noexcept
     {
-        StateVector gripReferenceState = _filter.state();
-        const float estimatedGyroBiasRadps = gripReferenceState(VehicleState::kBgz);
-        if (std::isfinite(yawRateRadps) && std::isfinite(estimatedGyroBiasRadps))
+        updateNonholonomicDiagnostics(shouldEnableNonholonomicConstraint());
+        if (!_nonholonomicConstraintEnabled)
         {
-            gripReferenceState(VehicleState::kR) = yawRateRadps - estimatedGyroBiasRadps;
-        }
-
-        const float sigmaMps = ComputeGripLateralVelocitySigmaMps(gripReferenceState);
-        if (!(std::isfinite(sigmaMps) && (sigmaMps > 0.0f)))
-        {
-            return false;
-        }
-
-        const LateralNoiseSchedule lateralNoiseSchedule = BuildLateralNoiseSchedule(gripReferenceState, _params);
-        if (!lateralNoiseSchedule.enableVReset)
-        {
-            inflateLateralVelocityVariance(sigmaMps);
             return false;
         }
 
         Eigen::Matrix<float, 1, 1> z;
         z << 0.0f;
         Eigen::Matrix<float, 1, 1> sqrtNoise;
-        sqrtNoise(0, 0) = sigmaMps;
+        sqrtNoise(0, 0) = _nhcSigmaMps;
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
             InvokeLoopHook(loopHookContext, loopHook);
@@ -1105,29 +1381,19 @@ namespace MazeMap
                 return prediction;
             },
             invokeLoop);
-        if (!accepted)
-        {
-            inflateLateralVelocityVariance(sigmaMps);
-        }
+        updateNonholonomicDiagnostics(accepted && _nonholonomicConstraintEnabled);
         return accepted;
     }
 
-    void SrUkfCore::inflateLateralVelocityVariance(float minimumSigmaMps) noexcept
+    void SrUkfCore::updateNonholonomicDiagnostics(bool constraintEnabled) noexcept
     {
-        if (!(std::isfinite(minimumSigmaMps) && (minimumSigmaMps > 0.0f)))
-        {
-            return;
-        }
-
-        const float minimumVarianceMps2 = minimumSigmaMps * minimumSigmaMps;
-        StateMatrix covariance = _filter.covariance();
-        if (covariance(VehicleState::kV, VehicleState::kV) >= minimumVarianceMps2)
-        {
-            return;
-        }
-
-        covariance(VehicleState::kV, VehicleState::kV) = minimumVarianceMps2;
-        _filter.setState(_filter.state(), covariance);
+        _nonholonomicConstraintEnabled = constraintEnabled;
+        _nhcSigmaMps = ComputeNonholonomicSigmaMps(std::fabs(_filter.state()(VehicleState::kU)));
+        _nhcResidualMps = _filter.state()(VehicleState::kV);
+        _nhcResidualSigma =
+            (_nhcSigmaMps > 0.0f) ?
+            (_nhcResidualMps / _nhcSigmaMps) :
+            0.0f;
     }
 
     void SrUkfCore::anchorPoseToEncoderDelta(
@@ -1209,39 +1475,335 @@ namespace MazeMap
         _filter.setState(constrainedState, constrainedCovariance);
     }
 
-    void SrUkfCore::applyStationaryZeroMotionConstraint(
-        float yawRateRadps,
-        float priorGyroBiasRadps,
-        float priorGyroBiasVarianceRadps2) noexcept
+    void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
     {
-        const LateralNoiseSchedule lateralNoiseSchedule = BuildLateralNoiseSchedule(_prePredictState, _params);
         VehicleState constrainedState;
         constrainedState.SetStateVector(_filter.state());
         constrainedState.SetCovariance(_filter.covariance());
         constrainedState.ApplyStationaryZeroMotionConstraint(
             _lastEncoderObs,
-            lateralNoiseSchedule.enableVReset,
+            true,
             _havePredictionReference,
             _prePredictState,
             _prePredictCovariance,
             ComputeDistancePerEncoderCountM(_params),
             _params.trackWidthM);
-        const float resolvedPriorGyroBiasRadps =
-            std::isfinite(priorGyroBiasRadps) ?
-            priorGyroBiasRadps :
-            constrainedState.GetGyroBiasZ();
         const float blendFactor = ComputeStationaryGyroBiasBlendFactor(_lastEncoderDtSeconds);
-        const float constrainedGyroBiasRadps =
-            resolvedPriorGyroBiasRadps +
-            (blendFactor * (yawRateRadps - resolvedPriorGyroBiasRadps));
-        constrainedState.SetGyroBiasZ(constrainedGyroBiasRadps);
+        _gyroBiasAnchorRadps =
+            _gyroBiasAnchorRadps +
+            (blendFactor * (yawRateRadps - _gyroBiasAnchorRadps));
+        _gyroBiasAnchorVarianceRadps2 = ComputeStationaryGyroBiasVarianceRadps2(
+            _gyroBiasAnchorVarianceRadps2,
+            blendFactor);
+        constrainedState.SetGyroBiasZ(_gyroBiasAnchorRadps);
         constrainedState.SetGyroBiasZVar(
-            ComputeStationaryGyroBiasVarianceRadps2(
-                priorGyroBiasVarianceRadps2,
-                blendFactor));
+            _gyroBiasAnchorVarianceRadps2);
         _filter.setStateSquareRootCovariance(
             constrainedState.GetStateVector(),
             constrainedState.GetSqrtCovariance());
+        _biasUpdateEnabled = true;
+        updateNonholonomicDiagnostics(false);
+    }
+
+    void SrUkfCore::updateCommandSignFlipWindow(float dtSeconds) noexcept
+    {
+        const float averageDriveCommand = 0.5f * (_lastControl.leftMotorCommand + _lastControl.rightMotorCommand);
+        const float averageDriveCommandSign =
+            (std::fabs(averageDriveCommand) > 1.0e-4f) ?
+            ((averageDriveCommand > 0.0f) ? 1.0f : -1.0f) :
+            0.0f;
+        if ((averageDriveCommandSign != 0.0f) &&
+            (_previousAverageDriveCommandSign != 0.0f) &&
+            (averageDriveCommandSign != _previousAverageDriveCommandSign))
+        {
+            _timeSinceCommandSignFlipS = 0.0f;
+        }
+        else if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            _timeSinceCommandSignFlipS += dtSeconds;
+        }
+        _previousAverageDriveCommandSign =
+            (averageDriveCommandSign != 0.0f) ?
+            averageDriveCommandSign :
+            _previousAverageDriveCommandSign;
+    }
+
+    void SrUkfCore::updateStationaryCertification(float yawRateRadps) noexcept
+    {
+        const bool stationaryCandidate = IsStationaryCandidate(
+            _lastControl,
+            _commandedLinearMps,
+            _commandedAngularRadps,
+            _lastEncoderObs,
+            yawRateRadps,
+            _gyroBiasAnchorRadps,
+            _accelBodyXMps2,
+            _accelBodyYMps2,
+            _saturationFlags);
+        if (stationaryCandidate)
+        {
+            _stationaryCandidateDwellS += _lastEncoderDtSeconds;
+        }
+        else
+        {
+            _stationaryCandidateDwellS = 0.0f;
+        }
+        _stationaryCertified = _stationaryCandidateDwellS >= kStationaryCertificationDwellS;
+        _biasUpdateEnabled = _stationaryCertified;
+    }
+
+    void SrUkfCore::pushYawWindowContribution(
+        float dtSeconds,
+        float ukfYawRateRadps,
+        float gyroYawRateRadps) noexcept
+    {
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        {
+            return;
+        }
+
+        if (_yawWindowSize == _yawWindowDtSeconds.size())
+        {
+            _yawWindowSpanS -= _yawWindowDtSeconds[_yawWindowHead];
+            _yawWindowHead = (_yawWindowHead + 1U) % _yawWindowDtSeconds.size();
+            --_yawWindowSize;
+        }
+
+        const std::size_t tail = (_yawWindowHead + _yawWindowSize) % _yawWindowDtSeconds.size();
+        _yawWindowDtSeconds[tail] = dtSeconds;
+        _yawWindowUkfIntegralRad[tail] = ukfYawRateRadps * dtSeconds;
+        _yawWindowGyroIntegralRad[tail] = gyroYawRateRadps * dtSeconds;
+        _yawWindowSpanS += dtSeconds;
+        ++_yawWindowSize;
+
+        while ((_yawWindowSize > 0U) && (_yawWindowSpanS > kYawWindowDurationS))
+        {
+            _yawWindowSpanS -= _yawWindowDtSeconds[_yawWindowHead];
+            _yawWindowHead = (_yawWindowHead + 1U) % _yawWindowDtSeconds.size();
+            --_yawWindowSize;
+        }
+
+        float ukfIntegralRad = 0.0f;
+        float gyroIntegralRad = 0.0f;
+        for (std::size_t index = 0; index < _yawWindowSize; ++index)
+        {
+            const std::size_t current = (_yawWindowHead + index) % _yawWindowDtSeconds.size();
+            ukfIntegralRad += _yawWindowUkfIntegralRad[current];
+            gyroIntegralRad += _yawWindowGyroIntegralRad[current];
+        }
+        _yawWindowMismatchRad = std::fabs(ukfIntegralRad - gyroIntegralRad);
+    }
+
+    void SrUkfCore::updateYawConsistencyMetrics(float yawRateRadps) noexcept
+    {
+        const float correctedGyroRadps = correctedYawRateRadps(yawRateRadps);
+        const float yawResidualRadps = std::fabs(_filter.state()(VehicleState::kR) - correctedGyroRadps);
+        const float alpha =
+            (std::isfinite(_lastEncoderDtSeconds) && (_lastEncoderDtSeconds > 0.0f)) ?
+            (std::clamp)(_lastEncoderDtSeconds / (kYawConsistencyLowPassTauS + _lastEncoderDtSeconds), 0.0f, 1.0f) :
+            1.0f;
+        _yawConsistencyLowPassRadps += alpha * (yawResidualRadps - _yawConsistencyLowPassRadps);
+        pushYawWindowContribution(_lastEncoderDtSeconds, _filter.state()(VehicleState::kR), correctedGyroRadps);
+        if (_yawConsistencyLowPassRadps > kYawConsistencyLowPassThresholdRadps)
+        {
+            _yawConsistencyExceedDwellS += _lastEncoderDtSeconds;
+        }
+        else
+        {
+            _yawConsistencyExceedDwellS = 0.0f;
+        }
+    }
+
+    void SrUkfCore::updateOperatingMode(float dtSeconds) noexcept
+    {
+        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            if (_timeSinceStationaryExitS < std::numeric_limits<float>::infinity())
+            {
+                _timeSinceStationaryExitS += dtSeconds;
+            }
+            if (_nhcReenableDelayRemainingS > 0.0f)
+            {
+                _nhcReenableDelayRemainingS = (std::max)(0.0f, _nhcReenableDelayRemainingS - dtSeconds);
+            }
+        }
+
+        const bool recentCommandSignFlip =
+            (_timeSinceCommandSignFlipS <= kCommandSignFlipWindowS);
+        const bool recentStationaryExit =
+            (_timeSinceStationaryExitS <= kStationaryExitLaunchWindowS);
+        const bool launchTrigger = HasLaunchOrReversalTrigger(
+            _filter.state()(VehicleState::kU),
+            _lastControl.leftMotorCommand,
+            _lastControl.rightMotorCommand,
+            _leftLaunchAssistFloor,
+            _rightLaunchAssistFloor,
+            recentCommandSignFlip,
+            recentStationaryExit);
+        if (launchTrigger)
+        {
+            _launchHoldRemainingS = kLaunchHoldS;
+        }
+        else if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            _launchHoldRemainingS = (std::max)(0.0f, _launchHoldRemainingS - dtSeconds);
+        }
+
+        const bool inconsistencyTrigger = HasInconsistentOrSaturatedTrigger(
+            _saturationFlags,
+            (_yawConsistencyExceedDwellS >= kYawConsistencyExceedDwellS) ? _yawConsistencyLowPassRadps : 0.0f,
+            _yawWindowMismatchRad,
+            _nonholonomicConstraintEnabled,
+            _nhcResidualSigma);
+        if (inconsistencyTrigger)
+        {
+            _inconsistentHoldRemainingS = kInconsistentHoldS;
+        }
+        else if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            _inconsistentHoldRemainingS = (std::max)(0.0f, _inconsistentHoldRemainingS - dtSeconds);
+        }
+
+        const OperatingMode previousMode = _operatingMode;
+        _operatingMode = ClassifyOperatingMode(
+            _stationaryCertified,
+            _launchHoldRemainingS > 0.0f,
+            _inconsistentHoldRemainingS > 0.0f);
+        if ((previousMode == OperatingMode::StationaryCertified) &&
+            (_operatingMode != OperatingMode::StationaryCertified))
+        {
+            _timeSinceStationaryExitS = 0.0f;
+        }
+        if (_operatingMode == OperatingMode::StationaryCertified)
+        {
+            _timeSinceStationaryExitS = std::numeric_limits<float>::infinity();
+        }
+    }
+
+    void SrUkfCore::updateProcessNoiseForMode() noexcept
+    {
+        _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
+    }
+
+    bool SrUkfCore::shouldEnableNonholonomicConstraint() const noexcept
+    {
+        const float forwardSpeedMps = std::fabs(_filter.state()(VehicleState::kU));
+        const float driveDelta = std::fabs(_lastControl.leftMotorCommand - _lastControl.rightMotorCommand);
+        return
+            !_stationaryCertified &&
+            (_operatingMode == OperatingMode::GripLinear) &&
+            (_saturationFlags == 0U) &&
+            (forwardSpeedMps >= kNhcMinimumEnableForwardSpeedMps) &&
+            (driveDelta <= kNhcMaxDriveCommandDelta) &&
+            (_timeSinceCommandSignFlipS > kCommandSignFlipWindowS) &&
+            (_nhcReenableDelayRemainingS <= 0.0f);
+    }
+
+    float SrUkfCore::correctedYawRateRadps(float yawRateRawRadps) const noexcept
+    {
+        return std::isfinite(yawRateRawRadps) ? (yawRateRawRadps - _gyroBiasAnchorRadps) : 0.0f;
+    }
+
+    void SrUkfCore::ZeroGyroBiasDynamicCrossCovariances(StateMatrix& covariance) noexcept
+    {
+        constexpr std::array<int, 6> kDynamicIndices = {
+            VehicleState::kPsi,
+            VehicleState::kU,
+            VehicleState::kV,
+            VehicleState::kR,
+            VehicleState::kOmegaL,
+            VehicleState::kOmegaR
+        };
+        for (const int index : kDynamicIndices)
+        {
+            covariance(VehicleState::kBgz, index) = 0.0f;
+            covariance(index, VehicleState::kBgz) = 0.0f;
+        }
+    }
+
+    float SrUkfCore::ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept
+    {
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        {
+            return 0.0f;
+        }
+        return (std::clamp)(dtSeconds / kStationaryGyroBiasTimeConstantS, 0.0f, 0.05f);
+    }
+
+    float SrUkfCore::ComputeStationaryGyroBiasVarianceRadps2(
+        float priorVarianceRadps2,
+        float blendFactor) noexcept
+    {
+        const float resolvedPriorVarianceRadps2 =
+            (std::isfinite(priorVarianceRadps2) && (priorVarianceRadps2 > 0.0f)) ?
+            priorVarianceRadps2 :
+            0.0f;
+        const float measurementVarianceRadps2 = kImuYawRateSigmaRadps * kImuYawRateSigmaRadps;
+        const float oneMinusBlend = 1.0f - (std::clamp)(blendFactor, 0.0f, 1.0f);
+        return
+            (oneMinusBlend * oneMinusBlend * resolvedPriorVarianceRadps2) +
+            (blendFactor * blendFactor * measurementVarianceRadps2);
+    }
+
+    void SrUkfCore::synchronizeGyroBiasStateToAnchor(
+        bool zeroDynamicCrossCovariances,
+        float maxGyroBiasStdRadps,
+        float minimumYawRateStdRadps) noexcept
+    {
+        StateVector state = _filter.state();
+        StateMatrix covariance = _filter.covariance();
+        state(VehicleState::kBgz) = _gyroBiasAnchorRadps;
+        if (zeroDynamicCrossCovariances)
+        {
+            ZeroGyroBiasDynamicCrossCovariances(covariance);
+        }
+        const float cappedBiasVarianceRadps2 =
+            (std::max)(maxGyroBiasStdRadps, 1.0e-4f) * (std::max)(maxGyroBiasStdRadps, 1.0e-4f);
+        _gyroBiasAnchorVarianceRadps2 =
+            (std::min)(
+                (std::max)(_gyroBiasAnchorVarianceRadps2, 1.0e-8f),
+                cappedBiasVarianceRadps2);
+        covariance(VehicleState::kBgz, VehicleState::kBgz) = _gyroBiasAnchorVarianceRadps2;
+        covariance(VehicleState::kR, VehicleState::kR) =
+            (std::max)(
+                covariance(VehicleState::kR, VehicleState::kR),
+                (std::max)(minimumYawRateStdRadps, 1.0e-4f) * (std::max)(minimumYawRateStdRadps, 1.0e-4f));
+        _filter.setState(state, covariance);
+    }
+
+    void SrUkfCore::enforceVarianceFloors(OperatingMode mode) noexcept
+    {
+        const ModeProcessNoiseConfig& config = GetModeProcessNoiseConfig(mode);
+        StateMatrix covariance = _filter.covariance();
+        covariance(VehicleState::kR, VehicleState::kR) =
+            (std::max)(covariance(VehicleState::kR, VehicleState::kR), config.stdRMin * config.stdRMin);
+        covariance(VehicleState::kV, VehicleState::kV) =
+            (std::max)(covariance(VehicleState::kV, VehicleState::kV), config.stdVMin * config.stdVMin);
+        covariance(VehicleState::kBgz, VehicleState::kBgz) =
+            (std::max)(covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-8f);
+        _filter.setState(_filter.state(), covariance);
+    }
+
+    void SrUkfCore::sanitizeLaunchRecoveryIfNeeded(OperatingMode previousMode, OperatingMode newMode) noexcept
+    {
+        if ((previousMode != OperatingMode::LaunchOrReversalTransient) ||
+            (newMode == OperatingMode::LaunchOrReversalTransient) ||
+            (_saturationFlags != 0U))
+        {
+            return;
+        }
+
+        StateVector state = _filter.state();
+        StateMatrix covariance = _filter.covariance();
+        state(VehicleState::kBgz) = _gyroBiasAnchorRadps;
+        ZeroGyroBiasDynamicCrossCovariances(covariance);
+        covariance(VehicleState::kBgz, VehicleState::kBgz) = _gyroBiasAnchorVarianceRadps2;
+        covariance(VehicleState::kR, VehicleState::kR) =
+            (std::max)(
+                covariance(VehicleState::kR, VehicleState::kR),
+                kRecoveryYawRateStdFloorRadps * kRecoveryYawRateStdFloorRadps);
+        _filter.setState(state, covariance);
+        _nhcReenableDelayRemainingS = kRecoveryNhcReenableDelayS;
     }
 
     float SrUkfCore::wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept
