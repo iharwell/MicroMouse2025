@@ -328,6 +328,20 @@ private:
         unsigned long timeoutMs{};
     };
 
+    struct SectionSettleState final
+    {
+        enum class Destination : std::uint8_t
+        {
+            None,
+            Yaw
+        } destination{ Destination::None };
+
+        OpenFloorMeasurementLabels labels{};
+        MazeMap::VehicleState stationaryCheckState{};
+        bool holdingSettled{};
+        unsigned long settleStartMs{};
+    };
+
     struct TurnSectionState final
     {
         OpenFloorMeasurementLabels labels{};
@@ -426,6 +440,7 @@ private:
     RecoveryState _recoveryState{};
     LaunchPulseState _launchPulseState{};
     StraightSectionState _straightSectionState{};
+    SectionSettleState _sectionSettleState{};
     TurnSectionState _turnSectionState{};
     SmoothTurnState _smoothTurnState{};
     LaunchSequenceState _launchSequenceState{};
@@ -544,6 +559,7 @@ private:
         uint16_t repeatIndex,
         MazeMap::OpenFloorSpeedBin speedBin,
         bool emitSectionMarkers = true);
+    bool StartSectionSettlePhase(const OpenFloorMeasurementLabels& labels, SectionSettleState::Destination destination);
     bool StartSmoothTurnPhase(
         MazeMap::ManeuverCode code,
         float cruiseSpeed,
@@ -586,6 +602,10 @@ private:
         const LoopController::ModeState& state,
         LoopController::TickServices& services);
     LoopController::ControlVector ExecuteStraightDistanceTick(
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services);
+    LoopController::ControlVector ExecuteSectionSettleTick(
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
         LoopController::TickServices& services);
@@ -1318,6 +1338,7 @@ bool OpenFloorMeasurementController::Begin()
     _recoveryState = RecoveryState{};
     _launchPulseState = LaunchPulseState{};
     _straightSectionState = StraightSectionState{};
+    _sectionSettleState = SectionSettleState{};
     _turnSectionState = TurnSectionState{};
     _smoothTurnState = SmoothTurnState{};
     _launchSequenceState = LaunchSequenceState{};
@@ -2352,7 +2373,100 @@ bool OpenFloorMeasurementController::AdvanceStraightSequence()
     }
 
     _yawSequenceState = YawSequenceState{};
-    return AdvanceYawSequence();
+    OpenFloorMeasurementLabels settleLabels{};
+    settleLabels.sectionId = MazeMap::OpenFloorSectionId::Sec40Yaw;
+    settleLabels.startMarkerId = MazeMap::OpenFloorMarkerId::C;
+    settleLabels.phaseId = MazeMap::OpenFloorPhaseId::Brake;
+    return StartSectionSettlePhase(settleLabels, SectionSettleState::Destination::Yaw);
+}
+
+bool OpenFloorMeasurementController::StartSectionSettlePhase(
+    const OpenFloorMeasurementLabels& labels,
+    const SectionSettleState::Destination destination)
+{
+    if (!BeginMainSection(labels))
+    {
+        return false;
+    }
+
+    _sectionSettleState = SectionSettleState{};
+    _sectionSettleState.labels = labels;
+    _sectionSettleState.destination = destination;
+    _phaseFn = &OpenFloorMeasurementController::ExecuteSectionSettleTick;
+    return true;
+}
+
+MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::ExecuteSectionSettleTick(
+    std::uint32_t loopEndTimeUs,
+    const MazeMap::App::Internal::LoopController::ModeState& state,
+    MazeMap::App::Internal::LoopController::TickServices& services)
+{
+    (void)loopEndTimeUs;
+    OpenFloorMeasurementCycle cycle{};
+    PopulateCycleFromState(state, cycle);
+    if (QueueMeasurementCaptureFault(_sectionSettleState.labels, cycle))
+    {
+        services.Fault(cycle.estimatorFault ?
+            "Estimator fault during open-floor measurement" :
+            "Primary diagnostic selector jumper removed during open-floor measurement");
+        return LoopController::ControlVector::BrakeCommand();
+    }
+
+    _sectionSettleState.stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
+    const bool estimatorStationary = _sectionSettleState.stationaryCheckState.IsStationary();
+    const unsigned long nowMs = millis();
+    if (!estimatorStationary)
+    {
+        _sectionSettleState.holdingSettled = false;
+        _sectionSettleState.settleStartMs = 0UL;
+        _sectionSettleState.labels.phaseId = MazeMap::OpenFloorPhaseId::Brake;
+        _sectionSettleState.labels.progressNorm = 0.0f;
+    }
+    else
+    {
+        if (!_sectionSettleState.holdingSettled)
+        {
+            _sectionSettleState.holdingSettled = true;
+            _sectionSettleState.settleStartMs = nowMs;
+        }
+        _sectionSettleState.labels.phaseId = MazeMap::OpenFloorPhaseId::Hold;
+        _sectionSettleState.labels.progressNorm = (MazeMap::kOpenFloorLaunchSettleMs > 0UL) ?
+            (std::clamp)(
+                static_cast<float>(nowMs - _sectionSettleState.settleStartMs) /
+                    static_cast<float>(MazeMap::kOpenFloorLaunchSettleMs),
+                0.0f,
+                1.0f) :
+            1.0f;
+    }
+
+    StageMainSample(_sectionSettleState.labels, cycle);
+    if (estimatorStationary &&
+        ((_sectionSettleState.holdingSettled && ((nowMs - _sectionSettleState.settleStartMs) >= MazeMap::kOpenFloorLaunchSettleMs)) ||
+         (MazeMap::kOpenFloorLaunchSettleMs == 0UL)))
+    {
+        if (!EndMainSection(_sectionSettleState.labels))
+        {
+            services.Fault("Failed to write section settle end marker");
+            return LoopController::ControlVector::BrakeCommand();
+        }
+
+        switch (_sectionSettleState.destination)
+        {
+        case SectionSettleState::Destination::Yaw:
+            if (!AdvanceYawSequence())
+            {
+                services.Fault("Failed to advance open-floor yaw sequence after settle");
+            }
+            break;
+
+        case SectionSettleState::Destination::None:
+        default:
+            services.Fault("Open-floor section settle destination was not configured");
+            break;
+        }
+    }
+
+    return LoopController::ControlVector::BrakeCommand();
 }
 
 MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::ExecuteInPlaceTurnTick(
@@ -2841,7 +2955,7 @@ namespace MazeMap::App::Internal
             "logging.txt; open-floor timing mmlog; open-floor main mmlog",
             "GetDiagnosticMode",
             "OpenFloorMeasurementController.cpp",
-            "timing capture; static hold; launch; straight; yaw; smooth turn; loop clockwise; loop counter-clockwise",
+            "timing capture; static hold; launch; straight; straight-to-yaw settle; yaw; smooth turn; loop clockwise; loop counter-clockwise",
             "DiagnosticConfig; OpenFloorMeasurementSpec; shared mission drive and sensor tuning",
             "open-floor workspace, section repeats, speed bins, and measurement primitives are diagnostic-local",
             "open_floor_timing.mmlog; open_floor_main.mmlog",
