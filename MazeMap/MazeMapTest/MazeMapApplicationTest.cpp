@@ -65,7 +65,7 @@ namespace MazeMap::App
 
         TEST_METHOD(BootModeRegistry_ExposesCurrentInventory)
         {
-            Assert::IsTrue(GetBootModeRegistryEntryCount() == 6U);
+            Assert::IsTrue(GetBootModeRegistryEntryCount() == 7U);
             Assert::IsTrue(GetBootModeRegistryEntryCount() <= kTestBootSelectorCapacity);
             Assert::IsTrue(GetBootModeRegistryEntry(0U).selector.pinA == 39U);
             Assert::IsTrue(GetBootModeRegistryEntry(0U).selector.pinB == 40U);
@@ -75,9 +75,11 @@ namespace MazeMap::App
             Assert::IsTrue(GetBootModeRegistryEntry(2U).selector.pinB == 29U);
             Assert::IsTrue(GetBootModeRegistryEntry(3U).selector.pinA == 29U);
             Assert::IsTrue(GetBootModeRegistryEntry(3U).selector.pinB == 30U);
-            Assert::IsTrue(GetBootModeRegistryEntry(4U).selector.pinA == 27U);
-            Assert::IsTrue(GetBootModeRegistryEntry(4U).selector.pinB == 28U);
-            Assert::IsTrue(GetBootModeRegistryEntry(5U).selector.kind == BootModeSelectorKind::Fallback);
+            Assert::IsTrue(GetBootModeRegistryEntry(4U).selector.pinA == 26U);
+            Assert::IsTrue(GetBootModeRegistryEntry(4U).selector.pinB == 27U);
+            Assert::IsTrue(GetBootModeRegistryEntry(5U).selector.pinA == 27U);
+            Assert::IsTrue(GetBootModeRegistryEntry(5U).selector.pinB == 28U);
+            Assert::IsTrue(GetBootModeRegistryEntry(6U).selector.kind == BootModeSelectorKind::Fallback);
         }
 
         TEST_METHOD(BootModeRegistry_DescriptorsAreAuthoritative)
@@ -107,6 +109,7 @@ namespace MazeMap::App
             ActivateBootSelector(38U, 39U);
             ActivateBootSelector(28U, 29U);
             ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::FrontWallCharacterization);
@@ -117,6 +120,7 @@ namespace MazeMap::App
             ActivateBootSelector(38U, 39U);
             ActivateBootSelector(28U, 29U);
             ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::WallSensorLedCalibration);
@@ -126,17 +130,27 @@ namespace MazeMap::App
         {
             ActivateBootSelector(28U, 29U);
             ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == GetBootModeRegistryEntry(2U).descriptor->id);
         }
 
-        TEST_METHOD(BootModeRegistry_PrefersManeuverFileTestOverDiagnostic)
+        TEST_METHOD(BootModeRegistry_PrefersManeuverFileTestOverTopSpeedAndDiagnostic)
         {
             ActivateBootSelector(29U, 30U);
+            ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::ManeuverFileTest);
+        }
+
+        TEST_METHOD(BootModeRegistry_PrefersTopSpeedMeasurementOverDiagnostic)
+        {
+            ActivateBootSelector(26U, 27U);
+            ActivateBootSelector(27U, 28U);
+
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::TopSpeedMeasurement);
         }
 
         TEST_METHOD(HostPinShortsDrivePullupInputsLowForTesting)

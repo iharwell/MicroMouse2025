@@ -914,6 +914,24 @@ namespace MazeMap::App::Internal
         return false;
     }
 
+    void SharedRobotRuntime::FinalizeSuccessfulModeExit() noexcept
+    {
+        if (_impl->modeFaulted || _impl->runtimeLogsClosedForFault)
+        {
+            return;
+        }
+
+        if (UtilityDataLogger().isOpen())
+        {
+            (void)CloseUtilityDataLog();
+        }
+
+        if (TextLogFileIsOpen(_impl->textLogFile))
+        {
+            CloseTextLog();
+        }
+    }
+
     bool SharedRobotRuntime::WriteUtilityDataLogMetadata(const char* key, const char* value)
     {
         ClearLastRuntimeLogError();

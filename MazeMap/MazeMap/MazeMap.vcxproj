@@ -236,6 +236,7 @@
     <ClInclude Include="ManeuverFileTestMode.h" />
     <ClInclude Include="CorridorRepeatabilityMode.h" />
     <ClInclude Include="PositionAccuracyAuditMode.h" />
+    <ClInclude Include="TopSpeedMeasurementMode.h" />
     <ClInclude Include="OpenFloorMeasurementSpec.h" />
     <ClInclude Include="MissionMazeExport.h" />
     <ClInclude Include="MissionStartPolicy.h" />
@@ -337,6 +338,7 @@
     <ClCompile Include="ManeuverFileTestMode.cpp" />
     <ClCompile Include="CorridorRepeatabilityMode.cpp" />
     <ClCompile Include="PositionAccuracyAuditMode.cpp" />
+    <ClCompile Include="TopSpeedMeasurementMode.cpp" />
     <ClCompile Include="MazeMapSharedRuntime.cpp" />
     <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>

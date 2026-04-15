@@ -7,7 +7,7 @@
 
 namespace
 {
-    constexpr std::size_t kBootModeRegistryEntryCount = 6U;
+    constexpr std::size_t kBootModeRegistryEntryCount = 7U;
 
     constexpr MazeMap::App::BootModeId GetAuxiliarySelectorBootModeId() noexcept
     {
@@ -66,6 +66,8 @@ namespace MazeMap::App
             return "position_accuracy_audit";
         case BootModeId::ManeuverFileTest:
             return "maneuver_file_test";
+        case BootModeId::TopSpeedMeasurement:
+            return "top_speed_measurement";
         case BootModeId::PrimaryDiagnostic:
             return "primary_diagnostic";
         case BootModeId::Mission:
@@ -100,6 +102,12 @@ namespace MazeMap::App
                 BootModeSelectorCondition::PinPair(29U, 30U),
                 true,
                 &Internal::GetManeuverFileTestBootModeDescriptor(),
+            },
+            BootModeRegistryEntry{
+                BootModeId::TopSpeedMeasurement,
+                BootModeSelectorCondition::PinPair(26U, 27U),
+                true,
+                &Internal::GetTopSpeedMeasurementBootModeDescriptor(),
             },
             BootModeRegistryEntry{
                 BootModeId::PrimaryDiagnostic,

@@ -541,9 +541,12 @@ namespace MazeMap::App::Internal
 
     bool LoopController::SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept
     {
-        // Preserve the current interlaced diagnostic capture/update ordering exactly.
-        // Widen selective sensor/update support only when the lower-level runtime tie-in supports it.
-        return IsFullSensorWorkPlan(workPlan);
+        return (workPlan.wallMask == WallMask::All) &&
+            workPlan.readEncoders &&
+            workPlan.readImuBundle &&
+            workPlan.useEncoderUpdate &&
+            workPlan.useGyroUpdate &&
+            workPlan.useAccelUpdate;
     }
 
     void LoopController::ResetLatchedRequests() noexcept
@@ -621,18 +624,19 @@ namespace MazeMap::App::Internal
         }
 
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
+        MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
         timing.controlTiming.encoderLatchUs = NowUs();
         observed.hasDiagnosticSensors = false;
         observed.sensors = _runtime->MissionSensors().Capture(
             stationaryHint,
             _runtime->Drive().GetPose(),
-            [this, &observed, &timing](SensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
+            [this, &observed, &timing, map](SensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
             {
                 timing.controlTiming.encoderReadDoneUs = NowUs();
                 _runtime->Drive().UpdateOdometry(
                     observed.dtSeconds,
                     captureSnapshot,
-                    &_runtime->Maze(),
+                    map,
                     &timing.controlTiming,
                     [this, &serviceWallRead]() noexcept
                     {
@@ -663,12 +667,13 @@ namespace MazeMap::App::Internal
         }
 
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
+        MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
         timing.controlTiming.encoderLatchUs = NowUs();
         observed.hasDiagnosticSensors = true;
         observed.diagnosticSensors = _runtime->DiagnosticSensors().Capture(
             stationaryHint,
             _runtime->Drive().GetPose(),
-            [this, &observed, &timing](
+            [this, &observed, &timing, map](
                 DiagnosticSensorSnapshot& captureSnapshot,
                 auto&& serviceWallRead,
                 auto&& captureImu) noexcept
@@ -677,7 +682,7 @@ namespace MazeMap::App::Internal
                 _runtime->Drive().UpdateOdometry(
                     observed.dtSeconds,
                     captureSnapshot,
-                    &_runtime->Maze(),
+                    map,
                     &timing.controlTiming,
                     [this, &serviceWallRead]() noexcept
                     {

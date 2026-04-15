@@ -24,6 +24,7 @@ namespace
             , frontWallCharacterization(MazeMap::App::Internal::GetFrontWallCharacterizationMode())
             , auxMeasurement(MazeMap::App::Internal::GetAuxMeasurementMode())
             , diagnostic(MazeMap::App::Internal::GetDiagnosticMode())
+            , topSpeedMeasurement(MazeMap::App::Internal::GetTopSpeedMeasurementMode())
             , mission(MazeMap::App::Internal::GetMissionModeHost())
             , missionMode(mission)
             , maneuverFileTestMode(mission)
@@ -36,6 +37,7 @@ namespace
         IApplicationMode& frontWallCharacterization;
         IApplicationMode& auxMeasurement;
         IApplicationMode& diagnostic;
+        IApplicationMode& topSpeedMeasurement;
         IMissionModeHost& mission;
         MissionRunMode missionMode;
         ManeuverFileTestMode maneuverFileTestMode;
@@ -65,6 +67,8 @@ namespace
             return controllers.positionAccuracyAuditMode;
         case MazeMap::App::BootModeId::ManeuverFileTest:
             return controllers.maneuverFileTestMode;
+        case MazeMap::App::BootModeId::TopSpeedMeasurement:
+            return controllers.topSpeedMeasurement;
         case MazeMap::App::BootModeId::PrimaryDiagnostic:
             return controllers.diagnostic;
         case MazeMap::App::BootModeId::Mission:

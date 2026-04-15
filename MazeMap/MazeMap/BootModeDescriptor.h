@@ -12,6 +12,7 @@ namespace MazeMap::App
         CorridorRepeatability,
         PositionAccuracyAudit,
         ManeuverFileTest,
+        TopSpeedMeasurement,
         PrimaryDiagnostic,
         Mission,
     };

@@ -43,7 +43,7 @@ namespace MazeMap {
 
 /** Maximum number of application metadata key/value pairs accepted before begin(). */
 #ifndef MMLOG_METADATA_MAX_ENTRIES
-#  define MMLOG_METADATA_MAX_ENTRIES 16u
+#  define MMLOG_METADATA_MAX_ENTRIES 512u
 #endif
 
 /** Maximum metadata-key length, excluding the null terminator. */

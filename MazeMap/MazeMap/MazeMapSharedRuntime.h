@@ -69,6 +69,10 @@ namespace MazeMap::App::Internal
         const char* TextLogFileName() const noexcept;
         const char* LastRuntimeLogError() const noexcept;
 
+        // logging.txt is runtime infrastructure, not a mode-owned file. Modes may write text
+        // entries and metadata through SharedRobotRuntime, but they should not manage the file
+        // lifetime directly. Treat it like Serial/printf/std::cout: expected to exist for the
+        // whole boot-to-shutdown session unless the runtime fault/shutdown path tears it down.
         bool EnsureTextLogOpen();
         bool TextLogIsOpen() noexcept;
         bool AppendTextLogLine(const char* line);
@@ -94,6 +98,7 @@ namespace MazeMap::App::Internal
             unsigned long timestampUs,
             const char* name);
         void FlushTextLog();
+        // Reserved for runtime shutdown/fault handling. Normal mode code should not call this.
         void CloseTextLog();
 
         // Centralized top-level mode failure path: one optional mode-specific cleanup callback plus
@@ -103,6 +108,7 @@ namespace MazeMap::App::Internal
             void* context,
             const char* source);
         bool FailActiveMode(const char* reason) noexcept;
+        void FinalizeSuccessfulModeExit() noexcept;
 
         bool WriteUtilityDataLogMetadata(const char* key, const char* value);
         bool WriteUtilityDataLogMetadataUnsigned(const char* key, unsigned long value);

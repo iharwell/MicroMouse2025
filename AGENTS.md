@@ -411,6 +411,7 @@ Reject the design and revise it if any of the following are true:
 ### Logging and output
 
 - Serial-style output should be sparse and should go to `logging.txt`.
+- Treat `logging.txt` as runtime infrastructure, not as a mode-owned file. Mode code should write to it through `SharedRobotRuntime`, but should never explicitly open or close it. It is expected to be available from boot through shutdown unless someone deliberately interferes with the runtime-owned logging pipeline, which is roughly equivalent to breaking `Serial`, `printf`, or `std::cout`.
 - Heavy data logging should use `mmlog` and the designated macros.
 - Do **not** create parallel ad hoc logging systems.
 

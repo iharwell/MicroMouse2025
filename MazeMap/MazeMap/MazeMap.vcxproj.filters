@@ -264,6 +264,9 @@
     <ClInclude Include="PositionAccuracyAuditMode.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
+    <ClInclude Include="TopSpeedMeasurementMode.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
     <ClInclude Include="OpenFloorMeasurementSpec.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -501,6 +504,9 @@
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="PositionAccuracyAuditMode.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="TopSpeedMeasurementMode.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapSharedRuntime.cpp">
