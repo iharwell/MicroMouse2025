@@ -15,6 +15,25 @@ namespace MazeMap
     TEST_CLASS(VehicleStateTest)
     {
     public:
+        TEST_METHOD(SetVarianceValuesUpdatesCanonicalVarianceEntries)
+        {
+            VehicleState state;
+            state.SetCovariance(BuildUkfCovariance(0.05f, 0.08f, 0.30f, 0.20f, 0.25f, 0.45f, 0.06f));
+
+            state.SetVarianceValues(0.12f, -0.03f, 0.25f, 0.07f, -0.50f);
+
+            const VehicleState::StateMatrix covariance = state.GetCovariance();
+            Assert::AreEqual(0.12f, covariance(VehicleState::kPx, VehicleState::kPx), 1.0e-7f);
+            Assert::AreEqual(0.0f, covariance(VehicleState::kPy, VehicleState::kPy), 1.0e-7f);
+            Assert::AreEqual(0.25f, covariance(VehicleState::kU, VehicleState::kU), 1.0e-7f);
+            Assert::AreEqual(0.20f * 0.20f, covariance(VehicleState::kV, VehicleState::kV), 1.0e-7f);
+            Assert::AreEqual(0.07f, covariance(VehicleState::kPsi, VehicleState::kPsi), 1.0e-7f);
+            Assert::AreEqual(0.0f, covariance(VehicleState::kR, VehicleState::kR), 1.0e-7f);
+            Assert::AreEqual(0.45f * 0.45f, covariance(VehicleState::kOmegaL, VehicleState::kOmegaL), 1.0e-7f);
+            Assert::AreEqual(0.45f * 0.45f, covariance(VehicleState::kOmegaR, VehicleState::kOmegaR), 1.0e-7f);
+            Assert::AreEqual(0.06f * 0.06f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-7f);
+        }
+
         TEST_METHOD(VehicleStateIsStationaryUsesCurrentUkfThresholds)
         {
             const PlantParams params = PlantParams::Default();

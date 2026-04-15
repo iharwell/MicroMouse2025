@@ -213,7 +213,13 @@ namespace MazeMap
 
         void SetVarianceValues(float xVar, float yVar, float velocityVar, float orientationVar, float rotVelocityVar)
         {
-
+            StateMatrix covariance = GetCovariance();
+            covariance(kPx, kPx) = (std::max)(0.0f, xVar);
+            covariance(kPy, kPy) = (std::max)(0.0f, yVar);
+            covariance(kU, kU) = (std::max)(0.0f, velocityVar);
+            covariance(kPsi, kPsi) = (std::max)(0.0f, orientationVar);
+            covariance(kR, kR) = (std::max)(0.0f, rotVelocityVar);
+            SetCovariance(covariance);
         }
 
         void SetPositionVar(const Eigen::Vector2f& positionVariance) noexcept
