@@ -468,12 +468,18 @@ public:
             return {};
         }
 
-        MazeMap::VehicleState::StateVector presentState = MazeMap::VehicleState::StateVector::Zero();
         float batteryVoltageV = 0.0f;
-        GetVelocityCommandOperatingState(presentState, batteryVoltageV);
-        presentState(MazeMap::VehicleState::kU) = presentLinearSpeedMps;
-        presentState(MazeMap::VehicleState::kR) = presentYawRateRadps;
-        MazeMap::VehicleState::NormalizeStateVector(presentState);
+        MazeMap::VehicleState::StateVector unusedPresentState = MazeMap::VehicleState::StateVector::Zero();
+        GetVelocityCommandOperatingState(unusedPresentState, batteryVoltageV);
+
+        const float resolvedPresentLinearSpeedMps =
+            (std::isfinite(presentLinearSpeedMps)) ?
+            presentLinearSpeedMps :
+            0.0f;
+        const float resolvedPresentYawRateRadps =
+            (std::isfinite(presentYawRateRadps)) ?
+            presentYawRateRadps :
+            0.0f;
 
         const float resolvedLongitudinalAccelMps2 =
             (std::isfinite(desiredLongitudinalAccelMps2)) ?
@@ -484,30 +490,22 @@ public:
             desiredYawAccelRadps2 :
             0.0f;
 
+        // Raw command resolution must stay feedforward-only; wheel-speed PI belongs to CommandVelocity().
         MazeMap::PlantModel plantModel;
         const MazeMap::DriveCommandSolution solution =
             plantModel.solveClosedLoopDriveCommands(
-                presentState,
+                resolvedPresentLinearSpeedMps,
                 resolvedLongitudinalAccelMps2,
+                resolvedPresentYawRateRadps,
                 resolvedYawAccelRadps2,
                 _ukf.ukf().preparedParams(),
                 GetMissionFanDutyCycle(),
                 batteryVoltageV);
-        const float responseTimeS =
-            (std::isfinite(MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS) &&
-             (MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS > 0.0f)) ?
-            MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS :
-            0.0f;
-        const float targetLinearSpeedMps = presentLinearSpeedMps + (resolvedLongitudinalAccelMps2 * responseTimeS);
-        const float targetYawRateRadps = presentYawRateRadps + (resolvedYawAccelRadps2 * responseTimeS);
-        const ClosedLoopVelocityCommand resolvedCommand =
-            BuildClosedLoopVelocityCommandFromSolution(
-                targetLinearSpeedMps,
-                targetYawRateRadps,
-                resolvedLongitudinalAccelMps2,
-                resolvedYawAccelRadps2,
-                solution);
-        return ResolveClosedLoopVelocityDriveSignal(resolvedCommand, dtSeconds).driveCommand;
+        (void)dtSeconds;
+        return MazeMap::ClampOpenLoopDriveCommand(
+            MazeMap::MakeOpenLoopDriveCommand(
+                solution.control.leftMotorCommand,
+                solution.control.rightMotorCommand));
     }
 
     MazeMap::OpenLoopDriveCommand ResolveVelocityDriveCommandRaw(

@@ -524,7 +524,7 @@ namespace MazeMap::Config
     constexpr float kSmoothTurnYawRateKp = 1.10f;
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
-    constexpr float kSmoothTurnYawRateKd = 0.0001f;
+    constexpr float kSmoothTurnYawRateKd = 0.001f;
     // [High] In-place turn proportional gain. Increase if the robot consistently stops short of target heading;
     // decrease if it overshoots or rings at the end of turns.
     constexpr float kTurnHeadingKp = 7.5f;

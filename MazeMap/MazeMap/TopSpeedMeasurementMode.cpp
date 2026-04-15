@@ -11,6 +11,7 @@
 #include "MazeMapRuntimeSensors.h"
 #include "MazeMapSharedRuntime.h"
 #include "PinPairStrap.h"
+#include "PlantModel.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,19 +21,66 @@ namespace
 {
     constexpr const char* kTopSpeedMeasurementStableId = "top_speed_measurement";
     constexpr const char* kTopSpeedMeasurementMainFileName = "top_speed_measurement_main.mmlog";
-    constexpr float kTopSpeedMeasurementForwardAccelerationMps2 = 8.5f;
-    constexpr std::uint32_t kTopSpeedMeasurementAccelerationDurationUs = 1000000U;
+    constexpr float kTopSpeedMeasurementForwardAccelerationMps2 = 3.0f;
+    constexpr std::uint32_t kTopSpeedMeasurementAccelerationDurationUs = 6000000U;
     constexpr std::uint32_t kTopSpeedMeasurementPrelaunchWaitUs = 1000000U;
     constexpr float kTopSpeedMeasurementPrelaunchReverseDriveCommand = -0.4f;
-    constexpr std::uint32_t kTopSpeedMeasurementPrelaunchReverseDurationUs = 10000U;
+    constexpr std::uint32_t kTopSpeedMeasurementPrelaunchReverseDurationUs = 50000U;
     constexpr std::uint32_t kTopSpeedMeasurementBrakeTriggerArmDelayUs = 50000U;
     constexpr const char* kTopSpeedMeasurementSelectorRemovedFaultReason =
         "Top-speed measurement selector jumper removed";
-    constexpr float kTopSpeedMeasurementReverseImpactThresholdMps2 = -6.0f;
-    constexpr float kTopSpeedMeasurementGyroXySpikeThresholdDps = 150.0f;
-    constexpr float kTopSpeedMeasurementImpactMinimumSpeedMps = 0.30f;
+    constexpr float kTopSpeedMeasurementReverseImpactThresholdMps2 = -12.0f;
+    constexpr float kTopSpeedMeasurementGyroXySpikeThresholdDps = 650.0f;
+    constexpr float kTopSpeedMeasurementImpactMinimumSpeedMps = 2.50f;
     constexpr float kTopSpeedMeasurementStoppedEncoderThresholdMps = Config::kWheelRestLaunchSpeedThresholdMps;
     constexpr std::uint8_t kTopSpeedMeasurementStoppedEncoderSettledTicks = 3U;
+
+    float ComputeHeadingDeviationRad(
+        const std::uint32_t measurementStartUs,
+        const float measurementStartYawRad,
+        const float currentYawRad) noexcept
+    {
+        if ((measurementStartUs == 0U) ||
+            !std::isfinite(measurementStartYawRad) ||
+            !std::isfinite(currentYawRad))
+        {
+            return 0.0f;
+        }
+
+        return MazeMap::VehicleState::NormalizeAngle(currentYawRad - measurementStartYawRad);
+    }
+
+    float ResolveBiasCorrectedGyroYawRateRadps(const DiagnosticSensorSnapshot& snapshot) noexcept
+    {
+        if (std::isfinite(snapshot.gyroRadps))
+        {
+            return snapshot.gyroRadps;
+        }
+
+        if (std::isfinite(snapshot.gyroRawRadps) && std::isfinite(snapshot.gyroBiasRadps))
+        {
+            return snapshot.gyroRawRadps - snapshot.gyroBiasRadps;
+        }
+
+        return 0.0f;
+    }
+
+    float ResolveGyroBiasHoldYawRateCommandRadps(
+        const DiagnosticSensorSnapshot& snapshot,
+        const float dtSeconds,
+        MazeMap::SmoothTurnYawRateControllerState& controllerState) noexcept
+    {
+        const float measuredYawRateRadps = ResolveBiasCorrectedGyroYawRateRadps(snapshot);
+        const float yawRateCommandRadps =
+            MazeMap::ComputeSmoothTurnYawRatePdCorrection(
+                0.0f,
+                measuredYawRateRadps,
+                dtSeconds,
+                Config::kSmoothTurnYawRateKp,
+                Config::kSmoothTurnYawRateKd,
+                controllerState);
+        return std::isfinite(yawRateCommandRadps) ? yawRateCommandRadps : 0.0f;
+    }
 
 #define TOP_SPEED_MEASUREMENT_FIELDS(X)              \
     X(std::uint32_t, master_time_us)                \
@@ -136,7 +184,7 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Top speed measurement mode");
         (void)_runtime.AppendTextLogLine("Enter by shorting pins 26-27 at boot.");
         (void)_runtime.AppendTextLogLine(
-            "This mode waits 1 second, commands a 10 ms -0.4 open-loop reverse pulse, then runs straight ahead at 8.5 m/s^2 for up to 1 second using symmetric left/right drive commands with no yaw feedback, or until strong reverse acceleration or an IMU X/Y gyro spike suggests impact, then brakes until wheel motion settles. Pulling the jumper at any point faults the mode as a manual halt.");
+            "This mode waits 1 second, commands a 10 ms -0.4 open-loop reverse pulse, then runs straight ahead at 8.5 m/s^2 for up to 1 second using a custom gyro-z bias-hold controller with the default yaw-rate PD gains on top of the raw-acceleration drive path, or until strong reverse acceleration or an IMU X/Y gyro spike suggests impact, then brakes until wheel motion settles. Pulling the jumper at any point faults the mode as a manual halt.");
 
         if (!_drive.Begin())
         {
@@ -359,7 +407,7 @@ namespace MazeMap::App::Internal
         const int length = std::snprintf(
             message,
             sizeof(message),
-            "run_id=%s;pins_26_27_shorted_at_boot=%u;battery_voltage_start=%.3f;fan_duty_cycle_start=%.3f;forward_accel_mps2=%.3f;accel_duration_ms=%lu;prelaunch_wait_ms=%lu;prelaunch_reverse_drive_command=%.3f;prelaunch_reverse_duration_ms=%lu;reverse_impact_threshold_mps2=%.3f;gyro_xy_spike_threshold_dps=%.3f",
+            "run_id=%s;pins_26_27_shorted_at_boot=%u;battery_voltage_start=%.3f;fan_duty_cycle_start=%.3f;forward_accel_mps2=%.3f;accel_duration_ms=%lu;prelaunch_wait_ms=%lu;prelaunch_reverse_drive_command=%.3f;prelaunch_reverse_duration_ms=%lu;reverse_impact_threshold_mps2=%.3f;gyro_xy_spike_threshold_dps=%.3f;gyro_z_bias_hold=1;gyro_z_hold_kp=%.3f;gyro_z_hold_kd=%.6f",
             _runId,
             _pinsLatchedAtBoot ? 1U : 0U,
             _batteryVoltageStart,
@@ -370,7 +418,9 @@ namespace MazeMap::App::Internal
             kTopSpeedMeasurementPrelaunchReverseDriveCommand,
             static_cast<unsigned long>(kTopSpeedMeasurementPrelaunchReverseDurationUs / 1000U),
             kTopSpeedMeasurementReverseImpactThresholdMps2,
-            kTopSpeedMeasurementGyroXySpikeThresholdDps);
+            kTopSpeedMeasurementGyroXySpikeThresholdDps,
+            Config::kSmoothTurnYawRateKp,
+            Config::kSmoothTurnYawRateKd);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
             return false;
@@ -401,7 +451,7 @@ namespace MazeMap::App::Internal
             _impactDetected ? 1U : 0U,
             _peakMeasuredSpeedMps,
             _peakPlanarAccelMps2,
-            0.0f,
+            _peakHeadingDeviationRad * RAD_TO_DEG_F,
             _mostNegativeForwardAccelMps2,
             _impactSpeedMps,
             _impactForwardAccelMps2,
@@ -446,7 +496,11 @@ namespace MazeMap::App::Internal
         row.measured_angular_speed_radps = state.measured.angularSpeedRadps;
         row.cmd_linear_mps = _lastCommandInputLinearSpeedMps;
         row.cmd_angular_radps = _lastCommandInputAngularRateRadps;
-        row.heading_error_rad = 0.0f;
+        row.heading_error_rad =
+            ComputeHeadingDeviationRad(
+                _measurementStartUs,
+                _measurementStartYawRad,
+                state.estimate.yawRad);
         row.cmd_linear_accel_mps2 =
             ((_phase == RunPhase::Running) && (_measurementStartUs != 0U)) ? kTopSpeedMeasurementForwardAccelerationMps2 : 0.0f;
         row.left_drive_command = state.driveTelemetry.leftDriveCommand;
@@ -628,12 +682,22 @@ namespace MazeMap::App::Internal
         {
             _peakPlanarAccelMps2 = (std::max)(_peakPlanarAccelMps2, state.sensors.planarAccelMps2);
         }
+        const float headingDeviationRad =
+            std::fabs(
+                ComputeHeadingDeviationRad(
+                    _measurementStartUs,
+                    _measurementStartYawRad,
+                    state.estimate.yawRad));
+        if (std::isfinite(headingDeviationRad))
+        {
+            _peakHeadingDeviationRad = (std::max)(_peakHeadingDeviationRad, headingDeviationRad);
+        }
         if (std::isfinite(state.diagnosticSensors.accelBodyYMps2))
         {
             _mostNegativeForwardAccelMps2 = (std::min)(_mostNegativeForwardAccelMps2, state.diagnosticSensors.accelBodyYMps2);
         }
     }
-
+    int accelcount = 0;
     LoopController::ControlVector TopSpeedMeasurementMode::RunTick(
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
@@ -703,15 +767,49 @@ namespace MazeMap::App::Internal
             {
                 const float resolvedLinearSpeedMps =
                     std::isfinite(state.measured.linearSpeedMps) ?
-                    state.measured.linearSpeedMps :
+                        state.measured.linearSpeedMps :
+                        0.0f;
+                const float measuredYawRateRadps =
+                    ResolveBiasCorrectedGyroYawRateRadps(state.diagnosticSensors);
+                const float yawRateCorrectionRadps =
+                    ResolveGyroBiasHoldYawRateCommandRadps(
+                        state.diagnosticSensors,
+                        state.dtSeconds,
+                        _gyroZHoldControllerState);
+                const float responseTimeS =
+                    (std::isfinite(MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS) &&
+                     (MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS > 0.0f)) ?
+                    MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS :
                     0.0f;
-                const MazeMap::OpenLoopDriveCommand driveCommand = _drive.ResolveAccelerationDriveCommandRaw(
+                const float desiredYawAccelRadps2 =
+                    (responseTimeS > 0.0f) ?
+                    ((yawRateCorrectionRadps - measuredYawRateRadps) / responseTimeS) :
+                    0.0f;
+
+                const MazeMap::OpenLoopDriveCommand nominalFeedforwardCommand = _drive.ResolveAccelerationDriveCommandRaw(
                     resolvedLinearSpeedMps,
                     0.0f,
                     kTopSpeedMeasurementForwardAccelerationMps2,
                     0.0f,
                     state.dtSeconds);
-                SetLastCommandInputs(resolvedLinearSpeedMps, 0.0f);
+                const float symmetricFeedforwardCommand =
+                    0.5f * (nominalFeedforwardCommand.leftDriveCommand + nominalFeedforwardCommand.rightDriveCommand);
+
+                const MazeMap::OpenLoopDriveCommand yawCorrectionCommand = _drive.ResolveAccelerationDriveCommandRaw(
+                    resolvedLinearSpeedMps,
+                    measuredYawRateRadps,
+                    0.0f,
+                    desiredYawAccelRadps2,
+                    state.dtSeconds);
+                const float differentialYawCorrectionCommand =
+                    0.5f * (yawCorrectionCommand.leftDriveCommand - yawCorrectionCommand.rightDriveCommand);
+                const MazeMap::OpenLoopDriveCommand driveCommand =
+                    MazeMap::ClampOpenLoopDriveCommand(
+                        MazeMap::MakeOpenLoopDriveCommand(
+                            symmetricFeedforwardCommand + differentialYawCorrectionCommand,
+                            symmetricFeedforwardCommand - differentialYawCorrectionCommand));
+
+                SetLastCommandInputs(resolvedLinearSpeedMps, yawRateCorrectionRadps);
                 return LoopController::ControlVector::OpenLoopCommand(
                     driveCommand.leftDriveCommand,
                     driveCommand.rightDriveCommand);
@@ -735,6 +833,11 @@ namespace MazeMap::App::Internal
                 }
 
                 _measurementStartUs = state.commandApplyTimeUs;
+                _gyroZHoldControllerState.Reset();
+                _measurementStartYawRad =
+                    std::isfinite(state.estimate.yawRad) ?
+                    state.estimate.yawRad :
+                    0.0f;
                 if (!WriteEvent("transition", "state=running;stage=forward_run"))
                 {
                     services.Fault("Top-speed measurement forward-run logging failed");
@@ -780,7 +883,7 @@ namespace MazeMap::App::Internal
             }
 
             const std::uint32_t nextCommandElapsedUs = state.commandApplyTimeUs - _measurementStartUs;
-            if (nextCommandElapsedUs >= kTopSpeedMeasurementAccelerationDurationUs)
+            if (accelcount>=(kTopSpeedMeasurementAccelerationDurationUs/1000))
             {
                 (void)EnterBrakingPhase(
                     BrakeTrigger::TimedWindowElapsed,
@@ -789,6 +892,7 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::BrakeCommand();
             }
 
+            accelcount++;
             return issueForwardAccelerationCommand();
         }
 
@@ -841,8 +945,10 @@ namespace MazeMap::App::Internal
         _controlTickSequence = 0U;
         _batteryVoltageStart = 0.0f;
         _fanDutyCycleStart = 0.0f;
+        _measurementStartYawRad = 0.0f;
         _peakMeasuredSpeedMps = 0.0f;
         _peakPlanarAccelMps2 = 0.0f;
+        _peakHeadingDeviationRad = 0.0f;
         _mostNegativeForwardAccelMps2 = 0.0f;
         _impactDetected = false;
         _impactSpeedMps = 0.0f;
@@ -851,6 +957,7 @@ namespace MazeMap::App::Internal
         _impactGyroYRawLsb = 0;
         _lastCommandInputLinearSpeedMps = 0.0f;
         _lastCommandInputAngularRateRadps = 0.0f;
+        _gyroZHoldControllerState.Reset();
         _settledEncoderTicks = 0U;
         _runId[0] = '\0';
     }
@@ -880,7 +987,7 @@ namespace MazeMap::App::Internal
             "TopSpeedMeasurementMode.cpp",
             "startup; 1 s prelaunch wait; 10 ms reverse kick; accelerated straight run; impact-or-gyro-or-timer brake transition; brake-to-stop; selector-jumper removal faults immediately",
             "DiagnosticConfig control period; shared mission drive and IMU tuning; LoopController diagnostic capture path",
-            "After a 1 second stationary wait and a 10 ms -0.4 open-loop reverse kick, the mode resumes the original fixed 8.5 m/s^2 forward-acceleration launch using symmetric left/right drive commands with no yaw-input correction; reverse-accel and IMU X/Y gyro-spike impact braking; wall updates disabled; selector-jumper removal is treated as a manual-halt fault rather than a clean exit",
+            "After a 1 second stationary wait and a 10 ms -0.4 open-loop reverse kick, the mode resumes the fixed 8.5 m/s^2 forward-acceleration launch through the raw-acceleration drive path while a mode-local gyro-z bias-hold controller reuses the default yaw-rate PD gains to suppress spin; heading deviation is logged for diagnosis, reverse-accel and IMU X/Y gyro-spike impact braking remain active, wall updates stay disabled, and selector-jumper removal is treated as a manual-halt fault rather than a clean exit",
             "top_speed_measurement_main.mmlog",
         };
         return descriptor;

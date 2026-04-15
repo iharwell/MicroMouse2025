@@ -184,6 +184,29 @@ namespace MazeMap
                 (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
         }
 
+        constexpr std::uint8_t kDriveBaseRightEncoderChannel = 1U;
+        constexpr std::uint8_t kDriveBaseLeftEncoderChannel = 2U;
+
+        DiagnosticSensorSnapshot BuildDriveBaseDiagnosticSnapshot() noexcept
+        {
+            DiagnosticSensorSnapshot snapshot{};
+            snapshot.gyroRawRadps = 0.0f;
+            snapshot.gyroRadps = 0.0f;
+            return snapshot;
+        }
+
+        void PrimeDriveBaseWithEncoderDelta(
+            DriveBase& drive,
+            const int32_t leftCounts,
+            const int32_t rightCounts,
+            const float dtSeconds = 0.001f)
+        {
+            MazeMap::Platform::WriteEncoderCount(kDriveBaseLeftEncoderChannel, leftCounts);
+            MazeMap::Platform::WriteEncoderCount(kDriveBaseRightEncoderChannel, rightCounts);
+            const DiagnosticSensorSnapshot snapshot = BuildDriveBaseDiagnosticSnapshot();
+            drive.UpdateOdometry(dtSeconds, snapshot, nullptr, nullptr);
+        }
+
         float StationaryGyroBiasBlendFactor(float dtSeconds) noexcept
         {
             if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)) ||
@@ -4338,6 +4361,49 @@ namespace MazeMap
             Assert::AreEqual(
                 1U,
                 MazeMap::App::Internal::LoopController::kInitialModeCallbackTick);
+        }
+
+        TEST_METHOD(DriveBaseRawAccelerationCommandStaysSymmetricAcrossWheelSpeedMismatch)
+        {
+            DriveBase drive;
+            Assert::IsTrue(drive.Begin());
+
+            PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
+
+            const OpenLoopDriveCommand command =
+                drive.ResolveAccelerationDriveCommandRaw(
+                    0.20f,
+                    0.0f,
+                    8.5f,
+                    0.0f,
+                    0.001f);
+
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(command));
+            Assert::IsTrue(command.leftDriveCommand > 0.0f);
+            Assert::AreEqual(command.leftDriveCommand, command.rightDriveCommand, 1.0e-6f);
+        }
+
+        TEST_METHOD(DriveBaseStraightHeadingHoldRawAccelerationReportsZeroYawWhenAligned)
+        {
+            DriveBase drive;
+            Assert::IsTrue(drive.Begin());
+
+            PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
+
+            float resolvedAngularCommandRadps = std::numeric_limits<float>::quiet_NaN();
+            const OpenLoopDriveCommand command =
+                drive.ResolveStraightHeadingHoldAccelerationDriveCommandRaw(
+                    0.0f,
+                    0.0f,
+                    0.20f,
+                    0.0f,
+                    8.5f,
+                    0.001f,
+                    &resolvedAngularCommandRadps);
+
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(command));
+            Assert::AreEqual(0.0f, resolvedAngularCommandRadps, 1.0e-6f);
+            Assert::AreEqual(command.leftDriveCommand, command.rightDriveCommand, 1.0e-6f);
         }
 
     };

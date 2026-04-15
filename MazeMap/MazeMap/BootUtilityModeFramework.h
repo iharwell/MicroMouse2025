@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Defines.h"
+
 namespace MazeMap::App::Internal::BootUtilityModeFramework
 {
-    bool ResetStartupTrace(const char* firstLine);
-    bool AppendStartupTrace(const char* line);
+    EXPORT bool ResetStartupTrace(const char* firstLine);
+    EXPORT bool AppendStartupTrace(const char* line);
 }

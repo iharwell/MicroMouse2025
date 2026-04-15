@@ -3,6 +3,7 @@
 #include "BootModeDescriptor.h"
 #include "LoopController.h"
 #include "MazeMapApplicationMode.h"
+#include "SmoothTurnYawRateController.h"
 
 #include <cstdint>
 
@@ -97,8 +98,10 @@ namespace MazeMap::App::Internal
         std::uint32_t _controlTickSequence{};
         float _batteryVoltageStart{};
         float _fanDutyCycleStart{};
+        float _measurementStartYawRad{};
         float _peakMeasuredSpeedMps{};
         float _peakPlanarAccelMps2{};
+        float _peakHeadingDeviationRad{};
         float _mostNegativeForwardAccelMps2{};
         bool _impactDetected{};
         float _impactSpeedMps{};
@@ -107,6 +110,7 @@ namespace MazeMap::App::Internal
         std::int16_t _impactGyroYRawLsb{};
         float _lastCommandInputLinearSpeedMps{};
         float _lastCommandInputAngularRateRadps{};
+        MazeMap::SmoothTurnYawRateControllerState _gyroZHoldControllerState{};
         std::uint8_t _settledEncoderTicks{};
         std::uint8_t _selectorDrivePin{};
         std::uint8_t _selectorSensePin{};

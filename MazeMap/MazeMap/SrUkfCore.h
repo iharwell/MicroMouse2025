@@ -50,8 +50,8 @@ namespace MazeMap
         // - SEC_10_STATIC / STATIC_HOLD set the IMU yaw noise floor,
         // - SEC_20_LAUNCH / OPEN_LOOP_LAUNCH repeatability set the moving encoder noise floor,
         // - the single accel sigma stays conservative at the noisier body-X axis while planar accel updates remain disabled.
-        static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.0066f;
-        static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.0484f;
+        static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.004f;
+        static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.1617f;
         static constexpr float kStationaryEncoderVelocitySigmaMps = 1.76e-6f;
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
         static constexpr float kImuYawRateSigmaRadps = 0.0131f;
