@@ -63,6 +63,55 @@ Typical use:
 5. Use the launch-floor section when you need a backlash-safe breakaway estimate; if the tool flags nonmonotonic clear motion, treat the reported floor as provisional and prefer another clean card before retuning launch thresholds.
 6. Use the tire-plant section only to update parameters that the current card actually excites; treat any output marked unstable or not identifiable as diagnostic-only.
 
+## `run_open_floor_ukf_replay.ps1`
+
+Purpose: build and run the standalone open-floor UKF replay tool that replays decoded `open_floor_main.csv` captures through the current C++ UKF implementation and writes a batch report, without rebuilding `MazeMap.dll`.
+
+Default usage:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1
+```
+
+Optional filters:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
+  -Root TestResults `
+  -Output TestResults\open_floor_ukf_replay_manual `
+  -RunId ofm_10728325
+```
+
+Optional repeat-run shortcut when the standalone exe is already current:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
+  -SkipToolBuild `
+  -RunId ofm_10728325
+```
+
+Single-run sample export example:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
+  -SkipToolBuild `
+  -RunId ofm_10728325 `
+  -Output TestResults\open_floor_ukf_replay_metrics_ofm_10728325 `
+  -SampleCsv TestResults\open_floor_ukf_replay_metrics_ofm_10728325\ofm_10728325_accel_compare.csv `
+  -Metrics context,accel_compare
+```
+
+Notes:
+
+- The runner builds only `Tools/OpenFloorUkfReplay/OpenFloorUkfReplay.vcxproj` in `Release|x64`; it links against the existing `MazeMap.lib` and runs against the existing `MazeMap.dll`.
+- Before replay, the runner checks that `MazeMap.dll` and `MazeMap.lib` exist and are not older than the authoritative UKF sources.
+- The tool binds each decoded CSV to its sibling `open_floor_main.sidecar` and uses the bound `logging.txt` when present.
+- It ignores the highest `section_id` in each run by default so the known failed final section does not contaminate the batch report.
+- The generated report now includes section-phase error association tables and writes `section_phase_summary.csv` so agents can see which canonical `section_id` + `phase_id` buckets concentrate estimator error.
+- `-SampleCsv` exports one replay-aligned per-sample CSV for the selected `-RunId`.
+- `-Metrics` accepts comma-separated metric names or aliases. Current aliases are `context`, `accel_compare`, and `speed_compare`.
+- The default sample-export metric set is the accel comparison layout shown above if you pass `-SampleCsv` without `-Metrics`.
+
 Caveats:
 
 - The script reports what the data says; it does not edit firmware.

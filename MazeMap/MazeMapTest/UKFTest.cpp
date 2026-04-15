@@ -2360,6 +2360,219 @@ namespace MazeMap
                 0.01f));
         }
 
+        TEST_METHOD(SrUkfCorePivotScrubModeMasksEncoderYawAndAppliesSoftZeroU)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                0.20f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f);
+            const VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.001f, 0.01f, 0.04f, 0.04f, 0.20f, 10.0f, 0.02f);
+            Assert::IsTrue(core.reset(initialState, initialCovariance));
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.60f;
+            control.rightMotorCommand = -0.60f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            struct PivotTickResults
+            {
+                bool predictAccepted;
+                MeasurementUpdateResult encoderResult;
+                MeasurementUpdateResult yawResult;
+            };
+
+            constexpr float kPivotDtSeconds = 0.01f;
+            const auto runPivotTick =
+                [&](int totalLeftCounts,
+                    int totalRightCounts,
+                    float omegaLeftRadps,
+                    float omegaRightRadps,
+                    float yawRateRawRadps) -> PivotTickResults
+            {
+                PivotTickResults results{};
+                core.setRuntimeContext(0.0f, 2.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+                results.predictAccepted = core.predict(kPivotDtSeconds, control);
+
+                EncoderObs encoder{};
+                encoder.totalLeftCounts = totalLeftCounts;
+                encoder.totalRightCounts = totalRightCounts;
+                encoder.omegaLeftRadps = omegaLeftRadps;
+                encoder.omegaRightRadps = omegaRightRadps;
+                results.encoderResult = core.updateEncoderPair(encoder, kPivotDtSeconds);
+                results.yawResult = core.updateYawRate(yawRateRawRadps);
+                return results;
+            };
+
+            int seedLeftCounts = 0;
+            int seedRightCounts = 0;
+            bool yawConflictSeeded = false;
+            for (int seedIndex = 0; seedIndex < 8; ++seedIndex)
+            {
+                seedLeftCounts += 100;
+                seedRightCounts -= 100;
+                const PivotTickResults seedResults = runPivotTick(seedLeftCounts, seedRightCounts, 12.0f, -12.0f, 0.0f);
+                Assert::IsTrue(seedResults.predictAccepted);
+                Assert::IsTrue(seedResults.encoderResult.attempted);
+                Assert::IsTrue(seedResults.encoderResult.accepted);
+                Assert::IsTrue(seedResults.yawResult.attempted);
+                Assert::IsTrue(seedResults.yawResult.accepted);
+                Assert::IsFalse(core.pivotScrubMode());
+
+                yawConflictSeeded =
+                    (std::fabs(core.yawConsistencyLowPassRadps()) > SrUkfCore::kPivotScrubYawConsistencyThresholdRadps) ||
+                    (std::fabs(core.yawWindowMismatchRad()) > SrUkfCore::kPivotScrubYawWindowMismatchThresholdRad);
+                if (yawConflictSeeded)
+                {
+                    break;
+                }
+            }
+
+            Assert::IsTrue(yawConflictSeeded);
+
+            const PivotTickResults pivotResults =
+                runPivotTick(seedLeftCounts + 120, seedRightCounts - 120, 18.0f, -18.0f, 1.80f);
+            Assert::IsTrue(pivotResults.predictAccepted);
+            Assert::IsTrue(pivotResults.encoderResult.attempted);
+            Assert::IsTrue(pivotResults.encoderResult.accepted);
+            Assert::IsTrue(pivotResults.yawResult.attempted);
+            Assert::IsTrue(pivotResults.yawResult.accepted);
+
+            Assert::IsTrue(core.pivotScrubMode());
+            Assert::IsTrue(core.pivotScrubEncoderBodyUpdateSkipped());
+            Assert::IsTrue(core.pivotScrubZeroUSoftApplied());
+            Assert::IsTrue(std::isfinite(core.pivotScrubEncoderWheelMaskedDeltaNorm()));
+            Assert::IsTrue(core.pivotScrubEncoderWheelMaskedDeltaNorm() > 0.0f);
+            Assert::AreEqual(0.0f, core.pivotScrubEncoderWheelDeltaPsiRad(), 1.0e-4f);
+            Assert::AreEqual(0.0f, core.pivotScrubEncoderWheelDeltaRRadps(), 1.0e-4f);
+            Assert::IsTrue(std::fabs(core.pivotScrubEncoderWheelDeltaOmegaLRadps()) > 0.0f);
+            Assert::IsTrue(std::fabs(core.pivotScrubEncoderWheelDeltaOmegaRRadps()) > 0.0f);
+            Assert::IsTrue(std::isfinite(core.pivotScrubGyroDeltaPsiRad()));
+            Assert::IsTrue(std::fabs(core.pivotScrubGyroDeltaRRadps()) > 0.0f);
+            Assert::IsTrue(std::isfinite(core.pivotScrubGyroDeltaBgzRadps()));
+            Assert::AreEqual(0.0f, core.pivotScrubGyroDeltaOmegaLRadps(), 1.0e-4f);
+            Assert::AreEqual(0.0f, core.pivotScrubGyroDeltaOmegaRRadps(), 1.0e-4f);
+            Assert::IsTrue(core.pivotScrubGyroMaskedDeltaNorm() > 0.0f);
+            Assert::IsTrue(std::fabs(core.pivotScrubZeroUInnovationMps()) > 0.0f);
+            Assert::IsTrue(std::fabs(core.pivotScrubZeroUDeltaMps()) > 0.0f);
+
+            const std::vector<std::pair<std::string, std::string>> dumpLines = CollectDebugDumpLines(core);
+            const std::size_t pivotModeIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub");
+            const std::size_t encoderIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub_encoder");
+            const std::size_t zeroUIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub_zero_u");
+            const std::size_t gyroIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub_gyro");
+
+            Assert::IsTrue(pivotModeIndex < dumpLines.size());
+            Assert::IsTrue(encoderIndex < dumpLines.size());
+            Assert::IsTrue(zeroUIndex < dumpLines.size());
+            Assert::IsTrue(gyroIndex < dumpLines.size());
+
+            const std::string& pivotModeLine = dumpLines[pivotModeIndex].second;
+            const std::string& encoderLine = dumpLines[encoderIndex].second;
+            const std::string& zeroULine = dumpLines[zeroUIndex].second;
+            const std::string& gyroLine = dumpLines[gyroIndex].second;
+            Assert::IsTrue(pivotModeLine.find("pivot_scrub_mode=true") != std::string::npos);
+            Assert::IsTrue(encoderLine.find("masked_delta_norm=") != std::string::npos);
+            Assert::IsTrue(zeroULine.find("innovation_mps=") != std::string::npos);
+            Assert::IsTrue(gyroLine.find("delta_omega_l_radps=") != std::string::npos);
+            Assert::IsTrue(gyroLine.find("masked_delta_norm=") != std::string::npos);
+        }
+
+        TEST_METHOD(SrUkfCorePivotCommandWithoutYawConflictDoesNotEnterPivotScrubMode)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                0.10f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.60f;
+            control.rightMotorCommand = -0.60f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            core.setRuntimeContext(0.0f, 2.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(core.predict(0.001f, control));
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 10;
+            encoder.totalRightCounts = -10;
+            encoder.omegaLeftRadps = 0.60f;
+            encoder.omegaRightRadps = -0.60f;
+            Assert::IsTrue(core.updateEncoderPair(encoder, 0.001f).accepted);
+
+            Assert::IsFalse(core.pivotScrubMode());
+            Assert::IsFalse(core.pivotScrubEncoderBodyUpdateSkipped());
+            Assert::IsFalse(core.pivotScrubZeroUSoftApplied());
+        }
+
+        TEST_METHOD(SrUkfCoreNonPivotMotionLeavesPivotScrubTelemetryCleared)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+
+            const VehicleState::StateVector initialState = BuildUkfState(
+                0.0f,
+                0.09f,
+                0.0f,
+                0.10f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f,
+                0.0f);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.25f;
+            control.rightMotorCommand = 0.25f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            core.setRuntimeContext(0.12f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
+            Assert::IsTrue(core.predict(0.001f, control));
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 6;
+            encoder.totalRightCounts = 6;
+            encoder.omegaLeftRadps = 0.80f;
+            encoder.omegaRightRadps = 0.80f;
+            Assert::IsTrue(core.updateEncoderPair(encoder, 0.001f).accepted);
+            Assert::IsTrue(core.updateYawRate(0.02f).accepted);
+
+            Assert::IsFalse(core.pivotScrubMode());
+            Assert::IsFalse(core.pivotScrubEncoderBodyUpdateSkipped());
+            Assert::IsFalse(core.pivotScrubZeroUSoftApplied());
+            Assert::AreEqual(0.0f, core.pivotScrubEncoderWheelMaskedDeltaNorm(), 1.0e-6f);
+            Assert::AreEqual(0.0f, core.pivotScrubZeroUInnovationMps(), 1.0e-6f);
+            Assert::AreEqual(0.0f, core.pivotScrubGyroMaskedDeltaNorm(), 1.0e-6f);
+
+            const std::vector<std::pair<std::string, std::string>> dumpLines = CollectDebugDumpLines(core);
+            const std::size_t pivotModeIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub");
+            Assert::IsTrue(pivotModeIndex < dumpLines.size());
+            Assert::IsTrue(dumpLines[pivotModeIndex].second.find("pivot_scrub_mode=false") != std::string::npos);
+        }
+
         TEST_METHOD(SrUkfCoreZeroVelocityEncoderUpdateKeepsYawRateVarianceBoundedAtRest)
         {
             const PlantParams params = PlantParams::Default();

@@ -320,6 +320,22 @@ namespace MazeMap
         , _nonholonomicConstraintEnabled(false)
         , _yawValidForFeedforward(true)
         , _biasUpdateEnabled(false)
+        , _pivotScrubMode(false)
+        , _pivotScrubEncoderBodyUpdateSkipped(false)
+        , _pivotScrubZeroUSoftApplied(false)
+        , _pivotScrubEncoderWheelDeltaPsiRad(0.0f)
+        , _pivotScrubEncoderWheelDeltaRRadps(0.0f)
+        , _pivotScrubEncoderWheelDeltaOmegaLRadps(0.0f)
+        , _pivotScrubEncoderWheelDeltaOmegaRRadps(0.0f)
+        , _pivotScrubEncoderWheelMaskedDeltaNorm(0.0f)
+        , _pivotScrubZeroUInnovationMps(0.0f)
+        , _pivotScrubZeroUDeltaMps(0.0f)
+        , _pivotScrubGyroDeltaPsiRad(0.0f)
+        , _pivotScrubGyroDeltaRRadps(0.0f)
+        , _pivotScrubGyroDeltaBgzRadps(0.0f)
+        , _pivotScrubGyroDeltaOmegaLRadps(0.0f)
+        , _pivotScrubGyroDeltaOmegaRRadps(0.0f)
+        , _pivotScrubGyroMaskedDeltaNorm(0.0f)
         , _yawWindowDtSeconds{}
         , _yawWindowUkfIntegralRad{}
         , _yawWindowGyroIntegralRad{}
@@ -514,6 +530,131 @@ namespace MazeMap
             }
         }
         return true;
+    }
+
+    void SrUkfCore::ProjectMaskedStateAndCovariance(
+        const StateVector& priorState,
+        const StateMatrix& priorCovariance,
+        const StateVector& updatedState,
+        const StateMatrix& updatedCovariance,
+        const int* allowedIndices,
+        std::size_t allowedCount,
+        StateVector& projectedState,
+        StateMatrix& projectedCovariance) noexcept
+    {
+        projectedState = priorState;
+        projectedCovariance = priorCovariance;
+        if ((allowedIndices == nullptr) || (allowedCount == 0U))
+        {
+            return;
+        }
+
+        std::array<bool, VehicleState::kDimension> allowedMask{};
+        for (std::size_t index = 0; index < allowedCount; ++index)
+        {
+            const int stateIndex = allowedIndices[index];
+            if ((stateIndex < 0) || (stateIndex >= VehicleState::kDimension))
+            {
+                return;
+            }
+            allowedMask[static_cast<std::size_t>(stateIndex)] = true;
+            projectedState(stateIndex) = updatedState(stateIndex);
+        }
+
+        for (int row = 0; row < VehicleState::kDimension; ++row)
+        {
+            for (int col = 0; col < VehicleState::kDimension; ++col)
+            {
+                const bool rowAllowed = allowedMask[static_cast<std::size_t>(row)];
+                const bool colAllowed = allowedMask[static_cast<std::size_t>(col)];
+                if (rowAllowed && colAllowed)
+                {
+                    projectedCovariance(row, col) = updatedCovariance(row, col);
+                }
+                else if (rowAllowed != colAllowed)
+                {
+                    projectedCovariance(row, col) = 0.0f;
+                }
+            }
+        }
+
+        VehicleState::NormalizeStateVector(projectedState);
+    }
+
+    bool SrUkfCore::IsPivotScrubCandidate(
+        const EncoderObs& observation,
+        float commandedLinearMps,
+        float commandedAngularRadps,
+        float yawConsistencyLowPassRadps,
+        float yawWindowMismatchRad,
+        const PlantParams& params) noexcept
+    {
+        if (!std::isfinite(commandedLinearMps) ||
+            !std::isfinite(commandedAngularRadps) ||
+            !std::isfinite(observation.omegaLeftRadps) ||
+            !std::isfinite(observation.omegaRightRadps))
+        {
+            return false;
+        }
+
+        if ((std::fabs(commandedLinearMps) > kPivotScrubMaxCommandLinearMps) ||
+            (std::fabs(commandedAngularRadps) < kPivotScrubMinCommandAngularRadps))
+        {
+            return false;
+        }
+
+        const float measuredLinearSpeedMps =
+            std::fabs(ComputeMeasuredLinearSpeedMps(observation, params));
+        if (!std::isfinite(measuredLinearSpeedMps) ||
+            (measuredLinearSpeedMps > kPivotScrubMaxCommandLinearMps))
+        {
+            return false;
+        }
+
+        const bool wheelOpposing = (observation.omegaLeftRadps * observation.omegaRightRadps) < 0.0f;
+        if (!wheelOpposing)
+        {
+            return false;
+        }
+
+        bool yawConflictKnown = false;
+        bool yawConflict = false;
+        if (std::isfinite(yawConsistencyLowPassRadps))
+        {
+            yawConflictKnown = true;
+            yawConflict =
+                yawConflict ||
+                (std::fabs(yawConsistencyLowPassRadps) > kPivotScrubYawConsistencyThresholdRadps);
+        }
+        if (std::isfinite(yawWindowMismatchRad))
+        {
+            yawConflictKnown = true;
+            yawConflict =
+                yawConflict ||
+                (std::fabs(yawWindowMismatchRad) > kPivotScrubYawWindowMismatchThresholdRad);
+        }
+
+        return yawConflictKnown && yawConflict;
+    }
+
+    void SrUkfCore::resetPivotScrubTelemetry() noexcept
+    {
+        _pivotScrubMode = false;
+        _pivotScrubEncoderBodyUpdateSkipped = false;
+        _pivotScrubZeroUSoftApplied = false;
+        _pivotScrubEncoderWheelDeltaPsiRad = 0.0f;
+        _pivotScrubEncoderWheelDeltaRRadps = 0.0f;
+        _pivotScrubEncoderWheelDeltaOmegaLRadps = 0.0f;
+        _pivotScrubEncoderWheelDeltaOmegaRRadps = 0.0f;
+        _pivotScrubEncoderWheelMaskedDeltaNorm = 0.0f;
+        _pivotScrubZeroUInnovationMps = 0.0f;
+        _pivotScrubZeroUDeltaMps = 0.0f;
+        _pivotScrubGyroDeltaPsiRad = 0.0f;
+        _pivotScrubGyroDeltaRRadps = 0.0f;
+        _pivotScrubGyroDeltaBgzRadps = 0.0f;
+        _pivotScrubGyroDeltaOmegaLRadps = 0.0f;
+        _pivotScrubGyroDeltaOmegaRRadps = 0.0f;
+        _pivotScrubGyroMaskedDeltaNorm = 0.0f;
     }
 
     bool SrUkfCore::WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept
@@ -798,6 +939,58 @@ namespace MazeMap
             return false;
         }
 
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_pivot_scrub",
+                "pivot_scrub_mode=%s;encoder_body_update_skipped=%s;zero_u_soft_applied=%s",
+                _pivotScrubMode ? "true" : "false",
+                _pivotScrubEncoderBodyUpdateSkipped ? "true" : "false",
+                _pivotScrubZeroUSoftApplied ? "true" : "false"))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_pivot_scrub_encoder",
+                "delta_psi_rad=%.9g;delta_r_radps=%.9g;delta_omega_l_radps=%.9g;delta_omega_r_radps=%.9g;masked_delta_norm=%.9g",
+                static_cast<double>(_pivotScrubEncoderWheelDeltaPsiRad),
+                static_cast<double>(_pivotScrubEncoderWheelDeltaRRadps),
+                static_cast<double>(_pivotScrubEncoderWheelDeltaOmegaLRadps),
+                static_cast<double>(_pivotScrubEncoderWheelDeltaOmegaRRadps),
+                static_cast<double>(_pivotScrubEncoderWheelMaskedDeltaNorm)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_pivot_scrub_zero_u",
+                "innovation_mps=%.9g;delta_mps=%.9g",
+                static_cast<double>(_pivotScrubZeroUInnovationMps),
+                static_cast<double>(_pivotScrubZeroUDeltaMps)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_pivot_scrub_gyro",
+                "delta_psi_rad=%.9g;delta_r_radps=%.9g;delta_bgz_radps=%.9g;delta_omega_l_radps=%.9g;delta_omega_r_radps=%.9g;masked_delta_norm=%.9g",
+                static_cast<double>(_pivotScrubGyroDeltaPsiRad),
+                static_cast<double>(_pivotScrubGyroDeltaRRadps),
+                static_cast<double>(_pivotScrubGyroDeltaBgzRadps),
+                static_cast<double>(_pivotScrubGyroDeltaOmegaLRadps),
+                static_cast<double>(_pivotScrubGyroDeltaOmegaRRadps),
+                static_cast<double>(_pivotScrubGyroMaskedDeltaNorm)))
+        {
+            return false;
+        }
+
         return EmitDebugTextLine(
             context,
             sink,
@@ -880,6 +1073,7 @@ namespace MazeMap
         _yawWindowHead = 0U;
         _yawWindowSize = 0U;
         _yawWindowSpanS = 0.0f;
+        resetPivotScrubTelemetry();
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastControl = ControlInput{};
@@ -935,6 +1129,7 @@ namespace MazeMap
         _yawWindowHead = 0U;
         _yawWindowSize = 0U;
         _yawWindowSpanS = 0.0f;
+        resetPivotScrubTelemetry();
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastEncoderDtSeconds = 0.0f;
@@ -1059,6 +1254,7 @@ namespace MazeMap
         _havePredictionReference = true;
         _acceptedEncoderUpdateSincePredict = false;
         _lastEncoderDtSeconds = 0.0f;
+        resetPivotScrubTelemetry();
         updateCommandSignFlipWindow(dt);
         updateOperatingMode(dt);
         updateProcessNoiseForMode();
@@ -1103,11 +1299,21 @@ namespace MazeMap
         result.attempted = true;
 
         const EncoderObs measured = observation;
+        const StateVector priorState = _filter.state();
+        const StateMatrix priorCovariance = _filter.covariance();
         _acceptedEncoderUpdateSincePredict = false;
         _lastEncoderDtSeconds =
             (std::isfinite(dt) && (dt > 0.0f)) ?
             dt :
             0.0f;
+        _pivotScrubMode = IsPivotScrubCandidate(
+            measured,
+            _commandedLinearMps,
+            _commandedAngularRadps,
+            _yawConsistencyLowPassRadps,
+            _yawWindowMismatchRad,
+            _params);
+        _pivotScrubEncoderBodyUpdateSkipped = _pivotScrubMode;
 
         Eigen::Matrix<float, 2, 1> z;
         z << measured.omegaLeftRadps, measured.omegaRightRadps;
@@ -1127,11 +1333,38 @@ namespace MazeMap
                 return prediction;
             },
             invokeLoop);
+        const float encoderMeasurementNis = _filter.lastNis();
         if (result.accepted)
         {
             _lastEncoderObs = measured;
             _acceptedEncoderUpdateSincePredict = true;
-            applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
+            if (_pivotScrubMode)
+            {
+                applyPivotScrubEncoderWheelConstraint(
+                    priorState,
+                    priorCovariance,
+                    measured,
+                    ComputeMeasuredWheelVarianceRadps2(measured, _params));
+                const StateVector& postEncoderState = _filter.state();
+                _pivotScrubEncoderWheelDeltaPsiRad =
+                    postEncoderState(VehicleState::kPsi) - priorState(VehicleState::kPsi);
+                _pivotScrubEncoderWheelDeltaRRadps =
+                    postEncoderState(VehicleState::kR) - priorState(VehicleState::kR);
+                _pivotScrubEncoderWheelDeltaOmegaLRadps =
+                    postEncoderState(VehicleState::kOmegaL) - priorState(VehicleState::kOmegaL);
+                _pivotScrubEncoderWheelDeltaOmegaRRadps =
+                    postEncoderState(VehicleState::kOmegaR) - priorState(VehicleState::kOmegaR);
+                const float encoderMaskedDeltaNorm =
+                    MazeMap::Math::Sqrtf(
+                        (_pivotScrubEncoderWheelDeltaOmegaLRadps * _pivotScrubEncoderWheelDeltaOmegaLRadps) +
+                        (_pivotScrubEncoderWheelDeltaOmegaRRadps * _pivotScrubEncoderWheelDeltaOmegaRRadps));
+                _pivotScrubEncoderWheelMaskedDeltaNorm =
+                    std::isfinite(encoderMaskedDeltaNorm) ? encoderMaskedDeltaNorm : 0.0f;
+            }
+            else
+            {
+                applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
+            }
         }
         else
         {
@@ -1140,7 +1373,40 @@ namespace MazeMap
             applyWheelSpeedConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
             result.accepted = true;
         }
-        result.nis = _filter.lastNis();
+        if (_pivotScrubMode)
+        {
+            const StateVector zeroUPriorState = _filter.state();
+            const StateMatrix zeroUPriorCovariance = _filter.covariance();
+            Eigen::Matrix<float, 1, 1> zeroUObservation;
+            zeroUObservation << 0.0f;
+            Eigen::Matrix<float, 1, 1> zeroUSqrtNoise;
+            zeroUSqrtNoise(0, 0) = kPivotScrubZeroUSigmaMps;
+            const bool zeroUAccepted = _filter.Update<1>(
+                zeroUObservation,
+                zeroUSqrtNoise,
+                std::numeric_limits<float>::infinity(),
+                [](const StateVector& sigmaPoint) noexcept
+                {
+                    Eigen::Matrix<float, 1, 1> prediction;
+                    prediction << sigmaPoint(VehicleState::kU);
+                    return prediction;
+                },
+                invokeLoop);
+            if (zeroUAccepted)
+            {
+                applyPivotScrubZeroUConstraint(
+                    zeroUPriorState,
+                    zeroUPriorCovariance,
+                    kPivotScrubZeroUSigmaMps);
+            }
+            _pivotScrubZeroUSoftApplied = zeroUAccepted;
+            const StateVector& zeroUPostState = _filter.state();
+            _pivotScrubZeroUInnovationMps = std::isfinite(zeroUPriorState(VehicleState::kU)) ?
+                -zeroUPriorState(VehicleState::kU) :
+                0.0f;
+            _pivotScrubZeroUDeltaMps = zeroUPostState(VehicleState::kU) - zeroUPriorState(VehicleState::kU);
+        }
+        result.nis = encoderMeasurementNis;
         return result;
     }
 
@@ -1176,6 +1442,8 @@ namespace MazeMap
             return result;
         }
 
+        const StateVector priorState = _filter.state();
+        const StateMatrix priorCovariance = _filter.covariance();
         Eigen::Matrix<float, 1, 1> z;
         z << yawRateRadps;
         Eigen::Matrix<float, 1, 1> sqrtNoise;
@@ -1202,6 +1470,20 @@ namespace MazeMap
         if (result.accepted)
         {
             updateInitialStationaryGyroBias(yawRateRadps, shouldApplyStationaryConstraint);
+            if (_pivotScrubMode)
+            {
+                applyPivotScrubGyroConstraint(priorState, priorCovariance, yawRateRadps);
+                const StateVector& postState = _filter.state();
+                _pivotScrubGyroDeltaPsiRad = postState(VehicleState::kPsi) - priorState(VehicleState::kPsi);
+                _pivotScrubGyroDeltaRRadps = postState(VehicleState::kR) - priorState(VehicleState::kR);
+                _pivotScrubGyroDeltaBgzRadps = postState(VehicleState::kBgz) - priorState(VehicleState::kBgz);
+                _pivotScrubGyroDeltaOmegaLRadps = postState(VehicleState::kOmegaL) - priorState(VehicleState::kOmegaL);
+                _pivotScrubGyroDeltaOmegaRRadps = postState(VehicleState::kOmegaR) - priorState(VehicleState::kOmegaR);
+                _pivotScrubGyroMaskedDeltaNorm = MazeMap::Math::Sqrtf(
+                    (_pivotScrubGyroDeltaPsiRad * _pivotScrubGyroDeltaPsiRad) +
+                    (_pivotScrubGyroDeltaRRadps * _pivotScrubGyroDeltaRRadps) +
+                    (_pivotScrubGyroDeltaBgzRadps * _pivotScrubGyroDeltaBgzRadps));
+            }
             updateStationaryCertification(yawRateRadps);
             updateYawConsistencyMetrics(yawRateRadps);
             const OperatingMode previousMode = _operatingMode;
@@ -1210,6 +1492,10 @@ namespace MazeMap
                 _stationaryCertified)
             {
                 applyStationaryZeroMotionConstraint(yawRateRadps);
+            }
+            else if (_pivotScrubMode)
+            {
+                updateNonholonomicDiagnostics(false);
             }
             else if (_acceptedEncoderUpdateSincePredict && !HasExactZeroWheelObservation(_lastEncoderObs))
             {
@@ -1471,6 +1757,86 @@ namespace MazeMap
         anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
         anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;
         _filter.setState(anchoredState, anchoredCovariance);
+    }
+
+    void SrUkfCore::applyPivotScrubEncoderWheelConstraint(
+        const StateVector& priorState,
+        const StateMatrix& priorCovariance,
+        const EncoderObs& measured,
+        float wheelVarianceRadps2) noexcept
+    {
+        (void)measured;
+        (void)wheelVarianceRadps2;
+        const StateVector updatedState = _filter.state();
+        const StateMatrix updatedCovariance = _filter.covariance();
+        StateVector projectedState = priorState;
+        StateMatrix projectedCovariance = priorCovariance;
+        constexpr std::array<int, 2> kAllowedIndices = {
+            VehicleState::kOmegaL,
+            VehicleState::kOmegaR
+        };
+        ProjectMaskedStateAndCovariance(
+            priorState,
+            priorCovariance,
+            updatedState,
+            updatedCovariance,
+            kAllowedIndices.data(),
+            kAllowedIndices.size(),
+            projectedState,
+            projectedCovariance);
+        _filter.setState(projectedState, projectedCovariance);
+    }
+
+    void SrUkfCore::applyPivotScrubZeroUConstraint(
+        const StateVector& priorState,
+        const StateMatrix& priorCovariance,
+        float sigmaMps) noexcept
+    {
+        (void)sigmaMps;
+        const StateVector updatedState = _filter.state();
+        const StateMatrix updatedCovariance = _filter.covariance();
+        StateVector projectedState = priorState;
+        StateMatrix projectedCovariance = priorCovariance;
+        constexpr std::array<int, 1> kAllowedIndices = {
+            VehicleState::kU
+        };
+        ProjectMaskedStateAndCovariance(
+            priorState,
+            priorCovariance,
+            updatedState,
+            updatedCovariance,
+            kAllowedIndices.data(),
+            kAllowedIndices.size(),
+            projectedState,
+            projectedCovariance);
+        _filter.setState(projectedState, projectedCovariance);
+    }
+
+    void SrUkfCore::applyPivotScrubGyroConstraint(
+        const StateVector& priorState,
+        const StateMatrix& priorCovariance,
+        float yawRateRadps) noexcept
+    {
+        (void)yawRateRadps;
+        const StateVector updatedState = _filter.state();
+        const StateMatrix updatedCovariance = _filter.covariance();
+        StateVector projectedState = priorState;
+        StateMatrix projectedCovariance = priorCovariance;
+        constexpr std::array<int, 3> kAllowedIndices = {
+            VehicleState::kPsi,
+            VehicleState::kR,
+            VehicleState::kBgz
+        };
+        ProjectMaskedStateAndCovariance(
+            priorState,
+            priorCovariance,
+            updatedState,
+            updatedCovariance,
+            kAllowedIndices.data(),
+            kAllowedIndices.size(),
+            projectedState,
+            projectedCovariance);
+        _filter.setState(projectedState, projectedCovariance);
     }
 
     void SrUkfCore::applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept

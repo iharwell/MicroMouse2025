@@ -56,6 +56,11 @@ namespace MazeMap
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
         static constexpr float kImuYawRateSigmaRadps = 0.0131f;
         static constexpr float kImuAccelSigmaMps2 = 0.1305f;
+        static constexpr float kPivotScrubMaxCommandLinearMps = 0.03f;
+        static constexpr float kPivotScrubMinCommandAngularRadps = 1.0f;
+        static constexpr float kPivotScrubYawConsistencyThresholdRadps = 0.03f;
+        static constexpr float kPivotScrubYawWindowMismatchThresholdRad = 0.003f;
+        static constexpr float kPivotScrubZeroUSigmaMps = 0.06f;
         static constexpr float kStationaryGyroBiasTimeConstantS = 30.0f;
         static constexpr std::uint16_t kInitialStationaryGyroBiasSeedStartSample = 50U;
         static constexpr std::uint16_t kInitialStationaryGyroBiasSeedEndSample = 150U;
@@ -102,6 +107,22 @@ namespace MazeMap
         bool nonholonomicConstraintEnabled() const noexcept { return _nonholonomicConstraintEnabled; }
         bool yawValidForFeedforward() const noexcept { return _yawValidForFeedforward; }
         bool biasUpdateEnabled() const noexcept { return _biasUpdateEnabled; }
+        bool pivotScrubMode() const noexcept { return _pivotScrubMode; }
+        bool pivotScrubEncoderBodyUpdateSkipped() const noexcept { return _pivotScrubEncoderBodyUpdateSkipped; }
+        bool pivotScrubZeroUSoftApplied() const noexcept { return _pivotScrubZeroUSoftApplied; }
+        float pivotScrubEncoderWheelDeltaPsiRad() const noexcept { return _pivotScrubEncoderWheelDeltaPsiRad; }
+        float pivotScrubEncoderWheelDeltaRRadps() const noexcept { return _pivotScrubEncoderWheelDeltaRRadps; }
+        float pivotScrubEncoderWheelDeltaOmegaLRadps() const noexcept { return _pivotScrubEncoderWheelDeltaOmegaLRadps; }
+        float pivotScrubEncoderWheelDeltaOmegaRRadps() const noexcept { return _pivotScrubEncoderWheelDeltaOmegaRRadps; }
+        float pivotScrubEncoderWheelMaskedDeltaNorm() const noexcept { return _pivotScrubEncoderWheelMaskedDeltaNorm; }
+        float pivotScrubZeroUInnovationMps() const noexcept { return _pivotScrubZeroUInnovationMps; }
+        float pivotScrubZeroUDeltaMps() const noexcept { return _pivotScrubZeroUDeltaMps; }
+        float pivotScrubGyroDeltaPsiRad() const noexcept { return _pivotScrubGyroDeltaPsiRad; }
+        float pivotScrubGyroDeltaRRadps() const noexcept { return _pivotScrubGyroDeltaRRadps; }
+        float pivotScrubGyroDeltaBgzRadps() const noexcept { return _pivotScrubGyroDeltaBgzRadps; }
+        float pivotScrubGyroDeltaOmegaLRadps() const noexcept { return _pivotScrubGyroDeltaOmegaLRadps; }
+        float pivotScrubGyroDeltaOmegaRRadps() const noexcept { return _pivotScrubGyroDeltaOmegaRRadps; }
+        float pivotScrubGyroMaskedDeltaNorm() const noexcept { return _pivotScrubGyroMaskedDeltaNorm; }
 
         void setRuntimeContext(
             float commandedLinearMps,
@@ -275,9 +296,25 @@ namespace MazeMap
         static float ComputeMeasuredYawRateVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredWheelVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeEncoderPairNisThreshold(const EncoderObs& observation) noexcept;
+        static bool IsPivotScrubCandidate(
+            const EncoderObs& observation,
+            float commandedLinearMps,
+            float commandedAngularRadps,
+            float yawConsistencyLowPassRadps,
+            float yawWindowMismatchRad,
+            const PlantParams& params) noexcept;
         static float wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept;
         static void ZeroGyroBiasDynamicCrossCovariances(StateMatrix& covariance) noexcept;
         static float ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept;
+        static void ProjectMaskedStateAndCovariance(
+            const StateVector& priorState,
+            const StateMatrix& priorCovariance,
+            const StateVector& updatedState,
+            const StateMatrix& updatedCovariance,
+            const int* allowedIndices,
+            std::size_t allowedCount,
+            StateVector& projectedState,
+            StateMatrix& projectedCovariance) noexcept;
         void updateInitialStationaryGyroBias(float yawRateRadps, bool stationaryZeroMotionCandidate) noexcept;
 
         bool predictImpl(float dt, const ControlInput& control, void* loopHookContext, LoopHookInvoker loopHook) noexcept;
@@ -303,6 +340,19 @@ namespace MazeMap
         void anchorPoseToEncoderDelta(StateVector& anchoredState, const EncoderObs& measured) const noexcept;
         void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
+        void applyPivotScrubEncoderWheelConstraint(
+            const StateVector& priorState,
+            const StateMatrix& priorCovariance,
+            const EncoderObs& measured,
+            float wheelVarianceRadps2) noexcept;
+        void applyPivotScrubZeroUConstraint(
+            const StateVector& priorState,
+            const StateMatrix& priorCovariance,
+            float sigmaMps) noexcept;
+        void applyPivotScrubGyroConstraint(
+            const StateVector& priorState,
+            const StateMatrix& priorCovariance,
+            float yawRateRadps) noexcept;
         void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
         void updateCommandSignFlipWindow(float dtSeconds) noexcept;
         void updateStationaryCertification(float yawRateRadps) noexcept;
@@ -310,6 +360,7 @@ namespace MazeMap
         void updateYawConsistencyMetrics(float yawRateRadps) noexcept;
         void updateOperatingMode(float dtSeconds) noexcept;
         void updateProcessNoiseForMode() noexcept;
+        void resetPivotScrubTelemetry() noexcept;
         bool shouldEnableNonholonomicConstraint() const noexcept;
         float correctedYawRateRadps(float yawRateRawRadps) const noexcept;
         void synchronizeGyroBiasStateToAnchor(
@@ -374,6 +425,22 @@ namespace MazeMap
         bool _nonholonomicConstraintEnabled;
         bool _yawValidForFeedforward;
         bool _biasUpdateEnabled;
+        bool _pivotScrubMode;
+        bool _pivotScrubEncoderBodyUpdateSkipped;
+        bool _pivotScrubZeroUSoftApplied;
+        float _pivotScrubEncoderWheelDeltaPsiRad;
+        float _pivotScrubEncoderWheelDeltaRRadps;
+        float _pivotScrubEncoderWheelDeltaOmegaLRadps;
+        float _pivotScrubEncoderWheelDeltaOmegaRRadps;
+        float _pivotScrubEncoderWheelMaskedDeltaNorm;
+        float _pivotScrubZeroUInnovationMps;
+        float _pivotScrubZeroUDeltaMps;
+        float _pivotScrubGyroDeltaPsiRad;
+        float _pivotScrubGyroDeltaRRadps;
+        float _pivotScrubGyroDeltaBgzRadps;
+        float _pivotScrubGyroDeltaOmegaLRadps;
+        float _pivotScrubGyroDeltaOmegaRRadps;
+        float _pivotScrubGyroMaskedDeltaNorm;
         std::array<float, 128> _yawWindowDtSeconds;
         std::array<float, 128> _yawWindowUkfIntegralRad;
         std::array<float, 128> _yawWindowGyroIntegralRad;
