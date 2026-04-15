@@ -71,6 +71,43 @@ namespace MazeMap
                 afterCovariance(VehicleState::kPsi, VehicleState::kPsi) <
                 (0.1f * initialYawRateVarianceRadps2));
         }
+        TEST_METHOD(FeedforwardAgreesWithPredict)
+        {
+            const PlantParams params = PlantParams::Default();
+            PlantModel plant;
+            SrUkfCore core(params);
+
+            const float driveCommand = 0.2f;
+
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.0f,
+                    0.00f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f);
+            const VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.01f, 0.001f, 0.005f, 0, 0, 0, 0.02f);
+            Assert::IsTrue(core.reset(initialState, initialCovariance));
+
+            auto control = plant.solveDriveCommands(
+                driveCommand,
+                0.0f,
+                0, 0, params, 0.8f, 8.4f);
+            Assert::IsTrue(control.control.leftMotorCommand > 0.1f, L"Left motor command should overcome friction."); // Should overcome friction.
+            Assert::IsTrue(control.control.rightMotorCommand > 0.1f, L"Right motor command should overcome friction."); // Should overcome friction.
+
+            for (size_t i = 0; i < 1000; i++)
+            {
+                core.predict(0.001f, control.control);
+            }
+            Assert::IsTrue(core.state()(VehicleState::kU) > driveCommand * 0.9f, L"Vehicle speed shouldn't fall too low.");
+            Assert::IsTrue(core.state()(VehicleState::kU) < driveCommand * 1.1f, L"Vehicle speed shouldn't be too high.");
+        }
 
         TEST_METHOD(SrUkfCoreMovingEncoderUpdateKeepsYawRateVarianceLowAfterPredictAndUpdate)
         {
