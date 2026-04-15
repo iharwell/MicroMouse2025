@@ -56,7 +56,12 @@ namespace MazeMap
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
         static constexpr float kImuYawRateSigmaRadps = 0.0131f;
         static constexpr float kImuAccelSigmaMps2 = 0.1305f;
-        static constexpr float kStationaryGyroBiasTimeConstantS = 0.50f;
+        static constexpr float kStationaryGyroBiasTimeConstantS = 30.0f;
+        static constexpr std::uint16_t kInitialStationaryGyroBiasSeedStartSample = 50U;
+        static constexpr std::uint16_t kInitialStationaryGyroBiasSeedEndSample = 150U;
+        static constexpr std::uint16_t kInitialStationaryGyroBiasSeedSampleCount =
+            static_cast<std::uint16_t>(
+                (kInitialStationaryGyroBiasSeedEndSample - kInitialStationaryGyroBiasSeedStartSample) + 1U);
 
         using StateVector = VehicleState::StateVector;
         using StateMatrix = VehicleState::StateMatrix;
@@ -146,6 +151,12 @@ namespace MazeMap
             bool nhcEnabled,
             float lateralVelocityMps,
             float nhcSigmaMps) noexcept;
+        static float ComputeStationaryGyroBiasWalkProcessVarianceRadps2(
+            float dtSeconds,
+            float measurementVarianceRadps2) noexcept;
+        static float ComputeStationaryGyroBiasWalkPosteriorVarianceRadps2(
+            float dtSeconds,
+            float measurementVarianceRadps2) noexcept;
 
         bool WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept;
 
@@ -267,7 +278,7 @@ namespace MazeMap
         static float wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept;
         static void ZeroGyroBiasDynamicCrossCovariances(StateMatrix& covariance) noexcept;
         static float ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept;
-        static float ComputeStationaryGyroBiasVarianceRadps2(float priorVarianceRadps2, float blendFactor) noexcept;
+        void updateInitialStationaryGyroBias(float yawRateRadps, bool stationaryZeroMotionCandidate) noexcept;
 
         bool predictImpl(float dt, const ControlInput& control, void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         MeasurementUpdateResult updateEncoderPairImpl(
@@ -334,6 +345,11 @@ namespace MazeMap
         OperatingMode _operatingMode;
         float _gyroBiasAnchorRadps;
         float _gyroBiasAnchorVarianceRadps2;
+        bool _initialStationaryGyroBiasPhaseExited;
+        bool _initialStationaryGyroBiasSeedApplied;
+        std::uint16_t _initialStationaryGyroBiasSampleOrdinal;
+        std::uint16_t _initialStationaryGyroBiasCollectedSeedSamples;
+        double _initialStationaryGyroBiasSeedAccumRadps;
         float _commandedLinearMps;
         float _commandedAngularRadps;
         std::uint16_t _saturationFlags;

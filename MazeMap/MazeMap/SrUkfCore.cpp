@@ -291,6 +291,11 @@ namespace MazeMap
         , _operatingMode(OperatingMode::GripLinear)
         , _gyroBiasAnchorRadps(0.0f)
         , _gyroBiasAnchorVarianceRadps2(0.01f)
+        , _initialStationaryGyroBiasPhaseExited(false)
+        , _initialStationaryGyroBiasSeedApplied(false)
+        , _initialStationaryGyroBiasSampleOrdinal(0U)
+        , _initialStationaryGyroBiasCollectedSeedSamples(0U)
+        , _initialStationaryGyroBiasSeedAccumRadps(0.0)
         , _commandedLinearMps(0.0f)
         , _commandedAngularRadps(0.0f)
         , _saturationFlags(0U)
@@ -839,6 +844,11 @@ namespace MazeMap
         _filter.setState(state, covariance);
         _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
         _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
+        _initialStationaryGyroBiasPhaseExited = false;
+        _initialStationaryGyroBiasSeedApplied = false;
+        _initialStationaryGyroBiasSampleOrdinal = 0U;
+        _initialStationaryGyroBiasCollectedSeedSamples = 0U;
+        _initialStationaryGyroBiasSeedAccumRadps = 0.0;
         _commandedLinearMps = 0.0f;
         _commandedAngularRadps = 0.0f;
         _saturationFlags = 0U;
@@ -889,6 +899,11 @@ namespace MazeMap
         _filter.setState(state, covariance);
         _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
         _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
+        _initialStationaryGyroBiasPhaseExited = false;
+        _initialStationaryGyroBiasSeedApplied = false;
+        _initialStationaryGyroBiasSampleOrdinal = 0U;
+        _initialStationaryGyroBiasCollectedSeedSamples = 0U;
+        _initialStationaryGyroBiasSeedAccumRadps = 0.0;
         _commandedLinearMps = 0.0f;
         _commandedAngularRadps = 0.0f;
         _saturationFlags = 0U;
@@ -1186,6 +1201,7 @@ namespace MazeMap
         const float yawMeasurementNis = _filter.lastNis();
         if (result.accepted)
         {
+            updateInitialStationaryGyroBias(yawRateRadps, shouldApplyStationaryConstraint);
             updateStationaryCertification(yawRateRadps);
             updateYawConsistencyMetrics(yawRateRadps);
             const OperatingMode previousMode = _operatingMode;
@@ -1477,6 +1493,7 @@ namespace MazeMap
 
     void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
     {
+        (void)yawRateRadps;
         VehicleState constrainedState;
         constrainedState.SetStateVector(_filter.state());
         constrainedState.SetCovariance(_filter.covariance());
@@ -1488,20 +1505,12 @@ namespace MazeMap
             _prePredictCovariance,
             ComputeDistancePerEncoderCountM(_params),
             _params.trackWidthM);
-        const float blendFactor = ComputeStationaryGyroBiasBlendFactor(_lastEncoderDtSeconds);
-        _gyroBiasAnchorRadps =
-            _gyroBiasAnchorRadps +
-            (blendFactor * (yawRateRadps - _gyroBiasAnchorRadps));
-        _gyroBiasAnchorVarianceRadps2 = ComputeStationaryGyroBiasVarianceRadps2(
-            _gyroBiasAnchorVarianceRadps2,
-            blendFactor);
         constrainedState.SetGyroBiasZ(_gyroBiasAnchorRadps);
         constrainedState.SetGyroBiasZVar(
             _gyroBiasAnchorVarianceRadps2);
         _filter.setStateSquareRootCovariance(
             constrainedState.GetStateVector(),
             constrainedState.GetSqrtCovariance());
-        _biasUpdateEnabled = true;
         updateNonholonomicDiagnostics(false);
     }
 
@@ -1549,7 +1558,6 @@ namespace MazeMap
             _stationaryCandidateDwellS = 0.0f;
         }
         _stationaryCertified = _stationaryCandidateDwellS >= kStationaryCertificationDwellS;
-        _biasUpdateEnabled = _stationaryCertified;
     }
 
     void SrUkfCore::pushYawWindowContribution(
@@ -1723,26 +1731,136 @@ namespace MazeMap
 
     float SrUkfCore::ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept
     {
-        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)) ||
+            !(std::isfinite(kStationaryGyroBiasTimeConstantS) && (kStationaryGyroBiasTimeConstantS > 0.0f)))
         {
             return 0.0f;
         }
-        return (std::clamp)(dtSeconds / kStationaryGyroBiasTimeConstantS, 0.0f, 0.05f);
+        return (std::clamp)(
+            1.0f - std::exp(-dtSeconds / kStationaryGyroBiasTimeConstantS),
+            0.0f,
+            1.0f);
     }
 
-    float SrUkfCore::ComputeStationaryGyroBiasVarianceRadps2(
-        float priorVarianceRadps2,
-        float blendFactor) noexcept
+    float SrUkfCore::ComputeStationaryGyroBiasWalkProcessVarianceRadps2(
+        float dtSeconds,
+        float measurementVarianceRadps2) noexcept
     {
-        const float resolvedPriorVarianceRadps2 =
-            (std::isfinite(priorVarianceRadps2) && (priorVarianceRadps2 > 0.0f)) ?
-            priorVarianceRadps2 :
-            0.0f;
+        if (!(std::isfinite(measurementVarianceRadps2) && (measurementVarianceRadps2 > 0.0f)))
+        {
+            return 0.0f;
+        }
+
+        const float alpha = ComputeStationaryGyroBiasBlendFactor(dtSeconds);
+        if (!(alpha > 0.0f) || !(alpha < 1.0f))
+        {
+            return 0.0f;
+        }
+
+        // Exact discrete random-walk variance that yields the target exponential averaging gain.
+        return ((alpha * alpha) / (1.0f - alpha)) * measurementVarianceRadps2;
+    }
+
+    float SrUkfCore::ComputeStationaryGyroBiasWalkPosteriorVarianceRadps2(
+        float dtSeconds,
+        float measurementVarianceRadps2) noexcept
+    {
+        if (!(std::isfinite(measurementVarianceRadps2) && (measurementVarianceRadps2 > 0.0f)))
+        {
+            return 0.0f;
+        }
+
+        return ComputeStationaryGyroBiasBlendFactor(dtSeconds) * measurementVarianceRadps2;
+    }
+
+    void SrUkfCore::updateInitialStationaryGyroBias(
+        float yawRateRadps,
+        bool stationaryZeroMotionCandidate) noexcept
+    {
+        _biasUpdateEnabled = false;
+        if (_initialStationaryGyroBiasPhaseExited)
+        {
+            return;
+        }
+
+        const bool startupStationaryTick =
+            stationaryZeroMotionCandidate &&
+            controlCommandsAreEffectivelyZero() &&
+            (_saturationFlags == 0U);
+        if (!startupStationaryTick)
+        {
+            _initialStationaryGyroBiasPhaseExited = true;
+            return;
+        }
+
+        if (!std::isfinite(yawRateRadps))
+        {
+            return;
+        }
+
+        if (_initialStationaryGyroBiasSampleOrdinal < (std::numeric_limits<std::uint16_t>::max)())
+        {
+            ++_initialStationaryGyroBiasSampleOrdinal;
+        }
+
+        if ((_initialStationaryGyroBiasSampleOrdinal >= kInitialStationaryGyroBiasSeedStartSample) &&
+            (_initialStationaryGyroBiasSampleOrdinal <= kInitialStationaryGyroBiasSeedEndSample))
+        {
+            _initialStationaryGyroBiasSeedAccumRadps += static_cast<double>(yawRateRadps);
+            if (_initialStationaryGyroBiasCollectedSeedSamples < (std::numeric_limits<std::uint16_t>::max)())
+            {
+                ++_initialStationaryGyroBiasCollectedSeedSamples;
+            }
+        }
+
         const float measurementVarianceRadps2 = kImuYawRateSigmaRadps * kImuYawRateSigmaRadps;
-        const float oneMinusBlend = 1.0f - (std::clamp)(blendFactor, 0.0f, 1.0f);
-        return
-            (oneMinusBlend * oneMinusBlend * resolvedPriorVarianceRadps2) +
-            (blendFactor * blendFactor * measurementVarianceRadps2);
+        if (!_initialStationaryGyroBiasSeedApplied)
+        {
+            if ((_initialStationaryGyroBiasSampleOrdinal >= kInitialStationaryGyroBiasSeedEndSample) &&
+                (_initialStationaryGyroBiasCollectedSeedSamples > 0U))
+            {
+                _gyroBiasAnchorRadps = static_cast<float>(
+                    _initialStationaryGyroBiasSeedAccumRadps /
+                    static_cast<double>(_initialStationaryGyroBiasCollectedSeedSamples));
+                _gyroBiasAnchorVarianceRadps2 =
+                    ComputeStationaryGyroBiasWalkPosteriorVarianceRadps2(
+                        _lastEncoderDtSeconds,
+                        measurementVarianceRadps2);
+                if (!std::isfinite(_gyroBiasAnchorVarianceRadps2) ||
+                    !(_gyroBiasAnchorVarianceRadps2 > 0.0f))
+                {
+                    _gyroBiasAnchorVarianceRadps2 = 1.0e-8f;
+                }
+                _initialStationaryGyroBiasSeedApplied = true;
+                _biasUpdateEnabled = true;
+            }
+            return;
+        }
+
+        const float priorVarianceRadps2 =
+            (std::isfinite(_gyroBiasAnchorVarianceRadps2) && (_gyroBiasAnchorVarianceRadps2 > 0.0f)) ?
+            _gyroBiasAnchorVarianceRadps2 :
+            1.0e-8f;
+        const float predictedVarianceRadps2 =
+            priorVarianceRadps2 +
+            ComputeStationaryGyroBiasWalkProcessVarianceRadps2(
+                _lastEncoderDtSeconds,
+                measurementVarianceRadps2);
+        const float innovationVarianceRadps2 = predictedVarianceRadps2 + measurementVarianceRadps2;
+        if (!(std::isfinite(predictedVarianceRadps2) && std::isfinite(innovationVarianceRadps2)) ||
+            !(innovationVarianceRadps2 > 0.0f))
+        {
+            return;
+        }
+
+        const float kalmanGain = (std::clamp)(predictedVarianceRadps2 / innovationVarianceRadps2, 0.0f, 1.0f);
+        _gyroBiasAnchorRadps += kalmanGain * (yawRateRadps - _gyroBiasAnchorRadps);
+        _gyroBiasAnchorVarianceRadps2 = (1.0f - kalmanGain) * predictedVarianceRadps2;
+        if (!std::isfinite(_gyroBiasAnchorVarianceRadps2) || !(_gyroBiasAnchorVarianceRadps2 > 0.0f))
+        {
+            _gyroBiasAnchorVarianceRadps2 = 1.0e-8f;
+        }
+        _biasUpdateEnabled = true;
     }
 
     void SrUkfCore::synchronizeGyroBiasStateToAnchor(
@@ -1759,11 +1877,16 @@ namespace MazeMap
         }
         const float cappedBiasVarianceRadps2 =
             (std::max)(maxGyroBiasStdRadps, 1.0e-4f) * (std::max)(maxGyroBiasStdRadps, 1.0e-4f);
-        _gyroBiasAnchorVarianceRadps2 =
-            (std::min)(
-                (std::max)(_gyroBiasAnchorVarianceRadps2, 1.0e-8f),
-                cappedBiasVarianceRadps2);
-        covariance(VehicleState::kBgz, VehicleState::kBgz) = _gyroBiasAnchorVarianceRadps2;
+        if (!(std::isfinite(_gyroBiasAnchorVarianceRadps2) && (_gyroBiasAnchorVarianceRadps2 > 0.0f)))
+        {
+            _gyroBiasAnchorVarianceRadps2 = 1.0e-8f;
+        }
+        _gyroBiasAnchorVarianceRadps2 = (std::min)(_gyroBiasAnchorVarianceRadps2, cappedBiasVarianceRadps2);
+
+        // Preserve the internal stationary-walk variance exactly; only the published UKF state
+        // covariance keeps the numeric floor used elsewhere in the estimator.
+        covariance(VehicleState::kBgz, VehicleState::kBgz) =
+            (std::max)(_gyroBiasAnchorVarianceRadps2, 1.0e-8f);
         covariance(VehicleState::kR, VehicleState::kR) =
             (std::max)(
                 covariance(VehicleState::kR, VehicleState::kR),

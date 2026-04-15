@@ -298,13 +298,17 @@ namespace MazeMap::App::Internal
                 BuildModeState(_observedScratch, projectionAnchorUs, loopEndTimeUs, overrunBeforeModeWork);
 
             TickServices services(*this);
-            const ControlVector candidateControl =
-                _activeModeWorkCallback(_callbacks.context, loopEndTimeUs, modeState, services);
-            RecordModeReturnTiming(tickStartUs);
-
-            if (_requests.nextModeWorkRequested && (_requests.nextModeWorkCallback != nullptr))
+            ControlVector candidateControl = ControlVector::BrakeCommand();
+            if (_tickCount >= kInitialModeCallbackTick)
             {
-                _activeModeWorkCallback = _requests.nextModeWorkCallback;
+                candidateControl =
+                    _activeModeWorkCallback(_callbacks.context, loopEndTimeUs, modeState, services);
+                RecordModeReturnTiming(tickStartUs);
+
+                if (_requests.nextModeWorkRequested && (_requests.nextModeWorkCallback != nullptr))
+                {
+                    _activeModeWorkCallback = _requests.nextModeWorkCallback;
+                }
             }
 
             bool faultPathFlushRequired = false;

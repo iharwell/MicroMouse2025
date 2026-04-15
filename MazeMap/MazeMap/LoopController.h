@@ -48,6 +48,10 @@ namespace MazeMap::App::Internal
             std::uint32_t tickCount{};
         };
 
+        // The loop owns the startup stationary warmup and does not invoke the mode callback
+        // until this tick sequence number is reached.
+        static constexpr std::uint32_t kInitialModeCallbackTick = 250U;
+
         struct ControlVector final
         {
             enum class Kind : std::uint8_t
