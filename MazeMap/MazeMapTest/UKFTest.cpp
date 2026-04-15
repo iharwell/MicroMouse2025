@@ -2258,7 +2258,7 @@ namespace MazeMap
                 static_cast<int>(SrUkfCore::OperatingMode::LaunchOrReversalTransient),
                 static_cast<int>(launchCore.operatingMode()));
             Assert::AreEqual(0.020f, FindProcessNoiseDiagonal(launchCore, "u_mps"), 1.0e-6f);
-            Assert::AreEqual(0.020f, FindProcessNoiseDiagonal(launchCore, "v_mps"), 1.0e-6f);
+            Assert::AreEqual(0.010f, FindProcessNoiseDiagonal(launchCore, "v_mps"), 1.0e-6f);
             Assert::AreEqual(0.050f, FindProcessNoiseDiagonal(launchCore, "r_radps"), 1.0e-6f);
 
             // Saturation should force the inconsistent/saturated mode.
@@ -3712,6 +3712,60 @@ namespace MazeMap
                 1.0e-6f);
         }
 
+        TEST_METHOD(SrUkfCoreYawRateUpdateDoesNotPullWheelRatesThroughYawCrossCovariance)
+        {
+            SrUkfCore core;
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.02f,
+                    0.14f,
+                    0.10f,
+                    1.40f,
+                    0.05f,
+                    0.0f,
+                    12.0f,
+                    11.5f,
+                    0.0f);
+            VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.01f, 0.04f, 0.02f, 0.02f, 0.30f, 0.30f, 0.03f);
+            initialCovariance(VehicleState::kR, VehicleState::kOmegaL) = 0.010f;
+            initialCovariance(VehicleState::kOmegaL, VehicleState::kR) = 0.010f;
+            initialCovariance(VehicleState::kR, VehicleState::kOmegaR) = -0.012f;
+            initialCovariance(VehicleState::kOmegaR, VehicleState::kR) = -0.012f;
+            Assert::IsTrue(core.reset(initialState, initialCovariance));
+
+            const VehicleState::StateVector before = core.state();
+            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            constexpr float observedYawRateRadps = 0.45f;
+            const float beforeError =
+                std::fabs((before(VehicleState::kR) + before(VehicleState::kBgz)) - observedYawRateRadps);
+
+            const MeasurementUpdateResult result = core.updateYawRate(observedYawRateRadps);
+            Assert::IsTrue(result.attempted);
+            Assert::IsTrue(result.accepted);
+
+            const VehicleState::StateVector& after = core.state();
+            const VehicleState::StateMatrix afterCovariance = core.covariance();
+            const float afterError =
+                std::fabs((after(VehicleState::kR) + after(VehicleState::kBgz)) - observedYawRateRadps);
+
+            Assert::IsTrue(afterError < beforeError);
+            Assert::AreEqual(before(VehicleState::kOmegaL), after(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(before(VehicleState::kOmegaR), after(VehicleState::kOmegaR), 1.0e-6f);
+            Assert::AreEqual(
+                beforeCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL),
+                afterCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL),
+                1.0e-6f);
+            Assert::AreEqual(
+                beforeCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR),
+                afterCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR),
+                1.0e-6f);
+            Assert::AreEqual(0.0f, afterCovariance(VehicleState::kR, VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(0.0f, afterCovariance(VehicleState::kOmegaL, VehicleState::kR), 1.0e-6f);
+            Assert::AreEqual(0.0f, afterCovariance(VehicleState::kR, VehicleState::kOmegaR), 1.0e-6f);
+            Assert::AreEqual(0.0f, afterCovariance(VehicleState::kOmegaR, VehicleState::kR), 1.0e-6f);
+        }
+
         TEST_METHOD(SrUkfCoreFrontWallUpdateMovesForwardForCloserSymmetricObservation)
         {
             Maze maze;
@@ -4279,10 +4333,10 @@ namespace MazeMap
                 (firstCertifiedCovariance(VehicleState::kPsi, VehicleState::kPsi) + 1.0e-9f));
         }
 
-        TEST_METHOD(LoopControllerDelaysFirstModeCallbackUntilStartupWarmupTick)
+        TEST_METHOD(LoopControllerStartsModeCallbackOnFirstTick)
         {
             Assert::AreEqual(
-                250U,
+                1U,
                 MazeMap::App::Internal::LoopController::kInitialModeCallbackTick);
         }
 

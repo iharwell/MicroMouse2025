@@ -20,31 +20,19 @@ namespace
 {
     constexpr const char* kTopSpeedMeasurementStableId = "top_speed_measurement";
     constexpr const char* kTopSpeedMeasurementMainFileName = "top_speed_measurement_main.mmlog";
-    constexpr const char* kTopSpeedMeasurementFormatVersion = "top_speed_measurement_rev_g";
-    constexpr const char* kTopSpeedMeasurementDataStreamType = "top_speed_main";
-    constexpr const char* kTopSpeedMeasurementTextStreamType = "top_speed_main_control_log";
     constexpr float kTopSpeedMeasurementForwardAccelerationMps2 = 8.5f;
     constexpr std::uint32_t kTopSpeedMeasurementAccelerationDurationUs = 1000000U;
+    constexpr std::uint32_t kTopSpeedMeasurementPrelaunchWaitUs = 1000000U;
+    constexpr float kTopSpeedMeasurementPrelaunchReverseDriveCommand = -0.4f;
+    constexpr std::uint32_t kTopSpeedMeasurementPrelaunchReverseDurationUs = 10000U;
+    constexpr std::uint32_t kTopSpeedMeasurementBrakeTriggerArmDelayUs = 50000U;
+    constexpr const char* kTopSpeedMeasurementSelectorRemovedFaultReason =
+        "Top-speed measurement selector jumper removed";
     constexpr float kTopSpeedMeasurementReverseImpactThresholdMps2 = -6.0f;
     constexpr float kTopSpeedMeasurementGyroXySpikeThresholdDps = 150.0f;
     constexpr float kTopSpeedMeasurementImpactMinimumSpeedMps = 0.30f;
     constexpr float kTopSpeedMeasurementStoppedEncoderThresholdMps = Config::kWheelRestLaunchSpeedThresholdMps;
     constexpr std::uint8_t kTopSpeedMeasurementStoppedEncoderSettledTicks = 3U;
-
-    float TopSpeedHeadingErrorRad(
-        const float targetYawRad,
-        const float measuredYawRad) noexcept
-    {
-        if (!(std::isfinite(targetYawRad) && std::isfinite(measuredYawRad)))
-        {
-            return 0.0f;
-        }
-
-        return
-            HeadingErrorRad(
-                HeadingUnitFromYawRad(targetYawRad),
-                HeadingUnitFromYawRad(measuredYawRad));
-    }
 
 #define TOP_SPEED_MEASUREMENT_FIELDS(X)              \
     X(std::uint32_t, master_time_us)                \
@@ -148,7 +136,7 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Top speed measurement mode");
         (void)_runtime.AppendTextLogLine("Enter by shorting pins 26-27 at boot.");
         (void)_runtime.AppendTextLogLine(
-            "This mode commands 8.5 m/s^2 straight ahead for up to 1 second while servoing back to the launch heading, or until strong reverse acceleration or an IMU X/Y gyro spike suggests impact, then brakes until wheel motion settles or the jumper is removed.");
+            "This mode waits 1 second, commands a 10 ms -0.4 open-loop reverse pulse, then runs straight ahead at 8.5 m/s^2 for up to 1 second using symmetric left/right drive commands with no yaw feedback, or until strong reverse acceleration or an IMU X/Y gyro spike suggests impact, then brakes until wheel motion settles. Pulling the jumper at any point faults the mode as a manual halt.");
 
         if (!_drive.Begin())
         {
@@ -158,9 +146,27 @@ namespace MazeMap::App::Internal
         _drive.UseNominalWheelControlProfile();
         SetMissionLevelFanEnabled(true);
         gWallDistanceCalibration.Clear();
+        _pinsLatchedAtBoot = MazeMap::App::IsBootModeSelectorActive(MazeMap::App::BootModeId::TopSpeedMeasurement);
+        ConfigureSelectorMonitor();
+        if (!EnsureSelectorStillPresent())
+        {
+            return false;
+        }
         if (!_sensors.Begin(DiagnosticConfig::kControlPeriodUs))
         {
             return Fail("Top speed measurement sensor init failed");
+        }
+        if (!EnsureSelectorStillPresent())
+        {
+            return false;
+        }
+        if (!FlushTextLogStep("startup text flush"))
+        {
+            return false;
+        }
+        if (!EnsureSelectorStillPresent())
+        {
+            return false;
         }
 
         const int runIdLength = std::snprintf(
@@ -173,17 +179,39 @@ namespace MazeMap::App::Internal
             return Fail("Top speed measurement run id generation failed");
         }
 
-        _pinsLatchedAtBoot = MazeMap::App::IsBootModeSelectorActive(MazeMap::App::BootModeId::TopSpeedMeasurement);
-        ConfigureSelectorMonitor();
         _batteryVoltageStart = ReadBatteryVoltage();
         _fanDutyCycleStart = GetMissionFanDutyCycle();
         if (!BeginLog())
         {
-            return Fail("Top speed measurement log open failed");
+            return FailLogSetupStep("log open");
+        }
+        if (!EnsureSelectorStillPresent())
+        {
+            return false;
+        }
+        if (!FlushTextLogStep("post-schema text flush"))
+        {
+            return false;
+        }
+        if (!EnsureSelectorStillPresent())
+        {
+            return false;
         }
         if (!WriteRunStartEvent())
         {
-            return Fail("Top speed measurement run metadata logging failed");
+            return FailLogSetupStep("run metadata logging");
+        }
+        if (!EnsureSelectorStillPresent())
+        {
+            return false;
+        }
+        if (!FlushTextLogStep("preloop text flush"))
+        {
+            return false;
+        }
+        if (!EnsureSelectorStillPresent())
+        {
+            return false;
         }
 
         return true;
@@ -274,89 +302,41 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        if (!_runtime.WriteUtilityDataLogMetadata("mode", kTopSpeedMeasurementStableId)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("stream_type", kTopSpeedMeasurementDataStreamType)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("format_version", kTopSpeedMeasurementFormatVersion)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("run_id", _runId)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("forward_accel_mps2", kTopSpeedMeasurementForwardAccelerationMps2, 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned(
-                "accel_duration_ms",
-                static_cast<unsigned long>(kTopSpeedMeasurementAccelerationDurationUs / 1000U))) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("control_strategy", "direct_longitudinal_accel_request_with_heading_hold")) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat(
-                "reverse_impact_threshold_mps2",
-                kTopSpeedMeasurementReverseImpactThresholdMps2,
-                3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat(
-                "gyro_xy_spike_threshold_dps",
-                kTopSpeedMeasurementGyroXySpikeThresholdDps,
-                3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat(
-                "encoder_stop_threshold_mps",
-                kTopSpeedMeasurementStoppedEncoderThresholdMps,
-                3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned(
-                "encoder_stop_settled_ticks",
-                static_cast<unsigned long>(kTopSpeedMeasurementStoppedEncoderSettledTicks))) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("wall_updates_enabled", "false")) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("pins_26_27_shorted_at_boot", _pinsLatchedAtBoot ? "true" : "false")) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("battery_voltage_start", _batteryVoltageStart, 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("fan_duty_cycle_start", _fanDutyCycleStart, 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _sensors.GetGyroBiasRadps(), 6)) return false;
-        if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_sensors)) return false;
-        {
-            const unsigned long imuSampleRateHz =
-                MazeMap::GetUiImuSampleRateHzForControlPeriodUs(DiagnosticConfig::kControlPeriodUs);
-            if ((imuSampleRateHz > 0UL) &&
-                !_runtime.WriteUtilityDataLogMetadataUnsigned("imu_sample_rate_hz", imuSampleRateHz))
-            {
-                return false;
-            }
-        }
-        {
-            const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
-                DiagnosticConfig::kControlPeriodUs,
-                Config::kMissionRuntimeAccelFilterFreq);
-            if ((imuAccelLpf2CutoffHz > 0.0f) &&
-                !_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3))
-            {
-                return false;
-            }
-        }
-        {
-            const float imuGyroLpf1ReferenceHz =
-                MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(DiagnosticConfig::kControlPeriodUs);
-            if ((imuGyroLpf1ReferenceHz > 0.0f) &&
-                !_runtime.WriteUtilityDataLogMetadataFloat(
-                    "imu_gyro_lpf1_cut213_datasheet_ref_hz",
-                    imuGyroLpf1ReferenceHz,
-                    3))
-            {
-                return false;
-            }
-        }
-
         TopSpeedMeasurementRow row{};
         if (!_runtime.BeginUtilityDataLogSchema(row))
         {
             return false;
         }
 
-        if (!_runtime.WriteTextLogMetadata("file", _runtime.TextLogFileName())) return false;
-        if (!_runtime.WriteTextLogMetadata("data_file", kTopSpeedMeasurementMainFileName)) return false;
-        if (!_runtime.WriteTextLogMetadata("mode", kTopSpeedMeasurementStableId)) return false;
-        if (!_runtime.WriteTextLogMetadata("stream_type", kTopSpeedMeasurementTextStreamType)) return false;
-        if (!_runtime.WriteTextLogMetadata("format_version", kTopSpeedMeasurementFormatVersion)) return false;
-        if (!_runtime.WriteTextLogMetadata("wall_updates_enabled", "false")) return false;
-        if (!_runtime.WriteTextLogMetadata("run_id", _runId)) return false;
-
         _logOpen = true;
         return true;
+    }
+
+    bool TopSpeedMeasurementMode::FailLogSetupStep(const char* step)
+    {
+        char message[256] = {};
+        const char* const detail = _runtime.LastRuntimeLogError();
+        const bool hasDetail = (detail != nullptr) && (detail[0] != '\0');
+        const int length = std::snprintf(
+            message,
+            sizeof(message),
+            "Top speed measurement %s failed%s%s",
+            (step != nullptr && step[0] != '\0') ? step : "log step",
+            hasDetail ? ": " : "",
+            hasDetail ? detail : "");
+        if (length > 0 && length < static_cast<int>(sizeof(message)))
+        {
+            return Fail(message);
+        }
+
+        return Fail("Top speed measurement log setup failed");
+    }
+
+    bool TopSpeedMeasurementMode::FlushTextLogStep(const char* step)
+    {
+        _runtime.FlushTextLog();
+        const char* const detail = _runtime.LastRuntimeLogError();
+        return ((detail == nullptr) || (detail[0] == '\0')) ? true : FailLogSetupStep(step);
     }
 
     void TopSpeedMeasurementMode::CloseLog() noexcept
@@ -379,13 +359,16 @@ namespace MazeMap::App::Internal
         const int length = std::snprintf(
             message,
             sizeof(message),
-            "run_id=%s;pins_26_27_shorted_at_boot=%u;battery_voltage_start=%.3f;fan_duty_cycle_start=%.3f;forward_accel_mps2=%.3f;accel_duration_ms=%lu;reverse_impact_threshold_mps2=%.3f;gyro_xy_spike_threshold_dps=%.3f",
+            "run_id=%s;pins_26_27_shorted_at_boot=%u;battery_voltage_start=%.3f;fan_duty_cycle_start=%.3f;forward_accel_mps2=%.3f;accel_duration_ms=%lu;prelaunch_wait_ms=%lu;prelaunch_reverse_drive_command=%.3f;prelaunch_reverse_duration_ms=%lu;reverse_impact_threshold_mps2=%.3f;gyro_xy_spike_threshold_dps=%.3f",
             _runId,
             _pinsLatchedAtBoot ? 1U : 0U,
             _batteryVoltageStart,
             _fanDutyCycleStart,
             kTopSpeedMeasurementForwardAccelerationMps2,
             static_cast<unsigned long>(kTopSpeedMeasurementAccelerationDurationUs / 1000U),
+            static_cast<unsigned long>(kTopSpeedMeasurementPrelaunchWaitUs / 1000U),
+            kTopSpeedMeasurementPrelaunchReverseDriveCommand,
+            static_cast<unsigned long>(kTopSpeedMeasurementPrelaunchReverseDurationUs / 1000U),
             kTopSpeedMeasurementReverseImpactThresholdMps2,
             kTopSpeedMeasurementGyroXySpikeThresholdDps);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
@@ -393,14 +376,7 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        return
-            WriteEvent(
-                "summary",
-                "Top-speed measurement runs straight ahead with LoopController at 8.5 m/s^2 for up to 1 second while servoing back to the launch heading, then transitions to braking on timer expiry, strong reverse acceleration, an IMU X/Y gyro spike, or selector removal.") &&
-            WriteEvent(
-                "summary",
-                "This mode logs a mode-specific telemetry row and disables wall-sensor estimator updates while still capturing the diagnostic sensor snapshot.") &&
-            WriteEvent("run_start", message);
+        return WriteEvent("run_start", message);
     }
 
     bool TopSpeedMeasurementMode::WriteResultSummary(const std::uint32_t completedTicks)
@@ -425,7 +401,7 @@ namespace MazeMap::App::Internal
             _impactDetected ? 1U : 0U,
             _peakMeasuredSpeedMps,
             _peakPlanarAccelMps2,
-            RAD_TO_DEG_F * _peakHeadingErrorRad,
+            0.0f,
             _mostNegativeForwardAccelMps2,
             _impactSpeedMps,
             _impactForwardAccelMps2,
@@ -453,7 +429,7 @@ namespace MazeMap::App::Internal
         row.master_time_us = state.tickStartUs;
         row.control_tick_sequence = ++_controlTickSequence;
         row.dt_us = state.dtUs;
-        row.elapsed_test_us = state.tickStartUs - _measurementStartUs;
+        row.elapsed_test_us = (_measurementStartUs != 0U) ? (state.tickStartUs - _measurementStartUs) : 0U;
         row.braking = (_phase == RunPhase::Braking) ? 1U : 0U;
         row.impact_detected = _impactDetected ? 1U : 0U;
         row.selector_removed = SelectorRemoved() ? 1U : 0U;
@@ -470,9 +446,9 @@ namespace MazeMap::App::Internal
         row.measured_angular_speed_radps = state.measured.angularSpeedRadps;
         row.cmd_linear_mps = _lastCommandInputLinearSpeedMps;
         row.cmd_angular_radps = _lastCommandInputAngularRateRadps;
-        row.heading_error_rad = _lastHeadingErrorRad;
+        row.heading_error_rad = 0.0f;
         row.cmd_linear_accel_mps2 =
-            (_phase == RunPhase::Accelerating) ? kTopSpeedMeasurementForwardAccelerationMps2 : 0.0f;
+            ((_phase == RunPhase::Running) && (_measurementStartUs != 0U)) ? kTopSpeedMeasurementForwardAccelerationMps2 : 0.0f;
         row.left_drive_command = state.driveTelemetry.leftDriveCommand;
         row.right_drive_command = state.driveTelemetry.rightDriveCommand;
         row.left_feedforward_command = state.driveTelemetry.leftFeedforwardCommand;
@@ -536,6 +512,7 @@ namespace MazeMap::App::Internal
         _phase = RunPhase::Braking;
         _brakeTrigger = trigger;
         _settledEncoderTicks = 0U;
+        SetLastCommandInputs(0.0f, 0.0f);
         if (eventMessage != nullptr && eventMessage[0] != '\0' && !WriteEvent("transition", eventMessage))
         {
             services.Fault("Top-speed measurement transition logging failed");
@@ -548,6 +525,16 @@ namespace MazeMap::App::Internal
     bool TopSpeedMeasurementMode::SelectorRemoved() const noexcept
     {
         return _selectorMonitorArmed && !IsPinPairStrapMonitorClosed(_selectorSensePin);
+    }
+
+    bool TopSpeedMeasurementMode::EnsureSelectorStillPresent()
+    {
+        if (!SelectorRemoved())
+        {
+            return true;
+        }
+
+        return Fail(kTopSpeedMeasurementSelectorRemovedFaultReason);
     }
 
     void TopSpeedMeasurementMode::ConfigureSelectorMonitor() noexcept
@@ -641,12 +628,6 @@ namespace MazeMap::App::Internal
         {
             _peakPlanarAccelMps2 = (std::max)(_peakPlanarAccelMps2, state.sensors.planarAccelMps2);
         }
-        if (std::isfinite(state.estimate.yawRad))
-        {
-            _peakHeadingErrorRad = (std::max)(
-                _peakHeadingErrorRad,
-                std::fabs(TopSpeedHeadingErrorRad(_targetYawRad, state.estimate.yawRad)));
-        }
         if (std::isfinite(state.diagnosticSensors.accelBodyYMps2))
         {
             _mostNegativeForwardAccelMps2 = (std::min)(_mostNegativeForwardAccelMps2, state.diagnosticSensors.accelBodyYMps2);
@@ -657,24 +638,15 @@ namespace MazeMap::App::Internal
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
-        if (_measurementStartUs == 0U)
+        if (_phaseStartUs == 0U)
         {
-            _measurementStartUs = state.tickStartUs;
-            _targetYawRad = state.estimate.yawRad;
-            _lastHeadingErrorRad = 0.0f;
+            _phaseStartUs = state.commandApplyTimeUs;
             SetLastCommandInputs(0.0f, 0.0f);
-            if (!WriteEvent("transition", "state=accelerating"))
+            if (!WriteEvent("transition", "state=prelaunch_wait"))
             {
                 services.Fault("Top-speed measurement start logging failed");
                 return LoopController::ControlVector::BrakeCommand();
             }
-        }
-        else
-        {
-            _lastHeadingErrorRad =
-                std::isfinite(state.estimate.yawRad) ?
-                TopSpeedHeadingErrorRad(_targetYawRad, state.estimate.yawRad) :
-                0.0f;
         }
 
         if (!LogSample(state))
@@ -683,7 +655,10 @@ namespace MazeMap::App::Internal
             return LoopController::ControlVector::BrakeCommand();
         }
 
-        UpdatePeaks(state);
+        if (_measurementStartUs != 0U)
+        {
+            UpdatePeaks(state);
+        }
         if (!state.estimatorHealthy)
         {
             services.Fault(
@@ -694,19 +669,89 @@ namespace MazeMap::App::Internal
         }
 
         const bool selectorRemoved = SelectorRemoved();
-        if (_phase == RunPhase::Accelerating)
+        if (_phase == RunPhase::PrelaunchWait)
         {
+            SetLastCommandInputs(0.0f, 0.0f);
             if (selectorRemoved)
             {
-                (void)EnterBrakingPhase(
-                    BrakeTrigger::SelectorRemoved,
-                    "state=braking;trigger=selector_removed",
-                    services);
-                SetLastCommandInputs(0.0f, 0.0f);
+                services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
                 return LoopController::ControlVector::BrakeCommand();
             }
 
-            if (ImpactDetected(state))
+            const std::uint32_t nextPhaseElapsedUs = state.commandApplyTimeUs - _phaseStartUs;
+            if (nextPhaseElapsedUs >= kTopSpeedMeasurementPrelaunchWaitUs)
+            {
+                _phase = RunPhase::Running;
+                _phaseStartUs = state.commandApplyTimeUs;
+                _measurementStartUs = 0U;
+                if (!WriteEvent("transition", "state=running;stage=reverse_kick"))
+                {
+                    services.Fault("Top-speed measurement reverse-kick logging failed");
+                    return LoopController::ControlVector::BrakeCommand();
+                }
+                return LoopController::ControlVector::OpenLoopCommand(
+                    kTopSpeedMeasurementPrelaunchReverseDriveCommand,
+                    kTopSpeedMeasurementPrelaunchReverseDriveCommand);
+            }
+
+            return LoopController::ControlVector::BrakeCommand();
+        }
+
+        if (_phase == RunPhase::Running)
+        {
+            const auto issueForwardAccelerationCommand = [&]() noexcept
+            {
+                const float resolvedLinearSpeedMps =
+                    std::isfinite(state.measured.linearSpeedMps) ?
+                    state.measured.linearSpeedMps :
+                    0.0f;
+                const MazeMap::OpenLoopDriveCommand driveCommand = _drive.ResolveAccelerationDriveCommandRaw(
+                    resolvedLinearSpeedMps,
+                    0.0f,
+                    kTopSpeedMeasurementForwardAccelerationMps2,
+                    0.0f,
+                    state.dtSeconds);
+                SetLastCommandInputs(resolvedLinearSpeedMps, 0.0f);
+                return LoopController::ControlVector::OpenLoopCommand(
+                    driveCommand.leftDriveCommand,
+                    driveCommand.rightDriveCommand);
+            };
+
+            if (_measurementStartUs == 0U)
+            {
+                SetLastCommandInputs(0.0f, 0.0f);
+                if (selectorRemoved)
+                {
+                    services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
+                    return LoopController::ControlVector::BrakeCommand();
+                }
+
+                const std::uint32_t nextPhaseElapsedUs = state.commandApplyTimeUs - _phaseStartUs;
+                if (nextPhaseElapsedUs < kTopSpeedMeasurementPrelaunchReverseDurationUs)
+                {
+                    return LoopController::ControlVector::OpenLoopCommand(
+                        kTopSpeedMeasurementPrelaunchReverseDriveCommand,
+                        kTopSpeedMeasurementPrelaunchReverseDriveCommand);
+                }
+
+                _measurementStartUs = state.commandApplyTimeUs;
+                if (!WriteEvent("transition", "state=running;stage=forward_run"))
+                {
+                    services.Fault("Top-speed measurement forward-run logging failed");
+                    return LoopController::ControlVector::BrakeCommand();
+                }
+                return issueForwardAccelerationCommand();
+            }
+
+            const std::uint32_t elapsedUs = state.tickStartUs - _measurementStartUs;
+            const bool brakeTriggersArmed = elapsedUs >= kTopSpeedMeasurementBrakeTriggerArmDelayUs;
+            if (selectorRemoved)
+            {
+                services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
+                return LoopController::ControlVector::BrakeCommand();
+            }
+
+            if (brakeTriggersArmed && ImpactDetected(state))
             {
                 _impactDetected = true;
                 _impactSpeedMps = state.measured.linearSpeedMps;
@@ -717,12 +762,10 @@ namespace MazeMap::App::Internal
                     BrakeTrigger::ImpactDetected,
                     "state=braking;trigger=impact_detected",
                     services);
-                SetLastCommandInputs(0.0f, 0.0f);
                 return LoopController::ControlVector::BrakeCommand();
             }
 
-            const std::uint32_t elapsedUs = state.tickStartUs - _measurementStartUs;
-            if ((elapsedUs > 0U) && GyroSpikeDetected(state))
+            if (brakeTriggersArmed && GyroSpikeDetected(state))
             {
                 _impactDetected = true;
                 _impactSpeedMps = state.measured.linearSpeedMps;
@@ -733,40 +776,25 @@ namespace MazeMap::App::Internal
                     BrakeTrigger::GyroSpikeDetected,
                     "state=braking;trigger=gyro_xy_spike_detected",
                     services);
-                SetLastCommandInputs(0.0f, 0.0f);
                 return LoopController::ControlVector::BrakeCommand();
             }
 
-            const std::uint32_t nextCommandElapsedUs = elapsedUs + state.dtUs;
+            const std::uint32_t nextCommandElapsedUs = state.commandApplyTimeUs - _measurementStartUs;
             if (nextCommandElapsedUs >= kTopSpeedMeasurementAccelerationDurationUs)
             {
                 (void)EnterBrakingPhase(
                     BrakeTrigger::TimedWindowElapsed,
                     "state=braking;trigger=timed_window_elapsed",
                     services);
-                SetLastCommandInputs(0.0f, 0.0f);
                 return LoopController::ControlVector::BrakeCommand();
             }
 
-            float commandedAngularRateRadps = 0.0f;
-            const MazeMap::OpenLoopDriveCommand driveCommand = _drive.ResolveStraightHeadingHoldAccelerationDriveCommandRaw(
-                _targetYawRad,
-                state.estimate.yawRad,
-                state.measured.linearSpeedMps,
-                state.estimate.angularSpeedRadps,
-                kTopSpeedMeasurementForwardAccelerationMps2,
-                state.dtSeconds,
-                &commandedAngularRateRadps);
-            SetLastCommandInputs(state.measured.linearSpeedMps, commandedAngularRateRadps);
-            return LoopController::ControlVector::OpenLoopCommand(
-                driveCommand.leftDriveCommand,
-                driveCommand.rightDriveCommand);
+            return issueForwardAccelerationCommand();
         }
 
         if (selectorRemoved)
         {
-            _completionReason = CompletionReason::SelectorRemoved;
-            services.RequestEndLoop();
+            services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
             SetLastCommandInputs(0.0f, 0.0f);
             return LoopController::ControlVector::BrakeCommand();
         }
@@ -791,7 +819,6 @@ namespace MazeMap::App::Internal
     void TopSpeedMeasurementMode::OnRuntimeFault(const char* reason) noexcept
     {
         _faulted = true;
-        _logOpen = false;
         ReleaseSelectorMonitor();
         AppendStartupTrace((reason != nullptr && reason[0] != '\0') ? reason : "top_speed_measurement_fault");
         if (reason != nullptr && reason[0] != '\0')
@@ -806,22 +833,20 @@ namespace MazeMap::App::Internal
         _faulted = false;
         _logOpen = false;
         _pinsLatchedAtBoot = false;
-        _phase = RunPhase::Accelerating;
+        _phase = RunPhase::PrelaunchWait;
         _brakeTrigger = BrakeTrigger::None;
         _completionReason = CompletionReason::None;
+        _phaseStartUs = 0U;
         _measurementStartUs = 0U;
         _controlTickSequence = 0U;
         _batteryVoltageStart = 0.0f;
         _fanDutyCycleStart = 0.0f;
         _peakMeasuredSpeedMps = 0.0f;
         _peakPlanarAccelMps2 = 0.0f;
-        _peakHeadingErrorRad = 0.0f;
         _mostNegativeForwardAccelMps2 = 0.0f;
         _impactDetected = false;
         _impactSpeedMps = 0.0f;
         _impactForwardAccelMps2 = 0.0f;
-        _targetYawRad = 0.0f;
-        _lastHeadingErrorRad = 0.0f;
         _impactGyroXRawLsb = 0;
         _impactGyroYRawLsb = 0;
         _lastCommandInputLinearSpeedMps = 0.0f;
@@ -849,13 +874,13 @@ namespace MazeMap::App::Internal
             BootModeId::TopSpeedMeasurement,
             BootModeCategory::Utility,
             "top_speed_measurement",
-            "Measure straight-line peak speed with a fixed forward-acceleration launch and braking recovery.",
+            "Measure straight-line peak speed with a prelaunch reverse kick, fixed forward-acceleration launch, and braking recovery.",
             "logging.txt; top-speed telemetry mmlog",
             "GetTopSpeedMeasurementMode",
             "TopSpeedMeasurementMode.cpp",
-            "startup; accelerated straight run; impact-or-gyro-or-timer brake transition; brake-to-stop or jumper-exit",
+            "startup; 1 s prelaunch wait; 10 ms reverse kick; accelerated straight run; impact-or-gyro-or-timer brake transition; brake-to-stop; selector-jumper removal faults immediately",
             "DiagnosticConfig control period; shared mission drive and IMU tuning; LoopController diagnostic capture path",
-            "Fixed 8.5 m/s^2 forward acceleration target for 1 second with launch-heading servo hold; reverse-accel and IMU X/Y gyro-spike impact braking; wall updates disabled; no wall-based correction",
+            "After a 1 second stationary wait and a 10 ms -0.4 open-loop reverse kick, the mode resumes the original fixed 8.5 m/s^2 forward-acceleration launch using symmetric left/right drive commands with no yaw-input correction; reverse-accel and IMU X/Y gyro-spike impact braking; wall updates disabled; selector-jumper removal is treated as a manual-halt fault rather than a clean exit",
             "top_speed_measurement_main.mmlog",
         };
         return descriptor;

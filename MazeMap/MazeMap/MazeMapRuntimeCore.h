@@ -488,10 +488,10 @@ namespace MazeMap::Config
     constexpr float kWheelIntegralLimit = 0.25f;
     // [High] Straight-line heading proportional gain. Increase if the robot drifts off heading in open corridors;
     // decrease if it snakes left-right while trying to stay on course.
-    constexpr float kStraightHeadingKp = 11.5f;
+    constexpr float kStraightHeadingKp = 19.5f;
     // [High] Straight-line yaw damping. Increase if heading correction oscillates; decrease if heading correction feels
     // lazy and the robot lets errors build before responding.
-    constexpr float kStraightYawD = 0.20f;
+    constexpr float kStraightYawD = 0.30f;
     // [High] Wall-centering gain used when side walls are available. Increase if the robot does not recenter in a
     // corridor; decrease if wall following hunts or bounces between walls.
     constexpr float kWallCenterGain = 135.0f;

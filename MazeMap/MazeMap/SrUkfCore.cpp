@@ -82,7 +82,7 @@ namespace
 
     constexpr ModeProcessNoiseConfig kStationaryCertifiedProcessNoise{
         0.006f,
-        0.006f,
+        0.000f,
         0.010f,
         0.050f,
         0.00010f,
@@ -92,17 +92,17 @@ namespace
 
     constexpr ModeProcessNoiseConfig kLaunchOrReversalProcessNoise{
         0.020f,
-        0.020f,
+        0.000f,
         0.050f,
         0.250f,
         0.000001f,
         0.030f,
-        0.010f
+        0.006f
     };
 
     constexpr ModeProcessNoiseConfig kGripLinearProcessNoise{
         0.012f,
-        0.010f,
+        0.000f,
         0.025f,
         0.100f,
         0.000001f,
@@ -112,7 +112,7 @@ namespace
 
     constexpr ModeProcessNoiseConfig kInconsistentOrSaturatedProcessNoise{
         0.030f,
-        0.030f,
+        0.002f,
         0.070f,
         0.350f,
         0.000001f,
@@ -1469,6 +1469,33 @@ namespace MazeMap
         const float yawMeasurementNis = _filter.lastNis();
         if (result.accepted)
         {
+            if (!_pivotScrubMode)
+            {
+                const StateVector updatedState = _filter.state();
+                const StateMatrix updatedCovariance = _filter.covariance();
+                StateVector projectedState = priorState;
+                StateMatrix projectedCovariance = priorCovariance;
+                constexpr std::array<int, 6> kAllowedIndices = {
+                    VehicleState::kPx,
+                    VehicleState::kPy,
+                    VehicleState::kPsi,
+                    VehicleState::kU,
+                    VehicleState::kV,
+                    VehicleState::kR
+                };
+
+                // Preserve the encoder-owned wheel-rate states across the gyro update.
+                ProjectMaskedStateAndCovariance(
+                    priorState,
+                    priorCovariance,
+                    updatedState,
+                    updatedCovariance,
+                    kAllowedIndices.data(),
+                    kAllowedIndices.size(),
+                    projectedState,
+                    projectedCovariance);
+                _filter.setState(projectedState, projectedCovariance);
+            }
             updateInitialStationaryGyroBias(yawRateRadps, shouldApplyStationaryConstraint);
             if (_pivotScrubMode)
             {

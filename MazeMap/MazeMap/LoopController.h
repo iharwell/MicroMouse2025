@@ -48,9 +48,9 @@ namespace MazeMap::App::Internal
             std::uint32_t tickCount{};
         };
 
-        // The loop owns the startup stationary warmup and does not invoke the mode callback
-        // until this tick sequence number is reached.
-        static constexpr std::uint32_t kInitialModeCallbackTick = 250U;
+        // The mode callback is eligible on the first control tick; any longer startup wait
+        // belongs in the mode callback rather than in LoopController dispatch.
+        static constexpr std::uint32_t kInitialModeCallbackTick = 1U;
 
         struct ControlVector final
         {

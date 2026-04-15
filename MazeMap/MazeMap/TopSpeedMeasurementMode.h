@@ -24,7 +24,8 @@ namespace MazeMap::App::Internal
     private:
         enum class RunPhase : std::uint8_t
         {
-            Accelerating,
+            PrelaunchWait,
+            Running,
             Braking
         };
 
@@ -53,6 +54,8 @@ namespace MazeMap::App::Internal
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
         bool BeginLog();
+        bool FailLogSetupStep(const char* step);
+        bool FlushTextLogStep(const char* step);
         void CloseLog() noexcept;
         bool WriteEvent(const char* type, const char* message);
         bool WriteRunStartEvent();
@@ -62,6 +65,7 @@ namespace MazeMap::App::Internal
             BrakeTrigger trigger,
             const char* eventMessage,
             LoopController::TickServices& services);
+        bool EnsureSelectorStillPresent();
         bool SelectorRemoved() const noexcept;
         void ConfigureSelectorMonitor() noexcept;
         void ReleaseSelectorMonitor() noexcept;
@@ -85,9 +89,10 @@ namespace MazeMap::App::Internal
         bool _faulted{};
         bool _logOpen{};
         bool _pinsLatchedAtBoot{};
-        RunPhase _phase{ RunPhase::Accelerating };
+        RunPhase _phase{ RunPhase::PrelaunchWait };
         BrakeTrigger _brakeTrigger{ BrakeTrigger::None };
         CompletionReason _completionReason{ CompletionReason::None };
+        std::uint32_t _phaseStartUs{};
         std::uint32_t _measurementStartUs{};
         std::uint32_t _controlTickSequence{};
         float _batteryVoltageStart{};
@@ -98,9 +103,6 @@ namespace MazeMap::App::Internal
         bool _impactDetected{};
         float _impactSpeedMps{};
         float _impactForwardAccelMps2{};
-        float _targetYawRad{};
-        float _lastHeadingErrorRad{};
-        float _peakHeadingErrorRad{};
         std::int16_t _impactGyroXRawLsb{};
         std::int16_t _impactGyroYRawLsb{};
         float _lastCommandInputLinearSpeedMps{};
