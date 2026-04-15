@@ -422,6 +422,9 @@
     <ClCompile Include="DirectionalPathFinder.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DriveBase.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

@@ -189,10 +189,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CellTest.cpp" />
+    <ClCompile Include="DriveBaseTest.cpp" />
     <ClCompile Include="DirectionTest.cpp" />
     <ClCompile Include="DiagnosticCoverageTest.cpp" />
     <ClCompile Include="FresnelTest.cpp" />
     <ClCompile Include="HistoricalMazePathFinderTest.cpp" />
+    <ClCompile Include="LoopControllerTest.cpp" />
     <ClCompile Include="ManeuverPathFinderTest.cpp" />
     <ClCompile Include="MazeMapApplicationTest.cpp" />
     <ClCompile Include="MazeMapRuntimeHelperTest.cpp">
@@ -216,16 +218,26 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="PlantModelDriveCommandTest.cpp" />
+    <ClCompile Include="PlantModelDynamicsTest.cpp" />
     <ClCompile Include="RelativeDirectionalDistanceTest.cpp" />
     <ClCompile Include="SearchRunPlannerTest.cpp" />
+    <ClCompile Include="SrUkfCoreBiasAndStationaryTest.cpp" />
+    <ClCompile Include="SrUkfCoreModeAndDiagnosticsTest.cpp" />
+    <ClCompile Include="SrUkfCoreMotionUpdateTest.cpp" />
+    <ClCompile Include="SrUkfCoreReplayRegressionTest.cpp" />
     <ClCompile Include="UKFTest.cpp">
       <ObjectFileName>$(IntDir)UKFTest.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="VehicleStateTest.cpp" />
     <ClCompile Include="Vector2fTest.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="EstimatorTestSupport.h" />
     <ClInclude Include="MazeRef.h" />
+    <ClInclude Include="PlantModelTestSupport.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="SrUkfCoreTestSupport.h" />
     <ClInclude Include="Templates.h" />
   </ItemGroup>
   <ItemGroup>

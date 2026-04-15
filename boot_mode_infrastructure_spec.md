@@ -5,6 +5,7 @@
 - Define the boot-mode architecture needed to make boot modes high-level, scenario-definition code.
 - Centralize low-level hardware, logging, recovery, timing, and memory-sensitive behavior into shared authoritative owners.
 - Keep the design compliant with `AGENTS.md`: one clear owner per responsibility, no forwarding-wrapper architecture, no duplicate shared subsystems.
+- For the concrete authoring checklist when adding a new mode, see `boot_mode_setup_guide.md`.
 
 ## Core Requirement
 

@@ -508,7 +508,7 @@ function Assert-HostReleaseIntermediatesIntact {
         })
 
         if ($missingTrackedObjects.Count -gt 0) {
-            $sampleMissingObjects = $missingTrackedObjects | Select-Object -First 5
+            $sampleMissingObjects = @($missingTrackedObjects | Select-Object -First 5)
             $sampleText = $sampleMissingObjects -join ', '
             if ($missingTrackedObjects.Count -gt $sampleMissingObjects.Count) {
                 $sampleText += (", ... ({0} missing total)" -f $missingTrackedObjects.Count)

@@ -16,6 +16,10 @@ namespace MazeMap::App::Internal
     const BootModeDescriptor& GetOpenFloorMeasurementBootModeDescriptor();
     IApplicationMode& GetTopSpeedMeasurementMode();
     const BootModeDescriptor& GetTopSpeedMeasurementBootModeDescriptor();
+    IApplicationMode& GetMissionRunMode();
+    IApplicationMode& GetManeuverFileTestMode();
+    IApplicationMode& GetCorridorRepeatabilityMode();
+    IApplicationMode& GetPositionAccuracyAuditMode();
     IMissionModeHost& GetMissionModeHost();
     const BootModeDescriptor& GetMissionRunBootModeDescriptor();
     const BootModeDescriptor& GetManeuverFileTestBootModeDescriptor();

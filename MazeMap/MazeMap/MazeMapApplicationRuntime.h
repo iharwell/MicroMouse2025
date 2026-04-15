@@ -1,9 +1,10 @@
 #pragma once
 
+#include "Defines.h"
 #include "MazeMapApplicationMode.h"
 
 namespace MazeMap::App::Internal
 {
-    IApplicationMode& ResolveActiveApplicationMode();
+    EXPORT IApplicationMode& ResolveActiveApplicationMode();
 }
 

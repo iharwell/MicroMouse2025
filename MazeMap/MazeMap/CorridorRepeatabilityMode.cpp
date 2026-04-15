@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "CorridorRepeatabilityMode.h"
 
-#include "BootModeDescriptor.h"
+#include "MazeMapControllerRegistry.h"
 
 namespace MazeMap::App::Internal
 {
@@ -13,7 +13,8 @@ namespace MazeMap::App::Internal
             "corridor_repeatability",
             "Run the fixed-corridor mapping repeatability sweep.",
             "logging.txt; corridor repeatability telemetry mmlog",
-            "CorridorRepeatabilityMode::Begin/Run",
+            &GetCorridorRepeatabilityMode,
+            "GetCorridorRepeatabilityMode",
             "CorridorRepeatabilityMode.cpp; MazeMapMissionController.cpp",
             "mission-family initialization; telemetry log setup; corridor speed passes",
             "AuxMeasurementConfig corridor profile; CoreConfig mission tuning; Maneuver classes",
@@ -36,6 +37,12 @@ namespace MazeMap::App::Internal
     void CorridorRepeatabilityMode::Run()
     {
         Host().RunCorridorRepeatabilityMode();
+    }
+
+    IApplicationMode& GetCorridorRepeatabilityMode()
+    {
+        static CorridorRepeatabilityMode mode(GetMissionModeHost());
+        return mode;
     }
 }
 

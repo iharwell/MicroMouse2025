@@ -1,80 +1,31 @@
+#include "pch.h"
 #include "MazeMapApplication.h"
 
 #include "BootModeRegistry.h"
-#include "CorridorRepeatabilityMode.h"
-#include "ManeuverFileTestMode.h"
-#include "MazeMapControllerRegistry.h"
-#include "MissionRunMode.h"
-#include "PositionAccuracyAuditMode.h"
+#include "MazeMapApplicationRuntime.h"
 
-using MazeMap::App::Internal::IApplicationMode;
-using MazeMap::App::Internal::IMissionModeHost;
-using MazeMap::App::Internal::MissionRunMode;
-using MazeMap::App::Internal::ManeuverFileTestMode;
-using MazeMap::App::Internal::CorridorRepeatabilityMode;
-using MazeMap::App::Internal::PositionAccuracyAuditMode;
+#include <cassert>
+#include <stdexcept>
+#include <string>
 
 namespace
 {
-    class ApplicationControllers final
+    [[noreturn]] void FailInvalidBootModeSelection(const MazeMap::App::BootModeRegistryEntry& selectedMode)
     {
-    public:
-        ApplicationControllers()
-            : ledCalibration(MazeMap::App::Internal::GetWallSensorLedCalibrationMode())
-            , frontWallCharacterization(MazeMap::App::Internal::GetFrontWallCharacterizationMode())
-            , auxMeasurement(MazeMap::App::Internal::GetAuxMeasurementMode())
-            , diagnostic(MazeMap::App::Internal::GetDiagnosticMode())
-            , topSpeedMeasurement(MazeMap::App::Internal::GetTopSpeedMeasurementMode())
-            , mission(MazeMap::App::Internal::GetMissionModeHost())
-            , missionMode(mission)
-            , maneuverFileTestMode(mission)
-            , corridorRepeatabilityMode(mission)
-            , positionAccuracyAuditMode(mission)
+        const char* stableId =
+            (selectedMode.descriptor != nullptr && selectedMode.descriptor->stableId != nullptr) ?
+            selectedMode.descriptor->stableId :
+            MazeMap::App::BootModeIdName(selectedMode.id);
+#ifdef ARDUINO_TEENSY41
+        assert(false && "BootModeRegistry selected a mode without a callable descriptor entry.");
+        while (true)
         {
         }
-
-        IApplicationMode& ledCalibration;
-        IApplicationMode& frontWallCharacterization;
-        IApplicationMode& auxMeasurement;
-        IApplicationMode& diagnostic;
-        IApplicationMode& topSpeedMeasurement;
-        IMissionModeHost& mission;
-        MissionRunMode missionMode;
-        ManeuverFileTestMode maneuverFileTestMode;
-        CorridorRepeatabilityMode corridorRepeatabilityMode;
-        PositionAccuracyAuditMode positionAccuracyAuditMode;
-    };
-
-    ApplicationControllers& GetApplicationControllers()
-    {
-        static ApplicationControllers controllers;
-        return controllers;
-    }
-
-    IApplicationMode& ResolveApplicationMode(ApplicationControllers& controllers, MazeMap::App::BootModeId bootModeId)
-    {
-        switch (bootModeId)
-        {
-        case MazeMap::App::BootModeId::FrontWallCharacterization:
-            return controllers.frontWallCharacterization;
-        case MazeMap::App::BootModeId::WallSensorLedCalibration:
-            return controllers.ledCalibration;
-        case MazeMap::App::BootModeId::AuxiliaryMeasurement:
-            return controllers.auxMeasurement;
-        case MazeMap::App::BootModeId::CorridorRepeatability:
-            return controllers.corridorRepeatabilityMode;
-        case MazeMap::App::BootModeId::PositionAccuracyAudit:
-            return controllers.positionAccuracyAuditMode;
-        case MazeMap::App::BootModeId::ManeuverFileTest:
-            return controllers.maneuverFileTestMode;
-        case MazeMap::App::BootModeId::TopSpeedMeasurement:
-            return controllers.topSpeedMeasurement;
-        case MazeMap::App::BootModeId::PrimaryDiagnostic:
-            return controllers.diagnostic;
-        case MazeMap::App::BootModeId::Mission:
-        default:
-            return controllers.missionMode;
-        }
+#else
+        throw std::logic_error(
+            std::string("BootModeRegistry selected a mode without a callable descriptor entry: ") +
+            stableId);
+#endif
     }
 }
 
@@ -82,8 +33,12 @@ namespace MazeMap::App::Internal
 {
     IApplicationMode& ResolveActiveApplicationMode()
     {
-        ApplicationControllers& controllers = GetApplicationControllers();
-        const MazeMap::App::BootModeRegistryEntry& selectedMode = MazeMap::App::ResolveSelectedBootMode();
-        return ResolveApplicationMode(controllers, selectedMode.descriptor->id);
+        const BootModeRegistryEntry& selectedMode = ResolveSelectedBootMode();
+        if (selectedMode.descriptor == nullptr || selectedMode.descriptor->entryMode == nullptr)
+        {
+            FailInvalidBootModeSelection(selectedMode);
+        }
+
+        return selectedMode.descriptor->entryMode();
     }
 }

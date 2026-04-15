@@ -584,6 +584,8 @@ private:
 
 namespace MazeMap::App::Internal
 {
+    IApplicationMode& GetFrontWallCharacterizationMode();
+
     const BootModeDescriptor& GetFrontWallCharacterizationBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -592,6 +594,7 @@ namespace MazeMap::App::Internal
             "front_wall_characterization",
             "Capture and persist the front-wall sensor response curve.",
             "logging.txt; front-wall characterization mmlog; persisted front-wall curve",
+            &GetFrontWallCharacterizationMode,
             "GetFrontWallCharacterizationMode",
             "FrontWallCharacterizationController.cpp",
             "startup settle; reverse capture; persist; SD export; post-capture settle",

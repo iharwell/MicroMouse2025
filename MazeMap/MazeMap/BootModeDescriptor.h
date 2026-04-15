@@ -2,6 +2,11 @@
 
 #include "Defines.h"
 
+namespace MazeMap::App::Internal
+{
+    class IApplicationMode;
+}
+
 namespace MazeMap::App
 {
     enum class BootModeId : uint8_t
@@ -23,6 +28,8 @@ namespace MazeMap::App
         Utility,
     };
 
+    using BootModeEntryMode = Internal::IApplicationMode& (*)();
+
     struct BootModeDescriptor
     {
         BootModeId id;
@@ -30,6 +37,7 @@ namespace MazeMap::App
         const char* stableId;
         const char* purposeSummary;
         const char* primaryOutputs;
+        BootModeEntryMode entryMode;
         const char* entryPoint;
         const char* implementationFile;
         const char* majorPhases;

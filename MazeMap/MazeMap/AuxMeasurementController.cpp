@@ -754,6 +754,8 @@ private:
 
 namespace MazeMap::App::Internal
 {
+    IApplicationMode& GetAuxMeasurementMode();
+
     const BootModeDescriptor& GetAuxMeasurementBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -762,6 +764,7 @@ namespace MazeMap::App::Internal
             "auxiliary_measurement",
             "Run the selected one-off auxiliary measurement routine.",
             "logging.txt; auxiliary measurement mmlog",
+            &GetAuxMeasurementMode,
             "GetAuxMeasurementMode",
             "AuxMeasurementController.cpp",
             "startup settle; selected auxiliary routine; final log close",

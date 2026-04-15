@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "ManeuverFileTestMode.h"
 
-#include "BootModeDescriptor.h"
+#include "MazeMapControllerRegistry.h"
 
 namespace MazeMap::App::Internal
 {
@@ -13,7 +13,8 @@ namespace MazeMap::App::Internal
             "maneuver_file_test",
             "Load and execute the maneuver queue stored in test.txt.",
             "logging.txt; maneuver test telemetry mmlog",
-            "ManeuverFileTestMode::Begin/Run",
+            &GetManeuverFileTestMode,
+            "GetManeuverFileTestMode",
             "ManeuverFileTestMode.cpp; MazeMapMissionController.cpp",
             "mission-family initialization; telemetry log setup; test.txt load; queue execution",
             "CoreConfig mission tuning; Maneuver classes; shared runtime pathfinders",
@@ -36,6 +37,12 @@ namespace MazeMap::App::Internal
     void ManeuverFileTestMode::Run()
     {
         Host().RunManeuverFileTestMode();
+    }
+
+    IApplicationMode& GetManeuverFileTestMode()
+    {
+        static ManeuverFileTestMode mode(GetMissionModeHost());
+        return mode;
     }
 }
 

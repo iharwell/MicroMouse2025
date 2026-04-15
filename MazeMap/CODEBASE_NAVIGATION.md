@@ -136,6 +136,9 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `HistoricalMazePathFinderTest.cpp`: regression sweep across historical mazes for the path-finding stack.
 - `ManeuverPathFinderTest.cpp`: tests for maneuver-aware path planning.
 - `ManeuverTest.cpp`: tests for maneuver geometry, identifiers, and maneuver semantics.
+- `DriveBaseTest.cpp`: runtime drive delta-command tests that prime encoder state through the production odometry path.
+- `EstimatorTestSupport.h`: shared estimator-test builders for `VehicleState`, covariance, local-map views, and encoder-distance conversion.
+- `LoopControllerTest.cpp`: focused checks for `LoopController` startup callback timing constants.
 - `MazeMapApplicationTest.cpp`: tests around application startup and mode selection.
 - `MazeMapRuntimeHelperTest.cpp`: tests for runtime helper functions and utility routines.
 - `MazeMapSharedRuntimeTest.cpp`: tests for shared runtime composition and default wiring.
@@ -144,9 +147,18 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MazeRef.h`: test helper that supplies reference mazes for assertions.
 - `MazeTest.cpp`: tests for maze mutation, lookup, and path interaction behavior.
 - `PathFinderTest.cpp`: tests for abstract/flood-fill/directional path-finding behavior.
+- `PlantModelDriveCommandTest.cpp`: inverse-drive, velocity-target, traction-limit, and plant envelope tests for `PlantModel`.
+- `PlantModelDynamicsTest.cpp`: forward-dynamics, integration, prepared-parameter, and IMU-prediction tests for `PlantModel`.
+- `PlantModelTestSupport.h`: plant-specific assertion helpers shared by the split `PlantModel` test files.
 - `RelativeDirectionalDistanceTest.cpp`: tests for relative directional distance math.
 - `SearchRunPlannerTest.cpp`: tests for search-run planning and replanning helpers.
+- `SrUkfCoreBiasAndStationaryTest.cpp`: stationary certification, gyro-bias seeding, and repeated-zero-motion regression tests for `SrUkfCore`.
+- `SrUkfCoreModeAndDiagnosticsTest.cpp`: mode classification, pivot-scrub, debug-dump, and IMU-update policy tests for `SrUkfCore`.
+- `SrUkfCoreMotionUpdateTest.cpp`: encoder, yaw, wall-update, and closed-loop motion propagation tests for `SrUkfCore`.
+- `SrUkfCoreReplayRegressionTest.cpp`: replay regression for the logged open-floor launch window that previously produced an X-pose jump.
+- `SrUkfCoreTestSupport.h`: shared `SrUkfCore` test helpers for debug-dump parsing, stationary-bias expectations, and repeated-cycle setup.
 - `Templates.h`: shared unit-test helper templates.
-- `UKFTest.cpp`: tests for the reusable UKF implementation and supporting math.
+- `UKFTest.cpp`: tests for the reusable square-root UKF math and covariance behavior.
+- `VehicleStateTest.cpp`: tests for stationary classification and zero-motion constraint behavior on `VehicleState`.
 - `Vector2fTest.cpp`: tests for vector math assumptions used by estimator code.
 - `pch.h` / `pch.cpp`: precompiled-header setup for the test project.

@@ -125,6 +125,8 @@ private:
 
 namespace MazeMap::App::Internal
 {
+    IApplicationMode& GetWallSensorLedCalibrationMode();
+
     const BootModeDescriptor& GetWallSensorLedCalibrationBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -133,6 +135,7 @@ namespace MazeMap::App::Internal
             "wall_sensor_led_calibration",
             "Drive front and side wall-sensor LEDs for optical calibration.",
             "logging.txt; operator-visible LED square waves",
+            &GetWallSensorLedCalibrationMode,
             "GetWallSensorLedCalibrationMode",
             "WallSensorLedCalibrationController.cpp",
             "front LED calibration; side LED calibration",

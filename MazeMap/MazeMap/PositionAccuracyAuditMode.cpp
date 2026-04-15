@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "PositionAccuracyAuditMode.h"
 
-#include "BootModeDescriptor.h"
+#include "MazeMapControllerRegistry.h"
 
 namespace MazeMap::App::Internal
 {
@@ -13,7 +13,8 @@ namespace MazeMap::App::Internal
             "position_accuracy_audit",
             "Run the fixed-fixture position accuracy audit.",
             "logging.txt; position accuracy telemetry mmlog",
-            "PositionAccuracyAuditMode::Begin/Run",
+            &GetPositionAccuracyAuditMode,
+            "GetPositionAccuracyAuditMode",
             "PositionAccuracyAuditMode.cpp; MazeMapMissionController.cpp",
             "mission-family initialization; telemetry log setup; straight, turn, and smooth-turn audit phases",
             "AuxMeasurementConfig position-audit profile; CoreConfig mission tuning; Maneuver classes",
@@ -36,6 +37,12 @@ namespace MazeMap::App::Internal
     void PositionAccuracyAuditMode::Run()
     {
         Host().RunPositionAccuracyAuditMode();
+    }
+
+    IApplicationMode& GetPositionAccuracyAuditMode()
+    {
+        static PositionAccuracyAuditMode mode(GetMissionModeHost());
+        return mode;
     }
 }
 

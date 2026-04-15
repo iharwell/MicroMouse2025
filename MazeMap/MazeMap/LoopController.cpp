@@ -575,7 +575,14 @@ namespace MazeMap::App::Internal
             break;
 
         case ControlVector::Kind::Velocity:
-            _runtime->Drive().CommandVelocity(resolvedControl.linearTarget, resolvedControl.angularTarget, dtSeconds);
+            (void)dtSeconds;
+            _runtime->Drive().CommandGenerated(
+                _runtime->Drive().PointCommand(
+                    resolvedControl.linearTarget,
+                    resolvedControl.angularTarget,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                resolvedControl.linearTarget,
+                resolvedControl.angularTarget);
             break;
 
         case ControlVector::Kind::Brake:

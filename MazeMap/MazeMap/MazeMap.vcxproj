@@ -290,6 +290,7 @@
     <ClCompile Include="Direction.cpp" />
     <ClCompile Include="DirectionalLocation.cpp" />
     <ClCompile Include="DirectionalPathFinder.cpp" />
+    <ClCompile Include="DriveBase.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="Fresnel.cpp" />
     <ClCompile Include="Kinematics.cpp" />

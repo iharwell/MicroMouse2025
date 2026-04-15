@@ -16,13 +16,28 @@
     <Filter Include="Source Files\App">
       <UniqueIdentifier>{B23B795D-92E2-B72D-0B44-E9CDCEFB1533}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Estimator">
+      <UniqueIdentifier>{3B2197BE-37E0-4B8D-81FC-37CA9B6C5B5D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Estimator">
+      <UniqueIdentifier>{6D44394C-9C79-4B9E-A00B-ED1EF94CD608}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="EstimatorTestSupport.h">
+      <Filter>Header Files\Estimator</Filter>
+    </ClInclude>
     <ClInclude Include="MazeRef.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="PlantModelTestSupport.h">
+      <Filter>Header Files\Estimator</Filter>
+    </ClInclude>
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SrUkfCoreTestSupport.h">
+      <Filter>Header Files\Estimator</Filter>
     </ClInclude>
     <ClInclude Include="Templates.h">
       <Filter>Header Files</Filter>
@@ -31,6 +46,9 @@
   <ItemGroup>
     <ClCompile Include="CellTest.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveBaseTest.cpp">
+      <Filter>Source Files\App</Filter>
     </ClCompile>
     <ClCompile Include="DirectionTest.cpp">
       <Filter>Source Files</Filter>
@@ -43,6 +61,9 @@
     </ClCompile>
     <ClCompile Include="HistoricalMazePathFinderTest.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="LoopControllerTest.cpp">
+      <Filter>Source Files\App</Filter>
     </ClCompile>
     <ClCompile Include="ManeuverPathFinderTest.cpp">
       <Filter>Source Files</Filter>
@@ -72,7 +93,7 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="OpenFloorMeasurementSpecTest.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\App</Filter>
     </ClCompile>
     <ClCompile Include="PathFinderTest.cpp">
       <Filter>Source Files</Filter>
@@ -80,17 +101,38 @@
     <ClCompile Include="pch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PlantModelDriveCommandTest.cpp">
+      <Filter>Source Files\Estimator</Filter>
+    </ClCompile>
+    <ClCompile Include="PlantModelDynamicsTest.cpp">
+      <Filter>Source Files\Estimator</Filter>
+    </ClCompile>
     <ClCompile Include="RelativeDirectionalDistanceTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SearchRunPlannerTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="SrUkfCoreBiasAndStationaryTest.cpp">
+      <Filter>Source Files\Estimator</Filter>
+    </ClCompile>
+    <ClCompile Include="SrUkfCoreModeAndDiagnosticsTest.cpp">
+      <Filter>Source Files\Estimator</Filter>
+    </ClCompile>
+    <ClCompile Include="SrUkfCoreMotionUpdateTest.cpp">
+      <Filter>Source Files\Estimator</Filter>
+    </ClCompile>
+    <ClCompile Include="SrUkfCoreReplayRegressionTest.cpp">
+      <Filter>Source Files\Estimator</Filter>
+    </ClCompile>
     <ClCompile Include="UKFTest.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Estimator</Filter>
+    </ClCompile>
+    <ClCompile Include="VehicleStateTest.cpp">
+      <Filter>Source Files\Estimator</Filter>
     </ClCompile>
     <ClCompile Include="Vector2fTest.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\Estimator</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

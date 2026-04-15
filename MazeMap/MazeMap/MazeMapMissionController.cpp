@@ -3736,7 +3736,14 @@ private:
             {
                 return Fail("Startup front calibration sweep profile became invalid");
             }
-            _drive.CommandVelocity(0.0f, angularCommandRadps, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    0.0f,
+                    angularCommandRadps,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                0.0f,
+                angularCommandRadps);
         }
 
         if (!HoldPosition(Config::kStartupWallCalibrationSettleMs))
@@ -4713,7 +4720,14 @@ private:
                 return false;
             }
 
-            _drive.CommandVelocity(0.0f, 0.0f, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                0.0f,
+                0.0f);
             const unsigned long nowMs = millis();
             const DriveTelemetry telemetry = _drive.GetTelemetry();
             if (!stationaryWindowActive)
@@ -4896,7 +4910,14 @@ private:
             const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
             float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps);
             angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            _drive.CommandVelocity(-commandedSpeedMps, angularCommandRadps, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    -commandedSpeedMps,
+                    angularCommandRadps,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                -commandedSpeedMps,
+                angularCommandRadps);
         }
     }
 
@@ -6043,7 +6064,14 @@ private:
             const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
             float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps) + wallOmegaRadps;
             angularCommandRadps = (std::clamp)(angularCommandRadps, -searchLimits.maxAngularSpeedRadps, searchLimits.maxAngularSpeedRadps);
-            _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    commandedSpeedMps,
+                    angularCommandRadps,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                commandedSpeedMps,
+                angularCommandRadps);
         }
 
         if (exitSpeedMps <= 0.05f)
@@ -6805,7 +6833,14 @@ private:
             const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
             float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps) + wallOmegaRadps;
             angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    commandedSpeedMps,
+                    angularCommandRadps,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                commandedSpeedMps,
+                angularCommandRadps);
         }
 
         if (exitSpeed <= 0.05f)
@@ -6866,7 +6901,14 @@ private:
             {
                 return Fail("Turn profile became invalid");
             }
-            _drive.CommandVelocity(0.0f, angularCommandRadps, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    0.0f,
+                    angularCommandRadps,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                0.0f,
+                angularCommandRadps);
         }
 
         if (!HoldZeroVelocityUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
@@ -6956,7 +6998,14 @@ private:
             const float headingErrorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
             float angularCommandRadps = (curvature * commandedSpeedMps) + (Config::kArcHeadingKp * headingErrorRad) - (Config::kArcYawD * _drive.GetPose().angularSpeedRadps);
             angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            _drive.CommandVelocity(commandedSpeedMps, angularCommandRadps, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    commandedSpeedMps,
+                    angularCommandRadps,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                commandedSpeedMps,
+                angularCommandRadps);
         }
 
         if (exitSpeed <= 0.05f)
@@ -7057,7 +7106,14 @@ private:
                 yawRateController);
             float angularCommandRadps = nominalOmegaRadps + yawRateCorrectionRadps;
             angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            _drive.CommandVelocity(maneuverSpeedMps, angularCommandRadps, dtSeconds);
+            (void)dtSeconds;
+            _drive.CommandGenerated(
+                _drive.PointCommand(
+                    maneuverSpeedMps,
+                    angularCommandRadps,
+                    MazeMap::CommandPD::StateWheelOmegaPD),
+                maneuverSpeedMps,
+                angularCommandRadps);
         }
 
         return true;

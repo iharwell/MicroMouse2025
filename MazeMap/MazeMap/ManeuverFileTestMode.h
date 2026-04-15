@@ -11,5 +11,7 @@ namespace MazeMap::App::Internal
         bool Begin() override;
         void Run() override;
     };
+
+    IApplicationMode& GetManeuverFileTestMode();
 }
 

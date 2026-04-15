@@ -1007,7 +1007,14 @@ namespace MazeMap::App::Internal::Runtime
                     angularCommandRadps,
                     -Config::kWallTouchReverseMaxAngularCommandRadps,
                     Config::kWallTouchReverseMaxAngularCommandRadps);
-                drive.CommandVelocity(-Config::kWallTouchReverseSpeedMps, angularCommandRadps, dtSeconds);
+                (void)dtSeconds;
+                drive.CommandGenerated(
+                    drive.PointCommand(
+                        -Config::kWallTouchReverseSpeedMps,
+                        angularCommandRadps,
+                        MazeMap::CommandPD::StateWheelOmegaPD),
+                    -Config::kWallTouchReverseSpeedMps,
+                    angularCommandRadps);
 
                 if (result.reverseDistanceM >= Config::kWallTouchFrontClearanceDistanceM)
                 {

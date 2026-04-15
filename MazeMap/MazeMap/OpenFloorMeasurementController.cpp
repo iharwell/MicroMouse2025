@@ -2945,6 +2945,8 @@ bool OpenFloorMeasurementController::AdvanceLoopAfterTurn()
 
 namespace MazeMap::App::Internal
 {
+    IApplicationMode& GetDiagnosticMode();
+
     const BootModeDescriptor& GetOpenFloorMeasurementBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -2953,6 +2955,7 @@ namespace MazeMap::App::Internal
             "primary_diagnostic",
             "Run the open-floor measurement battery registered as the primary diagnostic boot mode.",
             "logging.txt; open-floor timing mmlog; open-floor main mmlog",
+            &GetDiagnosticMode,
             "GetDiagnosticMode",
             "OpenFloorMeasurementController.cpp",
             "timing capture; static hold; launch; straight; straight-to-yaw settle; yaw; smooth turn; loop clockwise; loop counter-clockwise",

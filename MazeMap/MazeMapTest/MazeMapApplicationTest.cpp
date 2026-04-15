@@ -2,6 +2,7 @@
 #include "CppUnitTest.h"
 #include "..\MazeMap\BootModeRegistry.h"
 #include "..\MazeMap\MazeMapApplication.h"
+#include "..\MazeMap\MazeMapApplicationRuntime.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\PinPairStrap.h"
 #include "..\MazeMap\WallSensorLedCalibrationPhase.h"
@@ -91,11 +92,23 @@ namespace MazeMap::App
                 Assert::IsTrue(entry.descriptor->id == entry.id);
                 Assert::IsNotNull(entry.descriptor->stableId);
                 Assert::IsTrue(entry.descriptor->stableId[0] != '\0');
+                Assert::IsTrue(entry.descriptor->entryMode != nullptr);
                 Assert::IsNotNull(entry.descriptor->entryPoint);
                 Assert::IsTrue(entry.descriptor->entryPoint[0] != '\0');
                 Assert::IsNotNull(entry.descriptor->implementationFile);
                 Assert::IsTrue(entry.descriptor->implementationFile[0] != '\0');
             }
+        }
+
+        TEST_METHOD(ResolveActiveApplicationMode_UsesDescriptorEntryMode)
+        {
+            HostSetPinShort(26U, 27U);
+
+            const BootModeRegistryEntry& selectedMode = ResolveSelectedBootMode();
+            MazeMap::App::Internal::IApplicationMode& expected = selectedMode.descriptor->entryMode();
+            MazeMap::App::Internal::IApplicationMode& actual = MazeMap::App::Internal::ResolveActiveApplicationMode();
+
+            Assert::IsTrue(&actual == &expected);
         }
 
         TEST_METHOD(BootModeRegistry_DefaultsToMission)

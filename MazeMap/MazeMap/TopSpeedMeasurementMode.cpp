@@ -786,28 +786,13 @@ namespace MazeMap::App::Internal
                     ((yawRateCorrectionRadps - measuredYawRateRadps) / responseTimeS) :
                     0.0f;
 
-                const MazeMap::OpenLoopDriveCommand nominalFeedforwardCommand = _drive.ResolveAccelerationDriveCommandRaw(
-                    resolvedLinearSpeedMps,
-                    0.0f,
-                    kTopSpeedMeasurementForwardAccelerationMps2,
-                    0.0f,
-                    state.dtSeconds);
-                const float symmetricFeedforwardCommand =
-                    0.5f * (nominalFeedforwardCommand.leftDriveCommand + nominalFeedforwardCommand.rightDriveCommand);
-
-                const MazeMap::OpenLoopDriveCommand yawCorrectionCommand = _drive.ResolveAccelerationDriveCommandRaw(
-                    resolvedLinearSpeedMps,
-                    measuredYawRateRadps,
-                    0.0f,
-                    desiredYawAccelRadps2,
-                    state.dtSeconds);
-                const float differentialYawCorrectionCommand =
-                    0.5f * (yawCorrectionCommand.leftDriveCommand - yawCorrectionCommand.rightDriveCommand);
                 const MazeMap::OpenLoopDriveCommand driveCommand =
-                    MazeMap::ClampOpenLoopDriveCommand(
-                        MazeMap::MakeOpenLoopDriveCommand(
-                            symmetricFeedforwardCommand + differentialYawCorrectionCommand,
-                            symmetricFeedforwardCommand - differentialYawCorrectionCommand));
+                    _drive.DeltaCommand(
+                        resolvedLinearSpeedMps,
+                        kTopSpeedMeasurementForwardAccelerationMps2,
+                        measuredYawRateRadps,
+                        desiredYawAccelRadps2,
+                        MazeMap::CommandPD::RawCommand);
 
                 SetLastCommandInputs(resolvedLinearSpeedMps, yawRateCorrectionRadps);
                 return LoopController::ControlVector::OpenLoopCommand(
@@ -983,6 +968,7 @@ namespace MazeMap::App::Internal
             "top_speed_measurement",
             "Measure straight-line peak speed with a prelaunch reverse kick, fixed forward-acceleration launch, and braking recovery.",
             "logging.txt; top-speed telemetry mmlog",
+            &GetTopSpeedMeasurementMode,
             "GetTopSpeedMeasurementMode",
             "TopSpeedMeasurementMode.cpp",
             "startup; 1 s prelaunch wait; 10 ms reverse kick; accelerated straight run; impact-or-gyro-or-timer brake transition; brake-to-stop; selector-jumper removal faults immediately",
