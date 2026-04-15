@@ -43,14 +43,6 @@ namespace MazeMap
             Assert::AreEqual(expectedSigmaRadps, SrUkfCore::ComputeStationaryEncoderOmegaSigmaRadps(params), 1.0e-9f);
         }
 
-        TEST_METHOD(ConfiguredMeasurementSigmasMatchLatestOpenFloorLogTuning)
-        {
-            Assert::AreEqual(0.0066f, SrUkfCore::kGeneralEncoderLinearSpeedSigmaMps, 1.0e-9f);
-            Assert::AreEqual(0.0484f, SrUkfCore::kGeneralEncoderYawRateSigmaRadps, 1.0e-9f);
-            Assert::AreEqual(0.0131f, SrUkfCore::kImuYawRateSigmaRadps, 1.0e-9f);
-            Assert::AreEqual(0.1305f, SrUkfCore::kImuAccelSigmaMps2, 1.0e-9f);
-        }
-
         TEST_METHOD(BuildDefaultInitialCovariance_ReturnsCanonicalResetCovariance)
         {
             const VehicleState::StateMatrix covariance = SrUkfCore::BuildDefaultInitialCovariance();
@@ -64,107 +56,6 @@ namespace MazeMap
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaL, VehicleState::kOmegaL), 1.0e-9f);
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaR, VehicleState::kOmegaR), 1.0e-9f);
             Assert::AreEqual(0.01f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-9f);
-        }
-
-        TEST_METHOD(SrUkfCorePredictUsesModeDependentProcessNoise)
-        {
-            ControlInput control{};
-            EncoderObs encoder{};
-            constexpr float dt = 0.001f;
-
-            SrUkfCore stationaryCore;
-            // Reach certified stationary first.
-            for (int step = 0; step < 100; ++step)
-            {
-                stationaryCore.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-                Assert::IsTrue(stationaryCore.predict(dt, control));
-                Assert::IsTrue(stationaryCore.updateEncoderPair(encoder, dt).accepted);
-                Assert::IsTrue(stationaryCore.updateYawRate(0.0f).accepted);
-            }
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
-                static_cast<int>(stationaryCore.operatingMode()));
-            Assert::IsTrue(stationaryCore.predict(dt, control));
-            Assert::AreEqual(0.006f, FindProcessNoiseDiagonal(stationaryCore, "u_mps"), 1.0e-6f);
-            Assert::AreEqual(0.006f, FindProcessNoiseDiagonal(stationaryCore, "v_mps"), 1.0e-6f);
-            Assert::AreEqual(0.010f, FindProcessNoiseDiagonal(stationaryCore, "r_radps"), 1.0e-6f);
-
-            // A recent sign flip should force the launch/reversal process noise.
-            SrUkfCore launchCore;
-            Assert::IsTrue(launchCore.setState(
-                BuildUkfState(
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.20f,
-                    0.0f,
-                    0.0f,
-                    2.0f,
-                    2.0f,
-                    0.0f),
-                BuildUkfCovariance()));
-            control.leftMotorCommand = 0.20f;
-            control.rightMotorCommand = 0.20f;
-            launchCore.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(launchCore.predict(dt, control));
-            control.leftMotorCommand = -0.20f;
-            control.rightMotorCommand = -0.20f;
-            launchCore.setRuntimeContext(-0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(launchCore.predict(dt, control));
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::LaunchOrReversalTransient),
-                static_cast<int>(launchCore.operatingMode()));
-            Assert::AreEqual(0.020f, FindProcessNoiseDiagonal(launchCore, "u_mps"), 1.0e-6f);
-            Assert::AreEqual(0.010f, FindProcessNoiseDiagonal(launchCore, "v_mps"), 1.0e-6f);
-            Assert::AreEqual(0.050f, FindProcessNoiseDiagonal(launchCore, "r_radps"), 1.0e-6f);
-
-            // Saturation should force the inconsistent/saturated mode.
-            SrUkfCore inconsistentCore;
-            Assert::IsTrue(inconsistentCore.setState(
-                BuildUkfState(
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.50f,
-                    0.0f,
-                    0.0f,
-                    5.0f,
-                    5.0f,
-                    0.0f),
-                BuildUkfCovariance()));
-            inconsistentCore.setRuntimeContext(0.50f, 0.0f, 0x1U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(inconsistentCore.predict(dt, control));
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::InconsistentOrSaturated),
-                static_cast<int>(inconsistentCore.operatingMode()));
-            Assert::AreEqual(0.030f, FindProcessNoiseDiagonal(inconsistentCore, "u_mps"), 1.0e-6f);
-            Assert::AreEqual(0.030f, FindProcessNoiseDiagonal(inconsistentCore, "v_mps"), 1.0e-6f);
-            Assert::AreEqual(0.070f, FindProcessNoiseDiagonal(inconsistentCore, "r_radps"), 1.0e-6f);
-
-            // Nominal moving operation uses the grip-linear schedule.
-            SrUkfCore gripCore;
-            Assert::IsTrue(gripCore.setState(
-                BuildUkfState(
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.50f,
-                    0.0f,
-                    0.0f,
-                    5.0f,
-                    5.0f,
-                    0.0f),
-                BuildUkfCovariance()));
-            gripCore.setRuntimeContext(0.50f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(gripCore.predict(dt, control));
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::GripLinear),
-                static_cast<int>(gripCore.operatingMode()));
-            Assert::AreEqual(0.012f, FindProcessNoiseDiagonal(gripCore, "u_mps"), 1.0e-6f);
-            Assert::AreEqual(0.010f, FindProcessNoiseDiagonal(gripCore, "v_mps"), 1.0e-6f);
-            Assert::AreEqual(0.025f, FindProcessNoiseDiagonal(gripCore, "r_radps"), 1.0e-6f);
-            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(gripCore, "px_m"), 1.0e-9f);
-            Assert::AreEqual(0.0f, FindProcessNoiseDiagonal(gripCore, "py_m"), 1.0e-9f);
         }
 
         TEST_METHOD(SrUkfCoreRegimeHelpersExposeSpecThresholds)

@@ -1284,14 +1284,18 @@ namespace MazeMap
         return predicted;
     }
 
-    MeasurementUpdateResult SrUkfCore::updateEncoderPair(const EncoderObs& observation, float dt) noexcept
+    MeasurementUpdateResult SrUkfCore::updateEncoderPair(
+        const EncoderObs& observation,
+        float dt,
+        bool updateYaw) noexcept
     {
-        return updateEncoderPairImpl(observation, dt, nullptr, nullptr);
+        return updateEncoderPairImpl(observation, dt, updateYaw, nullptr, nullptr);
     }
 
     MeasurementUpdateResult SrUkfCore::updateEncoderPairImpl(
         const EncoderObs& observation,
         float dt,
+        bool updateYaw,
         void* loopHookContext,
         LoopHookInvoker loopHook) noexcept
     {
@@ -1363,7 +1367,12 @@ namespace MazeMap
             }
             else
             {
-                applyWheelRateConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
+                applyWheelRateConstraint(
+                    priorState,
+                    priorCovariance,
+                    measured,
+                    ComputeMeasuredWheelVarianceRadps2(measured, _params),
+                    updateYaw);
             }
         }
         else
@@ -1727,7 +1736,8 @@ namespace MazeMap
 
     void SrUkfCore::anchorPoseToEncoderDelta(
         StateVector& anchoredState,
-        const EncoderObs& measured) const noexcept
+        const EncoderObs& measured,
+        bool updateYaw) const noexcept
     {
         if (!_havePredictionReference)
         {
@@ -1754,13 +1764,21 @@ namespace MazeMap
 
         anchoredState(VehicleState::kPx) = _prePredictState(VehicleState::kPx) + (forwardDistanceM * heading.x());
         anchoredState(VehicleState::kPy) = _prePredictState(VehicleState::kPy) + (forwardDistanceM * heading.y());
-        anchoredState(VehicleState::kPsi) = VehicleState::NormalizeAngle(referenceYawRad + deltaYawRad);
+        if (updateYaw)
+        {
+            anchoredState(VehicleState::kPsi) = VehicleState::NormalizeAngle(referenceYawRad + deltaYawRad);
+        }
     }
 
-    void SrUkfCore::applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept
+    void SrUkfCore::applyWheelRateConstraint(
+        const StateVector& priorState,
+        const StateMatrix& priorCovariance,
+        const EncoderObs& measured,
+        float wheelVarianceRadps2,
+        bool updateYaw) noexcept
     {
         StateVector anchoredState = _filter.state();
-        anchorPoseToEncoderDelta(anchoredState, measured);
+        anchorPoseToEncoderDelta(anchoredState, measured, updateYaw);
         anchoredState(VehicleState::kU) = ComputeMeasuredLinearSpeedMps(measured, _params);
         anchoredState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
         anchoredState(VehicleState::kOmegaR) = measured.omegaRightRadps;
@@ -1769,20 +1787,53 @@ namespace MazeMap
         StateMatrix anchoredCovariance = _filter.covariance();
         anchoredCovariance.row(VehicleState::kU).setZero();
         anchoredCovariance.col(VehicleState::kU).setZero();
-        anchoredCovariance.row(VehicleState::kR).setZero();
-        anchoredCovariance.col(VehicleState::kR).setZero();
         anchoredCovariance.row(VehicleState::kOmegaL).setZero();
         anchoredCovariance.col(VehicleState::kOmegaL).setZero();
         anchoredCovariance.row(VehicleState::kOmegaR).setZero();
         anchoredCovariance.col(VehicleState::kOmegaR).setZero();
-        anchoredState(VehicleState::kR) = ComputeMeasuredYawRateRadps(measured, _params);
+        if (updateYaw)
+        {
+            anchoredCovariance.row(VehicleState::kR).setZero();
+            anchoredCovariance.col(VehicleState::kR).setZero();
+            anchoredState(VehicleState::kR) = ComputeMeasuredYawRateRadps(measured, _params);
+        }
         anchoredCovariance(VehicleState::kU, VehicleState::kU) =
             (std::max)(ComputeMeasuredLinearSpeedVarianceMps2(measured), 1.0e-12f);
-        anchoredCovariance(VehicleState::kR, VehicleState::kR) =
-            (std::max)(ComputeMeasuredYawRateVarianceRadps2(measured, _params), 1.0e-12f);
+        if (updateYaw)
+        {
+            anchoredCovariance(VehicleState::kR, VehicleState::kR) =
+                (std::max)(ComputeMeasuredYawRateVarianceRadps2(measured, _params), 1.0e-12f);
+        }
         const float constrainedVariance = (std::max)(wheelVarianceRadps2, 1.0e-12f);
         anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
         anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;
+
+        if (!updateYaw)
+        {
+            StateVector projectedState = priorState;
+            StateMatrix projectedCovariance = priorCovariance;
+            constexpr std::array<int, 7> kAllowedIndices = {
+                VehicleState::kPx,
+                VehicleState::kPy,
+                VehicleState::kU,
+                VehicleState::kV,
+                VehicleState::kOmegaL,
+                VehicleState::kOmegaR,
+                VehicleState::kBgz
+            };
+            ProjectMaskedStateAndCovariance(
+                priorState,
+                priorCovariance,
+                anchoredState,
+                anchoredCovariance,
+                kAllowedIndices.data(),
+                kAllowedIndices.size(),
+                projectedState,
+                projectedCovariance);
+            anchoredState = projectedState;
+            anchoredCovariance = projectedCovariance;
+        }
+
         _filter.setState(anchoredState, anchoredCovariance);
     }
 

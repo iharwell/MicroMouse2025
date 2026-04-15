@@ -25,12 +25,19 @@ namespace MazeMap
             return _core.predict(dt, control, static_cast<LoopHook&&>(loopHook));
         }
 
-        MeasurementUpdateResult updateEncoderPair(const EncoderObs& observation, float dt) noexcept;
+        MeasurementUpdateResult updateEncoderPair(
+            const EncoderObs& observation,
+            float dt,
+            bool updateYaw = true) noexcept;
 
         template <typename LoopHook>
-        MeasurementUpdateResult updateEncoderPair(const EncoderObs& observation, float dt, LoopHook&& loopHook) noexcept
+        MeasurementUpdateResult updateEncoderPair(
+            const EncoderObs& observation,
+            float dt,
+            bool updateYaw,
+            LoopHook&& loopHook) noexcept
         {
-            return _core.updateEncoderPair(observation, dt, static_cast<LoopHook&&>(loopHook));
+            return _core.updateEncoderPair(observation, dt, updateYaw, static_cast<LoopHook&&>(loopHook));
         }
 
         MeasurementUpdateResult updateYawRate(float yawRateRadps) noexcept;

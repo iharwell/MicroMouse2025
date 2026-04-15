@@ -131,6 +131,35 @@ namespace
             PlantModel::kDefaultVelocityTargetResponseTimeS;
     }
 
+    inline float ResolvePhysicalTrackWidthM(const PreparedParams& params) noexcept
+    {
+        if (std::isfinite(params.trackWidthM) && (params.trackWidthM > 0.0f))
+        {
+            return params.trackWidthM;
+        }
+
+        const float physicalTrackWidthM = MazeMap::Vehicle::GetPhysicalModel().trackWidthM;
+        return
+            (std::isfinite(physicalTrackWidthM) && (physicalTrackWidthM > 0.0f)) ?
+            physicalTrackWidthM :
+            0.0f;
+    }
+
+    inline float ResolveMotionTrackWidthM(
+        float forwardVelocityMps,
+        float yawRateRadps,
+        const PreparedParams& params) noexcept
+    {
+        const float effectiveTrackWidthM =
+            MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(forwardVelocityMps, yawRateRadps);
+        if (std::isfinite(effectiveTrackWidthM) && (effectiveTrackWidthM > 0.0f))
+        {
+            return effectiveTrackWidthM;
+        }
+
+        return ResolvePhysicalTrackWidthM(params);
+    }
+
     inline float ResolveClosedLoopTractionReserveScale(float tractionReserveScale) noexcept
     {
         return
@@ -1580,11 +1609,18 @@ namespace MazeMap
         float responseTimeS) const noexcept
     {
         const StateVector operatingState = BuildDriveCommandOperatingState(currentState, params);
-        const float resolvedResponseTimeS = ResolveVelocityTargetResponseTimeS(responseTimeS);
-        const float desiredLongitudinalAccelMps2 =
-            (targetForwardVelocityMps - operatingState(VehicleState::kU)) / resolvedResponseTimeS;
-        const float desiredYawAccelRadps2 =
-            (targetYawRateRadps - operatingState(VehicleState::kR)) / resolvedResponseTimeS;
+        float desiredLongitudinalAccelMps2 = 0.0f;
+        float desiredYawAccelRadps2 = 0.0f;
+        resolveVelocityTargetAccelerations(
+            operatingState(VehicleState::kU),
+            targetForwardVelocityMps,
+            operatingState(VehicleState::kR),
+            targetYawRateRadps,
+            (std::numeric_limits<float>::max)(),
+            (std::numeric_limits<float>::max)(),
+            responseTimeS,
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
         return solveDriveCommands(
             operatingState,
             desiredLongitudinalAccelMps2,
@@ -1634,6 +1670,156 @@ namespace MazeMap
             fanDutyCycle,
             batteryVoltageV,
             responseTimeS);
+    }
+
+    void PlantModel::resolveVelocityTargetAccelerations(
+        float currentForwardVelocityMps,
+        float targetForwardVelocityMps,
+        float currentYawRateRadps,
+        float targetYawRateRadps,
+        float longitudinalAccelLimitMps2,
+        float yawAccelLimitRadps2,
+        float responseTimeS,
+        float& desiredLongitudinalAccelMps2,
+        float& desiredYawAccelRadps2) const noexcept
+    {
+        desiredLongitudinalAccelMps2 = 0.0f;
+        desiredYawAccelRadps2 = 0.0f;
+
+        const float resolvedLongitudinalAccelLimitMps2 =
+            (std::isfinite(longitudinalAccelLimitMps2) && (longitudinalAccelLimitMps2 > 0.0f)) ?
+            longitudinalAccelLimitMps2 :
+            0.0f;
+        const float resolvedYawAccelLimitRadps2 =
+            (std::isfinite(yawAccelLimitRadps2) && (yawAccelLimitRadps2 > 0.0f)) ?
+            yawAccelLimitRadps2 :
+            0.0f;
+        const float resolvedResponseTimeS = ResolveVelocityTargetResponseTimeS(responseTimeS);
+        if (!(resolvedResponseTimeS > 0.0f) || !std::isfinite(resolvedResponseTimeS))
+        {
+            return;
+        }
+
+        if (std::isfinite(currentForwardVelocityMps) && std::isfinite(targetForwardVelocityMps))
+        {
+            desiredLongitudinalAccelMps2 =
+                (targetForwardVelocityMps - currentForwardVelocityMps) / resolvedResponseTimeS;
+        }
+        if (std::isfinite(currentYawRateRadps) && std::isfinite(targetYawRateRadps))
+        {
+            desiredYawAccelRadps2 =
+                (targetYawRateRadps - currentYawRateRadps) / resolvedResponseTimeS;
+        }
+
+        if (!(resolvedLongitudinalAccelLimitMps2 > 0.0f))
+        {
+            desiredLongitudinalAccelMps2 = 0.0f;
+        }
+        if (!(resolvedYawAccelLimitRadps2 > 0.0f))
+        {
+            desiredYawAccelRadps2 = 0.0f;
+        }
+
+        const float normalizedLongitudinalDemand =
+            (resolvedLongitudinalAccelLimitMps2 > 0.0f) ?
+            (std::fabs(desiredLongitudinalAccelMps2) / resolvedLongitudinalAccelLimitMps2) :
+            0.0f;
+        const float normalizedYawDemand =
+            (resolvedYawAccelLimitRadps2 > 0.0f) ?
+            (std::fabs(desiredYawAccelRadps2) / resolvedYawAccelLimitRadps2) :
+            0.0f;
+        const float balanceScale =
+            (std::max)(1.0f, (std::max)(normalizedLongitudinalDemand, normalizedYawDemand));
+
+        desiredLongitudinalAccelMps2 /= balanceScale;
+        desiredYawAccelRadps2 /= balanceScale;
+
+        if (resolvedLongitudinalAccelLimitMps2 > 0.0f)
+        {
+            desiredLongitudinalAccelMps2 =
+                (std::clamp)(
+                    desiredLongitudinalAccelMps2,
+                    -resolvedLongitudinalAccelLimitMps2,
+                    resolvedLongitudinalAccelLimitMps2);
+        }
+        if (resolvedYawAccelLimitRadps2 > 0.0f)
+        {
+            desiredYawAccelRadps2 =
+                (std::clamp)(
+                    desiredYawAccelRadps2,
+                    -resolvedYawAccelLimitRadps2,
+                    resolvedYawAccelLimitRadps2);
+        }
+    }
+
+    void PlantModel::resolveWheelMotionTargets(
+        float targetForwardVelocityMps,
+        float targetYawRateRadps,
+        float targetLongitudinalAccelMps2,
+        float targetYawAccelRadps2,
+        const PreparedParams& params,
+        float& leftTargetVelocityMps,
+        float& rightTargetVelocityMps,
+        float& leftTargetAccelMps2,
+        float& rightTargetAccelMps2,
+        float& leftTargetOmegaRadps,
+        float& rightTargetOmegaRadps) const noexcept
+    {
+        const float resolvedTargetForwardVelocityMps =
+            std::isfinite(targetForwardVelocityMps) ? targetForwardVelocityMps : 0.0f;
+        const float resolvedTargetYawRateRadps =
+            std::isfinite(targetYawRateRadps) ? targetYawRateRadps : 0.0f;
+        const float resolvedTargetLongitudinalAccelMps2 =
+            std::isfinite(targetLongitudinalAccelMps2) ? targetLongitudinalAccelMps2 : 0.0f;
+        const float resolvedTargetYawAccelRadps2 =
+            std::isfinite(targetYawAccelRadps2) ? targetYawAccelRadps2 : 0.0f;
+        const float effectiveTrackWidthM =
+            ResolveMotionTrackWidthM(
+                resolvedTargetForwardVelocityMps,
+                resolvedTargetYawRateRadps,
+                params);
+
+        leftTargetVelocityMps =
+            resolvedTargetForwardVelocityMps +
+            (0.5f * effectiveTrackWidthM * resolvedTargetYawRateRadps);
+        rightTargetVelocityMps =
+            resolvedTargetForwardVelocityMps -
+            (0.5f * effectiveTrackWidthM * resolvedTargetYawRateRadps);
+        leftTargetAccelMps2 =
+            resolvedTargetLongitudinalAccelMps2 +
+            (0.5f * effectiveTrackWidthM * resolvedTargetYawAccelRadps2);
+        rightTargetAccelMps2 =
+            resolvedTargetLongitudinalAccelMps2 -
+            (0.5f * effectiveTrackWidthM * resolvedTargetYawAccelRadps2);
+        leftTargetOmegaRadps =
+            (params.wheelRadiusM > 0.0f) ?
+            (leftTargetVelocityMps * params.invWheelRadiusM) :
+            0.0f;
+        rightTargetOmegaRadps =
+            (params.wheelRadiusM > 0.0f) ?
+            (rightTargetVelocityMps * params.invWheelRadiusM) :
+            0.0f;
+    }
+
+    void PlantModel::resolveBodyVelocityFromWheelSpeeds(
+        float leftWheelLinearVelocityMps,
+        float rightWheelLinearVelocityMps,
+        const PreparedParams& params,
+        float& forwardVelocityMps,
+        float& yawRateRadps) const noexcept
+    {
+        const float resolvedLeftWheelLinearVelocityMps =
+            std::isfinite(leftWheelLinearVelocityMps) ? leftWheelLinearVelocityMps : 0.0f;
+        const float resolvedRightWheelLinearVelocityMps =
+            std::isfinite(rightWheelLinearVelocityMps) ? rightWheelLinearVelocityMps : 0.0f;
+        const float physicalTrackWidthM = ResolvePhysicalTrackWidthM(params);
+
+        forwardVelocityMps =
+            0.5f * (resolvedLeftWheelLinearVelocityMps + resolvedRightWheelLinearVelocityMps);
+        yawRateRadps =
+            (physicalTrackWidthM > 0.0f) ?
+            ((resolvedLeftWheelLinearVelocityMps - resolvedRightWheelLinearVelocityMps) / physicalTrackWidthM) :
+            0.0f;
     }
 
     void PlantModel::velocityTargetTechnicalLimits(
@@ -1888,11 +2074,18 @@ namespace MazeMap
         float tractionReserveScale) const noexcept
     {
         const StateVector operatingState = BuildDriveCommandOperatingState(currentState, params);
-        const float resolvedResponseTimeS = ResolveVelocityTargetResponseTimeS(responseTimeS);
-        const float desiredLongitudinalAccelMps2 =
-            (targetForwardVelocityMps - operatingState(VehicleState::kU)) / resolvedResponseTimeS;
-        const float desiredYawAccelRadps2 =
-            (targetYawRateRadps - operatingState(VehicleState::kR)) / resolvedResponseTimeS;
+        float desiredLongitudinalAccelMps2 = 0.0f;
+        float desiredYawAccelRadps2 = 0.0f;
+        resolveVelocityTargetAccelerations(
+            operatingState(VehicleState::kU),
+            targetForwardVelocityMps,
+            operatingState(VehicleState::kR),
+            targetYawRateRadps,
+            (std::numeric_limits<float>::max)(),
+            (std::numeric_limits<float>::max)(),
+            responseTimeS,
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
         return solveClosedLoopDriveCommands(
             operatingState,
             desiredLongitudinalAccelMps2,

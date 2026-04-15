@@ -16,9 +16,12 @@ namespace MazeMap
         return _core.predict(dt, control);
     }
 
-    MeasurementUpdateResult MouseUkfFacade::updateEncoderPair(const EncoderObs& observation, float dt) noexcept
+    MeasurementUpdateResult MouseUkfFacade::updateEncoderPair(
+        const EncoderObs& observation,
+        float dt,
+        bool updateYaw) noexcept
     {
-        return _core.updateEncoderPair(observation, dt);
+        return _core.updateEncoderPair(observation, dt, updateYaw);
     }
 
     MeasurementUpdateResult MouseUkfFacade::updateYawRate(float yawRateRadps) noexcept

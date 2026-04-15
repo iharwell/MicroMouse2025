@@ -3,7 +3,6 @@
 
 #include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\OpenLoopDriveCommand.h"
-#include "..\MazeMap\PlantModel.h"
 
 #include <cstdint>
 
@@ -40,66 +39,6 @@ namespace MazeMap
     TEST_CLASS(DriveBaseTest)
     {
     public:
-        TEST_METHOD(ResolveVelocityTargetAsapAccelerationsUsesLongitudinalLimitForPureSpeedChange)
-        {
-            float desiredLongitudinalAccelMps2 = 0.0f;
-            float desiredYawAccelRadps2 = 0.0f;
-
-            MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
-                0.0f,
-                0.30f,
-                0.0f,
-                0.0f,
-                9.0f,
-                400.0f,
-                PlantModel::kDefaultVelocityTargetResponseTimeS,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
-
-            Assert::AreEqual(9.0f, desiredLongitudinalAccelMps2, 1.0e-6f);
-            Assert::AreEqual(0.0f, desiredYawAccelRadps2, 1.0e-6f);
-        }
-
-        TEST_METHOD(ResolveVelocityTargetAsapAccelerationsUsesYawLimitForPureYawChange)
-        {
-            float desiredLongitudinalAccelMps2 = 0.0f;
-            float desiredYawAccelRadps2 = 0.0f;
-
-            MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
-                0.0f,
-                0.0f,
-                0.0f,
-                8.0f,
-                9.0f,
-                400.0f,
-                PlantModel::kDefaultVelocityTargetResponseTimeS,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
-
-            Assert::AreEqual(0.0f, desiredLongitudinalAccelMps2, 1.0e-6f);
-            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
-        }
-
-        TEST_METHOD(ResolveVelocityTargetAsapAccelerationsBalancesCombinedRequestsToSharedArrivalScale)
-        {
-            float desiredLongitudinalAccelMps2 = 0.0f;
-            float desiredYawAccelRadps2 = 0.0f;
-
-            MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
-                0.0f,
-                0.06f,
-                0.0f,
-                8.0f,
-                9.0f,
-                400.0f,
-                PlantModel::kDefaultVelocityTargetResponseTimeS,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
-
-            Assert::AreEqual(3.0f, desiredLongitudinalAccelMps2, 1.0e-4f);
-            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
-        }
-
         TEST_METHOD(DriveBaseDeltaCommandStaysSymmetricAcrossWheelSpeedMismatch)
         {
             DriveBase drive;

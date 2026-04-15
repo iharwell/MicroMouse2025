@@ -460,6 +460,37 @@ namespace MazeMap
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
 
+        void resolveVelocityTargetAccelerations(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            float longitudinalAccelLimitMps2,
+            float yawAccelLimitRadps2,
+            float responseTimeS,
+            float& desiredLongitudinalAccelMps2,
+            float& desiredYawAccelRadps2) const noexcept;
+
+        void resolveWheelMotionTargets(
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            float targetLongitudinalAccelMps2,
+            float targetYawAccelRadps2,
+            const PreparedParams& params,
+            float& leftTargetVelocityMps,
+            float& rightTargetVelocityMps,
+            float& leftTargetAccelMps2,
+            float& rightTargetAccelMps2,
+            float& leftTargetOmegaRadps,
+            float& rightTargetOmegaRadps) const noexcept;
+
+        void resolveBodyVelocityFromWheelSpeeds(
+            float leftWheelLinearVelocityMps,
+            float rightWheelLinearVelocityMps,
+            const PreparedParams& params,
+            float& forwardVelocityMps,
+            float& yawRateRadps) const noexcept;
+
         void velocityTargetTechnicalLimits(
             const StateVector& currentState,
             const PlantParams& params,

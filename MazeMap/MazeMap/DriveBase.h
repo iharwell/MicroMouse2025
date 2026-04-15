@@ -78,92 +78,6 @@ namespace MazeMap
     }
 }
 
-namespace MazeMap::Internal
-{
-    inline void ResolveVelocityTargetAsapAccelerations(
-        float currentForwardVelocityMps,
-        float targetForwardVelocityMps,
-        float currentYawRateRadps,
-        float targetYawRateRadps,
-        float longitudinalAccelLimitMps2,
-        float yawAccelLimitRadps2,
-        float responseTimeS,
-        float& desiredLongitudinalAccelMps2,
-        float& desiredYawAccelRadps2) noexcept
-    {
-        desiredLongitudinalAccelMps2 = 0.0f;
-        desiredYawAccelRadps2 = 0.0f;
-        const float resolvedLongitudinalAccelLimitMps2 =
-            (std::isfinite(longitudinalAccelLimitMps2) && (longitudinalAccelLimitMps2 > 0.0f)) ?
-            longitudinalAccelLimitMps2 :
-            0.0f;
-        const float resolvedYawAccelLimitRadps2 =
-            (std::isfinite(yawAccelLimitRadps2) && (yawAccelLimitRadps2 > 0.0f)) ?
-            yawAccelLimitRadps2 :
-            0.0f;
-
-        const float resolvedResponseTimeS =
-            (std::isfinite(responseTimeS) && (responseTimeS > 0.0f)) ?
-            responseTimeS :
-            MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS;
-        if (!(resolvedResponseTimeS > 0.0f) || !std::isfinite(resolvedResponseTimeS))
-        {
-            return;
-        }
-
-        if (std::isfinite(currentForwardVelocityMps) && std::isfinite(targetForwardVelocityMps))
-        {
-            desiredLongitudinalAccelMps2 =
-                (targetForwardVelocityMps - currentForwardVelocityMps) / resolvedResponseTimeS;
-        }
-        if (std::isfinite(currentYawRateRadps) && std::isfinite(targetYawRateRadps))
-        {
-            desiredYawAccelRadps2 =
-                (targetYawRateRadps - currentYawRateRadps) / resolvedResponseTimeS;
-        }
-
-        if (!(resolvedLongitudinalAccelLimitMps2 > 0.0f))
-        {
-            desiredLongitudinalAccelMps2 = 0.0f;
-        }
-        if (!(resolvedYawAccelLimitRadps2 > 0.0f))
-        {
-            desiredYawAccelRadps2 = 0.0f;
-        }
-
-        const float normalizedLongitudinalDemand =
-            (resolvedLongitudinalAccelLimitMps2 > 0.0f) ?
-            (std::fabs(desiredLongitudinalAccelMps2) / resolvedLongitudinalAccelLimitMps2) :
-            0.0f;
-        const float normalizedYawDemand =
-            (resolvedYawAccelLimitRadps2 > 0.0f) ?
-            (std::fabs(desiredYawAccelRadps2) / resolvedYawAccelLimitRadps2) :
-            0.0f;
-        const float balanceScale =
-            (std::max)(1.0f, (std::max)(normalizedLongitudinalDemand, normalizedYawDemand));
-
-        desiredLongitudinalAccelMps2 /= balanceScale;
-        desiredYawAccelRadps2 /= balanceScale;
-
-        if (resolvedLongitudinalAccelLimitMps2 > 0.0f)
-        {
-            desiredLongitudinalAccelMps2 =
-                (std::clamp)(
-                    desiredLongitudinalAccelMps2,
-                    -resolvedLongitudinalAccelLimitMps2,
-                    resolvedLongitudinalAccelLimitMps2);
-        }
-        if (resolvedYawAccelLimitRadps2 > 0.0f)
-        {
-            desiredYawAccelRadps2 =
-                (std::clamp)(
-                    desiredYawAccelRadps2,
-                    -resolvedYawAccelLimitRadps2,
-                    resolvedYawAccelLimitRadps2);
-        }
-    }
-}
-
 inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(float maxAngularSpeedRadps, float angularAccelRadps2)
 {
     MazeMap::InPlaceTurnProfile profile{};
@@ -365,20 +279,23 @@ public:
         float measuredYawRateRadps = std::numeric_limits<float>::quiet_NaN()) const
     {
         MeasuredKinematics kinematics{};
-        const MazeMap::PlantParams& params = _ukf.ukf().params();
         kinematics.leftVelocityMps = _leftEncoderVelocityMps;
         kinematics.rightVelocityMps = _rightEncoderVelocityMps;
-        kinematics.linearSpeedMps = 0.5f * (kinematics.leftVelocityMps + kinematics.rightVelocityMps);
-        float trackWidthM = params.trackWidthM;
-        if (!(trackWidthM > 0.0f) || !std::isfinite(trackWidthM))
-        {
-            trackWidthM = MazeMap::Vehicle::GetPhysicalModel().trackWidthM;
-        }
-
         const float fallbackYawRateRadps =
-            ((trackWidthM > 0.0f) && std::isfinite(trackWidthM)) ?
-            ((kinematics.leftVelocityMps - kinematics.rightVelocityMps) / trackWidthM) :
-            0.0f;
+            [&]() noexcept
+            {
+                MazeMap::PlantModel plantModel;
+                float resolvedLinearSpeedMps = 0.0f;
+                float resolvedYawRateRadps = 0.0f;
+                plantModel.resolveBodyVelocityFromWheelSpeeds(
+                    kinematics.leftVelocityMps,
+                    kinematics.rightVelocityMps,
+                    _ukf.ukf().preparedParams(),
+                    resolvedLinearSpeedMps,
+                    resolvedYawRateRadps);
+                kinematics.linearSpeedMps = resolvedLinearSpeedMps;
+                return resolvedYawRateRadps;
+            }();
         kinematics.angularSpeedRadps =
             std::isfinite(measuredYawRateRadps) ?
             measuredYawRateRadps :
@@ -1098,7 +1015,8 @@ private:
         encoderObservation.omegaRightRadps = encoderSample.rightOmegaRadps;
         _lastEncoderObservation = encoderObservation;
         _encoderObservationValid = true;
-        (void)_ukf.updateEncoderPair(encoderObservation, dtSeconds, loopHook);
+        const bool updateYawFromEncoder = !std::isfinite(snapshot.gyroRawRadps);
+        (void)_ukf.updateEncoderPair(encoderObservation, dtSeconds, updateYawFromEncoder, loopHook);
 
         beforeYawUpdate();
 
@@ -1361,13 +1279,21 @@ private:
         const MazeMap::DriveCommandSolution& solution) const
     {
         ClosedLoopVelocityCommand command{};
-        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(linearSpeedMps, angularSpeedRadps);
-        command.leftTargetMps = linearSpeedMps + (0.5f * effectiveTrackWidthM * angularSpeedRadps);
-        command.rightTargetMps = linearSpeedMps - (0.5f * effectiveTrackWidthM * angularSpeedRadps);
-        command.leftTargetAccelMps2 =
-            desiredLongitudinalAccelMps2 + (0.5f * effectiveTrackWidthM * desiredYawAccelRadps2);
-        command.rightTargetAccelMps2 =
-            desiredLongitudinalAccelMps2 - (0.5f * effectiveTrackWidthM * desiredYawAccelRadps2);
+        float unusedLeftOmegaRadps = 0.0f;
+        float unusedRightOmegaRadps = 0.0f;
+        MazeMap::PlantModel plantModel;
+        plantModel.resolveWheelMotionTargets(
+            linearSpeedMps,
+            angularSpeedRadps,
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2,
+            _ukf.ukf().preparedParams(),
+            command.leftTargetMps,
+            command.rightTargetMps,
+            command.leftTargetAccelMps2,
+            command.rightTargetAccelMps2,
+            unusedLeftOmegaRadps,
+            unusedRightOmegaRadps);
         command.leftFeedforwardCommand = solution.control.leftMotorCommand;
         command.rightFeedforwardCommand = solution.control.rightMotorCommand;
         return command;
@@ -1445,7 +1371,8 @@ private:
         const float presentYawRateRadps = presentState(MazeMap::VehicleState::kR);
         float desiredLongitudinalAccelMps2 = 0.0f;
         float desiredYawAccelRadps2 = 0.0f;
-        MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
+        MazeMap::PlantModel plantModel;
+        plantModel.resolveVelocityTargetAccelerations(
             presentLinearSpeedMps,
             linearSpeedMps,
             presentYawRateRadps,
@@ -1455,8 +1382,6 @@ private:
             MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS,
             desiredLongitudinalAccelMps2,
             desiredYawAccelRadps2);
-
-        MazeMap::PlantModel plantModel;
         const MazeMap::DriveCommandSolution solution =
             plantModel.solveClosedLoopDriveCommands(
                 presentState,
@@ -1491,63 +1416,6 @@ private:
             presentState,
             maxLongitudinalAccelMps2,
             maxYawAccelRadps2);
-    }
-
-    ClosedLoopVelocityCommand BuildClosedLoopVelocityCommand(
-        float linearSpeedMps,
-        float angularSpeedRadps,
-        float desiredAccelerationMps2) const
-    {
-        MazeMap::VehicleState::StateVector presentState = MazeMap::VehicleState::StateVector::Zero();
-        float batteryVoltageV = 0.0f;
-        GetVelocityCommandOperatingState(presentState, batteryVoltageV);
-
-        const MeasuredKinematics measured = GetMeasuredKinematics();
-        const float presentLinearSpeedMps = presentState(MazeMap::VehicleState::kU);
-        const float effectiveTrackWidthM = MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(linearSpeedMps, angularSpeedRadps);
-        const float targetLeftMps = linearSpeedMps + (0.5f * effectiveTrackWidthM * angularSpeedRadps);
-        const float targetRightMps = linearSpeedMps - (0.5f * effectiveTrackWidthM * angularSpeedRadps);
-        const float accelerationLimitMps2 =
-            (std::isfinite(desiredAccelerationMps2) && (desiredAccelerationMps2 > 0.0f)) ?
-            desiredAccelerationMps2 :
-            0.0f;
-        float leftTargetAccelMps2 = 0.0f;
-        float rightTargetAccelMps2 = 0.0f;
-        if ((effectiveTrackWidthM > 0.0f) && (accelerationLimitMps2 > 0.0f))
-        {
-            leftTargetAccelMps2 =
-                (std::clamp)(
-                    (targetLeftMps - measured.leftVelocityMps) / MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS,
-                    -accelerationLimitMps2,
-                    accelerationLimitMps2);
-            rightTargetAccelMps2 =
-                (std::clamp)(
-                    (targetRightMps - measured.rightVelocityMps) / MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS,
-                    -accelerationLimitMps2,
-                    accelerationLimitMps2);
-        }
-
-        const float desiredLongitudinalAccelMps2 = 0.5f * (leftTargetAccelMps2 + rightTargetAccelMps2);
-        const float desiredYawAccelRadps2 =
-            (effectiveTrackWidthM > 0.0f) ?
-            ((leftTargetAccelMps2 - rightTargetAccelMps2) / effectiveTrackWidthM) :
-            0.0f;
-
-        MazeMap::PlantModel plantModel;
-        const MazeMap::DriveCommandSolution solution =
-            plantModel.solveClosedLoopDriveCommands(
-                presentState,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2,
-                _ukf.ukf().preparedParams(),
-                GetMissionFanDutyCycle(),
-                batteryVoltageV);
-        return BuildClosedLoopVelocityCommandFromSolution(
-            linearSpeedMps,
-            angularSpeedRadps,
-            desiredLongitudinalAccelMps2,
-            desiredYawAccelRadps2,
-            solution);
     }
 
     ResolvedVelocityDriveSignal ResolveClosedLoopVelocityDriveSignal(

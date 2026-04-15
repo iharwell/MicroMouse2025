@@ -458,24 +458,29 @@ void DriveBase::ResolveWheelTargets(
     float desiredYawRateRadps,
     CommandTargets& targets) const
 {
-    const float effectiveTrackWidthM =
-        MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(
-            desiredLinearSpeedMps,
-            desiredYawRateRadps);
+    float unusedLeftTargetAccelMps2 = 0.0f;
+    float unusedRightTargetAccelMps2 = 0.0f;
+    float leftTargetOmegaRadps = 0.0f;
+    float rightTargetOmegaRadps = 0.0f;
+    MazeMap::PlantModel plantModel;
+    plantModel.resolveWheelMotionTargets(
+        desiredLinearSpeedMps,
+        desiredYawRateRadps,
+        0.0f,
+        0.0f,
+        _ukf.ukf().preparedParams(),
+        targets.leftWheelLinearTargetMps,
+        targets.rightWheelLinearTargetMps,
+        unusedLeftTargetAccelMps2,
+        unusedRightTargetAccelMps2,
+        leftTargetOmegaRadps,
+        rightTargetOmegaRadps);
     targets.hasWheelLinearTargets = true;
-    targets.leftWheelLinearTargetMps =
-        desiredLinearSpeedMps + (0.5f * effectiveTrackWidthM * desiredYawRateRadps);
-    targets.rightWheelLinearTargetMps =
-        desiredLinearSpeedMps - (0.5f * effectiveTrackWidthM * desiredYawRateRadps);
-
-    const float wheelRadiusM = ResolvePositiveOrZero(_ukf.ukf().preparedParams().wheelRadiusM);
-    if (wheelRadiusM > 0.0f)
+    if (_ukf.ukf().preparedParams().wheelRadiusM > 0.0f)
     {
         targets.hasWheelOmegaTargets = true;
-        targets.leftWheelOmegaTargetRadps =
-            targets.leftWheelLinearTargetMps / wheelRadiusM;
-        targets.rightWheelOmegaTargetRadps =
-            targets.rightWheelLinearTargetMps / wheelRadiusM;
+        targets.leftWheelOmegaTargetRadps = leftTargetOmegaRadps;
+        targets.rightWheelOmegaTargetRadps = rightTargetOmegaRadps;
     }
 }
 
@@ -484,13 +489,18 @@ void DriveBase::ResolveVelocityPointAcceleration(
     float desiredLinearSpeedMps,
     float& desiredLongitudinalAccelMps2) const noexcept
 {
-    desiredLongitudinalAccelMps2 =
-        (desiredLinearSpeedMps - context.presentLinearSpeedMps) /
-        ResolveCommandResponseTimeS();
-    desiredLongitudinalAccelMps2 =
-        ClampMagnitude(
-            desiredLongitudinalAccelMps2,
-            context.maxLongitudinalAccelMps2);
+    float unusedDesiredYawAccelRadps2 = 0.0f;
+    MazeMap::PlantModel plantModel;
+    plantModel.resolveVelocityTargetAccelerations(
+        context.presentLinearSpeedMps,
+        desiredLinearSpeedMps,
+        context.presentYawRateRadps,
+        context.presentYawRateRadps,
+        context.maxLongitudinalAccelMps2,
+        (std::numeric_limits<float>::max)(),
+        ResolveCommandResponseTimeS(),
+        desiredLongitudinalAccelMps2,
+        unusedDesiredYawAccelRadps2);
 }
 
 void DriveBase::ResolveYawPointAcceleration(
@@ -498,13 +508,18 @@ void DriveBase::ResolveYawPointAcceleration(
     float desiredYawRateRadps,
     float& desiredYawAccelRadps2) const noexcept
 {
-    desiredYawAccelRadps2 =
-        (desiredYawRateRadps - context.presentYawRateRadps) /
-        ResolveCommandResponseTimeS();
-    desiredYawAccelRadps2 =
-        ClampMagnitude(
-            desiredYawAccelRadps2,
-            context.maxYawAccelRadps2);
+    float unusedDesiredLongitudinalAccelMps2 = 0.0f;
+    MazeMap::PlantModel plantModel;
+    plantModel.resolveVelocityTargetAccelerations(
+        context.presentLinearSpeedMps,
+        context.presentLinearSpeedMps,
+        context.presentYawRateRadps,
+        desiredYawRateRadps,
+        (std::numeric_limits<float>::max)(),
+        context.maxYawAccelRadps2,
+        ResolveCommandResponseTimeS(),
+        unusedDesiredLongitudinalAccelMps2,
+        desiredYawAccelRadps2);
 }
 
 void DriveBase::ResolveVelocityPointAccelerations(
@@ -514,7 +529,8 @@ void DriveBase::ResolveVelocityPointAccelerations(
     float& desiredLongitudinalAccelMps2,
     float& desiredYawAccelRadps2) const noexcept
 {
-    MazeMap::Internal::ResolveVelocityTargetAsapAccelerations(
+    MazeMap::PlantModel plantModel;
+    plantModel.resolveVelocityTargetAccelerations(
         context.presentLinearSpeedMps,
         desiredLinearSpeedMps,
         context.presentYawRateRadps,

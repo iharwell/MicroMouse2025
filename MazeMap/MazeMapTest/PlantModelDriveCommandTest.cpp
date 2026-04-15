@@ -99,6 +99,118 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaR)));
         }
 
+        TEST_METHOD(PlantModelResolveVelocityTargetAccelerationsUsesLongitudinalLimitForPureSpeedChange)
+        {
+            PlantModel plant;
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            plant.resolveVelocityTargetAccelerations(
+                0.0f,
+                0.30f,
+                0.0f,
+                0.0f,
+                9.0f,
+                400.0f,
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            Assert::AreEqual(9.0f, desiredLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(0.0f, desiredYawAccelRadps2, 1.0e-6f);
+        }
+
+        TEST_METHOD(PlantModelResolveVelocityTargetAccelerationsUsesYawLimitForPureYawChange)
+        {
+            PlantModel plant;
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            plant.resolveVelocityTargetAccelerations(
+                0.0f,
+                0.0f,
+                0.0f,
+                8.0f,
+                9.0f,
+                400.0f,
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            Assert::AreEqual(0.0f, desiredLongitudinalAccelMps2, 1.0e-6f);
+            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
+        }
+
+        TEST_METHOD(PlantModelResolveVelocityTargetAccelerationsBalancesCombinedRequestsToSharedArrivalScale)
+        {
+            PlantModel plant;
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            plant.resolveVelocityTargetAccelerations(
+                0.0f,
+                0.06f,
+                0.0f,
+                8.0f,
+                9.0f,
+                400.0f,
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            Assert::AreEqual(3.0f, desiredLongitudinalAccelMps2, 1.0e-4f);
+            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
+        }
+
+        TEST_METHOD(PlantModelResolveWheelMotionTargetsUsesEffectiveTrackWidthAndWheelRadius)
+        {
+            PlantModel plant;
+            const PlantModel::PreparedParams params = PlantModel::Prepare(PlantParams::Default());
+            constexpr float targetForwardVelocityMps = 0.30f;
+            constexpr float targetYawRateRadps = (0.30f / 0.063f);
+            constexpr float targetLongitudinalAccelMps2 = 3.0f;
+            constexpr float targetYawAccelRadps2 = 40.0f;
+            float leftTargetVelocityMps = 0.0f;
+            float rightTargetVelocityMps = 0.0f;
+            float leftTargetAccelMps2 = 0.0f;
+            float rightTargetAccelMps2 = 0.0f;
+            float leftTargetOmegaRadps = 0.0f;
+            float rightTargetOmegaRadps = 0.0f;
+
+            plant.resolveWheelMotionTargets(
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                targetLongitudinalAccelMps2,
+                targetYawAccelRadps2,
+                params,
+                leftTargetVelocityMps,
+                rightTargetVelocityMps,
+                leftTargetAccelMps2,
+                rightTargetAccelMps2,
+                leftTargetOmegaRadps,
+                rightTargetOmegaRadps);
+
+            const float effectiveTrackWidthM =
+                Vehicle::GetEffectiveTrackWidthForMotion(
+                    targetForwardVelocityMps,
+                    targetYawRateRadps);
+            const float expectedLeftTargetVelocityMps =
+                targetForwardVelocityMps + (0.5f * effectiveTrackWidthM * targetYawRateRadps);
+            const float expectedRightTargetVelocityMps =
+                targetForwardVelocityMps - (0.5f * effectiveTrackWidthM * targetYawRateRadps);
+            const float expectedLeftTargetAccelMps2 =
+                targetLongitudinalAccelMps2 + (0.5f * effectiveTrackWidthM * targetYawAccelRadps2);
+            const float expectedRightTargetAccelMps2 =
+                targetLongitudinalAccelMps2 - (0.5f * effectiveTrackWidthM * targetYawAccelRadps2);
+
+            Assert::AreEqual(expectedLeftTargetVelocityMps, leftTargetVelocityMps, 1.0e-6f);
+            Assert::AreEqual(expectedRightTargetVelocityMps, rightTargetVelocityMps, 1.0e-6f);
+            Assert::AreEqual(expectedLeftTargetAccelMps2, leftTargetAccelMps2, 1.0e-6f);
+            Assert::AreEqual(expectedRightTargetAccelMps2, rightTargetAccelMps2, 1.0e-6f);
+            Assert::AreEqual(expectedLeftTargetVelocityMps * params.invWheelRadiusM, leftTargetOmegaRadps, 1.0e-6f);
+            Assert::AreEqual(expectedRightTargetVelocityMps * params.invWheelRadiusM, rightTargetOmegaRadps, 1.0e-6f);
+        }
+
         TEST_METHOD(PlantModelVelocityTargetTechnicalLimitsReportReachableEnvelope)
         {
             PlantModel plant;

@@ -384,6 +384,123 @@ namespace MazeMap
             Assert::IsTrue(state(VehicleState::kU) > 0.0f);
         }
 
+        TEST_METHOD(SrUkfCoreEncoderUpdateCanPreserveYawStatesWhenRequested)
+        {
+            const PlantParams params = PlantParams::Default();
+            const float distancePerCountM = DistancePerEncoderCountMeters(params);
+            const auto formatState = [](const VehicleState::StateVector& state) -> std::wstring
+            {
+                return
+                    L"px=" + std::to_wstring(state(VehicleState::kPx)) +
+                    L", py=" + std::to_wstring(state(VehicleState::kPy)) +
+                    L", psi=" + std::to_wstring(state(VehicleState::kPsi)) +
+                    L", u=" + std::to_wstring(state(VehicleState::kU)) +
+                    L", v=" + std::to_wstring(state(VehicleState::kV)) +
+                    L", r=" + std::to_wstring(state(VehicleState::kR)) +
+                    L", omegaL=" + std::to_wstring(state(VehicleState::kOmegaL)) +
+                    L", omegaR=" + std::to_wstring(state(VehicleState::kOmegaR)) +
+                    L", bgz=" + std::to_wstring(state(VehicleState::kBgz));
+            };
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.01f,
+                    0.09f,
+                    0.18f,
+                    0.15f,
+                    0.02f,
+                    0.25f,
+                    1.8f,
+                    1.7f,
+                    0.01f);
+            const VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.04f, 0.12f, 0.20f, 0.02f);
+
+            SrUkfCore coreWithEncoderYaw(params);
+            SrUkfCore coreWithoutEncoderYaw(params);
+            Assert::IsTrue(coreWithEncoderYaw.reset(initialState, initialCovariance));
+            Assert::IsTrue(coreWithoutEncoderYaw.reset(initialState, initialCovariance));
+
+            ControlInput control{};
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+            constexpr float dt = 0.010f;
+            Assert::IsTrue(coreWithEncoderYaw.predict(dt, control));
+            Assert::IsTrue(coreWithoutEncoderYaw.predict(dt, control));
+
+            const VehicleState::StateVector predictedState = coreWithoutEncoderYaw.state();
+            const VehicleState::StateMatrix predictedCovariance = coreWithoutEncoderYaw.covariance();
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 4;
+            encoder.totalRightCounts = 2;
+            encoder.omegaLeftRadps =
+                (static_cast<float>(encoder.totalLeftCounts) * distancePerCountM) /
+                (params.wheelRadiusM * dt);
+            encoder.omegaRightRadps =
+                (static_cast<float>(encoder.totalRightCounts) * distancePerCountM) /
+                (params.wheelRadiusM * dt);
+
+            const MeasurementUpdateResult withYawResult =
+                coreWithEncoderYaw.updateEncoderPair(encoder, dt);
+            const MeasurementUpdateResult withoutYawResult =
+                coreWithoutEncoderYaw.updateEncoderPair(encoder, dt, false);
+            Assert::IsTrue(withYawResult.attempted);
+            Assert::IsTrue(withYawResult.accepted);
+            Assert::IsTrue(withoutYawResult.attempted);
+            Assert::IsTrue(withoutYawResult.accepted);
+
+            const VehicleState::StateVector& stateWithEncoderYaw = coreWithEncoderYaw.state();
+            const VehicleState::StateVector& stateWithoutEncoderYaw = coreWithoutEncoderYaw.state();
+            const VehicleState::StateMatrix covarianceWithoutEncoderYaw = coreWithoutEncoderYaw.covariance();
+            const float leftDistanceM = static_cast<float>(encoder.totalLeftCounts) * distancePerCountM;
+            const float rightDistanceM = static_cast<float>(encoder.totalRightCounts) * distancePerCountM;
+            const float forwardDistanceM = 0.5f * (leftDistanceM + rightDistanceM);
+            const float deltaYawRad = (leftDistanceM - rightDistanceM) / params.trackWidthM;
+            const float translationYawRad =
+                VehicleState::NormalizeAngle(initialState(VehicleState::kPsi) + (0.5f * deltaYawRad));
+            const float expectedPx =
+                initialState(VehicleState::kPx) + (forwardDistanceM * std::sin(translationYawRad));
+            const float expectedPy =
+                initialState(VehicleState::kPy) + (forwardDistanceM * std::cos(translationYawRad));
+            const float expectedLinearSpeedMps =
+                0.5f * params.wheelRadiusM * (encoder.omegaLeftRadps + encoder.omegaRightRadps);
+
+            Assert::IsTrue(
+                std::fabs(stateWithEncoderYaw(VehicleState::kPsi) - predictedState(VehicleState::kPsi)) > 1.0e-5f,
+                (L"predicted=" + formatState(predictedState) +
+                    L"; withEncoderYaw=" + formatState(stateWithEncoderYaw)).c_str());
+            Assert::IsTrue(
+                std::fabs(stateWithEncoderYaw(VehicleState::kR) - predictedState(VehicleState::kR)) > 1.0e-5f,
+                (L"predicted=" + formatState(predictedState) +
+                    L"; withEncoderYaw=" + formatState(stateWithEncoderYaw)).c_str());
+            Assert::AreEqual(
+                predictedState(VehicleState::kPsi),
+                stateWithoutEncoderYaw(VehicleState::kPsi),
+                1.0e-6f);
+            Assert::AreEqual(
+                predictedState(VehicleState::kR),
+                stateWithoutEncoderYaw(VehicleState::kR),
+                1.0e-6f);
+            Assert::AreEqual(
+                predictedCovariance(VehicleState::kPsi, VehicleState::kPsi),
+                covarianceWithoutEncoderYaw(VehicleState::kPsi, VehicleState::kPsi),
+                1.0e-6f);
+            Assert::AreEqual(
+                predictedCovariance(VehicleState::kR, VehicleState::kR),
+                covarianceWithoutEncoderYaw(VehicleState::kR, VehicleState::kR),
+                1.0e-6f);
+            Assert::AreEqual(expectedPx, stateWithEncoderYaw(VehicleState::kPx), 1.0e-6f);
+            Assert::AreEqual(expectedPy, stateWithEncoderYaw(VehicleState::kPy), 1.0e-6f);
+            Assert::AreEqual(expectedPx, stateWithoutEncoderYaw(VehicleState::kPx), 1.0e-6f);
+            Assert::AreEqual(expectedPy, stateWithoutEncoderYaw(VehicleState::kPy), 1.0e-6f);
+            Assert::AreEqual(expectedLinearSpeedMps, stateWithEncoderYaw(VehicleState::kU), 1.0e-6f);
+            Assert::AreEqual(expectedLinearSpeedMps, stateWithoutEncoderYaw(VehicleState::kU), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaLeftRadps, stateWithEncoderYaw(VehicleState::kOmegaL), 1.0e-5f);
+            Assert::AreEqual(encoder.omegaRightRadps, stateWithEncoderYaw(VehicleState::kOmegaR), 1.0e-5f);
+            Assert::AreEqual(encoder.omegaLeftRadps, stateWithoutEncoderYaw(VehicleState::kOmegaL), 1.0e-5f);
+            Assert::AreEqual(encoder.omegaRightRadps, stateWithoutEncoderYaw(VehicleState::kOmegaR), 1.0e-5f);
+        }
+
         TEST_METHOD(SrUkfCoreSplitDrivePredictBuildsTurnRateWhileKeepingForwardProgress)
         {
             const PlantParams params = PlantParams::Default();

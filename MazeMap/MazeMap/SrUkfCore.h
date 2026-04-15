@@ -213,18 +213,23 @@ namespace MazeMap
                 });
         }
 
-        MeasurementUpdateResult updateEncoderPair(const EncoderObs& observation, float dt) noexcept;
+        MeasurementUpdateResult updateEncoderPair(
+            const EncoderObs& observation,
+            float dt,
+            bool updateYaw = true) noexcept;
 
         template <typename LoopHook>
         MeasurementUpdateResult updateEncoderPair(
             const EncoderObs& observation,
             float dt,
+            bool updateYaw,
             LoopHook&& loopHook) noexcept
         {
             using HookType = std::remove_reference_t<LoopHook>;
             return updateEncoderPairImpl(
                 observation,
                 dt,
+                updateYaw,
                 const_cast<void*>(static_cast<const void*>(&loopHook)),
                 [](void* context) noexcept
                 {
@@ -321,6 +326,7 @@ namespace MazeMap
         MeasurementUpdateResult updateEncoderPairImpl(
             const EncoderObs& observation,
             float dt,
+            bool updateYaw,
             void* loopHookContext,
             LoopHookInvoker loopHook) noexcept;
         MeasurementUpdateResult updateYawRateImpl(
@@ -337,8 +343,16 @@ namespace MazeMap
             void* loopHookContext,
             LoopHookInvoker loopHook) noexcept;
         void updateNonholonomicDiagnostics(bool constraintEnabled) noexcept;
-        void anchorPoseToEncoderDelta(StateVector& anchoredState, const EncoderObs& measured) const noexcept;
-        void applyWheelRateConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
+        void anchorPoseToEncoderDelta(
+            StateVector& anchoredState,
+            const EncoderObs& measured,
+            bool updateYaw) const noexcept;
+        void applyWheelRateConstraint(
+            const StateVector& priorState,
+            const StateMatrix& priorCovariance,
+            const EncoderObs& measured,
+            float wheelVarianceRadps2,
+            bool updateYaw) noexcept;
         void applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
         void applyPivotScrubEncoderWheelConstraint(
             const StateVector& priorState,
