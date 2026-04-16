@@ -3,9 +3,10 @@
 
 #include "EstimatorTestSupport.h"
 #include "PlantModelTestSupport.h"
-#include "..\MazeMap\SrUkfCore.h"
 
+#include <algorithm>
 #include <cmath>
+#include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -14,8 +15,23 @@ namespace MazeMap
     namespace
     {
         constexpr float kPredictDtSeconds = 0.001f;
-        constexpr int kHoldFeedforwardPredictSteps = 4000;
-        constexpr int kVelocityTargetPredictSteps = 6000;
+        constexpr int kFeedforwardPredictSteps = 1000;
+        constexpr float kFeedforwardRelativeTolerance = 0.10f;
+
+        struct FeedforwardPredictHorizon
+        {
+            int steps;
+            const wchar_t* label;
+        };
+
+        constexpr FeedforwardPredictHorizon kExtendedFeedforwardPredictHorizons[] =
+        {
+            { 500, L"500 ms" },
+            { 550, L"550 ms" },
+            { 750, L"750 ms" },
+            { 990, L"990 ms" },
+            { 1950, L"1950 ms" },
+        };
 
         VehicleState::StateVector BuildRollingUkfState(
             float forwardVelocityMps,
@@ -35,38 +51,38 @@ namespace MazeMap
                 0.0f);
         }
 
-        void ResetPredictCore(
-            SrUkfCore& core,
-            const VehicleState::StateVector& initialState)
-        {
-            Assert::IsTrue(
-                core.reset(
-                    initialState,
-                    BuildUkfCovariance(0.01f, 0.001f, 0.005f, 0.005f, 0.05f, 0.05f, 0.02f)));
-        }
-
-        void RunPredictLoop(
-            SrUkfCore& core,
+        VehicleState::StateVector RunPlantPredictLoop(
+            const PlantModel& plant,
+            const PlantModel::PreparedParams& prepared,
+            const VehicleState::StateVector& initialState,
             const ControlInput& control,
             int steps)
         {
+            VehicleState::StateVector state = initialState;
             for (int step = 0; step < steps; ++step)
             {
-                Assert::IsTrue(core.predict(kPredictDtSeconds, control));
+                state = plant.integrate(state, control, kPredictDtSeconds, prepared);
             }
+
+            return state;
         }
 
         template <typename Solver>
-        void RunPredictLoopWithResolvedFeedforward(
-            SrUkfCore& core,
+        VehicleState::StateVector RunPlantPredictLoopWithResolvedFeedforward(
+            const PlantModel& plant,
+            const PlantModel::PreparedParams& prepared,
+            const VehicleState::StateVector& initialState,
             int steps,
             Solver&& solveFeedforward)
         {
+            VehicleState::StateVector state = initialState;
             for (int step = 0; step < steps; ++step)
             {
-                const DriveCommandSolution solution = solveFeedforward(core.state());
-                Assert::IsTrue(core.predict(kPredictDtSeconds, solution.control));
+                const DriveCommandSolution solution = solveFeedforward(state);
+                state = plant.integrate(state, solution.control, kPredictDtSeconds, prepared);
             }
+
+            return state;
         }
 
         void AssertPredictStateNearTarget(
@@ -80,6 +96,75 @@ namespace MazeMap
             Assert::AreEqual(expectedForwardVelocityMps, state(VehicleState::kU), forwardToleranceMps);
             Assert::AreEqual(expectedYawRateRadps, state(VehicleState::kR), yawToleranceRadps);
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) <= maxLateralVelocityMps);
+        }
+
+        float RelativeTolerance(float expectedValue, float minimumTolerance) noexcept
+        {
+            return (std::max)(minimumTolerance, std::fabs(expectedValue) * kFeedforwardRelativeTolerance);
+        }
+
+        void AssertPredictStateNearTargetWithContext(
+            const VehicleState::StateVector& state,
+            float expectedForwardVelocityMps,
+            float expectedYawRateRadps,
+            float forwardToleranceMps,
+            float yawToleranceRadps,
+            float maxLateralVelocityMps,
+            const std::wstring& context)
+        {
+            const float forwardVelocityMps = state(VehicleState::kU);
+            const float yawRateRadps = state(VehicleState::kR);
+            const float lateralVelocityMps = state(VehicleState::kV);
+            if ((std::fabs(forwardVelocityMps - expectedForwardVelocityMps) > forwardToleranceMps) ||
+                (std::fabs(yawRateRadps - expectedYawRateRadps) > yawToleranceRadps) ||
+                (std::fabs(lateralVelocityMps) > maxLateralVelocityMps))
+            {
+                const std::wstring message =
+                    context +
+                    (std::wstring(L": predicted U,R,V = ") +
+                        std::to_wstring(forwardVelocityMps) + L"," +
+                        std::to_wstring(yawRateRadps) + L"," +
+                        std::to_wstring(lateralVelocityMps) +
+                        L" expected U,R = " +
+                        std::to_wstring(expectedForwardVelocityMps) + L"," +
+                        std::to_wstring(expectedYawRateRadps) +
+                        L" tolerances U,R,V = " +
+                        std::to_wstring(forwardToleranceMps) + L"," +
+                        std::to_wstring(yawToleranceRadps) + L"," +
+                        std::to_wstring(maxLateralVelocityMps));
+                Assert::Fail(message.c_str());
+            }
+        }
+
+        template <typename Solver>
+        void AssertVelocityTargetFeedforwardAcrossHorizons(
+            const PlantModel& plant,
+            const PlantModel::PreparedParams& prepared,
+            const PlantParams& params,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            Solver&& solveFeedforward,
+            const wchar_t* scenarioLabel)
+        {
+            const auto& solver = solveFeedforward;
+            for (const FeedforwardPredictHorizon& horizon : kExtendedFeedforwardPredictHorizons)
+            {
+                const VehicleState::StateVector predictedState =
+                    RunPlantPredictLoopWithResolvedFeedforward(
+                        plant,
+                        prepared,
+                        BuildRollingUkfState(0.0f, 0.0f, params),
+                        horizon.steps,
+                        solver);
+                AssertPredictStateNearTargetWithContext(
+                    predictedState,
+                    targetForwardVelocityMps,
+                    targetYawRateRadps,
+                    RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                    RelativeTolerance(targetYawRateRadps, 0.02f),
+                    0.04f,
+                    std::wstring(scenarioLabel) + L" @ " + horizon.label);
+            }
         }
     }
 
@@ -172,10 +257,45 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaR)));
         }
 
-        TEST_METHOD(PlantModelSolveDriveCommandsStateFeedforwardAgreesWithPredict)
+        TEST_METHOD(PlantModelSolveDriveCommandsReducedFeedforwardHoldsOperatingPointInPredict)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            constexpr float targetForwardVelocityMps = 0.20f;
+            const DriveCommandSolution solution =
+                plant.solveDriveCommands(
+                    targetForwardVelocityMps,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoop(
+                    plant,
+                    prepared,
+                    BuildRollingUkfState(targetForwardVelocityMps, 0.0f, params),
+                    solution.control,
+                    kFeedforwardPredictSteps);
+
+            Assert::IsFalse(solution.tractionLimited);
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                0.0f,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                0.02f,
+                0.02f);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsStateFeedforwardHoldsOperatingPointInPredict)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             const VehicleState::StateVector operatingState =
                 BuildRollingUkfState(targetForwardVelocityMps, 0.0f, params);
@@ -186,20 +306,31 @@ namespace MazeMap
                     0.0f,
                     params,
                     0.80f,
-                    params.supplyVoltageV);
+                     params.supplyVoltageV);
 
-            SrUkfCore core(params);
-            ResetPredictCore(core, BuildRollingUkfState(0.0f, 0.0f, params));
-            RunPredictLoop(core, solution.control, kHoldFeedforwardPredictSteps);
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoop(
+                    plant,
+                    prepared,
+                    operatingState,
+                    solution.control,
+                    kFeedforwardPredictSteps);
 
             Assert::IsFalse(solution.tractionLimited);
-            AssertPredictStateNearTarget(core.state(), targetForwardVelocityMps, 0.0f, 0.03f, 0.03f, 0.02f);
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                0.0f,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                0.02f,
+                0.02f);
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsReducedFeedforwardAgreesWithPredict)
+        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsReducedFeedforwardHoldsOperatingPointInPredict)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             const DriveCommandSolution solution =
                 plant.solveClosedLoopDriveCommands(
@@ -211,18 +342,29 @@ namespace MazeMap
                     0.80f,
                     params.supplyVoltageV);
 
-            SrUkfCore core(params);
-            ResetPredictCore(core, BuildRollingUkfState(0.0f, 0.0f, params));
-            RunPredictLoop(core, solution.control, kHoldFeedforwardPredictSteps);
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoop(
+                    plant,
+                    prepared,
+                    BuildRollingUkfState(targetForwardVelocityMps, 0.0f, params),
+                    solution.control,
+                    kFeedforwardPredictSteps);
 
             Assert::IsFalse(solution.tractionLimited);
-            AssertPredictStateNearTarget(core.state(), targetForwardVelocityMps, 0.0f, 0.03f, 0.03f, 0.02f);
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                0.0f,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                0.02f,
+                0.02f);
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsStateFeedforwardAgreesWithPredict)
+        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsStateFeedforwardHoldsOperatingPointInPredict)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             const VehicleState::StateVector operatingState =
                 BuildRollingUkfState(targetForwardVelocityMps, 0.0f, params);
@@ -233,14 +375,24 @@ namespace MazeMap
                     0.0f,
                     params,
                     0.80f,
-                    params.supplyVoltageV);
+                     params.supplyVoltageV);
 
-            SrUkfCore core(params);
-            ResetPredictCore(core, BuildRollingUkfState(0.0f, 0.0f, params));
-            RunPredictLoop(core, solution.control, kHoldFeedforwardPredictSteps);
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoop(
+                    plant,
+                    prepared,
+                    operatingState,
+                    solution.control,
+                    kFeedforwardPredictSteps);
 
             Assert::IsFalse(solution.tractionLimited);
-            AssertPredictStateNearTarget(core.state(), targetForwardVelocityMps, 0.0f, 0.03f, 0.03f, 0.02f);
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                0.0f,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                0.02f,
+                0.02f);
         }
 
         TEST_METHOD(PlantModelResolveVelocityTargetAccelerationsUsesLongitudinalLimitForPureSpeedChange)
@@ -455,19 +607,167 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
         }
 
-        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReducedFeedforwardAgreesWithPredict)
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
             constexpr float responseTimeS = 0.10f;
 
-            SrUkfCore core(params);
-            ResetPredictCore(core, BuildRollingUkfState(0.0f, 0.0f, params));
-            RunPredictLoopWithResolvedFeedforward(
-                core,
-                kVelocityTargetPredictSteps,
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoopWithResolvedFeedforward(
+                    plant,
+                    prepared,
+                    BuildRollingUkfState(0.0f, 0.0f, params),
+                    kFeedforwardPredictSteps,
+                    [&](const VehicleState::StateVector& state)
+                    {
+                        return plant.solveDriveCommandsForVelocityTarget(
+                            state(VehicleState::kU),
+                            targetForwardVelocityMps,
+                            state(VehicleState::kR),
+                            targetYawRateRadps,
+                            params,
+                            0.80f,
+                            params.supplyVoltageV,
+                            responseTimeS);
+                    });
+
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                RelativeTolerance(targetYawRateRadps, 0.02f),
+                0.04f);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            constexpr float targetForwardVelocityMps = 0.20f;
+            constexpr float targetYawRateRadps = 0.60f;
+            constexpr float responseTimeS = 0.10f;
+
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoopWithResolvedFeedforward(
+                    plant,
+                    prepared,
+                    BuildRollingUkfState(0.0f, 0.0f, params),
+                    kFeedforwardPredictSteps,
+                    [&](const VehicleState::StateVector& state)
+                    {
+                        return plant.solveDriveCommandsForVelocityTarget(
+                            state,
+                            targetForwardVelocityMps,
+                            targetYawRateRadps,
+                            params,
+                            0.80f,
+                            params.supplyVoltageV,
+                            responseTimeS);
+                    });
+
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                RelativeTolerance(targetYawRateRadps, 0.02f),
+                0.04f);
+        }
+
+        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            constexpr float targetForwardVelocityMps = 0.20f;
+            constexpr float targetYawRateRadps = 0.60f;
+            constexpr float responseTimeS = 0.10f;
+
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoopWithResolvedFeedforward(
+                    plant,
+                    prepared,
+                    BuildRollingUkfState(0.0f, 0.0f, params),
+                    kFeedforwardPredictSteps,
+                    [&](const VehicleState::StateVector& state)
+                    {
+                        return plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                            state(VehicleState::kU),
+                            targetForwardVelocityMps,
+                            state(VehicleState::kR),
+                            targetYawRateRadps,
+                            params,
+                            0.80f,
+                            params.supplyVoltageV,
+                            responseTimeS);
+                    });
+
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                RelativeTolerance(targetYawRateRadps, 0.02f),
+                0.04f);
+        }
+
+        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            constexpr float targetForwardVelocityMps = 0.20f;
+            constexpr float targetYawRateRadps = 0.60f;
+            constexpr float responseTimeS = 0.10f;
+
+            const VehicleState::StateVector predictedState =
+                RunPlantPredictLoopWithResolvedFeedforward(
+                    plant,
+                    prepared,
+                    BuildRollingUkfState(0.0f, 0.0f, params),
+                    kFeedforwardPredictSteps,
+                    [&](const VehicleState::StateVector& state)
+                    {
+                        return plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                            state,
+                            targetForwardVelocityMps,
+                            targetYawRateRadps,
+                            params,
+                            0.80f,
+                            params.supplyVoltageV,
+                            responseTimeS);
+                    });
+
+            AssertPredictStateNearTarget(
+                predictedState,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                RelativeTolerance(targetForwardVelocityMps, 0.01f),
+                RelativeTolerance(targetYawRateRadps, 0.02f),
+                0.04f);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            constexpr float targetForwardVelocityMps = 0.20f;
+            constexpr float targetYawRateRadps = 0.60f;
+            constexpr float responseTimeS = 0.10f;
+
+            AssertVelocityTargetFeedforwardAcrossHorizons(
+                plant,
+                prepared,
+                params,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
                 [&](const VehicleState::StateVector& state)
                 {
                     return plant.solveDriveCommandsForVelocityTarget(
@@ -479,24 +779,25 @@ namespace MazeMap
                         0.80f,
                         params.supplyVoltageV,
                         responseTimeS);
-                });
-
-            AssertPredictStateNearTarget(core.state(), targetForwardVelocityMps, targetYawRateRadps, 0.03f, 0.08f, 0.04f);
+                },
+                L"Reduced open-loop velocity target");
         }
 
-        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetStateFeedforwardAgreesWithPredict)
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
             constexpr float responseTimeS = 0.10f;
 
-            SrUkfCore core(params);
-            ResetPredictCore(core, BuildRollingUkfState(0.0f, 0.0f, params));
-            RunPredictLoopWithResolvedFeedforward(
-                core,
-                kVelocityTargetPredictSteps,
+            AssertVelocityTargetFeedforwardAcrossHorizons(
+                plant,
+                prepared,
+                params,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
                 [&](const VehicleState::StateVector& state)
                 {
                     return plant.solveDriveCommandsForVelocityTarget(
@@ -507,24 +808,25 @@ namespace MazeMap
                         0.80f,
                         params.supplyVoltageV,
                         responseTimeS);
-                });
-
-            AssertPredictStateNearTarget(core.state(), targetForwardVelocityMps, targetYawRateRadps, 0.03f, 0.08f, 0.04f);
+                },
+                L"State open-loop velocity target");
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetReducedFeedforwardAgreesWithPredict)
+        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
             constexpr float responseTimeS = 0.10f;
 
-            SrUkfCore core(params);
-            ResetPredictCore(core, BuildRollingUkfState(0.0f, 0.0f, params));
-            RunPredictLoopWithResolvedFeedforward(
-                core,
-                kVelocityTargetPredictSteps,
+            AssertVelocityTargetFeedforwardAcrossHorizons(
+                plant,
+                prepared,
+                params,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
                 [&](const VehicleState::StateVector& state)
                 {
                     return plant.solveClosedLoopDriveCommandsForVelocityTarget(
@@ -536,24 +838,25 @@ namespace MazeMap
                         0.80f,
                         params.supplyVoltageV,
                         responseTimeS);
-                });
-
-            AssertPredictStateNearTarget(core.state(), targetForwardVelocityMps, targetYawRateRadps, 0.03f, 0.08f, 0.04f);
+                },
+                L"Reduced closed-loop velocity target");
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetStateFeedforwardAgreesWithPredict)
+        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
             constexpr float responseTimeS = 0.10f;
 
-            SrUkfCore core(params);
-            ResetPredictCore(core, BuildRollingUkfState(0.0f, 0.0f, params));
-            RunPredictLoopWithResolvedFeedforward(
-                core,
-                kVelocityTargetPredictSteps,
+            AssertVelocityTargetFeedforwardAcrossHorizons(
+                plant,
+                prepared,
+                params,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
                 [&](const VehicleState::StateVector& state)
                 {
                     return plant.solveClosedLoopDriveCommandsForVelocityTarget(
@@ -564,9 +867,8 @@ namespace MazeMap
                         0.80f,
                         params.supplyVoltageV,
                         responseTimeS);
-                });
-
-            AssertPredictStateNearTarget(core.state(), targetForwardVelocityMps, targetYawRateRadps, 0.03f, 0.08f, 0.04f);
+                },
+                L"State closed-loop velocity target");
         }
 
         TEST_METHOD(PlantModelClosedLoopVelocityTargetKeepsTenPercentTractionReserveWhenLimited)
