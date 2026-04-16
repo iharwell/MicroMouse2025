@@ -12,6 +12,24 @@
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
+namespace
+{
+    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
+        DriveBase& drive,
+        const float linearSpeedMps,
+        const float angularSpeedRadps) noexcept
+    {
+        const MazeMap::OpenLoopDriveCommand driveCommand =
+            drive.PointCommand(
+                linearSpeedMps,
+                angularSpeedRadps,
+                MazeMap::CommandPD::StateWheelOmegaPD);
+        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+            driveCommand.leftDriveCommand,
+            driveCommand.rightDriveCommand);
+    }
+}
+
 #define FRONT_WALL_CHARACTERIZATION_LOG_FIELDS(X) \
     X(std::uint32_t, index) \
     X(float,         distance_m) \
@@ -188,7 +206,7 @@ private:
         if ((self == nullptr) || (self->_phaseFn == nullptr))
         {
             services.Fault("Front wall characterization phase callback was not installed");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
@@ -353,7 +371,7 @@ private:
             }
         }
 
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     LoopController::ControlVector CaptureCurveTick(
@@ -373,7 +391,7 @@ private:
             request.flushLogsBeforeGrant = true;
             request.resetClockOnResume = true;
             services.RequestPause(request);
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         };
 
         const SensorSnapshot& snapshot = state.sensors;
@@ -448,7 +466,8 @@ private:
             angularCommandRadps,
             -FrontWallCharacterizationConfig::kMaxAngularCommandRadps,
             FrontWallCharacterizationConfig::kMaxAngularCommandRadps);
-        return LoopController::ControlVector::VelocityCommand(
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
             -_captureState.commandedSpeedMps,
             angularCommandRadps);
     }

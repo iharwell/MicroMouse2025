@@ -10,13 +10,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace MazeMap::App::Internal
 {
     namespace
     {
-        constexpr float kZeroVelocityThresholdMps = 1.0e-4f;
-        constexpr float kZeroYawThresholdRadps = 1.0e-4f;
+        constexpr float kZeroMotorPwmThreshold = 1.0e-4f;
         constexpr std::uint16_t kTickTimingSaturatedUs = 0xFFFFU;
         constexpr float kDefaultPauseLinearThresholdMps = 0.01f;
         constexpr float kDefaultPauseAngularThresholdRadps = 0.05f;
@@ -32,6 +32,19 @@ namespace MazeMap::App::Internal
             return std::isfinite(value) && (value > 0.0f);
         }
 
+        bool SetMotorPwmThunk(void* const context, const float leftMotorPwm, const float rightMotorPwm) noexcept
+        {
+            if (context == nullptr)
+            {
+                return false;
+            }
+
+            return static_cast<SharedRobotRuntime*>(context)->SetMotorPWM(leftMotorPwm, rightMotorPwm);
+        }
+
+        // LoopController intentionally owns the one normal cadence wait. If callers ever regain a
+        // public per-tick boundary, schedule ownership fragments immediately and this class stops
+        // being the strict timing authority it exists to be.
         inline void WaitUntilUs(const std::uint32_t absoluteDeadlineUs) noexcept
         {
             while (static_cast<std::int32_t>(absoluteDeadlineUs - NowUs()) > 0)
@@ -45,42 +58,18 @@ namespace MazeMap::App::Internal
         }
     }
 
-    LoopController::ControlVector LoopController::ControlVector::BrakeCommand() noexcept
-    {
-        return ControlVector{};
-    }
+    const LoopController::ControlVector LoopController::ControlVector::Brake =
+        LoopController::ControlVector::RawMotorPwm(
+            std::numeric_limits<float>::quiet_NaN(),
+            std::numeric_limits<float>::quiet_NaN());
 
-    LoopController::ControlVector LoopController::ControlVector::HoldZeroVelocityCommand() noexcept
-    {
-        return VelocityCommand(0.0f, 0.0f);
-    }
-
-    LoopController::ControlVector LoopController::ControlVector::VelocityCommand(
-        const float linearTarget,
-        const float angularTarget) noexcept
+    LoopController::ControlVector LoopController::ControlVector::RawMotorPwm(
+        const float leftMotorPwm,
+        const float rightMotorPwm) noexcept
     {
         ControlVector control{};
-        control.kind = Kind::Velocity;
-        control.linearTarget = linearTarget;
-        control.angularTarget = angularTarget;
-        return control;
-    }
-
-    LoopController::ControlVector LoopController::ControlVector::OpenLoopCommand(
-        const float leftCommand,
-        const float rightCommand) noexcept
-    {
-        ControlVector control{};
-        control.kind = Kind::OpenLoopRaw;
-        control.leftOpenLoop = leftCommand;
-        control.rightOpenLoop = rightCommand;
-        return control;
-    }
-
-    LoopController::ControlVector LoopController::ControlVector::NoChangeCommand() noexcept
-    {
-        ControlVector control{};
-        control.kind = Kind::NoChange;
+        control.leftMotorPwm = leftMotorPwm;
+        control.rightMotorPwm = rightMotorPwm;
         return control;
     }
 
@@ -156,7 +145,11 @@ namespace MazeMap::App::Internal
 
     bool LoopController::BeginSession(const SessionOptions& options, const ModeCallbacks& callbacks)
     {
+        // Session startup arms one continuous cadence owner. There is intentionally no "prime one
+        // tick" or "manually advance" companion API because yielding the schedule back to callers
+        // between ticks would fundamentally undercut LoopController's reason for existing.
         if ((_runtime == nullptr) ||
+            !_motorPwmSink ||
             _sessionActive ||
             _sessionBegun ||
             (callbacks.onModeWork == nullptr) ||
@@ -179,8 +172,8 @@ namespace MazeMap::App::Internal
         const std::uint32_t nowUs = NowUs();
         _lastTickStartUs = nowUs - _options.controlPeriodUs;
         _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
-        _queuedControl = ControlVector::BrakeCommand();
-        _appliedControl = ControlVector::BrakeCommand();
+        _queuedControl = ControlVector::Brake;
+        _appliedControl = ControlVector::Brake;
         _publishedTimingIndex = 0U;
         _workingTimingIndex = 1U;
         _timingBuffers[0] = TimingDiagnostics{};
@@ -195,10 +188,13 @@ namespace MazeMap::App::Internal
 
     LoopController::SessionResult LoopController::Run()
     {
+        // Run() owns the full active cadence. If this class ever exposes a public single-tick
+        // function, callers would be forced to reassemble cadence discipline around it and the
+        // result would only be a worse version of what this loop already does correctly.
         SessionResult result{};
         result.tickCount = _tickCount;
 
-        if (!_sessionActive || (_runtime == nullptr) || (_activeModeWorkCallback == nullptr))
+        if (!_sessionActive || (_runtime == nullptr) || !_motorPwmSink || (_activeModeWorkCallback == nullptr))
         {
             result.status = SessionResult::Status::StoppedByRuntime;
             return result;
@@ -206,15 +202,18 @@ namespace MazeMap::App::Internal
 
         while (_sessionActive)
         {
+            // Keep the entire tick private to this loop. Command application, sensing, mode work,
+            // post-work service, and the sync wait all stay under one owner specifically so no
+            // caller can wedge its own "just one tick" orchestration into the cadence path.
             if (_deferredTerminalOutcome != DeferredTerminalOutcome::None)
             {
                 const std::uint32_t nowUs = NowUs();
                 const std::uint32_t dtUs = nowUs - _lastTickStartUs;
-                const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
                 _lastTickStartUs = nowUs;
-                _appliedControl = ControlVector::BrakeCommand();
+                (void)dtUs;
+                _appliedControl = ControlVector::Brake;
                 _queuedControl = _appliedControl;
-                ApplyControlAtTickStart(_appliedControl, dtSeconds);
+                (void)ApplyControlAtTickStart(_appliedControl);
 
                 result.tickCount = _tickCount;
                 if (_deferredTerminalOutcome == DeferredTerminalOutcome::Complete)
@@ -252,8 +251,21 @@ namespace MazeMap::App::Internal
 
             const std::uint32_t loopEndTimeUs = _nextSyncTargetUs;
 
-            _appliedControl = NormalizeQueuedControl(_queuedControl);
-            ApplyControlAtTickStart(_appliedControl, dtSeconds);
+            _appliedControl = _queuedControl;
+            if (!ApplyControlAtTickStart(_appliedControl))
+            {
+                _queuedControl = ControlVector::Brake;
+                timing.flags |= kTimingFlagRuntimeStopPending;
+                _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
+                _deferredTerminalReason = "LoopController motor PWM hook failed";
+                ServiceRuntimeLogsForFaultPath();
+                RecordPostServiceTiming(tickStartUs);
+                FinalizeTiming(tickStartUs);
+                PublishWorkingTiming();
+                WaitUntilUs(loopEndTimeUs);
+                _nextSyncTargetUs += _options.controlPeriodUs;
+                continue;
+            }
             timing.tActuationAppliedUs = RelativeTickUs(tickStartUs, NowUs());
 
             if (_sessionStartWallSensorAdcProbePending)
@@ -271,7 +283,7 @@ namespace MazeMap::App::Internal
 
             if (!ExecuteSensingUpdate(_observedScratch, timing))
             {
-                _queuedControl = ControlVector::BrakeCommand();
+                _queuedControl = ControlVector::Brake;
                 timing.flags |= kTimingFlagRuntimeStopPending;
                 _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
                 _deferredTerminalReason =
@@ -309,7 +321,7 @@ namespace MazeMap::App::Internal
             bool faultPathFlushRequired = false;
             if (_requests.runtimeStopReason != nullptr)
             {
-                _queuedControl = ControlVector::BrakeCommand();
+                _queuedControl = ControlVector::Brake;
                 timing.flags |= kTimingFlagRuntimeStopPending;
                 _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
                 _deferredTerminalReason = _requests.runtimeStopReason;
@@ -317,17 +329,17 @@ namespace MazeMap::App::Internal
             }
             else if (_requests.endRequested)
             {
-                _queuedControl = ControlVector::BrakeCommand();
+                _queuedControl = ControlVector::Brake;
                 _deferredTerminalOutcome = DeferredTerminalOutcome::Complete;
             }
             else if (_requests.pauseRequested)
             {
-                _queuedControl = ControlVector::BrakeCommand();
+                _queuedControl = ControlVector::Brake;
                 timing.flags |= kTimingFlagPausePending;
             }
             else
             {
-                _queuedControl = NormalizeQueuedControl(candidateControl);
+                _queuedControl = candidateControl;
             }
 
             if (faultPathFlushRequired)
@@ -340,7 +352,7 @@ namespace MazeMap::App::Internal
                 {
                     const char* const runtimeReason =
                         (_runtime != nullptr) ? _runtime->LastRuntimeLogError() : nullptr;
-                    _queuedControl = ControlVector::BrakeCommand();
+                    _queuedControl = ControlVector::Brake;
                     timing.flags |= kTimingFlagRuntimeStopPending;
                     _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
                     _deferredTerminalReason =
@@ -355,9 +367,16 @@ namespace MazeMap::App::Internal
             FinalizeTiming(tickStartUs);
             PublishWorkingTiming();
 
+            // There is exactly one normal wait block per tick and it stays here at end-of-tick.
+            // Moving this behind a caller-visible per-tick return path would split cadence
+            // ownership and turn LoopController into a bad cooperative timer instead of the
+            // authoritative loop scheduler.
             WaitUntilUs(loopEndTimeUs);
             _nextSyncTargetUs += _options.controlPeriodUs;
 
+            // Pause is the explicit escape hatch for work that cannot remain inside strict cadence.
+            // Replacing this with caller-driven "tick once and come back" flow would break the
+            // class's sole responsibility while also doing a worse job of maintaining sync.
             if (_requests.pauseRequested && (_deferredTerminalOutcome == DeferredTerminalOutcome::None))
             {
                 result.tickCount = _tickCount;
@@ -383,7 +402,7 @@ namespace MazeMap::App::Internal
 
         if (_runtime != nullptr)
         {
-            _runtime->Drive().Brake();
+            (void)_motorPwmSink.Apply(ControlVector::Brake);
         }
 
         ResetSessionState();
@@ -417,11 +436,18 @@ namespace MazeMap::App::Internal
         return static_cast<std::uint16_t>((std::min)(elapsedUs, static_cast<std::uint32_t>(kTickTimingSaturatedUs)));
     }
 
-    bool LoopController::IsZeroVelocityCommand(const ControlVector& command) noexcept
+    bool LoopController::IsBrakeMotorPwmCommand(const ControlVector& command) noexcept
     {
-        return (command.kind == ControlVector::Kind::Velocity) &&
-            (std::fabs(command.linearTarget) <= kZeroVelocityThresholdMps) &&
-            (std::fabs(command.angularTarget) <= kZeroYawThresholdRadps);
+        return !std::isfinite(command.leftMotorPwm) || !std::isfinite(command.rightMotorPwm);
+    }
+
+    bool LoopController::IsZeroMotorPwmCommand(const ControlVector& command) noexcept
+    {
+        return
+            std::isfinite(command.leftMotorPwm) &&
+            std::isfinite(command.rightMotorPwm) &&
+            (std::fabs(command.leftMotorPwm) <= kZeroMotorPwmThreshold) &&
+            (std::fabs(command.rightMotorPwm) <= kZeroMotorPwmThreshold);
     }
 
     bool LoopController::IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept
@@ -478,6 +504,8 @@ namespace MazeMap::App::Internal
     void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
+        _motorPwmSink.context = &runtime;
+        _motorPwmSink.setMotorPwm = &SetMotorPwmThunk;
     }
 
     void LoopController::RunSessionStartWallSensorAdcProbe() noexcept
@@ -549,47 +577,14 @@ namespace MazeMap::App::Internal
         _requests = LatchedRequests{};
     }
 
-    LoopController::ControlVector LoopController::NormalizeQueuedControl(const ControlVector& candidate) const noexcept
+    bool LoopController::ApplyControlAtTickStart(const ControlVector& control) noexcept
     {
-        if (candidate.kind == ControlVector::Kind::NoChange)
+        if (!_motorPwmSink)
         {
-            return _appliedControl;
+            return false;
         }
 
-        return candidate;
-    }
-
-    void LoopController::ApplyControlAtTickStart(const ControlVector& control, const float dtSeconds)
-    {
-        if (_runtime == nullptr)
-        {
-            return;
-        }
-
-        const ControlVector resolvedControl = NormalizeQueuedControl(control);
-        switch (resolvedControl.kind)
-        {
-        case ControlVector::Kind::OpenLoopRaw:
-            _runtime->Drive().CommandOpenLoopRaw(resolvedControl.leftOpenLoop, resolvedControl.rightOpenLoop);
-            break;
-
-        case ControlVector::Kind::Velocity:
-            (void)dtSeconds;
-            _runtime->Drive().CommandGenerated(
-                _runtime->Drive().PointCommand(
-                    resolvedControl.linearTarget,
-                    resolvedControl.angularTarget,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                resolvedControl.linearTarget,
-                resolvedControl.angularTarget);
-            break;
-
-        case ControlVector::Kind::Brake:
-        case ControlVector::Kind::NoChange:
-        default:
-            _runtime->Drive().Brake();
-            break;
-        }
+        return _motorPwmSink.Apply(control);
     }
 
     bool LoopController::ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing)
@@ -790,7 +785,7 @@ namespace MazeMap::App::Internal
 
     bool LoopController::ShouldTreatAppliedControlAsStationary() const noexcept
     {
-        return (_appliedControl.kind == ControlVector::Kind::Brake) || IsZeroVelocityCommand(_appliedControl);
+        return IsBrakeMotorPwmCommand(_appliedControl) || IsZeroMotorPwmCommand(_appliedControl);
     }
 
     bool LoopController::ResolvePauseRequest(SessionResult& result)
@@ -836,8 +831,8 @@ namespace MazeMap::App::Internal
                 _lastTickStartUs = nowUs - _options.controlPeriodUs;
                 _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
             }
-            _queuedControl = ControlVector::BrakeCommand();
-            _appliedControl = ControlVector::BrakeCommand();
+            _queuedControl = ControlVector::Brake;
+            _appliedControl = ControlVector::Brake;
             _resumePending = true;
             result.tickCount = _tickCount;
             return true;
@@ -883,9 +878,15 @@ namespace MazeMap::App::Internal
             timing.controlTiming.controlStartUs = tickStartUs;
             timing.controlTiming.cycleCounterStart = ReadCycleCounter();
 
-            _appliedControl = ControlVector::BrakeCommand();
+            _appliedControl = ControlVector::Brake;
             _queuedControl = _appliedControl;
-            ApplyControlAtTickStart(_appliedControl, dtSeconds);
+            (void)dtSeconds;
+            if (!ApplyControlAtTickStart(_appliedControl))
+            {
+                _deferredTerminalReason = "LoopController motor PWM hook failed during pause settlement";
+                ServiceRuntimeLogsForFaultPath();
+                return false;
+            }
             timing.tActuationAppliedUs = RelativeTickUs(tickStartUs, NowUs());
 
             _observedScratch = ObservedTickState{};
@@ -942,8 +943,8 @@ namespace MazeMap::App::Internal
         _tickCount = 0U;
         _lastTickStartUs = 0U;
         _nextSyncTargetUs = 0U;
-        _queuedControl = ControlVector::BrakeCommand();
-        _appliedControl = ControlVector::BrakeCommand();
+        _queuedControl = ControlVector::Brake;
+        _appliedControl = ControlVector::Brake;
         _sessionStartWallSensorAdcProbePending = false;
         _requests = LatchedRequests{};
         _deferredTerminalOutcome = DeferredTerminalOutcome::None;

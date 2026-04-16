@@ -8,6 +8,11 @@ namespace MazeMap::App::Internal
 {
     class SharedRobotRuntime;
 
+    // LoopController owns one uninterrupted fixed-period control session. Its sole job is to lock
+    // cadence, command-application timing, sensing/update timing, and the final sync wait into one
+    // authoritative owner. Do not add public per-tick stepping APIs here. A public RunOneTick /
+    // Step / Advance surface would hand cadence ownership back to callers and reduce this class to
+    // a bad timer wrapper that can only imitate a real control-loop authority poorly.
     class LoopController final
     {
     public:
@@ -54,24 +59,11 @@ namespace MazeMap::App::Internal
 
         struct ControlVector final
         {
-            enum class Kind : std::uint8_t
-            {
-                Brake,
-                Velocity,
-                OpenLoopRaw,
-                NoChange
-            } kind{ Kind::Brake };
+            float leftMotorPwm{};
+            float rightMotorPwm{};
 
-            float linearTarget{};
-            float angularTarget{};
-            float leftOpenLoop{};
-            float rightOpenLoop{};
-
-            static ControlVector BrakeCommand() noexcept;
-            static ControlVector HoldZeroVelocityCommand() noexcept;
-            static ControlVector VelocityCommand(float linearTarget, float angularTarget) noexcept;
-            static ControlVector OpenLoopCommand(float leftCommand, float rightCommand) noexcept;
-            static ControlVector NoChangeCommand() noexcept;
+            static const ControlVector Brake;
+            static ControlVector RawMotorPwm(float leftMotorPwm, float rightMotorPwm) noexcept;
         };
 
         struct TimingDiagnostics final
@@ -169,6 +161,8 @@ namespace MazeMap::App::Internal
         {
         public:
             void Fault(const char* reason) noexcept;
+            // Pause is the only sanctioned way to leave strict periodic cadence for non-periodic
+            // work. Do not replace it with caller-driven "tick once, then return to me" control.
             void RequestPause(const PauseRequest& request) noexcept;
             void RequestEndLoop() noexcept;
             void SetNextModeWorkCallback(ModeWorkCallback callback) noexcept;
@@ -182,6 +176,11 @@ namespace MazeMap::App::Internal
 
         LoopController() = default;
 
+        // The public contract is intentionally session-scoped. Callers configure one loop session,
+        // hand LoopController the mode callback, and let Run() own the cadence until the session
+        // ends or pauses explicitly. Do not add public single-tick entry points here: any API that
+        // returns control after an individual tick fundamentally breaks LoopController's sole
+        // responsibility by making cadence caller-owned again.
         bool BeginSession(const SessionOptions& options, const ModeCallbacks& callbacks);
         SessionResult Run();
         void EndSession();
@@ -225,12 +224,33 @@ namespace MazeMap::App::Internal
             ModeWorkCallback nextModeWorkCallback{};
         };
 
+        struct MotorPwmSink final
+        {
+            using SetMotorPwmFn = bool (*)(void* context, float leftMotorPwm, float rightMotorPwm) noexcept;
+
+            void* context{};
+            SetMotorPwmFn setMotorPwm{};
+
+            explicit operator bool() const noexcept
+            {
+                return setMotorPwm != nullptr;
+            }
+
+            bool Apply(const ControlVector& control) const noexcept
+            {
+                return
+                    (setMotorPwm != nullptr) &&
+                    setMotorPwm(context, control.leftMotorPwm, control.rightMotorPwm);
+            }
+        };
+
         static constexpr std::uint8_t kTimingFlagResumedFromPause = 1U << 0;
         static constexpr std::uint8_t kTimingFlagPausePending = 1U << 1;
         static constexpr std::uint8_t kTimingFlagRuntimeStopPending = 1U << 2;
 
         static std::uint16_t RelativeTickUs(std::uint32_t tickStartUs, std::uint32_t timestampUs) noexcept;
-        static bool IsZeroVelocityCommand(const ControlVector& command) noexcept;
+        static bool IsBrakeMotorPwmCommand(const ControlVector& command) noexcept;
+        static bool IsZeroMotorPwmCommand(const ControlVector& command) noexcept;
         static bool IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
         static PoseEstimate ProjectEstimate(
@@ -243,8 +263,7 @@ namespace MazeMap::App::Internal
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
         void ResetLatchedRequests() noexcept;
-        ControlVector NormalizeQueuedControl(const ControlVector& candidate) const noexcept;
-        void ApplyControlAtTickStart(const ControlVector& control, float dtSeconds);
+        bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
         bool ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing);
         bool CaptureTickState(ObservedTickState& observed, TimingDiagnostics& timing);
         ModeState BuildModeState(
@@ -283,6 +302,7 @@ namespace MazeMap::App::Internal
         std::uint32_t _nextSyncTargetUs{};
         ControlVector _queuedControl{};
         ControlVector _appliedControl{};
+        MotorPwmSink _motorPwmSink{};
         bool _sessionStartWallSensorAdcProbePending{};
         TimingDiagnostics _timingBuffers[2]{};
         std::uint8_t _publishedTimingIndex{ 0U };

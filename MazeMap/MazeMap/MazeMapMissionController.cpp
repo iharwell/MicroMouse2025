@@ -1,17 +1,37 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
+#include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapSharedRuntime.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
+namespace
+{
+    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
+        DriveBase& drive,
+        const float linearSpeedMps,
+        const float angularSpeedRadps) noexcept
+    {
+        const MazeMap::OpenLoopDriveCommand driveCommand =
+            drive.PointCommand(
+                linearSpeedMps,
+                angularSpeedRadps,
+                MazeMap::CommandPD::StateWheelOmegaPD);
+        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+            driveCommand.leftDriveCommand,
+            driveCommand.rightDriveCommand);
+    }
+}
+
 class MissionController final : public IMissionModeHost
 {
 public:
     explicit MissionController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
+        , _loopController(runtime.ControlLoop())
         , _speedVehicle(runtime.SpeedVehicle())
         , _mappingVehicle(runtime.SearchVehicle())
         , _maze(runtime.Maze())
@@ -37,7 +57,6 @@ public:
         , _activeModeFaultSource("mission")
         , _telemetryPhaseId(0UL)
         , _telemetrySampleCount(0UL)
-        , _lastControlMicros(0UL)
     {
         _telemetryLogFileName[0] = '\0';
     }
@@ -329,7 +348,12 @@ public:
     }
 
 private:
+    using LoopController = MazeMap::App::Internal::LoopController;
+    static constexpr const char* kMissionControllerTextLogSource = "mission_controller";
+    static constexpr const char* kMissionTraceTextLogSource = "mission_trace";
+
     SharedRobotRuntime& _runtime;
+    LoopController& _loopController;
     static void SetKnownMazeCellWalls(
         MazeMap::Maze& maze,
         const MazeMap::CellCoordinates& cellCoordinates,
@@ -603,7 +627,239 @@ private:
     char _telemetryLogFileName[64];
     unsigned long _telemetryPhaseId;
     unsigned long _telemetrySampleCount;
-    unsigned long _lastControlMicros;
+    using ActiveLoopTickFn = LoopController::ControlVector (MissionController::*)(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services);
+
+    struct WallTouchPoseResetTarget;
+
+    struct HoldLoopState final
+    {
+        std::uint16_t durationMs{};
+        unsigned long startMs{};
+        bool stationary{ true };
+        bool started{};
+        void* nextState{};
+        ActiveLoopTickFn nextTickFn{};
+    };
+
+    struct SettleLoopState final
+    {
+        const char* timeoutMessage{};
+        std::uint16_t stationaryHoldMs{ Config::kMotionSettleHoldMs };
+        std::uint16_t timeoutMs{ Config::kMotionSettleTimeoutMs };
+        unsigned long startMs{};
+        unsigned long stationaryStartMs{};
+        bool stationaryWindowActive{};
+        bool started{};
+        bool brakeCommand{ true };
+        DriveTelemetry stationaryStartTelemetry{};
+        void* nextState{};
+        ActiveLoopTickFn nextTickFn{};
+    };
+
+    struct StartupStationaryHoldLoopState final
+    {
+        unsigned long stationaryStartMs{};
+        unsigned long lastResetTraceMs{};
+        bool stationaryWindowActive{};
+        DriveTelemetry stationaryStartTelemetry{};
+    };
+
+    struct ObservationCaptureLoopState final
+    {
+        MazeMap::CellCoordinates observedCell{};
+        MazeMap::Direction observedDirection{ MazeMap::None };
+        SensorSnapshot* outputSnapshot{};
+        SensorSnapshot samples[Config::kSearchRollingObservationSampleCount]{};
+        float frontLeftCandidateDistanceM[Config::kSearchRollingObservationSampleCount]{};
+        float frontRightCandidateDistanceM[Config::kSearchRollingObservationSampleCount]{};
+        std::uint8_t nextSampleIndex{};
+    };
+
+    struct FrontCalibrationSweepLoopState final
+    {
+        FrontCalibrationSpinSampleSet<Config::kStartupWallCalibrationFrontSpinMaxSamples> sweepSamples{};
+        MazeMap::InPlaceTurnProfile turnProfile{};
+        MotionLimits limits{};
+        float targetSweepAngleRad{};
+        float captureStepRad{};
+        float accumulatedSweepAngleRad{};
+        float lastStoredSweepAngleRad{};
+        float previousYawRad{};
+        unsigned long expectedCompletionDeadlineMs{};
+        bool durationLogged{};
+        bool* storedBands{};
+        HoldLoopState settleHold{};
+    };
+
+    struct ReverseStraightLoopState final
+    {
+        MotionLimits limits{};
+        Eigen::Vector2f targetHeading = Eigen::Vector2f(0.0f, 1.0f);
+        const Eigen::Vector2f* targetPositionOverride{};
+        float distanceM{};
+        float startDistanceM{};
+        float commandedSpeedMps{};
+        bool projectionFallbackLogged{};
+        unsigned long timeoutMs{};
+        EncoderProgressWatchdog translationWatchdog{};
+        SettleLoopState completionSettle{};
+        HoldLoopState fallbackHold{};
+    };
+
+    struct StraightLoopState final
+    {
+        MotionLimits limits{};
+        Eigen::Vector2f targetHeading = Eigen::Vector2f(0.0f, 1.0f);
+        const Eigen::Vector2f* targetPositionOverride{};
+        float distanceM{};
+        float entrySpeed{};
+        float exitSpeed{};
+        float cruiseSpeed{};
+        float startDistanceM{};
+        float commandedSpeedMps{};
+        bool useWallCentering{};
+        bool diagonalHeading{};
+        bool stallLogged{};
+        bool durationLogged{};
+        float previousCorridorErrorM{};
+        float filteredCorridorErrorRateMps{};
+        bool previousCorridorErrorValid{};
+        unsigned long expectedCompletionDeadlineMs{};
+        EncoderProgressWatchdog translationWatchdog{};
+        SettleLoopState completionSettle{};
+    };
+
+    struct SearchStraightLoopState final
+    {
+        MazeMap::Direction direction{ MazeMap::None };
+        MazeMap::CellCoordinates startCell{};
+        MazeMap::CellCoordinates destination{};
+        std::uint16_t cellCount{};
+        float entrySpeedMps{};
+        float cruiseSpeedMps{};
+        float exitSpeedMps{};
+        bool observeWhileRolling{};
+        bool stoppedForReplan{};
+        Eigen::Vector2f targetHeading = Eigen::Vector2f(0.0f, 1.0f);
+        float targetXMeters{};
+        float targetYMeters{};
+        float distanceToTargetM{};
+        float commandedSpeedMps{};
+        std::uint16_t rollingObservationCount{};
+        MazeMap::CellCoordinates nextRollingObservationCell{};
+        float rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount]{};
+        SensorSnapshot rollingObservationSamples[Config::kSearchRollingObservationSampleCount]{};
+        float rollingObservationFrontLeftCandidateDistanceM[Config::kSearchRollingObservationSampleCount]{};
+        float rollingObservationFrontRightCandidateDistanceM[Config::kSearchRollingObservationSampleCount]{};
+        float rollingObservationSideResetTriggerTravelM{};
+        std::uint8_t rollingObservationNextSampleIndex{};
+        bool rollingObservationSideResetPending{};
+        bool rollingObservationPlanInitialized{};
+        bool stallLogged{};
+        bool durationLogged{};
+        float previousCorridorErrorM{};
+        float filteredCorridorErrorRateMps{};
+        bool previousCorridorErrorValid{};
+        MazeMap::CellCoordinates replanObservedCell{};
+        float replanProjectedTravelM{};
+        std::uint16_t replanFrontVoteCount{};
+        unsigned long expectedCompletionDeadlineMs{};
+        EncoderProgressWatchdog translationWatchdog{};
+        SettleLoopState completionSettle{};
+    };
+
+    struct TurnLoopState final
+    {
+        float targetYawRad{};
+        MazeMap::InPlaceTurnProfile turnProfile{};
+        unsigned long expectedCompletionDeadlineMs{};
+        bool durationLogged{};
+        MazeMap::TurnWallEdgeTracker* wallEdgeTracker{};
+        SettleLoopState completionSettle{};
+    };
+
+    struct ArcLoopState final
+    {
+        MotionLimits limits{};
+        float distanceM{};
+        float angleRad{};
+        float entrySpeed{};
+        float exitSpeed{};
+        float cruiseSpeed{};
+        float startDistanceM{};
+        float startYawRad{};
+        float curvature{};
+        float commandedSpeedMps{};
+        unsigned long expectedCompletionDeadlineMs{};
+        bool stallLogged{};
+        bool durationLogged{};
+        EncoderProgressWatchdog translationWatchdog{};
+        SettleLoopState completionSettle{};
+    };
+
+    struct SmoothTurnLoopState final
+    {
+        MazeMap::SmoothTurnExecutionProfile profile{};
+        MotionLimits limits{};
+        float entrySpeed{};
+        float exitSpeed{};
+        float cruiseSpeed{};
+        float maneuverSpeedMps{};
+        float startDistanceM{};
+        unsigned long expectedCompletionDeadlineMs{};
+        MazeMap::SmoothTurnYawRateControllerState yawRateController{};
+        bool stallLogged{};
+        bool durationLogged{};
+        EncoderProgressWatchdog translationWatchdog{};
+    };
+
+    struct WallTouchLoopState final
+    {
+        float targetYawRad{};
+        float minLatchTravelM{};
+        float maxApproachTravelM{};
+        bool allowPassThroughNoWall{};
+        const WallTouchPoseResetTarget* poseResetTarget{};
+        float* seatedYawErrorRad{};
+        MazeMap::App::Internal::Runtime::WallTouchExecutionResult result{};
+        DriveTelemetry lastMotionTelemetry{};
+        unsigned long touchStartMs{};
+        unsigned long stateStartMs{};
+        unsigned long contactCandidateStartMs{};
+        unsigned long contactConfirmedStartMs{};
+        unsigned long frontSignalMissingStartMs{};
+        unsigned long lastMotionMs{};
+        float startDistanceM{};
+        float approachDriveCommand{};
+        float ditherTurnFraction{};
+        float previousCycleFrontSkewMagnitudeM{};
+        float currentCycleStartYawRad{};
+        float currentCycleMaxFrontSkewMagnitudeM{};
+        float currentCycleMaxResidualYawRateRadps{};
+        bool currentCycleFrontSignalValid{};
+        bool haveSquareSample{};
+        unsigned long lastHalfCycleIndex{};
+        float lastSquareYawRad{};
+        float lastSquareFrontSkewM{};
+        float lastSquareYawRateRadps{};
+        bool lastSquareFrontSignalValid{};
+        std::uint8_t completedHalfCycles{};
+        std::uint8_t consecutiveGoodFullCycles{};
+        bool contactCandidateActive{};
+        bool seatedResetApplied{};
+        bool passThroughCompletionPending{};
+        MazeMap::App::Internal::Runtime::WallTouchState runtimeState{
+            MazeMap::App::Internal::Runtime::WallTouchState::EntryConditioning
+        };
+        SettleLoopState passThroughSettle{};
+    };
+
+    void* _activeLoopState{};
+    ActiveLoopTickFn _activeLoopTickFn{};
 
     bool BeginTelemetryLog(const char* fileName, const char* modeName)
     {
@@ -819,7 +1075,6 @@ private:
         _currentDirection = MazeMap::Up;
         _currentDirectionalLocation = MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(_currentCell), _currentDirection);
         _drive.SetStartPoint(_currentDirectionalLocation);
-        _lastControlMicros = micros();
     }
 
     void PrimeKnownMissionStartCell()
@@ -889,7 +1144,7 @@ private:
 
     void CloseMissionTextLog()
     {
-        _runtime.CloseTextLog();
+        _runtime.FlushTextLog();
     }
 
     bool WriteMissionTextLineIfEnabled(const char* message)
@@ -904,7 +1159,11 @@ private:
             return false;
         }
 
-        return _runtime.AppendTextLogLine(message);
+        return _runtime.WriteTextLogEntry(
+            kMissionTraceTextLogSource,
+            micros(),
+            "trace",
+            message);
     }
 
     void DisableMissionTextLogging(const char* traceLabel)
@@ -917,7 +1176,20 @@ private:
         if (traceLabel != nullptr && traceLabel[0] != '\0')
         {
             AppendStartupTrace(traceLabel);
-            (void)_runtime.AppendTextLogFormatted("Mission text logging disabled: %s", traceLabel);
+            char message[192] = {};
+            const int written = snprintf(
+                message,
+                sizeof(message),
+                "Mission text logging disabled: %s",
+                traceLabel);
+            if (written > 0 && written < static_cast<int>(sizeof(message)))
+            {
+                (void)_runtime.WriteTextLogEntry(
+                    kMissionControllerTextLogSource,
+                    micros(),
+                    "status",
+                    message);
+            }
         }
 
         CloseMissionTextLog();
@@ -1113,77 +1385,94 @@ private:
         return true;
     }
 
-    bool CaptureStationaryObservationSnapshot(
-        const MazeMap::CellCoordinates& observedCell,
-        MazeMap::Direction observedDirection,
-        SensorSnapshot& observationSnapshot)
+    LoopController::ControlVector ObservationCaptureLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
     {
-        SensorSnapshot samples[Config::kSearchRollingObservationSampleCount] = {};
-        float frontLeftCandidateDistanceM[Config::kSearchRollingObservationSampleCount] = {};
-        float frontRightCandidateDistanceM[Config::kSearchRollingObservationSampleCount] = {};
-        for (uint8_t index = 0U; index < Config::kSearchRollingObservationSampleCount; ++index)
+        (void)loopEndTimeUs;
+        auto& capture = *static_cast<ObservationCaptureLoopState*>(rawState);
+        if (!LogTelemetrySample(true, state))
         {
-            float dtSeconds = 0.0f;
-            if (!TickControl(true, dtSeconds, samples[index]))
-            {
-                return false;
-            }
-            _drive.Brake();
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
 
+        if (capture.nextSampleIndex < Config::kSearchRollingObservationSampleCount)
+        {
+            capture.samples[capture.nextSampleIndex] = state.sensors;
             float frontLeftDistanceM = NAN;
             float frontRightDistanceM = NAN;
             (void)TryComputeFrontWallCandidateDistancesForPose(
                 _drive.GetPose(),
                 _speedVehicle,
-                observedCell,
-                observedDirection,
+                capture.observedCell,
+                capture.observedDirection,
                 frontLeftDistanceM,
                 frontRightDistanceM);
-            frontLeftCandidateDistanceM[index] = frontLeftDistanceM;
-            frontRightCandidateDistanceM[index] = frontRightDistanceM;
+            capture.frontLeftCandidateDistanceM[capture.nextSampleIndex] = frontLeftDistanceM;
+            capture.frontRightCandidateDistanceM[capture.nextSampleIndex] = frontRightDistanceM;
+            ++capture.nextSampleIndex;
+        }
+
+        if (capture.nextSampleIndex < Config::kSearchRollingObservationSampleCount)
+        {
+            return LoopController::ControlVector::Brake;
         }
 
         RollingObservationVoteSummary voteSummary{};
         if (!BuildEvidenceObservationSnapshot(
-                samples,
+                capture.samples,
                 Config::kSearchRollingObservationSampleCount,
-                observationSnapshot,
+                *capture.outputSnapshot,
                 voteSummary))
         {
-            return Fail("Stationary observation majority snapshot is invalid");
+            return FaultLoopPhase(services, "Stationary observation majority snapshot is invalid");
         }
 
         if (!TryApplyFrontWallCharacterizationToObservation(
-                observedCell,
-                observedDirection,
+                capture.observedCell,
+                capture.observedDirection,
                 "stationary",
-                samples,
-                frontLeftCandidateDistanceM,
-                frontRightCandidateDistanceM,
+                capture.samples,
+                capture.frontLeftCandidateDistanceM,
+                capture.frontRightCandidateDistanceM,
                 Config::kSearchRollingObservationSampleCount,
-                observationSnapshot))
+                *capture.outputSnapshot))
         {
             AppendMissionTraceFormatted(
                 "mission_front_curve_fit_unavailable,cell=(%d,%d),abs=%s,origin=stationary,fallback_valid=%u",
-                observedCell.GetX(),
-                observedCell.GetY(),
-                DirectionName(observedDirection),
-                observationSnapshot.frontWallObservationValid ? 1U : 0U);
+                capture.observedCell.GetX(),
+                capture.observedCell.GetY(),
+                DirectionName(capture.observedDirection),
+                capture.outputSnapshot->frontWallObservationValid ? 1U : 0U);
         }
 
         AppendMissionTraceFormatted(
             "mission_observation_stationary,cell=(%d,%d),abs=%s,samples=%u,front_valid=%u,front_votes=%u,left_valid=%u,left_votes=%u,right_valid=%u,right_votes=%u",
-            observedCell.GetX(),
-            observedCell.GetY(),
-            DirectionName(observedDirection),
+            capture.observedCell.GetX(),
+            capture.observedCell.GetY(),
+            DirectionName(capture.observedDirection),
             static_cast<unsigned>(voteSummary.sampleCount),
-            observationSnapshot.frontWallObservationValid ? 1U : 0U,
+            capture.outputSnapshot->frontWallObservationValid ? 1U : 0U,
             static_cast<unsigned>(voteSummary.frontWallVotes),
             static_cast<unsigned>(voteSummary.leftWindowValidVotes),
             static_cast<unsigned>(voteSummary.leftWallVotes),
             static_cast<unsigned>(voteSummary.rightWindowValidVotes),
             static_cast<unsigned>(voteSummary.rightWallVotes));
-        return true;
+        return EndLoopPhase(services);
+    }
+
+    bool CaptureStationaryObservationSnapshot(
+        const MazeMap::CellCoordinates& observedCell,
+        MazeMap::Direction observedDirection,
+        SensorSnapshot& observationSnapshot)
+    {
+        ObservationCaptureLoopState capture{};
+        capture.observedCell = observedCell;
+        capture.observedDirection = observedDirection;
+        capture.outputSnapshot = &observationSnapshot;
+        return RunLoopSession(&capture, &MissionController::ObservationCaptureLoopTick);
     }
 
     bool LogWallObservationDecision(
@@ -1260,7 +1549,11 @@ private:
 
         if (_missionTextLoggingEnabled)
         {
-            if (WriteMissionTextLineIfEnabled(message))
+            if (_runtime.WriteTextLogEntry(
+                    kMissionControllerTextLogSource,
+                    micros(),
+                    "status",
+                    message))
             {
                 return true;
             }
@@ -1268,7 +1561,11 @@ private:
             DisableMissionTextLogging("mission_text_logging:controller_write_failed");
         }
 
-        return _runtime.AppendTextLogLine(message);
+        return _runtime.WriteTextLogEntry(
+            kMissionControllerTextLogSource,
+            micros(),
+            "status",
+            message);
     }
 
     bool EmitMissionControllerFormatted(const char* format, ...)
@@ -2710,7 +3007,6 @@ private:
         _currentDirection = MazeMap::Up;
         _currentDirectionalLocation = MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(_currentCell), _currentDirection);
         _drive.SetPose(0.5f * Config::kCellSizeM, Config::kMissionStartRearWallInsetM, DirectionToYawRad(MazeMap::Up));
-        _lastControlMicros = micros();
         AppendStartupCalibrationStateTrace("seed_south_wall_start");
     }
 
@@ -2728,7 +3024,6 @@ private:
             return false;
         }
 
-        _lastControlMicros = micros();
         AppendStartupCalibrationStateTrace("rotate_end");
         return true;
     }
@@ -2768,7 +3063,6 @@ private:
             }
         }
 
-        _lastControlMicros = micros();
         AppendStartupCalibrationStateTrace("x_move_end");
         return true;
     }
@@ -2811,7 +3105,6 @@ private:
             }
         }
 
-        _lastControlMicros = micros();
         AppendStartupCalibrationStateTrace("y_move_end");
         return true;
     }
@@ -2917,6 +3210,546 @@ private:
         float& traveledDistanceM,
         float* seatedYawErrorRad = nullptr)
     {
+        return ExecuteWallTouchOffLoopDriven(
+            targetYawRad,
+            minLatchTravelM,
+            maxApproachTravelM,
+            allowPassThroughNoWall,
+            poseResetTarget,
+            outcome,
+            traveledDistanceM,
+            seatedYawErrorRad);
+    }
+
+    LoopController::ControlVector WallTouchLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& wallTouch = *static_cast<WallTouchLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
+        {
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
+
+        const float clampedMinLatchTravelM = (std::max)(0.0f, wallTouch.minLatchTravelM);
+        const float clampedMaxApproachTravelM =
+            (std::max)(clampedMinLatchTravelM, wallTouch.maxApproachTravelM);
+        if (!(std::isfinite(clampedMaxApproachTravelM) && (clampedMaxApproachTravelM > 0.0f)))
+        {
+            return FaultLoopPhase(services, "Wall touch-off max travel is invalid");
+        }
+
+        auto appendTraceLine = [this](const char* line)
+        {
+            if (line != nullptr)
+            {
+                AppendStartupTrace(line);
+            }
+        };
+        auto traceStateTransition =
+            [&wallTouch, &appendTraceLine](MazeMap::App::Internal::Runtime::WallTouchState fromState,
+                                           MazeMap::App::Internal::Runtime::WallTouchState toState,
+                                           float traveledDistanceM)
+        {
+            char line[192] = {};
+            snprintf(
+                line,
+                sizeof(line),
+                "startup_cal_touch:state,from=%s,to=%s,elapsed_ms=%lu,travel=%.4f",
+                MazeMap::App::Internal::Runtime::WallTouchStateName(fromState),
+                MazeMap::App::Internal::Runtime::WallTouchStateName(toState),
+                static_cast<unsigned long>(millis() - wallTouch.touchStartMs),
+                traveledDistanceM);
+            appendTraceLine(line);
+        };
+
+        const MazeMap::App::Internal::Runtime::WallTouchObservation observation =
+            MazeMap::App::Internal::Runtime::MakeWallTouchObservation(state.sensors);
+        const unsigned long nowMs = millis();
+        const unsigned long elapsedMs = nowMs - wallTouch.touchStartMs;
+        const unsigned long stateElapsedMs = nowMs - wallTouch.stateStartMs;
+        const PoseEstimate& pose = _drive.GetPose();
+        const DriveTelemetry& telemetry = state.driveTelemetry;
+        const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - wallTouch.startDistanceM);
+        const bool frontSignalActive =
+            observation.frontWall ||
+            observation.frontLeftWall ||
+            observation.frontRightWall;
+        wallTouch.result.finalTravelM = traveledDistanceM;
+
+        if ((wallTouch.runtimeState != MazeMap::App::Internal::Runtime::WallTouchState::ControlledRelease) &&
+            (wallTouch.runtimeState != MazeMap::App::Internal::Runtime::WallTouchState::ReverseToClearance) &&
+            (traveledDistanceM >= clampedMaxApproachTravelM))
+        {
+            char line[192] = {};
+            snprintf(
+                line,
+                sizeof(line),
+                "startup_cal_touch:max_travel,state=%s,travel=%.4f,expected=%.4f,max=%.4f",
+                MazeMap::App::Internal::Runtime::WallTouchStateName(wallTouch.runtimeState),
+                traveledDistanceM,
+                clampedMinLatchTravelM,
+                clampedMaxApproachTravelM);
+            appendTraceLine(line);
+            if (wallTouch.allowPassThroughNoWall && (wallTouch.contactConfirmedStartMs == 0UL))
+            {
+                wallTouch.result.outcome = WallTouchOutcome::PassedThroughNoWall;
+                wallTouch.passThroughSettle.timeoutMessage = "Wall touch-off failed to settle after pass-through";
+                wallTouch.passThroughSettle.stationaryHoldMs = Config::kStartupWallCalibrationSettleMs;
+                wallTouch.passThroughSettle.timeoutMs = 0U;
+                wallTouch.passThroughSettle.brakeCommand = true;
+                TransitionLoopPhase(&wallTouch.passThroughSettle, &MissionController::SettleLoopTick, services);
+                return LoopController::ControlVector::Brake;
+            }
+            return FaultLoopPhase(services, "Wall touch-off exceeded max travel");
+        }
+
+        if (MazeMap::App::Internal::Runtime::HasWallTouchEncoderMotion(
+                wallTouch.lastMotionTelemetry,
+                telemetry,
+                Config::kWallTouchProgressStallDistanceM))
+        {
+            wallTouch.lastMotionMs = nowMs;
+            wallTouch.lastMotionTelemetry = telemetry;
+        }
+
+        if (wallTouch.runtimeState == MazeMap::App::Internal::Runtime::WallTouchState::ContactSeek)
+        {
+            wallTouch.approachDriveCommand =
+                MazeMap::App::Internal::Runtime::ComputeWallTouchApproachDriveCommand(
+                    traveledDistanceM,
+                    clampedMinLatchTravelM);
+            LoopController::ControlVector command = LoopController::ControlVector::Brake;
+            if (MazeMap::App::Internal::Runtime::ShouldBrakeWallTouchApproachForEncoderSpeed(telemetry))
+            {
+                command = LoopController::ControlVector::Brake;
+            }
+            else
+            {
+                wallTouch.approachDriveCommand =
+                    MazeMap::App::Internal::Runtime::LimitWallTouchApproachDriveCommandByEncoderSpeed(
+                        wallTouch.approachDriveCommand,
+                        telemetry);
+                command = LoopController::ControlVector::RawMotorPwm(
+                    wallTouch.approachDriveCommand,
+                    wallTouch.approachDriveCommand);
+            }
+
+            const bool motionCollapseIndicator = MazeMap::IsWallTouchContactSample(
+                traveledDistanceM,
+                pose.linearSpeedMps,
+                Config::kWallTouchMinApproachDistanceM,
+                clampedMinLatchTravelM,
+                Config::kMotionSettleSpeedThresholdMps,
+                elapsedMs,
+                Config::kWallTouchMinCommandTimeMs);
+            const bool progressStallIndicator =
+                (elapsedMs >= Config::kWallTouchMinCommandTimeMs) &&
+                ((nowMs - wallTouch.lastMotionMs) >= Config::kWallTouchProgressStallWindowMs);
+            const std::uint8_t indicatorCount = MazeMap::CountWallTouchContactIndicators(
+                frontSignalActive,
+                motionCollapseIndicator,
+                progressStallIndicator);
+            if (indicatorCount >= 2U)
+            {
+                if (!wallTouch.contactCandidateActive)
+                {
+                    wallTouch.contactCandidateStartMs = nowMs;
+                    wallTouch.contactCandidateActive = true;
+                }
+                else if (MazeMap::HasWallTouchConfirmedContact(
+                    nowMs - wallTouch.contactCandidateStartMs,
+                    Config::kWallTouchContactConfirmationMs,
+                    indicatorCount))
+                {
+                    wallTouch.contactConfirmedStartMs = wallTouch.contactCandidateStartMs;
+                    wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::SeatingPreloadRamp;
+                    wallTouch.stateStartMs = nowMs;
+                    char line[224] = {};
+                    snprintf(
+                        line,
+                        sizeof(line),
+                        "startup_cal_touch:contact_confirmed,travel=%.4f,elapsed_ms=%lu,front=%u,collapse=%u,stall=%u",
+                        traveledDistanceM,
+                        elapsedMs,
+                        frontSignalActive ? 1U : 0U,
+                        motionCollapseIndicator ? 1U : 0U,
+                        progressStallIndicator ? 1U : 0U);
+                    appendTraceLine(line);
+                    traceStateTransition(
+                        MazeMap::App::Internal::Runtime::WallTouchState::ContactSeek,
+                        wallTouch.runtimeState,
+                        traveledDistanceM);
+                }
+            }
+            else
+            {
+                wallTouch.contactCandidateActive = false;
+            }
+
+            return command;
+        }
+
+        if (wallTouch.runtimeState == MazeMap::App::Internal::Runtime::WallTouchState::SeatingPreloadRamp)
+        {
+            const float rampAlpha =
+                static_cast<float>((std::min)(stateElapsedMs, static_cast<unsigned long>(Config::kWallTouchSeatRampMs))) /
+                static_cast<float>((std::max)(Config::kWallTouchSeatRampMs, static_cast<std::uint16_t>(1U)));
+            const float seatDriveCommand =
+                wallTouch.approachDriveCommand +
+                ((Config::kWallTouchSeatRampMaxDriveCommand - wallTouch.approachDriveCommand) * rampAlpha);
+            if (stateElapsedMs >= Config::kWallTouchSeatRampMs)
+            {
+                wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::InitialSeatingDwell;
+                wallTouch.stateStartMs = nowMs;
+                traceStateTransition(
+                    MazeMap::App::Internal::Runtime::WallTouchState::SeatingPreloadRamp,
+                    wallTouch.runtimeState,
+                    traveledDistanceM);
+            }
+            return LoopController::ControlVector::RawMotorPwm(seatDriveCommand, seatDriveCommand);
+        }
+
+        if (wallTouch.runtimeState == MazeMap::App::Internal::Runtime::WallTouchState::InitialSeatingDwell)
+        {
+            if (stateElapsedMs >= Config::kWallTouchInitialSeatDwellMs)
+            {
+                wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::SquareUpDither;
+                wallTouch.stateStartMs = nowMs;
+                wallTouch.currentCycleStartYawRad = pose.yawRad;
+                wallTouch.currentCycleMaxFrontSkewMagnitudeM = 0.0f;
+                wallTouch.currentCycleMaxResidualYawRateRadps = 0.0f;
+                wallTouch.currentCycleFrontSignalValid = true;
+                wallTouch.haveSquareSample = false;
+                wallTouch.completedHalfCycles = 0U;
+                wallTouch.result.completedFullCycles = 0U;
+                wallTouch.consecutiveGoodFullCycles = 0U;
+                wallTouch.ditherTurnFraction = Config::kWallTouchSeatWiggleTurnFraction;
+                wallTouch.frontSignalMissingStartMs = 0UL;
+                traceStateTransition(
+                    MazeMap::App::Internal::Runtime::WallTouchState::InitialSeatingDwell,
+                    wallTouch.runtimeState,
+                    traveledDistanceM);
+            }
+            return LoopController::ControlVector::RawMotorPwm(
+                Config::kWallTouchSeatRampMaxDriveCommand,
+                Config::kWallTouchSeatRampMaxDriveCommand);
+        }
+
+        if (wallTouch.runtimeState == MazeMap::App::Internal::Runtime::WallTouchState::SquareUpDither)
+        {
+            const unsigned long contactDurationMs =
+                (wallTouch.contactConfirmedStartMs > 0UL) ?
+                (nowMs - wallTouch.contactConfirmedStartMs) :
+                0UL;
+            wallTouch.result.confirmedContactMs = contactDurationMs;
+            if (!frontSignalActive)
+            {
+                if (wallTouch.frontSignalMissingStartMs == 0UL)
+                {
+                    wallTouch.frontSignalMissingStartMs = nowMs;
+                }
+                else if ((nowMs - wallTouch.frontSignalMissingStartMs) >= Config::kWallTouchContactConfirmationMs)
+                {
+                    char line[192] = {};
+                    snprintf(
+                        line,
+                        sizeof(line),
+                        "startup_cal_touch:front_signal_invalid,elapsed_ms=%lu,travel=%.4f",
+                        contactDurationMs,
+                        traveledDistanceM);
+                    appendTraceLine(line);
+                    return FaultLoopPhase(services, "Wall touch-off front sensors invalid during square-up");
+                }
+            }
+            else
+            {
+                wallTouch.frontSignalMissingStartMs = 0UL;
+            }
+
+            const MazeMap::OpenLoopDriveCommand ditherCommand = MazeMap::ComputeOpenLoopYawDitherCommand(
+                Config::kWallTouchSeatRampMaxDriveCommand,
+                stateElapsedMs,
+                Config::kWallTouchSeatWiggleHalfPeriodMs,
+                Config::kWallTouchSeatWiggleBlendMs,
+                wallTouch.ditherTurnFraction,
+                Config::kWallTouchSeatWiggleRetainedForwardFraction);
+
+            const unsigned long halfCycleIndex =
+                stateElapsedMs /
+                (std::max)(Config::kWallTouchSeatWiggleHalfPeriodMs, static_cast<std::uint16_t>(1U));
+            if (wallTouch.haveSquareSample && (halfCycleIndex != wallTouch.lastHalfCycleIndex))
+            {
+                ++wallTouch.completedHalfCycles;
+                wallTouch.currentCycleMaxFrontSkewMagnitudeM = (std::max)(
+                    wallTouch.currentCycleMaxFrontSkewMagnitudeM,
+                    std::fabs(wallTouch.lastSquareFrontSkewM));
+                wallTouch.currentCycleMaxResidualYawRateRadps = (std::max)(
+                    wallTouch.currentCycleMaxResidualYawRateRadps,
+                    std::fabs(wallTouch.lastSquareYawRateRadps));
+                wallTouch.currentCycleFrontSignalValid =
+                    wallTouch.currentCycleFrontSignalValid && wallTouch.lastSquareFrontSignalValid;
+
+                char halfCycleLine[256] = {};
+                snprintf(
+                    halfCycleLine,
+                    sizeof(halfCycleLine),
+                    "startup_cal_touch:half_cycle,index=%u,front_skew_m=%.4f,residual_yaw_rate_radps=%.4f,turn_fraction=%.3f",
+                    static_cast<unsigned>(wallTouch.completedHalfCycles),
+                    std::fabs(wallTouch.lastSquareFrontSkewM),
+                    std::fabs(wallTouch.lastSquareYawRateRadps),
+                    wallTouch.ditherTurnFraction);
+                appendTraceLine(halfCycleLine);
+
+                if ((wallTouch.completedHalfCycles & 1U) == 0U)
+                {
+                    ++wallTouch.result.completedFullCycles;
+                    const float netYawChangeMagnitudeRad =
+                        std::fabs(AngleErrorRad(wallTouch.currentCycleStartYawRad, wallTouch.lastSquareYawRad));
+                    const bool cycleGood = MazeMap::IsWallTouchSquareCycleGood(
+                        wallTouch.currentCycleMaxFrontSkewMagnitudeM,
+                        Config::kWallTouchSquareFrontSkewThresholdM,
+                        wallTouch.currentCycleMaxResidualYawRateRadps,
+                        Config::kWallTouchSquareResidualYawRateThresholdRadps,
+                        netYawChangeMagnitudeRad,
+                        Config::kWallTouchSquareNetYawChangeThresholdRad,
+                        wallTouch.currentCycleFrontSignalValid);
+                    wallTouch.consecutiveGoodFullCycles =
+                        cycleGood ? static_cast<std::uint8_t>(wallTouch.consecutiveGoodFullCycles + 1U) : 0U;
+
+                    char cycleLine[320] = {};
+                    snprintf(
+                        cycleLine,
+                        sizeof(cycleLine),
+                        "startup_cal_touch:full_cycle,index=%u,good=%u,front_skew_m=%.4f,residual_yaw_rate_radps=%.4f,net_yaw_deg=%.2f,contact_ms=%lu,turn_fraction=%.3f",
+                        static_cast<unsigned>(wallTouch.result.completedFullCycles),
+                        cycleGood ? 1U : 0U,
+                        wallTouch.currentCycleMaxFrontSkewMagnitudeM,
+                        wallTouch.currentCycleMaxResidualYawRateRadps,
+                        RAD_TO_DEG_F * netYawChangeMagnitudeRad,
+                        contactDurationMs,
+                        wallTouch.ditherTurnFraction);
+                    appendTraceLine(cycleLine);
+
+                    if (!cycleGood &&
+                        (wallTouch.ditherTurnFraction < Config::kWallTouchSeatWiggleMaxTurnFraction) &&
+                        (MazeMap::HasWallTouchSquareUpSaturated(
+                            wallTouch.previousCycleFrontSkewMagnitudeM,
+                            wallTouch.currentCycleMaxFrontSkewMagnitudeM,
+                            Config::kWallTouchSquareImprovementSaturationThresholdM) ||
+                            (wallTouch.result.completedFullCycles >= Config::kWallTouchSeatMinimumFullCycles)))
+                    {
+                        wallTouch.ditherTurnFraction = MazeMap::ComputeWallTouchSeatWiggleTurnFraction(
+                            wallTouch.result.completedFullCycles,
+                            Config::kWallTouchSeatWiggleTurnFraction,
+                            Config::kWallTouchSeatWiggleTurnFractionStep,
+                            Config::kWallTouchSeatWiggleMaxTurnFraction);
+                    }
+
+                    wallTouch.previousCycleFrontSkewMagnitudeM = wallTouch.currentCycleMaxFrontSkewMagnitudeM;
+                    wallTouch.currentCycleStartYawRad = wallTouch.lastSquareYawRad;
+                    wallTouch.currentCycleMaxFrontSkewMagnitudeM = 0.0f;
+                    wallTouch.currentCycleMaxResidualYawRateRadps = 0.0f;
+                    wallTouch.currentCycleFrontSignalValid = true;
+
+                    if (MazeMap::IsWallTouchSquareSuccessEligible(
+                            contactDurationMs,
+                            Config::kWallTouchMinimumConfirmedContactMs,
+                            wallTouch.result.completedFullCycles,
+                            Config::kWallTouchSeatMinimumFullCycles,
+                            wallTouch.consecutiveGoodFullCycles,
+                            Config::kWallTouchSeatRequiredGoodFullCycles))
+                    {
+                        wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::PostSquareSeatedHold;
+                        wallTouch.stateStartMs = nowMs;
+                        wallTouch.result.seatedTravelM = traveledDistanceM;
+                        wallTouch.result.seatedYawErrorRad = AngleErrorRad(wallTouch.targetYawRad, pose.yawRad);
+                        traceStateTransition(
+                            MazeMap::App::Internal::Runtime::WallTouchState::SquareUpDither,
+                            wallTouch.runtimeState,
+                            traveledDistanceM);
+                    }
+                }
+            }
+
+            if (contactDurationMs >= Config::kWallTouchSquareUpTimeoutMs)
+            {
+                char line[192] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "startup_cal_touch:square_timeout,contact_ms=%lu,turn_fraction=%.3f,cycles=%u",
+                    contactDurationMs,
+                    wallTouch.ditherTurnFraction,
+                    static_cast<unsigned>(wallTouch.result.completedFullCycles));
+                appendTraceLine(line);
+                return FaultLoopPhase(services, "Wall touch-off square-up timed out");
+            }
+
+            wallTouch.haveSquareSample = true;
+            wallTouch.lastHalfCycleIndex = halfCycleIndex;
+            wallTouch.lastSquareYawRad = pose.yawRad;
+            wallTouch.lastSquareFrontSkewM = observation.frontSkewM;
+            wallTouch.lastSquareYawRateRadps = pose.angularSpeedRadps;
+            wallTouch.lastSquareFrontSignalValid = frontSignalActive;
+            return LoopController::ControlVector::RawMotorPwm(
+                ditherCommand.leftDriveCommand,
+                ditherCommand.rightDriveCommand);
+        }
+
+        if (wallTouch.runtimeState == MazeMap::App::Internal::Runtime::WallTouchState::PostSquareSeatedHold)
+        {
+            if (!wallTouch.seatedResetApplied &&
+                (stateElapsedMs >= (Config::kWallTouchPostSquareHoldMs / 2U)))
+            {
+                wallTouch.seatedResetApplied = true;
+                if (wallTouch.poseResetTarget != nullptr && wallTouch.poseResetTarget->enabled)
+                {
+                    _drive.SetPose(
+                        wallTouch.poseResetTarget->xMeters,
+                        wallTouch.poseResetTarget->yMeters,
+                        wallTouch.poseResetTarget->yawRad);
+                    AppendStartupCalibrationStateTrace("touch_pose_set");
+                }
+            }
+            if (stateElapsedMs >= Config::kWallTouchPostSquareHoldMs)
+            {
+                char line[224] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "startup_cal_touch:reset_pose,x=%.4f,y=%.4f,yaw_deg=%.2f,travel=%.4f",
+                    _drive.GetPose().xMeters,
+                    _drive.GetPose().yMeters,
+                    RAD_TO_DEG_F * _drive.GetPose().yawRad,
+                    wallTouch.result.seatedTravelM);
+                appendTraceLine(line);
+                wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::ControlledRelease;
+                wallTouch.stateStartMs = nowMs;
+                traceStateTransition(
+                    MazeMap::App::Internal::Runtime::WallTouchState::PostSquareSeatedHold,
+                    wallTouch.runtimeState,
+                    traveledDistanceM);
+            }
+            return LoopController::ControlVector::RawMotorPwm(
+                Config::kWallTouchSeatRampMaxDriveCommand,
+                Config::kWallTouchSeatRampMaxDriveCommand);
+        }
+
+        if (wallTouch.runtimeState == MazeMap::App::Internal::Runtime::WallTouchState::ControlledRelease)
+        {
+            const float releaseAlpha =
+                static_cast<float>((std::min)(stateElapsedMs, static_cast<unsigned long>(Config::kWallTouchReleaseRampMs))) /
+                static_cast<float>((std::max)(Config::kWallTouchReleaseRampMs, static_cast<std::uint16_t>(1U)));
+            const float forwardPreloadCommand =
+                Config::kWallTouchSeatRampMaxDriveCommand * (1.0f - releaseAlpha);
+            float reverseCommand = 0.0f;
+            if (Config::kWallTouchReleaseReverseOverlapMs >= Config::kWallTouchReleaseRampMs)
+            {
+                reverseCommand = Config::kWallTouchReleaseReverseDriveCommand * releaseAlpha;
+            }
+            else if (stateElapsedMs >= (Config::kWallTouchReleaseRampMs - Config::kWallTouchReleaseReverseOverlapMs))
+            {
+                const unsigned long reverseElapsedMs =
+                    stateElapsedMs - (Config::kWallTouchReleaseRampMs - Config::kWallTouchReleaseReverseOverlapMs);
+                const float reverseAlpha =
+                    static_cast<float>((std::min)(reverseElapsedMs, static_cast<unsigned long>(Config::kWallTouchReleaseReverseOverlapMs))) /
+                    static_cast<float>((std::max)(Config::kWallTouchReleaseReverseOverlapMs, static_cast<std::uint16_t>(1U)));
+                reverseCommand = Config::kWallTouchReleaseReverseDriveCommand * reverseAlpha;
+            }
+
+            wallTouch.result.reverseDistanceM = (std::max)(0.0f, wallTouch.result.seatedTravelM - traveledDistanceM);
+            if ((wallTouch.result.reverseDistanceM >= Config::kDistanceToleranceM) && !frontSignalActive)
+            {
+                char line[224] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "startup_cal_touch:release_clear,reverse_m=%.4f,elapsed_ms=%lu",
+                    wallTouch.result.reverseDistanceM,
+                    stateElapsedMs);
+                appendTraceLine(line);
+                wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::ReverseToClearance;
+                wallTouch.stateStartMs = nowMs;
+                traceStateTransition(
+                    MazeMap::App::Internal::Runtime::WallTouchState::ControlledRelease,
+                    wallTouch.runtimeState,
+                    traveledDistanceM);
+            }
+            else if (stateElapsedMs >= Config::kWallTouchReleaseRampMs)
+            {
+                wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::ReverseToClearance;
+                wallTouch.stateStartMs = nowMs;
+                traceStateTransition(
+                    MazeMap::App::Internal::Runtime::WallTouchState::ControlledRelease,
+                    wallTouch.runtimeState,
+                    traveledDistanceM);
+            }
+            return LoopController::ControlVector::RawMotorPwm(
+                forwardPreloadCommand - reverseCommand,
+                forwardPreloadCommand - reverseCommand);
+        }
+
+        if (wallTouch.runtimeState == MazeMap::App::Internal::Runtime::WallTouchState::ReverseToClearance)
+        {
+            wallTouch.result.reverseDistanceM = (std::max)(0.0f, wallTouch.result.seatedTravelM - traveledDistanceM);
+            const float headingErrorRad = AngleErrorRad(wallTouch.targetYawRad, pose.yawRad);
+            float angularCommandRadps =
+                (Config::kStraightHeadingKp * headingErrorRad) -
+                (Config::kStraightYawD * pose.angularSpeedRadps);
+            angularCommandRadps = (std::clamp)(
+                angularCommandRadps,
+                -Config::kWallTouchReverseMaxAngularCommandRadps,
+                Config::kWallTouchReverseMaxAngularCommandRadps);
+
+            if (wallTouch.result.reverseDistanceM >= Config::kWallTouchFrontClearanceDistanceM)
+            {
+                char line[224] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "startup_cal_touch:clearance_reached,reverse_m=%.4f,target_m=%.4f",
+                    wallTouch.result.reverseDistanceM,
+                    Config::kWallTouchFrontClearanceDistanceM);
+                appendTraceLine(line);
+                return EndLoopPhase(services);
+            }
+
+            if ((stateElapsedMs >= Config::kMotionSettleTimeoutMs) && frontSignalActive)
+            {
+                char line[192] = {};
+                snprintf(
+                    line,
+                    sizeof(line),
+                    "startup_cal_touch:clearance_failed,reverse_m=%.4f,elapsed_ms=%lu",
+                    wallTouch.result.reverseDistanceM,
+                    stateElapsedMs);
+                appendTraceLine(line);
+                return FaultLoopPhase(services, "Wall touch-off failed to establish front-wall clearance");
+            }
+
+            return MakeWheelOmegaRawMotorPwmCommand(
+                _drive,
+                -Config::kWallTouchReverseSpeedMps,
+                angularCommandRadps);
+        }
+
+        return EndLoopPhase(services);
+    }
+
+    bool ExecuteWallTouchOffLoopDriven(
+        float targetYawRad,
+        float minLatchTravelM,
+        float maxApproachTravelM,
+        bool allowPassThroughNoWall,
+        const WallTouchPoseResetTarget* poseResetTarget,
+        WallTouchOutcome& outcome,
+        float& traveledDistanceM,
+        float* seatedYawErrorRad = nullptr)
+    {
         outcome = WallTouchOutcome::SeatedContact;
         traveledDistanceM = 0.0f;
         if (seatedYawErrorRad != nullptr)
@@ -2924,69 +3757,48 @@ private:
             *seatedYawErrorRad = 0.0f;
         }
 
-        MazeMap::App::Internal::Runtime::WallTouchExecutionResult result{};
-        const auto tickWallTouch =
-            [this](bool stationary, float& dtSeconds, MazeMap::App::Internal::Runtime::WallTouchObservation& observation) -> bool
+        WallTouchLoopState wallTouch{};
+        wallTouch.targetYawRad = targetYawRad;
+        wallTouch.minLatchTravelM = minLatchTravelM;
+        wallTouch.maxApproachTravelM = maxApproachTravelM;
+        wallTouch.allowPassThroughNoWall = allowPassThroughNoWall;
+        wallTouch.poseResetTarget = poseResetTarget;
+        wallTouch.seatedYawErrorRad = seatedYawErrorRad;
+        wallTouch.startDistanceM = _drive.GetAverageDistanceMeters();
+        wallTouch.touchStartMs = millis();
+        wallTouch.stateStartMs = wallTouch.touchStartMs;
+        wallTouch.lastMotionMs = wallTouch.touchStartMs;
+        wallTouch.lastMotionTelemetry = _drive.GetTelemetry();
+        wallTouch.approachDriveCommand = Config::kWallTouchDriveCommand;
+        wallTouch.ditherTurnFraction = Config::kWallTouchSeatWiggleTurnFraction;
+        wallTouch.previousCycleFrontSkewMagnitudeM = std::numeric_limits<float>::infinity();
+        wallTouch.currentCycleStartYawRad = _drive.GetPose().yawRad;
+        wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::ContactSeek;
         {
-            SensorSnapshot snapshot{};
-            if (!TickControl(stationary, dtSeconds, snapshot))
-            {
-                return false;
-            }
+            char line[192] = {};
+            snprintf(
+                line,
+                sizeof(line),
+                "startup_cal_touch:state,from=%s,to=%s,elapsed_ms=%lu,travel=%.4f",
+                MazeMap::App::Internal::Runtime::WallTouchStateName(
+                    MazeMap::App::Internal::Runtime::WallTouchState::EntryConditioning),
+                MazeMap::App::Internal::Runtime::WallTouchStateName(wallTouch.runtimeState),
+                0UL,
+                0.0f);
+            AppendStartupTrace(line);
+        }
 
-            observation = MazeMap::App::Internal::Runtime::MakeWallTouchObservation(snapshot);
-            return true;
-        };
-        const auto appendTraceLine =
-            [this](const char* line)
-        {
-            if (line != nullptr)
-            {
-                AppendStartupTrace(line);
-            }
-        };
-        const auto finishWallTouch =
-            [this](const char* timeoutMessage) -> bool
-        {
-            _drive.Brake();
-            return HoldBrakedUntilDriveSettles(timeoutMessage, Config::kStartupWallCalibrationSettleMs, 0U);
-        };
-        const auto onSeatedHold =
-            [this, poseResetTarget, seatedYawErrorRad](const MazeMap::App::Internal::Runtime::WallTouchExecutionResult& touchResult) -> bool
-        {
-            if (seatedYawErrorRad != nullptr)
-            {
-                *seatedYawErrorRad = touchResult.seatedYawErrorRad;
-            }
-            if ((poseResetTarget == nullptr) || !poseResetTarget->enabled)
-            {
-                return true;
-            }
-
-            _drive.SetPose(poseResetTarget->xMeters, poseResetTarget->yMeters, poseResetTarget->yawRad);
-            _lastControlMicros = micros();
-            AppendStartupCalibrationStateTrace("touch_pose_set");
-            return true;
-        };
-
-        if (!MazeMap::App::Internal::Runtime::ExecuteSharedWallTouchOff(
-                _drive,
-                targetYawRad,
-                minLatchTravelM,
-                maxApproachTravelM,
-                allowPassThroughNoWall,
-                tickWallTouch,
-                appendTraceLine,
-                finishWallTouch,
-                [this](const char* message) -> bool { return Fail(message); },
-                onSeatedHold,
-                result))
+        if (!RunLoopSession(&wallTouch, &MissionController::WallTouchLoopTick))
         {
             return false;
         }
 
-        outcome = result.outcome;
-        traveledDistanceM = result.seatedTravelM;
+        outcome = wallTouch.result.outcome;
+        traveledDistanceM = wallTouch.result.seatedTravelM;
+        if (seatedYawErrorRad != nullptr)
+        {
+            *seatedYawErrorRad = wallTouch.result.seatedYawErrorRad;
+        }
         return true;
     }
 
@@ -3653,99 +4465,99 @@ private:
         return true;
     }
 
+    LoopController::ControlVector FrontCalibrationSweepLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& sweep = *static_cast<FrontCalibrationSweepLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
+        {
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
+
+        const PoseEstimate& pose = _drive.GetPose();
+        const float deltaYawRad = WrapAngleRad(pose.yawRad - sweep.previousYawRad);
+        sweep.previousYawRad = pose.yawRad;
+        sweep.accumulatedSweepAngleRad += (std::max)(0.0f, deltaYawRad);
+        sweep.accumulatedSweepAngleRad = (std::min)(sweep.accumulatedSweepAngleRad, sweep.targetSweepAngleRad);
+
+        if ((sweep.accumulatedSweepAngleRad - sweep.lastStoredSweepAngleRad) >= sweep.captureStepRad)
+        {
+            RawWallSensorSample frontLeftSample{};
+            RawWallSensorSample frontRightSample{};
+            float frontLeftWallDistanceM = NAN;
+            float frontRightWallDistanceM = NAN;
+            SampleWallSensorPairRaw(
+                WallSensorId::FrontLeft,
+                _speedVehicle.FrontLeft,
+                WallSensorId::FrontRight,
+                _speedVehicle.FrontRight,
+                frontLeftSample,
+                frontRightSample);
+            (void)TryComputeNearestStartCellWallDistanceM(pose, _speedVehicle.FrontLeft, frontLeftWallDistanceM);
+            (void)TryComputeNearestStartCellWallDistanceM(pose, _speedVehicle.FrontRight, frontRightWallDistanceM);
+            sweep.sweepSamples.Push(
+                MazeMap::ClassifyFrontCalibrationSpinHeadingFromNorth(
+                    pose.yawRad,
+                    Config::kStartupWallCalibrationFrontNorthOpenHalfWidthRad,
+                    Config::kStartupWallCalibrationFrontWallMinEastOfNorthRad,
+                    Config::kStartupWallCalibrationFrontWallMaxEastOfNorthRad),
+                frontLeftSample.differentialLight,
+                frontRightSample.differentialLight,
+                frontLeftWallDistanceM,
+                frontRightWallDistanceM);
+            sweep.lastStoredSweepAngleRad = sweep.accumulatedSweepAngleRad;
+        }
+
+        const float remainingRad = sweep.targetSweepAngleRad - sweep.accumulatedSweepAngleRad;
+        if (MazeMap::IsInPlaceTurnComplete(remainingRad, pose.angularSpeedRadps, sweep.turnProfile))
+        {
+            sweep.settleHold.durationMs = Config::kStartupWallCalibrationSettleMs;
+            sweep.settleHold.stationary = true;
+            TransitionLoopPhase(&sweep.settleHold, &MissionController::HoldLoopTick, services);
+            return LoopController::ControlVector::Brake;
+        }
+        if (!sweep.durationLogged && static_cast<long>(sweep.expectedCompletionDeadlineMs - millis()) <= 0)
+        {
+            sweep.durationLogged = true;
+            AppendStartupTrace("startup_wall_calibration:front_sweep_elapsed_budget_exceeded");
+        }
+
+        float angularCommandRadps = 0.0f;
+        if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
+                remainingRad,
+                pose.angularSpeedRadps,
+                sweep.turnProfile,
+                angularCommandRadps))
+        {
+            return FaultLoopPhase(services, "Startup front calibration sweep profile became invalid");
+        }
+
+        return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
+    }
+
     bool CaptureAndStoreFrontCalibrationSweep(const MotionLimits& limits, bool& storedBands)
     {
         storedBands = false;
-        FrontCalibrationSpinSampleSet<Config::kStartupWallCalibrationFrontSpinMaxSamples> sweepSamples{};
-        const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(limits);
-        const float targetSweepAngleRad = static_cast<float>(Config::kStartupWallCalibrationFrontSpinTurnCount) * TWO_PI_F;
-        const float captureStepRad = Config::kStartupWallCalibrationFrontSpinCaptureStepRad;
-        float accumulatedSweepAngleRad = 0.0f;
-        float lastStoredSweepAngleRad = -captureStepRad;
-        float previousYawRad = _drive.GetPose().yawRad;
-        const unsigned long expectedCompletionDeadlineMs =
+        FrontCalibrationSweepLoopState sweep{};
+        sweep.limits = limits;
+        sweep.turnProfile = BuildSharedInPlaceTurnProfile(limits);
+        sweep.targetSweepAngleRad =
+            static_cast<float>(Config::kStartupWallCalibrationFrontSpinTurnCount) * TWO_PI_F;
+        sweep.captureStepRad = Config::kStartupWallCalibrationFrontSpinCaptureStepRad;
+        sweep.lastStoredSweepAngleRad = -sweep.captureStepRad;
+        sweep.previousYawRad = _drive.GetPose().yawRad;
+        sweep.expectedCompletionDeadlineMs =
             millis() +
             static_cast<unsigned long>(
                 2500.0f +
-                (1000.0f * targetSweepAngleRad / (std::max)(0.25f, limits.maxAngularSpeedRadps)));
-        bool durationLogged = false;
+                (1000.0f * sweep.targetSweepAngleRad / (std::max)(0.25f, limits.maxAngularSpeedRadps)));
+        sweep.storedBands = &storedBands;
 
-        while (true)
-        {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-            (void)snapshot;
-
-            const PoseEstimate& pose = _drive.GetPose();
-            const float deltaYawRad = WrapAngleRad(pose.yawRad - previousYawRad);
-            previousYawRad = pose.yawRad;
-            accumulatedSweepAngleRad += (std::max)(0.0f, deltaYawRad);
-            accumulatedSweepAngleRad = (std::min)(accumulatedSweepAngleRad, targetSweepAngleRad);
-
-            if ((accumulatedSweepAngleRad - lastStoredSweepAngleRad) >= captureStepRad)
-            {
-                RawWallSensorSample frontLeftSample{};
-                RawWallSensorSample frontRightSample{};
-                float frontLeftWallDistanceM = NAN;
-                float frontRightWallDistanceM = NAN;
-                SampleWallSensorPairRaw(
-                    WallSensorId::FrontLeft,
-                    _speedVehicle.FrontLeft,
-                    WallSensorId::FrontRight,
-                    _speedVehicle.FrontRight,
-                    frontLeftSample,
-                    frontRightSample);
-                (void)TryComputeNearestStartCellWallDistanceM(pose, _speedVehicle.FrontLeft, frontLeftWallDistanceM);
-                (void)TryComputeNearestStartCellWallDistanceM(pose, _speedVehicle.FrontRight, frontRightWallDistanceM);
-                sweepSamples.Push(
-                    MazeMap::ClassifyFrontCalibrationSpinHeadingFromNorth(
-                        pose.yawRad,
-                        Config::kStartupWallCalibrationFrontNorthOpenHalfWidthRad,
-                        Config::kStartupWallCalibrationFrontWallMinEastOfNorthRad,
-                        Config::kStartupWallCalibrationFrontWallMaxEastOfNorthRad),
-                    frontLeftSample.differentialLight,
-                    frontRightSample.differentialLight,
-                    frontLeftWallDistanceM,
-                    frontRightWallDistanceM);
-                lastStoredSweepAngleRad = accumulatedSweepAngleRad;
-            }
-
-            const float remainingRad = targetSweepAngleRad - accumulatedSweepAngleRad;
-            if (MazeMap::IsInPlaceTurnComplete(remainingRad, pose.angularSpeedRadps, turnProfile))
-            {
-                _drive.Brake();
-                break;
-            }
-            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - millis()) <= 0)
-            {
-                durationLogged = true;
-                AppendStartupTrace("startup_wall_calibration:front_sweep_elapsed_budget_exceeded");
-            }
-
-            float angularCommandRadps = 0.0f;
-            if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
-                    remainingRad,
-                    pose.angularSpeedRadps,
-                    turnProfile,
-                    angularCommandRadps))
-            {
-                return Fail("Startup front calibration sweep profile became invalid");
-            }
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    0.0f,
-                    angularCommandRadps,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                0.0f,
-                angularCommandRadps);
-        }
-
-        if (!HoldPosition(Config::kStartupWallCalibrationSettleMs))
+        if (!RunLoopSession(&sweep, &MissionController::FrontCalibrationSweepLoopTick))
         {
             return false;
         }
@@ -3755,26 +4567,26 @@ private:
             traceLine,
             sizeof(traceLine),
             "startup_front_sweep_samples,fl_open=%u,fl_wall=%u,fr_open=%u,fr_wall=%u",
-            static_cast<unsigned>(sweepSamples.frontLeftOpenCount),
-            static_cast<unsigned>(sweepSamples.frontLeftWallCount),
-            static_cast<unsigned>(sweepSamples.frontRightOpenCount),
-            static_cast<unsigned>(sweepSamples.frontRightWallCount));
+            static_cast<unsigned>(sweep.sweepSamples.frontLeftOpenCount),
+            static_cast<unsigned>(sweep.sweepSamples.frontLeftWallCount),
+            static_cast<unsigned>(sweep.sweepSamples.frontRightOpenCount),
+            static_cast<unsigned>(sweep.sweepSamples.frontRightWallCount));
         AppendStartupTrace(traceLine);
 
         const bool storedFrontLeftBands = TryStoreFrontCalibrationSpinSensorBands(
             WallSensorId::FrontLeft,
-            sweepSamples.frontLeftOpenSamples,
-            sweepSamples.frontLeftOpenCount,
-            sweepSamples.frontLeftWallSamples,
-            sweepSamples.frontLeftWallDistanceSamples,
-            sweepSamples.frontLeftWallCount);
+            sweep.sweepSamples.frontLeftOpenSamples,
+            sweep.sweepSamples.frontLeftOpenCount,
+            sweep.sweepSamples.frontLeftWallSamples,
+            sweep.sweepSamples.frontLeftWallDistanceSamples,
+            sweep.sweepSamples.frontLeftWallCount);
         const bool storedFrontRightBands = TryStoreFrontCalibrationSpinSensorBands(
             WallSensorId::FrontRight,
-            sweepSamples.frontRightOpenSamples,
-            sweepSamples.frontRightOpenCount,
-            sweepSamples.frontRightWallSamples,
-            sweepSamples.frontRightWallDistanceSamples,
-            sweepSamples.frontRightWallCount);
+            sweep.sweepSamples.frontRightOpenSamples,
+            sweep.sweepSamples.frontRightOpenCount,
+            sweep.sweepSamples.frontRightWallSamples,
+            sweep.sweepSamples.frontRightWallDistanceSamples,
+            sweep.sweepSamples.frontRightWallCount);
 
         snprintf(
             traceLine,
@@ -4502,34 +5314,110 @@ private:
         return true;
     }
 
-    bool LogTelemetrySample(bool stationary, uint32_t timestampUs, uint32_t dtUs)
+    bool LogTelemetrySample(bool stationary, const LoopController::ModeState& state)
     {
         if (!_telemetryLoggingEnabled)
         {
             return true;
         }
-
-        SensorSnapshot telemetrySnapshot{};
-        _sensors.Capture(stationary, _drive.GetPose(), telemetrySnapshot);
-        const DriveTelemetry telemetry = _drive.GetTelemetry();
         DiagnosticLogRow row{};
         MazeMap::App::Internal::Runtime::PopulateDiagnosticLogRow(
             row,
             _telemetrySampleCount,
             _telemetryPhaseId,
             stationary,
-            timestampUs,
-            dtUs,
-            _drive.GetPose(),
+            state.tickStartUs,
+            state.dtUs,
+            state.estimate,
             _drive,
-            telemetry,
-            telemetrySnapshot);
+            state.driveTelemetry,
+            state.sensors);
         if (_runtime.LogUtilityDataRow(row))
         {
             ++_telemetrySampleCount;
             return true;
         }
         return Fail("Failed to write maneuver test sample");
+    }
+
+    LoopController::SessionOptions BuildLoopOptions() const
+    {
+        LoopController::SessionOptions options{};
+        options.controlPeriodUs = Config::kControlPeriodUs;
+        return options;
+    }
+
+    static LoopController::ControlVector ActiveLoopThunk(
+        void* context,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        auto* const self = static_cast<MissionController*>(context);
+        if ((self == nullptr) || (self->_activeLoopState == nullptr) || (self->_activeLoopTickFn == nullptr))
+        {
+            services.Fault("Mission loop callback dispatch was not initialized");
+            return LoopController::ControlVector::Brake;
+        }
+
+        return (self->*self->_activeLoopTickFn)(self->_activeLoopState, loopEndTimeUs, state, services);
+    }
+
+    void TransitionLoopPhase(
+        void* nextState,
+        const ActiveLoopTickFn nextTickFn,
+        LoopController::TickServices& services) noexcept
+    {
+        _activeLoopState = nextState;
+        _activeLoopTickFn = nextTickFn;
+        services.SetNextModeWorkCallback(&MissionController::ActiveLoopThunk);
+    }
+
+    LoopController::ControlVector EndLoopPhase(LoopController::TickServices& services) noexcept
+    {
+        services.RequestEndLoop();
+        return LoopController::ControlVector::Brake;
+    }
+
+    LoopController::ControlVector FaultLoopPhase(
+        LoopController::TickServices& services,
+        const char* reason) noexcept
+    {
+        services.Fault(reason);
+        return LoopController::ControlVector::Brake;
+    }
+
+    bool RunLoopSession(void* initialState, const ActiveLoopTickFn initialTickFn)
+    {
+        LoopController::ModeCallbacks callbacks{};
+        callbacks.onModeWork = &MissionController::ActiveLoopThunk;
+        callbacks.context = this;
+        _activeLoopState = initialState;
+        _activeLoopTickFn = initialTickFn;
+
+        const bool began = _loopController.BeginSession(BuildLoopOptions(), callbacks);
+        if (!began)
+        {
+            _activeLoopState = nullptr;
+            _activeLoopTickFn = nullptr;
+            return Fail("Mission loop controller session could not start");
+        }
+
+        const LoopController::SessionResult result = _loopController.Run();
+        _loopController.EndSession();
+        _activeLoopState = nullptr;
+        _activeLoopTickFn = nullptr;
+
+        if (_faulted)
+        {
+            return false;
+        }
+        if (result.status != LoopController::SessionResult::Status::Completed)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     bool Fail(const char* message)
@@ -4559,79 +5447,37 @@ private:
         FlushMissionTextLog();
     }
 
-    bool TickControl(bool stationary, float& dtSeconds, SensorSnapshot& snapshot)
+    LoopController::ControlVector HoldLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
     {
-        if ((micros() - _lastControlMicros) < Config::kControlPeriodUs)
+        (void)loopEndTimeUs;
+        auto& hold = *static_cast<HoldLoopState*>(rawState);
+        if (!hold.started)
         {
-            ServiceTelemetryLog();
-            while ((micros() - _lastControlMicros) < Config::kControlPeriodUs)
-            {
-                delayMicroseconds(50);
-            }
+            hold.started = true;
+            hold.startMs = millis();
         }
 
-        const unsigned long now = micros();
-        dtSeconds = static_cast<float>(now - _lastControlMicros) * 1.0e-6f;
-        _lastControlMicros = now;
-        struct CaptureContext final
+        if (!LogTelemetrySample(hold.stationary, state))
         {
-            MissionController* owner{};
-            float dtSeconds{};
-        } captureContext{ this, dtSeconds };
-        const RuntimeSensorSuite::CaptureCallback captureCallback
-        {
-            &captureContext,
-            [](void* rawContext, SensorSnapshot& captureSnapshot, RuntimeSensorSuite::CaptureServices& services) noexcept
-            {
-                auto& context = *static_cast<CaptureContext*>(rawContext);
-                context.owner->_drive.UpdateOdometry(
-                    context.dtSeconds,
-                    captureSnapshot,
-                    &context.owner->_maze,
-                    nullptr,
-                    [&services]() noexcept
-                    {
-                        (void)services.ServiceWallRead();
-                    },
-                    [&services]() noexcept
-                    {
-                        services.CaptureImu();
-                    });
-            }
-        };
-        _sensors.Capture(
-            stationary,
-            _drive.GetPose(),
-            snapshot,
-            &captureCallback);
-        if (_drive.HasEstimatorFault())
-        {
-            return Fail(_drive.GetEstimatorFaultReason());
-        }
-        return LogTelemetrySample(stationary, now, static_cast<uint32_t>(dtSeconds * 1.0e6f));
-    }
-
-    bool HoldPosition(uint16_t durationMs, const char* phaseName = nullptr)
-    {
-        if (phaseName != nullptr && !BeginTelemetryPhase(phaseName))
-        {
-            return false;
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
         }
 
-        const unsigned long deadline = millis() + durationMs;
-        _drive.Brake();
-        while (static_cast<long>(deadline - millis()) > 0)
+        if (static_cast<unsigned long>(millis() - hold.startMs) < hold.durationMs)
         {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(true, dtSeconds, snapshot))
-            {
-                return false;
-            }
-            _drive.Brake();
+            return LoopController::ControlVector::Brake;
         }
 
-        return true;
+        if (hold.nextTickFn != nullptr)
+        {
+            TransitionLoopPhase(hold.nextState, hold.nextTickFn, services);
+            return LoopController::ControlVector::Brake;
+        }
+
+        return EndLoopPhase(services);
     }
 
     bool IsDriveMotionSettled(
@@ -4651,6 +5497,78 @@ private:
             Config::kMotionSettleAngularSpeedThresholdRadps);
     }
 
+    LoopController::ControlVector SettleLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& settle = *static_cast<SettleLoopState*>(rawState);
+        if (!settle.started)
+        {
+            settle.started = true;
+            settle.startMs = millis();
+        }
+
+        if (!LogTelemetrySample(settle.brakeCommand, state))
+        {
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
+
+        const unsigned long nowMs = millis();
+        if (!settle.stationaryWindowActive)
+        {
+            settle.stationaryStartMs = nowMs;
+            settle.stationaryStartTelemetry = state.driveTelemetry;
+            settle.stationaryWindowActive = true;
+        }
+        else if (!IsDriveMotionSettled(
+            settle.stationaryStartTelemetry,
+            settle.stationaryStartMs,
+            state.driveTelemetry,
+            state.sensors,
+            nowMs))
+        {
+            settle.stationaryStartMs = nowMs;
+            settle.stationaryStartTelemetry = state.driveTelemetry;
+        }
+        else if ((nowMs - settle.stationaryStartMs) >= settle.stationaryHoldMs)
+        {
+            if (settle.nextTickFn != nullptr)
+            {
+                TransitionLoopPhase(settle.nextState, settle.nextTickFn, services);
+                return LoopController::ControlVector::Brake;
+            }
+
+            return EndLoopPhase(services);
+        }
+
+        if ((settle.timeoutMs > 0U) && ((nowMs - settle.startMs) >= settle.timeoutMs))
+        {
+            return FaultLoopPhase(
+                services,
+                (settle.timeoutMessage != nullptr) ? settle.timeoutMessage : "Drive settle timed out");
+        }
+
+        return settle.brakeCommand ?
+            LoopController::ControlVector::Brake :
+            MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, 0.0f);
+    }
+
+    bool HoldPosition(uint16_t durationMs, const char* phaseName = nullptr)
+    {
+        if (phaseName != nullptr && !BeginTelemetryPhase(phaseName))
+        {
+            return false;
+        }
+
+        HoldLoopState hold{};
+        hold.durationMs = durationMs;
+        hold.stationary = true;
+        return RunLoopSession(&hold, &MissionController::HoldLoopTick);
+    }
+
     bool HoldBrakedUntilDriveSettles(const char* timeoutMessage, uint16_t stationaryHoldMs = Config::kMotionSettleHoldMs, uint16_t timeoutMs = Config::kMotionSettleTimeoutMs)
     {
         if (timeoutMs > 0U && timeoutMessage == nullptr)
@@ -4658,52 +5576,12 @@ private:
             timeoutMessage = "Drive settle timed out";
         }
 
-        const unsigned long startMs = millis();
-        unsigned long stationaryStartMs = 0UL;
-        bool stationaryWindowActive = false;
-        DriveTelemetry stationaryStartTelemetry{};
-        _drive.Brake();
-        while (true)
-        {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(true, dtSeconds, snapshot))
-            {
-                return false;
-            }
-
-            _drive.Brake();
-            const unsigned long nowMs = millis();
-            const DriveTelemetry telemetry = _drive.GetTelemetry();
-            if (!stationaryWindowActive)
-            {
-                stationaryStartMs = nowMs;
-                stationaryStartTelemetry = telemetry;
-                stationaryWindowActive = true;
-            }
-            else if (!IsDriveMotionSettled(
-                stationaryStartTelemetry,
-                stationaryStartMs,
-                telemetry,
-                snapshot,
-                nowMs))
-            {
-                stationaryStartMs = nowMs;
-                stationaryStartTelemetry = telemetry;
-            }
-            else
-            {
-                if ((nowMs - stationaryStartMs) >= stationaryHoldMs)
-                {
-                    return true;
-                }
-            }
-
-            if ((timeoutMs > 0U) && ((nowMs - startMs) >= timeoutMs))
-            {
-                return Fail(timeoutMessage);
-            }
-        }
+        SettleLoopState settle{};
+        settle.timeoutMessage = timeoutMessage;
+        settle.stationaryHoldMs = stationaryHoldMs;
+        settle.timeoutMs = timeoutMs;
+        settle.brakeCommand = true;
+        return RunLoopSession(&settle, &MissionController::SettleLoopTick);
     }
 
     bool HoldZeroVelocityUntilDriveSettles(const char* timeoutMessage, uint16_t stationaryHoldMs = Config::kMotionSettleHoldMs, uint16_t timeoutMs = Config::kMotionSettleTimeoutMs)
@@ -4713,59 +5591,70 @@ private:
             timeoutMessage = "Drive settle timed out";
         }
 
-        const unsigned long startMs = millis();
-        unsigned long stationaryStartMs = 0UL;
-        bool stationaryWindowActive = false;
-        DriveTelemetry stationaryStartTelemetry{};
-        while (true)
+        SettleLoopState settle{};
+        settle.timeoutMessage = timeoutMessage;
+        settle.stationaryHoldMs = stationaryHoldMs;
+        settle.timeoutMs = timeoutMs;
+        settle.brakeCommand = false;
+        return RunLoopSession(&settle, &MissionController::SettleLoopTick);
+    }
+
+    LoopController::ControlVector StartupStationaryHoldLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& hold = *static_cast<StartupStationaryHoldLoopState*>(rawState);
+        if (!LogTelemetrySample(true, state))
         {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    0.0f,
-                    0.0f,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                0.0f,
-                0.0f);
-            const unsigned long nowMs = millis();
-            const DriveTelemetry telemetry = _drive.GetTelemetry();
-            if (!stationaryWindowActive)
-            {
-                stationaryStartMs = nowMs;
-                stationaryStartTelemetry = telemetry;
-                stationaryWindowActive = true;
-            }
-            else if (!IsDriveMotionSettled(
-                stationaryStartTelemetry,
-                stationaryStartMs,
-                telemetry,
-                snapshot,
-                nowMs))
-            {
-                stationaryStartMs = nowMs;
-                stationaryStartTelemetry = telemetry;
-            }
-            else
-            {
-                if ((nowMs - stationaryStartMs) >= stationaryHoldMs)
-                {
-                    _drive.Brake();
-                    return true;
-                }
-            }
-
-            if ((timeoutMs > 0U) && ((nowMs - startMs) >= timeoutMs))
-            {
-                return Fail(timeoutMessage);
-            }
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
         }
+
+        const unsigned long nowMs = millis();
+        if (!hold.stationaryWindowActive)
+        {
+            hold.stationaryStartMs = nowMs;
+            hold.stationaryStartTelemetry = state.driveTelemetry;
+            hold.stationaryWindowActive = true;
+            return LoopController::ControlVector::Brake;
+        }
+
+        const bool stationary = MazeMap::IsMissionStartupStationaryFromEncoderWindow(
+            state.driveTelemetry.leftDistanceM - hold.stationaryStartTelemetry.leftDistanceM,
+            state.driveTelemetry.rightDistanceM - hold.stationaryStartTelemetry.rightDistanceM,
+            static_cast<float>(nowMs - hold.stationaryStartMs) * 1.0e-3f,
+            state.sensors.gyroRadps,
+            Config::kMissionStartupStationarySpeedThresholdMps,
+            Config::kMissionStartupStationaryMaxAbsYawRateRadps);
+        if (!stationary)
+        {
+            if ((nowMs - hold.lastResetTraceMs) >= 1000UL)
+            {
+                char traceLine[160];
+                snprintf(
+                    traceLine,
+                    sizeof(traceLine),
+                    "startup_stationary_hold:reset,left_dm=%.5f,right_dm=%.5f,gyro=%.5f",
+                    state.driveTelemetry.leftDistanceM - hold.stationaryStartTelemetry.leftDistanceM,
+                    state.driveTelemetry.rightDistanceM - hold.stationaryStartTelemetry.rightDistanceM,
+                    state.sensors.gyroRadps);
+                AppendStartupTrace(traceLine);
+                hold.lastResetTraceMs = nowMs;
+            }
+            hold.stationaryStartMs = nowMs;
+            hold.stationaryStartTelemetry = state.driveTelemetry;
+            return LoopController::ControlVector::Brake;
+        }
+
+        if ((nowMs - hold.stationaryStartMs) >= Config::kMissionStartupStationaryHoldMs)
+        {
+            AppendStartupTrace("startup_stationary_hold:complete");
+            return EndLoopPhase(services);
+        }
+
+        return LoopController::ControlVector::Brake;
     }
 
     bool WaitForMissionStartupStationaryHold()
@@ -4776,63 +5665,94 @@ private:
         }
         AppendStartupTrace("startup_stationary_hold:waiting");
 
-        unsigned long stationaryStartMs = 0UL;
-        bool stationaryWindowActive = false;
-        unsigned long lastResetTraceMs = 0UL;
-        DriveTelemetry stationaryStartTelemetry{};
-        while (true)
+        StartupStationaryHoldLoopState hold{};
+        return RunLoopSession(&hold, &MissionController::StartupStationaryHoldLoopTick);
+    }
+
+    LoopController::ControlVector ReverseStraightLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& reverse = *static_cast<ReverseStraightLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
         {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(true, dtSeconds, snapshot))
-            {
-                return false;
-            }
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
 
-            const DriveTelemetry telemetry = _drive.GetTelemetry();
-            _drive.Brake();
-            const unsigned long nowMs = millis();
-            if (!stationaryWindowActive)
+        const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - reverse.startDistanceM);
+        float remainingM = (std::max)(0.0f, reverse.distanceM - traveledM);
+        if (reverse.targetPositionOverride != nullptr)
+        {
+            float projectedRemainingM = 0.0f;
+            if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                    state.estimate.xMeters,
+                    state.estimate.yMeters,
+                    reverse.targetPositionOverride->x(),
+                    reverse.targetPositionOverride->y(),
+                    -reverse.targetHeading.x(),
+                    -reverse.targetHeading.y(),
+                    projectedRemainingM))
             {
-                stationaryStartMs = nowMs;
-                stationaryStartTelemetry = telemetry;
-                stationaryWindowActive = true;
-                continue;
-            }
-
-            const bool stationary = MazeMap::IsMissionStartupStationaryFromEncoderWindow(
-                telemetry.leftDistanceM - stationaryStartTelemetry.leftDistanceM,
-                telemetry.rightDistanceM - stationaryStartTelemetry.rightDistanceM,
-                static_cast<float>(nowMs - stationaryStartMs) * 1.0e-3f,
-                snapshot.gyroRadps,
-                Config::kMissionStartupStationarySpeedThresholdMps,
-                Config::kMissionStartupStationaryMaxAbsYawRateRadps);
-            if (!stationary)
-            {
-                if ((nowMs - lastResetTraceMs) >= 1000UL)
+                if (!reverse.projectionFallbackLogged)
                 {
-                    char traceLine[160];
-                    snprintf(
-                        traceLine,
-                        sizeof(traceLine),
-                        "startup_stationary_hold:reset,left_dm=%.5f,right_dm=%.5f,gyro=%.5f",
-                        telemetry.leftDistanceM - stationaryStartTelemetry.leftDistanceM,
-                        telemetry.rightDistanceM - stationaryStartTelemetry.rightDistanceM,
-                        snapshot.gyroRadps);
-                    AppendStartupTrace(traceLine);
-                    lastResetTraceMs = nowMs;
+                    reverse.projectionFallbackLogged = true;
+                    AppendStartupTrace("reverse_profile:projection_fallback_to_encoder_distance");
                 }
-                stationaryStartMs = nowMs;
-                stationaryStartTelemetry = telemetry;
-                continue;
             }
-
-            if ((nowMs - stationaryStartMs) >= Config::kMissionStartupStationaryHoldMs)
+            else
             {
-                AppendStartupTrace("startup_stationary_hold:complete");
-                return true;
+                remainingM = (std::max)(0.0f, projectedRemainingM);
             }
         }
+        if (remainingM <= Config::kDistanceToleranceM)
+        {
+            reverse.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
+            reverse.completionSettle.timeoutMs = 0U;
+            reverse.completionSettle.brakeCommand = true;
+            TransitionLoopPhase(&reverse.completionSettle, &MissionController::SettleLoopTick, services);
+            return LoopController::ControlVector::Brake;
+        }
+
+        const unsigned long nowMs = millis();
+        if (reverse.translationWatchdog.Stalled(traveledM, reverse.commandedSpeedMps, remainingM, nowMs))
+        {
+            AppendStartupTrace("reverse_profile:encoder_progress_stalled_holding_position");
+            reverse.fallbackHold.durationMs = Config::kMotionSettleHoldMs;
+            reverse.fallbackHold.stationary = true;
+            TransitionLoopPhase(&reverse.fallbackHold, &MissionController::HoldLoopTick, services);
+            return LoopController::ControlVector::Brake;
+        }
+        if (static_cast<long>(reverse.timeoutMs - nowMs) <= 0)
+        {
+            AppendStartupTrace("reverse_profile:elapsed_budget_reached_holding_position");
+            reverse.fallbackHold.durationMs = Config::kMotionSettleHoldMs;
+            reverse.fallbackHold.stationary = true;
+            TransitionLoopPhase(&reverse.fallbackHold, &MissionController::HoldLoopTick, services);
+            return LoopController::ControlVector::Brake;
+        }
+
+        const float accelLimitedSpeedMps = (std::min)(
+            reverse.limits.maxSpeedMps,
+            reverse.commandedSpeedMps + (reverse.limits.accelMps2 * state.dtSeconds));
+        const float decelLimitedSpeedMps =
+            ReachableSpeedWithBoundary(0.0f, remainingM, reverse.limits.decelMps2);
+        reverse.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+
+        const float headingErrorRad = HeadingErrorRad(reverse.targetHeading, state.estimate.headingUnit);
+        float angularCommandRadps =
+            (Config::kStraightHeadingKp * headingErrorRad) -
+            (Config::kStraightYawD * state.estimate.angularSpeedRadps);
+        angularCommandRadps = (std::clamp)(
+            angularCommandRadps,
+            -reverse.limits.maxAngularSpeedRadps,
+            reverse.limits.maxAngularSpeedRadps);
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
+            -reverse.commandedSpeedMps,
+            angularCommandRadps);
     }
 
     bool ExecuteReverseStraightProfile(
@@ -4846,85 +5766,20 @@ private:
             return true;
         }
 
-        const float startDistanceM = _drive.GetAverageDistanceMeters();
-        const Eigen::Vector2f targetHeading =
+        ReverseStraightLoopState reverse{};
+        reverse.distanceM = distanceM;
+        reverse.limits = limits;
+        reverse.targetHeading =
             (targetHeadingOverride != nullptr) ?
             *targetHeadingOverride :
             _drive.GetPose().headingUnit;
-        float commandedSpeedMps = 0.0f;
-        EncoderProgressWatchdog translationWatchdog{};
-        translationWatchdog.Reset(0.0f, millis());
-        const unsigned long timeoutMs = millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
-        bool projectionFallbackLogged = false;
-
-        while (true)
-        {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            float remainingM = (std::max)(0.0f, distanceM - traveledM);
-            if (targetPositionOverride != nullptr)
-            {
-                const PoseEstimate& pose = _drive.GetPose();
-                float projectedRemainingM = 0.0f;
-                if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-                    pose.xMeters,
-                    pose.yMeters,
-                    targetPositionOverride->x(),
-                    targetPositionOverride->y(),
-                    -targetHeading.x(),
-                    -targetHeading.y(),
-                    projectedRemainingM))
-                {
-                    if (!projectionFallbackLogged)
-                    {
-                        projectionFallbackLogged = true;
-                        AppendStartupTrace("reverse_profile:projection_fallback_to_encoder_distance");
-                    }
-                }
-                else
-                {
-                    remainingM = (std::max)(0.0f, projectedRemainingM);
-                }
-            }
-            if (remainingM <= Config::kDistanceToleranceM)
-            {
-                _drive.Brake();
-                return HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U);
-            }
-            if (translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, millis()))
-            {
-                _drive.Brake();
-                AppendStartupTrace("reverse_profile:encoder_progress_stalled_holding_position");
-                return HoldPosition(Config::kMotionSettleHoldMs);
-            }
-            if (static_cast<long>(timeoutMs - millis()) <= 0)
-            {
-                _drive.Brake();
-                AppendStartupTrace("reverse_profile:elapsed_budget_reached_holding_position");
-                return HoldPosition(Config::kMotionSettleHoldMs);
-            }
-
-            const float accelLimitedSpeedMps = (std::min)(limits.maxSpeedMps, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
-            const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
-            commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
-
-            const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
-            float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps);
-            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    -commandedSpeedMps,
-                    angularCommandRadps,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                -commandedSpeedMps,
-                angularCommandRadps);
-        }
+        reverse.targetPositionOverride = targetPositionOverride;
+        reverse.startDistanceM = _drive.GetAverageDistanceMeters();
+        reverse.timeoutMs =
+            millis() +
+            static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
+        reverse.translationWatchdog.Reset(0.0f, millis());
+        return RunLoopSession(&reverse, &MissionController::ReverseStraightLoopTick);
     }
 
     bool LoadManeuverQueueFromSd(const char* fileName, MazeMap::ManeuverQueue& queue)
@@ -5418,6 +6273,471 @@ private:
         return true;
     }
 
+    LoopController::ControlVector SearchStraightLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& search = *static_cast<SearchStraightLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
+        {
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
+
+        const PoseEstimate& livePose = _drive.GetPose();
+        float projectedRemainingM = 0.0f;
+        if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                livePose.xMeters,
+                livePose.yMeters,
+                search.targetXMeters,
+                search.targetYMeters,
+                search.targetHeading.x(),
+                search.targetHeading.y(),
+                projectedRemainingM))
+        {
+            return FaultLoopPhase(services, "Search straight target projection is invalid");
+        }
+        const float remainingM = (std::max)(0.0f, projectedRemainingM);
+        const float projectedTravelM =
+            (std::clamp)(search.distanceToTargetM - projectedRemainingM, 0.0f, search.distanceToTargetM);
+        const float sideSensorForwardOffsetM =
+            (std::max)(_speedVehicle.SideLeft.GetPosition().x(), _speedVehicle.SideRight.GetPosition().x());
+
+        auto resetRollingObservationPlan = [&search]()
+        {
+            search.rollingObservationNextSampleIndex = 0U;
+            search.rollingObservationPlanInitialized = false;
+            search.rollingObservationSideResetTriggerTravelM = 0.0f;
+            search.rollingObservationSideResetPending = false;
+            memset(search.rollingObservationTriggerTravelM, 0, sizeof(search.rollingObservationTriggerTravelM));
+            memset(search.rollingObservationSamples, 0, sizeof(search.rollingObservationSamples));
+            for (std::uint8_t sampleIndex = 0U;
+                sampleIndex < Config::kSearchRollingObservationSampleCount;
+                ++sampleIndex)
+            {
+                search.rollingObservationFrontLeftCandidateDistanceM[sampleIndex] = NAN;
+                search.rollingObservationFrontRightCandidateDistanceM[sampleIndex] = NAN;
+            }
+        };
+
+        auto initializeRollingObservationPlan = [this, &search, sideSensorForwardOffsetM]() -> const char*
+        {
+            if (!search.observeWhileRolling || search.rollingObservationCount >= search.cellCount)
+            {
+                return nullptr;
+            }
+            if (search.rollingObservationPlanInitialized)
+            {
+                return nullptr;
+            }
+
+            const PoseEstimate startPose = _drive.GetPose();
+            for (std::uint8_t sampleIndex = 0U;
+                sampleIndex < Config::kSearchRollingObservationSampleCount;
+                ++sampleIndex)
+            {
+                float targetObservationXMeters = 0.0f;
+                float targetObservationYMeters = 0.0f;
+                if (!MazeMap::TryComputeSideWallObservationSamplePoseM(
+                        search.nextRollingObservationCell,
+                        search.direction,
+                        Config::kCellSizeM,
+                        Config::kMazeWallThicknessM,
+                        sideSensorForwardOffsetM,
+                        Config::kSideWallSegmentCenterFraction,
+                        sampleIndex,
+                        Config::kSearchRollingObservationSampleCount,
+                        targetObservationXMeters,
+                        targetObservationYMeters))
+                {
+                    return "Search straight rolling observation sample pose is invalid";
+                }
+
+                float triggerTravelM = 0.0f;
+                if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                        startPose.xMeters,
+                        startPose.yMeters,
+                        targetObservationXMeters,
+                        targetObservationYMeters,
+                        search.targetHeading.x(),
+                        search.targetHeading.y(),
+                        triggerTravelM))
+                {
+                    return "Search straight rolling observation sample trigger is invalid";
+                }
+                if (sampleIndex > 0U &&
+                    triggerTravelM < (search.rollingObservationTriggerTravelM[sampleIndex - 1U] - Config::kDistanceToleranceM))
+                {
+                    AppendMissionTraceFormatted(
+                        "mission_observation_trigger_recovered,cell=(%d,%d),abs=%s,sample=%u,prev_m=%.4f,raw_m=%.4f",
+                        search.nextRollingObservationCell.GetX(),
+                        search.nextRollingObservationCell.GetY(),
+                        DirectionName(search.direction),
+                        static_cast<unsigned>(sampleIndex),
+                        search.rollingObservationTriggerTravelM[sampleIndex - 1U],
+                        triggerTravelM);
+                    triggerTravelM = search.rollingObservationTriggerTravelM[sampleIndex - 1U];
+                }
+
+                search.rollingObservationTriggerTravelM[sampleIndex] = triggerTravelM;
+            }
+
+            float targetResetXMeters = 0.0f;
+            float targetResetYMeters = 0.0f;
+            if (!MazeMap::TryComputeSideWallTravelFractionPoseM(
+                    search.nextRollingObservationCell,
+                    search.direction,
+                    Config::kCellSizeM,
+                    sideSensorForwardOffsetM,
+                    Config::kSideWallStateResetCellEntryFraction,
+                    targetResetXMeters,
+                    targetResetYMeters))
+            {
+                return "Search straight side reset trigger pose is invalid";
+            }
+
+            float resetTriggerTravelM = 0.0f;
+            if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                    startPose.xMeters,
+                    startPose.yMeters,
+                    targetResetXMeters,
+                    targetResetYMeters,
+                    search.targetHeading.x(),
+                    search.targetHeading.y(),
+                    resetTriggerTravelM))
+            {
+                return "Search straight side reset trigger is invalid";
+            }
+            if (resetTriggerTravelM > (search.rollingObservationTriggerTravelM[0] - Config::kDistanceToleranceM))
+            {
+                AppendMissionTraceFormatted(
+                    "mission_side_reset_trigger_recovered,cell=(%d,%d),abs=%s,raw_m=%.4f,first_sample_m=%.4f",
+                    search.nextRollingObservationCell.GetX(),
+                    search.nextRollingObservationCell.GetY(),
+                    DirectionName(search.direction),
+                    resetTriggerTravelM,
+                    search.rollingObservationTriggerTravelM[0]);
+                resetTriggerTravelM =
+                    (std::max)(0.0f, search.rollingObservationTriggerTravelM[0] - Config::kDistanceToleranceM);
+            }
+
+            search.rollingObservationSideResetTriggerTravelM = resetTriggerTravelM;
+            search.rollingObservationSideResetPending = true;
+            search.rollingObservationPlanInitialized = true;
+            return nullptr;
+        };
+
+        if (search.observeWhileRolling)
+        {
+            while (search.rollingObservationCount < search.cellCount)
+            {
+                if (const char* error = initializeRollingObservationPlan())
+                {
+                    return FaultLoopPhase(services, error);
+                }
+
+                if (search.rollingObservationSideResetPending &&
+                    (projectedTravelM + Config::kDistanceToleranceM) >= search.rollingObservationSideResetTriggerTravelM)
+                {
+                    _sensors.ResetSideWallMemory();
+                    search.rollingObservationSideResetPending = false;
+                    AppendMissionTraceFormatted(
+                        "mission_side_reset,cell=(%d,%d),abs=%s,travel_m=%.4f,trigger_m=%.4f",
+                        search.nextRollingObservationCell.GetX(),
+                        search.nextRollingObservationCell.GetY(),
+                        DirectionName(search.direction),
+                        projectedTravelM,
+                        search.rollingObservationSideResetTriggerTravelM);
+                    break;
+                }
+
+                while (search.rollingObservationNextSampleIndex < Config::kSearchRollingObservationSampleCount &&
+                    (projectedTravelM + Config::kDistanceToleranceM) >=
+                        search.rollingObservationTriggerTravelM[search.rollingObservationNextSampleIndex])
+                {
+                    search.rollingObservationSamples[search.rollingObservationNextSampleIndex] = state.sensors;
+                    float frontLeftCandidateDistanceM = NAN;
+                    float frontRightCandidateDistanceM = NAN;
+                    (void)TryComputeDistanceToCellWallM(
+                        livePose,
+                        _speedVehicle.FrontLeft,
+                        search.nextRollingObservationCell,
+                        search.direction,
+                        frontLeftCandidateDistanceM);
+                    (void)TryComputeDistanceToCellWallM(
+                        livePose,
+                        _speedVehicle.FrontRight,
+                        search.nextRollingObservationCell,
+                        search.direction,
+                        frontRightCandidateDistanceM);
+                    search.rollingObservationFrontLeftCandidateDistanceM[search.rollingObservationNextSampleIndex] =
+                        frontLeftCandidateDistanceM;
+                    search.rollingObservationFrontRightCandidateDistanceM[search.rollingObservationNextSampleIndex] =
+                        frontRightCandidateDistanceM;
+                    ++search.rollingObservationNextSampleIndex;
+                }
+
+                if (search.rollingObservationNextSampleIndex < Config::kSearchRollingObservationSampleCount)
+                {
+                    break;
+                }
+
+                SensorSnapshot majoritySnapshot{};
+                RollingObservationVoteSummary voteSummary{};
+                if (!BuildEvidenceObservationSnapshot(
+                        search.rollingObservationSamples,
+                        Config::kSearchRollingObservationSampleCount,
+                        majoritySnapshot,
+                        voteSummary))
+                {
+                    return FaultLoopPhase(services, "Search straight rolling observation majority snapshot is invalid");
+                }
+                if (!TryApplyFrontWallCharacterizationToObservation(
+                        search.nextRollingObservationCell,
+                        search.direction,
+                        "rolling",
+                        search.rollingObservationSamples,
+                        search.rollingObservationFrontLeftCandidateDistanceM,
+                        search.rollingObservationFrontRightCandidateDistanceM,
+                        Config::kSearchRollingObservationSampleCount,
+                        majoritySnapshot))
+                {
+                    AppendMissionTraceFormatted(
+                        "mission_front_curve_fit_unavailable,cell=(%d,%d),abs=%s,origin=rolling,fallback_valid=%u",
+                        search.nextRollingObservationCell.GetX(),
+                        search.nextRollingObservationCell.GetY(),
+                        DirectionName(search.direction),
+                        majoritySnapshot.frontWallObservationValid ? 1U : 0U);
+                }
+
+                AppendMissionTraceFormatted(
+                    "mission_observation_timed,cell=(%d,%d),abs=%s,samples=%u,start_m=%.4f,end_m=%.4f,travel_m=%.4f,front_votes=%u,left_valid=%u,left_votes=%u,right_valid=%u,right_votes=%u",
+                    search.nextRollingObservationCell.GetX(),
+                    search.nextRollingObservationCell.GetY(),
+                    DirectionName(search.direction),
+                    static_cast<unsigned>(voteSummary.sampleCount),
+                    search.rollingObservationTriggerTravelM[0],
+                    search.rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount - 1U],
+                    projectedTravelM,
+                    static_cast<unsigned>(voteSummary.frontWallVotes),
+                    static_cast<unsigned>(voteSummary.leftWindowValidVotes),
+                    static_cast<unsigned>(voteSummary.leftWallVotes),
+                    static_cast<unsigned>(voteSummary.rightWindowValidVotes),
+                    static_cast<unsigned>(voteSummary.rightWallVotes));
+                bool forwardWallCommittedFromUnknown = false;
+                if (!ObserveCellFromSnapshot(
+                        search.nextRollingObservationCell,
+                        search.direction,
+                        majoritySnapshot,
+                        &forwardWallCommittedFromUnknown))
+                {
+                    return FaultLoopPhase(services, "Search straight observation commit failed");
+                }
+
+                if (forwardWallCommittedFromUnknown)
+                {
+                    search.stoppedForReplan = true;
+                    search.replanObservedCell = search.nextRollingObservationCell;
+                    search.replanProjectedTravelM = projectedTravelM;
+                    search.replanFrontVoteCount = voteSummary.frontWallVotes;
+                    search.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
+                    search.completionSettle.timeoutMs = 0U;
+                    search.completionSettle.brakeCommand = true;
+                    TransitionLoopPhase(&search.completionSettle, &MissionController::SettleLoopTick, services);
+                    return LoopController::ControlVector::Brake;
+                }
+
+                ++search.rollingObservationCount;
+                if (search.rollingObservationCount < search.cellCount)
+                {
+                    search.nextRollingObservationCell = search.nextRollingObservationCell >> search.direction;
+                }
+                resetRollingObservationPlan();
+            }
+        }
+
+        const bool stoppingAtEndpoint = search.exitSpeedMps <= 0.05f;
+        if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
+        {
+            search.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
+            search.completionSettle.timeoutMs = 0U;
+            search.completionSettle.brakeCommand = true;
+            TransitionLoopPhase(&search.completionSettle, &MissionController::SettleLoopTick, services);
+            return LoopController::ControlVector::Brake;
+        }
+
+        const bool terminalReached =
+            (remainingM <= Config::kDistanceToleranceM) &&
+            (std::fabs(state.estimate.linearSpeedMps - search.exitSpeedMps) <= Config::kSpeedToleranceMps);
+        if (terminalReached)
+        {
+            return EndLoopPhase(services);
+        }
+
+        const unsigned long nowMs = millis();
+        if (!search.stallLogged &&
+            search.translationWatchdog.Stalled(projectedTravelM, search.commandedSpeedMps, remainingM, nowMs))
+        {
+            search.stallLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=search_straight,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                projectedTravelM,
+                remainingM,
+                search.commandedSpeedMps);
+        }
+        if (!search.durationLogged && static_cast<long>(search.expectedCompletionDeadlineMs - nowMs) <= 0)
+        {
+            search.durationLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=search_straight,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                projectedTravelM,
+                remainingM,
+                search.commandedSpeedMps);
+        }
+
+        const MotionLimits searchLimits = SearchLimits();
+        const float accelLimitedSpeedMps = (std::min)(
+            search.cruiseSpeedMps,
+            search.commandedSpeedMps + (searchLimits.accelMps2 * state.dtSeconds));
+        const float decelLimitedSpeedMps =
+            ReachableSpeedWithBoundary(search.exitSpeedMps, remainingM, searchLimits.decelMps2);
+        search.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+
+        float wallOmegaRadps = 0.0f;
+        float signalCorridorErrorM = 0.0f;
+        if (TryComputeWallGroundedCorridorErrorM(state.sensors, signalCorridorErrorM))
+        {
+            wallOmegaRadps += ComputeWallCenterPdOmegaRadps(
+                signalCorridorErrorM,
+                search.commandedSpeedMps,
+                state.dtSeconds,
+                search.previousCorridorErrorM,
+                search.filteredCorridorErrorRateMps,
+                search.previousCorridorErrorValid);
+        }
+        else
+        {
+            search.filteredCorridorErrorRateMps = 0.0f;
+            search.previousCorridorErrorValid = false;
+        }
+        if (stoppingAtEndpoint &&
+            std::isfinite(state.sensors.frontLeftDistanceM) &&
+            std::isfinite(state.sensors.frontRightDistanceM) &&
+            state.sensors.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+            state.sensors.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+            remainingM < 0.07f)
+        {
+            wallOmegaRadps += Config::kFrontSkewGain * state.sensors.frontSkewM;
+        }
+
+        const float headingErrorRad = HeadingErrorRad(search.targetHeading, state.estimate.headingUnit);
+        float angularCommandRadps =
+            (Config::kStraightHeadingKp * headingErrorRad) -
+            (Config::kStraightYawD * state.estimate.angularSpeedRadps) +
+            wallOmegaRadps;
+        angularCommandRadps = (std::clamp)(
+            angularCommandRadps,
+            -searchLimits.maxAngularSpeedRadps,
+            searchLimits.maxAngularSpeedRadps);
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
+            search.commandedSpeedMps,
+            angularCommandRadps);
+    }
+
+    bool ExecuteSearchStraightCellsLoopDriven(
+        MazeMap::Direction direction,
+        uint16_t cellCount,
+        float entrySpeedMps,
+        float cruiseSpeedMps,
+        float exitSpeedMps,
+        bool snapAtEnd,
+        bool observeWhileRolling = false,
+        bool* outStoppedForReplan = nullptr)
+    {
+        (void)snapAtEnd;
+        if (outStoppedForReplan != nullptr)
+        {
+            *outStoppedForReplan = false;
+        }
+        if (cellCount == 0U)
+        {
+            return true;
+        }
+
+        SearchStraightLoopState search{};
+        search.direction = direction;
+        search.cellCount = cellCount;
+        search.entrySpeedMps = entrySpeedMps;
+        search.cruiseSpeedMps = cruiseSpeedMps;
+        search.exitSpeedMps = exitSpeedMps;
+        search.observeWhileRolling = observeWhileRolling;
+        search.startCell = _currentCell;
+        search.destination = _currentCell;
+        for (std::uint16_t index = 0U; index < cellCount; ++index)
+        {
+            search.destination = search.destination >> direction;
+        }
+        search.targetHeading = DirectionToUnitVector(direction);
+        MazeMap::MazeLocation::CellCenter(search.destination).GetPhysicalLocation(
+            Config::kCellSizeM,
+            search.targetXMeters,
+            search.targetYMeters);
+
+        const PoseEstimate startPose = _drive.GetPose();
+        if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                startPose.xMeters,
+                startPose.yMeters,
+                search.targetXMeters,
+                search.targetYMeters,
+                search.targetHeading.x(),
+                search.targetHeading.y(),
+                search.distanceToTargetM))
+        {
+            return Fail("Search straight target distance is invalid");
+        }
+        if (search.distanceToTargetM < -Config::kDistanceToleranceM)
+        {
+            return Fail("Search straight target fell behind the current pose");
+        }
+
+        search.nextRollingObservationCell = search.startCell;
+        if (observeWhileRolling)
+        {
+            search.nextRollingObservationCell = search.nextRollingObservationCell >> direction;
+        }
+        search.commandedSpeedMps = (std::max)(entrySpeedMps, 0.0f);
+        search.translationWatchdog.Reset(0.0f, millis());
+        search.expectedCompletionDeadlineMs =
+            millis() + static_cast<unsigned long>(2500.0f + (5000.0f * search.distanceToTargetM));
+
+        if (!RunLoopSession(&search, &MissionController::SearchStraightLoopTick))
+        {
+            return false;
+        }
+
+        if (search.stoppedForReplan)
+        {
+            return HandleSearchWallMapUpdateStop(
+                search.replanObservedCell,
+                direction,
+                search.replanProjectedTravelM,
+                search.replanFrontVoteCount,
+                outStoppedForReplan);
+        }
+
+        _currentCell = search.destination;
+        _currentDirectionalLocation =
+            MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(_currentCell), _currentDirection);
+        return true;
+    }
+
     bool ExploreFullMaze()
     {
         while (!_maze.IsComplete())
@@ -5631,466 +6951,15 @@ private:
         bool observeWhileRolling = false,
         bool* outStoppedForReplan = nullptr)
     {
-        (void)snapAtEnd;
-        if (outStoppedForReplan != nullptr)
-        {
-            *outStoppedForReplan = false;
-        }
-
-        if (cellCount == 0U)
-        {
-            return true;
-        }
-
-        const MazeMap::CellCoordinates startCell = _currentCell;
-        MazeMap::CellCoordinates destination = startCell;
-        for (uint16_t i = 0U; i < cellCount; ++i)
-        {
-            destination = destination >> direction;
-        }
-
-        const Eigen::Vector2f targetHeading = DirectionToUnitVector(direction);
-        float targetXMeters = 0.0f;
-        float targetYMeters = 0.0f;
-        MazeMap::MazeLocation::CellCenter(destination).GetPhysicalLocation(Config::kCellSizeM, targetXMeters, targetYMeters);
-
-        const PoseEstimate startPose = _drive.GetPose();
-        float distanceToTargetM = 0.0f;
-        if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-            startPose.xMeters,
-            startPose.yMeters,
-            targetXMeters,
-            targetYMeters,
-            targetHeading.x(),
-            targetHeading.y(),
-            distanceToTargetM))
-        {
-            return Fail("Search straight target distance is invalid");
-        }
-        if (distanceToTargetM < -Config::kDistanceToleranceM)
-        {
-            return Fail("Search straight target fell behind the current pose");
-        }
-
-        const float sideSensorForwardOffsetM =
-            (std::max)(_speedVehicle.SideLeft.GetPosition().x(), _speedVehicle.SideRight.GetPosition().x());
-        uint16_t rollingObservationCount = 0U;
-        MazeMap::CellCoordinates nextRollingObservationCell = startCell;
-        float rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount] = {};
-        SensorSnapshot rollingObservationSamples[Config::kSearchRollingObservationSampleCount] = {};
-        float rollingObservationFrontLeftCandidateDistanceM[Config::kSearchRollingObservationSampleCount] = {};
-        float rollingObservationFrontRightCandidateDistanceM[Config::kSearchRollingObservationSampleCount] = {};
-        float rollingObservationSideResetTriggerTravelM = 0.0f;
-        uint8_t rollingObservationNextSampleIndex = 0U;
-        bool rollingObservationSideResetPending = false;
-        bool rollingObservationPlanInitialized = false;
-        if (observeWhileRolling)
-        {
-            nextRollingObservationCell = nextRollingObservationCell >> direction;
-        }
-
-        const auto resetRollingObservationPlan = [&]()
-        {
-            rollingObservationNextSampleIndex = 0U;
-            rollingObservationPlanInitialized = false;
-            rollingObservationSideResetTriggerTravelM = 0.0f;
-            rollingObservationSideResetPending = false;
-            memset(rollingObservationTriggerTravelM, 0, sizeof(rollingObservationTriggerTravelM));
-            memset(rollingObservationSamples, 0, sizeof(rollingObservationSamples));
-            for (uint8_t sampleIndex = 0U; sampleIndex < Config::kSearchRollingObservationSampleCount; ++sampleIndex)
-            {
-                rollingObservationFrontLeftCandidateDistanceM[sampleIndex] = NAN;
-                rollingObservationFrontRightCandidateDistanceM[sampleIndex] = NAN;
-            }
-        };
-
-        const auto initializeRollingObservationPlan = [&]() -> bool
-        {
-            if (!observeWhileRolling || rollingObservationCount >= cellCount)
-            {
-                return true;
-            }
-            if (rollingObservationPlanInitialized)
-            {
-                return true;
-            }
-
-            // WARNING: Mapping observation here is intentionally one constant-velocity traversal through the cell.
-            // Do not add any parallel traversal mechanism, extra pass, or speed-shape change here. The only permitted
-            // refinement is to move the observation timing inside the target region while the chassis keeps the same
-            // steady mapping straight.
-            for (uint8_t sampleIndex = 0U; sampleIndex < Config::kSearchRollingObservationSampleCount; ++sampleIndex)
-            {
-                float targetObservationXMeters = 0.0f;
-                float targetObservationYMeters = 0.0f;
-                if (!MazeMap::TryComputeSideWallObservationSamplePoseM(
-                        nextRollingObservationCell,
-                        direction,
-                        Config::kCellSizeM,
-                        Config::kMazeWallThicknessM,
-                        sideSensorForwardOffsetM,
-                        Config::kSideWallSegmentCenterFraction,
-                        sampleIndex,
-                        Config::kSearchRollingObservationSampleCount,
-                        targetObservationXMeters,
-                        targetObservationYMeters))
-                {
-                    return Fail("Search straight rolling observation sample pose is invalid");
-                }
-
-                float triggerTravelM = 0.0f;
-                if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-                        startPose.xMeters,
-                        startPose.yMeters,
-                        targetObservationXMeters,
-                        targetObservationYMeters,
-                        targetHeading.x(),
-                        targetHeading.y(),
-                        triggerTravelM))
-                {
-                    return Fail("Search straight rolling observation sample trigger is invalid");
-                }
-                if (sampleIndex > 0U &&
-                    triggerTravelM < (rollingObservationTriggerTravelM[sampleIndex - 1U] - Config::kDistanceToleranceM))
-                {
-                    AppendMissionTraceFormatted(
-                        "mission_observation_trigger_recovered,cell=(%d,%d),abs=%s,sample=%u,prev_m=%.4f,raw_m=%.4f",
-                        nextRollingObservationCell.GetX(),
-                        nextRollingObservationCell.GetY(),
-                        DirectionName(direction),
-                        static_cast<unsigned>(sampleIndex),
-                        rollingObservationTriggerTravelM[sampleIndex - 1U],
-                        triggerTravelM);
-                    triggerTravelM = rollingObservationTriggerTravelM[sampleIndex - 1U];
-                }
-
-                rollingObservationTriggerTravelM[sampleIndex] = triggerTravelM;
-            }
-
-            float targetResetXMeters = 0.0f;
-            float targetResetYMeters = 0.0f;
-            if (!MazeMap::TryComputeSideWallTravelFractionPoseM(
-                    nextRollingObservationCell,
-                    direction,
-                    Config::kCellSizeM,
-                    sideSensorForwardOffsetM,
-                    Config::kSideWallStateResetCellEntryFraction,
-                    targetResetXMeters,
-                    targetResetYMeters))
-            {
-                return Fail("Search straight side reset trigger pose is invalid");
-            }
-
-            float resetTriggerTravelM = 0.0f;
-            if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-                    startPose.xMeters,
-                    startPose.yMeters,
-                    targetResetXMeters,
-                    targetResetYMeters,
-                    targetHeading.x(),
-                    targetHeading.y(),
-                    resetTriggerTravelM))
-            {
-                return Fail("Search straight side reset trigger is invalid");
-            }
-            if (resetTriggerTravelM > (rollingObservationTriggerTravelM[0] - Config::kDistanceToleranceM))
-            {
-                AppendMissionTraceFormatted(
-                    "mission_side_reset_trigger_recovered,cell=(%d,%d),abs=%s,raw_m=%.4f,first_sample_m=%.4f",
-                    nextRollingObservationCell.GetX(),
-                    nextRollingObservationCell.GetY(),
-                    DirectionName(direction),
-                    resetTriggerTravelM,
-                    rollingObservationTriggerTravelM[0]);
-                resetTriggerTravelM = (std::max)(0.0f, rollingObservationTriggerTravelM[0] - Config::kDistanceToleranceM);
-            }
-
-            rollingObservationSideResetTriggerTravelM = resetTriggerTravelM;
-            rollingObservationSideResetPending = true;
-
-            rollingObservationPlanInitialized = true;
-            return true;
-        };
-
-        bool rollingObservationStoppedForReplan = false;
-        const auto tryObserveRollingCells = [&](float projectedTravelM, const PoseEstimate& livePose, const SensorSnapshot& liveSnapshot) -> bool
-        {
-            if (!observeWhileRolling)
-            {
-                return true;
-            }
-
-            while (rollingObservationCount < cellCount)
-            {
-                if (!initializeRollingObservationPlan())
-                {
-                    return false;
-                }
-
-                if (rollingObservationSideResetPending &&
-                    (projectedTravelM + Config::kDistanceToleranceM) >= rollingObservationSideResetTriggerTravelM)
-                {
-                    _sensors.ResetSideWallMemory();
-                    rollingObservationSideResetPending = false;
-                    AppendMissionTraceFormatted(
-                        "mission_side_reset,cell=(%d,%d),abs=%s,travel_m=%.4f,trigger_m=%.4f",
-                        nextRollingObservationCell.GetX(),
-                        nextRollingObservationCell.GetY(),
-                        DirectionName(direction),
-                        projectedTravelM,
-                        rollingObservationSideResetTriggerTravelM);
-                    break;
-                }
-
-                while (rollingObservationNextSampleIndex < Config::kSearchRollingObservationSampleCount &&
-                    (projectedTravelM + Config::kDistanceToleranceM) >= rollingObservationTriggerTravelM[rollingObservationNextSampleIndex])
-                {
-                    rollingObservationSamples[rollingObservationNextSampleIndex] = liveSnapshot;
-                    float frontLeftCandidateDistanceM = NAN;
-                    float frontRightCandidateDistanceM = NAN;
-                    (void)TryComputeDistanceToCellWallM(
-                        livePose,
-                        _speedVehicle.FrontLeft,
-                        nextRollingObservationCell,
-                        direction,
-                        frontLeftCandidateDistanceM);
-                    (void)TryComputeDistanceToCellWallM(
-                        livePose,
-                        _speedVehicle.FrontRight,
-                        nextRollingObservationCell,
-                        direction,
-                        frontRightCandidateDistanceM);
-                    rollingObservationFrontLeftCandidateDistanceM[rollingObservationNextSampleIndex] = frontLeftCandidateDistanceM;
-                    rollingObservationFrontRightCandidateDistanceM[rollingObservationNextSampleIndex] = frontRightCandidateDistanceM;
-                    ++rollingObservationNextSampleIndex;
-                }
-
-                if (rollingObservationNextSampleIndex < Config::kSearchRollingObservationSampleCount)
-                {
-                    break;
-                }
-
-                SensorSnapshot majoritySnapshot{};
-                RollingObservationVoteSummary voteSummary{};
-                if (!BuildEvidenceObservationSnapshot(
-                        rollingObservationSamples,
-                        Config::kSearchRollingObservationSampleCount,
-                        majoritySnapshot,
-                        voteSummary))
-                {
-                    return Fail("Search straight rolling observation majority snapshot is invalid");
-                }
-                if (!TryApplyFrontWallCharacterizationToObservation(
-                        nextRollingObservationCell,
-                        direction,
-                        "rolling",
-                        rollingObservationSamples,
-                        rollingObservationFrontLeftCandidateDistanceM,
-                        rollingObservationFrontRightCandidateDistanceM,
-                        Config::kSearchRollingObservationSampleCount,
-                        majoritySnapshot))
-                {
-                    AppendMissionTraceFormatted(
-                        "mission_front_curve_fit_unavailable,cell=(%d,%d),abs=%s,origin=rolling,fallback_valid=%u",
-                        nextRollingObservationCell.GetX(),
-                        nextRollingObservationCell.GetY(),
-                        DirectionName(direction),
-                        majoritySnapshot.frontWallObservationValid ? 1U : 0U);
-                }
-
-                AppendMissionTraceFormatted(
-                    "mission_observation_timed,cell=(%d,%d),abs=%s,samples=%u,start_m=%.4f,end_m=%.4f,travel_m=%.4f,front_votes=%u,left_valid=%u,left_votes=%u,right_valid=%u,right_votes=%u",
-                    nextRollingObservationCell.GetX(),
-                    nextRollingObservationCell.GetY(),
-                    DirectionName(direction),
-                    static_cast<unsigned>(voteSummary.sampleCount),
-                    rollingObservationTriggerTravelM[0],
-                    rollingObservationTriggerTravelM[Config::kSearchRollingObservationSampleCount - 1U],
-                    projectedTravelM,
-                    static_cast<unsigned>(voteSummary.frontWallVotes),
-                    static_cast<unsigned>(voteSummary.leftWindowValidVotes),
-                    static_cast<unsigned>(voteSummary.leftWallVotes),
-                    static_cast<unsigned>(voteSummary.rightWindowValidVotes),
-                    static_cast<unsigned>(voteSummary.rightWallVotes));
-                bool forwardWallCommittedFromUnknown = false;
-                if (!ObserveCellFromSnapshot(
-                        nextRollingObservationCell,
-                        direction,
-                        majoritySnapshot,
-                        &forwardWallCommittedFromUnknown))
-                {
-                    return false;
-                }
-
-                if (forwardWallCommittedFromUnknown)
-                {
-                    if (!HandleSearchWallMapUpdateStop(
-                            nextRollingObservationCell,
-                            direction,
-                            projectedTravelM,
-                            voteSummary.frontWallVotes,
-                            outStoppedForReplan))
-                    {
-                        return false;
-                    }
-                    rollingObservationStoppedForReplan = true;
-                    return true;
-                }
-
-                ++rollingObservationCount;
-                if (rollingObservationCount < cellCount)
-                {
-                    nextRollingObservationCell = nextRollingObservationCell >> direction;
-                }
-                resetRollingObservationPlan();
-            }
-
-            return true;
-        };
-
-        const MotionLimits searchLimits = SearchLimits();
-        float commandedSpeedMps = (std::max)(entrySpeedMps, 0.0f);
-        EncoderProgressWatchdog translationWatchdog{};
-        translationWatchdog.Reset(0.0f, millis());
-        const unsigned long expectedCompletionDeadlineMs =
-            millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceToTargetM));
-        bool stallLogged = false;
-        bool durationLogged = false;
-        float previousCorridorErrorM = 0.0f;
-        float filteredCorridorErrorRateMps = 0.0f;
-        bool previousCorridorErrorValid = false;
-        while (true)
-        {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-
-            const PoseEstimate& livePose = _drive.GetPose();
-            float projectedRemainingM = 0.0f;
-            if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-                    livePose.xMeters,
-                    livePose.yMeters,
-                    targetXMeters,
-                    targetYMeters,
-                    targetHeading.x(),
-                    targetHeading.y(),
-                    projectedRemainingM))
-            {
-                return Fail("Search straight target projection is invalid");
-            }
-            const float remainingM = (std::max)(0.0f, projectedRemainingM);
-            const float projectedTravelM = (std::clamp)(distanceToTargetM - projectedRemainingM, 0.0f, distanceToTargetM);
-
-            if (!tryObserveRollingCells(projectedTravelM, livePose, snapshot))
-            {
-                return false;
-            }
-            if (rollingObservationStoppedForReplan)
-            {
-                return true;
-            }
-
-            const bool stoppingAtEndpoint = exitSpeedMps <= 0.05f;
-            if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
-            {
-                _drive.Brake();
-                if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
-                {
-                    return false;
-                }
-                break;
-            }
-            const bool terminalReached =
-                (remainingM <= Config::kDistanceToleranceM) &&
-                (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeedMps) <= Config::kSpeedToleranceMps);
-            if (terminalReached)
-            {
-                _drive.Brake();
-                break;
-            }
-
-            const unsigned long nowMs = millis();
-            if (!stallLogged && translationWatchdog.Stalled(projectedTravelM, commandedSpeedMps, remainingM, nowMs))
-            {
-                stallLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=search_straight,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    projectedTravelM,
-                    remainingM,
-                    commandedSpeedMps);
-            }
-            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - nowMs) <= 0)
-            {
-                durationLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=search_straight,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    projectedTravelM,
-                    remainingM,
-                    commandedSpeedMps);
-            }
-
-            const float accelLimitedSpeedMps = (std::min)(cruiseSpeedMps, commandedSpeedMps + (searchLimits.accelMps2 * dtSeconds));
-            const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(exitSpeedMps, remainingM, searchLimits.decelMps2);
-            commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
-
-            float wallOmegaRadps = 0.0f;
-            float signalCorridorErrorM = 0.0f;
-            if (TryComputeWallGroundedCorridorErrorM(snapshot, signalCorridorErrorM))
-            {
-                wallOmegaRadps += ComputeWallCenterPdOmegaRadps(
-                    signalCorridorErrorM,
-                    commandedSpeedMps,
-                    dtSeconds,
-                    previousCorridorErrorM,
-                    filteredCorridorErrorRateMps,
-                    previousCorridorErrorValid);
-            }
-            else
-            {
-                filteredCorridorErrorRateMps = 0.0f;
-                previousCorridorErrorValid = false;
-            }
-            if (stoppingAtEndpoint &&
-                std::isfinite(snapshot.frontLeftDistanceM) &&
-                std::isfinite(snapshot.frontRightDistanceM) &&
-                snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
-                snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
-                remainingM < 0.07f)
-            {
-                wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
-            }
-
-            const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
-            float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps) + wallOmegaRadps;
-            angularCommandRadps = (std::clamp)(angularCommandRadps, -searchLimits.maxAngularSpeedRadps, searchLimits.maxAngularSpeedRadps);
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    commandedSpeedMps,
-                    angularCommandRadps,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                commandedSpeedMps,
-                angularCommandRadps);
-        }
-
-        if (exitSpeedMps <= 0.05f)
-        {
-            if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
-            {
-                return false;
-            }
-        }
-
-        _currentCell = destination;
-        _currentDirectionalLocation = MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(_currentCell), _currentDirection);
-        return true;
+        return ExecuteSearchStraightCellsLoopDriven(
+            direction,
+            cellCount,
+            entrySpeedMps,
+            cruiseSpeedMps,
+            exitSpeedMps,
+            snapAtEnd,
+            observeWhileRolling,
+            outStoppedForReplan);
     }
 
     bool ExecuteSearchPath(const MazeMap::Path<PATH_SIZE>& path, bool observeFinalCell)
@@ -6691,6 +7560,148 @@ private:
         return true;
     }
 
+    LoopController::ControlVector StraightLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& straight = *static_cast<StraightLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
+        {
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
+
+        const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - straight.startDistanceM);
+        float remainingM = (std::max)(0.0f, straight.distanceM - traveledM);
+        if (straight.targetPositionOverride != nullptr)
+        {
+            float projectedRemainingM = 0.0f;
+            if (!MazeMap::TryComputeProjectedDistanceToTargetM(
+                    state.estimate.xMeters,
+                    state.estimate.yMeters,
+                    straight.targetPositionOverride->x(),
+                    straight.targetPositionOverride->y(),
+                    straight.targetHeading.x(),
+                    straight.targetHeading.y(),
+                    projectedRemainingM))
+            {
+                return FaultLoopPhase(services, "Straight target projection is invalid");
+            }
+            remainingM = (std::max)(0.0f, projectedRemainingM);
+        }
+
+        const bool stoppingAtEndpoint = straight.exitSpeed <= 0.05f;
+        if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
+        {
+            straight.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
+            straight.completionSettle.timeoutMs = 0U;
+            straight.completionSettle.brakeCommand = true;
+            TransitionLoopPhase(&straight.completionSettle, &MissionController::SettleLoopTick, services);
+            return LoopController::ControlVector::Brake;
+        }
+
+        const bool terminalReached =
+            (remainingM <= Config::kDistanceToleranceM) &&
+            (std::fabs(state.estimate.linearSpeedMps - straight.exitSpeed) <= Config::kSpeedToleranceMps);
+        if (terminalReached)
+        {
+            return EndLoopPhase(services);
+        }
+
+        const unsigned long nowMs = millis();
+        if (!straight.stallLogged &&
+            straight.translationWatchdog.Stalled(traveledM, straight.commandedSpeedMps, remainingM, nowMs))
+        {
+            straight.stallLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=straight,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                traveledM,
+                remainingM,
+                straight.commandedSpeedMps);
+        }
+        if (!straight.durationLogged && static_cast<long>(straight.expectedCompletionDeadlineMs - nowMs) <= 0)
+        {
+            straight.durationLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=straight,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                traveledM,
+                remainingM,
+                straight.commandedSpeedMps);
+        }
+
+        const float accelLimitedSpeedMps = (std::min)(
+            straight.cruiseSpeed,
+            straight.commandedSpeedMps + (straight.limits.accelMps2 * state.dtSeconds));
+        const float decelLimitedSpeedMps =
+            ReachableSpeedWithBoundary(straight.exitSpeed, remainingM, straight.limits.decelMps2);
+        straight.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+
+        float wallOmegaRadps = 0.0f;
+        if (straight.useWallCentering)
+        {
+            if (straight.diagonalHeading)
+            {
+                wallOmegaRadps += ComputeDiagonalWallCenterOmegaRadps(
+                    gWallDistanceCalibration,
+                    state.sensors.sideLeftDifferentialLight,
+                    state.sensors.sideRightDifferentialLight);
+            }
+            else
+            {
+                float signalCorridorErrorM = 0.0f;
+                if (TryComputeWallGroundedCorridorErrorM(state.sensors, signalCorridorErrorM))
+                {
+                    wallOmegaRadps += ComputeWallCenterPdOmegaRadps(
+                        signalCorridorErrorM,
+                        straight.commandedSpeedMps,
+                        state.dtSeconds,
+                        straight.previousCorridorErrorM,
+                        straight.filteredCorridorErrorRateMps,
+                        straight.previousCorridorErrorValid);
+                }
+                else
+                {
+                    straight.filteredCorridorErrorRateMps = 0.0f;
+                    straight.previousCorridorErrorValid = false;
+                }
+                if (stoppingAtEndpoint &&
+                    std::isfinite(state.sensors.frontLeftDistanceM) &&
+                    std::isfinite(state.sensors.frontRightDistanceM) &&
+                    state.sensors.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
+                    state.sensors.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
+                    remainingM < 0.07f)
+                {
+                    wallOmegaRadps += Config::kFrontSkewGain * state.sensors.frontSkewM;
+                }
+            }
+        }
+        else
+        {
+            straight.filteredCorridorErrorRateMps = 0.0f;
+            straight.previousCorridorErrorValid = false;
+        }
+
+        const float headingErrorRad = HeadingErrorRad(straight.targetHeading, state.estimate.headingUnit);
+        float angularCommandRadps =
+            (Config::kStraightHeadingKp * headingErrorRad) -
+            (Config::kStraightYawD * state.estimate.angularSpeedRadps) +
+            wallOmegaRadps;
+        angularCommandRadps = (std::clamp)(
+            angularCommandRadps,
+            -straight.limits.maxAngularSpeedRadps,
+            straight.limits.maxAngularSpeedRadps);
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
+            straight.commandedSpeedMps,
+            angularCommandRadps);
+    }
+
     bool ExecuteStraightProfile(
         float distanceM,
         float entrySpeed,
@@ -6701,162 +7712,75 @@ private:
         const Eigen::Vector2f* targetHeadingOverride = nullptr,
         const Eigen::Vector2f* targetPositionOverride = nullptr)
     {
-        const float startDistanceM = _drive.GetAverageDistanceMeters();
-        const Eigen::Vector2f targetHeading =
+        StraightLoopState straight{};
+        straight.distanceM = distanceM;
+        straight.entrySpeed = entrySpeed;
+        straight.cruiseSpeed = cruiseSpeed;
+        straight.exitSpeed = exitSpeed;
+        straight.limits = limits;
+        straight.useWallCentering = useWallCentering;
+        straight.targetHeading =
             (targetHeadingOverride != nullptr) ?
             *targetHeadingOverride :
             _drive.GetPose().headingUnit;
-        const bool diagonalHeading = IsApproximatelyDiagonalHeadingUnit(targetHeading);
-        float commandedSpeedMps = (std::max)(entrySpeed, 0.0f);
-        const unsigned long expectedCompletionDeadlineMs = millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
-        EncoderProgressWatchdog translationWatchdog{};
-        translationWatchdog.Reset(0.0f, millis());
-        bool stallLogged = false;
-        bool durationLogged = false;
-        float previousCorridorErrorM = 0.0f;
-        float filteredCorridorErrorRateMps = 0.0f;
-        bool previousCorridorErrorValid = false;
+        straight.targetPositionOverride = targetPositionOverride;
+        straight.diagonalHeading = IsApproximatelyDiagonalHeadingUnit(straight.targetHeading);
+        straight.commandedSpeedMps = (std::max)(entrySpeed, 0.0f);
+        straight.startDistanceM = _drive.GetAverageDistanceMeters();
+        straight.expectedCompletionDeadlineMs =
+            millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
+        straight.translationWatchdog.Reset(0.0f, millis());
+        return RunLoopSession(&straight, &MissionController::StraightLoopTick);
+    }
 
-        while (true)
+    LoopController::ControlVector TurnLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& turn = *static_cast<TurnLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
         {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-
-            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            float remainingM = (std::max)(0.0f, distanceM - traveledM);
-            if (targetPositionOverride != nullptr)
-            {
-                const PoseEstimate& pose = _drive.GetPose();
-                float projectedRemainingM = 0.0f;
-                if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-                    pose.xMeters,
-                    pose.yMeters,
-                    targetPositionOverride->x(),
-                    targetPositionOverride->y(),
-                    targetHeading.x(),
-                    targetHeading.y(),
-                    projectedRemainingM))
-                {
-                    return Fail("Straight target projection is invalid");
-                }
-                remainingM = (std::max)(0.0f, projectedRemainingM);
-            }
-            const bool stoppingAtEndpoint = exitSpeed <= 0.05f;
-            if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
-            {
-                _drive.Brake();
-                if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
-                {
-                    return false;
-                }
-                break;
-            }
-            const bool terminalReached =
-                (remainingM <= Config::kDistanceToleranceM) &&
-                (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeed) <= Config::kSpeedToleranceMps);
-            if (terminalReached)
-            {
-                _drive.Brake();
-                break;
-            }
-            const unsigned long nowMs = millis();
-            if (!stallLogged && translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, nowMs))
-            {
-                stallLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=straight,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    traveledM,
-                    remainingM,
-                    commandedSpeedMps);
-            }
-            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - nowMs) <= 0)
-            {
-                durationLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=straight,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    traveledM,
-                    remainingM,
-                    commandedSpeedMps);
-            }
-
-            const float accelLimitedSpeedMps = (std::min)(cruiseSpeed, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
-            const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(exitSpeed, remainingM, limits.decelMps2);
-            commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
-
-            float wallOmegaRadps = 0.0f;
-            if (useWallCentering)
-            {
-                if (diagonalHeading)
-                {
-                    wallOmegaRadps += ComputeDiagonalWallCenterOmegaRadps(
-                        gWallDistanceCalibration,
-                        snapshot.sideLeftDifferentialLight,
-                        snapshot.sideRightDifferentialLight);
-                }
-                else
-                {
-                    float signalCorridorErrorM = 0.0f;
-                    if (TryComputeWallGroundedCorridorErrorM(snapshot, signalCorridorErrorM))
-                    {
-                        wallOmegaRadps += ComputeWallCenterPdOmegaRadps(
-                            signalCorridorErrorM,
-                            commandedSpeedMps,
-                            dtSeconds,
-                            previousCorridorErrorM,
-                            filteredCorridorErrorRateMps,
-                            previousCorridorErrorValid);
-                    }
-                    else
-                    {
-                        filteredCorridorErrorRateMps = 0.0f;
-                        previousCorridorErrorValid = false;
-                    }
-                    if (stoppingAtEndpoint &&
-                        std::isfinite(snapshot.frontLeftDistanceM) &&
-                        std::isfinite(snapshot.frontRightDistanceM) &&
-                        snapshot.frontLeftDistanceM < Config::kFrontWallOnThresholdM &&
-                        snapshot.frontRightDistanceM < Config::kFrontWallOnThresholdM &&
-                        remainingM < 0.07f)
-                    {
-                        wallOmegaRadps += Config::kFrontSkewGain * snapshot.frontSkewM;
-                    }
-                }
-            }
-            else
-            {
-                filteredCorridorErrorRateMps = 0.0f;
-                previousCorridorErrorValid = false;
-            }
-
-            const float headingErrorRad = HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
-            float angularCommandRadps = (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * _drive.GetPose().angularSpeedRadps) + wallOmegaRadps;
-            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    commandedSpeedMps,
-                    angularCommandRadps,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                commandedSpeedMps,
-                angularCommandRadps);
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
+        }
+        if (turn.wallEdgeTracker != nullptr)
+        {
+            MazeMap::ObserveTurnWallStates(*turn.wallEdgeTracker, state.sensors.leftWall, state.sensors.rightWall);
         }
 
-        if (exitSpeed <= 0.05f)
+        const float errorRad = AngleErrorRad(turn.targetYawRad, state.estimate.yawRad);
+        if (MazeMap::IsInPlaceTurnComplete(errorRad, state.estimate.angularSpeedRadps, turn.turnProfile))
         {
-            if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
-            {
-                return false;
-            }
+            turn.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
+            turn.completionSettle.timeoutMs = 0U;
+            turn.completionSettle.brakeCommand = false;
+            TransitionLoopPhase(&turn.completionSettle, &MissionController::SettleLoopTick, services);
+            return LoopController::ControlVector::Brake;
         }
-        return true;
+        if (!turn.durationLogged && static_cast<long>(turn.expectedCompletionDeadlineMs - millis()) <= 0)
+        {
+            turn.durationLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=turn,reason=elapsed_budget_exceeded,cell=(%d,%d),yaw_err_deg=%.2f,w_radps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                RAD_TO_DEG_F * errorRad,
+                state.estimate.angularSpeedRadps);
+        }
+
+        float angularCommandRadps = 0.0f;
+        if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
+                errorRad,
+                state.estimate.angularSpeedRadps,
+                turn.turnProfile,
+                angularCommandRadps))
+        {
+            return FaultLoopPhase(services, "Turn profile became invalid");
+        }
+
+        return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
     }
 
     bool ExecuteTurnProfile(
@@ -6864,64 +7788,94 @@ private:
         const MotionLimits& limits,
         MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr)
     {
-        const float targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
-        const MazeMap::InPlaceTurnProfile turnProfile = BuildSharedInPlaceTurnProfile(limits);
-        const unsigned long expectedCompletionDeadlineMs = millis() + 2500UL;
-        bool durationLogged = false;
+        TurnLoopState turn{};
+        turn.targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
+        turn.turnProfile = BuildSharedInPlaceTurnProfile(limits);
+        turn.expectedCompletionDeadlineMs = millis() + 2500UL;
+        turn.wallEdgeTracker = wallEdgeTracker;
+        return RunLoopSession(&turn, &MissionController::TurnLoopTick);
+    }
 
-        while (true)
+    LoopController::ControlVector ArcLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& arc = *static_cast<ArcLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
         {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-            if (wallEdgeTracker != nullptr)
-            {
-                MazeMap::ObserveTurnWallStates(*wallEdgeTracker, snapshot.leftWall, snapshot.rightWall);
-            }
-
-            const float errorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
-            if (MazeMap::IsInPlaceTurnComplete(errorRad, _drive.GetPose().angularSpeedRadps, turnProfile))
-            {
-                break;
-            }
-            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - millis()) <= 0)
-            {
-                durationLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=turn,reason=elapsed_budget_exceeded,cell=(%d,%d),yaw_err_deg=%.2f,w_radps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    RAD_TO_DEG_F * errorRad,
-                    _drive.GetPose().angularSpeedRadps);
-            }
-
-            float angularCommandRadps = 0.0f;
-            if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
-                    errorRad,
-                    _drive.GetPose().angularSpeedRadps,
-                    turnProfile,
-                    angularCommandRadps))
-            {
-                return Fail("Turn profile became invalid");
-            }
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    0.0f,
-                    angularCommandRadps,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                0.0f,
-                angularCommandRadps);
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
         }
 
-        if (!HoldZeroVelocityUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
+        const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - arc.startDistanceM);
+        const float remainingM = (std::max)(0.0f, arc.distanceM - traveledM);
+        const bool stoppingAtEndpoint = arc.exitSpeed <= 0.05f;
+        if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
         {
-            return false;
+            arc.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
+            arc.completionSettle.timeoutMs = 0U;
+            arc.completionSettle.brakeCommand = true;
+            TransitionLoopPhase(&arc.completionSettle, &MissionController::SettleLoopTick, services);
+            return LoopController::ControlVector::Brake;
         }
-        return true;
+
+        const bool terminalReached =
+            (remainingM <= Config::kDistanceToleranceM) &&
+            (std::fabs(state.estimate.linearSpeedMps - arc.exitSpeed) <= Config::kSpeedToleranceMps);
+        if (terminalReached)
+        {
+            return EndLoopPhase(services);
+        }
+
+        const unsigned long nowMs = millis();
+        if (!arc.stallLogged &&
+            arc.translationWatchdog.Stalled(traveledM, arc.commandedSpeedMps, remainingM, nowMs))
+        {
+            arc.stallLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=arc,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                traveledM,
+                remainingM,
+                arc.commandedSpeedMps);
+        }
+        if (!arc.durationLogged && static_cast<long>(arc.expectedCompletionDeadlineMs - nowMs) <= 0)
+        {
+            arc.durationLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=arc,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                traveledM,
+                remainingM,
+                arc.commandedSpeedMps);
+        }
+
+        const float accelLimitedSpeedMps = (std::min)(
+            arc.cruiseSpeed,
+            arc.commandedSpeedMps + (arc.limits.accelMps2 * state.dtSeconds));
+        const float decelLimitedSpeedMps =
+            ReachableSpeedWithBoundary(arc.exitSpeed, remainingM, arc.limits.decelMps2);
+        arc.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
+
+        const float progress = (std::clamp)(traveledM / arc.distanceM, 0.0f, 1.0f);
+        const float targetYawRad = WrapAngleRad(arc.startYawRad + (arc.angleRad * progress));
+        const float headingErrorRad = AngleErrorRad(targetYawRad, state.estimate.yawRad);
+        float angularCommandRadps =
+            (arc.curvature * arc.commandedSpeedMps) +
+            (Config::kArcHeadingKp * headingErrorRad) -
+            (Config::kArcYawD * state.estimate.angularSpeedRadps);
+        angularCommandRadps = (std::clamp)(
+            angularCommandRadps,
+            -arc.limits.maxAngularSpeedRadps,
+            arc.limits.maxAngularSpeedRadps);
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
+            arc.commandedSpeedMps,
+            angularCommandRadps);
     }
 
     bool ExecuteArcProfile(float distanceM, float angleRad, float entrySpeed, float exitSpeed, float cruiseSpeed, const MotionLimits& limits)
@@ -6931,97 +7885,96 @@ private:
             return ExecuteTurnProfile(angleRad, limits);
         }
 
-        const float startDistanceM = _drive.GetAverageDistanceMeters();
-        const float startYawRad = _drive.GetPose().yawRad;
-        const float curvature = angleRad / distanceM;
-        float commandedSpeedMps = (std::max)(entrySpeed, 0.0f);
-        EncoderProgressWatchdog translationWatchdog{};
-        translationWatchdog.Reset(0.0f, millis());
-        const unsigned long expectedCompletionDeadlineMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceM));
-        bool stallLogged = false;
-        bool durationLogged = false;
+        ArcLoopState arc{};
+        arc.distanceM = distanceM;
+        arc.angleRad = angleRad;
+        arc.entrySpeed = entrySpeed;
+        arc.exitSpeed = exitSpeed;
+        arc.cruiseSpeed = cruiseSpeed;
+        arc.limits = limits;
+        arc.startDistanceM = _drive.GetAverageDistanceMeters();
+        arc.startYawRad = _drive.GetPose().yawRad;
+        arc.curvature = angleRad / distanceM;
+        arc.commandedSpeedMps = (std::max)(entrySpeed, 0.0f);
+        arc.translationWatchdog.Reset(0.0f, millis());
+        arc.expectedCompletionDeadlineMs =
+            millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceM));
+        return RunLoopSession(&arc, &MissionController::ArcLoopTick);
+    }
 
-        while (true)
+    LoopController::ControlVector SmoothTurnLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto& smoothTurn = *static_cast<SmoothTurnLoopState*>(rawState);
+        if (!LogTelemetrySample(false, state))
         {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-            (void)snapshot;
-
-            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            const float remainingM = (std::max)(0.0f, distanceM - traveledM);
-            const bool stoppingAtEndpoint = exitSpeed <= 0.05f;
-            if (stoppingAtEndpoint && (remainingM <= Config::kDistanceToleranceM))
-            {
-                _drive.Brake();
-                if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
-                {
-                    return false;
-                }
-                break;
-            }
-            const bool terminalReached =
-                (remainingM <= Config::kDistanceToleranceM) &&
-                (std::fabs(_drive.GetPose().linearSpeedMps - exitSpeed) <= Config::kSpeedToleranceMps);
-            if (terminalReached)
-            {
-                _drive.Brake();
-                break;
-            }
-            const unsigned long nowMs = millis();
-            if (!stallLogged && translationWatchdog.Stalled(traveledM, commandedSpeedMps, remainingM, nowMs))
-            {
-                stallLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=arc,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    traveledM,
-                    remainingM,
-                    commandedSpeedMps);
-            }
-            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - nowMs) <= 0)
-            {
-                durationLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=arc,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    traveledM,
-                    remainingM,
-                    commandedSpeedMps);
-            }
-
-            const float accelLimitedSpeedMps = (std::min)(cruiseSpeed, commandedSpeedMps + (limits.accelMps2 * dtSeconds));
-            const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(exitSpeed, remainingM, limits.decelMps2);
-            commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
-
-            const float progress = (std::clamp)(traveledM / distanceM, 0.0f, 1.0f);
-            const float targetYawRad = WrapAngleRad(startYawRad + (angleRad * progress));
-            const float headingErrorRad = AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
-            float angularCommandRadps = (curvature * commandedSpeedMps) + (Config::kArcHeadingKp * headingErrorRad) - (Config::kArcYawD * _drive.GetPose().angularSpeedRadps);
-            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    commandedSpeedMps,
-                    angularCommandRadps,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                commandedSpeedMps,
-                angularCommandRadps);
+            return FaultLoopPhase(services, "Failed to write maneuver test sample");
         }
 
-        if (exitSpeed <= 0.05f)
+        const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - smoothTurn.startDistanceM);
+        const float remainingM = (std::max)(0.0f, smoothTurn.profile.totalDistance - traveledM);
+        if (remainingM <= Config::kDistanceToleranceM)
         {
-            if (!HoldBrakedUntilDriveSettles(nullptr, Config::kMotionSettleHoldMs, 0U))
-            {
-                return false;
-            }
+            return EndLoopPhase(services);
         }
-        return true;
+
+        const unsigned long nowMs = millis();
+        if (!smoothTurn.stallLogged &&
+            smoothTurn.translationWatchdog.Stalled(traveledM, smoothTurn.maneuverSpeedMps, remainingM, nowMs))
+        {
+            smoothTurn.stallLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=smooth_turn,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                traveledM,
+                remainingM,
+                smoothTurn.maneuverSpeedMps);
+        }
+        if (!smoothTurn.durationLogged && static_cast<long>(smoothTurn.expectedCompletionDeadlineMs - nowMs) <= 0)
+        {
+            smoothTurn.durationLogged = true;
+            AppendMissionTraceFormatted(
+                "mission_motion_watchdog,mode=smooth_turn,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
+                _currentCell.GetX(),
+                _currentCell.GetY(),
+                traveledM,
+                remainingM,
+                smoothTurn.maneuverSpeedMps);
+        }
+
+        float yawOffsetRad = 0.0f;
+        float nominalOmegaRadps = 0.0f;
+        if (!MazeMap::TryComputeSmoothTurnTarget(
+                smoothTurn.profile,
+                traveledM,
+                smoothTurn.maneuverSpeedMps,
+                yawOffsetRad,
+                nominalOmegaRadps))
+        {
+            return FaultLoopPhase(services, "Smooth turn target became invalid");
+        }
+
+        const float yawRateCorrectionRadps = MazeMap::ComputeSmoothTurnYawRatePdCorrection(
+            nominalOmegaRadps,
+            state.estimate.angularSpeedRadps,
+            state.dtSeconds,
+            Config::kSmoothTurnYawRateKp,
+            Config::kSmoothTurnYawRateKd,
+            smoothTurn.yawRateController);
+        float angularCommandRadps = nominalOmegaRadps + yawRateCorrectionRadps;
+        angularCommandRadps = (std::clamp)(
+            angularCommandRadps,
+            -smoothTurn.limits.maxAngularSpeedRadps,
+            smoothTurn.limits.maxAngularSpeedRadps);
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
+            smoothTurn.maneuverSpeedMps,
+            angularCommandRadps);
     }
 
     bool ExecuteSmoothTurnProfile(
@@ -7031,98 +7984,31 @@ private:
         float cruiseSpeed,
         const MotionLimits& limits)
     {
-        MazeMap::SmoothTurnExecutionProfile profile{};
-        if (!TryGetSmoothTurnExecutionProfileMeters(code, profile))
+        SmoothTurnLoopState smoothTurn{};
+        if (!TryGetSmoothTurnExecutionProfileMeters(code, smoothTurn.profile))
         {
             return Fail("Smooth turn geometry is unavailable");
         }
 
-        float maneuverSpeedMps = cruiseSpeed;
-        if (!(maneuverSpeedMps > 0.0f))
+        smoothTurn.maneuverSpeedMps = cruiseSpeed;
+        if (!(smoothTurn.maneuverSpeedMps > 0.0f))
         {
-            maneuverSpeedMps = (std::max)(entrySpeed, exitSpeed);
+            smoothTurn.maneuverSpeedMps = (std::max)(entrySpeed, exitSpeed);
         }
-        if (!(maneuverSpeedMps > 0.0f))
+        if (!(smoothTurn.maneuverSpeedMps > 0.0f))
         {
             return Fail("Smooth turn speed is invalid");
         }
 
-        const float startDistanceM = _drive.GetAverageDistanceMeters();
-        EncoderProgressWatchdog translationWatchdog{};
-        translationWatchdog.Reset(0.0f, millis());
-        const unsigned long expectedCompletionDeadlineMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * profile.totalDistance));
-        MazeMap::SmoothTurnYawRateControllerState yawRateController{};
-        bool stallLogged = false;
-        bool durationLogged = false;
-
-        while (true)
-        {
-            float dtSeconds = 0.0f;
-            SensorSnapshot snapshot{};
-            if (!TickControl(false, dtSeconds, snapshot))
-            {
-                return false;
-            }
-            (void)snapshot;
-
-            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            const float remainingM = (std::max)(0.0f, profile.totalDistance - traveledM);
-            if (remainingM <= Config::kDistanceToleranceM)
-            {
-                break;
-            }
-
-            const unsigned long nowMs = millis();
-            if (!stallLogged && translationWatchdog.Stalled(traveledM, maneuverSpeedMps, remainingM, nowMs))
-            {
-                stallLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=smooth_turn,reason=encoder_stall,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    traveledM,
-                    remainingM,
-                    maneuverSpeedMps);
-            }
-            if (!durationLogged && static_cast<long>(expectedCompletionDeadlineMs - nowMs) <= 0)
-            {
-                durationLogged = true;
-                AppendMissionTraceFormatted(
-                    "mission_motion_watchdog,mode=smooth_turn,reason=elapsed_budget_exceeded,cell=(%d,%d),traveled_m=%.4f,remaining_m=%.4f,cmd_v_mps=%.4f",
-                    _currentCell.GetX(),
-                    _currentCell.GetY(),
-                    traveledM,
-                    remainingM,
-                    maneuverSpeedMps);
-            }
-
-            float yawOffsetRad = 0.0f;
-            float nominalOmegaRadps = 0.0f;
-            if (!MazeMap::TryComputeSmoothTurnTarget(profile, traveledM, maneuverSpeedMps, yawOffsetRad, nominalOmegaRadps))
-            {
-                return Fail("Smooth turn target became invalid");
-            }
-
-            const float yawRateCorrectionRadps = MazeMap::ComputeSmoothTurnYawRatePdCorrection(
-                nominalOmegaRadps,
-                _drive.GetPose().angularSpeedRadps,
-                dtSeconds,
-                Config::kSmoothTurnYawRateKp,
-                Config::kSmoothTurnYawRateKd,
-                yawRateController);
-            float angularCommandRadps = nominalOmegaRadps + yawRateCorrectionRadps;
-            angularCommandRadps = (std::clamp)(angularCommandRadps, -limits.maxAngularSpeedRadps, limits.maxAngularSpeedRadps);
-            (void)dtSeconds;
-            _drive.CommandGenerated(
-                _drive.PointCommand(
-                    maneuverSpeedMps,
-                    angularCommandRadps,
-                    MazeMap::CommandPD::StateWheelOmegaPD),
-                maneuverSpeedMps,
-                angularCommandRadps);
-        }
-
-        return true;
+        smoothTurn.limits = limits;
+        smoothTurn.entrySpeed = entrySpeed;
+        smoothTurn.exitSpeed = exitSpeed;
+        smoothTurn.cruiseSpeed = cruiseSpeed;
+        smoothTurn.startDistanceM = _drive.GetAverageDistanceMeters();
+        smoothTurn.translationWatchdog.Reset(0.0f, millis());
+        smoothTurn.expectedCompletionDeadlineMs =
+            millis() + static_cast<unsigned long>(2500.0f + (5000.0f * smoothTurn.profile.totalDistance));
+        return RunLoopSession(&smoothTurn, &MissionController::SmoothTurnLoopTick);
     }
 
     bool IsInGoalCell(MazeMap::CellCoordinates coords) const

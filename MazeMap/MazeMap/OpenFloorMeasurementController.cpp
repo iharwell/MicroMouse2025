@@ -17,6 +17,24 @@
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
+namespace
+{
+    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
+        DriveBase& drive,
+        const float linearSpeedMps,
+        const float angularSpeedRadps) noexcept
+    {
+        const MazeMap::OpenLoopDriveCommand driveCommand =
+            drive.PointCommand(
+                linearSpeedMps,
+                angularSpeedRadps,
+                MazeMap::CommandPD::StateWheelOmegaPD);
+        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+            driveCommand.leftDriveCommand,
+            driveCommand.rightDriveCommand);
+    }
+}
+
 namespace MazeMap::App::Internal::Runtime
 {
 #define OPEN_FLOOR_TIMING_FIELDS(X)                \
@@ -662,12 +680,12 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     if ((self == nullptr) || (self->_phaseFn == nullptr))
     {
         services.Fault("Open-floor measurement phase callback was not installed");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     if (!self->EmitPendingLog(services))
     {
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
@@ -1870,7 +1888,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     {
         StageTimingFault(cycle, MazeMap::OpenFloorFaultCode::EstimatorFault, true);
         services.Fault("Estimator fault during timing capture");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
     if (cycle.selectorJumperRemoved)
     {
@@ -1880,7 +1898,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             true,
             static_cast<std::uint32_t>(MazeMap::kOpenFloorSelectorRemovalFaultDelayMs));
         services.Fault("Primary diagnostic selector jumper removed during timing capture");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     StageTimingSample(cycle);
@@ -1893,7 +1911,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         }
     }
 
-    return LoopController::ControlVector::BrakeCommand();
+    return LoopController::ControlVector::Brake;
 }
 
 MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::TimingToMainPauseTick(
@@ -1910,7 +1928,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     request.flushLogsBeforeGrant = true;
     request.resetClockOnResume = true;
     services.RequestPause(request);
-    return LoopController::ControlVector::BrakeCommand();
+    return LoopController::ControlVector::Brake;
 }
 
 MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::RunStaticSectionTick(
@@ -1926,7 +1944,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
             "Primary diagnostic selector jumper removed during open-floor measurement");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     StageMainSample(_staticHoldState.labels, cycle);
@@ -1935,7 +1953,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         if (!EndMainSection(_staticHoldState.labels))
         {
             services.Fault("Failed to write static section end marker");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         _launchSequenceState = LaunchSequenceState{};
@@ -1945,7 +1963,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         }
     }
 
-    return LoopController::ControlVector::BrakeCommand();
+    return LoopController::ControlVector::Brake;
 }
 
 MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::RecoverToMarkerTick(
@@ -1961,7 +1979,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
             "Primary diagnostic selector jumper removed during open-floor measurement");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     const PoseEstimate& pose = state.estimate;
@@ -1993,7 +2011,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         if (_mainLogOpen && !EndMainSection(_recoveryState.labels))
         {
             services.Fault("Failed to write recovery section end marker");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         switch (_recoveryState.labels.sectionId)
@@ -2002,7 +2020,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             if (!BeginMainSection(_staticHoldState.labels))
             {
                 services.Fault("Failed to write static section start marker");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             _staticHoldState.deadlineMs = millis() + DiagnosticConfig::kStaticHoldMs;
             _phaseFn = &OpenFloorMeasurementController::RunStaticSectionTick;
@@ -2013,16 +2031,16 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             if (!AdvanceLoopAfterRecovery())
             {
                 services.Fault("Failed to continue open-floor loop section after recovery");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             break;
 
         default:
             services.Fault("Open-floor recovery completed without a valid continuation");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     if (static_cast<long>(_recoveryState.deadlineMs - millis()) <= 0)
@@ -2035,7 +2053,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             MazeMap::OpenFloorFaultCode::RecoveryTimedOut,
             true);
         services.Fault("Recovery to marker timed out");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     const float linearCommandMps = positionArrived ?
@@ -2050,9 +2068,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         _recoveryState.limits.maxAngularSpeedRadps);
 
     StageMainSample(_recoveryState.labels, cycle);
-    return LoopController::ControlVector::VelocityCommand(
-        linearCommandMps,
-        angularCommandRadps);
+    return MakeWheelOmegaRawMotorPwmCommand(_drive, linearCommandMps, angularCommandRadps);
 }
 
 MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::ExecuteLaunchPulseTick(
@@ -2068,7 +2084,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
             "Primary diagnostic selector jumper removed during open-floor measurement");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     _launchPulseState.stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
@@ -2094,17 +2110,17 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
                 if (!EndMainSection(_launchPulseState.labels))
                 {
                     services.Fault("Failed to write launch section end marker");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
                 if (!AdvanceLaunchSequence())
                 {
                     services.Fault("Failed to advance open-floor launch sequence");
                 }
             }
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
-        return LoopController::ControlVector::OpenLoopCommand(
+        return LoopController::ControlVector::RawMotorPwm(
             _launchPulseState.signedDriveCommand,
             _launchPulseState.signedDriveCommand);
     }
@@ -2140,14 +2156,14 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         if (!EndMainSection(_launchPulseState.labels))
         {
             services.Fault("Failed to write launch section end marker");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
         if (!AdvanceLaunchSequence())
         {
             services.Fault("Failed to advance open-floor launch sequence");
         }
     }
-    return LoopController::ControlVector::BrakeCommand();
+    return LoopController::ControlVector::Brake;
 }
 
 bool OpenFloorMeasurementController::StartLaunchPulsePhase(const float signedDriveCommand, const uint16_t repeatIndex)
@@ -2222,7 +2238,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
             "Primary diagnostic selector jumper removed during open-floor measurement");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - _straightSectionState.startDistanceM);
@@ -2249,14 +2265,14 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             if (!EndMainSection(_straightSectionState.labels))
             {
                 services.Fault("Failed to write straight section end marker");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             if (!AdvanceStraightSequence())
             {
                 services.Fault("Failed to advance open-floor straight sequence");
             }
         }
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
     if (_straightSectionState.translationWatchdog.Stalled(
             traveledM,
@@ -2276,7 +2292,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             MazeMap::OpenFloorFaultCode::StraightSectionTimedOut,
             true);
         services.Fault("Straight section timed out");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     const float accelLimitedSpeedMps =
@@ -2290,7 +2306,8 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * state.estimate.angularSpeedRadps);
 
     StageMainSample(_straightSectionState.labels, cycle);
-    return LoopController::ControlVector::VelocityCommand(
+    return MakeWheelOmegaRawMotorPwmCommand(
+        _drive,
         _straightSectionState.straightDirectionSign * _straightSectionState.commandedSpeedMagnitudeMps,
         angularCommandRadps);
 }
@@ -2409,7 +2426,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
             "Primary diagnostic selector jumper removed during open-floor measurement");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     _sectionSettleState.stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
@@ -2447,7 +2464,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         if (!EndMainSection(_sectionSettleState.labels))
         {
             services.Fault("Failed to write section settle end marker");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         switch (_sectionSettleState.destination)
@@ -2466,7 +2483,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         }
     }
 
-    return LoopController::ControlVector::BrakeCommand();
+    return LoopController::ControlVector::Brake;
 }
 
 MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::ExecuteInPlaceTurnTick(
@@ -2482,7 +2499,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
             "Primary diagnostic selector jumper removed during open-floor measurement");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     const float errorRad = AngleErrorRad(_turnSectionState.targetYawRad, state.estimate.yawRad);
@@ -2508,7 +2525,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
                 if (!EndMainSection(_loopSequenceState.loopLabels))
                 {
                     services.Fault("Failed to write final loop section end marker");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
                 services.RequestEndLoop();
             }
@@ -2522,14 +2539,14 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             if (!EndMainSection(_turnSectionState.labels))
             {
                 services.Fault("Failed to write yaw section end marker");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             if (!AdvanceYawSequence())
             {
                 services.Fault("Failed to advance open-floor yaw sequence");
             }
         }
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
     if (static_cast<long>(_turnSectionState.timeoutMs - millis()) <= 0)
     {
@@ -2541,7 +2558,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             MazeMap::OpenFloorFaultCode::YawSectionTimedOut,
             true);
         services.Fault("Yaw section timed out");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     float angularCommandRadps = 0.0f;
@@ -2558,11 +2575,11 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             MazeMap::OpenFloorFaultCode::YawProfileInvalid,
             true);
         services.Fault("Yaw profile became invalid");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     StageMainSample(_turnSectionState.labels, cycle);
-    return LoopController::ControlVector::VelocityCommand(0.0f, angularCommandRadps);
+    return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
 }
 
 bool OpenFloorMeasurementController::StartInPlaceTurnPhase(
@@ -2674,7 +2691,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
             "Primary diagnostic selector jumper removed during open-floor measurement");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - _smoothTurnState.startDistanceM);
@@ -2691,13 +2708,13 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         if (!EndMainSection(_smoothTurnState.labels))
         {
             services.Fault("Failed to write smooth-turn section end marker");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
         if (!AdvanceSmoothSequence())
         {
             services.Fault("Failed to advance open-floor smooth-turn sequence");
         }
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
     if (_smoothTurnState.translationWatchdog.Stalled(traveledM, _smoothTurnState.cruiseSpeed, remainingM, millis()))
     {
@@ -2713,7 +2730,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             MazeMap::OpenFloorFaultCode::SmoothSectionTimedOut,
             true);
         services.Fault("Smooth-turn section timed out");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     float yawOffsetRad = 0.0f;
@@ -2732,7 +2749,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             MazeMap::OpenFloorFaultCode::SmoothTargetInvalid,
             true);
         services.Fault("Smooth-turn target became invalid");
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
     const float yawRateCorrectionRadps = MazeMap::ComputeSmoothTurnYawRatePdCorrection(
         nominalOmegaRadps,
@@ -2748,7 +2765,8 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         _smoothTurnState.limits.maxAngularSpeedRadps);
 
     StageMainSample(_smoothTurnState.labels, cycle);
-    return LoopController::ControlVector::VelocityCommand(
+    return MakeWheelOmegaRawMotorPwmCommand(
+        _drive,
         _smoothTurnState.cruiseSpeed,
         angularCommandRadps);
 }

@@ -138,6 +138,9 @@ namespace MazeMap::App::Internal
         bool CloseUtilityDataLog();
         void CaptureUtilityDataLogFailure(bool& overflowed, bool& writeFailed) const noexcept;
 
+        // SharedRobotRuntime owns the production actuation hookup for the shared control loop so
+        // LoopController can remain a cadence owner that only forwards raw motor PWM values.
+        bool SetMotorPWM(float leftMotorPwm, float rightMotorPwm) noexcept;
         DriveBase& Drive() noexcept;
         LoopController& ControlLoop() noexcept;
         RuntimeSensorSuite& Sensors() noexcept;

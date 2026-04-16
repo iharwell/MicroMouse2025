@@ -329,7 +329,7 @@ namespace MazeMap::App::Internal
         if (self == nullptr)
         {
             services.Fault("Top-speed measurement context was not installed");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         return self->RunTick(state, services);
@@ -709,14 +709,14 @@ namespace MazeMap::App::Internal
             if (!WriteEvent("transition", "state=prelaunch_wait"))
             {
                 services.Fault("Top-speed measurement start logging failed");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
         }
 
         if (!LogSample(state))
         {
             services.Fault("Top-speed measurement log write failed");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (_measurementStartUs != 0U)
@@ -729,7 +729,7 @@ namespace MazeMap::App::Internal
                 (state.faultReason != nullptr) ?
                     state.faultReason :
                     "Top-speed measurement estimator fault");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         const bool selectorRemoved = SelectorRemoved();
@@ -739,7 +739,7 @@ namespace MazeMap::App::Internal
             if (selectorRemoved)
             {
                 services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             const std::uint32_t nextPhaseElapsedUs = state.commandApplyTimeUs - _phaseStartUs;
@@ -751,14 +751,14 @@ namespace MazeMap::App::Internal
                 if (!WriteEvent("transition", "state=running;stage=reverse_kick"))
                 {
                     services.Fault("Top-speed measurement reverse-kick logging failed");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
-                return LoopController::ControlVector::OpenLoopCommand(
+                return LoopController::ControlVector::RawMotorPwm(
                     kTopSpeedMeasurementPrelaunchReverseDriveCommand,
                     kTopSpeedMeasurementPrelaunchReverseDriveCommand);
             }
 
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (_phase == RunPhase::Running)
@@ -795,7 +795,7 @@ namespace MazeMap::App::Internal
                         MazeMap::CommandPD::RawCommand);
 
                 SetLastCommandInputs(resolvedLinearSpeedMps, yawRateCorrectionRadps);
-                return LoopController::ControlVector::OpenLoopCommand(
+                return LoopController::ControlVector::RawMotorPwm(
                     driveCommand.leftDriveCommand,
                     driveCommand.rightDriveCommand);
             };
@@ -806,13 +806,13 @@ namespace MazeMap::App::Internal
                 if (selectorRemoved)
                 {
                     services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
 
                 const std::uint32_t nextPhaseElapsedUs = state.commandApplyTimeUs - _phaseStartUs;
                 if (nextPhaseElapsedUs < kTopSpeedMeasurementPrelaunchReverseDurationUs)
                 {
-                    return LoopController::ControlVector::OpenLoopCommand(
+                    return LoopController::ControlVector::RawMotorPwm(
                         kTopSpeedMeasurementPrelaunchReverseDriveCommand,
                         kTopSpeedMeasurementPrelaunchReverseDriveCommand);
                 }
@@ -826,7 +826,7 @@ namespace MazeMap::App::Internal
                 if (!WriteEvent("transition", "state=running;stage=forward_run"))
                 {
                     services.Fault("Top-speed measurement forward-run logging failed");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
                 return issueForwardAccelerationCommand();
             }
@@ -836,7 +836,7 @@ namespace MazeMap::App::Internal
             if (selectorRemoved)
             {
                 services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             if (brakeTriggersArmed && ImpactDetected(state))
@@ -850,7 +850,7 @@ namespace MazeMap::App::Internal
                     BrakeTrigger::ImpactDetected,
                     "state=braking;trigger=impact_detected",
                     services);
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             if (brakeTriggersArmed && GyroSpikeDetected(state))
@@ -864,7 +864,7 @@ namespace MazeMap::App::Internal
                     BrakeTrigger::GyroSpikeDetected,
                     "state=braking;trigger=gyro_xy_spike_detected",
                     services);
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             const std::uint32_t nextCommandElapsedUs = state.commandApplyTimeUs - _measurementStartUs;
@@ -874,7 +874,7 @@ namespace MazeMap::App::Internal
                     BrakeTrigger::TimedWindowElapsed,
                     "state=braking;trigger=timed_window_elapsed",
                     services);
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             accelcount++;
@@ -885,7 +885,7 @@ namespace MazeMap::App::Internal
         {
             services.Fault(kTopSpeedMeasurementSelectorRemovedFaultReason);
             SetLastCommandInputs(0.0f, 0.0f);
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (EncoderMotionSettled(state))
@@ -893,11 +893,11 @@ namespace MazeMap::App::Internal
             _completionReason = CompletionReason::SettledStop;
             services.RequestEndLoop();
             SetLastCommandInputs(0.0f, 0.0f);
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         SetLastCommandInputs(0.0f, 0.0f);
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     bool TopSpeedMeasurementMode::Fail(const char* reason)

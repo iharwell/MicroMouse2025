@@ -7,6 +7,7 @@
 #include "MazeMapRuntimeInfrastructure.h"
 #include "RuntimeBinaryLogSupport.h"
 
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -1073,6 +1074,25 @@ namespace MazeMap::App::Internal
     void SharedRobotRuntime::CaptureUtilityDataLogFailure(bool& overflowed, bool& writeFailed) const noexcept
     {
         Runtime::CaptureMmLogFailure(UtilityDataLogger(), overflowed, writeFailed);
+    }
+
+    bool SharedRobotRuntime::SetMotorPWM(const float leftMotorPwm, const float rightMotorPwm) noexcept
+    {
+        if (_impl == nullptr)
+        {
+            return false;
+        }
+
+        if (!std::isfinite(leftMotorPwm) || !std::isfinite(rightMotorPwm))
+        {
+            _impl->drive.Brake();
+        }
+        else
+        {
+            _impl->drive.CommandOpenLoopRaw(leftMotorPwm, rightMotorPwm);
+        }
+
+        return true;
     }
 
     DriveBase& SharedRobotRuntime::Drive() noexcept

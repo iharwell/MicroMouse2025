@@ -37,6 +37,21 @@ namespace
         constexpr float kForwardSweepCarryThresholdMps = 0.05f;
         constexpr float kForwardSweepCarryThresholdM = 0.180f;
     }
+
+    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
+        DriveBase& drive,
+        const float linearSpeedMps,
+        const float angularSpeedRadps) noexcept
+    {
+        const MazeMap::OpenLoopDriveCommand driveCommand =
+            drive.PointCommand(
+                linearSpeedMps,
+                angularSpeedRadps,
+                MazeMap::CommandPD::StateWheelOmegaPD);
+        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+            driveCommand.leftDriveCommand,
+            driveCommand.rightDriveCommand);
+    }
 }
 
 class DiagnosticController : public IApplicationMode
@@ -400,19 +415,19 @@ private:
         if ((self == nullptr) || (self->_phaseFn == nullptr))
         {
             services.Fault("Diagnostic phase callback was not installed");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (!state.estimatorHealthy)
         {
             services.Fault((state.faultReason != nullptr) ? state.faultReason : "Diagnostic estimator fault");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (!self->IsWithinBoundary(state.estimate))
         {
             services.Fault("Diagnostic boundary exceeded");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
@@ -1477,7 +1492,7 @@ private:
         if (!LogSample(_holdPhaseState.stationary, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (static_cast<long>(_holdPhaseState.deadlineMs - millis()) <= 0)
@@ -1488,7 +1503,7 @@ private:
                 "Failed to advance diagnostic hold phase");
         }
 
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     LoopController::ControlVector StraightPhaseTick(
@@ -1510,7 +1525,7 @@ private:
             if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
             {
                 services.Fault("Failed to write diagnostic sample");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             if (_straightPhaseState.selectReturnDistance)
@@ -1528,13 +1543,13 @@ private:
                     _straightPhaseState.metrics))
             {
                 services.Fault("Failed to write straight diagnostic result");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             (void)AdvanceToNextStep(
                 _straightPhaseState.nextStep,
                 services,
                 "Failed to advance diagnostic straight phase");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
         if (_straightPhaseState.translationWatchdog.Stalled(
                 _straightPhaseState.traveledM,
@@ -1543,12 +1558,12 @@ private:
                 millis()))
         {
             services.Fault("Straight diagnostic encoder progress stalled");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
         if (static_cast<long>(_straightPhaseState.timeoutMs - millis()) <= 0)
         {
             services.Fault("Straight diagnostic phase timed out");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         const float accelLimitedSpeedMps = (std::min)(
@@ -1572,10 +1587,11 @@ private:
         if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
-        return LoopController::ControlVector::VelocityCommand(
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
             _straightPhaseState.commandedSpeedMps,
             angularCommandRadps);
     }
@@ -1602,12 +1618,12 @@ private:
             (static_cast<long>(_kickoffPhaseState.pulseDeadlineMs - nowMs) > 0);
         const LoopController::ControlVector command =
             _kickoffPhaseState.travelLimited ?
-            LoopController::ControlVector::BrakeCommand() :
+            LoopController::ControlVector::Brake :
             pulseActive ?
-            LoopController::ControlVector::OpenLoopCommand(
+            LoopController::ControlVector::RawMotorPwm(
                 _kickoffPhaseState.driveCommand,
                 _kickoffPhaseState.driveCommand) :
-            LoopController::ControlVector::BrakeCommand();
+            LoopController::ControlVector::Brake;
 
         _kickoffPhaseState.maxSpeedMps = (std::max)(
             _kickoffPhaseState.maxSpeedMps,
@@ -1615,7 +1631,7 @@ private:
         if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (_kickoffPhaseState.travelLimited &&
@@ -1626,7 +1642,7 @@ private:
             {
                 services.Fault("Failed to complete kickoff characterization sample");
             }
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (!_kickoffPhaseState.travelLimited &&
@@ -1638,7 +1654,7 @@ private:
             {
                 services.Fault("Failed to complete kickoff characterization sample");
             }
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         return command;
@@ -1666,14 +1682,14 @@ private:
             }
         }
 
-        LoopController::ControlVector command = LoopController::ControlVector::BrakeCommand();
+        LoopController::ControlVector command = LoopController::ControlVector::Brake;
         if (_forwardPhaseState.travelLimited)
         {
-            command = LoopController::ControlVector::BrakeCommand();
+            command = LoopController::ControlVector::Brake;
         }
         else if (static_cast<long>(_forwardPhaseState.kickoffDeadlineMs - nowMs) > 0)
         {
-            command = LoopController::ControlVector::OpenLoopCommand(
+            command = LoopController::ControlVector::RawMotorPwm(
                 LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
                 LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand);
         }
@@ -1685,7 +1701,7 @@ private:
                 _forwardPhaseState.holdStartDistanceM = _drive.GetAverageDistanceMeters();
             }
             _forwardPhaseState.holdElapsedSeconds += state.dtSeconds;
-            command = LoopController::ControlVector::OpenLoopCommand(
+            command = LoopController::ControlVector::RawMotorPwm(
                 _forwardPhaseState.forwardDriveCommand,
                 _forwardPhaseState.forwardDriveCommand);
         }
@@ -1701,7 +1717,7 @@ private:
         if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (_forwardPhaseState.travelLimited &&
@@ -1712,7 +1728,7 @@ private:
             {
                 services.Fault("Failed to complete forward characterization sample");
             }
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (!_forwardPhaseState.travelLimited &&
@@ -1724,7 +1740,7 @@ private:
             {
                 services.Fault("Failed to complete forward characterization sample");
             }
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         return command;
@@ -1747,7 +1763,7 @@ private:
             if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
             {
                 services.Fault("Failed to write diagnostic sample");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             if (!WriteTurnResult(
@@ -1757,7 +1773,7 @@ private:
                     _turnPhaseState.targetYawRad))
             {
                 services.Fault("Failed to write turn diagnostic result");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             if (_turnPhaseState.nextStep == ScenarioStep::RecoverySettle)
             {
@@ -1772,18 +1788,18 @@ private:
                     "Failed to write square diagnostic result"))
             {
                 services.Fault("Failed to write square diagnostic result");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             (void)AdvanceToNextStep(
                 _turnPhaseState.nextStep,
                 services,
                 "Failed to advance diagnostic turn phase");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
         if (static_cast<long>(_turnPhaseState.timeoutMs - millis()) <= 0)
         {
             services.Fault("Turn diagnostic phase timed out");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         float angularCommandRadps = 0.0f;
@@ -1794,16 +1810,16 @@ private:
                 angularCommandRadps))
         {
             services.Fault("Turn diagnostic phase profile became invalid");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
-        return LoopController::ControlVector::VelocityCommand(0.0f, angularCommandRadps);
+        return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
     }
 
     LoopController::ControlVector ArcPhaseTick(
@@ -1834,7 +1850,7 @@ private:
             if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
             {
                 services.Fault("Failed to write diagnostic sample");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
 
             AccumulateArcMetrics(_circleSequenceState.totalMetrics, _arcPhaseState.metrics);
@@ -1847,7 +1863,7 @@ private:
                     _arcPhaseState.metrics))
             {
                 services.Fault("Failed to write arc diagnostic result");
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
             if (_arcPhaseState.writeCircleSummary)
             {
@@ -1858,7 +1874,7 @@ private:
                         _circleSequenceState.totalMetrics))
                 {
                     services.Fault("Failed to write circle diagnostic result");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
                 if (!WriteClosureResult(
                         "arc_circle_result",
@@ -1867,14 +1883,14 @@ private:
                         "Failed to write arc circle diagnostic result"))
                 {
                     services.Fault("Failed to write arc circle diagnostic result");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
             }
             (void)AdvanceToNextStep(
                 _arcPhaseState.nextStep,
                 services,
                 "Failed to advance diagnostic arc phase");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
         if (_arcPhaseState.translationWatchdog.Stalled(
                 _arcPhaseState.traveledM,
@@ -1883,12 +1899,12 @@ private:
                 millis()))
         {
             services.Fault("Arc diagnostic encoder progress stalled");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
         if (static_cast<long>(_arcPhaseState.timeoutMs - millis()) <= 0)
         {
             services.Fault("Arc diagnostic phase timed out");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         const float accelLimitedSpeedMps = (std::min)(
@@ -1916,10 +1932,11 @@ private:
         if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
-        return LoopController::ControlVector::VelocityCommand(
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _drive,
             _arcPhaseState.commandedSpeedMps,
             angularCommandRadps);
     }

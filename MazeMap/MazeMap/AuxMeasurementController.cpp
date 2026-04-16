@@ -12,6 +12,24 @@
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
+namespace
+{
+    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
+        DriveBase& drive,
+        const float linearSpeedMps,
+        const float angularSpeedRadps) noexcept
+    {
+        const MazeMap::OpenLoopDriveCommand driveCommand =
+            drive.PointCommand(
+                linearSpeedMps,
+                angularSpeedRadps,
+                MazeMap::CommandPD::StateWheelOmegaPD);
+        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+            driveCommand.leftDriveCommand,
+            driveCommand.rightDriveCommand);
+    }
+}
+
 class AuxMeasurementController : public IApplicationMode
 {
 public:
@@ -152,7 +170,7 @@ private:
         if ((self == nullptr) || (self->_phaseFn == nullptr))
         {
             services.Fault("Aux measurement phase callback was not installed");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
@@ -465,7 +483,7 @@ private:
                 planarAccelMps2))
         {
             services.Fault("Failed to write auxiliary measurement sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         if (static_cast<unsigned long>(millis() - _holdPhaseState.startMs) >= _holdPhaseState.durationMs)
@@ -480,7 +498,7 @@ private:
             }
         }
 
-        return LoopController::ControlVector::BrakeCommand();
+        return LoopController::ControlVector::Brake;
     }
 
     LoopController::ControlVector TurningTractionTick(
@@ -511,7 +529,7 @@ private:
                 services.Fault("Failed to write turning traction timeout result");
             }
             services.RequestEndLoop();
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         const SensorSnapshot& sensorSnapshot = state.sensors;
@@ -572,7 +590,7 @@ private:
                 planarAccelMps2))
         {
             services.Fault("Failed to write turning traction sample");
-            return LoopController::ControlVector::BrakeCommand();
+            return LoopController::ControlVector::Brake;
         }
 
         const bool slipDetected = MazeMap::IsTurningTractionLossDetected(
@@ -603,7 +621,7 @@ private:
                     services.Fault("Failed to write turning traction loss result");
                 }
                 services.RequestEndLoop();
-                return LoopController::ControlVector::BrakeCommand();
+                return LoopController::ControlVector::Brake;
             }
         }
         else
@@ -655,12 +673,12 @@ private:
                 if (messageLength <= 0 || messageLength >= static_cast<int>(sizeof(message)))
                 {
                     services.Fault("Failed to format turning traction mode event");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
                 if (!WriteEvent("turning_traction_mode", message))
                 {
                     services.Fault("Failed to write turning traction mode event");
-                    return LoopController::ControlVector::BrakeCommand();
+                    return LoopController::ControlVector::Brake;
                 }
             }
         }
@@ -672,12 +690,13 @@ private:
                 _turningTractionState.lastCommandedOmegaRadps,
                 effectiveTrackWidthM,
                 Config::kWheelRestLaunchDriveCommand);
-            return LoopController::ControlVector::OpenLoopCommand(
+            return LoopController::ControlVector::RawMotorPwm(
                 launchCommands.leftCommand,
                 launchCommands.rightCommand);
         }
 
-        return LoopController::ControlVector::VelocityCommand(
+        return MakeWheelOmegaRawMotorPwmCommand(
+            _runtime.Drive(),
             _turningTractionState.commandedSpeedMps,
             _turningTractionState.lastCommandedOmegaRadps);
     }
