@@ -1,10 +1,25 @@
 #include "pch.h"
 #include "MissionRunMode.h"
 
-#include "MazeMapControllerRegistry.h"
+#include "MazeMapSharedRuntime.h"
 
 namespace MazeMap::App::Internal
 {
+    MissionRunMode::MissionRunMode(SharedRobotRuntime& runtime)
+        : _controller(runtime)
+    {
+    }
+
+    bool MissionRunMode::Begin()
+    {
+        return _controller.BeginMissionRunMode();
+    }
+
+    void MissionRunMode::Run()
+    {
+        _controller.RunMissionRunMode();
+    }
+
     const BootModeDescriptor& GetMissionRunBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -15,7 +30,7 @@ namespace MazeMap::App::Internal
             "logging.txt; mission telemetry; maze snapshot when exported",
             &GetMissionRunMode,
             "GetMissionRunMode",
-            "MissionRunMode.cpp; MazeMapMissionController.cpp",
+            "MissionRunMode.cpp",
             "mission initialization; startup wall calibration; exploration; return; speed runs; service cycle",
             "CoreConfig mission tuning; shared runtime pathfinders; persisted front-wall characterization when available",
             "none",
@@ -24,25 +39,9 @@ namespace MazeMap::App::Internal
         return descriptor;
     }
 
-    MissionRunMode::MissionRunMode(IMissionModeHost& host)
-        : MissionHostedModeBase(host)
-    {
-    }
-
-    bool MissionRunMode::Begin()
-    {
-        return Host().BeginMissionRunMode();
-    }
-
-    void MissionRunMode::Run()
-    {
-        Host().RunMissionRunMode();
-    }
-
     IApplicationMode& GetMissionRunMode()
     {
-        static MissionRunMode mode(GetMissionModeHost());
+        static MissionRunMode mode(GetSharedRobotRuntime());
         return mode;
     }
 }
-

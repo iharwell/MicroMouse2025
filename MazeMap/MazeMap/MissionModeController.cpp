@@ -1,11 +1,12 @@
 #include "pch.h"
+#include "MissionModeController.h"
+
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapSharedRuntime.h"
 
-using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
 namespace
@@ -24,12 +25,712 @@ namespace
             driveCommand.leftDriveCommand,
             driveCommand.rightDriveCommand);
     }
+
+    void SetKnownMazeCellWalls(
+        MazeMap::Maze& maze,
+        const MazeMap::CellCoordinates& cellCoordinates,
+        MazeMap::WallState up,
+        MazeMap::WallState down,
+        MazeMap::WallState left,
+        MazeMap::WallState right)
+    {
+        MazeMap::Cell& cell = maze[cellCoordinates];
+        maze.SetWall(cell, MazeMap::Up, up);
+        maze.SetWall(cell, MazeMap::Down, down);
+        maze.SetWall(cell, MazeMap::Left, left);
+        maze.SetWall(cell, MazeMap::Right, right);
+    }
+
+    struct PositionAuditFixtureGeometry
+    {
+        MazeMap::Maze maze;
+        uint8_t northCorridorCellCount = 0U;
+        uint8_t eastExtensionCellCount = 0U;
+        uint8_t eastTotalCellCount = 0U;
+        float northCorridorSpanYM = 0.0f;
+        float eastBranchSpanXM = 0.0f;
+        float outDistanceM = 0.0f;
+        float farCellCenterYM = 0.0f;
+        float farWallTouchYM = 0.0f;
+        float eastWallTouchXM = 0.0f;
+    };
+
+    MazeMap::Maze BuildPositionAuditMazeFixture(
+        const uint8_t northCorridorCellCount,
+        const uint8_t eastExtensionCellCount)
+    {
+        MazeMap::Maze maze;
+
+        for (uint8_t y = 0U; y < northCorridorCellCount; ++y)
+        {
+            const MazeMap::CellCoordinates cell(0U, y);
+            SetKnownMazeCellWalls(
+                maze,
+                cell,
+                (y + 1U < northCorridorCellCount) ? MazeMap::NoWall : MazeMap::Wall,
+                (y > 0U) ? MazeMap::NoWall : MazeMap::Wall,
+                MazeMap::Wall,
+                (y + 1U == northCorridorCellCount) ? MazeMap::NoWall : MazeMap::Wall);
+        }
+
+        for (uint8_t x = 1U; x <= eastExtensionCellCount; ++x)
+        {
+            const MazeMap::CellCoordinates cell(
+                x,
+                static_cast<uint8_t>(northCorridorCellCount - 1U));
+            SetKnownMazeCellWalls(
+                maze,
+                cell,
+                MazeMap::Wall,
+                MazeMap::Wall,
+                MazeMap::NoWall,
+                (x < eastExtensionCellCount) ? MazeMap::NoWall : MazeMap::Wall);
+        }
+
+        return maze;
+    }
+
+    PositionAuditFixtureGeometry BuildPositionAuditFixtureGeometry()
+    {
+        PositionAuditFixtureGeometry geometry{};
+        geometry.northCorridorCellCount = AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount;
+        geometry.eastExtensionCellCount = AuxMeasurementConfig::kPositionAuditEastBranchCellCount;
+        geometry.eastTotalCellCount = static_cast<uint8_t>(geometry.eastExtensionCellCount + 1U);
+        geometry.northCorridorSpanYM = Config::kCellSizeM * static_cast<float>(geometry.northCorridorCellCount);
+        geometry.eastBranchSpanXM = Config::kCellSizeM * static_cast<float>(geometry.eastTotalCellCount);
+        geometry.outDistanceM =
+            Config::kCellSizeM *
+            static_cast<float>(geometry.northCorridorCellCount - 1U);
+        geometry.farCellCenterYM =
+            (static_cast<float>(geometry.northCorridorCellCount) - 0.5f) *
+            Config::kCellSizeM;
+        geometry.farWallTouchYM = MazeMap::ComputeWallTouchPoseFromNorthWallM(
+            geometry.northCorridorSpanYM,
+            Config::kMazeWallThicknessM,
+            Config::kWallTouchContactStandoffM);
+        geometry.eastWallTouchXM = MazeMap::ComputeWallTouchPoseFromEastWallM(
+            geometry.eastBranchSpanXM,
+            Config::kMazeWallThicknessM,
+            Config::kWallTouchContactStandoffM);
+        geometry.maze = BuildPositionAuditMazeFixture(
+            geometry.northCorridorCellCount,
+            geometry.eastExtensionCellCount);
+        return geometry;
+    }
+
+    bool TryBuildReverseManeuverPath(
+        const MazeMap::ManeuverPath& forwardPath,
+        MazeMap::ManeuverPath& reversePath)
+    {
+        reversePath.clear();
+        const MazeMap::ManeuverSet& maneuverSet = MazeMap::ManeuverSet::GetSet();
+        for (int index = static_cast<int>(forwardPath.GetSize()) - 1; index >= 0; --index)
+        {
+            if (!reversePath.push_back(maneuverSet.GetReverseCode(forwardPath[static_cast<uint16_t>(index)])))
+            {
+                reversePath.clear();
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool TryResolvePositionAuditSmoothTurnHalfSteps(
+        const MazeMap::ManeuverCode code,
+        uint8_t& preTurnHalfSteps,
+        uint8_t& postTurnHalfSteps)
+    {
+        switch (code)
+        {
+        case MazeMap::S90SS:
+            preTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase2PreTurnHalfSteps;
+            postTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase2PostTurnHalfSteps;
+            return true;
+        case MazeMap::S90LS:
+            preTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase3PreTurnHalfSteps;
+            postTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase3PostTurnHalfSteps;
+            return true;
+        default:
+            preTurnHalfSteps = 0U;
+            postTurnHalfSteps = 0U;
+            return false;
+        }
+    }
+
+    bool TryBuildPositionAuditSmoothTurnPaths(
+        const MazeMap::ManeuverCode code,
+        MazeMap::ManeuverPath& forwardPath,
+        MazeMap::ManeuverPath& reversePath,
+        uint8_t& preTurnHalfSteps,
+        uint8_t& postTurnHalfSteps)
+    {
+        forwardPath.clear();
+        reversePath.clear();
+        if (!TryResolvePositionAuditSmoothTurnHalfSteps(code, preTurnHalfSteps, postTurnHalfSteps))
+        {
+            return false;
+        }
+
+        if (!forwardPath.push_back(static_cast<MazeMap::ManeuverCode>(preTurnHalfSteps)) ||
+            !forwardPath.push_back(code) ||
+            !forwardPath.push_back(static_cast<MazeMap::ManeuverCode>(postTurnHalfSteps)))
+        {
+            forwardPath.clear();
+            return false;
+        }
+
+        return TryBuildReverseManeuverPath(forwardPath, reversePath);
+    }
+
+    bool TryValidatePositionAuditPath(
+        const MazeMap::Maze& maze,
+        const MazeMap::ManeuverPath& path,
+        MazeMap::DirectionalLocation start,
+        MazeMap::DirectionalLocation& end)
+    {
+        MazeMap::DirectionalLocation current = start;
+        const MazeMap::ManeuverSet& maneuverSet = MazeMap::ManeuverSet::GetSet();
+        for (uint16_t index = 0U; index < path.GetSize(); ++index)
+        {
+            const MazeMap::ManeuverCode code = path[index];
+            if (!maneuverSet.IsValidMove(code, current, maze))
+            {
+                end = MazeMap::DirectionalLocation();
+                return false;
+            }
+
+            current = maneuverSet.Move(code, current);
+            if (!maze.IsAccessibleLocation(current.GetLocation()))
+            {
+                end = MazeMap::DirectionalLocation();
+                return false;
+            }
+        }
+
+        end = current;
+        return true;
+    }
+
+    MotionLimits CorridorRepeatabilityLimits(const float cruiseSpeedMps) noexcept
+    {
+        MotionLimits limits{};
+        limits.maxSpeedMps = (std::max)(0.0f, cruiseSpeedMps);
+        limits.accelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2;
+        limits.decelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2;
+        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
+        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
+        return limits;
+    }
+
+    MotionLimits PositionAccuracyAuditStraightLimits(const float cruiseSpeedMps) noexcept
+    {
+        MotionLimits limits{};
+        limits.maxSpeedMps = (std::max)(0.0f, cruiseSpeedMps);
+        limits.accelMps2 = AuxMeasurementConfig::kPositionAuditAccelMps2;
+        limits.decelMps2 = AuxMeasurementConfig::kPositionAuditDecelMps2;
+        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
+        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
+        return limits;
+    }
+
+    MotionLimits PositionAccuracyAuditTurnLimits() noexcept
+    {
+        MotionLimits limits = PositionAccuracyAuditStraightLimits(0.0f);
+        limits.maxSpeedMps = 0.0f;
+        return limits;
+    }
+
+    MotionLimits PositionAccuracyAuditCornerLimits(
+        const float cruiseSpeedMps,
+        const float nominalRadiusM) noexcept
+    {
+        MotionLimits limits = PositionAccuracyAuditStraightLimits(cruiseSpeedMps);
+        (void)nominalRadiusM;
+        limits.maxAngularSpeedRadps = AuxMeasurementConfig::kPositionAuditCornerMaxOmegaRadps;
+        return limits;
+    }
+
+    float UtilityModeManeuverDistanceMeters(const MazeMap::ManeuverCode code)
+    {
+        MazeMap::SmoothTurnExecutionProfile profileInCells{};
+        if (MazeMap::ManeuverSet::GetSet()[code].TryGetSmoothTurnExecutionProfile(profileInCells))
+        {
+            MazeMap::SmoothTurnExecutionProfile profile =
+                MazeMap::ScaleSmoothTurnExecutionProfile(profileInCells, Config::kCellSizeM);
+            profile.radians = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
+            if (profile.IsValid())
+            {
+                return profile.totalDistance;
+            }
+        }
+
+        return 0.5f * Config::kCellSizeM * static_cast<float>(MazeMap::ManeuverSet::GetSet().DistanceTravelled(code));
+    }
+
+    template <typename WriteEventFn, typename FailFn>
+    bool LogCorridorRepeatabilityMetadataImpl(WriteEventFn&& writeEvent, FailFn&& fail)
+    {
+        char line[160] = {};
+        if (!writeEvent(
+                "summary",
+                "Place the robot in a 5-cell enclosed row like a mission start. This routine runs startup wall calibration, drives to the far end and back at several speeds, and logs closure error at the start cell."))
+        {
+            return fail("Unable to write corridor repeatability summary");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "row_cell_count,%u",
+            static_cast<unsigned>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount));
+        if (!writeEvent("corridor_repeatability", line))
+        {
+            return fail("Unable to write corridor repeatability metadata");
+        }
+
+        const float outDistanceM =
+            (AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount > 0U) ?
+            (Config::kCellSizeM * static_cast<float>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount - 1U)) :
+            0.0f;
+        snprintf(line, sizeof(line), "out_distance_m,%.6f", outDistanceM);
+        if (!writeEvent("corridor_repeatability", line))
+        {
+            return fail("Unable to write corridor repeatability metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "accel_mps2,%.6f;decel_mps2,%.6f;turn_max_omega_radps,%.6f;turn_accel_radps2,%.6f",
+            AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2,
+            AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2,
+            Config::kSearchTurnMaxOmegaRadps,
+            Config::kSearchTurnAccelRadps2);
+        if (!writeEvent("corridor_repeatability", line))
+        {
+            return fail("Unable to write corridor repeatability metadata");
+        }
+
+        for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kCorridorRepeatabilitySpeedCount; ++speedIndex)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "speed_%u_mps,%.6f",
+                static_cast<unsigned>(speedIndex),
+                AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[speedIndex]);
+            if (!writeEvent("corridor_repeatability_speed", line))
+            {
+                return fail("Unable to write corridor repeatability speed metadata");
+            }
+        }
+
+        return true;
+    }
+
+    template <typename WriteEventFn, typename FailFn>
+    bool LogPositionAccuracyAuditMetadataImpl(
+        const PositionAuditFixtureGeometry& geometry,
+        WriteEventFn&& writeEvent,
+        FailFn&& fail)
+    {
+        char line[320] = {};
+        snprintf(
+            line,
+            sizeof(line),
+            "Build a one-cell-wide fixture: normal mission start, a %u-cell north corridor including the start and corner cells, and a %u-cell east extension beyond that corner with solid side walls. All following phases reuse this same fixed geometry.",
+            static_cast<unsigned>(geometry.northCorridorCellCount),
+            static_cast<unsigned>(geometry.eastExtensionCellCount));
+        if (!writeEvent("summary", line))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+        if (!writeEvent(
+                "summary",
+                "position_straight_result isolates wheel-diameter, straight feedforward, and stop-distance error through north_touch_correction_m, enc_out_err_m, closure_m, and yaw_err_deg."))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+        if (!writeEvent(
+                "summary",
+                "position_in_place_turn_result isolates the shared in-place turn profile through yaw_err_deg, effective_track_width_m, and wall_touch_correction_m."))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+        if (!writeEvent(
+                "summary",
+                "position_smooth_turn_result compares S90SS and S90LS against nominal_radius_m, measured_radius_m, effective_track_width_m, corridor_err_m, and east_touch_correction_m to expose radius-dependent feedforward error."))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+        if (!writeEvent(
+                "summary",
+                "Phase 1 runs S8, centers in the north corner, turns in place to face down, and runs S8 back to start."))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+        if (!writeEvent(
+                "summary",
+                "Phase 2 reseats at start, runs S7 + S90SS + S7, centers at the east end, turns to face left, and returns on the reversed maneuver path."))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+        if (!writeEvent(
+                "summary",
+                "Phase 3 reseats at start, runs S6 + S90LS + S6, recenters at the east end, and returns on the reversed maneuver path."))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+        if (AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled &&
+            !writeEvent(
+                "summary",
+                "Smooth-turn phases run with the mission fan enabled; the existing 2 s ramp to 80% completes before motion begins so high-speed S90 data reflects the intended downforce state."))
+        {
+            return fail("Unable to write position accuracy audit summary");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "north_corridor_cells,%u;east_extension_cells,%u;east_total_cells,%u",
+            static_cast<unsigned>(geometry.northCorridorCellCount),
+            static_cast<unsigned>(geometry.eastExtensionCellCount),
+            static_cast<unsigned>(geometry.eastTotalCellCount));
+        if (!writeEvent("position_audit", line))
+        {
+            return fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "accel_mps2,%.6f;decel_mps2,%.6f;start_settle_ms,%u",
+            AuxMeasurementConfig::kPositionAuditAccelMps2,
+            AuxMeasurementConfig::kPositionAuditDecelMps2,
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditStartSettleMs));
+        if (!writeEvent("position_audit", line))
+        {
+            return fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "smooth_turn_fan_enabled,%u;kRacingFanDutyCycle,%.6f;kRacingFanRampMs,%u",
+            AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled ? 1U : 0U,
+            Config::kRacingFanDutyCycle,
+            static_cast<unsigned>(Config::kRacingFanRampMs));
+        if (!writeEvent("position_audit", line))
+        {
+            return fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "phase=1;forward_half_steps=%u;turn=IP180;return_half_steps=%u",
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps),
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps));
+        if (!writeEvent("position_audit_phase", line))
+        {
+            return fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "phase=2;forward=%u,S90SS,%u;return=reverse(forward)",
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PreTurnHalfSteps),
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PostTurnHalfSteps));
+        if (!writeEvent("position_audit_phase", line))
+        {
+            return fail("Unable to write position accuracy audit metadata");
+        }
+
+        snprintf(
+            line,
+            sizeof(line),
+            "phase=3;forward=%u,S90LS,%u;return=reverse(forward)",
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PreTurnHalfSteps),
+            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PostTurnHalfSteps));
+        if (!writeEvent("position_audit_phase", line))
+        {
+            return fail("Unable to write position accuracy audit metadata");
+        }
+
+        for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kPositionAuditStraightSpeedCount; ++speedIndex)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "speed_%u_mps,%.6f",
+                static_cast<unsigned>(speedIndex),
+                AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[speedIndex]);
+            if (!writeEvent("position_audit_straight_speed", line))
+            {
+                return fail("Unable to write position accuracy audit speed metadata");
+            }
+        }
+
+        for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kPositionAuditCornerSpeedCount; ++speedIndex)
+        {
+            snprintf(
+                line,
+                sizeof(line),
+                "speed_%u_mps,%.6f",
+                static_cast<unsigned>(speedIndex),
+                AuxMeasurementConfig::kPositionAuditCornerSpeedsMps[speedIndex]);
+            if (!writeEvent("position_audit_corner_speed", line))
+            {
+                return fail("Unable to write position accuracy audit speed metadata");
+            }
+        }
+
+        for (uint8_t codeIndex = 0U; codeIndex < AuxMeasurementConfig::kPositionAuditSmoothTurnCodeCount; ++codeIndex)
+        {
+            const MazeMap::ManeuverCode code = AuxMeasurementConfig::kPositionAuditSmoothTurnCodes[codeIndex];
+            char codeName[24] = {};
+            FormatManeuverCodeName(code, codeName, sizeof(codeName));
+            snprintf(
+                line,
+                sizeof(line),
+                "code=%s;nominal_radius_m=%.6f;distance_m=%.6f",
+                codeName,
+                MazeMap::ManeuverSet::GetSet()[code].GetNominalTurnRadiusInCells() * Config::kCellSizeM,
+                UtilityModeManeuverDistanceMeters(code));
+            if (!writeEvent("position_audit_turn_code", line))
+            {
+                return fail("Unable to write position accuracy audit turn metadata");
+            }
+        }
+
+        return true;
+    }
+
+    template <typename WriteEventFn, typename FailFn>
+    bool WriteCorridorRepeatabilityResultImpl(
+        WriteEventFn&& writeEvent,
+        FailFn&& fail,
+        const uint8_t speedIndex,
+        const float cruiseSpeedMps,
+        const PoseEstimate& startPose,
+        const DriveTelemetry& startTelemetry,
+        const PoseEstimate& finalPose,
+        const DriveTelemetry& finalTelemetry)
+    {
+        const float deltaXM = finalPose.xMeters - startPose.xMeters;
+        const float deltaYM = finalPose.yMeters - startPose.yMeters;
+        const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
+        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.yawRad, finalPose.yawRad);
+
+        char message[224] = {};
+        const int length = snprintf(
+            message,
+            sizeof(message),
+            "speed_index=%u;cruise_mps=%.3f;dx_m=%.6f;dy_m=%.6f;closure_m=%.6f;yaw_err_deg=%.3f;"
+            "left_delta_m=%.6f;right_delta_m=%.6f;left_delta_cnt=%ld;right_delta_cnt=%ld",
+            static_cast<unsigned>(speedIndex),
+            cruiseSpeedMps,
+            deltaXM,
+            deltaYM,
+            closureErrorM,
+            yawErrorDeg,
+            finalTelemetry.leftDistanceM - startTelemetry.leftDistanceM,
+            finalTelemetry.rightDistanceM - startTelemetry.rightDistanceM,
+            static_cast<long>(finalTelemetry.leftEncoderCount - startTelemetry.leftEncoderCount),
+            static_cast<long>(finalTelemetry.rightEncoderCount - startTelemetry.rightEncoderCount));
+
+        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        {
+            return fail("Corridor repeatability result event overflowed");
+        }
+        if (writeEvent("corridor_repeatability_result", message))
+        {
+            return true;
+        }
+        return fail("Unable to write corridor repeatability result");
+    }
+
+    template <typename WriteEventFn, typename FailFn>
+    bool WritePositionStraightAuditResultImpl(
+        WriteEventFn&& writeEvent,
+        FailFn&& fail,
+        const uint8_t speedIndex,
+        const float cruiseSpeedMps,
+        const float northStopErrorM,
+        const float northTouchCorrectionM,
+        const float encoderOutErrorM,
+        const PoseEstimate& startPose,
+        const PoseEstimate& finalPose)
+    {
+        const float deltaXM = finalPose.xMeters - startPose.xMeters;
+        const float deltaYM = finalPose.yMeters - startPose.yMeters;
+        const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
+        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.yawRad, finalPose.yawRad);
+
+        char message[224] = {};
+        const int length = snprintf(
+            message,
+            sizeof(message),
+            "speed_idx=%u;v=%.3f;stop_err_m=%.6f;touch_correction_m=%.6f;enc_out_err_m=%.6f;"
+            "dx_m=%.6f;dy_m=%.6f;closure_m=%.6f;yaw_err_deg=%.3f",
+            static_cast<unsigned>(speedIndex),
+            cruiseSpeedMps,
+            northStopErrorM,
+            northTouchCorrectionM,
+            encoderOutErrorM,
+            deltaXM,
+            deltaYM,
+            closureErrorM,
+            yawErrorDeg);
+        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        {
+            return fail("Position straight result event overflowed");
+        }
+        if (writeEvent("position_straight_result", message))
+        {
+            return true;
+        }
+        return fail("Unable to write position straight result");
+    }
+
+    template <typename WriteEventFn, typename FailFn>
+    bool WritePositionInPlaceTurnAuditResultImpl(
+        WriteEventFn&& writeEvent,
+        FailFn&& fail,
+        const MazeMap::Direction targetDirection,
+        const float touchCorrectionM,
+        const float leftDeltaM,
+        const float rightDeltaM,
+        const float yawChangeRad,
+        const float currentYawRad)
+    {
+        float effectiveTrackWidthM = 0.0f;
+        const bool haveTrackWidth = MazeMap::TryComputeEffectiveTrackWidthM(
+            leftDeltaM,
+            rightDeltaM,
+            yawChangeRad,
+            effectiveTrackWidthM);
+        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(DirectionToYawRad(targetDirection), currentYawRad);
+
+        char message[224] = {};
+        const int length =
+            haveTrackWidth ?
+            snprintf(
+                message,
+                sizeof(message),
+                "target=%s;yaw_err_deg=%.3f;touch_correction_m=%.6f;left_delta_m=%.6f;right_delta_m=%.6f;"
+                "yaw_change_deg=%.3f;effective_track_width_m=%.6f",
+                DirectionName(targetDirection),
+                yawErrorDeg,
+                touchCorrectionM,
+                leftDeltaM,
+                rightDeltaM,
+                RAD_TO_DEG_F * yawChangeRad,
+                effectiveTrackWidthM) :
+            snprintf(
+                message,
+                sizeof(message),
+                "target=%s;yaw_err_deg=%.3f;touch_correction_m=%.6f;left_delta_m=%.6f;right_delta_m=%.6f;"
+                "yaw_change_deg=%.3f;effective_track_width_m=nan",
+                DirectionName(targetDirection),
+                yawErrorDeg,
+                touchCorrectionM,
+                leftDeltaM,
+                rightDeltaM,
+                RAD_TO_DEG_F * yawChangeRad);
+        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        {
+            return fail("Position in-place turn result event overflowed");
+        }
+        if (writeEvent("position_in_place_turn_result", message))
+        {
+            return true;
+        }
+        return fail("Unable to write position in-place turn result");
+    }
+
+    template <typename WriteEventFn, typename FailFn>
+    bool WritePositionSmoothTurnAuditResultImpl(
+        WriteEventFn&& writeEvent,
+        FailFn&& fail,
+        const MazeMap::ManeuverCode code,
+        const uint8_t speedIndex,
+        const float cruiseSpeedMps,
+        const float nominalRadiusM,
+        const float corridorErrorM,
+        const float eastTouchCorrectionM,
+        const float leftArcDeltaM,
+        const float rightArcDeltaM,
+        const float yawChangeRad,
+        const float yawErrorDeg)
+    {
+        float effectiveTrackWidthM = 0.0f;
+        const bool haveTrackWidth = MazeMap::TryComputeEffectiveTrackWidthM(
+            leftArcDeltaM,
+            rightArcDeltaM,
+            yawChangeRad,
+            effectiveTrackWidthM);
+        float measuredRadiusM = 0.0f;
+        const bool haveMeasuredRadius = TryComputeEffectiveTurnRadiusM(
+            leftArcDeltaM,
+            rightArcDeltaM,
+            yawChangeRad,
+            measuredRadiusM);
+
+        char codeName[24] = {};
+        FormatManeuverCodeName(code, codeName, sizeof(codeName));
+        char measuredRadiusText[24] = {};
+        char effectiveTrackWidthText[24] = {};
+        if (haveMeasuredRadius)
+        {
+            snprintf(measuredRadiusText, sizeof(measuredRadiusText), "%.6f", measuredRadiusM);
+        }
+        else
+        {
+            snprintf(measuredRadiusText, sizeof(measuredRadiusText), "nan");
+        }
+        if (haveTrackWidth)
+        {
+            snprintf(effectiveTrackWidthText, sizeof(effectiveTrackWidthText), "%.6f", effectiveTrackWidthM);
+        }
+        else
+        {
+            snprintf(effectiveTrackWidthText, sizeof(effectiveTrackWidthText), "nan");
+        }
+
+        char message[256] = {};
+        const int length = snprintf(
+            message,
+            sizeof(message),
+            "code=%s;speed_idx=%u;v=%.3f;nominal_radius_m=%.6f;measured_radius_m=%s;"
+            "effective_track_width_m=%s;yaw_err_deg=%.3f;corridor_err_m=%.6f;east_touch_correction_m=%.6f",
+            codeName,
+            static_cast<unsigned>(speedIndex),
+            cruiseSpeedMps,
+            nominalRadiusM,
+            measuredRadiusText,
+            effectiveTrackWidthText,
+            yawErrorDeg,
+            corridorErrorM,
+            eastTouchCorrectionM);
+        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        {
+            return fail("Position smooth turn result event overflowed");
+        }
+        if (writeEvent("position_smooth_turn_result", message))
+        {
+            return true;
+        }
+        return fail("Unable to write position smooth turn result");
+    }
 }
 
-class MissionController final : public IMissionModeHost
+class MazeMap::App::Internal::MissionModeController::Implementation final
 {
 public:
-    explicit MissionController(SharedRobotRuntime& runtime)
+    explicit Implementation(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
         , _speedVehicle(runtime.SpeedVehicle())
@@ -61,12 +762,12 @@ public:
         _telemetryLogFileName[0] = '\0';
     }
 
-    MissionController(const MissionController&) = delete;
-    MissionController& operator=(const MissionController&) = delete;
-    MissionController(MissionController&&) = delete;
-    MissionController& operator=(MissionController&&) = delete;
+    Implementation(const Implementation&) = delete;
+    Implementation& operator=(const Implementation&) = delete;
+    Implementation(Implementation&&) = delete;
+    Implementation& operator=(Implementation&&) = delete;
 
-    bool BeginMissionRunMode() override
+    bool BeginMissionRunMode()
     {
         ResetForMode(false, true, "mission");
         if (!Initialize("Micromouse mission setup", false))
@@ -79,7 +780,7 @@ public:
         return true;
     }
 
-    void RunMissionRunMode() override
+    void RunMissionRunMode()
     {
         if (_missionComplete || _faulted)
         {
@@ -140,7 +841,7 @@ public:
         CloseMissionTextLog();
     }
 
-    bool BeginManeuverFileTestMode() override
+    bool BeginManeuverFileTestMode()
     {
         ResetForMode(true, false, "maneuver_file_test");
         if (!Initialize("Micromouse maneuver test setup", false))
@@ -179,7 +880,7 @@ public:
         return true;
     }
 
-    void RunManeuverFileTestMode() override
+    void RunManeuverFileTestMode()
     {
         if (_faulted)
         {
@@ -222,7 +923,7 @@ public:
         CloseMissionTextLog();
     }
 
-    bool BeginCorridorRepeatabilityMode() override
+    bool BeginCorridorRepeatabilityMode()
     {
         ResetForMode(false, false, "corridor_repeatability");
         if (!Initialize("Corridor repeatability setup", false))
@@ -258,7 +959,15 @@ public:
         {
             return false;
         }
-        if (!LogCorridorRepeatabilityMetadata())
+        if (!LogCorridorRepeatabilityMetadataImpl(
+                [this](const char* type, const char* message) -> bool
+                {
+                    return WriteTelemetryEvent(type, message);
+                },
+                [this](const char* message) -> bool
+                {
+                    return Fail(message);
+                }))
         {
             return false;
         }
@@ -266,7 +975,7 @@ public:
         return true;
     }
 
-    void RunCorridorRepeatabilityMode() override
+    void RunCorridorRepeatabilityMode()
     {
         if (_faulted)
         {
@@ -284,7 +993,7 @@ public:
         CloseMissionTextLog();
     }
 
-    bool BeginPositionAccuracyAuditMode() override
+    bool BeginPositionAccuracyAuditMode()
     {
         ResetForMode(false, false, "position_accuracy_audit");
         if (!Initialize("Position accuracy audit setup", false))
@@ -321,7 +1030,16 @@ public:
             return false;
         }
         const PositionAuditFixtureGeometry positionAuditGeometry = BuildPositionAuditFixtureGeometry();
-        if (!LogPositionAccuracyAuditMetadata(positionAuditGeometry))
+        if (!LogPositionAccuracyAuditMetadataImpl(
+                positionAuditGeometry,
+                [this](const char* type, const char* message) -> bool
+                {
+                    return WriteTelemetryEvent(type, message);
+                },
+                [this](const char* message) -> bool
+                {
+                    return Fail(message);
+                }))
         {
             return false;
         }
@@ -329,7 +1047,7 @@ public:
         return true;
     }
 
-    void RunPositionAccuracyAuditMode() override
+    void RunPositionAccuracyAuditMode()
     {
         if (_faulted)
         {
@@ -354,253 +1072,6 @@ private:
 
     SharedRobotRuntime& _runtime;
     LoopController& _loopController;
-    static void SetKnownMazeCellWalls(
-        MazeMap::Maze& maze,
-        const MazeMap::CellCoordinates& cellCoordinates,
-        MazeMap::WallState up,
-        MazeMap::WallState down,
-        MazeMap::WallState left,
-        MazeMap::WallState right)
-    {
-        MazeMap::Cell& cell = maze[cellCoordinates];
-        maze.SetWall(cell, MazeMap::Up, up);
-        maze.SetWall(cell, MazeMap::Down, down);
-        maze.SetWall(cell, MazeMap::Left, left);
-        maze.SetWall(cell, MazeMap::Right, right);
-    }
-
-    struct PositionAuditFixtureGeometry
-    {
-        MazeMap::Maze maze;
-        uint8_t northCorridorCellCount = 0U;
-        uint8_t eastExtensionCellCount = 0U;
-        uint8_t eastTotalCellCount = 0U;
-        float northCorridorSpanYM = 0.0f;
-        float eastBranchSpanXM = 0.0f;
-        float outDistanceM = 0.0f;
-        float farCellCenterYM = 0.0f;
-        float farWallTouchYM = 0.0f;
-        float eastWallTouchXM = 0.0f;
-    };
-
-    static MazeMap::Maze BuildPositionAuditMazeFixture(uint8_t northCorridorCellCount, uint8_t eastExtensionCellCount)
-    {
-        MazeMap::Maze maze;
-
-        for (uint8_t y = 0U; y < northCorridorCellCount; ++y)
-        {
-            const MazeMap::CellCoordinates cell(0U, y);
-            SetKnownMazeCellWalls(
-                maze,
-                cell,
-                (y + 1U < northCorridorCellCount) ? MazeMap::NoWall : MazeMap::Wall,
-                (y > 0U) ? MazeMap::NoWall : MazeMap::Wall,
-                MazeMap::Wall,
-                (y + 1U == northCorridorCellCount) ? MazeMap::NoWall : MazeMap::Wall);
-        }
-
-        for (uint8_t x = 1U; x <= eastExtensionCellCount; ++x)
-        {
-            const MazeMap::CellCoordinates cell(
-                x,
-                static_cast<uint8_t>(northCorridorCellCount - 1U));
-            SetKnownMazeCellWalls(
-                maze,
-                cell,
-                MazeMap::Wall,
-                MazeMap::Wall,
-                MazeMap::NoWall,
-                (x < eastExtensionCellCount) ? MazeMap::NoWall : MazeMap::Wall);
-        }
-
-        return maze;
-    }
-
-    static PositionAuditFixtureGeometry BuildPositionAuditFixtureGeometry()
-    {
-        PositionAuditFixtureGeometry geometry{};
-        geometry.northCorridorCellCount = AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount;
-        geometry.eastExtensionCellCount = AuxMeasurementConfig::kPositionAuditEastBranchCellCount;
-        geometry.eastTotalCellCount = static_cast<uint8_t>(geometry.eastExtensionCellCount + 1U);
-        geometry.northCorridorSpanYM = Config::kCellSizeM * static_cast<float>(geometry.northCorridorCellCount);
-        geometry.eastBranchSpanXM = Config::kCellSizeM * static_cast<float>(geometry.eastTotalCellCount);
-        geometry.outDistanceM =
-            Config::kCellSizeM *
-            static_cast<float>(geometry.northCorridorCellCount - 1U);
-        geometry.farCellCenterYM =
-            (static_cast<float>(geometry.northCorridorCellCount) - 0.5f) *
-            Config::kCellSizeM;
-        geometry.farWallTouchYM = MazeMap::ComputeWallTouchPoseFromNorthWallM(
-            geometry.northCorridorSpanYM,
-            Config::kMazeWallThicknessM,
-            Config::kWallTouchContactStandoffM);
-        geometry.eastWallTouchXM = MazeMap::ComputeWallTouchPoseFromEastWallM(
-            geometry.eastBranchSpanXM,
-            Config::kMazeWallThicknessM,
-            Config::kWallTouchContactStandoffM);
-        geometry.maze = BuildPositionAuditMazeFixture(
-            geometry.northCorridorCellCount,
-            geometry.eastExtensionCellCount);
-        return geometry;
-    }
-
-    static uint8_t CountClearForwardHalfStepsUntilBlocked(
-        const MazeMap::Maze& maze,
-        const MazeMap::DirectionalLocation& start,
-        uint8_t maxHalfSteps = 31U)
-    {
-        MazeMap::DirectionalLocation cursor = start;
-        uint8_t clearHalfSteps = 0U;
-        while (clearHalfSteps < maxHalfSteps)
-        {
-            cursor = cursor.MoveForward(1U);
-            if (!maze.IsAccessibleLocation(cursor.GetLocation()))
-            {
-                break;
-            }
-
-            ++clearHalfSteps;
-        }
-
-        return clearHalfSteps;
-    }
-
-    static bool TryResolvePositionAuditSmoothTurnLaunchLocation(
-        const PositionAuditFixtureGeometry& geometry,
-        MazeMap::ManeuverCode code,
-        MazeMap::DirectionalLocation& launchLocation)
-    {
-        const uint8_t corridorCenterHalfX = 1U;
-        const uint8_t maxHalfY = static_cast<uint8_t>(
-            (geometry.northCorridorCellCount << 1U) - 1U);
-        const MazeMap::Maze& auditMaze = geometry.maze;
-
-        for (uint8_t halfY = maxHalfY; halfY > 0U; --halfY)
-        {
-            const MazeMap::DirectionalLocation candidate(
-                MazeMap::MazeLocation(corridorCenterHalfX, halfY),
-                MazeMap::Up);
-            if (!auditMaze.IsAccessibleLocation(candidate.GetLocation()))
-            {
-                continue;
-            }
-            if (!MazeMap::ManeuverSet::GetSet().IsValidMove(code, candidate, auditMaze))
-            {
-                continue;
-            }
-
-            const MazeMap::DirectionalLocation maneuverEnd = MazeMap::ManeuverSet::GetSet().Move(code, candidate);
-            if (!auditMaze.IsAccessibleLocation(maneuverEnd.GetLocation()))
-            {
-                continue;
-            }
-            if (CountClearForwardHalfStepsUntilBlocked(auditMaze, maneuverEnd) == 0U)
-            {
-                continue;
-            }
-
-            launchLocation = candidate;
-            return true;
-        }
-
-        launchLocation = MazeMap::DirectionalLocation();
-        return false;
-    }
-
-    static bool TryBuildReverseManeuverPath(
-        const MazeMap::ManeuverPath& forwardPath,
-        MazeMap::ManeuverPath& reversePath)
-    {
-        reversePath.clear();
-        const MazeMap::ManeuverSet& maneuverSet = MazeMap::ManeuverSet::GetSet();
-        for (int index = static_cast<int>(forwardPath.GetSize()) - 1; index >= 0; --index)
-        {
-            if (!reversePath.push_back(maneuverSet.GetReverseCode(forwardPath[static_cast<uint16_t>(index)])))
-            {
-                reversePath.clear();
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    static bool TryResolvePositionAuditSmoothTurnHalfSteps(
-        MazeMap::ManeuverCode code,
-        uint8_t& preTurnHalfSteps,
-        uint8_t& postTurnHalfSteps)
-    {
-        switch (code)
-        {
-        case MazeMap::S90SS:
-            preTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase2PreTurnHalfSteps;
-            postTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase2PostTurnHalfSteps;
-            return true;
-        case MazeMap::S90LS:
-            preTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase3PreTurnHalfSteps;
-            postTurnHalfSteps = AuxMeasurementConfig::kPositionAuditPhase3PostTurnHalfSteps;
-            return true;
-        default:
-            preTurnHalfSteps = 0U;
-            postTurnHalfSteps = 0U;
-            return false;
-        }
-    }
-
-    static bool TryBuildPositionAuditSmoothTurnPaths(
-        MazeMap::ManeuverCode code,
-        MazeMap::ManeuverPath& forwardPath,
-        MazeMap::ManeuverPath& reversePath,
-        uint8_t& preTurnHalfSteps,
-        uint8_t& postTurnHalfSteps)
-    {
-        forwardPath.clear();
-        reversePath.clear();
-        if (!TryResolvePositionAuditSmoothTurnHalfSteps(code, preTurnHalfSteps, postTurnHalfSteps))
-        {
-            return false;
-        }
-
-        if (!forwardPath.push_back(static_cast<MazeMap::ManeuverCode>(preTurnHalfSteps)) ||
-            !forwardPath.push_back(code) ||
-            !forwardPath.push_back(static_cast<MazeMap::ManeuverCode>(postTurnHalfSteps)))
-        {
-            forwardPath.clear();
-            return false;
-        }
-
-        return TryBuildReverseManeuverPath(forwardPath, reversePath);
-    }
-
-    static bool TryValidatePositionAuditPath(
-        const MazeMap::Maze& maze,
-        const MazeMap::ManeuverPath& path,
-        MazeMap::DirectionalLocation start,
-        MazeMap::DirectionalLocation& end)
-    {
-        MazeMap::DirectionalLocation current = start;
-        const MazeMap::ManeuverSet& maneuverSet = MazeMap::ManeuverSet::GetSet();
-        for (uint16_t index = 0U; index < path.GetSize(); ++index)
-        {
-            const MazeMap::ManeuverCode code = path[index];
-            if (!maneuverSet.IsValidMove(code, current, maze))
-            {
-                end = MazeMap::DirectionalLocation();
-                return false;
-            }
-
-            current = maneuverSet.Move(code, current);
-            if (!maze.IsAccessibleLocation(current.GetLocation()))
-            {
-                end = MazeMap::DirectionalLocation();
-                return false;
-            }
-        }
-
-        end = current;
-        return true;
-    }
-
     MazeMap::Vehicle& _speedVehicle;
     MazeMap::Vehicle& _mappingVehicle;
     MazeMap::Maze& _maze;
@@ -627,7 +1098,7 @@ private:
     char _telemetryLogFileName[64];
     unsigned long _telemetryPhaseId;
     unsigned long _telemetrySampleCount;
-    using ActiveLoopTickFn = LoopController::ControlVector (MissionController::*)(
+    using ActiveLoopTickFn = LoopController::ControlVector (Implementation::*)(
         void* rawState,
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
@@ -1093,7 +1564,7 @@ private:
             return;
         }
 
-        static_cast<MissionController*>(context)->OnRuntimeFault(reason);
+        static_cast<Implementation*>(context)->OnRuntimeFault(reason);
     }
 
     void ResetForMode(bool maneuverTestMode, bool enableMissionTextLogging, const char* activeModeFaultSource)
@@ -1472,7 +1943,7 @@ private:
         capture.observedCell = observedCell;
         capture.observedDirection = observedDirection;
         capture.outputSnapshot = &observationSnapshot;
-        return RunLoopSession(&capture, &MissionController::ObservationCaptureLoopTick);
+        return RunLoopSession(&capture, &Implementation::ObservationCaptureLoopTick);
     }
 
     bool LogWallObservationDecision(
@@ -1781,481 +2252,6 @@ private:
         AppendStartupTrace(line);
     }
 
-    bool LogCorridorRepeatabilityMetadata()
-    {
-        char line[160] = {};
-        if (!WriteTelemetryEvent(
-            "summary",
-            "Place the robot in a 5-cell enclosed row like a mission start. This routine runs startup wall calibration, drives to the far end and back at several speeds, and logs closure error at the start cell."))
-        {
-            return Fail("Unable to write corridor repeatability summary");
-        }
-
-        snprintf(line, sizeof(line), "row_cell_count,%u", static_cast<unsigned>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount));
-        if (!WriteTelemetryEvent("corridor_repeatability", line))
-        {
-            return Fail("Unable to write corridor repeatability metadata");
-        }
-
-        const float outDistanceM =
-            (AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount > 0U) ?
-            (Config::kCellSizeM * static_cast<float>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount - 1U)) :
-            0.0f;
-        snprintf(line, sizeof(line), "out_distance_m,%.6f", outDistanceM);
-        if (!WriteTelemetryEvent("corridor_repeatability", line))
-        {
-            return Fail("Unable to write corridor repeatability metadata");
-        }
-
-        snprintf(
-            line,
-            sizeof(line),
-            "accel_mps2,%.6f;decel_mps2,%.6f;turn_max_omega_radps,%.6f;turn_accel_radps2,%.6f",
-            AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2,
-            AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2,
-            Config::kSearchTurnMaxOmegaRadps,
-            Config::kSearchTurnAccelRadps2);
-        if (!WriteTelemetryEvent("corridor_repeatability", line))
-        {
-            return Fail("Unable to write corridor repeatability metadata");
-        }
-
-        for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kCorridorRepeatabilitySpeedCount; ++speedIndex)
-        {
-            snprintf(
-                line,
-                sizeof(line),
-                "speed_%u_mps,%.6f",
-                static_cast<unsigned>(speedIndex),
-                AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[speedIndex]);
-            if (!WriteTelemetryEvent("corridor_repeatability_speed", line))
-            {
-                return Fail("Unable to write corridor repeatability speed metadata");
-            }
-        }
-
-        return true;
-    }
-
-    bool LogPositionAccuracyAuditMetadata(const PositionAuditFixtureGeometry& geometry)
-    {
-        char line[320] = {};
-        snprintf(
-            line,
-            sizeof(line),
-            "Build a one-cell-wide fixture: normal mission start, a %u-cell north corridor including the start and corner cells, and a %u-cell east extension beyond that corner with solid side walls. All following phases reuse this same fixed geometry.",
-            static_cast<unsigned>(geometry.northCorridorCellCount),
-            static_cast<unsigned>(geometry.eastExtensionCellCount));
-        if (!WriteTelemetryEvent("summary", line))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (!WriteTelemetryEvent(
-                "summary",
-                "position_straight_result isolates wheel-diameter, straight feedforward, and stop-distance error through north_touch_correction_m, enc_out_err_m, closure_m, and yaw_err_deg."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (!WriteTelemetryEvent(
-                "summary",
-                "position_in_place_turn_result isolates the shared in-place turn profile through yaw_err_deg, effective_track_width_m, and wall_touch_correction_m."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (!WriteTelemetryEvent(
-                "summary",
-                "position_smooth_turn_result compares S90SS and S90LS against nominal_radius_m, measured_radius_m, effective_track_width_m, corridor_err_m, and east_touch_correction_m to expose radius-dependent feedforward error."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (!WriteTelemetryEvent(
-                "summary",
-                "Phase 1 runs S8, centers in the north corner, turns in place to face down, and runs S8 back to start."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (!WriteTelemetryEvent(
-                "summary",
-                "Phase 2 reseats at start, runs S7 + S90SS + S7, centers at the east end, turns to face left, and returns on the reversed maneuver path."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (!WriteTelemetryEvent(
-                "summary",
-                "Phase 3 reseats at start, runs S6 + S90LS + S6, recenters at the east end, and returns on the reversed maneuver path."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-        if (AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled &&
-            !WriteTelemetryEvent(
-                "summary",
-                "Smooth-turn phases run with the mission fan enabled; the existing 2 s ramp to 80% completes before motion begins so high-speed S90 data reflects the intended downforce state."))
-        {
-            return Fail("Unable to write position accuracy audit summary");
-        }
-
-        snprintf(
-            line,
-            sizeof(line),
-            "north_corridor_cells,%u;east_extension_cells,%u;east_total_cells,%u",
-            static_cast<unsigned>(geometry.northCorridorCellCount),
-            static_cast<unsigned>(geometry.eastExtensionCellCount),
-            static_cast<unsigned>(geometry.eastTotalCellCount));
-        if (!WriteTelemetryEvent("position_audit", line))
-        {
-            return Fail("Unable to write position accuracy audit metadata");
-        }
-
-        snprintf(
-            line,
-            sizeof(line),
-            "accel_mps2,%.6f;decel_mps2,%.6f;start_settle_ms,%u",
-            AuxMeasurementConfig::kPositionAuditAccelMps2,
-            AuxMeasurementConfig::kPositionAuditDecelMps2,
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditStartSettleMs));
-        if (!WriteTelemetryEvent("position_audit", line))
-        {
-            return Fail("Unable to write position accuracy audit metadata");
-        }
-
-        snprintf(
-            line,
-            sizeof(line),
-            "smooth_turn_fan_enabled,%u;kRacingFanDutyCycle,%.6f;kRacingFanRampMs,%u",
-            AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled ? 1U : 0U,
-            Config::kRacingFanDutyCycle,
-            static_cast<unsigned>(Config::kRacingFanRampMs));
-        if (!WriteTelemetryEvent("position_audit", line))
-        {
-            return Fail("Unable to write position accuracy audit metadata");
-        }
-
-        snprintf(
-            line,
-            sizeof(line),
-            "phase=1;forward_half_steps=%u;turn=IP180;return_half_steps=%u",
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps),
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase1ForwardHalfSteps));
-        if (!WriteTelemetryEvent("position_audit_phase", line))
-        {
-            return Fail("Unable to write position accuracy audit metadata");
-        }
-
-        snprintf(
-            line,
-            sizeof(line),
-            "phase=2;forward=%u,S90SS,%u;return=reverse(forward)",
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PreTurnHalfSteps),
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase2PostTurnHalfSteps));
-        if (!WriteTelemetryEvent("position_audit_phase", line))
-        {
-            return Fail("Unable to write position accuracy audit metadata");
-        }
-
-        snprintf(
-            line,
-            sizeof(line),
-            "phase=3;forward=%u,S90LS,%u;return=reverse(forward)",
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PreTurnHalfSteps),
-            static_cast<unsigned>(AuxMeasurementConfig::kPositionAuditPhase3PostTurnHalfSteps));
-        if (!WriteTelemetryEvent("position_audit_phase", line))
-        {
-            return Fail("Unable to write position accuracy audit metadata");
-        }
-
-        for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kPositionAuditStraightSpeedCount; ++speedIndex)
-        {
-            snprintf(
-                line,
-                sizeof(line),
-                "speed_%u_mps,%.6f",
-                static_cast<unsigned>(speedIndex),
-                AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[speedIndex]);
-            if (!WriteTelemetryEvent("position_audit_straight_speed", line))
-            {
-                return Fail("Unable to write position accuracy audit speed metadata");
-            }
-        }
-
-        for (uint8_t speedIndex = 0U; speedIndex < AuxMeasurementConfig::kPositionAuditCornerSpeedCount; ++speedIndex)
-        {
-            snprintf(
-                line,
-                sizeof(line),
-                "speed_%u_mps,%.6f",
-                static_cast<unsigned>(speedIndex),
-                AuxMeasurementConfig::kPositionAuditCornerSpeedsMps[speedIndex]);
-            if (!WriteTelemetryEvent("position_audit_corner_speed", line))
-            {
-                return Fail("Unable to write position accuracy audit speed metadata");
-            }
-        }
-
-        for (uint8_t codeIndex = 0U; codeIndex < AuxMeasurementConfig::kPositionAuditSmoothTurnCodeCount; ++codeIndex)
-        {
-            const MazeMap::ManeuverCode code = AuxMeasurementConfig::kPositionAuditSmoothTurnCodes[codeIndex];
-            char codeName[24] = {};
-            FormatManeuverCodeName(code, codeName, sizeof(codeName));
-            snprintf(
-                line,
-                sizeof(line),
-                "code=%s;nominal_radius_m=%.6f;distance_m=%.6f",
-                codeName,
-                MazeMap::ManeuverSet::GetSet()[code].GetNominalTurnRadiusInCells() * Config::kCellSizeM,
-                ManeuverDistanceMeters(code));
-            if (!WriteTelemetryEvent("position_audit_turn_code", line))
-            {
-                return Fail("Unable to write position accuracy audit turn metadata");
-            }
-        }
-
-        return true;
-    }
-
-    MotionLimits CorridorRepeatabilityLimits(float cruiseSpeedMps) const
-    {
-        MotionLimits limits{};
-        limits.maxSpeedMps = (std::max)(0.0f, cruiseSpeedMps);
-        limits.accelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2;
-        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
-        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
-        return limits;
-    }
-
-    MotionLimits PositionAccuracyAuditStraightLimits(float cruiseSpeedMps) const
-    {
-        MotionLimits limits{};
-        limits.maxSpeedMps = (std::max)(0.0f, cruiseSpeedMps);
-        limits.accelMps2 = AuxMeasurementConfig::kPositionAuditAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kPositionAuditDecelMps2;
-        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
-        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
-        return limits;
-    }
-
-    MotionLimits PositionAccuracyAuditTurnLimits() const
-    {
-        MotionLimits limits = PositionAccuracyAuditStraightLimits(0.0f);
-        limits.maxSpeedMps = 0.0f;
-        return limits;
-    }
-
-    MotionLimits PositionAccuracyAuditCornerLimits(float cruiseSpeedMps, float nominalRadiusM) const
-    {
-        MotionLimits limits = PositionAccuracyAuditStraightLimits(cruiseSpeedMps);
-        (void)nominalRadiusM;
-        limits.maxAngularSpeedRadps = AuxMeasurementConfig::kPositionAuditCornerMaxOmegaRadps;
-        return limits;
-    }
-
-    bool WriteCorridorRepeatabilityResult(
-        uint8_t speedIndex,
-        float cruiseSpeedMps,
-        const PoseEstimate& startPose,
-        const DriveTelemetry& startTelemetry)
-    {
-        const PoseEstimate& finalPose = _drive.GetPose();
-        const DriveTelemetry& finalTelemetry = _drive.GetTelemetry();
-        const float deltaXM = finalPose.xMeters - startPose.xMeters;
-        const float deltaYM = finalPose.yMeters - startPose.yMeters;
-        const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
-        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.yawRad, finalPose.yawRad);
-
-        char message[224] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "speed_index=%u;cruise_mps=%.3f;dx_m=%.6f;dy_m=%.6f;closure_m=%.6f;yaw_err_deg=%.3f;"
-            "left_delta_m=%.6f;right_delta_m=%.6f;left_delta_cnt=%ld;right_delta_cnt=%ld",
-            static_cast<unsigned>(speedIndex),
-            cruiseSpeedMps,
-            deltaXM,
-            deltaYM,
-            closureErrorM,
-            yawErrorDeg,
-            finalTelemetry.leftDistanceM - startTelemetry.leftDistanceM,
-            finalTelemetry.rightDistanceM - startTelemetry.rightDistanceM,
-            static_cast<long>(finalTelemetry.leftEncoderCount - startTelemetry.leftEncoderCount),
-            static_cast<long>(finalTelemetry.rightEncoderCount - startTelemetry.rightEncoderCount));
-
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return Fail("Corridor repeatability result event overflowed");
-        }
-        if (WriteTelemetryEvent("corridor_repeatability_result", message))
-        {
-            return true;
-        }
-        return Fail("Unable to write corridor repeatability result");
-    }
-
-    bool WritePositionStraightAuditResult(
-        uint8_t speedIndex,
-        float cruiseSpeedMps,
-        float northStopErrorM,
-        float northTouchCorrectionM,
-        float encoderOutErrorM,
-        const PoseEstimate& startPose,
-        const DriveTelemetry& startTelemetry)
-    {
-        (void)startTelemetry;
-        const PoseEstimate& finalPose = _drive.GetPose();
-        const float deltaXM = finalPose.xMeters - startPose.xMeters;
-        const float deltaYM = finalPose.yMeters - startPose.yMeters;
-        const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
-        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.yawRad, finalPose.yawRad);
-
-        char message[224] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "speed_idx=%u;v=%.3f;stop_err_m=%.6f;touch_correction_m=%.6f;enc_out_err_m=%.6f;"
-            "dx_m=%.6f;dy_m=%.6f;closure_m=%.6f;yaw_err_deg=%.3f",
-            static_cast<unsigned>(speedIndex),
-            cruiseSpeedMps,
-            northStopErrorM,
-            northTouchCorrectionM,
-            encoderOutErrorM,
-            deltaXM,
-            deltaYM,
-            closureErrorM,
-            yawErrorDeg);
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return Fail("Position straight result event overflowed");
-        }
-        if (WriteTelemetryEvent("position_straight_result", message))
-        {
-            return true;
-        }
-        return Fail("Unable to write position straight result");
-    }
-
-    bool WritePositionInPlaceTurnAuditResult(
-        MazeMap::Direction targetDirection,
-        float touchCorrectionM,
-        float leftDeltaM,
-        float rightDeltaM,
-        float yawChangeRad)
-    {
-        float effectiveTrackWidthM = 0.0f;
-        const bool haveTrackWidth = MazeMap::TryComputeEffectiveTrackWidthM(
-            leftDeltaM,
-            rightDeltaM,
-            yawChangeRad,
-            effectiveTrackWidthM);
-        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(DirectionToYawRad(targetDirection), _drive.GetPose().yawRad);
-
-        char message[224] = {};
-        const int length =
-            haveTrackWidth ?
-            snprintf(
-                message,
-                sizeof(message),
-                "target=%s;yaw_err_deg=%.3f;touch_correction_m=%.6f;left_delta_m=%.6f;right_delta_m=%.6f;"
-                "yaw_change_deg=%.3f;effective_track_width_m=%.6f",
-                DirectionName(targetDirection),
-                yawErrorDeg,
-                touchCorrectionM,
-                leftDeltaM,
-                rightDeltaM,
-                RAD_TO_DEG_F * yawChangeRad,
-                effectiveTrackWidthM) :
-            snprintf(
-                message,
-                sizeof(message),
-                "target=%s;yaw_err_deg=%.3f;touch_correction_m=%.6f;left_delta_m=%.6f;right_delta_m=%.6f;"
-                "yaw_change_deg=%.3f;effective_track_width_m=nan",
-                DirectionName(targetDirection),
-                yawErrorDeg,
-                touchCorrectionM,
-                leftDeltaM,
-                rightDeltaM,
-                RAD_TO_DEG_F * yawChangeRad);
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return Fail("Position in-place turn result event overflowed");
-        }
-        if (WriteTelemetryEvent("position_in_place_turn_result", message))
-        {
-            return true;
-        }
-        return Fail("Unable to write position in-place turn result");
-    }
-
-    bool WritePositionSmoothTurnAuditResult(
-        MazeMap::ManeuverCode code,
-        uint8_t speedIndex,
-        float cruiseSpeedMps,
-        float nominalRadiusM,
-        float corridorErrorM,
-        float eastTouchCorrectionM,
-        float leftArcDeltaM,
-        float rightArcDeltaM,
-        float yawChangeRad,
-        float yawErrorDeg)
-    {
-        float effectiveTrackWidthM = 0.0f;
-        const bool haveTrackWidth = MazeMap::TryComputeEffectiveTrackWidthM(
-            leftArcDeltaM,
-            rightArcDeltaM,
-            yawChangeRad,
-            effectiveTrackWidthM);
-        float measuredRadiusM = 0.0f;
-        const bool haveMeasuredRadius = TryComputeEffectiveTurnRadiusM(
-            leftArcDeltaM,
-            rightArcDeltaM,
-            yawChangeRad,
-            measuredRadiusM);
-
-        char codeName[24] = {};
-        FormatManeuverCodeName(code, codeName, sizeof(codeName));
-        char measuredRadiusText[24] = {};
-        char effectiveTrackWidthText[24] = {};
-        if (haveMeasuredRadius)
-        {
-            snprintf(measuredRadiusText, sizeof(measuredRadiusText), "%.6f", measuredRadiusM);
-        }
-        else
-        {
-            snprintf(measuredRadiusText, sizeof(measuredRadiusText), "nan");
-        }
-        if (haveTrackWidth)
-        {
-            snprintf(effectiveTrackWidthText, sizeof(effectiveTrackWidthText), "%.6f", effectiveTrackWidthM);
-        }
-        else
-        {
-            snprintf(effectiveTrackWidthText, sizeof(effectiveTrackWidthText), "nan");
-        }
-
-        char message[256] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "code=%s;speed_idx=%u;v=%.3f;nominal_radius_m=%.6f;measured_radius_m=%s;"
-            "effective_track_width_m=%s;yaw_err_deg=%.3f;corridor_err_m=%.6f;east_touch_correction_m=%.6f",
-            codeName,
-            static_cast<unsigned>(speedIndex),
-            cruiseSpeedMps,
-            nominalRadiusM,
-            measuredRadiusText,
-            effectiveTrackWidthText,
-            yawErrorDeg,
-            corridorErrorM,
-            eastTouchCorrectionM);
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
-        {
-            return Fail("Position smooth turn result event overflowed");
-        }
-        if (WriteTelemetryEvent("position_smooth_turn_result", message))
-        {
-            return true;
-        }
-        return Fail("Unable to write position smooth turn result");
-    }
-
     bool ReseatMissionStartPoseWithPhasePrefix(const char* phasePrefix, uint16_t settleMs)
     {
         const MotionLimits limits = StartupWallCalibrationLimits();
@@ -2428,7 +2424,21 @@ private:
             return false;
         }
 
-        if (!WriteCorridorRepeatabilityResult(speedIndex, cruiseSpeedMps, startPose, startTelemetry))
+        if (!WriteCorridorRepeatabilityResultImpl(
+                [this](const char* type, const char* message) -> bool
+                {
+                    return WriteTelemetryEvent(type, message);
+                },
+                [this](const char* message) -> bool
+                {
+                    return Fail(message);
+                },
+                speedIndex,
+                cruiseSpeedMps,
+                startPose,
+                startTelemetry,
+                _drive.GetPose(),
+                _drive.GetTelemetry()))
         {
             return false;
         }
@@ -2552,12 +2562,21 @@ private:
         const float yawChangeRad = WrapAngleRad(_drive.GetPose().yawRad - turnStartYawRad);
         const float leftTurnDeltaM = turnEndTelemetry.leftDistanceM - turnStartTelemetry.leftDistanceM;
         const float rightTurnDeltaM = turnEndTelemetry.rightDistanceM - turnStartTelemetry.rightDistanceM;
-        if (!WritePositionInPlaceTurnAuditResult(
+        if (!WritePositionInPlaceTurnAuditResultImpl(
+                [this](const char* type, const char* message) -> bool
+                {
+                    return WriteTelemetryEvent(type, message);
+                },
+                [this](const char* message) -> bool
+                {
+                    return Fail(message);
+                },
                 MazeMap::Down,
                 northTouchCorrectionM,
                 leftTurnDeltaM,
                 rightTurnDeltaM,
-                yawChangeRad))
+                yawChangeRad,
+                _drive.GetPose().yawRad))
         {
             return false;
         }
@@ -2572,14 +2591,22 @@ private:
             return false;
         }
 
-        if (!WritePositionStraightAuditResult(
+        if (!WritePositionStraightAuditResultImpl(
+                [this](const char* type, const char* message) -> bool
+                {
+                    return WriteTelemetryEvent(type, message);
+                },
+                [this](const char* message) -> bool
+                {
+                    return Fail(message);
+                },
                 speedIndex,
                 cruiseSpeedMps,
                 northStopErrorM,
                 northTouchCorrectionM,
                 encoderOutErrorM,
                 startPose,
-                startTelemetry))
+                _drive.GetPose()))
         {
             return false;
         }
@@ -2655,7 +2682,21 @@ private:
             return false;
         }
 
-        if (!WritePositionInPlaceTurnAuditResult(targetDirection, touchCorrectionM, leftDeltaM, rightDeltaM, yawChangeRad))
+        if (!WritePositionInPlaceTurnAuditResultImpl(
+                [this](const char* type, const char* message) -> bool
+                {
+                    return WriteTelemetryEvent(type, message);
+                },
+                [this](const char* message) -> bool
+                {
+                    return Fail(message);
+                },
+                targetDirection,
+                touchCorrectionM,
+                leftDeltaM,
+                rightDeltaM,
+                yawChangeRad,
+                _drive.GetPose().yawRad))
         {
             return false;
         }
@@ -2862,7 +2903,15 @@ private:
             break;
         }
 
-        if (!WritePositionSmoothTurnAuditResult(
+        if (!WritePositionSmoothTurnAuditResultImpl(
+                [this](const char* type, const char* message) -> bool
+                {
+                    return WriteTelemetryEvent(type, message);
+                },
+                [this](const char* message) -> bool
+                {
+                    return Fail(message);
+                },
                 code,
                 speedIndex,
                 turnCruiseSpeedMps,
@@ -3301,7 +3350,7 @@ private:
                 wallTouch.passThroughSettle.stationaryHoldMs = Config::kStartupWallCalibrationSettleMs;
                 wallTouch.passThroughSettle.timeoutMs = 0U;
                 wallTouch.passThroughSettle.brakeCommand = true;
-                TransitionLoopPhase(&wallTouch.passThroughSettle, &MissionController::SettleLoopTick, services);
+                TransitionLoopPhase(&wallTouch.passThroughSettle, &Implementation::SettleLoopTick, services);
                 return LoopController::ControlVector::Brake;
             }
             return FaultLoopPhase(services, "Wall touch-off exceeded max travel");
@@ -3788,7 +3837,7 @@ private:
             AppendStartupTrace(line);
         }
 
-        if (!RunLoopSession(&wallTouch, &MissionController::WallTouchLoopTick))
+        if (!RunLoopSession(&wallTouch, &Implementation::WallTouchLoopTick))
         {
             return false;
         }
@@ -4517,7 +4566,7 @@ private:
         {
             sweep.settleHold.durationMs = Config::kStartupWallCalibrationSettleMs;
             sweep.settleHold.stationary = true;
-            TransitionLoopPhase(&sweep.settleHold, &MissionController::HoldLoopTick, services);
+                TransitionLoopPhase(&sweep.settleHold, &Implementation::HoldLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
         if (!sweep.durationLogged && static_cast<long>(sweep.expectedCompletionDeadlineMs - millis()) <= 0)
@@ -4557,7 +4606,7 @@ private:
                 (1000.0f * sweep.targetSweepAngleRad / (std::max)(0.25f, limits.maxAngularSpeedRadps)));
         sweep.storedBands = &storedBands;
 
-        if (!RunLoopSession(&sweep, &MissionController::FrontCalibrationSweepLoopTick))
+        if (!RunLoopSession(&sweep, &Implementation::FrontCalibrationSweepLoopTick))
         {
             return false;
         }
@@ -4793,7 +4842,7 @@ private:
 
     bool Initialize(const char* banner, bool observeCurrentCellAfterInit)
     {
-        if (!_runtime.RegisterModeFaultHandler(&MissionController::HandleRuntimeFault, this, _activeModeFaultSource))
+        if (!_runtime.RegisterModeFaultHandler(&Implementation::HandleRuntimeFault, this, _activeModeFaultSource))
         {
             return false;
         }
@@ -5353,7 +5402,7 @@ private:
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
-        auto* const self = static_cast<MissionController*>(context);
+        auto* const self = static_cast<Implementation*>(context);
         if ((self == nullptr) || (self->_activeLoopState == nullptr) || (self->_activeLoopTickFn == nullptr))
         {
             services.Fault("Mission loop callback dispatch was not initialized");
@@ -5370,7 +5419,7 @@ private:
     {
         _activeLoopState = nextState;
         _activeLoopTickFn = nextTickFn;
-        services.SetNextModeWorkCallback(&MissionController::ActiveLoopThunk);
+        services.SetNextModeWorkCallback(&Implementation::ActiveLoopThunk);
     }
 
     LoopController::ControlVector EndLoopPhase(LoopController::TickServices& services) noexcept
@@ -5390,7 +5439,7 @@ private:
     bool RunLoopSession(void* initialState, const ActiveLoopTickFn initialTickFn)
     {
         LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &MissionController::ActiveLoopThunk;
+        callbacks.onModeWork = &Implementation::ActiveLoopThunk;
         callbacks.context = this;
         _activeLoopState = initialState;
         _activeLoopTickFn = initialTickFn;
@@ -5566,7 +5615,7 @@ private:
         HoldLoopState hold{};
         hold.durationMs = durationMs;
         hold.stationary = true;
-        return RunLoopSession(&hold, &MissionController::HoldLoopTick);
+        return RunLoopSession(&hold, &Implementation::HoldLoopTick);
     }
 
     bool HoldBrakedUntilDriveSettles(const char* timeoutMessage, uint16_t stationaryHoldMs = Config::kMotionSettleHoldMs, uint16_t timeoutMs = Config::kMotionSettleTimeoutMs)
@@ -5581,7 +5630,7 @@ private:
         settle.stationaryHoldMs = stationaryHoldMs;
         settle.timeoutMs = timeoutMs;
         settle.brakeCommand = true;
-        return RunLoopSession(&settle, &MissionController::SettleLoopTick);
+        return RunLoopSession(&settle, &Implementation::SettleLoopTick);
     }
 
     bool HoldZeroVelocityUntilDriveSettles(const char* timeoutMessage, uint16_t stationaryHoldMs = Config::kMotionSettleHoldMs, uint16_t timeoutMs = Config::kMotionSettleTimeoutMs)
@@ -5596,7 +5645,7 @@ private:
         settle.stationaryHoldMs = stationaryHoldMs;
         settle.timeoutMs = timeoutMs;
         settle.brakeCommand = false;
-        return RunLoopSession(&settle, &MissionController::SettleLoopTick);
+        return RunLoopSession(&settle, &Implementation::SettleLoopTick);
     }
 
     LoopController::ControlVector StartupStationaryHoldLoopTick(
@@ -5666,7 +5715,7 @@ private:
         AppendStartupTrace("startup_stationary_hold:waiting");
 
         StartupStationaryHoldLoopState hold{};
-        return RunLoopSession(&hold, &MissionController::StartupStationaryHoldLoopTick);
+        return RunLoopSession(&hold, &Implementation::StartupStationaryHoldLoopTick);
     }
 
     LoopController::ControlVector ReverseStraightLoopTick(
@@ -5712,7 +5761,7 @@ private:
             reverse.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
             reverse.completionSettle.timeoutMs = 0U;
             reverse.completionSettle.brakeCommand = true;
-            TransitionLoopPhase(&reverse.completionSettle, &MissionController::SettleLoopTick, services);
+                TransitionLoopPhase(&reverse.completionSettle, &Implementation::SettleLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
 
@@ -5722,7 +5771,7 @@ private:
             AppendStartupTrace("reverse_profile:encoder_progress_stalled_holding_position");
             reverse.fallbackHold.durationMs = Config::kMotionSettleHoldMs;
             reverse.fallbackHold.stationary = true;
-            TransitionLoopPhase(&reverse.fallbackHold, &MissionController::HoldLoopTick, services);
+                TransitionLoopPhase(&reverse.fallbackHold, &Implementation::HoldLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
         if (static_cast<long>(reverse.timeoutMs - nowMs) <= 0)
@@ -5730,7 +5779,7 @@ private:
             AppendStartupTrace("reverse_profile:elapsed_budget_reached_holding_position");
             reverse.fallbackHold.durationMs = Config::kMotionSettleHoldMs;
             reverse.fallbackHold.stationary = true;
-            TransitionLoopPhase(&reverse.fallbackHold, &MissionController::HoldLoopTick, services);
+                TransitionLoopPhase(&reverse.fallbackHold, &Implementation::HoldLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
 
@@ -5779,7 +5828,7 @@ private:
             millis() +
             static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
         reverse.translationWatchdog.Reset(0.0f, millis());
-        return RunLoopSession(&reverse, &MissionController::ReverseStraightLoopTick);
+        return RunLoopSession(&reverse, &Implementation::ReverseStraightLoopTick);
     }
 
     bool LoadManeuverQueueFromSd(const char* fileName, MazeMap::ManeuverQueue& queue)
@@ -6545,7 +6594,7 @@ private:
                     search.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
                     search.completionSettle.timeoutMs = 0U;
                     search.completionSettle.brakeCommand = true;
-                    TransitionLoopPhase(&search.completionSettle, &MissionController::SettleLoopTick, services);
+                TransitionLoopPhase(&search.completionSettle, &Implementation::SettleLoopTick, services);
                     return LoopController::ControlVector::Brake;
                 }
 
@@ -6564,7 +6613,7 @@ private:
             search.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
             search.completionSettle.timeoutMs = 0U;
             search.completionSettle.brakeCommand = true;
-            TransitionLoopPhase(&search.completionSettle, &MissionController::SettleLoopTick, services);
+                TransitionLoopPhase(&search.completionSettle, &Implementation::SettleLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
 
@@ -6717,7 +6766,7 @@ private:
         search.expectedCompletionDeadlineMs =
             millis() + static_cast<unsigned long>(2500.0f + (5000.0f * search.distanceToTargetM));
 
-        if (!RunLoopSession(&search, &MissionController::SearchStraightLoopTick))
+        if (!RunLoopSession(&search, &Implementation::SearchStraightLoopTick))
         {
             return false;
         }
@@ -7598,7 +7647,7 @@ private:
             straight.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
             straight.completionSettle.timeoutMs = 0U;
             straight.completionSettle.brakeCommand = true;
-            TransitionLoopPhase(&straight.completionSettle, &MissionController::SettleLoopTick, services);
+                TransitionLoopPhase(&straight.completionSettle, &Implementation::SettleLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
 
@@ -7730,7 +7779,7 @@ private:
         straight.expectedCompletionDeadlineMs =
             millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
         straight.translationWatchdog.Reset(0.0f, millis());
-        return RunLoopSession(&straight, &MissionController::StraightLoopTick);
+        return RunLoopSession(&straight, &Implementation::StraightLoopTick);
     }
 
     LoopController::ControlVector TurnLoopTick(
@@ -7756,7 +7805,7 @@ private:
             turn.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
             turn.completionSettle.timeoutMs = 0U;
             turn.completionSettle.brakeCommand = false;
-            TransitionLoopPhase(&turn.completionSettle, &MissionController::SettleLoopTick, services);
+            TransitionLoopPhase(&turn.completionSettle, &Implementation::SettleLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
         if (!turn.durationLogged && static_cast<long>(turn.expectedCompletionDeadlineMs - millis()) <= 0)
@@ -7793,7 +7842,7 @@ private:
         turn.turnProfile = BuildSharedInPlaceTurnProfile(limits);
         turn.expectedCompletionDeadlineMs = millis() + 2500UL;
         turn.wallEdgeTracker = wallEdgeTracker;
-        return RunLoopSession(&turn, &MissionController::TurnLoopTick);
+        return RunLoopSession(&turn, &Implementation::TurnLoopTick);
     }
 
     LoopController::ControlVector ArcLoopTick(
@@ -7817,7 +7866,7 @@ private:
             arc.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
             arc.completionSettle.timeoutMs = 0U;
             arc.completionSettle.brakeCommand = true;
-            TransitionLoopPhase(&arc.completionSettle, &MissionController::SettleLoopTick, services);
+                TransitionLoopPhase(&arc.completionSettle, &Implementation::SettleLoopTick, services);
             return LoopController::ControlVector::Brake;
         }
 
@@ -7899,7 +7948,7 @@ private:
         arc.translationWatchdog.Reset(0.0f, millis());
         arc.expectedCompletionDeadlineMs =
             millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceM));
-        return RunLoopSession(&arc, &MissionController::ArcLoopTick);
+        return RunLoopSession(&arc, &Implementation::ArcLoopTick);
     }
 
     LoopController::ControlVector SmoothTurnLoopTick(
@@ -8008,7 +8057,7 @@ private:
         smoothTurn.translationWatchdog.Reset(0.0f, millis());
         smoothTurn.expectedCompletionDeadlineMs =
             millis() + static_cast<unsigned long>(2500.0f + (5000.0f * smoothTurn.profile.totalDistance));
-        return RunLoopSession(&smoothTurn, &MissionController::SmoothTurnLoopTick);
+        return RunLoopSession(&smoothTurn, &Implementation::SmoothTurnLoopTick);
     }
 
     bool IsInGoalCell(MazeMap::CellCoordinates coords) const
@@ -8158,14 +8207,53 @@ private:
         ApplyAsymmetricQueueLimits(queue, FinalLimits(), _speedVehicle, initialEntrySpeed, finalExitSpeed);
     }
 };
+
 namespace MazeMap::App::Internal
 {
-    IMissionModeHost& GetMissionModeHost()
+    MissionModeController::MissionModeController(SharedRobotRuntime& runtime)
+        : _impl(std::make_unique<Implementation>(runtime))
     {
-        static MissionController mission(GetSharedRobotRuntime());
-        return mission;
+    }
+
+    MissionModeController::~MissionModeController() = default;
+
+    bool MissionModeController::BeginMissionRunMode()
+    {
+        return _impl->BeginMissionRunMode();
+    }
+
+    void MissionModeController::RunMissionRunMode()
+    {
+        _impl->RunMissionRunMode();
+    }
+
+    bool MissionModeController::BeginManeuverFileTestMode()
+    {
+        return _impl->BeginManeuverFileTestMode();
+    }
+
+    void MissionModeController::RunManeuverFileTestMode()
+    {
+        _impl->RunManeuverFileTestMode();
+    }
+
+    bool MissionModeController::BeginCorridorRepeatabilityMode()
+    {
+        return _impl->BeginCorridorRepeatabilityMode();
+    }
+
+    void MissionModeController::RunCorridorRepeatabilityMode()
+    {
+        _impl->RunCorridorRepeatabilityMode();
+    }
+
+    bool MissionModeController::BeginPositionAccuracyAuditMode()
+    {
+        return _impl->BeginPositionAccuracyAuditMode();
+    }
+
+    void MissionModeController::RunPositionAccuracyAuditMode()
+    {
+        _impl->RunPositionAccuracyAuditMode();
     }
 }
-
-
-

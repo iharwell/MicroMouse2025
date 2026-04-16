@@ -2,9 +2,13 @@
 
 ## Scope
 
-This note records the current responsibility inventory for `MissionController` in
-`MazeMap/MazeMap/MazeMapMissionController.cpp` and evaluates whether each area
-belongs there under the current cleanup rules.
+This note records the current responsibility inventory for the mission-mode
+control stack in `MazeMap/MazeMap/MazeMapMissionController.cpp` and evaluates
+whether each area belongs there under the current cleanup rules. The file now
+exports direct boot-mode owners, and the utility-mode fixture/result helpers
+now live in file-local support functions, but the shared
+`MissionModeController` implementation still carries most of the execution
+responsibilities inventoried below.
 
 The assessment below incorporates these architectural constraints:
 
@@ -19,14 +23,14 @@ The assessment below incorporates these architectural constraints:
 ### 1. Boot-mode host multiplexing
 
 - Current code:
-  - `MazeMap/MazeMap/MazeMapMissionModeHost.h`
-  - `BeginMissionRunMode`, `BeginManeuverFileTestMode`, `BeginCorridorRepeatabilityMode`, `BeginPositionAccuracyAuditMode`
+  - file-local `MissionRunModeOwner`, `ManeuverFileTestModeOwner`, `CorridorRepeatabilityModeOwner`, and `PositionAccuracyAuditModeOwner`
+  - shared `MissionModeController` methods `BeginMissionRunMode`, `BeginManeuverFileTestMode`, `BeginCorridorRepeatabilityMode`, and `BeginPositionAccuracyAuditMode`
 - Why it is currently here:
-  - One host object was used as the sink for mission mode plus several utility modes.
+  - The stale `IMissionModeHost` wrapper layer was removed, but the four boot-mode owners still delegate into one shared controller implementation.
 - Assessment:
-  - This should not stay in its current shape.
-  - `MissionController` may remain the owner of mission-run mode only.
-  - Maneuver-file test, corridor repeatability, and position accuracy audit should become separate mode owners.
+  - The public host-multiplexing shape has been removed.
+  - The remaining issue is internal ownership: `MissionModeController` still carries mission plus utility-mode behavior.
+  - Mission mode should remain the owner of mission-run policy only; maneuver-file test, corridor repeatability, and position accuracy audit should continue moving toward distinct owners over shared infrastructure.
 
 ### 2. Top-level mission policy
 
@@ -172,19 +176,22 @@ The assessment below incorporates these architectural constraints:
 ### 12. Utility-mode audit fixtures and result writers
 
 - Current code:
-  - corridor repeatability metadata/results
-  - position accuracy audit metadata/results
-  - audit fixture construction helpers
+  - file-local corridor repeatability metadata/result helpers
+  - file-local position accuracy audit metadata/result helpers
+  - file-local audit fixture construction helpers
   - maneuver-file test helpers
 - Why it is currently here:
-  - The class became the dumping ground for bring-up and audit workflows.
+  - The fixed-fixture and result-formatting pieces were moved out of `MissionModeController`, but the surrounding utility workflows still run through the shared controller.
 - Assessment:
-  - This should not stay.
-  - These should be separate testing/diagnostic mode owners built over shared infrastructure, not methods on the mission owner.
+  - The extracted file-local helpers are an improvement: the mission controller no longer owns the fixed utility geometry and audit result/metadata formatting bodies directly.
+  - The remaining issue is workflow ownership. Corridor repeatability, position accuracy audit, and maneuver-file test still execute through `MissionModeController` instead of dedicated diagnostic owners over shared runtime infrastructure.
 
 ## Conclusion
 
-`MissionController` should collapse toward a thin mission-policy owner.
+The old boot-mode host wrapper concern is resolved, and the utility-specific
+fixture/result support is no longer implemented directly on
+`MissionModeController`, but the shared controller still needs to collapse
+toward a thin mission-policy owner.
 
 It should remain responsible for:
 

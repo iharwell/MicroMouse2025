@@ -1,10 +1,25 @@
 #include "pch.h"
 #include "ManeuverFileTestMode.h"
 
-#include "MazeMapControllerRegistry.h"
+#include "MazeMapSharedRuntime.h"
 
 namespace MazeMap::App::Internal
 {
+    ManeuverFileTestMode::ManeuverFileTestMode(SharedRobotRuntime& runtime)
+        : _controller(runtime)
+    {
+    }
+
+    bool ManeuverFileTestMode::Begin()
+    {
+        return _controller.BeginManeuverFileTestMode();
+    }
+
+    void ManeuverFileTestMode::Run()
+    {
+        _controller.RunManeuverFileTestMode();
+    }
+
     const BootModeDescriptor& GetManeuverFileTestBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -15,7 +30,7 @@ namespace MazeMap::App::Internal
             "logging.txt; maneuver test telemetry mmlog",
             &GetManeuverFileTestMode,
             "GetManeuverFileTestMode",
-            "ManeuverFileTestMode.cpp; MazeMapMissionController.cpp",
+            "ManeuverFileTestMode.cpp",
             "mission-family initialization; telemetry log setup; test.txt load; queue execution",
             "CoreConfig mission tuning; Maneuver classes; shared runtime pathfinders",
             "test.txt is the selected input artifact for this utility workflow",
@@ -24,25 +39,9 @@ namespace MazeMap::App::Internal
         return descriptor;
     }
 
-    ManeuverFileTestMode::ManeuverFileTestMode(IMissionModeHost& host)
-        : MissionHostedModeBase(host)
-    {
-    }
-
-    bool ManeuverFileTestMode::Begin()
-    {
-        return Host().BeginManeuverFileTestMode();
-    }
-
-    void ManeuverFileTestMode::Run()
-    {
-        Host().RunManeuverFileTestMode();
-    }
-
     IApplicationMode& GetManeuverFileTestMode()
     {
-        static ManeuverFileTestMode mode(GetMissionModeHost());
+        static ManeuverFileTestMode mode(GetSharedRobotRuntime());
         return mode;
     }
 }
-

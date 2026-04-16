@@ -234,8 +234,7 @@
     <ClInclude Include="MazeMapSharedRuntime.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
-    <ClInclude Include="MazeMapMissionModeHost.h" />
-    <ClInclude Include="MissionHostedModeBase.h" />
+    <ClInclude Include="MissionModeController.h" />
     <ClInclude Include="MissionRunMode.h" />
     <ClInclude Include="ManeuverFileTestMode.h" />
     <ClInclude Include="CorridorRepeatabilityMode.h" />
@@ -334,11 +333,10 @@
       <ObjectFileName>$(IntDir)OpenFloorMeasurementController.obj</ObjectFileName>
       <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="MazeMapMissionController.cpp">
-      <ObjectFileName>$(IntDir)MazeMapMissionController.obj</ObjectFileName>
+    <ClCompile Include="MissionModeController.cpp">
+      <ObjectFileName>$(IntDir)MissionModeController.obj</ObjectFileName>
       <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="MissionHostedModeBase.cpp" />
     <ClCompile Include="MissionRunMode.cpp" />
     <ClCompile Include="ManeuverFileTestMode.cpp" />
     <ClCompile Include="CorridorRepeatabilityMode.cpp" />

@@ -2,7 +2,6 @@
 
 #include "BootModeDescriptor.h"
 #include "MazeMapApplicationMode.h"
-#include "MazeMapMissionModeHost.h"
 
 namespace MazeMap::App::Internal
 {
@@ -20,7 +19,6 @@ namespace MazeMap::App::Internal
     IApplicationMode& GetManeuverFileTestMode();
     IApplicationMode& GetCorridorRepeatabilityMode();
     IApplicationMode& GetPositionAccuracyAuditMode();
-    IMissionModeHost& GetMissionModeHost();
     const BootModeDescriptor& GetMissionRunBootModeDescriptor();
     const BootModeDescriptor& GetManeuverFileTestBootModeDescriptor();
     const BootModeDescriptor& GetCorridorRepeatabilityBootModeDescriptor();

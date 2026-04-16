@@ -1,10 +1,25 @@
 #include "pch.h"
 #include "PositionAccuracyAuditMode.h"
 
-#include "MazeMapControllerRegistry.h"
+#include "MazeMapSharedRuntime.h"
 
 namespace MazeMap::App::Internal
 {
+    PositionAccuracyAuditMode::PositionAccuracyAuditMode(SharedRobotRuntime& runtime)
+        : _controller(runtime)
+    {
+    }
+
+    bool PositionAccuracyAuditMode::Begin()
+    {
+        return _controller.BeginPositionAccuracyAuditMode();
+    }
+
+    void PositionAccuracyAuditMode::Run()
+    {
+        _controller.RunPositionAccuracyAuditMode();
+    }
+
     const BootModeDescriptor& GetPositionAccuracyAuditBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -15,7 +30,7 @@ namespace MazeMap::App::Internal
             "logging.txt; position accuracy telemetry mmlog",
             &GetPositionAccuracyAuditMode,
             "GetPositionAccuracyAuditMode",
-            "PositionAccuracyAuditMode.cpp; MazeMapMissionController.cpp",
+            "PositionAccuracyAuditMode.cpp",
             "mission-family initialization; telemetry log setup; straight, turn, and smooth-turn audit phases",
             "AuxMeasurementConfig position-audit profile; CoreConfig mission tuning; Maneuver classes",
             "fixture geometry, speed points, and fan policy are auxiliary-profile deltas",
@@ -24,25 +39,9 @@ namespace MazeMap::App::Internal
         return descriptor;
     }
 
-    PositionAccuracyAuditMode::PositionAccuracyAuditMode(IMissionModeHost& host)
-        : MissionHostedModeBase(host)
-    {
-    }
-
-    bool PositionAccuracyAuditMode::Begin()
-    {
-        return Host().BeginPositionAccuracyAuditMode();
-    }
-
-    void PositionAccuracyAuditMode::Run()
-    {
-        Host().RunPositionAccuracyAuditMode();
-    }
-
     IApplicationMode& GetPositionAccuracyAuditMode()
     {
-        static PositionAccuracyAuditMode mode(GetMissionModeHost());
+        static PositionAccuracyAuditMode mode(GetSharedRobotRuntime());
         return mode;
     }
 }
-

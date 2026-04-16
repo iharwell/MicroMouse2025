@@ -1,17 +1,25 @@
 #pragma once
 
-#include "MissionHostedModeBase.h"
+#include "BootModeDescriptor.h"
+#include "MazeMapApplicationMode.h"
+#include "MissionModeController.h"
 
 namespace MazeMap::App::Internal
 {
-    class MissionRunMode final : public MissionHostedModeBase
+    class SharedRobotRuntime;
+
+    class MissionRunMode final : public IApplicationMode
     {
     public:
-        explicit MissionRunMode(IMissionModeHost& host);
+        explicit MissionRunMode(SharedRobotRuntime& runtime);
+
         bool Begin() override;
         void Run() override;
+
+    private:
+        MissionModeController _controller;
     };
 
     IApplicationMode& GetMissionRunMode();
+    const BootModeDescriptor& GetMissionRunBootModeDescriptor();
 }
-

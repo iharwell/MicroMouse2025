@@ -240,10 +240,7 @@
     <ClInclude Include="MazeMask.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapMissionModeHost.h">
-      <Filter>Header Files\App\Internal</Filter>
-    </ClInclude>
-    <ClInclude Include="MissionHostedModeBase.h">
+    <ClInclude Include="MissionModeController.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="MissionRunMode.h">
@@ -485,10 +482,7 @@
     <ClCompile Include="OpenFloorMeasurementController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapMissionController.cpp">
-      <Filter>Source Files\App\Internal</Filter>
-    </ClCompile>
-    <ClCompile Include="MissionHostedModeBase.cpp">
+    <ClCompile Include="MissionModeController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MissionRunMode.cpp">

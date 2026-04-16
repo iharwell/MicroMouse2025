@@ -1,17 +1,25 @@
 #pragma once
 
-#include "MissionHostedModeBase.h"
+#include "BootModeDescriptor.h"
+#include "MazeMapApplicationMode.h"
+#include "MissionModeController.h"
 
 namespace MazeMap::App::Internal
 {
-    class PositionAccuracyAuditMode final : public MissionHostedModeBase
+    class SharedRobotRuntime;
+
+    class PositionAccuracyAuditMode final : public IApplicationMode
     {
     public:
-        explicit PositionAccuracyAuditMode(IMissionModeHost& host);
+        explicit PositionAccuracyAuditMode(SharedRobotRuntime& runtime);
+
         bool Begin() override;
         void Run() override;
+
+    private:
+        MissionModeController _controller;
     };
 
     IApplicationMode& GetPositionAccuracyAuditMode();
+    const BootModeDescriptor& GetPositionAccuracyAuditBootModeDescriptor();
 }
-

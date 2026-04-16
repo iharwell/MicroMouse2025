@@ -1,10 +1,25 @@
 #include "pch.h"
 #include "CorridorRepeatabilityMode.h"
 
-#include "MazeMapControllerRegistry.h"
+#include "MazeMapSharedRuntime.h"
 
 namespace MazeMap::App::Internal
 {
+    CorridorRepeatabilityMode::CorridorRepeatabilityMode(SharedRobotRuntime& runtime)
+        : _controller(runtime)
+    {
+    }
+
+    bool CorridorRepeatabilityMode::Begin()
+    {
+        return _controller.BeginCorridorRepeatabilityMode();
+    }
+
+    void CorridorRepeatabilityMode::Run()
+    {
+        _controller.RunCorridorRepeatabilityMode();
+    }
+
     const BootModeDescriptor& GetCorridorRepeatabilityBootModeDescriptor()
     {
         static constexpr BootModeDescriptor descriptor{
@@ -15,7 +30,7 @@ namespace MazeMap::App::Internal
             "logging.txt; corridor repeatability telemetry mmlog",
             &GetCorridorRepeatabilityMode,
             "GetCorridorRepeatabilityMode",
-            "CorridorRepeatabilityMode.cpp; MazeMapMissionController.cpp",
+            "CorridorRepeatabilityMode.cpp",
             "mission-family initialization; telemetry log setup; corridor speed passes",
             "AuxMeasurementConfig corridor profile; CoreConfig mission tuning; Maneuver classes",
             "corridor geometry, speed points, and repeatability limits are auxiliary-profile deltas",
@@ -24,25 +39,9 @@ namespace MazeMap::App::Internal
         return descriptor;
     }
 
-    CorridorRepeatabilityMode::CorridorRepeatabilityMode(IMissionModeHost& host)
-        : MissionHostedModeBase(host)
-    {
-    }
-
-    bool CorridorRepeatabilityMode::Begin()
-    {
-        return Host().BeginCorridorRepeatabilityMode();
-    }
-
-    void CorridorRepeatabilityMode::Run()
-    {
-        Host().RunCorridorRepeatabilityMode();
-    }
-
     IApplicationMode& GetCorridorRepeatabilityMode()
     {
-        static CorridorRepeatabilityMode mode(GetMissionModeHost());
+        static CorridorRepeatabilityMode mode(GetSharedRobotRuntime());
         return mode;
     }
 }
-
