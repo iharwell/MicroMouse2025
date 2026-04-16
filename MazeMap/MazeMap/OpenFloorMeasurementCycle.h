@@ -14,7 +14,7 @@ struct OpenFloorMeasurementCycle
     uint32_t dtUs = 0UL;
     ControlCycleTiming controlTiming{};
     DriveTelemetry driveTelemetry{};
-    DiagnosticSensorSnapshot sensorSnapshot{};
+    SensorSnapshot sensorSnapshot{};
     float measuredLinearSpeedMps = 0.0f;
     float measuredAngularSpeedRadps = 0.0f;
     float planarAccelMps2 = 0.0f;

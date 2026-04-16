@@ -108,8 +108,6 @@ namespace MazeMap::App::Internal
             MeasuredMotion measured{};
             DriveTelemetry driveTelemetry{};
             SensorSnapshot sensors{};
-            DiagnosticSensorSnapshot diagnosticSensors{};
-            bool hasDiagnosticSensors{};
             bool estimatorHealthy{ true };
             bool overrun{};
             const char* faultReason{};
@@ -205,8 +203,6 @@ namespace MazeMap::App::Internal
             MeasuredMotion measured{};
             DriveTelemetry driveTelemetry{};
             SensorSnapshot sensors{};
-            DiagnosticSensorSnapshot diagnosticSensors{};
-            bool hasDiagnosticSensors{};
             bool estimatorHealthy{ true };
             bool overrun{};
             const char* faultReason{};
@@ -250,9 +246,7 @@ namespace MazeMap::App::Internal
         ControlVector NormalizeQueuedControl(const ControlVector& candidate) const noexcept;
         void ApplyControlAtTickStart(const ControlVector& control, float dtSeconds);
         bool ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing);
-        bool CaptureMissionTickState(ObservedTickState& observed, TimingDiagnostics& timing);
-        bool CaptureDiagnosticTickState(ObservedTickState& observed, TimingDiagnostics& timing);
-        bool CaptureSelectedTickState(ObservedTickState& observed, TimingDiagnostics& timing);
+        bool CaptureTickState(ObservedTickState& observed, TimingDiagnostics& timing);
         ModeState BuildModeState(
             const ObservedTickState& observed,
             std::uint32_t projectionAnchorUs,

@@ -93,6 +93,8 @@ function Append-FileToLog {
 }
 
 Write-LogLine ("Build-and-verify log: {0}" -f $LogFilePath) 'DarkCyan'
+$script:SuppressTerminalErrorSummary = $false
+$scriptExitCode = 0
 
 function Write-Step {
     param(
@@ -156,12 +158,98 @@ function Assert-UnsandboxedVerifyEnvironment {
     }
 }
 
+function Write-VsTestFailureConsoleOutput {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StdoutPath,
+        [Parameter(Mandatory = $true)]
+        [string]$StderrPath
+    )
+
+    $selectedLines = [System.Collections.Generic.List[string]]::new()
+    $capturingFailureBlock = $false
+
+    if (Test-Path -LiteralPath $StdoutPath -PathType Leaf) {
+        foreach ($line in Get-Content -LiteralPath $StdoutPath) {
+            if ($line -match '^\s*Failed\s+') {
+                if ($selectedLines.Count -gt 0 -and $selectedLines[$selectedLines.Count - 1] -ne '') {
+                    $selectedLines.Add('')
+                }
+
+                $capturingFailureBlock = $true
+                $selectedLines.Add($line)
+                continue
+            }
+
+            if ($line -match '^Total tests:' -or
+                $line -match '^\s+Passed:' -or
+                $line -match '^\s+Failed:' -or
+                $line -match '^ Total time:' -or
+                $line -match '^Test Run Failed\.') {
+                $capturingFailureBlock = $false
+                $selectedLines.Add($line)
+                continue
+            }
+
+            if (-not $capturingFailureBlock) {
+                continue
+            }
+
+            if ($line -match '^\s*Passed\s+' -or
+                $line -match '^\s*Skipped\s+' -or
+                $line -match '^\s*Not Run\s+') {
+                $capturingFailureBlock = $false
+                continue
+            }
+
+            $selectedLines.Add($line)
+        }
+    }
+
+    if ($selectedLines.Count -eq 0) {
+        Write-LogFileContents -Path $StdoutPath
+    }
+    else {
+        Write-LogLine 'VSTest failure summary:' 'Red'
+        foreach ($line in $selectedLines) {
+            if ($line -match '^\s*Failed\s+' -or $line -match '^Test Run Failed\.') {
+                Write-LogLine -Message $line -Color 'Red'
+                continue
+            }
+
+            if ($line -match '^\s*Error Message:') {
+                Write-LogLine -Message $line -Color 'Yellow'
+                continue
+            }
+
+            if ($line -match '^\s*Stack Trace:') {
+                Write-LogLine -Message $line -Color 'DarkYellow'
+                continue
+            }
+
+            Write-LogLine -Message $line
+        }
+    }
+
+    if (Test-Path -LiteralPath $StderrPath -PathType Leaf) {
+        $stderrLines = @(Get-Content -LiteralPath $StderrPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($stderrLines.Count -gt 0) {
+            Write-LogLine 'VSTest stderr:' 'Red'
+            Write-LogFileContents -Path $StderrPath -Color 'Red'
+        }
+    }
+}
+
 function Invoke-External {
     param(
         [Parameter(Mandatory = $true)]
         [string]$FilePath,
         [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [int]$SuccessTailLineCount = 0,
+        [string]$SuccessTailHeader,
+        [ValidateSet('All', 'VSTestFailuresOnly')]
+        [string]$FailureConsoleOutputMode = 'All'
     )
 
     Write-LogLine ($FilePath + ' ' + ($Arguments -join ' '))
@@ -173,9 +261,44 @@ function Invoke-External {
         Append-FileToLog -Path $stdoutPath
         Append-FileToLog -Path $stderrPath
         if ($process.ExitCode -ne 0) {
-            Write-LogFileContents -Path $stdoutPath
-            Write-LogFileContents -Path $stderrPath -Color 'Red'
+            if ($FailureConsoleOutputMode -eq 'VSTestFailuresOnly') {
+                $script:SuppressTerminalErrorSummary = $true
+                Write-VsTestFailureConsoleOutput -StdoutPath $stdoutPath -StderrPath $stderrPath
+            }
+            else {
+                Write-LogFileContents -Path $stdoutPath
+                Write-LogFileContents -Path $stderrPath -Color 'Red'
+            }
+
             throw "Command failed with exit code $($process.ExitCode)."
+        }
+
+        if ($SuccessTailLineCount -gt 0) {
+            $recentOutputLines = [System.Collections.Generic.List[string]]::new()
+            foreach ($capturedPath in @($stdoutPath, $stderrPath)) {
+                if (-not (Test-Path -LiteralPath $capturedPath -PathType Leaf)) {
+                    continue
+                }
+
+                foreach ($line in Get-Content -LiteralPath $capturedPath) {
+                    if ([string]::IsNullOrWhiteSpace($line)) {
+                        continue
+                    }
+
+                    $recentOutputLines.Add($line)
+                }
+            }
+
+            if ($recentOutputLines.Count -gt 0) {
+                if (-not [string]::IsNullOrWhiteSpace($SuccessTailHeader)) {
+                    Write-LogLine $SuccessTailHeader 'DarkCyan'
+                }
+
+                $tailStartIndex = [Math]::Max(0, $recentOutputLines.Count - $SuccessTailLineCount)
+                for ($i = $tailStartIndex; $i -lt $recentOutputLines.Count; $i++) {
+                    Write-LogLine $recentOutputLines[$i] 'DarkGray'
+                }
+            }
         }
     }
     finally {
@@ -622,7 +745,7 @@ try {
         '--library', $arduinoEigenLibraryDir,
         '--build-path', $buildPath,
         $sketchDir
-    )
+    ) -SuccessTailLineCount 4 -SuccessTailHeader 'Teensy compile output tail:'
     $teensyBuildStopwatch.Stop()
 
     $firmwareImage = Assert-ArtifactNotOlderThan -Path $hexPath -Description 'Compiled firmware image' -NotOlderThan $runStartedAt
@@ -661,7 +784,7 @@ try {
 
     Write-Step 'Running the Release unit tests'
     $testStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Invoke-External -FilePath $vstest -Arguments @($testDll.FullName)
+    Invoke-External -FilePath $vstest -Arguments @($testDll.FullName) -FailureConsoleOutputMode 'VSTestFailuresOnly'
     $testStopwatch.Stop()
     Write-LogLine ("Release tests completed in {0:n1}s" -f $testStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
@@ -671,11 +794,21 @@ try {
     Write-LogLine ("Build-and-verify log: {0}" -f $LogFilePath) 'Green'
 }
 catch {
-    Write-LogLine ("ERROR: {0}" -f $_.Exception.Message) 'Red'
-    throw
+    $scriptExitCode = 1
+    $errorMessage = ("ERROR: {0}" -f $_.Exception.Message)
+    if ($script:SuppressTerminalErrorSummary) {
+        Add-Content -LiteralPath $LogFilePath -Value $errorMessage -Encoding UTF8
+    }
+    else {
+        Write-LogLine $errorMessage 'Red'
+    }
 }
 finally {
     Add-Content -LiteralPath $LogFilePath -Value '' -Encoding UTF8
     Add-Content -LiteralPath $LogFilePath -Value ('End time: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff zzz')) -Encoding UTF8
     Pop-Location
+}
+
+if ($scriptExitCode -ne 0) {
+    exit $scriptExitCode
 }

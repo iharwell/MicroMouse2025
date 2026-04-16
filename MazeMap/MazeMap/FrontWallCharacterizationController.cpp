@@ -30,7 +30,7 @@ public:
     explicit FrontWallCharacterizationController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _sensors(runtime.DiagnosticSensors())
+        , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
         , _faulted(false)
     {
@@ -206,7 +206,7 @@ private:
 
     SharedRobotRuntime& _runtime;
     LoopController& _loopController;
-    DiagnosticSensorSuite& _sensors;
+    RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
     bool _faulted;
     PhaseFn _phaseFn{};
@@ -376,7 +376,7 @@ private:
             return LoopController::ControlVector::BrakeCommand();
         };
 
-        const DiagnosticSensorSnapshot& snapshot = state.diagnosticSensors;
+        const SensorSnapshot& snapshot = state.sensors;
         if (!_captureState.started)
         {
             _captureState.started = true;
@@ -456,7 +456,7 @@ private:
     static void StoreCurveSample(
         MazeMap::FrontWallCharacterizationStorage& storage,
         float traveledDistanceM,
-        const DiagnosticSensorSnapshot& snapshot)
+        const SensorSnapshot& snapshot)
     {
         if (storage.sampleCount >= MazeMap::kFrontWallCharacterizationMaxStoredSamples ||
             !std::isfinite(traveledDistanceM) ||

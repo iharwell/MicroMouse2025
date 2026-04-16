@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-class DiagnosticSensorSuite;
+class RuntimeSensorSuite;
 class DriveBase;
 
 namespace MazeMap::App::Internal
@@ -85,7 +85,7 @@ namespace MazeMap::App::Internal
 
         SharedRobotRuntime& _runtime;
         LoopController& _loopController;
-        DiagnosticSensorSuite& _sensors;
+        RuntimeSensorSuite& _sensors;
         DriveBase& _drive;
         bool _faulted{};
         bool _logOpen{};

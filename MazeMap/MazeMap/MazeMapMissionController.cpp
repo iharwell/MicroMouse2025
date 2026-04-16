@@ -18,8 +18,7 @@ public:
         , _searchPathFinder(runtime.SearchPathFinder())
         , _speedPathFinder(runtime.SpeedPathFinder())
         , _wallBeliefMap(runtime.WallBeliefMap())
-        , _sensors(runtime.MissionSensors())
-        , _telemetrySensors(runtime.DiagnosticSensors())
+        , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
         , _currentCell(0, 0)
         , _currentDirection(MazeMap::Up)
@@ -131,7 +130,7 @@ public:
         }
 
         SeedWallBeliefsFromKnownMaze();
-        if (!_telemetrySensors.Begin())
+        if (!_sensors.Begin())
         {
             return Fail("Telemetry sensor init failed");
         }
@@ -214,7 +213,7 @@ public:
 
         PrimeKnownMissionStartCell();
         AppendStartupTrace("initialize:seeded_known_start_cell");
-        if (!_telemetrySensors.Begin())
+        if (!_sensors.Begin())
         {
             return Fail("Telemetry sensor init failed");
         }
@@ -276,7 +275,7 @@ public:
 
         PrimeKnownMissionStartCell();
         AppendStartupTrace("initialize:seeded_known_start_cell");
-        if (!_telemetrySensors.Begin())
+        if (!_sensors.Begin())
         {
             return Fail("Telemetry sensor init failed");
         }
@@ -584,8 +583,7 @@ private:
     MazeMap::FloodFillPathFinder& _searchPathFinder;
     MazeMap::ManeuverPathFinder& _speedPathFinder;
     MazeMap::WallBeliefMap& _wallBeliefMap;
-    SensorSuite& _sensors;
-    DiagnosticSensorSuite& _telemetrySensors;
+    RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
     MazeMap::CellCoordinates _currentCell;
     MazeMap::Direction _currentDirection;
@@ -639,10 +637,10 @@ private:
             if (imuGyroLpf1ReferenceHz > 0.0f && !_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
         }
         if (!_runtime.WriteUtilityDataLogMetadataFloat("boundary_half_span_m", DiagnosticConfig::kBoundaryHalfSpanM, 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _telemetrySensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _telemetrySensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _telemetrySensors.GetGyroBiasRadps(), 6)) return false;
-        if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_telemetrySensors)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _sensors.GetGyroBiasRadps(), 6)) return false;
+        if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_sensors)) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return false;
 
@@ -2547,7 +2545,8 @@ private:
         }
 
         const PoseEstimate poseBeforeTouch = _drive.GetPose();
-        const SensorSnapshot snapshotBeforeTouch = _sensors.Capture(true, _drive.GetPose());
+        SensorSnapshot snapshotBeforeTouch{};
+        _sensors.Capture(true, _drive.GetPose(), snapshotBeforeTouch);
         const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(DirectionToYawRad(finalLocation.GetDirection()), poseBeforeTouch.yawRad);
 
         snprintf(
@@ -4510,13 +4509,8 @@ private:
             return true;
         }
 
-        const DiagnosticSensorSnapshot telemetrySnapshot = _telemetrySensors.Capture(
-            stationary,
-            _drive.GetPose(),
-            [](DiagnosticSensorSnapshot&, auto&&, auto&& captureImu) noexcept
-            {
-                captureImu();
-            });
+        SensorSnapshot telemetrySnapshot{};
+        _sensors.Capture(stationary, _drive.GetPose(), telemetrySnapshot);
         const DriveTelemetry telemetry = _drive.GetTelemetry();
         DiagnosticLogRow row{};
         MazeMap::App::Internal::Runtime::PopulateDiagnosticLogRow(
@@ -4579,25 +4573,37 @@ private:
         const unsigned long now = micros();
         dtSeconds = static_cast<float>(now - _lastControlMicros) * 1.0e-6f;
         _lastControlMicros = now;
-        snapshot = _sensors.Capture(
+        struct CaptureContext final
+        {
+            MissionController* owner{};
+            float dtSeconds{};
+        } captureContext{ this, dtSeconds };
+        const RuntimeSensorSuite::CaptureCallback captureCallback
+        {
+            &captureContext,
+            [](void* rawContext, SensorSnapshot& captureSnapshot, RuntimeSensorSuite::CaptureServices& services) noexcept
+            {
+                auto& context = *static_cast<CaptureContext*>(rawContext);
+                context.owner->_drive.UpdateOdometry(
+                    context.dtSeconds,
+                    captureSnapshot,
+                    &context.owner->_maze,
+                    nullptr,
+                    [&services]() noexcept
+                    {
+                        (void)services.ServiceWallRead();
+                    },
+                    [&services]() noexcept
+                    {
+                        services.CaptureImu();
+                    });
+            }
+        };
+        _sensors.Capture(
             stationary,
             _drive.GetPose(),
-            [this, dtSeconds](SensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
-            {
-                _drive.UpdateOdometry(
-                    dtSeconds,
-                    captureSnapshot,
-                    &_maze,
-                    nullptr,
-                    [&serviceWallRead]() noexcept
-                    {
-                        serviceWallRead();
-                    },
-                    [&captureImu]() noexcept
-                    {
-                        captureImu();
-                    });
-            });
+            snapshot,
+            &captureCallback);
         if (_drive.HasEstimatorFault())
         {
             return Fail(_drive.GetEstimatorFaultReason());

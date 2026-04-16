@@ -190,7 +190,6 @@
     <ClInclude Include="DiagnosticCoverage.h" />
     <ClInclude Include="DiagnosticLogBudget.h" />
     <ClInclude Include="DiagnosticMotionPlan.h" />
-    <ClInclude Include="DiagnosticSensorSuite.h" />
     <ClInclude Include="DiagonalWallCentering.h" />
     <ClInclude Include="Direction.h" />
     <ClInclude Include="DirectionalLocation.h" />
@@ -232,7 +231,6 @@
     <ClInclude Include="MazeMapRuntimeInfrastructure.h" />
     <ClInclude Include="MazeMapRuntimeMmLog.h" />
     <ClInclude Include="MazeMapRuntimeSignalHelpers.h" />
-    <ClInclude Include="MazeMapRuntimeSensors.h" />
     <ClInclude Include="MazeMapSharedRuntime.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
@@ -263,10 +261,10 @@
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="RollingAverageWindow.h" />
+    <ClInclude Include="RuntimeSensorSuite.h" />
     <ClInclude Include="RuntimeBinaryLogSupport.h" />
     <ClInclude Include="SearchRunPlanner.h" />
     <ClInclude Include="Sensor.h" />
-    <ClInclude Include="SensorSuite.h" />
     <ClInclude Include="SmoothTurnYawRateController.h" />
     <ClInclude Include="StartupWaitProfile.h" />
     <ClInclude Include="SrUkfCore.h" />
@@ -350,6 +348,7 @@
     <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="RuntimeSensorSuite.cpp" />
     <ClCompile Include="MazeLocation.cpp" />
     <ClCompile Include="MazeMapCore.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>

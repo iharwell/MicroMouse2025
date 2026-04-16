@@ -9,8 +9,7 @@
 #include "MmLog.h"
 
 class DriveBase;
-class SensorSuite;
-class DiagnosticSensorSuite;
+class RuntimeSensorSuite;
 namespace MazeMap::App::Internal
 {
     class LoopController;
@@ -113,7 +112,7 @@ namespace MazeMap::App::Internal
         bool WriteUtilityDataLogMetadata(const char* key, const char* value);
         bool WriteUtilityDataLogMetadataUnsigned(const char* key, unsigned long value);
         bool WriteUtilityDataLogMetadataFloat(const char* key, float value, std::uint8_t precision);
-        bool WriteUtilityDataLogAccelBiasMetadata(const DiagnosticSensorSuite& sensors);
+        bool WriteUtilityDataLogAccelBiasMetadata(const RuntimeSensorSuite& sensors);
 
         template <typename Row>
         bool BeginUtilityDataLogSchema(const Row& row)
@@ -141,8 +140,7 @@ namespace MazeMap::App::Internal
 
         DriveBase& Drive() noexcept;
         LoopController& ControlLoop() noexcept;
-        SensorSuite& MissionSensors() noexcept;
-        DiagnosticSensorSuite& DiagnosticSensors() noexcept;
+        RuntimeSensorSuite& Sensors() noexcept;
 
     private:
         mmlog::MmLogLogger& UtilityDataLogger() noexcept;

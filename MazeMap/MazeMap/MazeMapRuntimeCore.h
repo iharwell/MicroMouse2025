@@ -591,41 +591,97 @@ struct PoseEstimate
     float angularSpeedRadps = 0.0f;
 };
 
+struct OpticalObservationTiming
+{
+    uint32_t ledOnCommandUs = 0UL;
+    uint32_t adcOnSampleUs = 0UL;
+    uint32_t ledOffCommandUs = 0UL;
+    uint32_t adcOffSampleUs = 0UL;
+    uint32_t observationReadyUs = 0UL;
+};
+
+struct ImuObservationTiming
+{
+    uint32_t drdyUs = 0UL;
+    uint32_t readStartUs = 0UL;
+    uint32_t readDoneUs = 0UL;
+};
+
+struct WallSensorTelemetry
+{
+    float ambientLight = 0.0f;
+    float litLight = 0.0f;
+    float differentialLight = 0.0f;
+    float rawDistanceM = 0.20f;
+    float distanceM = 0.20f;
+    bool wall = false;
+};
+
+struct ImuTelemetry
+{
+    uint8_t status = 0U;
+    int16_t gyroX = 0;
+    int16_t gyroY = 0;
+    int16_t gyroZ = 0;
+    int16_t accelX = 0;
+    int16_t accelY = 0;
+    int16_t accelZ = 0;
+    int16_t temp = 0;
+    bool interruptHigh = false;
+};
+
 struct SensorSnapshot
 {
-    float frontLeftDistanceM;
-    float frontRightDistanceM;
-    float frontLeftDifferentialLight;
-    float frontRightDifferentialLight;
-    float sideLeftDistanceM;
-    float sideRightDistanceM;
-    float sideLeftDifferentialLight;
-    float sideRightDifferentialLight;
-    float corridorErrorM;
-    float frontSkewM;
-    float accelBodyXMps2;
-    float accelBodyYMps2;
-    float planarAccelMps2;
-    float gyroRawRadps;
-    float gyroBiasRadps;
-    float gyroRadps;
-    bool accelBiasValid;
-    bool frontWall;
-    bool frontLeftWall;
-    bool frontRightWall;
-    bool frontWallObservationValid;
-    bool frontWallUsesFallbackDetection;
-    bool frontWallUsesCharacterizationDetection;
-    bool leftWall;
-    bool rightWall;
-    bool leftDistanceValidForControl;
-    bool rightDistanceValidForControl;
-    bool leftWallObservation;
-    bool rightWallObservation;
-    bool leftWallObservationWindowValid;
-    bool rightWallObservationWindowValid;
-    bool leftTransitionDetected;
-    bool rightTransitionDetected;
+    float frontLeftDistanceM = 0.0f;
+    float frontRightDistanceM = 0.0f;
+    float frontLeftDifferentialLight = 0.0f;
+    float frontRightDifferentialLight = 0.0f;
+    float sideLeftDistanceM = 0.0f;
+    float sideRightDistanceM = 0.0f;
+    float sideLeftDifferentialLight = 0.0f;
+    float sideRightDifferentialLight = 0.0f;
+    float corridorErrorM = 0.0f;
+    float frontSkewM = 0.0f;
+    float accelBodyXMps2 = 0.0f;
+    float accelBodyYMps2 = 0.0f;
+    float planarAccelMps2 = 0.0f;
+    float gyroRawRadps = 0.0f;
+    float gyroBiasRadps = 0.0f;
+    float gyroRadps = 0.0f;
+    bool accelBiasValid = false;
+    bool frontWall = false;
+    bool frontLeftWall = false;
+    bool frontRightWall = false;
+    bool frontWallObservationValid = false;
+    bool frontWallUsesFallbackDetection = false;
+    bool frontWallUsesCharacterizationDetection = false;
+    bool leftWall = false;
+    bool rightWall = false;
+    bool leftDistanceValidForControl = false;
+    bool rightDistanceValidForControl = false;
+    bool leftWallObservation = false;
+    bool rightWallObservation = false;
+    bool leftWallObservationWindowValid = false;
+    bool rightWallObservationWindowValid = false;
+    bool leftTransitionDetected = false;
+    bool rightTransitionDetected = false;
+
+    WallSensorTelemetry frontLeft{};
+    WallSensorTelemetry frontRight{};
+    WallSensorTelemetry sideLeft{};
+    WallSensorTelemetry sideRight{};
+    OpticalObservationTiming frontTiming{};
+    OpticalObservationTiming leftTiming{};
+    OpticalObservationTiming rightTiming{};
+    std::uint32_t wallSensorAdcCfgBeforeStart = 0U;
+    std::uint32_t wallSensorAdcGcBeforeStart = 0U;
+    std::uint32_t wallSensorAdcCfgAfterStart = 0U;
+    std::uint32_t wallSensorAdcGcAfterStart = 0U;
+    std::uint32_t wallSensorAdcTargetCfg = 0U;
+    std::uint32_t wallSensorAdcIpgClockHz = 0U;
+    ImuTelemetry imuFrontRight{};
+    ImuTelemetry imuBackLeft{};
+    ImuObservationTiming imuTiming{};
 };
 
 struct DriveTelemetry
@@ -662,22 +718,6 @@ struct DriveTelemetry
     float ukfNhcResidualSigma = 0.0f;
     float ukfFeedforwardYawRateRadps = 0.0f;
     bool encoderObservationValid = false;
-};
-
-struct OpticalObservationTiming
-{
-    uint32_t ledOnCommandUs = 0UL;
-    uint32_t adcOnSampleUs = 0UL;
-    uint32_t ledOffCommandUs = 0UL;
-    uint32_t adcOffSampleUs = 0UL;
-    uint32_t observationReadyUs = 0UL;
-};
-
-struct ImuObservationTiming
-{
-    uint32_t drdyUs = 0UL;
-    uint32_t readStartUs = 0UL;
-    uint32_t readDoneUs = 0UL;
 };
 
 struct ControlCycleTiming
@@ -750,62 +790,6 @@ private:
     unsigned long _lastProgressMs = 0UL;
     unsigned long _activeMotionStartMs = 0UL;
     bool _activeMotionCommand = false;
-};
-
-struct WallSensorTelemetry
-{
-    float ambientLight = 0.0f;
-    float litLight = 0.0f;
-    float differentialLight = 0.0f;
-    float rawDistanceM = 0.20f;
-    float distanceM = 0.20f;
-    bool wall = false;
-};
-
-struct ImuTelemetry
-{
-    uint8_t status = 0U;
-    int16_t gyroX = 0;
-    int16_t gyroY = 0;
-    int16_t gyroZ = 0;
-    int16_t accelX = 0;
-    int16_t accelY = 0;
-    int16_t accelZ = 0;
-    int16_t temp = 0;
-    bool interruptHigh = false;
-};
-
-struct DiagnosticSensorSnapshot
-{
-    WallSensorTelemetry frontLeft;
-    WallSensorTelemetry frontRight;
-    WallSensorTelemetry sideLeft;
-    WallSensorTelemetry sideRight;
-    OpticalObservationTiming frontTiming;
-    OpticalObservationTiming leftTiming;
-    OpticalObservationTiming rightTiming;
-    std::uint32_t wallSensorAdcCfgBeforeStart = 0U;
-    std::uint32_t wallSensorAdcGcBeforeStart = 0U;
-    std::uint32_t wallSensorAdcCfgAfterStart = 0U;
-    std::uint32_t wallSensorAdcGcAfterStart = 0U;
-    std::uint32_t wallSensorAdcTargetCfg = 0U;
-    std::uint32_t wallSensorAdcIpgClockHz = 0U;
-    ImuTelemetry imuFrontRight;
-    ImuTelemetry imuBackLeft;
-    ImuObservationTiming imuTiming;
-    float corridorErrorM = 0.0f;
-    float frontSkewM = 0.0f;
-    float accelBodyXMps2 = 0.0f;
-    float accelBodyYMps2 = 0.0f;
-    bool accelBiasValid = false;
-    bool frontWall = false;
-    bool leftWall = false;
-    bool rightWall = false;
-    bool leftDistanceValidForControl = false;
-    bool rightDistanceValidForControl = false;
-    float gyroBiasRadps = 0.0f;
-    float gyroRawRadps = 0.0f;
-    float gyroRadps = 0.0f;
 };
 
 enum class WallSensorId : uint8_t

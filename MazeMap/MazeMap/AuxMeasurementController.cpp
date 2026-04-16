@@ -58,7 +58,7 @@ public:
         }
         SetFanEnabled(false);
         gWallDistanceCalibration.Clear();
-        if (!_runtime.DiagnosticSensors().Begin(AuxMeasurementConfig::kControlPeriodUs))
+        if (!_runtime.Sensors().Begin(AuxMeasurementConfig::kControlPeriodUs))
         {
             return Fail("Auxiliary sensor init failed");
         }
@@ -344,10 +344,10 @@ private:
             if (imuGyroLpf1ReferenceHz > 0.0f && !_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
         }
         if (!_runtime.WriteUtilityDataLogMetadataUnsigned("startup_settle_ms", static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs))) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _runtime.DiagnosticSensors().GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _runtime.DiagnosticSensors().GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _runtime.DiagnosticSensors().GetGyroBiasRadps(), 6)) return false;
-        if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_runtime.DiagnosticSensors())) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _runtime.Sensors().GetGyroSensitivityMdpsPerLsb(), 3)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _runtime.Sensors().GetAccelSensitivityMgPerLsb(), 3)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _runtime.Sensors().GetGyroBiasRadps(), 6)) return false;
+        if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_runtime.Sensors())) return false;
         if (!WriteEvent("summary", "Enter by shorting pins 28 and 29 at boot. Those pins only select this mode; they are not measurement inputs.")) return false;
         if (!WriteEvent("summary", "Edit AuxMeasurementConfig::kRoutine and RunSelectedRoutine() to repurpose this mode for one-off internal measurements.")) return false;
         if (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
@@ -385,7 +385,7 @@ private:
         const PoseEstimate& pose,
         const DriveBase& drive,
         const DriveTelemetry& driveTelemetry,
-        const DiagnosticSensorSnapshot& sensorSnapshot,
+        const SensorSnapshot& sensorSnapshot,
         float planarAccelMps2)
     {
         AuxMeasurementLogRow row{};
@@ -452,7 +452,7 @@ private:
             _holdPhaseState.startMs = millis();
         }
 
-        const float planarAccelMps2 = _runtime.DiagnosticSensors().GetPlanarAccelMps2(state.diagnosticSensors);
+        const float planarAccelMps2 = state.sensors.planarAccelMps2;
         if (!LogSample(
                 _holdPhaseState.stationary,
                 _fanEnabled,
@@ -461,7 +461,7 @@ private:
                 state.estimate,
                 _runtime.Drive(),
                 state.driveTelemetry,
-                state.diagnosticSensors,
+                state.sensors,
                 planarAccelMps2))
         {
             services.Fault("Failed to write auxiliary measurement sample");
@@ -514,7 +514,7 @@ private:
             return LoopController::ControlVector::BrakeCommand();
         }
 
-        const DiagnosticSensorSnapshot& sensorSnapshot = state.diagnosticSensors;
+        const SensorSnapshot& sensorSnapshot = state.sensors;
         if (!_turningTractionState.tighteningTurn)
         {
             _turningTractionState.commandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * state.dtSeconds;
@@ -550,7 +550,7 @@ private:
             MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(
                 _turningTractionState.commandedSpeedMps,
                 _turningTractionState.lastCommandedOmegaRadps);
-        const float planarAccelMps2 = _runtime.DiagnosticSensors().GetPlanarAccelMps2(sensorSnapshot);
+        const float planarAccelMps2 = sensorSnapshot.planarAccelMps2;
         const MazeMap::TurningTractionMetrics metrics = MazeMap::ComputeTurningTractionMetrics(
             state.driveTelemetry.leftVelocityMps,
             state.driveTelemetry.rightVelocityMps,

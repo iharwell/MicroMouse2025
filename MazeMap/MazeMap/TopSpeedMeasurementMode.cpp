@@ -8,10 +8,10 @@
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
-#include "MazeMapRuntimeSensors.h"
 #include "MazeMapSharedRuntime.h"
 #include "PinPairStrap.h"
 #include "PlantModel.h"
+#include "RuntimeSensorSuite.h"
 
 #include <algorithm>
 #include <cmath>
@@ -50,7 +50,7 @@ namespace
         return MazeMap::VehicleState::NormalizeAngle(currentYawRad - measurementStartYawRad);
     }
 
-    float ResolveBiasCorrectedGyroYawRateRadps(const DiagnosticSensorSnapshot& snapshot) noexcept
+    float ResolveBiasCorrectedGyroYawRateRadps(const SensorSnapshot& snapshot) noexcept
     {
         if (std::isfinite(snapshot.gyroRadps))
         {
@@ -66,7 +66,7 @@ namespace
     }
 
     float ResolveGyroBiasHoldYawRateCommandRadps(
-        const DiagnosticSensorSnapshot& snapshot,
+        const SensorSnapshot& snapshot,
         const float dtSeconds,
         MazeMap::SmoothTurnYawRateControllerState& controllerState) noexcept
     {
@@ -161,7 +161,7 @@ namespace MazeMap::App::Internal
     TopSpeedMeasurementMode::TopSpeedMeasurementMode(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _sensors(runtime.DiagnosticSensors())
+        , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
     {
         ResetRunState();
@@ -473,7 +473,7 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        const DiagnosticSensorSnapshot& snapshot = state.diagnosticSensors;
+        const SensorSnapshot& snapshot = state.sensors;
         const MazeMap::VehicleState::StateVector& estimatorState = _drive.GetEstimatorStateVector();
         TopSpeedMeasurementRow row{};
         row.master_time_us = state.tickStartUs;
@@ -626,8 +626,8 @@ namespace MazeMap::App::Internal
 
     bool TopSpeedMeasurementMode::ImpactDetected(const LoopController::ModeState& state) const noexcept
     {
-        const float forwardAccelMps2 = state.diagnosticSensors.accelBodyYMps2;
-        return state.diagnosticSensors.accelBiasValid &&
+        const float forwardAccelMps2 = state.sensors.accelBodyYMps2;
+        return state.sensors.accelBiasValid &&
             std::isfinite(forwardAccelMps2) &&
             std::isfinite(state.measured.linearSpeedMps) &&
             (state.measured.linearSpeedMps >= kTopSpeedMeasurementImpactMinimumSpeedMps) &&
@@ -643,8 +643,8 @@ namespace MazeMap::App::Internal
         }
 
         const float gyroDpsPerLsb = gyroMdpsPerLsb / 1000.0f;
-        const float absGyroXDps = std::fabs(static_cast<float>(state.diagnosticSensors.imuBackLeft.gyroX)) * gyroDpsPerLsb;
-        const float absGyroYDps = std::fabs(static_cast<float>(state.diagnosticSensors.imuBackLeft.gyroY)) * gyroDpsPerLsb;
+        const float absGyroXDps = std::fabs(static_cast<float>(state.sensors.imuBackLeft.gyroX)) * gyroDpsPerLsb;
+        const float absGyroYDps = std::fabs(static_cast<float>(state.sensors.imuBackLeft.gyroY)) * gyroDpsPerLsb;
         return (absGyroXDps >= kTopSpeedMeasurementGyroXySpikeThresholdDps) ||
             (absGyroYDps >= kTopSpeedMeasurementGyroXySpikeThresholdDps);
     }
@@ -692,9 +692,9 @@ namespace MazeMap::App::Internal
         {
             _peakHeadingDeviationRad = (std::max)(_peakHeadingDeviationRad, headingDeviationRad);
         }
-        if (std::isfinite(state.diagnosticSensors.accelBodyYMps2))
+        if (std::isfinite(state.sensors.accelBodyYMps2))
         {
-            _mostNegativeForwardAccelMps2 = (std::min)(_mostNegativeForwardAccelMps2, state.diagnosticSensors.accelBodyYMps2);
+            _mostNegativeForwardAccelMps2 = (std::min)(_mostNegativeForwardAccelMps2, state.sensors.accelBodyYMps2);
         }
     }
     int accelcount = 0;
@@ -770,10 +770,10 @@ namespace MazeMap::App::Internal
                         state.measured.linearSpeedMps :
                         0.0f;
                 const float measuredYawRateRadps =
-                    ResolveBiasCorrectedGyroYawRateRadps(state.diagnosticSensors);
+            ResolveBiasCorrectedGyroYawRateRadps(state.sensors);
                 const float yawRateCorrectionRadps =
                     ResolveGyroBiasHoldYawRateCommandRadps(
-                        state.diagnosticSensors,
+            state.sensors,
                         state.dtSeconds,
                         _gyroZHoldControllerState);
                 const float responseTimeS =
@@ -843,9 +843,9 @@ namespace MazeMap::App::Internal
             {
                 _impactDetected = true;
                 _impactSpeedMps = state.measured.linearSpeedMps;
-                _impactForwardAccelMps2 = state.diagnosticSensors.accelBodyYMps2;
-                _impactGyroXRawLsb = state.diagnosticSensors.imuBackLeft.gyroX;
-                _impactGyroYRawLsb = state.diagnosticSensors.imuBackLeft.gyroY;
+                _impactForwardAccelMps2 = state.sensors.accelBodyYMps2;
+                _impactGyroXRawLsb = state.sensors.imuBackLeft.gyroX;
+                _impactGyroYRawLsb = state.sensors.imuBackLeft.gyroY;
                 (void)EnterBrakingPhase(
                     BrakeTrigger::ImpactDetected,
                     "state=braking;trigger=impact_detected",
@@ -857,9 +857,9 @@ namespace MazeMap::App::Internal
             {
                 _impactDetected = true;
                 _impactSpeedMps = state.measured.linearSpeedMps;
-                _impactForwardAccelMps2 = state.diagnosticSensors.accelBodyYMps2;
-                _impactGyroXRawLsb = state.diagnosticSensors.imuBackLeft.gyroX;
-                _impactGyroYRawLsb = state.diagnosticSensors.imuBackLeft.gyroY;
+                _impactForwardAccelMps2 = state.sensors.accelBodyYMps2;
+                _impactGyroXRawLsb = state.sensors.imuBackLeft.gyroX;
+                _impactGyroYRawLsb = state.sensors.imuBackLeft.gyroY;
                 (void)EnterBrakingPhase(
                     BrakeTrigger::GyroSpikeDetected,
                     "state=braking;trigger=gyro_xy_spike_detected",

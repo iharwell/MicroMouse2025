@@ -3,10 +3,9 @@
 
 #include "Defines.h"
 #include "DriveBase.h"
-#include "DiagnosticSensorSuite.h"
 #include "HardwareConfig.h"
 #include "MazeMapSharedRuntime.h"
-#include "SensorSuite.h"
+#include "RuntimeSensorSuite.h"
 #include "Vehicle.h"
 
 #include <algorithm>
@@ -595,7 +594,7 @@ namespace MazeMap::App::Internal
 
     bool LoopController::ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing)
     {
-        if (!CaptureSelectedTickState(observed, timing))
+        if (!CaptureTickState(observed, timing))
         {
             return false;
         }
@@ -603,8 +602,7 @@ namespace MazeMap::App::Internal
         observed.estimate = _runtime->Drive().GetPose();
         observed.driveTelemetry = _runtime->Drive().GetTelemetry();
 
-        const float measuredYawRateRadps =
-            observed.hasDiagnosticSensors ? observed.diagnosticSensors.gyroRadps : observed.sensors.gyroRadps;
+        const float measuredYawRateRadps = observed.sensors.gyroRadps;
         const DriveBase::MeasuredKinematics measured = _runtime->Drive().GetMeasuredKinematics(measuredYawRateRadps);
         observed.measured.linearSpeedMps = measured.linearSpeedMps;
         observed.measured.angularSpeedRadps = measured.angularSpeedRadps;
@@ -618,7 +616,7 @@ namespace MazeMap::App::Internal
         return true;
     }
 
-    bool LoopController::CaptureMissionTickState(ObservedTickState& observed, TimingDiagnostics& timing)
+    bool LoopController::CaptureTickState(ObservedTickState& observed, TimingDiagnostics& timing)
     {
         if (_runtime == nullptr)
         {
@@ -629,118 +627,56 @@ namespace MazeMap::App::Internal
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
         MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
         timing.controlTiming.encoderLatchUs = NowUs();
-        observed.hasDiagnosticSensors = false;
-        observed.sensors = _runtime->MissionSensors().Capture(
-            stationaryHint,
-            _runtime->Drive().GetPose(),
-            [this, &observed, &timing, map](SensorSnapshot& captureSnapshot, auto&& serviceWallRead, auto&& captureImu) noexcept
-            {
-                timing.controlTiming.encoderReadDoneUs = NowUs();
-                _runtime->Drive().UpdateOdometry(
-                    observed.dtSeconds,
-                    captureSnapshot,
-                    map,
-                    &timing.controlTiming,
-                    [this, &serviceWallRead]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->ServiceUtilityDataLog();
-                        }
-                        serviceWallRead();
-                    },
-                    [this, &captureImu]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->ServiceUtilityDataLog();
-                        }
-                        captureImu();
-                    });
-            });
-        return true;
-    }
-
-    bool LoopController::CaptureDiagnosticTickState(ObservedTickState& observed, TimingDiagnostics& timing)
-    {
-        if (_runtime == nullptr)
+        struct CaptureContext final
         {
-            observed.faultReason = "LoopController runtime unavailable";
-            return false;
-        }
+            LoopController* owner{};
+            ObservedTickState* observed{};
+            TimingDiagnostics* timing{};
+            MazeMap::Maze* map{};
+        } captureContext{ this, &observed, &timing, map };
 
-        const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
-        MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
-        timing.controlTiming.encoderLatchUs = NowUs();
-        observed.hasDiagnosticSensors = true;
-        observed.diagnosticSensors = _runtime->DiagnosticSensors().Capture(
+        const RuntimeSensorSuite::CaptureCallback callback
+        {
+            &captureContext,
+            [](void* rawContext, SensorSnapshot& captureSnapshot, RuntimeSensorSuite::CaptureServices& services) noexcept
+            {
+                auto& context = *static_cast<CaptureContext*>(rawContext);
+                context.timing->controlTiming.encoderReadDoneUs = NowUs();
+                context.owner->_runtime->Drive().UpdateOdometry(
+                    context.observed->dtSeconds,
+                    captureSnapshot,
+                    context.map,
+                    &context.timing->controlTiming,
+                    [&context, &services]() noexcept
+                    {
+                        if (context.owner->_runtime != nullptr)
+                        {
+                            (void)context.owner->_runtime->ServiceUtilityDataLog();
+                        }
+                        (void)services.ServiceWallRead();
+                    },
+                    [&context, &services]() noexcept
+                    {
+                        if (context.owner->_runtime != nullptr)
+                        {
+                            (void)context.owner->_runtime->ServiceUtilityDataLog();
+                        }
+                        services.CaptureImu();
+                    });
+            }
+        };
+
+        _runtime->Sensors().Capture(
             stationaryHint,
             _runtime->Drive().GetPose(),
-            [this, &observed, &timing, map](
-                DiagnosticSensorSnapshot& captureSnapshot,
-                auto&& serviceWallRead,
-                auto&& captureImu) noexcept
-            {
-                timing.controlTiming.encoderReadDoneUs = NowUs();
-                _runtime->Drive().UpdateOdometry(
-                    observed.dtSeconds,
-                    captureSnapshot,
-                    map,
-                    &timing.controlTiming,
-                    [this, &serviceWallRead]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->ServiceUtilityDataLog();
-                        }
-                        serviceWallRead();
-                    },
-                    [this, &captureImu]() noexcept
-                    {
-                        if (_runtime != nullptr)
-                        {
-                            (void)_runtime->ServiceUtilityDataLog();
-                        }
-                        captureImu();
-                    });
-            });
+            observed.sensors,
+            &callback);
 
-        observed.sensors = SensorSnapshot{};
-        observed.sensors.frontLeftDistanceM = observed.diagnosticSensors.frontLeft.distanceM;
-        observed.sensors.frontRightDistanceM = observed.diagnosticSensors.frontRight.distanceM;
-        observed.sensors.frontLeftDifferentialLight = observed.diagnosticSensors.frontLeft.differentialLight;
-        observed.sensors.frontRightDifferentialLight = observed.diagnosticSensors.frontRight.differentialLight;
-        observed.sensors.sideLeftDistanceM = observed.diagnosticSensors.sideLeft.distanceM;
-        observed.sensors.sideRightDistanceM = observed.diagnosticSensors.sideRight.distanceM;
-        observed.sensors.sideLeftDifferentialLight = observed.diagnosticSensors.sideLeft.differentialLight;
-        observed.sensors.sideRightDifferentialLight = observed.diagnosticSensors.sideRight.differentialLight;
-        observed.sensors.corridorErrorM = observed.diagnosticSensors.corridorErrorM;
-        observed.sensors.frontSkewM = observed.diagnosticSensors.frontSkewM;
-        observed.sensors.accelBodyXMps2 = observed.diagnosticSensors.accelBodyXMps2;
-        observed.sensors.accelBodyYMps2 = observed.diagnosticSensors.accelBodyYMps2;
-        observed.sensors.planarAccelMps2 = _runtime->DiagnosticSensors().GetPlanarAccelMps2(observed.diagnosticSensors);
-        observed.sensors.gyroRawRadps = observed.diagnosticSensors.gyroRawRadps;
-        observed.sensors.gyroBiasRadps = observed.diagnosticSensors.gyroBiasRadps;
-        observed.sensors.gyroRadps = observed.diagnosticSensors.gyroRadps;
-        observed.sensors.accelBiasValid = observed.diagnosticSensors.accelBiasValid;
-        observed.sensors.frontWall = observed.diagnosticSensors.frontWall;
-        observed.sensors.frontLeftWall = observed.diagnosticSensors.frontLeft.wall;
-        observed.sensors.frontRightWall = observed.diagnosticSensors.frontRight.wall;
-        observed.sensors.leftWall = observed.diagnosticSensors.leftWall;
-        observed.sensors.rightWall = observed.diagnosticSensors.rightWall;
-        observed.sensors.leftDistanceValidForControl = observed.diagnosticSensors.leftDistanceValidForControl;
-        observed.sensors.rightDistanceValidForControl = observed.diagnosticSensors.rightDistanceValidForControl;
-
-        timing.frontTiming = observed.diagnosticSensors.frontTiming;
-        timing.leftTiming = observed.diagnosticSensors.leftTiming;
-        timing.rightTiming = observed.diagnosticSensors.rightTiming;
-        timing.imuTiming = observed.diagnosticSensors.imuTiming;
+        timing.frontTiming = observed.sensors.frontTiming;
+        timing.leftTiming = observed.sensors.leftTiming;
+        timing.rightTiming = observed.sensors.rightTiming;
+        timing.imuTiming = observed.sensors.imuTiming;
         return true;
-    }
-
-    bool LoopController::CaptureSelectedTickState(ObservedTickState& observed, TimingDiagnostics& timing)
-    {
-        return CaptureDiagnosticTickState(observed, timing);
     }
 
     LoopController::ModeState LoopController::BuildModeState(
@@ -759,8 +695,6 @@ namespace MazeMap::App::Internal
         state.measured = observed.measured;
         state.driveTelemetry = observed.driveTelemetry;
         state.sensors = observed.sensors;
-        state.diagnosticSensors = observed.diagnosticSensors;
-        state.hasDiagnosticSensors = observed.hasDiagnosticSensors;
         state.estimatorHealthy = observed.estimatorHealthy;
         state.overrun = overrunBeforeModeWork || observed.overrun;
         state.faultReason = observed.faultReason;

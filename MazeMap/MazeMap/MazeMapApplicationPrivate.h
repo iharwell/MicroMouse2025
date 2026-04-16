@@ -82,5 +82,5 @@ namespace MazeMap
 }
 
 #include "MazeMapRuntimeCore.h"
-#include "MazeMapRuntimeSensors.h"
+#include "RuntimeSensorSuite.h"
 

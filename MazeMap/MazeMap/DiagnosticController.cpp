@@ -46,7 +46,7 @@ public:
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
         , _vehicle(runtime.SpeedVehicle())
-        , _sensors(runtime.DiagnosticSensors())
+        , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
         , _startX(0.0f)
         , _startY(0.0f)
@@ -252,7 +252,7 @@ private:
     };
 
     MazeMap::Vehicle& _vehicle;
-    DiagnosticSensorSuite& _sensors;
+    RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
     char _logFileName[64];
     float _startX;
@@ -1444,7 +1444,7 @@ private:
             (std::fabs(pose.yMeters - _startY) <= DiagnosticConfig::kBoundaryHalfSpanM);
     }
 
-    bool LogSample(bool stationary, uint32_t timestampUs, float dtSeconds, const DiagnosticSensorSnapshot& snapshot)
+    bool LogSample(bool stationary, uint32_t timestampUs, float dtSeconds, const SensorSnapshot& snapshot)
     {
         const DriveTelemetry telemetry = _drive.GetTelemetry();
         const uint32_t dtUs = static_cast<uint32_t>(dtSeconds * 1.0e6f);
@@ -1474,7 +1474,7 @@ private:
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
-        if (!LogSample(_holdPhaseState.stationary, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+        if (!LogSample(_holdPhaseState.stationary, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
             return LoopController::ControlVector::BrakeCommand();
@@ -1507,7 +1507,7 @@ private:
         if ((remainingM <= Config::kDistanceToleranceM) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
             {
                 services.Fault("Failed to write diagnostic sample");
                 return LoopController::ControlVector::BrakeCommand();
@@ -1569,7 +1569,7 @@ private:
             -limits.maxAngularSpeedRadps,
             limits.maxAngularSpeedRadps);
 
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
             return LoopController::ControlVector::BrakeCommand();
@@ -1612,7 +1612,7 @@ private:
         _kickoffPhaseState.maxSpeedMps = (std::max)(
             _kickoffPhaseState.maxSpeedMps,
             std::fabs(state.estimate.linearSpeedMps));
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
             return LoopController::ControlVector::BrakeCommand();
@@ -1698,7 +1698,7 @@ private:
         _forwardPhaseState.maxSpeedMps = (std::max)(
             _forwardPhaseState.maxSpeedMps,
             std::fabs(state.estimate.linearSpeedMps));
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
             return LoopController::ControlVector::BrakeCommand();
@@ -1744,7 +1744,7 @@ private:
             std::fabs(state.estimate.angularSpeedRadps));
         if (MazeMap::IsInPlaceTurnComplete(errorRad, state.estimate.angularSpeedRadps, _turnPhaseState.turnProfile))
         {
-            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
             {
                 services.Fault("Failed to write diagnostic sample");
                 return LoopController::ControlVector::BrakeCommand();
@@ -1797,7 +1797,7 @@ private:
             return LoopController::ControlVector::BrakeCommand();
         }
 
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
             return LoopController::ControlVector::BrakeCommand();
@@ -1823,7 +1823,7 @@ private:
         _arcPhaseState.metrics.durationSeconds += state.dtSeconds;
         _arcPhaseState.metrics.omegaIntegralRad += state.estimate.angularSpeedRadps * state.dtSeconds;
         _arcPhaseState.metrics.speedIntegralMpsSeconds += std::fabs(state.estimate.linearSpeedMps) * state.dtSeconds;
-        const float planarAccelMps2 = _sensors.GetPlanarAccelMps2(state.diagnosticSensors);
+        const float planarAccelMps2 = state.sensors.planarAccelMps2;
         _arcPhaseState.metrics.planarAccelIntegralMps2Seconds += planarAccelMps2 * state.dtSeconds;
         _arcPhaseState.metrics.peakPlanarAccelMps2 = (std::max)(
             _arcPhaseState.metrics.peakPlanarAccelMps2,
@@ -1831,7 +1831,7 @@ private:
         if ((remainingM <= Config::kDistanceToleranceM) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
             {
                 services.Fault("Failed to write diagnostic sample");
                 return LoopController::ControlVector::BrakeCommand();
@@ -1913,7 +1913,7 @@ private:
             -_arcPhaseState.limits.maxAngularSpeedRadps,
             _arcPhaseState.limits.maxAngularSpeedRadps);
 
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.diagnosticSensors))
+        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
         {
             services.Fault("Failed to write diagnostic sample");
             return LoopController::ControlVector::BrakeCommand();

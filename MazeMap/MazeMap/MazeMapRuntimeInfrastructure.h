@@ -10,6 +10,8 @@
 
 // Private application infrastructure helpers for the MazeMap runtime.
 
+class RuntimeSensorSuite;
+
 #define DIAGNOSTIC_LOG_FIELDS(X)                  \
     X(std::uint32_t, sample)                     \
     X(std::uint32_t, phase_id)                   \
@@ -85,7 +87,7 @@ namespace MazeMap::App::Internal::Runtime
 {
     inline bool WriteMmLogAccelBiasMetadata(
         MazeMap::mmlog::MmLogLogger& log,
-        const DiagnosticSensorSuite& sensors)
+        const RuntimeSensorSuite& sensors)
     {
         char value[48] = {};
         if (!sensors.HasAccelBias())
@@ -240,7 +242,7 @@ namespace MazeMap::App::Internal::Runtime
         const PoseEstimate& pose,
         const DriveBase& drive,
         const DriveTelemetry& driveTelemetry,
-        const DiagnosticSensorSnapshot& sensorSnapshot)
+        const SensorSnapshot& sensorSnapshot)
     {
         row.sample = static_cast<std::uint32_t>(sampleCount);
         row.phase_id = static_cast<std::uint32_t>(phaseId);
@@ -383,20 +385,6 @@ namespace MazeMap::App::Internal::Runtime
         observation.frontWall = snapshot.frontWall;
         observation.frontLeftWall = snapshot.frontLeftWall;
         observation.frontRightWall = snapshot.frontRightWall;
-        observation.leftWall = snapshot.leftWall;
-        observation.rightWall = snapshot.rightWall;
-        observation.leftDistanceValidForControl = snapshot.leftDistanceValidForControl;
-        observation.rightDistanceValidForControl = snapshot.rightDistanceValidForControl;
-        return observation;
-    }
-
-    inline WallTouchObservation MakeWallTouchObservation(const DiagnosticSensorSnapshot& snapshot)
-    {
-        WallTouchObservation observation{};
-        observation.frontSkewM = snapshot.frontSkewM;
-        observation.frontWall = snapshot.frontWall;
-        observation.frontLeftWall = snapshot.frontLeft.wall;
-        observation.frontRightWall = snapshot.frontRight.wall;
         observation.leftWall = snapshot.leftWall;
         observation.rightWall = snapshot.rightWall;
         observation.leftDistanceValidForControl = snapshot.leftDistanceValidForControl;
@@ -1152,7 +1140,7 @@ namespace MazeMap::App::Internal::Runtime
         const PoseEstimate& pose,
         const DriveBase& drive,
         const DriveTelemetry& driveTelemetry,
-        const DiagnosticSensorSnapshot& sensorSnapshot,
+        const SensorSnapshot& sensorSnapshot,
         float planarAccelMps2)
     {
         row.sample = static_cast<std::uint32_t>(sampleCount);

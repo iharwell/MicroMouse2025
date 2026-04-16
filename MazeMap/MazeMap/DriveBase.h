@@ -240,33 +240,6 @@ public:
         UpdatePoseEstimate(dtSeconds, snapshot, map, timing, loopHook, beforeYawUpdate);
     }
 
-    void UpdateOdometry(
-        float dtSeconds,
-        const DiagnosticSensorSnapshot& snapshot,
-        const MazeMap::Maze* map = nullptr,
-        ControlCycleTiming* timing = nullptr)
-    {
-        UpdatePoseEstimate(
-            dtSeconds,
-            snapshot,
-            map,
-            timing,
-            MazeMap::NoopUkfLoopHook{},
-            []() noexcept {});
-    }
-
-    template <typename LoopHook, typename BeforeYawUpdate>
-    void UpdateOdometry(
-        float dtSeconds,
-        const DiagnosticSensorSnapshot& snapshot,
-        const MazeMap::Maze* map,
-        ControlCycleTiming* timing,
-        LoopHook&& loopHook,
-        BeforeYawUpdate&& beforeYawUpdate)
-    {
-        UpdatePoseEstimate(dtSeconds, snapshot, map, timing, loopHook, beforeYawUpdate);
-    }
-
     struct MeasuredKinematics
     {
         float leftVelocityMps = 0.0f;
@@ -363,7 +336,7 @@ public:
 
     // DeltaYawRateCommand resolves a zero-mean command from the present yaw rate and a desired yaw
     // acceleration. This is the single-axis rotational variant of `DeltaCommand`.
-    MazeMap::OpenLoopDriveCommand DeltaYawRateCommand(
+    EXPORT MazeMap::OpenLoopDriveCommand DeltaYawRateCommand(
         float presentYawRateRadps,
         float desiredYawAccelRadps2,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -372,14 +345,14 @@ public:
     // forward speed over the canonical roll-off horizon while respecting the plant-reported acceleration
     // envelope. Wheel-speed or other optional loops use `desiredLinearSpeedMps` as their setpoint when
     // that association is meaningful; all unrelated loops hold their present values.
-    MazeMap::OpenLoopDriveCommand PointCommand(
+    EXPORT MazeMap::OpenLoopDriveCommand PointCommand(
         float desiredLinearSpeedMps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
     // PointCommand resolves the fully coupled command that drives the present forward speed and yaw rate
     // toward the requested targets over the canonical roll-off horizon while respecting the plant envelope.
     // This replaces the old ambiguous "velocity command" entry point.
-    MazeMap::OpenLoopDriveCommand PointCommand(
+    EXPORT MazeMap::OpenLoopDriveCommand PointCommand(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -387,18 +360,18 @@ public:
     // PointYawRateCommand resolves a zero-mean command that drives the present yaw rate toward the
     // requested yaw-rate target over the canonical roll-off horizon while respecting the yaw-acceleration
     // limit reported by the plant.
-    MazeMap::OpenLoopDriveCommand PointYawRateCommand(
+    EXPORT MazeMap::OpenLoopDriveCommand PointYawRateCommand(
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
     // FeedbackCommand produces a pure feedback command cluster. Each selected loop uses `setpoint` as
     // its target. Unselected loops contribute nothing. The returned command starts from the plant command
     // that preserves the present motion state, then layers the requested feedback objectives on top.
-    MazeMap::OpenLoopDriveCommand FeedbackCommand(
+    EXPORT MazeMap::OpenLoopDriveCommand FeedbackCommand(
         float setpoint,
         MazeMap::CommandPD pd) const;
 
-    void CommandGenerated(
+    EXPORT void CommandGenerated(
         const MazeMap::OpenLoopDriveCommand& command,
         float linearSpeedMps,
         float angularSpeedRadps);
@@ -593,7 +566,7 @@ public:
     }
 
     static void BuildLoggedFrontPairObservations(
-        const DiagnosticSensorSnapshot& snapshot,
+        const SensorSnapshot& snapshot,
         float maxRangeM,
         MazeMap::WallObs& left,
         MazeMap::WallObs& right) noexcept
@@ -602,14 +575,14 @@ public:
     }
 
     static MazeMap::WallObs BuildLoggedLeftSideObservation(
-        const DiagnosticSensorSnapshot& snapshot,
+        const SensorSnapshot& snapshot,
         float maxRangeM) noexcept
     {
         return BuildUkfLeftSideObservation(snapshot, maxRangeM);
     }
 
     static MazeMap::WallObs BuildLoggedRightSideObservation(
-        const DiagnosticSensorSnapshot& snapshot,
+        const SensorSnapshot& snapshot,
         float maxRangeM) noexcept
     {
         return BuildUkfRightSideObservation(snapshot, maxRangeM);
@@ -781,24 +754,6 @@ private:
         return observation;
     }
 
-    static MazeMap::ImuMergedObs BuildUkfImuObservation(const DiagnosticSensorSnapshot& snapshot) noexcept
-    {
-        MazeMap::ImuMergedObs observation{};
-        if (!snapshot.accelBiasValid ||
-            !std::isfinite(snapshot.gyroRadps) ||
-            !std::isfinite(snapshot.accelBodyXMps2) ||
-            !std::isfinite(snapshot.accelBodyYMps2))
-        {
-            return observation;
-        }
-
-        observation.valid = true;
-        observation.gyroZRadps = snapshot.gyroRawRadps;
-        observation.accelBodyXMps2 = snapshot.accelBodyXMps2;
-        observation.accelBodyYMps2 = snapshot.accelBodyYMps2;
-        return observation;
-    }
-
     static void BuildUkfFrontPairObservations(
         const SensorSnapshot& snapshot,
         float maxRangeM,
@@ -825,31 +780,6 @@ private:
         right.valid = true;
         right.rho = ClampMeasuredRange(snapshot.frontRightDistanceM, maxRangeM);
         right.confidence = confidence;
-        right.cls = MazeMap::ObsClass::WallLike;
-    }
-
-    static void BuildUkfFrontPairObservations(
-        const DiagnosticSensorSnapshot& snapshot,
-        float maxRangeM,
-        MazeMap::WallObs& left,
-        MazeMap::WallObs& right) noexcept
-    {
-        left = MazeMap::WallObs{};
-        right = MazeMap::WallObs{};
-        if (!snapshot.frontWall ||
-            !IsFinitePositive(snapshot.frontLeft.distanceM) ||
-            !IsFinitePositive(snapshot.frontRight.distanceM))
-        {
-            return;
-        }
-
-        left.valid = true;
-        left.rho = ClampMeasuredRange(snapshot.frontLeft.distanceM, maxRangeM);
-        left.confidence = 0.80f;
-        left.cls = MazeMap::ObsClass::WallLike;
-        right.valid = true;
-        right.rho = ClampMeasuredRange(snapshot.frontRight.distanceM, maxRangeM);
-        right.confidence = 0.80f;
         right.cls = MazeMap::ObsClass::WallLike;
     }
 
@@ -884,40 +814,6 @@ private:
 
         observation.valid = true;
         observation.rho = ClampMeasuredRange(snapshot.sideRightDistanceM, maxRangeM);
-        observation.confidence = 0.80f;
-        observation.cls = MazeMap::ObsClass::WallLike;
-        return observation;
-    }
-
-    static MazeMap::WallObs BuildUkfLeftSideObservation(const DiagnosticSensorSnapshot& snapshot, float maxRangeM) noexcept
-    {
-        MazeMap::WallObs observation{};
-        if (!snapshot.leftDistanceValidForControl ||
-            !snapshot.leftWall ||
-            !IsFinitePositive(snapshot.sideLeft.distanceM))
-        {
-            return observation;
-        }
-
-        observation.valid = true;
-        observation.rho = ClampMeasuredRange(snapshot.sideLeft.distanceM, maxRangeM);
-        observation.confidence = 0.80f;
-        observation.cls = MazeMap::ObsClass::WallLike;
-        return observation;
-    }
-
-    static MazeMap::WallObs BuildUkfRightSideObservation(const DiagnosticSensorSnapshot& snapshot, float maxRangeM) noexcept
-    {
-        MazeMap::WallObs observation{};
-        if (!snapshot.rightDistanceValidForControl ||
-            !snapshot.rightWall ||
-            !IsFinitePositive(snapshot.sideRight.distanceM))
-        {
-            return observation;
-        }
-
-        observation.valid = true;
-        observation.rho = ClampMeasuredRange(snapshot.sideRight.distanceM, maxRangeM);
         observation.confidence = 0.80f;
         observation.cls = MazeMap::ObsClass::WallLike;
         return observation;

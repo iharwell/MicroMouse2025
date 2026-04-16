@@ -135,13 +135,15 @@ namespace MazeMap::App
             Assert::IsTrue(searchVehicle.GetMaxLateralAcceleration() < speedVehicle.GetMaxLateralAcceleration());
         }
 
-        TEST_METHOD(SharedRuntime_ProvidesDistinctDiagnosticAndTelemetrySensorPipelines)
+        TEST_METHOD(SharedRuntime_ProvidesOneCanonicalRuntimeSensorSuite)
         {
             Internal::SharedRobotRuntime runtime;
+            auto& first = runtime.Sensors();
+            auto& second = runtime.Sensors();
 
             Assert::IsTrue(
-                static_cast<const void*>(&runtime.DiagnosticSensors()) !=
-                static_cast<const void*>(&runtime.MissionSensors()));
+                static_cast<const void*>(&first) ==
+                static_cast<const void*>(&second));
             Assert::IsTrue(&runtime.Drive() == &runtime.Drive());
         }
 

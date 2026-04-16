@@ -413,7 +413,7 @@ private:
     SharedRobotRuntime& _runtime;
     LoopController& _loopController;
     MazeMap::Vehicle& _vehicle;
-    DiagnosticSensorSuite& _sensors;
+    RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
     bool _pinsLatchedAtBoot;
     float _batteryVoltageStart;
@@ -530,7 +530,7 @@ private:
     LoopController::PauseDisposition OnPauseGranted(const LoopController::PauseContext& pause);
     bool TransitionFromTimingToMain();
     float ReadBatteryVoltage() const;
-    float ReadBoardTemperatureC(const DiagnosticSensorSnapshot& snapshot) const;
+    float ReadBoardTemperatureC(const SensorSnapshot& snapshot) const;
     void PopulateCycleFromState(
         const LoopController::ModeState& state,
         OpenFloorMeasurementCycle& cycle);
@@ -623,7 +623,7 @@ OpenFloorMeasurementController::OpenFloorMeasurementController(SharedRobotRuntim
     : _runtime(runtime)
     , _loopController(runtime.ControlLoop())
     , _vehicle(runtime.SpeedVehicle())
-    , _sensors(runtime.DiagnosticSensors())
+        , _sensors(runtime.Sensors())
     , _drive(runtime.Drive())
     , _pinsLatchedAtBoot(false)
     , _batteryVoltageStart(0.0f)
@@ -1679,7 +1679,7 @@ float OpenFloorMeasurementController::ReadBatteryVoltage() const
     return MazeMap::MotorEncoderDrive::GetSharedPhysicalModel().supplyVoltageV;
 }
 
-float OpenFloorMeasurementController::ReadBoardTemperatureC(const DiagnosticSensorSnapshot& snapshot) const
+float OpenFloorMeasurementController::ReadBoardTemperatureC(const SensorSnapshot& snapshot) const
 {
     return 25.0f + (static_cast<float>(snapshot.imuBackLeft.temp) / 256.0f);
 }
@@ -1692,10 +1692,10 @@ void OpenFloorMeasurementController::PopulateCycleFromState(
     cycle.controlTickSequence = ++_controlTickSequence;
     cycle.dtUs = state.dtUs;
     cycle.driveTelemetry = state.driveTelemetry;
-    cycle.sensorSnapshot = state.diagnosticSensors;
+    cycle.sensorSnapshot = state.sensors;
     cycle.measuredLinearSpeedMps = state.measured.linearSpeedMps;
     cycle.measuredAngularSpeedRadps = state.measured.angularSpeedRadps;
-    cycle.planarAccelMps2 = _sensors.GetPlanarAccelMps2(cycle.sensorSnapshot);
+    cycle.planarAccelMps2 = cycle.sensorSnapshot.planarAccelMps2;
     cycle.batteryVoltage = ReadBatteryVoltage();
     cycle.boardTemperatureC = ReadBoardTemperatureC(cycle.sensorSnapshot);
     cycle.fanDutyCycle = GetMissionFanDutyCycle();

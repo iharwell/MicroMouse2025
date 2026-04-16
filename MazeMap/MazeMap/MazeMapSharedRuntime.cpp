@@ -422,8 +422,7 @@ namespace MazeMap::App::Internal
             , wallBeliefMap()
             , drive()
             , controlLoop()
-            , missionSensors(speedVehicle, gWallDistanceCalibration)
-            , diagnosticSensors(speedVehicle, gWallDistanceCalibration)
+            , sensors(speedVehicle, gWallDistanceCalibration)
             , dataLogger()
             , textLogFile()
             , textLogQueue()
@@ -459,8 +458,7 @@ namespace MazeMap::App::Internal
         MazeMap::WallBeliefMap wallBeliefMap;
         DriveBase drive;
         LoopController controlLoop;
-        SensorSuite missionSensors;
-        DiagnosticSensorSuite diagnosticSensors;
+        RuntimeSensorSuite sensors;
         MazeMap::mmlog::MmLogLogger dataLogger;
         TextLogFileHandle textLogFile{};
         MazeMap::mmlog::detail::ByteRing textLogQueue;
@@ -968,7 +966,7 @@ namespace MazeMap::App::Internal
         return ok;
     }
 
-    bool SharedRobotRuntime::WriteUtilityDataLogAccelBiasMetadata(const DiagnosticSensorSuite& sensors)
+    bool SharedRobotRuntime::WriteUtilityDataLogAccelBiasMetadata(const RuntimeSensorSuite& sensors)
     {
         ClearLastRuntimeLogError();
         const bool ok = Runtime::WriteMmLogAccelBiasMetadata(UtilityDataLogger(), sensors);
@@ -1087,14 +1085,9 @@ namespace MazeMap::App::Internal
         return _impl->controlLoop;
     }
 
-    SensorSuite& SharedRobotRuntime::MissionSensors() noexcept
+    RuntimeSensorSuite& SharedRobotRuntime::Sensors() noexcept
     {
-        return _impl->missionSensors;
-    }
-
-    DiagnosticSensorSuite& SharedRobotRuntime::DiagnosticSensors() noexcept
-    {
-        return _impl->diagnosticSensors;
+        return _impl->sensors;
     }
 
     MazeMap::mmlog::MmLogLogger& SharedRobotRuntime::UtilityDataLogger() noexcept
