@@ -2,7 +2,8 @@
 
 #include "BootModeDescriptor.h"
 #include "MazeMapApplicationMode.h"
-#include "MissionModeController.h"
+
+#include <memory>
 
 namespace MazeMap::App::Internal
 {
@@ -12,12 +13,19 @@ namespace MazeMap::App::Internal
     {
     public:
         explicit ManeuverFileTestMode(SharedRobotRuntime& runtime);
+        ~ManeuverFileTestMode();
+
+        ManeuverFileTestMode(const ManeuverFileTestMode&) = delete;
+        ManeuverFileTestMode& operator=(const ManeuverFileTestMode&) = delete;
+        ManeuverFileTestMode(ManeuverFileTestMode&&) = delete;
+        ManeuverFileTestMode& operator=(ManeuverFileTestMode&&) = delete;
 
         bool Begin() override;
         void Run() override;
 
     private:
-        MissionModeController _controller;
+        class Implementation;
+        std::unique_ptr<Implementation> _impl;
     };
 
     IApplicationMode& GetManeuverFileTestMode();

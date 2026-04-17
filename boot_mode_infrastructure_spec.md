@@ -57,7 +57,7 @@ Current architectural problems that the infrastructure must resolve:
 - selector precedence is encoded in if-chains
 - mode identity is ambiguous for auxiliary and diagnostic paths
 - mission-side boot modes are wrappers over `IMissionModeHost`
-- utility modes duplicate setup, logging, recovery, and fault plumbing
+- multiple boot-selected modes duplicate setup, logging, recovery, and fault plumbing
 
 ## Architectural Principles
 
@@ -151,12 +151,12 @@ Each boot mode defines one authoritative descriptor, colocated with the mode.
 The descriptor owns:
 
 - stable mode id
-- mode category: mission or utility
+- mode category if retained as a human-facing scenario label such as mission or utility
 - short purpose summary
 - artifacts or logs produced
 - authoritative entry point
 - authoritative implementation file location
-- major sections or phases for utility modes
+- major sections or phases when meaningful
 - shared tuning relied upon
 - explicit tuning overrides
 
@@ -175,15 +175,15 @@ It should no longer own:
 
 ### `BootUtilityModeFramework`
 
-`BootUtilityModeFramework` is the shared session/lifecycle surface for utility modes.
+`BootUtilityModeFramework` is the shared session/lifecycle surface for runtime-backed boot-selected modes. The name is historical and should not be read as an architectural split between mission mode and other boot modes.
 
-It should own only shared utility-mode mechanics such as:
+It should own only shared boot-mode/session mechanics such as:
 
 - startup trace begin/append
 - mode fault registration
 - canonical failure routing
 - text-log event, metadata, and phase helpers
-- utility-data-log session open/begin/service/flush/close
+- the existing `UtilityDataLog` session open/begin/service/flush/close helpers
 - logger failure capture
 - timeout normalization and watchdog policy
 - common recovery flow
@@ -283,7 +283,7 @@ A mode author should not need to:
 - fault registration
 - canonical fail path
 - text-log metadata and phase writing
-- utility-data-log session lifecycle
+- the existing `UtilityDataLog` session lifecycle
 - logger failure capture
 - timeout normalization
 - shared recovery/session policy
@@ -357,7 +357,7 @@ This work is done when:
 
 - boot discovery and precedence are owned only by `BootModeRegistry`
 - every boot-selectable mode has one authoritative descriptor
-- utility-mode lifecycle code is centralized in `BootUtilityModeFramework`
+- shared boot-mode/session lifecycle code is centralized in `BootUtilityModeFramework`
 - shared execution mechanics live in one or a few reusable execution cores
 - boot modes can be written primarily as high-level scenario definitions
 - boot modes do not directly own low-level hardware or memory-architecture concerns

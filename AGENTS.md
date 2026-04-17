@@ -77,11 +77,11 @@ Working junk is still junk. Do not keep it just because replacing it touches man
 
 ### BootUtilityModeFramework
 
-- `BootUtilityModeFramework` is the intended authoritative home for shared utility-mode execution helpers and contracts when such shared infrastructure is justified.
+- `BootUtilityModeFramework` is the intended authoritative home for shared boot-mode execution helpers and contracts when such shared infrastructure is justified. The name is historical; it does **not** imply that mission mode is a different architectural species.
 - It does **not** need to be introduced preemptively for a single mode.
-- If a task must introduce or substantially extend shared utility-mode infrastructure, it must converge on `BootUtilityModeFramework` rather than creating another host contract, setup layer, helper family, or provisional registry/context abstraction.
+- If a task must introduce or substantially extend shared boot-mode/session infrastructure, it must converge on `BootUtilityModeFramework` rather than creating another host contract, setup layer, helper family, or provisional registry/context abstraction.
 - Shared setup/teardown, runtime access, logging lifecycle, failure handling, control-tick capture, and recovery helpers belong here once they are truly shared.
-- Until it exists in acceptable form, keep utility-mode logic direct and local rather than inventing temporary shared layers.
+- Until it exists in acceptable form, keep boot-mode logic direct and local rather than inventing temporary shared layers.
 
 ### SoftwareLimits
 
@@ -192,14 +192,14 @@ Top-level application modes are selected only at startup by reading designated m
 
 ### Mode categories
 
-- `mission mode`: the normal operational top-level mode; it may remain a substantive owner.
-- `utility mode`: a boot-selected test, measurement, calibration, audit, or bring-up workflow; it should be lightweight and procedural rather than a parallel architecture.
+- `mission mode`: a boot-selected mode whose scenario is normal maze operation. This is a scenario label, not a separate architectural class, and the mission mode may be smaller than many test or measurement modes because only heavily verified behavior should live there.
+- `utility mode`: a boot-selected mode whose scenario is measurement, calibration, audit, characterization, or bring-up. This is also a scenario label, not a lighter-weight architectural class.
 
-A utility mode may use one class per mode only when that pattern is applied consistently and the mode uses `BootUtilityModeFramework` for shared setup, runtime access, logging, and teardown.
+Both labels follow the same structural rules. A boot-selected mode may use one class per mode only when that pattern is applied consistently and the mode uses `BootUtilityModeFramework` for shared setup, runtime access, logging, and teardown where that sharing is truly justified.
 
-### Utility-mode construction rule
+### Boot-mode construction rule
 
-A non-mission utility mode should normally consist of:
+A direct boot-selected mode should normally consist of:
 
 - one `BootModeRegistry` entry,
 - one authoritative descriptor,
@@ -207,7 +207,7 @@ A non-mission utility mode should normally consist of:
 - optional small mode-specific callbacks only where `BootUtilityModeFramework` cannot express the behavior directly,
 - shared use of canonical runtime, logging, control, sensing, recovery, and watchdog infrastructure.
 
-Editing a non-mission utility mode should usually require touching only:
+Editing a boot-selected mode should usually require touching only:
 
 - `BootModeRegistry`,
 - the mode's authoritative implementation files,
@@ -239,10 +239,10 @@ Each boot mode must define one authoritative descriptor, colocated with the mode
 - primary outputs or logs produced,
 - the implementation entry point or callable,
 - authoritative implementation file location,
-- for utility modes: major phases or sections,
-- for utility modes: shared tuning relied upon,
-- for utility modes: any explicit tuning overrides,
-- for utility modes: expected artifacts produced.
+- when meaningful: major phases or sections,
+- when meaningful: shared tuning relied upon,
+- when meaningful: any explicit tuning overrides,
+- when meaningful: expected artifacts produced.
 
 Do **not** duplicate selector metadata in descriptors or descriptive metadata in the registry beyond what the registry minimally needs for discovery.
 
@@ -252,31 +252,31 @@ A reviewer must be able to inspect `BootModeRegistry` to find every boot-selecta
 
 ### Shared framework introduction rule
 
-`BootUtilityModeFramework` becomes authoritative only when shared utility-mode infrastructure is deliberately introduced or substantially extended.
+`BootUtilityModeFramework` becomes authoritative only when shared boot-mode/session infrastructure is deliberately introduced or substantially extended.
 
-If a change must introduce or substantially extend shared utility-mode infrastructure, define in the plan or task notes:
+If a change must introduce or substantially extend shared boot-mode/session infrastructure, define in the plan or task notes:
 
 1. the authoritative owner,
 2. the common contract and shared responsibilities,
 3. which duplicated per-mode infrastructure it replaces,
 4. which files become authoritative and which are expected to shrink or disappear,
-5. which existing or planned utility modes will use it.
+5. which existing or planned modes will use it.
 
 Do **not** create multiple provisional registries, contexts, wrappers, logger layers, or dispatch abstractions without this plan. Prefer one convergent framework introduction over iterative framework sprawl.
-Introduce or extend shared utility-mode infrastructure only when it replaces duplicated per-mode machinery across multiple existing modes, or across one existing mode and at least one clearly planned additional mode, or when the task explicitly makes framework introduction a primary objective. Do **not** create shared framework layers opportunistically for a single mode when direct mode-local code still satisfies the canonical-owner rules.
+Introduce or extend shared boot-mode/session infrastructure only when it replaces duplicated per-mode machinery across multiple existing modes, or across one existing mode and at least one clearly planned additional mode, or when the task explicitly makes framework introduction a primary objective. Do **not** create shared framework layers opportunistically for a single mode when direct mode-local code still satisfies the canonical-owner rules.
 
 ### Mode interface, logging, and tuning
 
 - Do **not** encode the set of modes into host interface method names such as `BeginXMode()` or `RunXMode()`.
 - Do **not** create one forwarding wrapper per mode.
-- If utility modes use one class per mode, they must all conform to one common contract and be registered through `BootModeRegistry`.
+- If boot-selected modes use one class per mode, they must all conform to one common contract and be registered through `BootModeRegistry`.
 - Pause callbacks must stay small and phase-specific. Do **not** build a catch-all pause-dispatch hub that re-routes unrelated behavior.
-- In production runtime, utility modes must use only the shared logging architecture: the one runtime-owned `MmLogLogger` instance for structured data, `logging.txt` for sparse human-readable text, and other runtime-owned logging objects.
-- Utility modes may declare `mmlog` row schemas with the designated macros, including separate schemas for different internal phases.
+- In production runtime, boot-selected modes must use only the shared logging architecture: the one runtime-owned `MmLogLogger` instance for structured data, `logging.txt` for sparse human-readable text, and other runtime-owned logging objects.
+- Boot-selected modes may declare `mmlog` row schemas with the designated macros, including separate schemas for different internal phases.
 - Separate phase schemas are allowed only through the designated macros and only when bound through the one runtime-owned `MmLogLogger` instance by closing/reopening or otherwise reconfiguring that same logger according to the shared runtime logging architecture.
-- Utility modes may **not** own additional `MmLogLogger` instances, export objects, file-export objects, event-log objects, or alternate logging subsystems directly.
-- Utility modes must use shared mission/runtime tuning by default.
-- Allowed utility-mode-specific parameters are limited to test geometry, repetition counts, workspace limits, capture cadence, labels/metadata, safety bounds expressed through `SoftwareLimits`, and explicit documented experimental overrides.
+- Boot-selected modes may **not** own additional `MmLogLogger` instances, export objects, file-export objects, event-log objects, or alternate logging subsystems directly.
+- Boot-selected modes should use shared runtime tuning by default.
+- Allowed mode-specific parameters are limited to geometry, repetition counts, workspace limits, capture cadence, labels/metadata, safety bounds expressed through `SoftwareLimits`, and explicit documented experimental overrides.
 - Any tuning override must be explicit, minimal, local, and documented with why shared mission/runtime tuning is insufficient.
 
 ---
@@ -345,7 +345,7 @@ Reject the design and revise it if any of the following are true:
 - inheritance grows where composition or a flatter contract would suffice,
 - production code creates another `MmLogLogger` instance or another production pathfinder instance outside `SharedRobotRuntime`,
 - production code dynamically allocates a large shared pathfinder instead of using the runtime-owned instance,
-- shared utility-mode infrastructure is introduced or widened without satisfying the shared framework introduction rule,
+- shared boot-mode/session infrastructure is introduced or widened without satisfying the shared framework introduction rule,
 - a file builds only because of incidental transitive includes or forwarding headers.
 
 ---
@@ -446,7 +446,7 @@ A good cleanup change should usually produce:
 - easier unit testing through canonical owners,
 - easier discovery of every boot mode and its entry condition,
 - stronger include hygiene,
-- more consistent utility-mode setup, logging, and self-description.
+- more consistent boot-mode setup, logging, and self-description.
 
 If a change increases the number of layers, config owners, wrappers, or parallel patterns, it is probably wrong.
 

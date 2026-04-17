@@ -3,6 +3,16 @@
 #include "Defines.h"
 #include "WallDetectionThresholds.h"
 
+struct PoseEstimate;
+struct SensorSnapshot;
+
+namespace MazeMap
+{
+    class Maze;
+    class Vehicle;
+    class DirectionalLocation;
+}
+
 namespace MazeMap::App::Internal::Runtime
 {
     // Computes the usable reflected-light rise above a calibrated open-space baseline.
@@ -24,5 +34,33 @@ namespace MazeMap::App::Internal::Runtime
         bool leftDistanceValidForControl,
         bool rightDistanceValidForControl,
         float expectedSideWallDistanceM) noexcept;
+
+    // Resolves the map-qualified corridor coordinate from valid side-wall observations.
+    EXPORT bool TryComputeWallGroundedCorridorCoordinateM(
+        const MazeMap::Maze& maze,
+        const MazeMap::Vehicle& vehicle,
+        const MazeMap::DirectionalLocation& currentLocation,
+        const PoseEstimate& pose,
+        const SensorSnapshot& snapshot,
+        float& coordinateM,
+        bool& correctsXAxis);
+
+    // Computes signed corridor error in the robot heading frame using map-qualified side walls.
+    EXPORT bool TryComputeWallGroundedCorridorErrorM(
+        const MazeMap::Maze& maze,
+        const MazeMap::Vehicle& vehicle,
+        const MazeMap::DirectionalLocation& currentLocation,
+        const PoseEstimate& pose,
+        const SensorSnapshot& snapshot,
+        float& corridorErrorM);
+
+    // Shared PD wall-centering controller used by both search motion and maneuver execution.
+    EXPORT float ComputeWallCenterPdOmegaRadps(
+        float corridorErrorM,
+        float forwardSpeedMps,
+        float dtSeconds,
+        float& previousCorridorErrorM,
+        float& filteredCorridorErrorRateMps,
+        bool& previousCorridorErrorValid);
 }
 

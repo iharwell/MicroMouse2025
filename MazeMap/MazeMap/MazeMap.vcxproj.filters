@@ -66,6 +66,9 @@
     <ClInclude Include="AuxMeasurementConfig.h">
       <Filter>Header Files\AuxMeasurementConfig</Filter>
     </ClInclude>
+    <ClInclude Include="AuxMeasurementModeSupport.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
     <ClInclude Include="BootModeDescriptor.h">
       <Filter>Header Files\App</Filter>
     </ClInclude>
@@ -174,7 +177,7 @@
     <ClInclude Include="LedCalibrationConfig.h">
       <Filter>Header Files\LedCalibrationConfig</Filter>
     </ClInclude>
-    <ClInclude Include="LSV6DSV16X_IMU.h">
+    <ClInclude Include="LSM6DSV16X_IMU.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Maneuver.h">
@@ -182,6 +185,9 @@
     </ClInclude>
     <ClInclude Include="ManeuverInstance.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ManeuverExecutor.h">
+      <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="ManeuverPath.h">
       <Filter>Header Files</Filter>
@@ -431,6 +437,9 @@
     <ClCompile Include="Maneuver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ManeuverExecutor.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
     <ClCompile Include="ManeuverPath.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -502,6 +511,9 @@
     </ClCompile>
     <ClCompile Include="MazeMapSharedRuntime.cpp">
       <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeMapRuntimeInfrastructure.cpp">
+      <Filter>Source Files\App\Internal\Runtime</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
       <Filter>Source Files\App\Internal\Runtime</Filter>

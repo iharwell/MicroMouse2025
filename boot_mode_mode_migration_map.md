@@ -32,12 +32,12 @@ Owns:
 
 ### `BootUtilityModeFramework`
 
-Owns shared utility-mode session mechanics:
+Owns shared boot-mode session mechanics:
 
 - startup trace begin/append
 - fault registration and canonical fail path
 - text-log events, metadata, and phase markers
-- utility-data-log session lifecycle
+- existing `UtilityDataLog` session lifecycle
 - logger failure capture
 - timeout/watchdog normalization
 - common recovery/session policy
@@ -79,16 +79,16 @@ Owns shared mechanics such as:
 
 ### `MissionModeCore`
 
-Reusable execution core for mission-family modes.
+Reusable execution core for boot modes that share maze-start assumptions, startup wall calibration, and maneuver-oriented execution. This is a family grouping by shared mechanics, not a privileged mission-only architecture.
 
 Owns shared mechanics such as:
 
-- mission-family startup preparation
-- mission-family text tracing and telemetry sessions
+- maze-running-family startup preparation
+- maze-running-family text tracing and telemetry sessions
 - startup wall-calibration/session preparation
 - known-maze and known-start seeding
 - maneuver-queue execution
-- mission-family artifact output such as maze snapshots
+- maze-running-family artifact output such as maze snapshots
 
 ### `WallSensorLedHardwareService`
 
@@ -267,7 +267,7 @@ Move out:
 
 - the forwarding wrapper itself
   Destination: deletion; descriptor points directly at the authoritative mission owner
-- shared mission-family startup/session mechanics from `Initialize()`
+- shared maze-running startup/session mechanics from `Initialize()`
   Destination: `MissionModeCore`
 - mission text-log session plumbing
   Destination: `MissionModeCore`
@@ -296,10 +296,10 @@ Move out:
 
 - the forwarding wrapper itself
   Destination: deletion
-- mission-family startup/session preparation
+- shared maze-running startup/session preparation
   Destination: `MissionModeCore`
 - telemetry log-session lifecycle
-  Destination: `MissionModeCore` plus `BootUtilityModeFramework` where shared utility behavior overlaps
+  Destination: `MissionModeCore` plus `BootUtilityModeFramework` where shared session behavior overlaps
 - maneuver-file loading and queue import plumbing
   Destination: `RuntimeArtifactSupport` plus `MissionModeCore`
 - queue execution, expected-location snapping, and telemetry phase handling
@@ -324,7 +324,7 @@ Move out:
 
 - the forwarding wrapper itself
   Destination: deletion
-- mission-family startup/session preparation
+- shared maze-running startup/session preparation
   Destination: `MissionModeCore`
 - telemetry log-session setup and shutdown
   Destination: `MissionModeCore`
@@ -353,7 +353,7 @@ Move out:
 
 - the forwarding wrapper itself
   Destination: deletion
-- mission-family startup/session preparation
+- shared maze-running startup/session preparation
   Destination: `MissionModeCore`
 - telemetry log-session setup and shutdown
   Destination: `MissionModeCore`
@@ -367,14 +367,14 @@ Resulting mode shape:
 - define the fixture, phases, and expected paths
 - execute through `MissionModeCore`
 
-## Mission-Family Shared Extraction
+## Shared Maze-Running Extraction
 
 The following shared responsibilities are currently spread across `MissionController` and should move once for reuse by `MissionRun`, `ManeuverFileTest`, `CorridorRepeatability`, and `PositionAccuracyAudit`:
 
 - startup/session preparation from `Initialize()`
 - startup wall-calibration session handling
-- mission-family text-log and telemetry-session lifecycle
-- front-wall characterization loading for mission-family consumers
+- maze-running-family text-log and telemetry-session lifecycle
+- front-wall characterization loading for maze-running-family consumers
 - known-start and known-maze seeding helpers
 - maze snapshot output
 - queued maneuver execution
@@ -406,8 +406,8 @@ After the migration:
 
 - `BootModeRegistry` chooses the boot mode
 - each mode contributes one descriptor and one high-level scenario definition
-- `BootUtilityModeFramework` owns shared utility-mode session mechanics
+- `BootUtilityModeFramework` owns shared boot-mode session mechanics
 - `MeasurementModeCore` owns shared measurement/calibration execution mechanics
-- `MissionModeCore` owns shared mission-family execution mechanics
+- `MissionModeCore` owns shared maze-running execution mechanics
 - `SharedRobotRuntime` remains the sole owner of shared production resources
 - modes stop carrying low-level hardware and memory-architecture concerns

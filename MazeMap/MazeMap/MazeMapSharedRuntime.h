@@ -26,6 +26,8 @@ namespace MazeMap
 
 namespace MazeMap::App::Internal
 {
+    class ManeuverExecutor;
+
     inline constexpr const char* kSharedRuntimeTextLogFileName = "logging.txt";
 
     // Owns the heavyweight runtime infrastructure that should be shared across all startup modes.
@@ -142,6 +144,7 @@ namespace MazeMap::App::Internal
         // LoopController can remain a cadence owner that only forwards raw motor PWM values.
         bool SetMotorPWM(float leftMotorPwm, float rightMotorPwm) noexcept;
         DriveBase& Drive() noexcept;
+        ManeuverExecutor& ManeuverExecutorService() noexcept;
         LoopController& ControlLoop() noexcept;
         RuntimeSensorSuite& Sensors() noexcept;
 

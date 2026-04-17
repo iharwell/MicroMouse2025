@@ -20,9 +20,6 @@ namespace MazeMap::App::Internal
         bool BeginMissionRunMode();
         void RunMissionRunMode();
 
-        bool BeginManeuverFileTestMode();
-        void RunManeuverFileTestMode();
-
         bool BeginCorridorRepeatabilityMode();
         void RunCorridorRepeatabilityMode();
 

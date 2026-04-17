@@ -282,7 +282,7 @@ For new mode structure specifically:
 - Put the selector rule only in `BootModeRegistry`.
 - Do not duplicate selector conditions in comments, config namespaces, or text-log trivia.
 - Do not add runtime switching between top-level modes.
-- Do not add a per-mode host interface for a new utility mode.
+- Do not add a per-mode host interface for a new boot-selected mode.
 - Do not create wrappers around `SharedRobotRuntime`, `LoopController`, or the pathfinders just to reduce edits.
 
 ## Post-Addition Audit
@@ -340,7 +340,7 @@ Before considering a new mode done, audit it against this list.
 
 ## Current Best Starting Point
 
-For a new direct utility mode, start by reading:
+For a new direct boot-selected mode, start by reading:
 
 - `MazeMap/MazeMap/TopSpeedMeasurementMode.h`
 - `MazeMap/MazeMap/TopSpeedMeasurementMode.cpp`

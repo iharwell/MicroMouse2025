@@ -10,6 +10,10 @@ For Arduino / Teensy builds, use the repo helper:
 - `codex_verify/build_and_verify_latest.ps1`
 
 The `.cmd` wrapper at `codex_verify/build_and_verify_latest.cmd` just launches that PowerShell helper.
+The same PowerShell helper now also supports build-only and verify-only modes through thin wrappers:
+
+- `codex_verify/build_latest.cmd`
+- `codex_verify/verify_latest_build.cmd`
 
 The helper keeps the fix repo-local. It does not modify the installed Teensy core under `AppData`.
 
@@ -46,6 +50,15 @@ The required build path is:
 - `codex_verify/build_and_verify_latest.cmd --no-pause`
 
 That wrapper runs the firmware build first, then the Release host rebuild, then the Release unit tests.
+For build-only use:
+
+- `codex_verify/build_latest.cmd --no-pause`
+
+For verify-only use:
+
+- `codex_verify/verify_latest_build.cmd --no-pause`
+
+The verify-only path checks that the canonical firmware and Release host artifacts are newer than their tracked repo-local inputs before it runs the Release unit tests.
 The firmware build forces the Teensy 4.1 `Optimize` board option to `Faster with LTO` (`opt=o2lto`), which maps to `-O2` plus link-time optimization.
 The firmware build now compiles directly into the canonical repo-local output directory under `codex_verify/arduino_build/firmware` instead of staging the compile in a separate work directory first.
 

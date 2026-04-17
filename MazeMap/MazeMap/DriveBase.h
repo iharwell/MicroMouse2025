@@ -9,6 +9,7 @@
 #include "MotorEncoderDrive.h"
 #include "MouseUkfFacade.h"
 #include "OpenLoopDriveCommand.h"
+#include "PlantModel.h"
 #include "WheelControlProfile.h"
 
 #include <algorithm>
@@ -133,10 +134,11 @@ public:
     static constexpr uint16_t kModeLaunchAssistLeft = 1u << 4;
     static constexpr uint16_t kModeLaunchAssistRight = 1u << 5;
 
-    DriveBase()
+    explicit DriveBase(const MazeMap::PlantModel& plantModel)
         : _leftMotor(MazeMap::MotorEncoderDrive::CreateDefaultLeftDrive())
         , _rightMotor(MazeMap::MotorEncoderDrive::CreateDefaultRightDrive())
         , _ukf(MazeMap::PlantParams::Default())
+        , _plantModel(plantModel)
         , _poseCache{}
         , _leftIntegral(0.0f)
         , _rightIntegral(0.0f)
@@ -259,10 +261,9 @@ public:
         const float fallbackYawRateRadps =
             [&]() noexcept
             {
-                MazeMap::PlantModel plantModel;
                 float resolvedLinearSpeedMps = 0.0f;
                 float resolvedYawRateRadps = 0.0f;
-                plantModel.resolveBodyVelocityFromWheelSpeeds(
+                _plantModel.resolveBodyVelocityFromWheelSpeeds(
                     kinematics.leftVelocityMps,
                     kinematics.rightVelocityMps,
                     _ukf.ukf().preparedParams(),
@@ -1004,6 +1005,7 @@ private:
     MazeMap::MotorEncoderDrive _leftMotor;
     MazeMap::MotorEncoderDrive _rightMotor;
     MazeMap::MouseUkfFacade _ukf;
+    const MazeMap::PlantModel& _plantModel;
     PoseEstimate _poseCache;
     float _leftIntegral;
     float _rightIntegral;
@@ -1204,8 +1206,7 @@ private:
         ClosedLoopVelocityCommand command{};
         float unusedLeftOmegaRadps = 0.0f;
         float unusedRightOmegaRadps = 0.0f;
-        MazeMap::PlantModel plantModel;
-        plantModel.resolveWheelMotionTargets(
+        _plantModel.resolveWheelMotionTargets(
             linearSpeedMps,
             angularSpeedRadps,
             desiredLongitudinalAccelMps2,
@@ -1258,10 +1259,9 @@ private:
         maxLongitudinalAccelMps2 = kDefaultCommandVelocityAsapLongitudinalAccelLimitMps2;
         maxYawAccelRadps2 = kDefaultCommandVelocityAsapYawAccelLimitRadps2;
 
-        MazeMap::PlantModel plantModel;
         float technicalLongitudinalAccelMps2 = 0.0f;
         float technicalYawAccelRadps2 = 0.0f;
-        plantModel.velocityTargetTechnicalLimits(
+        _plantModel.velocityTargetTechnicalLimits(
             presentState,
             _ukf.ukf().preparedParams(),
             technicalLongitudinalAccelMps2,
@@ -1294,8 +1294,7 @@ private:
         const float presentYawRateRadps = presentState(MazeMap::VehicleState::kR);
         float desiredLongitudinalAccelMps2 = 0.0f;
         float desiredYawAccelRadps2 = 0.0f;
-        MazeMap::PlantModel plantModel;
-        plantModel.resolveVelocityTargetAccelerations(
+        _plantModel.resolveVelocityTargetAccelerations(
             presentLinearSpeedMps,
             linearSpeedMps,
             presentYawRateRadps,
@@ -1306,7 +1305,7 @@ private:
             desiredLongitudinalAccelMps2,
             desiredYawAccelRadps2);
         const MazeMap::DriveCommandSolution solution =
-            plantModel.solveClosedLoopDriveCommands(
+            _plantModel.solveClosedLoopDriveCommands(
                 presentState,
                 desiredLongitudinalAccelMps2,
                 desiredYawAccelRadps2,

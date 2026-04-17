@@ -7,7 +7,7 @@
 
 ## Post-Transplant Baseline
 
-- The concrete utility-mode controllers are now isolated into same-named implementation files:
+- The concrete standalone boot-mode controllers are now isolated into same-named implementation files:
   - `MazeMap/MazeMap/AuxMeasurementController.cpp`
   - `MazeMap/MazeMap/FrontWallCharacterizationController.cpp`
   - `MazeMap/MazeMap/WallSensorLedCalibrationController.cpp`
@@ -24,7 +24,7 @@
   - `IMissionModeHost` remains the mission-wrapper boundary.
   - `MazeMapApplication.cpp` still resolves startup precedence the same way.
   - `GetDiagnosticMode()` still resolves to `OpenFloorMeasurementController`.
-- The next refactoring stages should improve ownership and shared utility-mode infrastructure without undoing the file split.
+- The next refactoring stages should improve ownership and shared boot-mode/session infrastructure without undoing the file split.
 
 ## Current State
 
@@ -64,7 +64,7 @@
 - The current `IMissionModeHost` shape encodes the mode list into `BeginXMode()` and `RunXMode()` methods, which the repository guidance explicitly rejects as the long-term design.
 - `GetDiagnosticMode()` currently returns `OpenFloorMeasurementController`, while `DiagnosticController` remains defined in the same aggregate file but is not wired through the factory path. That must be resolved before architectural cleanup, because it is not clear whether `DiagnosticController` is obsolete or merely disconnected.
 - `MazeMapStandaloneModes.cpp` also owns unrelated per-mode helpers and `mmlog` row declarations, which makes direct dependency ownership harder to trace.
-- Several utility modes still duplicate the same lifecycle responsibilities:
+- Several boot-selected modes still duplicate the same lifecycle responsibilities:
   - runtime fault registration and trampoline handling
   - hardware/setup entry
   - startup trace reset and trace append calls
@@ -80,8 +80,8 @@
 - `MazeMapApplication.cpp` depends on authoritative mode declarations only and does not locally redeclare registry/factory functions.
 - `BootModeRegistry` becomes the single source of truth for boot-mode discovery metadata.
 - Every boot-selectable mode has one authoritative descriptor colocated with the mode implementation or its header.
-- Any remaining shared utility-mode infrastructure is introduced only if it clearly replaces duplicated machinery across multiple modes.
-- Shared utility-mode infrastructure is owned in one place rather than repeated in each runtime-backed utility controller.
+- Any remaining shared boot-mode/session infrastructure is introduced only if it clearly replaces duplicated machinery across multiple modes.
+- Shared boot-mode/session infrastructure is owned in one place rather than repeated in each runtime-backed controller.
 
 ## Phase 1: File Compliance Without Architecture Change
 
@@ -124,19 +124,19 @@
   - primary outputs or logs
   - entry point
   - implementation file location
-  - major phases or sections for utility modes
+  - major phases or sections when meaningful
   - shared tuning used
   - explicit tuning overrides
   - expected artifacts produced
 - Keep the registry focused on discovery only. It should not absorb mode behavior, logging mechanics, or runtime setup.
 
-## Phase 3: Compliant Utility-Mode Infrastructure
+## Phase 3: Compliant Shared Boot-Mode Session Infrastructure
 
-- Introduce `BootUtilityModeFramework` only for the runtime-backed utility modes that genuinely share lifecycle mechanics:
+- Introduce `BootUtilityModeFramework` only for the runtime-backed boot-selected modes that genuinely share lifecycle mechanics:
   - `AuxMeasurementController`
   - `FrontWallCharacterizationController`
   - `OpenFloorMeasurementController`
-  - any future measurement, audit, calibration, or bring-up modes that need the same runtime/logging skeleton
+  - any future measurement, audit, calibration, bring-up, or operational modes that need the same runtime/logging skeleton
 - Do not force `WallSensorLedCalibrationController` into the framework unless it starts sharing enough machinery to justify it. It is currently simple enough to remain direct mode-local code.
 - Define the framework's responsibilities narrowly:
   - acquire shared runtime access
@@ -157,8 +157,8 @@
   - one descriptor definition colocated beside each mode file
 - Migration strategy for that stage:
   - start by extracting only the exact duplicated begin/fault/log/shutdown mechanics
-  - move one utility mode onto the shared framework
-  - move the next utility mode only after the first extraction proves the framework is actually reducing duplication
+  - move one boot-selected mode onto the shared framework
+  - move the next boot-selected mode only after the first extraction proves the framework is actually reducing duplication
   - stop if the framework starts accumulating mode-specific knowledge instead of shared lifecycle mechanics
 - The one runtime-owned logger rule remains unchanged:
   - the framework may reconfigure or reopen the canonical runtime-owned logger
@@ -177,11 +177,11 @@
 
 ## Recommended Work Order
 
-1. Extract the standalone utility-mode classes into same-named files while preserving existing factory entry points.
+1. Extract the standalone boot-mode classes into same-named files while preserving existing factory entry points.
 2. Extract the mission-side wrapper classes into same-named files while preserving `IMissionModeHost`.
 3. Switch `MazeMapApplication.cpp` to authoritative declarations only and update Visual Studio project metadata.
 4. Introduce `BootModeRegistry` and colocated descriptors without changing the mode implementations yet.
-5. Extract the shared utility-mode lifecycle mechanics into `BootUtilityModeFramework` only where real duplication exists.
+5. Extract the shared boot-mode/session lifecycle mechanics into `BootUtilityModeFramework` only where real duplication exists.
 6. Resolve whether `DiagnosticController` is obsolete, disconnected, or still intended.
 7. Remove the long-term noncompliant forwarding and selection shapes after registry ownership is in place.
 

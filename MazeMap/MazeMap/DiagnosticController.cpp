@@ -261,6 +261,7 @@ private:
     bool _faulted;
     unsigned long _phaseId;
     unsigned long _sampleCount;
+    DiagnosticLogRow _logRow{};
     PhaseFn _phaseFn{};
 
     struct HoldPhaseState final
@@ -415,6 +416,82 @@ private:
             services.Fault("Diagnostic boundary exceeded");
             return LoopController::ControlVector::Brake;
         }
+
+        const SensorSnapshot& snapshot = state.sensors;
+        self->_logRow = {};
+        self->_logRow.sample = static_cast<std::uint32_t>(self->_sampleCount);
+        self->_logRow.phase_id = static_cast<std::uint32_t>(self->_phaseId);
+        self->_logRow.t_us = state.tickStartUs;
+        self->_logRow.dt_us = state.dtUs;
+        self->_logRow.stationary =
+            (self->_phaseFn == &DiagnosticController::HoldPhaseTick && self->_holdPhaseState.stationary) ? 1U : 0U;
+        self->_logRow.pose_x_m = state.estimate.xMeters;
+        self->_logRow.pose_y_m = state.estimate.yMeters;
+        self->_logRow.yaw_rad = state.estimate.yawRad;
+        self->_logRow.linear_speed_mps = state.estimate.linearSpeedMps;
+        self->_logRow.angular_speed_radps = state.estimate.angularSpeedRadps;
+        self->_logRow.cmd_linear_mps = self->_drive.GetLastLinearCommandMps();
+        self->_logRow.cmd_angular_radps = self->_drive.GetLastAngularCommandRadps();
+        self->_logRow.left_drive_cmd = state.driveTelemetry.leftDriveCommand;
+        self->_logRow.right_drive_cmd = state.driveTelemetry.rightDriveCommand;
+        self->_logRow.left_encoder_count = state.driveTelemetry.leftEncoderCount;
+        self->_logRow.right_encoder_count = state.driveTelemetry.rightEncoderCount;
+        self->_logRow.left_distance_m = state.driveTelemetry.leftDistanceM;
+        self->_logRow.right_distance_m = state.driveTelemetry.rightDistanceM;
+        self->_logRow.left_velocity_mps = state.driveTelemetry.leftVelocityMps;
+        self->_logRow.right_velocity_mps = state.driveTelemetry.rightVelocityMps;
+        self->_logRow.imu_fr_status = snapshot.imuFrontRight.status;
+        self->_logRow.imu_fr_gyro_x = snapshot.imuFrontRight.gyroX;
+        self->_logRow.imu_fr_gyro_y = snapshot.imuFrontRight.gyroY;
+        self->_logRow.imu_fr_gyro_z = snapshot.imuFrontRight.gyroZ;
+        self->_logRow.imu_fr_accel_x = snapshot.imuFrontRight.accelX;
+        self->_logRow.imu_fr_accel_y = snapshot.imuFrontRight.accelY;
+        self->_logRow.imu_fr_accel_z = snapshot.imuFrontRight.accelZ;
+        self->_logRow.imu_fr_temp = snapshot.imuFrontRight.temp;
+        self->_logRow.imu_fr_int = snapshot.imuFrontRight.interruptHigh ? 1U : 0U;
+        self->_logRow.imu_bl_status = snapshot.imuBackLeft.status;
+        self->_logRow.imu_bl_gyro_x = snapshot.imuBackLeft.gyroX;
+        self->_logRow.imu_bl_gyro_y = snapshot.imuBackLeft.gyroY;
+        self->_logRow.imu_bl_gyro_z = snapshot.imuBackLeft.gyroZ;
+        self->_logRow.imu_bl_accel_x = snapshot.imuBackLeft.accelX;
+        self->_logRow.imu_bl_accel_y = snapshot.imuBackLeft.accelY;
+        self->_logRow.imu_bl_accel_z = snapshot.imuBackLeft.accelZ;
+        self->_logRow.imu_bl_temp = snapshot.imuBackLeft.temp;
+        self->_logRow.imu_bl_int = snapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+        self->_logRow.ws_fl_ambient = snapshot.frontLeft.ambientLight;
+        self->_logRow.ws_fl_lit = snapshot.frontLeft.litLight;
+        self->_logRow.ws_fl_delta = snapshot.frontLeft.differentialLight;
+        self->_logRow.ws_fl_raw_distance_m = snapshot.frontLeft.rawDistanceM;
+        self->_logRow.ws_fl_distance_m = snapshot.frontLeft.distanceM;
+        self->_logRow.ws_fr_ambient = snapshot.frontRight.ambientLight;
+        self->_logRow.ws_fr_lit = snapshot.frontRight.litLight;
+        self->_logRow.ws_fr_delta = snapshot.frontRight.differentialLight;
+        self->_logRow.ws_fr_raw_distance_m = snapshot.frontRight.rawDistanceM;
+        self->_logRow.ws_fr_distance_m = snapshot.frontRight.distanceM;
+        self->_logRow.ws_sl_ambient = snapshot.sideLeft.ambientLight;
+        self->_logRow.ws_sl_lit = snapshot.sideLeft.litLight;
+        self->_logRow.ws_sl_delta = snapshot.sideLeft.differentialLight;
+        self->_logRow.ws_sl_raw_distance_m = snapshot.sideLeft.rawDistanceM;
+        self->_logRow.ws_sl_distance_m = snapshot.sideLeft.distanceM;
+        self->_logRow.ws_sr_ambient = snapshot.sideRight.ambientLight;
+        self->_logRow.ws_sr_lit = snapshot.sideRight.litLight;
+        self->_logRow.ws_sr_delta = snapshot.sideRight.differentialLight;
+        self->_logRow.ws_sr_raw_distance_m = snapshot.sideRight.rawDistanceM;
+        self->_logRow.ws_sr_distance_m = snapshot.sideRight.distanceM;
+        self->_logRow.front_wall = snapshot.frontWall ? 1U : 0U;
+        self->_logRow.left_wall = snapshot.leftWall ? 1U : 0U;
+        self->_logRow.right_wall = snapshot.rightWall ? 1U : 0U;
+        self->_logRow.corridor_error_m = snapshot.corridorErrorM;
+        self->_logRow.front_skew_m = snapshot.frontSkewM;
+        self->_logRow.gyro_bias_radps = snapshot.gyroBiasRadps;
+        self->_logRow.gyro_raw_radps = snapshot.gyroRawRadps;
+        self->_logRow.gyro_radps = snapshot.gyroRadps;
+        if (!self->_runtime.LogUtilityDataRow(self->_logRow))
+        {
+            services.Fault("Failed to write diagnostic sample");
+            return LoopController::ControlVector::Brake;
+        }
+        ++self->_sampleCount;
 
         return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
     }
@@ -1192,8 +1269,8 @@ private:
                     return _runtime.WriteTextLogEntry(micros(), type, message);
                 })) return false;
 
-        DiagnosticLogRow row{};
-        if (!_runtime.BeginUtilityDataLogSchema(row))
+        _logRow = {};
+        if (!_runtime.BeginUtilityDataLogSchema(_logRow))
         {
             return false;
         }
@@ -1445,42 +1522,12 @@ private:
             (std::fabs(pose.yMeters - _startY) <= DiagnosticConfig::kBoundaryHalfSpanM);
     }
 
-    bool LogSample(bool stationary, uint32_t timestampUs, float dtSeconds, const SensorSnapshot& snapshot)
-    {
-        const DriveTelemetry telemetry = _drive.GetTelemetry();
-        const uint32_t dtUs = static_cast<uint32_t>(dtSeconds * 1.0e6f);
-        DiagnosticLogRow row{};
-        MazeMap::App::Internal::Runtime::PopulateDiagnosticLogRow(
-            row,
-            _sampleCount,
-            _phaseId,
-            stationary,
-            timestampUs,
-            dtUs,
-            _drive.GetPose(),
-            _drive,
-            telemetry,
-            snapshot);
-        if (_runtime.LogUtilityDataRow(row))
-        {
-            ++_sampleCount;
-            return true;
-        }
-        return Fail("Failed to write diagnostic sample");
-    }
-
     LoopController::ControlVector HoldPhaseTick(
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
-        if (!LogSample(_holdPhaseState.stationary, state.tickStartUs, state.dtSeconds, state.sensors))
-        {
-            services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
-
         if (static_cast<long>(_holdPhaseState.deadlineMs - millis()) <= 0)
         {
             (void)AdvanceToNextStep(
@@ -1508,12 +1555,6 @@ private:
         if ((remainingM <= Config::kDistanceToleranceM) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-            {
-                services.Fault("Failed to write diagnostic sample");
-                return LoopController::ControlVector::Brake;
-            }
-
             if (_straightPhaseState.selectReturnDistance)
             {
                 _pendingReturnDistanceM = MazeMap::SelectDiagnosticReturnDistanceM(
@@ -1570,12 +1611,6 @@ private:
             -limits.maxAngularSpeedRadps,
             limits.maxAngularSpeedRadps);
 
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-        {
-            services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
-
         return _drive.PointControlVector(
             _straightPhaseState.commandedSpeedMps,
             angularCommandRadps,
@@ -1614,12 +1649,6 @@ private:
         _kickoffPhaseState.maxSpeedMps = (std::max)(
             _kickoffPhaseState.maxSpeedMps,
             std::fabs(state.estimate.linearSpeedMps));
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-        {
-            services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
-
         if (_kickoffPhaseState.travelLimited &&
             (static_cast<long>(_kickoffPhaseState.travelLimitSettleDeadlineMs - nowMs) <= 0) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
@@ -1700,12 +1729,6 @@ private:
         _forwardPhaseState.maxSpeedMps = (std::max)(
             _forwardPhaseState.maxSpeedMps,
             std::fabs(state.estimate.linearSpeedMps));
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-        {
-            services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
-
         if (_forwardPhaseState.travelLimited &&
             (static_cast<long>(_forwardPhaseState.travelLimitSettleDeadlineMs - nowMs) <= 0) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
@@ -1746,12 +1769,6 @@ private:
             std::fabs(state.estimate.angularSpeedRadps));
         if (MazeMap::IsInPlaceTurnComplete(errorRad, state.estimate.angularSpeedRadps, _turnPhaseState.turnProfile))
         {
-            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-            {
-                services.Fault("Failed to write diagnostic sample");
-                return LoopController::ControlVector::Brake;
-            }
-
             if (!WriteTurnResult(
                     _turnPhaseState.phaseName,
                     _turnPhaseState.angleRad,
@@ -1799,12 +1816,6 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-        {
-            services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
-
         return _drive.PointControlVector(
             0.0f,
             angularCommandRadps,
@@ -1836,12 +1847,6 @@ private:
         if ((remainingM <= Config::kDistanceToleranceM) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-            {
-                services.Fault("Failed to write diagnostic sample");
-                return LoopController::ControlVector::Brake;
-            }
-
             AccumulateArcMetrics(_circleSequenceState.totalMetrics, _arcPhaseState.metrics);
             if (!WriteArcResult(
                     _arcPhaseState.phaseName,
@@ -1917,12 +1922,6 @@ private:
             angularCommandRadps,
             -_arcPhaseState.limits.maxAngularSpeedRadps,
             _arcPhaseState.limits.maxAngularSpeedRadps);
-
-        if (!LogSample(false, state.tickStartUs, state.dtSeconds, state.sensors))
-        {
-            services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
 
         return _drive.PointControlVector(
             _arcPhaseState.commandedSpeedMps,

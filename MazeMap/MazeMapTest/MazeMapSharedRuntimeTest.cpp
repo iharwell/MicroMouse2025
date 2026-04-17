@@ -147,6 +147,17 @@ namespace MazeMap::App
             Assert::IsTrue(&runtime.Drive() == &runtime.Drive());
         }
 
+        TEST_METHOD(SharedRuntime_ProvidesOneCanonicalManeuverExecutor)
+        {
+            Internal::SharedRobotRuntime runtime;
+            auto& first = runtime.ManeuverExecutorService();
+            auto& second = runtime.ManeuverExecutorService();
+
+            Assert::IsTrue(
+                static_cast<const void*>(&first) ==
+                static_cast<const void*>(&second));
+        }
+
         TEST_METHOD(SharedRuntime_SingletonIsStable)
         {
             Internal::SharedRobotRuntime& first = Internal::GetSharedRobotRuntime();

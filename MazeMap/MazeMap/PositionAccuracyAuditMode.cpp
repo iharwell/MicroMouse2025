@@ -27,13 +27,13 @@ namespace MazeMap::App::Internal
             BootModeCategory::Utility,
             "position_accuracy_audit",
             "Run the fixed-fixture position accuracy audit.",
-            "logging.txt; position accuracy telemetry mmlog",
+            "logging.txt; position-audit mmlog",
             &GetPositionAccuracyAuditMode,
             "GetPositionAccuracyAuditMode",
             "PositionAccuracyAuditMode.cpp",
-            "mission-family initialization; telemetry log setup; straight, turn, and smooth-turn audit phases",
-            "AuxMeasurementConfig position-audit profile; CoreConfig mission tuning; Maneuver classes",
-            "fixture geometry, speed points, and fan policy are auxiliary-profile deltas",
+            "mission-family init; log setup; straight, turn, smooth-turn phases",
+            "AuxMeasurementConfig position-audit profile; CoreConfig mission tuning; Maneuvers",
+            "Fixture geometry, speed points, and fan policy are profile deltas",
             "position_accuracy_audit.mmlog",
         };
         return descriptor;

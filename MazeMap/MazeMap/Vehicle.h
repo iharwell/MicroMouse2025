@@ -5,7 +5,7 @@
 #include "CircularBuffer.h"
 #include "VehicleState.h"
 #include "WallSensor.h"
-#include "LSV6DSV16X_IMU.h"
+#include "LSM6DSV16X_IMU.h"
 #include <cmath>
 
 namespace MazeMap

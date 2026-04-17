@@ -79,7 +79,7 @@ public:
         }
 
         (void)_runtime.AppendTextLogLine("Entered by shorting pins 28-29 at boot.");
-        (void)_runtime.AppendTextLogLine("This mode uses internal sensors only; edit AuxMeasurementConfig::kRoutine for other one-off measurements.");
+        (void)_runtime.AppendTextLogLine("Internal-sensor auxiliary mode; change AuxMeasurementConfig::kRoutine for other one-offs.");
 
         const bool ok = RunSelectedRoutine();
 
@@ -155,6 +155,84 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
+        const SensorSnapshot& sensorSnapshot = state.sensors;
+        self->_logRow = {};
+        self->_logRow.sample = static_cast<std::uint32_t>(self->_sampleCount);
+        self->_logRow.phase_id = static_cast<std::uint32_t>(self->_phaseId);
+        self->_logRow.t_us = state.tickStartUs;
+        self->_logRow.dt_us = state.dtUs;
+        self->_logRow.stationary =
+            (self->_phaseFn == &AuxMeasurementController::HoldPhaseTick && self->_holdPhaseState.stationary) ? 1U : 0U;
+        self->_logRow.fan_enabled = self->_fanEnabled ? 1U : 0U;
+        self->_logRow.pose_x_m = state.estimate.xMeters;
+        self->_logRow.pose_y_m = state.estimate.yMeters;
+        self->_logRow.yaw_rad = state.estimate.yawRad;
+        self->_logRow.linear_speed_mps = state.estimate.linearSpeedMps;
+        self->_logRow.angular_speed_radps = state.estimate.angularSpeedRadps;
+        self->_logRow.planar_accel_mps2 = sensorSnapshot.planarAccelMps2;
+        self->_logRow.cmd_linear_mps = self->_runtime.Drive().GetLastLinearCommandMps();
+        self->_logRow.cmd_angular_radps = self->_runtime.Drive().GetLastAngularCommandRadps();
+        self->_logRow.left_drive_cmd = state.driveTelemetry.leftDriveCommand;
+        self->_logRow.right_drive_cmd = state.driveTelemetry.rightDriveCommand;
+        self->_logRow.left_encoder_count = state.driveTelemetry.leftEncoderCount;
+        self->_logRow.right_encoder_count = state.driveTelemetry.rightEncoderCount;
+        self->_logRow.left_distance_m = state.driveTelemetry.leftDistanceM;
+        self->_logRow.right_distance_m = state.driveTelemetry.rightDistanceM;
+        self->_logRow.left_velocity_mps = state.driveTelemetry.leftVelocityMps;
+        self->_logRow.right_velocity_mps = state.driveTelemetry.rightVelocityMps;
+        self->_logRow.imu_fr_status = sensorSnapshot.imuFrontRight.status;
+        self->_logRow.imu_fr_gyro_x = sensorSnapshot.imuFrontRight.gyroX;
+        self->_logRow.imu_fr_gyro_y = sensorSnapshot.imuFrontRight.gyroY;
+        self->_logRow.imu_fr_gyro_z = sensorSnapshot.imuFrontRight.gyroZ;
+        self->_logRow.imu_fr_accel_x = sensorSnapshot.imuFrontRight.accelX;
+        self->_logRow.imu_fr_accel_y = sensorSnapshot.imuFrontRight.accelY;
+        self->_logRow.imu_fr_accel_z = sensorSnapshot.imuFrontRight.accelZ;
+        self->_logRow.imu_fr_temp = sensorSnapshot.imuFrontRight.temp;
+        self->_logRow.imu_fr_int = sensorSnapshot.imuFrontRight.interruptHigh ? 1U : 0U;
+        self->_logRow.imu_bl_status = sensorSnapshot.imuBackLeft.status;
+        self->_logRow.imu_bl_gyro_x = sensorSnapshot.imuBackLeft.gyroX;
+        self->_logRow.imu_bl_gyro_y = sensorSnapshot.imuBackLeft.gyroY;
+        self->_logRow.imu_bl_gyro_z = sensorSnapshot.imuBackLeft.gyroZ;
+        self->_logRow.imu_bl_accel_x = sensorSnapshot.imuBackLeft.accelX;
+        self->_logRow.imu_bl_accel_y = sensorSnapshot.imuBackLeft.accelY;
+        self->_logRow.imu_bl_accel_z = sensorSnapshot.imuBackLeft.accelZ;
+        self->_logRow.imu_bl_temp = sensorSnapshot.imuBackLeft.temp;
+        self->_logRow.imu_bl_int = sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+        self->_logRow.ws_fl_ambient = sensorSnapshot.frontLeft.ambientLight;
+        self->_logRow.ws_fl_lit = sensorSnapshot.frontLeft.litLight;
+        self->_logRow.ws_fl_delta = sensorSnapshot.frontLeft.differentialLight;
+        self->_logRow.ws_fl_raw_distance_m = sensorSnapshot.frontLeft.rawDistanceM;
+        self->_logRow.ws_fl_distance_m = sensorSnapshot.frontLeft.distanceM;
+        self->_logRow.ws_fr_ambient = sensorSnapshot.frontRight.ambientLight;
+        self->_logRow.ws_fr_lit = sensorSnapshot.frontRight.litLight;
+        self->_logRow.ws_fr_delta = sensorSnapshot.frontRight.differentialLight;
+        self->_logRow.ws_fr_raw_distance_m = sensorSnapshot.frontRight.rawDistanceM;
+        self->_logRow.ws_fr_distance_m = sensorSnapshot.frontRight.distanceM;
+        self->_logRow.ws_sl_ambient = sensorSnapshot.sideLeft.ambientLight;
+        self->_logRow.ws_sl_lit = sensorSnapshot.sideLeft.litLight;
+        self->_logRow.ws_sl_delta = sensorSnapshot.sideLeft.differentialLight;
+        self->_logRow.ws_sl_raw_distance_m = sensorSnapshot.sideLeft.rawDistanceM;
+        self->_logRow.ws_sl_distance_m = sensorSnapshot.sideLeft.distanceM;
+        self->_logRow.ws_sr_ambient = sensorSnapshot.sideRight.ambientLight;
+        self->_logRow.ws_sr_lit = sensorSnapshot.sideRight.litLight;
+        self->_logRow.ws_sr_delta = sensorSnapshot.sideRight.differentialLight;
+        self->_logRow.ws_sr_raw_distance_m = sensorSnapshot.sideRight.rawDistanceM;
+        self->_logRow.ws_sr_distance_m = sensorSnapshot.sideRight.distanceM;
+        self->_logRow.front_wall = sensorSnapshot.frontWall ? 1U : 0U;
+        self->_logRow.left_wall = sensorSnapshot.leftWall ? 1U : 0U;
+        self->_logRow.right_wall = sensorSnapshot.rightWall ? 1U : 0U;
+        self->_logRow.corridor_error_m = sensorSnapshot.corridorErrorM;
+        self->_logRow.front_skew_m = sensorSnapshot.frontSkewM;
+        self->_logRow.gyro_bias_radps = sensorSnapshot.gyroBiasRadps;
+        self->_logRow.gyro_raw_radps = sensorSnapshot.gyroRawRadps;
+        self->_logRow.gyro_radps = sensorSnapshot.gyroRadps;
+        if (!self->_runtime.LogUtilityDataRow(self->_logRow))
+        {
+            services.Fault("Failed to write auxiliary measurement sample");
+            return LoopController::ControlVector::Brake;
+        }
+        ++self->_sampleCount;
+
         return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
     }
 
@@ -175,6 +253,7 @@ private:
     bool _fanEnabled;
     unsigned long _phaseId;
     unsigned long _sampleCount;
+    AuxMeasurementLogRow _logRow{};
     PhaseFn _phaseFn{};
     HoldPhaseState _holdPhaseState{};
     TurningTractionState _turningTractionState{};
@@ -348,22 +427,22 @@ private:
         if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _runtime.Sensors().GetAccelSensitivityMgPerLsb(), 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _runtime.Sensors().GetGyroBiasRadps(), 6)) return false;
         if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_runtime.Sensors())) return false;
-        if (!WriteEvent("summary", "Enter by shorting pins 28 and 29 at boot. Those pins only select this mode; they are not measurement inputs.")) return false;
-        if (!WriteEvent("summary", "Edit AuxMeasurementConfig::kRoutine and RunSelectedRoutine() to repurpose this mode for one-off internal measurements.")) return false;
+        if (!WriteEvent("summary", "Enter by shorting pins 28-29 at boot; those pins select the mode only.")) return false;
+        if (!WriteEvent("summary", "Change AuxMeasurementConfig::kRoutine and RunSelectedRoutine() to repurpose this mode.")) return false;
         if (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
         {
-            if (!WriteEvent("summary", "The default routine enables the mission fan, ramps circle speed without a software ceiling, and if speed plateaus before slip it tightens curvature until sustained encoder-vs-gyro/IMU mismatch indicates traction loss.")) return false;
-            if (!WriteEvent("summary", "Use traction_limit_result and the last steady samples before it to estimate the maximum sustainable circle speed, yaw rate, and lateral acceleration.")) return false;
+            if (!WriteEvent("summary", "Default routine enables the fan, ramps circle speed, then tightens curvature after speed plateaus until encoder-vs-gyro/IMU mismatch marks traction loss.")) return false;
+            if (!WriteEvent("summary", "Use traction_limit_result and the last steady samples to estimate max sustainable circle speed, yaw rate, and lateral acceleration.")) return false;
         }
         else
         {
-            if (!WriteEvent("summary", "The default routine logs stationary fan-off, fan-on, and recovery phases so you can quantify fan-induced sensor and vibration shifts.")) return false;
+            if (!WriteEvent("summary", "Default routine logs stationary fan-off, fan-on, and recovery phases to measure fan-induced sensor/vibration shifts.")) return false;
         }
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return false;
 
-        AuxMeasurementLogRow row{};
-        return _runtime.BeginUtilityDataLogSchema(row);
+        _logRow = {};
+        return _runtime.BeginUtilityDataLogSchema(_logRow);
     }
 
     bool BeginPhase(const char* name)
@@ -375,40 +454,6 @@ private:
     bool WriteEvent(const char* type, const char* message)
     {
         return _runtime.WriteTextLogEntry(micros(), type, message);
-    }
-
-    bool LogSample(
-        bool stationary,
-        bool fanEnabled,
-        uint32_t timestampUs,
-        uint32_t dtUs,
-        const PoseEstimate& pose,
-        const DriveBase& drive,
-        const DriveTelemetry& driveTelemetry,
-        const SensorSnapshot& sensorSnapshot,
-        float planarAccelMps2)
-    {
-        AuxMeasurementLogRow row{};
-        MazeMap::App::Internal::Runtime::PopulateAuxMeasurementLogRow(
-            row,
-            _sampleCount,
-            _phaseId,
-            stationary,
-            fanEnabled,
-            timestampUs,
-            dtUs,
-            pose,
-            drive,
-            driveTelemetry,
-            sensorSnapshot,
-            planarAccelMps2);
-        if (!_runtime.LogUtilityDataRow(row))
-        {
-            return false;
-        }
-
-        ++_sampleCount;
-        return true;
     }
 
     void ServiceLog()
@@ -450,22 +495,6 @@ private:
         {
             _holdPhaseState.started = true;
             _holdPhaseState.startMs = millis();
-        }
-
-        const float planarAccelMps2 = state.sensors.planarAccelMps2;
-        if (!LogSample(
-                _holdPhaseState.stationary,
-                _fanEnabled,
-                state.tickStartUs,
-                state.dtUs,
-                state.estimate,
-                _runtime.Drive(),
-                state.driveTelemetry,
-                state.sensors,
-                planarAccelMps2))
-        {
-            services.Fault("Failed to write auxiliary measurement sample");
-            return LoopController::ControlVector::Brake;
         }
 
         if (static_cast<unsigned long>(millis() - _holdPhaseState.startMs) >= _holdPhaseState.durationMs)
@@ -559,21 +588,6 @@ private:
             planarAccelMps2);
         _turningTractionState.lastMetrics = metrics;
         _turningTractionState.lastPlanarAccelMps2 = planarAccelMps2;
-
-        if (!LogSample(
-                false,
-                _fanEnabled,
-                state.tickStartUs,
-                state.dtUs,
-                state.estimate,
-                _runtime.Drive(),
-                state.driveTelemetry,
-                sensorSnapshot,
-                planarAccelMps2))
-        {
-            services.Fault("Failed to write turning traction sample");
-            return LoopController::ControlVector::Brake;
-        }
 
         const bool slipDetected = MazeMap::IsTurningTractionLossDetected(
             metrics,
@@ -770,7 +784,7 @@ namespace MazeMap::App::Internal
             "AuxMeasurementController.cpp",
             "startup settle; selected auxiliary routine; final log close",
             "AuxMeasurementConfig; shared mission drive and sensor tuning",
-            "AuxMeasurementConfig::kRoutine selects the auxiliary scenario",
+            "AuxMeasurementConfig::kRoutine selects the scenario",
             "aux%03u.mmlog or aux_measurement_log.mmlog",
         };
         return descriptor;

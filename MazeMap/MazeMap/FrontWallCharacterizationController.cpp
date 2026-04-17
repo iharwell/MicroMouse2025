@@ -55,7 +55,7 @@ public:
         (void)ResetStartupTrace("mode:front_wall_characterization");
         (void)_runtime.AppendTextLogLine("Front wall characterization mode");
         (void)_runtime.AppendTextLogLine("Enter by shorting pins 39-40 at boot.");
-        (void)_runtime.AppendTextLogLine("Place the robot with its nose touching a wall, keep the area dark, then power on.");
+        (void)_runtime.AppendTextLogLine("Place the nose on a wall in a dark area, then power on.");
         AppendStartupTrace("front_wall_characterization:begin");
         AppendStartupTrace("front_wall_characterization:sd_ready_wait_begin");
         (void)_runtime.AppendTextLogFormatted(
@@ -82,7 +82,7 @@ public:
                 storedCurve.terminalDistanceM,
                 storedCurve.commandedReverseSpeedMps);
             AppendStartupTrace(line);
-            (void)_runtime.AppendTextLogLine("Existing persisted front curve found; it will be replaced on success.");
+            (void)_runtime.AppendTextLogLine("Existing front-wall curve will be replaced on success.");
         }
 
         if (!driveOk)
@@ -209,6 +209,7 @@ private:
     RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
     bool _faulted;
+    FrontWallCharacterizationLogRow _logRow{};
     PhaseFn _phaseFn{};
     PauseAction _pauseAction{ PauseAction::None };
     HoldPhaseState _holdState{};
@@ -529,23 +530,24 @@ private:
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return Fail("Front wall characterization log metadata failed");
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return Fail("Front wall characterization log metadata failed");
 
-        FrontWallCharacterizationLogRow row{};
-        if (!_runtime.BeginUtilityDataLogSchema(row))
+        _logRow = {};
+        if (!_runtime.BeginUtilityDataLogSchema(_logRow))
         {
             return Fail("Front wall characterization log open failed");
         }
 
         for (uint16_t index = 0U; index < storage.sampleCount; ++index)
         {
-            row.index = index;
-            row.distance_m = storage.distanceM[index];
-            row.front_left_ambient = storage.frontLeftAmbientLight[index];
-            row.front_left_lit = storage.frontLeftLitLight[index];
-            row.front_left_delta = storage.frontLeftDifferentialLight[index];
-            row.front_right_ambient = storage.frontRightAmbientLight[index];
-            row.front_right_lit = storage.frontRightLitLight[index];
-            row.front_right_delta = storage.frontRightDifferentialLight[index];
-            if (!_runtime.LogUtilityDataRow(row))
+            _logRow = {};
+            _logRow.index = index;
+            _logRow.distance_m = storage.distanceM[index];
+            _logRow.front_left_ambient = storage.frontLeftAmbientLight[index];
+            _logRow.front_left_lit = storage.frontLeftLitLight[index];
+            _logRow.front_left_delta = storage.frontLeftDifferentialLight[index];
+            _logRow.front_right_ambient = storage.frontRightAmbientLight[index];
+            _logRow.front_right_lit = storage.frontRightLitLight[index];
+            _logRow.front_right_delta = storage.frontRightDifferentialLight[index];
+            if (!_runtime.LogUtilityDataRow(_logRow))
             {
                 return Fail("Front wall characterization log write failed");
             }
@@ -593,15 +595,15 @@ namespace MazeMap::App::Internal
             BootModeId::FrontWallCharacterization,
             BootModeCategory::Utility,
             "front_wall_characterization",
-            "Capture and persist the front-wall sensor response curve.",
-            "logging.txt; front-wall characterization mmlog; persisted front-wall curve",
+            "Capture and save the front-wall sensor response curve.",
+            "logging.txt; front-wall mmlog; saved front-wall curve",
             &GetFrontWallCharacterizationMode,
             "GetFrontWallCharacterizationMode",
             "FrontWallCharacterizationController.cpp",
-            "startup settle; reverse capture; persist; SD export; post-capture settle",
-            "FrontWallCharacterizationConfig; shared mission drive and sensor tuning",
-            "reverse speed, max travel, sample spacing, and collapse threshold are local to this characterization",
-            "fwc%03u.mmlog or front_wall_characterization.mmlog; EEPROM front-wall storage",
+            "startup settle; reverse capture; persist; export; settle",
+            "FrontWallCharacterizationConfig; mission drive/sensor tuning",
+            "Reverse speed, max travel, sample spacing, and collapse threshold are local.",
+            "fwc%03u.mmlog or front_wall_characterization.mmlog; EEPROM front-wall curve",
         };
         return descriptor;
     }

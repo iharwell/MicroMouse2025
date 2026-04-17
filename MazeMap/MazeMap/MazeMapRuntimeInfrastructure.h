@@ -1,6 +1,7 @@
 #pragma once
 // Declares runtime logging, telemetry, and measurement-capture infrastructure for the MazeMap application runtime.
 #include "DriveBase.h"
+#include "LoopController.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"
@@ -11,6 +12,10 @@
 // Private application infrastructure helpers for the MazeMap runtime.
 
 class RuntimeSensorSuite;
+namespace MazeMap::App::Internal
+{
+    class SharedRobotRuntime;
+}
 
 #define DIAGNOSTIC_LOG_FIELDS(X)                  \
     X(std::uint32_t, sample)                     \
@@ -85,6 +90,92 @@ MMLOG_DEFINE_ROW(DiagnosticLogRow, DIAGNOSTIC_LOG_FIELDS);
 
 namespace MazeMap::App::Internal::Runtime
 {
+    EXPORT bool BeginDiagnosticUtilityTelemetryLog(
+        MazeMap::App::Internal::SharedRobotRuntime& runtime,
+        RuntimeSensorSuite& sensors,
+        DiagnosticLogRow& row,
+        const char* fileName,
+        const char* modeName,
+        unsigned long& phaseId,
+        unsigned long& sampleCount);
+
+    inline void PopulateDiagnosticLogRow(
+        DiagnosticLogRow& row,
+        const std::uint32_t sample,
+        const std::uint32_t phaseId,
+        const bool stationary,
+        const LoopController::ModeState& state,
+        const DriveBase& drive)
+    {
+        row = {};
+        row.sample = sample;
+        row.phase_id = phaseId;
+        row.t_us = state.tickStartUs;
+        row.dt_us = state.dtUs;
+        row.stationary = stationary ? 1U : 0U;
+        row.pose_x_m = state.estimate.xMeters;
+        row.pose_y_m = state.estimate.yMeters;
+        row.yaw_rad = state.estimate.yawRad;
+        row.linear_speed_mps = state.estimate.linearSpeedMps;
+        row.angular_speed_radps = state.estimate.angularSpeedRadps;
+        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
+        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
+        row.left_drive_cmd = state.driveTelemetry.leftDriveCommand;
+        row.right_drive_cmd = state.driveTelemetry.rightDriveCommand;
+        row.left_encoder_count = state.driveTelemetry.leftEncoderCount;
+        row.right_encoder_count = state.driveTelemetry.rightEncoderCount;
+        row.left_distance_m = state.driveTelemetry.leftDistanceM;
+        row.right_distance_m = state.driveTelemetry.rightDistanceM;
+        row.left_velocity_mps = state.driveTelemetry.leftVelocityMps;
+        row.right_velocity_mps = state.driveTelemetry.rightVelocityMps;
+        row.imu_fr_status = state.sensors.imuFrontRight.status;
+        row.imu_fr_gyro_x = state.sensors.imuFrontRight.gyroX;
+        row.imu_fr_gyro_y = state.sensors.imuFrontRight.gyroY;
+        row.imu_fr_gyro_z = state.sensors.imuFrontRight.gyroZ;
+        row.imu_fr_accel_x = state.sensors.imuFrontRight.accelX;
+        row.imu_fr_accel_y = state.sensors.imuFrontRight.accelY;
+        row.imu_fr_accel_z = state.sensors.imuFrontRight.accelZ;
+        row.imu_fr_temp = state.sensors.imuFrontRight.temp;
+        row.imu_fr_int = state.sensors.imuFrontRight.interruptHigh ? 1U : 0U;
+        row.imu_bl_status = state.sensors.imuBackLeft.status;
+        row.imu_bl_gyro_x = state.sensors.imuBackLeft.gyroX;
+        row.imu_bl_gyro_y = state.sensors.imuBackLeft.gyroY;
+        row.imu_bl_gyro_z = state.sensors.imuBackLeft.gyroZ;
+        row.imu_bl_accel_x = state.sensors.imuBackLeft.accelX;
+        row.imu_bl_accel_y = state.sensors.imuBackLeft.accelY;
+        row.imu_bl_accel_z = state.sensors.imuBackLeft.accelZ;
+        row.imu_bl_temp = state.sensors.imuBackLeft.temp;
+        row.imu_bl_int = state.sensors.imuBackLeft.interruptHigh ? 1U : 0U;
+        row.ws_fl_ambient = state.sensors.frontLeft.ambientLight;
+        row.ws_fl_lit = state.sensors.frontLeft.litLight;
+        row.ws_fl_delta = state.sensors.frontLeft.differentialLight;
+        row.ws_fl_raw_distance_m = state.sensors.frontLeft.rawDistanceM;
+        row.ws_fl_distance_m = state.sensors.frontLeft.distanceM;
+        row.ws_fr_ambient = state.sensors.frontRight.ambientLight;
+        row.ws_fr_lit = state.sensors.frontRight.litLight;
+        row.ws_fr_delta = state.sensors.frontRight.differentialLight;
+        row.ws_fr_raw_distance_m = state.sensors.frontRight.rawDistanceM;
+        row.ws_fr_distance_m = state.sensors.frontRight.distanceM;
+        row.ws_sl_ambient = state.sensors.sideLeft.ambientLight;
+        row.ws_sl_lit = state.sensors.sideLeft.litLight;
+        row.ws_sl_delta = state.sensors.sideLeft.differentialLight;
+        row.ws_sl_raw_distance_m = state.sensors.sideLeft.rawDistanceM;
+        row.ws_sl_distance_m = state.sensors.sideLeft.distanceM;
+        row.ws_sr_ambient = state.sensors.sideRight.ambientLight;
+        row.ws_sr_lit = state.sensors.sideRight.litLight;
+        row.ws_sr_delta = state.sensors.sideRight.differentialLight;
+        row.ws_sr_raw_distance_m = state.sensors.sideRight.rawDistanceM;
+        row.ws_sr_distance_m = state.sensors.sideRight.distanceM;
+        row.front_wall = state.sensors.frontWall ? 1U : 0U;
+        row.left_wall = state.sensors.leftWall ? 1U : 0U;
+        row.right_wall = state.sensors.rightWall ? 1U : 0U;
+        row.corridor_error_m = state.sensors.corridorErrorM;
+        row.front_skew_m = state.sensors.frontSkewM;
+        row.gyro_bias_radps = state.sensors.gyroBiasRadps;
+        row.gyro_raw_radps = state.sensors.gyroRawRadps;
+        row.gyro_radps = state.sensors.gyroRadps;
+    }
+
     inline bool WriteMmLogAccelBiasMetadata(
         MazeMap::mmlog::MmLogLogger& log,
         const RuntimeSensorSuite& sensors)
@@ -232,85 +323,6 @@ namespace MazeMap::App::Internal::Runtime
         return true;
     }
 
-    inline void PopulateDiagnosticLogRow(
-        DiagnosticLogRow& row,
-        unsigned long sampleCount,
-        unsigned long phaseId,
-        bool stationary,
-        uint32_t timestampUs,
-        uint32_t dtUs,
-        const PoseEstimate& pose,
-        const DriveBase& drive,
-        const DriveTelemetry& driveTelemetry,
-        const SensorSnapshot& sensorSnapshot)
-    {
-        row.sample = static_cast<std::uint32_t>(sampleCount);
-        row.phase_id = static_cast<std::uint32_t>(phaseId);
-        row.t_us = timestampUs;
-        row.dt_us = dtUs;
-        row.stationary = stationary ? 1U : 0U;
-        row.pose_x_m = pose.xMeters;
-        row.pose_y_m = pose.yMeters;
-        row.yaw_rad = pose.yawRad;
-        row.linear_speed_mps = pose.linearSpeedMps;
-        row.angular_speed_radps = pose.angularSpeedRadps;
-        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
-        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
-        row.left_drive_cmd = driveTelemetry.leftDriveCommand;
-        row.right_drive_cmd = driveTelemetry.rightDriveCommand;
-        row.left_encoder_count = driveTelemetry.leftEncoderCount;
-        row.right_encoder_count = driveTelemetry.rightEncoderCount;
-        row.left_distance_m = driveTelemetry.leftDistanceM;
-        row.right_distance_m = driveTelemetry.rightDistanceM;
-        row.left_velocity_mps = driveTelemetry.leftVelocityMps;
-        row.right_velocity_mps = driveTelemetry.rightVelocityMps;
-        row.imu_fr_status = sensorSnapshot.imuFrontRight.status;
-        row.imu_fr_gyro_x = sensorSnapshot.imuFrontRight.gyroX;
-        row.imu_fr_gyro_y = sensorSnapshot.imuFrontRight.gyroY;
-        row.imu_fr_gyro_z = sensorSnapshot.imuFrontRight.gyroZ;
-        row.imu_fr_accel_x = sensorSnapshot.imuFrontRight.accelX;
-        row.imu_fr_accel_y = sensorSnapshot.imuFrontRight.accelY;
-        row.imu_fr_accel_z = sensorSnapshot.imuFrontRight.accelZ;
-        row.imu_fr_temp = sensorSnapshot.imuFrontRight.temp;
-        row.imu_fr_int = sensorSnapshot.imuFrontRight.interruptHigh ? 1U : 0U;
-        row.imu_bl_status = sensorSnapshot.imuBackLeft.status;
-        row.imu_bl_gyro_x = sensorSnapshot.imuBackLeft.gyroX;
-        row.imu_bl_gyro_y = sensorSnapshot.imuBackLeft.gyroY;
-        row.imu_bl_gyro_z = sensorSnapshot.imuBackLeft.gyroZ;
-        row.imu_bl_accel_x = sensorSnapshot.imuBackLeft.accelX;
-        row.imu_bl_accel_y = sensorSnapshot.imuBackLeft.accelY;
-        row.imu_bl_accel_z = sensorSnapshot.imuBackLeft.accelZ;
-        row.imu_bl_temp = sensorSnapshot.imuBackLeft.temp;
-        row.imu_bl_int = sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
-        row.ws_fl_ambient = sensorSnapshot.frontLeft.ambientLight;
-        row.ws_fl_lit = sensorSnapshot.frontLeft.litLight;
-        row.ws_fl_delta = sensorSnapshot.frontLeft.differentialLight;
-        row.ws_fl_raw_distance_m = sensorSnapshot.frontLeft.rawDistanceM;
-        row.ws_fl_distance_m = sensorSnapshot.frontLeft.distanceM;
-        row.ws_fr_ambient = sensorSnapshot.frontRight.ambientLight;
-        row.ws_fr_lit = sensorSnapshot.frontRight.litLight;
-        row.ws_fr_delta = sensorSnapshot.frontRight.differentialLight;
-        row.ws_fr_raw_distance_m = sensorSnapshot.frontRight.rawDistanceM;
-        row.ws_fr_distance_m = sensorSnapshot.frontRight.distanceM;
-        row.ws_sl_ambient = sensorSnapshot.sideLeft.ambientLight;
-        row.ws_sl_lit = sensorSnapshot.sideLeft.litLight;
-        row.ws_sl_delta = sensorSnapshot.sideLeft.differentialLight;
-        row.ws_sl_raw_distance_m = sensorSnapshot.sideLeft.rawDistanceM;
-        row.ws_sl_distance_m = sensorSnapshot.sideLeft.distanceM;
-        row.ws_sr_ambient = sensorSnapshot.sideRight.ambientLight;
-        row.ws_sr_lit = sensorSnapshot.sideRight.litLight;
-        row.ws_sr_delta = sensorSnapshot.sideRight.differentialLight;
-        row.ws_sr_raw_distance_m = sensorSnapshot.sideRight.rawDistanceM;
-        row.ws_sr_distance_m = sensorSnapshot.sideRight.distanceM;
-        row.front_wall = sensorSnapshot.frontWall ? 1U : 0U;
-        row.left_wall = sensorSnapshot.leftWall ? 1U : 0U;
-        row.right_wall = sensorSnapshot.rightWall ? 1U : 0U;
-        row.corridor_error_m = sensorSnapshot.corridorErrorM;
-        row.front_skew_m = sensorSnapshot.frontSkewM;
-        row.gyro_bias_radps = sensorSnapshot.gyroBiasRadps;
-        row.gyro_raw_radps = sensorSnapshot.gyroRawRadps;
-        row.gyro_radps = sensorSnapshot.gyroRadps;
-    }
 }
 
 inline bool IsInterRunServiceJumperInstalled()
@@ -1129,90 +1141,6 @@ MMLOG_DEFINE_ROW(AuxMeasurementLogRow, AUX_MEASUREMENT_LOG_FIELDS);
 
 namespace MazeMap::App::Internal::Runtime
 {
-    inline void PopulateAuxMeasurementLogRow(
-        AuxMeasurementLogRow& row,
-        unsigned long sampleCount,
-        unsigned long phaseId,
-        bool stationary,
-        bool fanEnabled,
-        uint32_t timestampUs,
-        uint32_t dtUs,
-        const PoseEstimate& pose,
-        const DriveBase& drive,
-        const DriveTelemetry& driveTelemetry,
-        const SensorSnapshot& sensorSnapshot,
-        float planarAccelMps2)
-    {
-        row.sample = static_cast<std::uint32_t>(sampleCount);
-        row.phase_id = static_cast<std::uint32_t>(phaseId);
-        row.t_us = timestampUs;
-        row.dt_us = dtUs;
-        row.stationary = stationary ? 1U : 0U;
-        row.fan_enabled = fanEnabled ? 1U : 0U;
-        row.pose_x_m = pose.xMeters;
-        row.pose_y_m = pose.yMeters;
-        row.yaw_rad = pose.yawRad;
-        row.linear_speed_mps = pose.linearSpeedMps;
-        row.angular_speed_radps = pose.angularSpeedRadps;
-        row.planar_accel_mps2 = planarAccelMps2;
-        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
-        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
-        row.left_drive_cmd = driveTelemetry.leftDriveCommand;
-        row.right_drive_cmd = driveTelemetry.rightDriveCommand;
-        row.left_encoder_count = driveTelemetry.leftEncoderCount;
-        row.right_encoder_count = driveTelemetry.rightEncoderCount;
-        row.left_distance_m = driveTelemetry.leftDistanceM;
-        row.right_distance_m = driveTelemetry.rightDistanceM;
-        row.left_velocity_mps = driveTelemetry.leftVelocityMps;
-        row.right_velocity_mps = driveTelemetry.rightVelocityMps;
-        row.imu_fr_status = sensorSnapshot.imuFrontRight.status;
-        row.imu_fr_gyro_x = sensorSnapshot.imuFrontRight.gyroX;
-        row.imu_fr_gyro_y = sensorSnapshot.imuFrontRight.gyroY;
-        row.imu_fr_gyro_z = sensorSnapshot.imuFrontRight.gyroZ;
-        row.imu_fr_accel_x = sensorSnapshot.imuFrontRight.accelX;
-        row.imu_fr_accel_y = sensorSnapshot.imuFrontRight.accelY;
-        row.imu_fr_accel_z = sensorSnapshot.imuFrontRight.accelZ;
-        row.imu_fr_temp = sensorSnapshot.imuFrontRight.temp;
-        row.imu_fr_int = sensorSnapshot.imuFrontRight.interruptHigh ? 1U : 0U;
-        row.imu_bl_status = sensorSnapshot.imuBackLeft.status;
-        row.imu_bl_gyro_x = sensorSnapshot.imuBackLeft.gyroX;
-        row.imu_bl_gyro_y = sensorSnapshot.imuBackLeft.gyroY;
-        row.imu_bl_gyro_z = sensorSnapshot.imuBackLeft.gyroZ;
-        row.imu_bl_accel_x = sensorSnapshot.imuBackLeft.accelX;
-        row.imu_bl_accel_y = sensorSnapshot.imuBackLeft.accelY;
-        row.imu_bl_accel_z = sensorSnapshot.imuBackLeft.accelZ;
-        row.imu_bl_temp = sensorSnapshot.imuBackLeft.temp;
-        row.imu_bl_int = sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
-        row.ws_fl_ambient = sensorSnapshot.frontLeft.ambientLight;
-        row.ws_fl_lit = sensorSnapshot.frontLeft.litLight;
-        row.ws_fl_delta = sensorSnapshot.frontLeft.differentialLight;
-        row.ws_fl_raw_distance_m = sensorSnapshot.frontLeft.rawDistanceM;
-        row.ws_fl_distance_m = sensorSnapshot.frontLeft.distanceM;
-        row.ws_fr_ambient = sensorSnapshot.frontRight.ambientLight;
-        row.ws_fr_lit = sensorSnapshot.frontRight.litLight;
-        row.ws_fr_delta = sensorSnapshot.frontRight.differentialLight;
-        row.ws_fr_raw_distance_m = sensorSnapshot.frontRight.rawDistanceM;
-        row.ws_fr_distance_m = sensorSnapshot.frontRight.distanceM;
-        row.ws_sl_ambient = sensorSnapshot.sideLeft.ambientLight;
-        row.ws_sl_lit = sensorSnapshot.sideLeft.litLight;
-        row.ws_sl_delta = sensorSnapshot.sideLeft.differentialLight;
-        row.ws_sl_raw_distance_m = sensorSnapshot.sideLeft.rawDistanceM;
-        row.ws_sl_distance_m = sensorSnapshot.sideLeft.distanceM;
-        row.ws_sr_ambient = sensorSnapshot.sideRight.ambientLight;
-        row.ws_sr_lit = sensorSnapshot.sideRight.litLight;
-        row.ws_sr_delta = sensorSnapshot.sideRight.differentialLight;
-        row.ws_sr_raw_distance_m = sensorSnapshot.sideRight.rawDistanceM;
-        row.ws_sr_distance_m = sensorSnapshot.sideRight.distanceM;
-        row.front_wall = sensorSnapshot.frontWall ? 1U : 0U;
-        row.left_wall = sensorSnapshot.leftWall ? 1U : 0U;
-        row.right_wall = sensorSnapshot.rightWall ? 1U : 0U;
-        row.corridor_error_m = sensorSnapshot.corridorErrorM;
-        row.front_skew_m = sensorSnapshot.frontSkewM;
-        row.gyro_bias_radps = sensorSnapshot.gyroBiasRadps;
-        row.gyro_raw_radps = sensorSnapshot.gyroRawRadps;
-        row.gyro_radps = sensorSnapshot.gyroRadps;
-    }
-
 }
 
 

@@ -4,6 +4,7 @@
 #include "EstimatorTestSupport.h"
 #include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\OpenLoopDriveCommand.h"
+#include "..\MazeMap\PlantModel.h"
 
 #include <cmath>
 #include <cstdint>
@@ -127,7 +128,8 @@ namespace MazeMap
     public:
         TEST_METHOD(DriveBaseDeltaCommandStaysSymmetricAcrossWheelSpeedMismatch)
         {
-            DriveBase drive;
+            PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
 
             PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
@@ -144,7 +146,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBaseDeltaCommandHeadingHoldStaysSymmetricWhenAlreadyAligned)
         {
-            DriveBase drive;
+            PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
 
             PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
@@ -161,8 +164,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBaseDeltaCommandRawMatchesPlantFeedforwardAtSteadyForwardTarget)
         {
-            DriveBase drive;
             PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -188,8 +191,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBaseDeltaCommandCombinedRawMatchesPlantFeedforwardAtSteadyTarget)
         {
-            DriveBase drive;
             PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -217,8 +220,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBaseDeltaYawRateCommandRawMatchesPlantFeedforwardAtSteadyYawRateTarget)
         {
-            DriveBase drive;
             PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -244,8 +247,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBasePointCommandRawMatchesPlantVelocityTargetFeedforwardAtForwardTarget)
         {
-            DriveBase drive;
             PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -269,8 +272,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBasePointCommandCombinedRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
-            DriveBase drive;
             PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -295,8 +298,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBasePointYawRateCommandRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
-            DriveBase drive;
             PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -320,7 +323,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBasePointCommandManeuverPointMatchesScalarTargets)
         {
-            DriveBase drive;
+            PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.15f), nullptr, nullptr);
@@ -346,7 +350,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBasePointCommandManeuverPointRejectsNonFiniteTargets)
         {
-            DriveBase drive;
+            PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
@@ -369,7 +374,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBasePointCommandImuYawTrackingMatchesWheelOnlyAtTargetYawRate)
         {
-            DriveBase drive;
+            PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
@@ -394,7 +400,8 @@ namespace MazeMap
 
         TEST_METHOD(DriveBasePointCommandImuYawTrackingChangesCommandWhenYawRateErrorExists)
         {
-            DriveBase drive;
+            PlantModel plant;
+            DriveBase drive(plant);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.40f), nullptr, nullptr);

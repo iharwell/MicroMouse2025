@@ -13,7 +13,7 @@ namespace MazeMap::App::Internal
     // authoritative owner. Do not add public per-tick stepping APIs here. A public RunOneTick /
     // Step / Advance surface would hand cadence ownership back to callers and reduce this class to
     // a bad timer wrapper that can only imitate a real control-loop authority poorly.
-    class LoopController final
+    class EXPORT LoopController final
     {
     public:
         enum class WallMask : std::uint8_t

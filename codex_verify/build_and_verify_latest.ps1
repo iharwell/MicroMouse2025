@@ -1,4 +1,6 @@
 param(
+    [ValidateSet('BuildOnly', 'VerifyOnly', 'BuildAndVerify')]
+    [string]$Mode = 'BuildAndVerify',
     [ValidateSet('Build', 'Rebuild')]
     [string]$HostBuildTarget = 'Build',
     [ValidateSet('Incremental', 'ProjectDefault')]
@@ -13,9 +15,51 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
 $runStamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
 $defaultLogDirectory = Join-Path $scriptRoot 'logs'
+$requiresBuild = $Mode -ne 'VerifyOnly'
+$requiresTests = $Mode -ne 'BuildOnly'
+$artifactVerb = if ($requiresBuild) { 'Built' } else { 'Verified' }
+
+switch ($Mode) {
+    'BuildOnly' {
+        $logFilePrefix = 'build_latest_'
+        $logTitle = 'Build latest log'
+        $logPathLabel = 'Build log'
+        $launcherStepLabel = 'Checking build launcher'
+        $launcherSuccessLabel = 'Build launcher check passed.'
+        $modeWrapperPath = Join-Path $scriptRoot 'build_latest.cmd'
+        $launcherEnvironmentVariables = @(
+            'MM_BUILD_LATEST_LAUNCHED_FROM_CMD',
+            'MM_BUILD_AND_VERIFY_LAUNCHED_FROM_CMD'
+        )
+        $finalStepLabel = 'Build completed'
+    }
+    'VerifyOnly' {
+        $logFilePrefix = 'verify_latest_build_'
+        $logTitle = 'Verify latest build log'
+        $logPathLabel = 'Verify log'
+        $launcherStepLabel = 'Checking verify launcher'
+        $launcherSuccessLabel = 'Verify launcher check passed.'
+        $modeWrapperPath = Join-Path $scriptRoot 'verify_latest_build.cmd'
+        $launcherEnvironmentVariables = @(
+            'MM_VERIFY_LAUNCHED_FROM_CMD',
+            'MM_BUILD_AND_VERIFY_LAUNCHED_FROM_CMD'
+        )
+        $finalStepLabel = 'Verify completed'
+    }
+    default {
+        $logFilePrefix = 'build_and_verify_latest_'
+        $logTitle = 'Build and verify latest log'
+        $logPathLabel = 'Build-and-verify log'
+        $launcherStepLabel = 'Checking build-and-verify launcher'
+        $launcherSuccessLabel = 'Build-and-verify launcher check passed.'
+        $modeWrapperPath = Join-Path $scriptRoot 'build_and_verify_latest.cmd'
+        $launcherEnvironmentVariables = @('MM_BUILD_AND_VERIFY_LAUNCHED_FROM_CMD')
+        $finalStepLabel = 'Build and verify completed'
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($LogFilePath)) {
-    $LogFilePath = Join-Path $defaultLogDirectory ('build_and_verify_latest_' + $runStamp + '.txt')
+    $LogFilePath = Join-Path $defaultLogDirectory ($logFilePrefix + $runStamp + '.txt')
 }
 elseif (-not [System.IO.Path]::IsPathRooted($LogFilePath)) {
     $LogFilePath = Join-Path $repoRoot $LogFilePath
@@ -28,9 +72,10 @@ if (-not [string]::IsNullOrWhiteSpace($logDirectory)) {
 }
 
 @(
-    'Build and verify latest log'
+    $logTitle
     ('Start time: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff zzz'))
     ('Repository: ' + $repoRoot)
+    ('Mode: ' + $Mode)
     ''
 ) | Set-Content -LiteralPath $LogFilePath -Encoding UTF8
 
@@ -92,7 +137,7 @@ function Append-FileToLog {
     }
 }
 
-Write-LogLine ("Build-and-verify log: {0}" -f $LogFilePath) 'DarkCyan'
+Write-LogLine ("{0}: {1}" -f $logPathLabel, $LogFilePath) 'DarkCyan'
 $script:SuppressTerminalErrorSummary = $false
 $scriptExitCode = 0
 
@@ -123,22 +168,43 @@ function Test-IsCodexShell {
     return ($env:CODEX_SHELL -eq '1') -or (-not [string]::IsNullOrWhiteSpace($env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE))
 }
 
-function Assert-SupportedBuildAndVerifyLauncher {
+function Assert-SupportedLauncher {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$WrapperPath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$AcceptedEnvironmentVariables,
+        [switch]$SuggestElevation
+    )
+
     if (-not (Test-IsCodexShell)) {
         return
     }
 
-    if ($env:MM_BUILD_AND_VERIFY_LAUNCHED_FROM_CMD -eq '1') {
-        return
+    foreach ($environmentVariable in $AcceptedEnvironmentVariables) {
+        $environmentEntry = Get-Item -LiteralPath ('Env:' + $environmentVariable) -ErrorAction SilentlyContinue
+        if ($null -ne $environmentEntry -and $environmentEntry.Value -eq '1') {
+            return
+        }
     }
 
-    $wrapperPath = Join-Path $scriptRoot 'build_and_verify_latest.cmd'
-    throw ('ELEVATION_REQUIRED: Inside Codex, launch "' +
-        $wrapperPath +
-        '" and request elevation for that command. Do not invoke build_and_verify_latest.ps1 directly from Codex or bypass it with direct msbuild, arduino-cli, or vstest commands.')
+    if ($SuggestElevation) {
+        throw ('ELEVATION_REQUIRED: Inside Codex, launch "' +
+            $WrapperPath +
+            '" and request elevation for that command. Do not invoke build_and_verify_latest.ps1 directly from Codex or bypass it with direct msbuild, arduino-cli, or vstest commands.')
+    }
+
+    throw ('LAUNCHER_REQUIRED: Inside Codex, launch "' +
+        $WrapperPath +
+        '". Do not invoke build_and_verify_latest.ps1 directly from Codex or bypass it with direct msbuild, arduino-cli, or vstest commands.')
 }
 
-function Assert-UnsandboxedVerifyEnvironment {
+function Assert-UnsandboxedBuildEnvironment {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$WrapperPath
+    )
+
     $microsoftSdksRoot = Join-Path $env:LOCALAPPDATA 'Microsoft SDKs'
     Assert-PathExists -Path $microsoftSdksRoot -Description 'Microsoft SDKs directory'
 
@@ -151,7 +217,9 @@ function Assert-UnsandboxedVerifyEnvironment {
         if ($isAccessDenied) {
             throw ('ELEVATION_REQUIRED: build_and_verify_latest.ps1 must be run elevated outside the Codex sandbox because the sandbox blocks access to "' +
                 $microsoftSdksRoot +
-                '", which forces a full host rebuild. Re-run this build-and-verify flow through build_and_verify_latest.cmd with elevated permissions; do not bypass it with direct msbuild, arduino-cli, or vstest commands.')
+                '", which forces a full host rebuild. Re-run this flow through ' +
+                $WrapperPath +
+                ' with elevated permissions; do not bypass it with direct msbuild, arduino-cli, or vstest commands.')
         }
 
         throw
@@ -466,6 +534,235 @@ function Test-IsPathUnderRoot {
     return $fullPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-RelativePathWithinRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    if (-not (Test-IsPathUnderRoot -Path $Path -Root $Root)) {
+        throw ("Path is not under root. Path={0}; Root={1}" -f $Path, $Root)
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $rootPrefix = [System.IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    if ($fullPath.Equals($rootPrefix.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+        return ''
+    }
+
+    return $fullPath.Substring($rootPrefix.Length)
+}
+
+function Get-TrackedPathsFromArduinoDependencyFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $trackedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $foundDependencySeparator = $false
+
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        $normalizedLine = $line.Trim()
+        if (-not $foundDependencySeparator) {
+            $separatorIndex = $normalizedLine.IndexOf(':')
+            if ($separatorIndex -lt 0) {
+                continue
+            }
+
+            $normalizedLine = $normalizedLine.Substring($separatorIndex + 1).Trim()
+            $foundDependencySeparator = $true
+        }
+
+        $normalizedLine = $normalizedLine.TrimEnd('\').Trim()
+        if ([string]::IsNullOrWhiteSpace($normalizedLine)) {
+            continue
+        }
+
+        $candidatePath = $normalizedLine -replace '\\ ', ' '
+        if (-not [System.IO.Path]::IsPathRooted($candidatePath)) {
+            continue
+        }
+
+        try {
+            $fullPath = [System.IO.Path]::GetFullPath($candidatePath)
+        }
+        catch {
+            continue
+        }
+
+        [void]$trackedPaths.Add($fullPath)
+    }
+
+    return @($trackedPaths)
+}
+
+function Convert-ArduinoDependencyToRepoPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$CanonicalBuildPath,
+        [Parameter(Mandatory = $true)]
+        [string]$FirmwareSketchDir,
+        [Parameter(Mandatory = $true)]
+        [string]$SketchDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ArduinoEigenLibraryDir,
+        [Parameter(Mandatory = $true)]
+        [string]$EigenSourceRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$ArduinoStubHeaderPath
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    if (-not (Test-IsPathUnderRoot -Path $fullPath -Root $RepoRoot)) {
+        return $null
+    }
+
+    if (-not (Test-IsPathUnderRoot -Path $fullPath -Root $CanonicalBuildPath)) {
+        if (Test-IsPathUnderRoot -Path $fullPath -Root $ArduinoEigenLibraryDir) {
+            return $null
+        }
+
+        return $fullPath
+    }
+
+    if (Test-IsPathUnderRoot -Path $fullPath -Root $FirmwareSketchDir) {
+        $relativePath = Get-RelativePathWithinRoot -Path $fullPath -Root $FirmwareSketchDir
+        if ($relativePath.EndsWith('.ino.cpp', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $relativePath = $relativePath.Substring(0, $relativePath.Length - 4)
+        }
+
+        $candidatePath = Join-Path $SketchDir $relativePath
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return [System.IO.Path]::GetFullPath($candidatePath)
+        }
+
+        return $null
+    }
+
+    $arduinoEigenSourceRoot = Join-Path $ArduinoEigenLibraryDir 'src'
+    if (Test-IsPathUnderRoot -Path $fullPath -Root $arduinoEigenSourceRoot) {
+        $relativePath = Get-RelativePathWithinRoot -Path $fullPath -Root $arduinoEigenSourceRoot
+        if ([string]::IsNullOrWhiteSpace($relativePath) -or
+            $relativePath.Equals('Eigen.h', [System.StringComparison]::OrdinalIgnoreCase) -or
+            $relativePath.Equals('library.properties', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $null
+        }
+
+        $candidatePath = Join-Path $EigenSourceRoot $relativePath
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return [System.IO.Path]::GetFullPath($candidatePath)
+        }
+
+        return $null
+    }
+
+    $firmwarePchDir = Join-Path $CanonicalBuildPath 'firmware\pch'
+    if ((Test-IsPathUnderRoot -Path $fullPath -Root $firmwarePchDir) -and
+        $fullPath.EndsWith('Arduino.h', [System.StringComparison]::OrdinalIgnoreCase) -and
+        (Test-Path -LiteralPath $ArduinoStubHeaderPath -PathType Leaf)) {
+        return [System.IO.Path]::GetFullPath($ArduinoStubHeaderPath)
+    }
+
+    return $null
+}
+
+function Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FirmwareOutputDir,
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$CanonicalBuildPath,
+        [Parameter(Mandatory = $true)]
+        [string]$SketchDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ArduinoEigenLibraryDir,
+        [Parameter(Mandatory = $true)]
+        [string]$EigenSourceRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$ArduinoStubHeaderPath
+    )
+
+    $firmwareSketchDir = Join-Path $FirmwareOutputDir 'sketch'
+    Assert-PathExists -Path $firmwareSketchDir -Description 'Arduino sketch dependency directory'
+
+    $dependencyFiles = @(Get-ChildItem -LiteralPath $firmwareSketchDir -File -Filter '*.d')
+    if ($dependencyFiles.Count -eq 0) {
+        throw ("No Arduino dependency files were found under {0}" -f $firmwareSketchDir)
+    }
+
+    $repoLocalPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($dependencyFile in $dependencyFiles) {
+        foreach ($trackedPath in Get-TrackedPathsFromArduinoDependencyFile -Path $dependencyFile.FullName) {
+            $repoLocalPath = Convert-ArduinoDependencyToRepoPath `
+                -Path $trackedPath `
+                -RepoRoot $RepoRoot `
+                -CanonicalBuildPath $CanonicalBuildPath `
+                -FirmwareSketchDir $firmwareSketchDir `
+                -SketchDir $SketchDir `
+                -ArduinoEigenLibraryDir $ArduinoEigenLibraryDir `
+                -EigenSourceRoot $EigenSourceRoot `
+                -ArduinoStubHeaderPath $ArduinoStubHeaderPath
+            if ([string]::IsNullOrWhiteSpace($repoLocalPath)) {
+                continue
+            }
+
+            [void]$repoLocalPaths.Add($repoLocalPath)
+        }
+    }
+
+    $sketchEntryPoint = Join-Path $SketchDir 'MazeMap.ino'
+    if (Test-Path -LiteralPath $sketchEntryPoint -PathType Leaf) {
+        [void]$repoLocalPaths.Add([System.IO.Path]::GetFullPath($sketchEntryPoint))
+    }
+
+    if ($repoLocalPaths.Count -eq 0) {
+        throw ("No repo-local Arduino inputs were found in dependency files under {0}" -f $firmwareSketchDir)
+    }
+
+    $missingRepoLocalPaths = [System.Collections.Generic.List[string]]::new()
+    $latestWriteTime = [datetime]::MinValue
+    foreach ($repoLocalPath in $repoLocalPaths) {
+        if (-not (Test-Path -LiteralPath $repoLocalPath -PathType Leaf)) {
+            $missingRepoLocalPaths.Add($repoLocalPath)
+            continue
+        }
+
+        $item = Get-Item -LiteralPath $repoLocalPath
+        if ($item.LastWriteTime -gt $latestWriteTime) {
+            $latestWriteTime = $item.LastWriteTime
+        }
+    }
+
+    if ($missingRepoLocalPaths.Count -gt 0) {
+        $sampleMissingPaths = $missingRepoLocalPaths | Select-Object -First 5
+        $sampleText = $sampleMissingPaths -join ', '
+        if ($missingRepoLocalPaths.Count -gt $sampleMissingPaths.Count) {
+            $sampleText += (", ... ({0} missing total)" -f $missingRepoLocalPaths.Count)
+        }
+
+        throw ("Arduino dependency files reference missing repo-local inputs: {0}" -f $sampleText)
+    }
+
+    if ($latestWriteTime -eq [datetime]::MinValue) {
+        throw ("No repo-local Arduino inputs were found under {0}" -f $firmwareSketchDir)
+    }
+
+    return $latestWriteTime
+}
+
 function Get-LatestRepoInputWriteTimeFromProjectTLogs {
     param(
         [Parameter(Mandatory = $true)]
@@ -659,6 +956,70 @@ function Assert-HostReleaseIntermediatesIntact {
     )
 }
 
+function Assert-AndLogCurrentReleaseArtifacts {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArtifactVerb,
+        [Parameter(Mandatory = $true)]
+        [string]$FirmwareOutputDir,
+        [Parameter(Mandatory = $true)]
+        [string]$HexPath,
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$CanonicalBuildPath,
+        [Parameter(Mandatory = $true)]
+        [string]$SketchDir,
+        [Parameter(Mandatory = $true)]
+        [string]$ArduinoEigenLibraryDir,
+        [Parameter(Mandatory = $true)]
+        [string]$EigenSourceRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$ArduinoStubHeaderPath,
+        [Parameter(Mandatory = $true)]
+        [psobject]$MazeMapProject,
+        [Parameter(Mandatory = $true)]
+        [psobject]$MazeMapTestProject,
+        [Parameter(Mandatory = $true)]
+        [psobject]$MazeSimulationProject,
+        [Parameter(Mandatory = $true)]
+        [string]$MazeMapDllPath,
+        [Parameter(Mandatory = $true)]
+        [string]$TestDllPath,
+        [Parameter(Mandatory = $true)]
+        [string]$SimulationExePath
+    )
+
+    $firmwareSourceCutoff = Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles `
+        -FirmwareOutputDir $FirmwareOutputDir `
+        -RepoRoot $RepoRoot `
+        -CanonicalBuildPath $CanonicalBuildPath `
+        -SketchDir $SketchDir `
+        -ArduinoEigenLibraryDir $ArduinoEigenLibraryDir `
+        -EigenSourceRoot $EigenSourceRoot `
+        -ArduinoStubHeaderPath $ArduinoStubHeaderPath
+    $mazeMapSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeMapProject -RepoRoot $RepoRoot
+    $mazeMapTestSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeMapTestProject -RepoRoot $RepoRoot
+    $mazeSimulationSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeSimulationProject -RepoRoot $RepoRoot
+
+    $firmwareImage = Assert-ArtifactNotOlderThan -Path $HexPath -Description 'Compiled firmware image' -NotOlderThan $firmwareSourceCutoff
+    $mazeMapDll = Assert-ArtifactNotOlderThan -Path $MazeMapDllPath -Description 'Release MazeMap host binary' -NotOlderThan $mazeMapSourceCutoff
+    $simulationExe = Assert-ArtifactNotOlderThan -Path $SimulationExePath -Description 'Release MazeSimulation host binary' -NotOlderThan $mazeSimulationSourceCutoff
+    $testDll = Assert-ArtifactNotOlderThan -Path $TestDllPath -Description 'Release test binary' -NotOlderThan $mazeMapTestSourceCutoff
+
+    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $firmwareImage.FullName, $firmwareImage.LastWriteTime, $firmwareImage.Length) 'Green'
+    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $mazeMapDll.FullName, $mazeMapDll.LastWriteTime, $mazeMapDll.Length) 'Green'
+    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $testDll.FullName, $testDll.LastWriteTime, $testDll.Length) 'Green'
+    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $simulationExe.FullName, $simulationExe.LastWriteTime, $simulationExe.Length) 'Green'
+
+    return [pscustomobject]@{
+        FirmwareImage = $firmwareImage
+        MazeMapDll = $mazeMapDll
+        TestDll = $testDll
+        SimulationExe = $simulationExe
+    }
+}
+
 $arduinoCli = 'C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe'
 $visualStudioRoot = 'C:\Program Files\Microsoft Visual Studio\18\Community'
 $vsDevCmd = Join-Path $visualStudioRoot 'Common7\Tools\VsDevCmd.bat'
@@ -673,23 +1034,36 @@ $canonicalBuildPath = Join-Path $scriptRoot 'arduino_build'
 $firmwareOutputDir = Join-Path $canonicalBuildPath 'firmware'
 $buildPath = $firmwareOutputDir
 $hexPath = Join-Path $firmwareOutputDir 'MazeMap.ino.hex'
+$arduinoStubHeaderPath = Join-Path $scriptRoot 'Arduino.h'
 $mazeMapDllPath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeMap.dll'
 $testDllPath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeMapTest.dll'
 $simulationExePath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeSimulation.exe'
 $fqbn = 'teensy:avr:teensy41'
 $teensyBoardOptions = @('opt=o2lto')
 $teensyOptimizationProfile = 'O2 + LTO'
-$runStartedAt = Get-Date
-Assert-PathExists -Path $arduinoCli -Description 'Arduino CLI'
-Assert-PathExists -Path $vsDevCmd -Description 'Visual Studio developer command script'
-Assert-PathExists -Path $vstest -Description 'VSTest console'
 Assert-PathExists -Path $sketchDir -Description 'Arduino sketch directory'
 Assert-PathExists -Path $eigenIncludeDir -Description 'Shared Eigen include directory'
 Assert-PathExists -Path $solutionPath -Description 'MazeMap solution'
+Assert-PathExists -Path $arduinoStubHeaderPath -Description 'Arduino stub header'
+
+if ($requiresBuild) {
+    Assert-PathExists -Path $arduinoCli -Description 'Arduino CLI'
+    Assert-PathExists -Path $vsDevCmd -Description 'Visual Studio developer command script'
+}
+
+if ($requiresTests) {
+    Assert-PathExists -Path $vstest -Description 'VSTest console'
+}
 
 $eigenIncludeDir = (Resolve-Path -LiteralPath $eigenIncludeDir).Path
-$arduinoLibrariesDir = Ensure-ArduinoEigenLibrary -LibraryRoot $arduinoLibrariesDir -EigenSourceRoot $eigenIncludeDir
-$arduinoEigenLibraryDir = (Resolve-Path -LiteralPath $arduinoEigenLibraryDir).Path
+if ($requiresBuild) {
+    $arduinoLibrariesDir = Ensure-ArduinoEigenLibrary -LibraryRoot $arduinoLibrariesDir -EigenSourceRoot $eigenIncludeDir
+    $arduinoEigenLibraryDir = (Resolve-Path -LiteralPath $arduinoEigenLibraryDir).Path
+}
+else {
+    $arduinoLibrariesDir = [System.IO.Path]::GetFullPath($arduinoLibrariesDir)
+    $arduinoEigenLibraryDir = [System.IO.Path]::GetFullPath($arduinoEigenLibraryDir)
+}
 $mazeMapHostProject = [pscustomobject]@{
     Name = 'MazeMap'
     IntermediateDir = Join-Path $repoRoot 'MazeMap\MazeMap\x64\Release'
@@ -716,82 +1090,92 @@ $hostReleaseIntermediateProjects = @(
 
 Push-Location $repoRoot
 try {
-    Write-Step 'Checking build-and-verify launcher'
-    Assert-SupportedBuildAndVerifyLauncher
-    Write-LogLine 'Build-and-verify launcher check passed.' 'DarkCyan'
+    Write-Step $launcherStepLabel
+    Assert-SupportedLauncher -WrapperPath $modeWrapperPath -AcceptedEnvironmentVariables $launcherEnvironmentVariables -SuggestElevation:$requiresBuild
+    Write-LogLine $launcherSuccessLabel 'DarkCyan'
 
-    Write-Step 'Checking verify environment'
-    Assert-UnsandboxedVerifyEnvironment
-    Write-LogLine 'Host build environment access check passed.' 'DarkCyan'
+    if ($requiresBuild) {
+        Write-Step 'Checking build environment'
+        Assert-UnsandboxedBuildEnvironment -WrapperPath $modeWrapperPath
+        Write-LogLine 'Host build environment access check passed.' 'DarkCyan'
+    }
 
     Write-Step 'Checking host Release intermediates'
     Assert-HostReleaseIntermediatesIntact -Projects $hostReleaseIntermediateProjects
     Write-LogLine 'Host Release intermediate integrity check passed.' 'DarkCyan'
 
-    New-Item -ItemType Directory -Path $canonicalBuildPath -Force | Out-Null
-    New-Item -ItemType Directory -Path $buildPath -Force | Out-Null
-    New-Item -ItemType Directory -Path $firmwareOutputDir -Force | Out-Null
-    Write-LogLine ("Resetting upload artifact path: {0}" -f $hexPath) 'DarkCyan'
-    Remove-FileIfPresent -Path $hexPath
+    if ($requiresBuild) {
+        New-Item -ItemType Directory -Path $canonicalBuildPath -Force | Out-Null
+        New-Item -ItemType Directory -Path $buildPath -Force | Out-Null
+        New-Item -ItemType Directory -Path $firmwareOutputDir -Force | Out-Null
+        Write-LogLine ("Resetting upload artifact path: {0}" -f $hexPath) 'DarkCyan'
+        Remove-FileIfPresent -Path $hexPath
 
-    Write-Step 'Compiling the Teensy sketch'
-    Write-LogLine ("Teensy compile profile: {0} ({1})" -f $teensyOptimizationProfile, ($teensyBoardOptions -join ', ')) 'DarkCyan'
-    $teensyBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Invoke-External -FilePath $arduinoCli -Arguments @(
-        'compile',
-        '--fqbn', $fqbn,
-        '--board-options', ($teensyBoardOptions -join ','),
-        '--libraries', $arduinoLibrariesDir,
-        '--library', $arduinoEigenLibraryDir,
-        '--build-path', $buildPath,
-        $sketchDir
-    ) -SuccessTailLineCount 4 -SuccessTailHeader 'Teensy compile output tail:'
-    $teensyBuildStopwatch.Stop()
+        Write-Step 'Compiling the Teensy sketch'
+        Write-LogLine ("Teensy compile profile: {0} ({1})" -f $teensyOptimizationProfile, ($teensyBoardOptions -join ', ')) 'DarkCyan'
+        $teensyBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        Invoke-External -FilePath $arduinoCli -Arguments @(
+            'compile',
+            '--fqbn', $fqbn,
+            '--board-options', ($teensyBoardOptions -join ','),
+            '--libraries', $arduinoLibrariesDir,
+            '--library', $arduinoEigenLibraryDir,
+            '--build-path', $buildPath,
+            $sketchDir
+        ) -SuccessTailLineCount 4 -SuccessTailHeader 'Teensy compile output tail:'
+        $teensyBuildStopwatch.Stop()
+        Write-LogLine ("Teensy compile completed in {0:n1}s" -f $teensyBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
-    $firmwareImage = Assert-ArtifactNotOlderThan -Path $hexPath -Description 'Compiled firmware image' -NotOlderThan $runStartedAt
-    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $firmwareImage.FullName, $firmwareImage.LastWriteTime, $firmwareImage.Length) 'Green'
-    Write-LogLine ("Teensy compile completed in {0:n1}s" -f $teensyBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
-
-    Write-Step 'Building the Release solution'
-    Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
-    Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
-    $hostMsBuildArguments = @(
-        $solutionPath,
-        '/m',
-        ('/t:' + $HostBuildTarget),
-        '/p:Configuration=Release',
-        '/p:Platform=x64',
-        '/v:m'
-    )
-    if ($HostLtcgMode -eq 'Incremental') {
-        $hostMsBuildArguments += '/p:LinkTimeCodeGeneration=UseFastLinkTimeCodeGeneration'
+        Write-Step 'Building the Release solution'
+        Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
+        Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
+        $hostMsBuildArguments = @(
+            $solutionPath,
+            '/m',
+            ('/t:' + $HostBuildTarget),
+            '/p:Configuration=Release',
+            '/p:Platform=x64',
+            '/v:m'
+        )
+        if ($HostLtcgMode -eq 'Incremental') {
+            $hostMsBuildArguments += '/p:LinkTimeCodeGeneration=UseFastLinkTimeCodeGeneration'
+        }
+        $hostBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild {1}' -f $vsDevCmd, (New-MsBuildArgumentString -Arguments $hostMsBuildArguments))
+        $hostBuildStopwatch.Stop()
+        Write-LogLine ("Host build completed in {0:n1}s" -f $hostBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
     }
-    $hostBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild {1}' -f $vsDevCmd, (New-MsBuildArgumentString -Arguments $hostMsBuildArguments))
-    $hostBuildStopwatch.Stop()
 
-    $mazeMapSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $mazeMapHostProject -RepoRoot $repoRoot
-    $mazeMapTestSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $mazeMapTestHostProject -RepoRoot $repoRoot
-    $mazeSimulationSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $mazeSimulationHostProject -RepoRoot $repoRoot
+    Write-Step 'Checking latest release artifacts'
+    $releaseArtifacts = Assert-AndLogCurrentReleaseArtifacts `
+        -ArtifactVerb $artifactVerb `
+        -FirmwareOutputDir $firmwareOutputDir `
+        -HexPath $hexPath `
+        -RepoRoot $repoRoot `
+        -CanonicalBuildPath $canonicalBuildPath `
+        -SketchDir $sketchDir `
+        -ArduinoEigenLibraryDir $arduinoEigenLibraryDir `
+        -EigenSourceRoot $eigenIncludeDir `
+        -ArduinoStubHeaderPath $arduinoStubHeaderPath `
+        -MazeMapProject $mazeMapHostProject `
+        -MazeMapTestProject $mazeMapTestHostProject `
+        -MazeSimulationProject $mazeSimulationHostProject `
+        -MazeMapDllPath $mazeMapDllPath `
+        -TestDllPath $testDllPath `
+        -SimulationExePath $simulationExePath
 
-    $mazeMapDll = Assert-ArtifactNotOlderThan -Path $mazeMapDllPath -Description 'Release MazeMap host binary' -NotOlderThan $mazeMapSourceCutoff
-    $simulationExe = Assert-ArtifactNotOlderThan -Path $simulationExePath -Description 'Release MazeSimulation host binary' -NotOlderThan $mazeSimulationSourceCutoff
-    $testDll = Assert-ArtifactNotOlderThan -Path $testDllPath -Description 'Release test binary' -NotOlderThan $mazeMapTestSourceCutoff
-    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $mazeMapDll.FullName, $mazeMapDll.LastWriteTime, $mazeMapDll.Length) 'Green'
-    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $testDll.FullName, $testDll.LastWriteTime, $testDll.Length) 'Green'
-    Write-LogLine ("Built {0} ({1}, {2} bytes)" -f $simulationExe.FullName, $simulationExe.LastWriteTime, $simulationExe.Length) 'Green'
-    Write-LogLine ("Host build completed in {0:n1}s" -f $hostBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
+    if ($requiresTests) {
+        Write-Step 'Running the Release unit tests'
+        $testStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        Invoke-External -FilePath $vstest -Arguments @($releaseArtifacts.TestDll.FullName) -FailureConsoleOutputMode 'VSTestFailuresOnly'
+        $testStopwatch.Stop()
+        Write-LogLine ("Release tests completed in {0:n1}s" -f $testStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
+    }
 
-    Write-Step 'Running the Release unit tests'
-    $testStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Invoke-External -FilePath $vstest -Arguments @($testDll.FullName) -FailureConsoleOutputMode 'VSTestFailuresOnly'
-    $testStopwatch.Stop()
-    Write-LogLine ("Release tests completed in {0:n1}s" -f $testStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
-
-    Write-Step 'Build and test completed'
-    Write-LogLine ("Latest firmware image: {0}" -f $firmwareImage.FullName) 'Green'
-    Write-LogLine ("Release test binary: {0}" -f $testDll.FullName) 'Green'
-    Write-LogLine ("Build-and-verify log: {0}" -f $LogFilePath) 'Green'
+    Write-Step $finalStepLabel
+    Write-LogLine ("Latest firmware image: {0}" -f $releaseArtifacts.FirmwareImage.FullName) 'Green'
+    Write-LogLine ("Release test binary: {0}" -f $releaseArtifacts.TestDll.FullName) 'Green'
+    Write-LogLine ("{0}: {1}" -f $logPathLabel, $LogFilePath) 'Green'
 }
 catch {
     $scriptExitCode = 1

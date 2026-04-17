@@ -4,7 +4,9 @@
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
 #include "LoopController.h"
+#include "ManeuverExecutor.h"
 #include "MazeMapRuntimeInfrastructure.h"
+#include "PlantModel.h"
 #include "RuntimeBinaryLogSupport.h"
 
 #include <cmath>
@@ -421,7 +423,8 @@ namespace MazeMap::App::Internal
             , searchPathFinder(maze, speedVehicle)
             , speedPathFinder(maze, speedVehicle)
             , wallBeliefMap()
-            , drive()
+            , plantModel()
+            , drive(plantModel)
             , controlLoop()
             , sensors(speedVehicle, gWallDistanceCalibration)
             , dataLogger()
@@ -457,7 +460,9 @@ namespace MazeMap::App::Internal
         MazeMap::FloodFillPathFinder searchPathFinder;
         MazeMap::ManeuverPathFinder speedPathFinder;
         MazeMap::WallBeliefMap wallBeliefMap;
+        MazeMap::PlantModel plantModel;
         DriveBase drive;
+        ManeuverExecutor maneuverExecutor;
         LoopController controlLoop;
         RuntimeSensorSuite sensors;
         MazeMap::mmlog::MmLogLogger dataLogger;
@@ -480,6 +485,7 @@ namespace MazeMap::App::Internal
     SharedRobotRuntime::SharedRobotRuntime()
         : _impl(std::make_unique<Implementation>())
     {
+        _impl->maneuverExecutor.AttachRuntime(*this);
         _impl->controlLoop.AttachRuntime(*this);
     }
 
@@ -1098,6 +1104,11 @@ namespace MazeMap::App::Internal
     DriveBase& SharedRobotRuntime::Drive() noexcept
     {
         return _impl->drive;
+    }
+
+    ManeuverExecutor& SharedRobotRuntime::ManeuverExecutorService() noexcept
+    {
+        return _impl->maneuverExecutor;
     }
 
     LoopController& SharedRobotRuntime::ControlLoop() noexcept

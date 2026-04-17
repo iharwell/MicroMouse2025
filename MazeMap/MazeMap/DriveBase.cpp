@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "DriveBase.h"
 
+#include "PlantModel.h"
+
 MazeMap::OpenLoopDriveCommand DriveBase::DeltaCommand(
     float presentLinearSpeedMps,
     float desiredLongitudinalAccelMps2,
@@ -439,9 +441,8 @@ DriveBase::CommandContext DriveBase::CaptureCommandContext() const
     control.fanDutyCycle = GetMissionFanDutyCycle();
     control.batteryVoltageV = context.batteryVoltageV;
 
-    MazeMap::PlantModel plantModel;
     context.presentDerivatives =
-        plantModel.forwardStep(
+        _plantModel.forwardStep(
             context.presentState,
             control,
             prepared);
@@ -480,8 +481,7 @@ void DriveBase::ResolveWheelTargets(
     float unusedRightTargetAccelMps2 = 0.0f;
     float leftTargetOmegaRadps = 0.0f;
     float rightTargetOmegaRadps = 0.0f;
-    MazeMap::PlantModel plantModel;
-    plantModel.resolveWheelMotionTargets(
+    _plantModel.resolveWheelMotionTargets(
         desiredLinearSpeedMps,
         desiredYawRateRadps,
         0.0f,
@@ -508,8 +508,7 @@ void DriveBase::ResolveVelocityPointAcceleration(
     float& desiredLongitudinalAccelMps2) const noexcept
 {
     float unusedDesiredYawAccelRadps2 = 0.0f;
-    MazeMap::PlantModel plantModel;
-    plantModel.resolveVelocityTargetAccelerations(
+    _plantModel.resolveVelocityTargetAccelerations(
         context.presentLinearSpeedMps,
         desiredLinearSpeedMps,
         context.presentYawRateRadps,
@@ -527,8 +526,7 @@ void DriveBase::ResolveYawPointAcceleration(
     float& desiredYawAccelRadps2) const noexcept
 {
     float unusedDesiredLongitudinalAccelMps2 = 0.0f;
-    MazeMap::PlantModel plantModel;
-    plantModel.resolveVelocityTargetAccelerations(
+    _plantModel.resolveVelocityTargetAccelerations(
         context.presentLinearSpeedMps,
         context.presentLinearSpeedMps,
         context.presentYawRateRadps,
@@ -547,8 +545,7 @@ void DriveBase::ResolveVelocityPointAccelerations(
     float& desiredLongitudinalAccelMps2,
     float& desiredYawAccelRadps2) const noexcept
 {
-    MazeMap::PlantModel plantModel;
-    plantModel.resolveVelocityTargetAccelerations(
+    _plantModel.resolveVelocityTargetAccelerations(
         context.presentLinearSpeedMps,
         desiredLinearSpeedMps,
         context.presentYawRateRadps,
@@ -587,13 +584,12 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveRawAccelerationCommand(
         desiredYawAccelRadps2 :
         0.0f;
 
-    MazeMap::PlantModel plantModel;
     const bool isSteadyHoldRequest =
         (std::fabs(resolvedLongitudinalAccelMps2) <= 1.0e-5f) &&
         (std::fabs(resolvedYawAccelRadps2) <= 1.0e-5f);
     const MazeMap::DriveCommandSolution solution =
         isSteadyHoldRequest ?
-        plantModel.solveDriveCommandsForVelocityTarget(
+        _plantModel.solveDriveCommandsForVelocityTarget(
             resolvedPresentLinearSpeedMps,
             resolvedPresentLinearSpeedMps,
             resolvedPresentYawRateRadps,
@@ -602,7 +598,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveRawAccelerationCommand(
             GetMissionFanDutyCycle(),
             batteryVoltageV,
             ResolveCommandResponseTimeS()) :
-        plantModel.solveDriveCommands(
+        _plantModel.solveDriveCommands(
             resolvedPresentLinearSpeedMps,
             resolvedLongitudinalAccelMps2,
             resolvedPresentYawRateRadps,
@@ -621,9 +617,8 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveRawVelocityTargetCommand(
     float desiredLinearSpeedMps,
     float desiredYawRateRadps) const
 {
-    MazeMap::PlantModel plantModel;
     const MazeMap::DriveCommandSolution solution =
-        plantModel.solveDriveCommandsForVelocityTarget(
+        _plantModel.solveDriveCommandsForVelocityTarget(
             context.presentState,
             desiredLinearSpeedMps,
             desiredYawRateRadps,

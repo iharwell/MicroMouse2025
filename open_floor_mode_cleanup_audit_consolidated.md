@@ -57,11 +57,11 @@ Recommended cleanup:
 - Derive boot-reason strings from the registry entry rather than hard-coding pin numbers inside the mode.
 - Move the selector-removal timeout out of `OpenFloorMeasurementSpec`; it belongs with boot-mode selection metadata or a shared limit owner, not with open-floor motion/measurement definitions.
 
-### 3. Shared utility-mode lifecycle and shared utility-log session setup are still implemented locally in the controller
+### 3. Shared boot-mode lifecycle and shared log-session setup are still implemented locally in the controller
 
 Severity: Medium
 
-The repository already has a `BootUtilityModeFramework`, but it currently only wraps startup-trace logging. `OpenFloorMeasurementController` still owns the larger utility-mode lifecycle itself: fault-handler registration, hardware setup, drive/sensor initialization, fan policy, wall-calibration reset, teardown, and the full setup/close path for the runtime-owned utility log sessions. The same pattern is repeated in other utility modes, which means the cleanup threshold for shared framework ownership has already been crossed.
+The repository already has a `BootUtilityModeFramework`, but it currently only wraps startup-trace logging. `OpenFloorMeasurementController` still owns the larger boot-mode lifecycle itself: fault-handler registration, hardware setup, drive/sensor initialization, fan policy, wall-calibration reset, teardown, and the full setup/close path for the runtime-owned log sessions. The same pattern is repeated in other boot-selected modes, which means the cleanup threshold for shared framework ownership has already been crossed.
 
 Evidence:
 
@@ -73,8 +73,8 @@ Evidence:
 
 Recommended cleanup:
 
-- Expand `BootUtilityModeFramework` or one shared runtime helper so utility modes stop individually managing shared begin/fail/teardown behavior.
-- Move shared utility log session setup/teardown/failure handling out of `OpenFloorMeasurementController`.
+- Expand `BootUtilityModeFramework` or one shared runtime helper so boot-selected modes stop individually managing shared begin/fail/teardown behavior.
+- Move shared log-session setup/teardown/failure handling out of `OpenFloorMeasurementController`.
 - Keep only row schemas and truly open-floor-specific metadata local to the mode.
 
 ### 4. Active open-floor tuning still lives under stale and mixed `DiagnosticConfig` ownership

@@ -27,13 +27,13 @@ namespace MazeMap::App::Internal
             BootModeCategory::Utility,
             "corridor_repeatability",
             "Run the fixed-corridor mapping repeatability sweep.",
-            "logging.txt; corridor repeatability telemetry mmlog",
+            "logging.txt; corridor repeatability mmlog",
             &GetCorridorRepeatabilityMode,
             "GetCorridorRepeatabilityMode",
             "CorridorRepeatabilityMode.cpp",
-            "mission-family initialization; telemetry log setup; corridor speed passes",
-            "AuxMeasurementConfig corridor profile; CoreConfig mission tuning; Maneuver classes",
-            "corridor geometry, speed points, and repeatability limits are auxiliary-profile deltas",
+            "mission-family init; log setup; corridor speed passes",
+            "AuxMeasurementConfig corridor profile; CoreConfig mission tuning; Maneuvers",
+            "Corridor geometry, speed points, and repeatability limits are profile deltas",
             "corridor_repeatability.mmlog",
         };
         return descriptor;

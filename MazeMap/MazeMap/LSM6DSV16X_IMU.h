@@ -13,7 +13,7 @@
 namespace MazeMap
 {
     template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
-    class LSV6DSV16X_IMU
+    class LSM6DSV16X_IMU
     {
     public:
         static constexpr uint8_t WHO_AM_I_VALUE = 0x70;
@@ -260,7 +260,7 @@ namespace MazeMap
             uint8_t data_;
         };
 
-        LSV6DSV16X_IMU() = default;
+        LSM6DSV16X_IMU() = default;
 
         bool Begin()
         {
@@ -677,8 +677,6 @@ namespace MazeMap
         uint8_t last_who_am_i_ = 0U;
     };
 
-    template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
-    using LSM6DSV16X_IMU = LSV6DSV16X_IMU<CS_PIN, INT_PIN, MOSI_PIN, MISO_PIN, CLOCK_PIN>;
 }
 
 #else
@@ -686,7 +684,7 @@ namespace MazeMap
 namespace MazeMap
 {
     template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
-    class LSV6DSV16X_IMU
+    class LSM6DSV16X_IMU
     {
     public:
         enum class BeginFailureReason : uint8_t
@@ -812,7 +810,7 @@ namespace MazeMap
             int16_t z = 0;
         };
 
-        LSV6DSV16X_IMU() = default;
+        LSM6DSV16X_IMU() = default;
 
         bool Begin() { return true; }
         bool Reset(uint32_t timeout_ms = 50U)
@@ -942,10 +940,7 @@ namespace MazeMap
         GYRO_FULLSCALE_RANGE gyro_scale_ = GYRO_FULLSCALE_RANGE::DPS0125;
     };
 
-    template <int CS_PIN, int INT_PIN, int MOSI_PIN, int MISO_PIN, int CLOCK_PIN>
-    using LSM6DSV16X_IMU = LSV6DSV16X_IMU<CS_PIN, INT_PIN, MOSI_PIN, MISO_PIN, CLOCK_PIN>;
 }
 
 #endif
-
 

@@ -81,79 +81,6 @@ namespace
                 controllerState);
         return std::isfinite(yawRateCommandRadps) ? yawRateCommandRadps : 0.0f;
     }
-
-#define TOP_SPEED_MEASUREMENT_FIELDS(X)              \
-    X(std::uint32_t, master_time_us)                \
-    X(std::uint32_t, control_tick_sequence)         \
-    X(std::uint32_t, dt_us)                         \
-    X(std::uint32_t, elapsed_test_us)               \
-    X(std::uint8_t,  braking)                       \
-    X(std::uint8_t,  impact_detected)               \
-    X(std::uint8_t,  selector_removed)              \
-    X(float,         ukf_state_px_m)                \
-    X(float,         ukf_state_py_m)                \
-    X(float,         ukf_state_psi_rad)             \
-    X(float,         ukf_state_u_mps)               \
-    X(float,         ukf_state_v_mps)               \
-    X(float,         ukf_state_r_radps)             \
-    X(float,         ukf_state_omega_l_radps)       \
-    X(float,         ukf_state_omega_r_radps)       \
-    X(float,         ukf_state_bgz_radps)           \
-    X(float,         measured_linear_speed_mps)     \
-    X(float,         measured_angular_speed_radps)  \
-    X(float,         cmd_linear_mps)                \
-    X(float,         cmd_angular_radps)             \
-    X(float,         heading_error_rad)             \
-    X(float,         cmd_linear_accel_mps2)         \
-    X(float,         left_drive_command)            \
-    X(float,         right_drive_command)           \
-    X(float,         left_feedforward_command)      \
-    X(float,         right_feedforward_command)     \
-    X(float,         left_feedback_command)         \
-    X(float,         right_feedback_command)        \
-    X(float,         left_target_velocity_mps)      \
-    X(float,         right_target_velocity_mps)     \
-    X(float,         left_launch_assist_floor)      \
-    X(float,         right_launch_assist_floor)     \
-    X(std::int32_t,  left_encoder_count)            \
-    X(std::int32_t,  right_encoder_count)           \
-    X(float,         left_encoder_omega_radps)      \
-    X(float,         right_encoder_omega_radps)     \
-    X(float,         left_encoder_distance_m)       \
-    X(float,         right_encoder_distance_m)      \
-    X(float,         left_encoder_velocity_mps)     \
-    X(float,         right_encoder_velocity_mps)    \
-    X(std::uint32_t, imu_timestamp_us)              \
-    X(std::uint8_t,  imu_status)                    \
-    X(std::uint8_t,  imu_interrupt_high)            \
-    X(std::uint8_t,  accel_bias_valid)              \
-    X(std::int16_t,  imu_gyro_x)                    \
-    X(std::int16_t,  imu_gyro_y)                    \
-    X(std::int16_t,  imu_gyro_z)                    \
-    X(std::int16_t,  imu_accel_x)                   \
-    X(std::int16_t,  imu_accel_y)                   \
-    X(std::int16_t,  imu_accel_z)                   \
-    X(std::int16_t,  imu_temp)                      \
-    X(float,         gyro_raw_radps)                \
-    X(float,         gyro_bias_radps)               \
-    X(float,         gyro_radps)                    \
-    X(float,         accel_body_x_mps2)             \
-    X(float,         accel_body_y_mps2)             \
-    X(float,         planar_accel_mps2)             \
-    X(std::uint32_t, front_timestamp_us)            \
-    X(std::uint32_t, left_timestamp_us)             \
-    X(std::uint32_t, right_timestamp_us)            \
-    X(float,         front_left_wall_distance_m)    \
-    X(float,         front_right_wall_distance_m)   \
-    X(float,         side_left_wall_distance_m)     \
-    X(float,         side_right_wall_distance_m)    \
-    X(float,         front_left_differential_light) \
-    X(float,         front_right_differential_light)\
-    X(float,         side_left_differential_light)  \
-    X(float,         side_right_differential_light) \
-    X(float,         fan_duty_cycle)
-
-    MMLOG_DEFINE_ROW(TopSpeedMeasurementRow, TOP_SPEED_MEASUREMENT_FIELDS);
 }
 
 namespace MazeMap::App::Internal
@@ -184,7 +111,7 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Top speed measurement mode");
         (void)_runtime.AppendTextLogLine("Enter by shorting pins 26-27 at boot.");
         (void)_runtime.AppendTextLogLine(
-            "This mode waits 1 second, commands a 10 ms -0.4 open-loop reverse pulse, then runs straight ahead at 8.5 m/s^2 for up to 1 second using a custom gyro-z bias-hold controller with the default yaw-rate PD gains on top of the raw-acceleration drive path, or until strong reverse acceleration or an IMU X/Y gyro spike suggests impact, then brakes until wheel motion settles. Pulling the jumper at any point faults the mode as a manual halt.");
+            "1 s wait, 10 ms -0.4 reverse kick, then 8.5 m/s^2 launch with local gyro-z bias hold until timeout or impact from reverse accel / IMU X-Y gyro spikes. Then brake to rest. Jumper removal faults the run.");
 
         if (!_drive.Begin())
         {
@@ -350,8 +277,8 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        TopSpeedMeasurementRow row{};
-        if (!_runtime.BeginUtilityDataLogSchema(row))
+        _logRow = {};
+        if (!_runtime.BeginUtilityDataLogSchema(_logRow))
         {
             return false;
         }
@@ -403,11 +330,11 @@ namespace MazeMap::App::Internal
 
     bool TopSpeedMeasurementMode::WriteRunStartEvent()
     {
-        char message[384] = {};
+        char message[256] = {};
         const int length = std::snprintf(
             message,
             sizeof(message),
-            "run_id=%s;pins_26_27_shorted_at_boot=%u;battery_voltage_start=%.3f;fan_duty_cycle_start=%.3f;forward_accel_mps2=%.3f;accel_duration_ms=%lu;prelaunch_wait_ms=%lu;prelaunch_reverse_drive_command=%.3f;prelaunch_reverse_duration_ms=%lu;reverse_impact_threshold_mps2=%.3f;gyro_xy_spike_threshold_dps=%.3f;gyro_z_bias_hold=1;gyro_z_hold_kp=%.3f;gyro_z_hold_kd=%.6f",
+            "run=%s;pins=%u;bat0=%.3f;fan0=%.3f;launch_a=%.3f;launch_ms=%lu;wait_ms=%lu;rev_cmd=%.3f;rev_ms=%lu;impact_a=%.3f;gxy_spike_dps=%.3f;gz_hold=1;kp=%.3f;kd=%.6f",
             _runId,
             _pinsLatchedAtBoot ? 1U : 0U,
             _batteryVoltageStart,
@@ -441,11 +368,11 @@ namespace MazeMap::App::Internal
             (_brakeTrigger == BrakeTrigger::GyroSpikeDetected) ? "gyro_xy_spike_detected" :
             (_brakeTrigger == BrakeTrigger::SelectorRemoved) ? "selector_removed" :
             "none";
-        char message[384] = {};
+        char message[256] = {};
         const int length = std::snprintf(
             message,
             sizeof(message),
-            "completion_reason=%s;brake_trigger=%s;impact_detected=%u;peak_measured_speed_mps=%.6f;peak_planar_accel_mps2=%.6f;peak_heading_error_deg=%.3f;most_negative_forward_accel_mps2=%.6f;impact_speed_mps=%.6f;impact_forward_accel_mps2=%.6f;impact_imu_gyro_x_lsb=%d;impact_imu_gyro_y_lsb=%d;completed_ticks=%lu",
+            "done=%s;brake=%s;impact=%u;peak_v=%.6f;peak_pa=%.6f;peak_head_deg=%.3f;min_ax=%.6f;impact_v=%.6f;impact_ax=%.6f;impact_gx=%d;impact_gy=%d;ticks=%lu",
             completionReasonName,
             brakeTriggerName,
             _impactDetected ? 1U : 0U,
@@ -464,93 +391,6 @@ namespace MazeMap::App::Internal
         }
 
         return WriteEvent("result", message);
-    }
-
-    bool TopSpeedMeasurementMode::LogSample(const LoopController::ModeState& state)
-    {
-        if (!_logOpen)
-        {
-            return false;
-        }
-
-        const SensorSnapshot& snapshot = state.sensors;
-        const MazeMap::VehicleState::StateVector& estimatorState = _drive.GetEstimatorStateVector();
-        TopSpeedMeasurementRow row{};
-        row.master_time_us = state.tickStartUs;
-        row.control_tick_sequence = ++_controlTickSequence;
-        row.dt_us = state.dtUs;
-        row.elapsed_test_us = (_measurementStartUs != 0U) ? (state.tickStartUs - _measurementStartUs) : 0U;
-        row.braking = (_phase == RunPhase::Braking) ? 1U : 0U;
-        row.impact_detected = _impactDetected ? 1U : 0U;
-        row.selector_removed = SelectorRemoved() ? 1U : 0U;
-        row.ukf_state_px_m = estimatorState(MazeMap::VehicleState::kPx);
-        row.ukf_state_py_m = estimatorState(MazeMap::VehicleState::kPy);
-        row.ukf_state_psi_rad = estimatorState(MazeMap::VehicleState::kPsi);
-        row.ukf_state_u_mps = estimatorState(MazeMap::VehicleState::kU);
-        row.ukf_state_v_mps = estimatorState(MazeMap::VehicleState::kV);
-        row.ukf_state_r_radps = estimatorState(MazeMap::VehicleState::kR);
-        row.ukf_state_omega_l_radps = estimatorState(MazeMap::VehicleState::kOmegaL);
-        row.ukf_state_omega_r_radps = estimatorState(MazeMap::VehicleState::kOmegaR);
-        row.ukf_state_bgz_radps = estimatorState(MazeMap::VehicleState::kBgz);
-        row.measured_linear_speed_mps = state.measured.linearSpeedMps;
-        row.measured_angular_speed_radps = state.measured.angularSpeedRadps;
-        row.cmd_linear_mps = _lastCommandInputLinearSpeedMps;
-        row.cmd_angular_radps = _lastCommandInputAngularRateRadps;
-        row.heading_error_rad =
-            ComputeHeadingDeviationRad(
-                _measurementStartUs,
-                _measurementStartYawRad,
-                state.estimate.yawRad);
-        row.cmd_linear_accel_mps2 =
-            ((_phase == RunPhase::Running) && (_measurementStartUs != 0U)) ? kTopSpeedMeasurementForwardAccelerationMps2 : 0.0f;
-        row.left_drive_command = state.driveTelemetry.leftDriveCommand;
-        row.right_drive_command = state.driveTelemetry.rightDriveCommand;
-        row.left_feedforward_command = state.driveTelemetry.leftFeedforwardCommand;
-        row.right_feedforward_command = state.driveTelemetry.rightFeedforwardCommand;
-        row.left_feedback_command = state.driveTelemetry.leftFeedbackCommand;
-        row.right_feedback_command = state.driveTelemetry.rightFeedbackCommand;
-        row.left_target_velocity_mps = state.driveTelemetry.leftTargetVelocityMps;
-        row.right_target_velocity_mps = state.driveTelemetry.rightTargetVelocityMps;
-        row.left_launch_assist_floor = state.driveTelemetry.leftLaunchAssistFloor;
-        row.right_launch_assist_floor = state.driveTelemetry.rightLaunchAssistFloor;
-        row.left_encoder_count = state.driveTelemetry.leftEncoderCount;
-        row.right_encoder_count = state.driveTelemetry.rightEncoderCount;
-        row.left_encoder_omega_radps = state.driveTelemetry.leftEncoderOmegaRadps;
-        row.right_encoder_omega_radps = state.driveTelemetry.rightEncoderOmegaRadps;
-        row.left_encoder_distance_m = state.driveTelemetry.leftDistanceM;
-        row.right_encoder_distance_m = state.driveTelemetry.rightDistanceM;
-        row.left_encoder_velocity_mps = state.driveTelemetry.leftVelocityMps;
-        row.right_encoder_velocity_mps = state.driveTelemetry.rightVelocityMps;
-        row.imu_timestamp_us = snapshot.imuTiming.readDoneUs;
-        row.imu_status = snapshot.imuBackLeft.status;
-        row.imu_interrupt_high = snapshot.imuBackLeft.interruptHigh ? 1U : 0U;
-        row.accel_bias_valid = snapshot.accelBiasValid ? 1U : 0U;
-        row.imu_gyro_x = snapshot.imuBackLeft.gyroX;
-        row.imu_gyro_y = snapshot.imuBackLeft.gyroY;
-        row.imu_gyro_z = snapshot.imuBackLeft.gyroZ;
-        row.imu_accel_x = snapshot.imuBackLeft.accelX;
-        row.imu_accel_y = snapshot.imuBackLeft.accelY;
-        row.imu_accel_z = snapshot.imuBackLeft.accelZ;
-        row.imu_temp = snapshot.imuBackLeft.temp;
-        row.gyro_raw_radps = snapshot.gyroRawRadps;
-        row.gyro_bias_radps = snapshot.gyroBiasRadps;
-        row.gyro_radps = snapshot.gyroRadps;
-        row.accel_body_x_mps2 = snapshot.accelBodyXMps2;
-        row.accel_body_y_mps2 = snapshot.accelBodyYMps2;
-        row.planar_accel_mps2 = state.sensors.planarAccelMps2;
-        row.front_timestamp_us = snapshot.frontTiming.observationReadyUs;
-        row.left_timestamp_us = snapshot.leftTiming.observationReadyUs;
-        row.right_timestamp_us = snapshot.rightTiming.observationReadyUs;
-        row.front_left_wall_distance_m = snapshot.frontLeft.distanceM;
-        row.front_right_wall_distance_m = snapshot.frontRight.distanceM;
-        row.side_left_wall_distance_m = snapshot.sideLeft.distanceM;
-        row.side_right_wall_distance_m = snapshot.sideRight.distanceM;
-        row.front_left_differential_light = snapshot.frontLeft.differentialLight;
-        row.front_right_differential_light = snapshot.frontRight.differentialLight;
-        row.side_left_differential_light = snapshot.sideLeft.differentialLight;
-        row.side_right_differential_light = snapshot.sideRight.differentialLight;
-        row.fan_duty_cycle = GetMissionFanDutyCycle();
-        return _runtime.LogUtilityDataRow(row);
     }
 
     bool TopSpeedMeasurementMode::EnterBrakingPhase(
@@ -713,10 +553,90 @@ namespace MazeMap::App::Internal
             }
         }
 
-        if (!LogSample(state))
+        if (_logOpen)
         {
-            services.Fault("Top-speed measurement log write failed");
-            return LoopController::ControlVector::Brake;
+            const SensorSnapshot& snapshot = state.sensors;
+            const MazeMap::VehicleState::StateVector& estimatorState = _drive.GetEstimatorStateVector();
+            _logRow = {};
+            _logRow.master_time_us = state.tickStartUs;
+            _logRow.control_tick_sequence = ++_controlTickSequence;
+            _logRow.dt_us = state.dtUs;
+            _logRow.elapsed_test_us = (_measurementStartUs != 0U) ? (state.tickStartUs - _measurementStartUs) : 0U;
+            _logRow.braking = (_phase == RunPhase::Braking) ? 1U : 0U;
+            _logRow.impact_detected = _impactDetected ? 1U : 0U;
+            _logRow.selector_removed = SelectorRemoved() ? 1U : 0U;
+            _logRow.ukf_state_px_m = estimatorState(MazeMap::VehicleState::kPx);
+            _logRow.ukf_state_py_m = estimatorState(MazeMap::VehicleState::kPy);
+            _logRow.ukf_state_psi_rad = estimatorState(MazeMap::VehicleState::kPsi);
+            _logRow.ukf_state_u_mps = estimatorState(MazeMap::VehicleState::kU);
+            _logRow.ukf_state_v_mps = estimatorState(MazeMap::VehicleState::kV);
+            _logRow.ukf_state_r_radps = estimatorState(MazeMap::VehicleState::kR);
+            _logRow.ukf_state_omega_l_radps = estimatorState(MazeMap::VehicleState::kOmegaL);
+            _logRow.ukf_state_omega_r_radps = estimatorState(MazeMap::VehicleState::kOmegaR);
+            _logRow.ukf_state_bgz_radps = estimatorState(MazeMap::VehicleState::kBgz);
+            _logRow.measured_linear_speed_mps = state.measured.linearSpeedMps;
+            _logRow.measured_angular_speed_radps = state.measured.angularSpeedRadps;
+            _logRow.cmd_linear_mps = _lastCommandInputLinearSpeedMps;
+            _logRow.cmd_angular_radps = _lastCommandInputAngularRateRadps;
+            _logRow.heading_error_rad =
+                ComputeHeadingDeviationRad(
+                    _measurementStartUs,
+                    _measurementStartYawRad,
+                    state.estimate.yawRad);
+            _logRow.cmd_linear_accel_mps2 =
+                ((_phase == RunPhase::Running) && (_measurementStartUs != 0U)) ? kTopSpeedMeasurementForwardAccelerationMps2 : 0.0f;
+            _logRow.left_drive_command = state.driveTelemetry.leftDriveCommand;
+            _logRow.right_drive_command = state.driveTelemetry.rightDriveCommand;
+            _logRow.left_feedforward_command = state.driveTelemetry.leftFeedforwardCommand;
+            _logRow.right_feedforward_command = state.driveTelemetry.rightFeedforwardCommand;
+            _logRow.left_feedback_command = state.driveTelemetry.leftFeedbackCommand;
+            _logRow.right_feedback_command = state.driveTelemetry.rightFeedbackCommand;
+            _logRow.left_target_velocity_mps = state.driveTelemetry.leftTargetVelocityMps;
+            _logRow.right_target_velocity_mps = state.driveTelemetry.rightTargetVelocityMps;
+            _logRow.left_launch_assist_floor = state.driveTelemetry.leftLaunchAssistFloor;
+            _logRow.right_launch_assist_floor = state.driveTelemetry.rightLaunchAssistFloor;
+            _logRow.left_encoder_count = state.driveTelemetry.leftEncoderCount;
+            _logRow.right_encoder_count = state.driveTelemetry.rightEncoderCount;
+            _logRow.left_encoder_omega_radps = state.driveTelemetry.leftEncoderOmegaRadps;
+            _logRow.right_encoder_omega_radps = state.driveTelemetry.rightEncoderOmegaRadps;
+            _logRow.left_encoder_distance_m = state.driveTelemetry.leftDistanceM;
+            _logRow.right_encoder_distance_m = state.driveTelemetry.rightDistanceM;
+            _logRow.left_encoder_velocity_mps = state.driveTelemetry.leftVelocityMps;
+            _logRow.right_encoder_velocity_mps = state.driveTelemetry.rightVelocityMps;
+            _logRow.imu_timestamp_us = snapshot.imuTiming.readDoneUs;
+            _logRow.imu_status = snapshot.imuBackLeft.status;
+            _logRow.imu_interrupt_high = snapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+            _logRow.accel_bias_valid = snapshot.accelBiasValid ? 1U : 0U;
+            _logRow.imu_gyro_x = snapshot.imuBackLeft.gyroX;
+            _logRow.imu_gyro_y = snapshot.imuBackLeft.gyroY;
+            _logRow.imu_gyro_z = snapshot.imuBackLeft.gyroZ;
+            _logRow.imu_accel_x = snapshot.imuBackLeft.accelX;
+            _logRow.imu_accel_y = snapshot.imuBackLeft.accelY;
+            _logRow.imu_accel_z = snapshot.imuBackLeft.accelZ;
+            _logRow.imu_temp = snapshot.imuBackLeft.temp;
+            _logRow.gyro_raw_radps = snapshot.gyroRawRadps;
+            _logRow.gyro_bias_radps = snapshot.gyroBiasRadps;
+            _logRow.gyro_radps = snapshot.gyroRadps;
+            _logRow.accel_body_x_mps2 = snapshot.accelBodyXMps2;
+            _logRow.accel_body_y_mps2 = snapshot.accelBodyYMps2;
+            _logRow.planar_accel_mps2 = state.sensors.planarAccelMps2;
+            _logRow.front_timestamp_us = snapshot.frontTiming.observationReadyUs;
+            _logRow.left_timestamp_us = snapshot.leftTiming.observationReadyUs;
+            _logRow.right_timestamp_us = snapshot.rightTiming.observationReadyUs;
+            _logRow.front_left_wall_distance_m = snapshot.frontLeft.distanceM;
+            _logRow.front_right_wall_distance_m = snapshot.frontRight.distanceM;
+            _logRow.side_left_wall_distance_m = snapshot.sideLeft.distanceM;
+            _logRow.side_right_wall_distance_m = snapshot.sideRight.distanceM;
+            _logRow.front_left_differential_light = snapshot.frontLeft.differentialLight;
+            _logRow.front_right_differential_light = snapshot.frontRight.differentialLight;
+            _logRow.side_left_differential_light = snapshot.sideLeft.differentialLight;
+            _logRow.side_right_differential_light = snapshot.sideRight.differentialLight;
+            _logRow.fan_duty_cycle = GetMissionFanDutyCycle();
+            if (!_runtime.LogUtilityDataRow(_logRow))
+            {
+                services.Fault("Top-speed measurement log write failed");
+                return LoopController::ControlVector::Brake;
+            }
         }
 
         if (_measurementStartUs != 0U)
@@ -966,14 +886,14 @@ namespace MazeMap::App::Internal
             BootModeId::TopSpeedMeasurement,
             BootModeCategory::Utility,
             "top_speed_measurement",
-            "Measure straight-line peak speed with a prelaunch reverse kick, fixed forward-acceleration launch, and braking recovery.",
+            "Measure straight-line peak speed with reverse-kick launch and impact brake.",
             "logging.txt; top-speed telemetry mmlog",
             &GetTopSpeedMeasurementMode,
             "GetTopSpeedMeasurementMode",
             "TopSpeedMeasurementMode.cpp",
-            "startup; 1 s prelaunch wait; 10 ms reverse kick; accelerated straight run; impact-or-gyro-or-timer brake transition; brake-to-stop; selector-jumper removal faults immediately",
-            "DiagnosticConfig control period; shared mission drive and IMU tuning; LoopController diagnostic capture path",
-            "After a 1 second stationary wait and a 10 ms -0.4 open-loop reverse kick, the mode resumes the fixed 8.5 m/s^2 forward-acceleration launch through the raw-acceleration drive path while a mode-local gyro-z bias-hold controller reuses the default yaw-rate PD gains to suppress spin; heading deviation is logged for diagnosis, reverse-accel and IMU X/Y gyro-spike impact braking remain active, wall updates stay disabled, and selector-jumper removal is treated as a manual-halt fault rather than a clean exit",
+            "startup; 1 s wait; 10 ms reverse kick; accel run; impact-or-time brake; settle",
+            "DiagnosticConfig period; shared mission drive/IMU tuning; LoopController capture",
+            "Fixed 8.5 m/s^2 launch, 10 ms -0.4 reverse kick, local gyro-z bias hold, impact thresholds, wall updates disabled, selector removal faults.",
             "top_speed_measurement_main.mmlog",
         };
         return descriptor;
