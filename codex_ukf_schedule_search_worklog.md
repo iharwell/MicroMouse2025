@@ -23,10 +23,24 @@
   - `OpenFloorUkfReplay` aggregate JSON metrics output for machine scoring.
   - `VehicleState` stationary thresholds wired to runtime tuning instead of frozen constants.
 - Confirmed the sandbox copy did not include a completed sweep script or completed sweep output files, so the search runner still needs to be finished in the main tree.
+- Confirmed the substantive UKF replay/tuning work was already committed on `codex/drivebase-mission-control-rewrite`.
+- Committed the remaining dirty follow-up fix on that branch:
+  - `1befe3f Fix DriveBase correction command operating-state inputs`
+- Detected an accidental rescue-branch commit that tracked build artifacts and the nested `.codex-main-merge` worktree pointer:
+  - `ef30840 Add UKF sweep recovery log and build outputs`
+- Cleaned that accidental rescue-branch commit non-destructively with a follow-up commit that removed those tracked artifact paths from the index:
+  - `788df07 Remove accidental UKF sweep artifact commit contents`
+- Fast-forwarded `main` to include the real UKF/DriveBase branch tip:
+  - `main: 1fbf1be -> 1befe3f`
+- Ran the required release verification entry point from merged `main`:
+  - `codex_verify\build_and_verify_latest.cmd --no-pause`
+- Verification stopped immediately with the repo-mandated blocker:
+  - `HOST_INTERMEDIATE_STATE_BROKEN`
+  - Missing or damaged host Release intermediates were reported for `MazeMapTest` and `MazeSimulation`.
+  - Per repo instructions, no `Clean`, `Rebuild`, or further artifact deletion was attempted.
 
 ## Next
 
-- Port the recovered UKF replay tuning changes into the main tree without disturbing unrelated dirty files.
-- Add the missing sweep driver and scoring path.
-- Verify release binaries are current before running tests or replay.
-- Run the sweep with the known stationary seed path and capture the best result.
+- Human intervention is required to repair or intentionally recreate the missing host Release intermediates before release verification or replay can continue.
+- After the host incremental-build state is repaired, rerun release verification from merged `main`.
+- Once verification is unblocked, run the stationary-seed UKF sweep from merged `main` and capture the tuned result.
