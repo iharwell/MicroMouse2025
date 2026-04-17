@@ -5414,9 +5414,12 @@ private:
         const ActiveLoopTickFn nextTickFn,
         LoopController::TickServices& services) noexcept
     {
+        LoopController::ModeCallbacks callbacks{};
+        callbacks.onModeWork = &Implementation::ActiveLoopThunk;
+        callbacks.context = this;
         _activeLoopState = nextState;
         _activeLoopTickFn = nextTickFn;
-        services.SetNextModeWorkCallback(&Implementation::ActiveLoopThunk);
+        services.SetNextModeWorkCallbacks(callbacks);
     }
 
     LoopController::ControlVector EndLoopPhase(LoopController::TickServices& services) noexcept

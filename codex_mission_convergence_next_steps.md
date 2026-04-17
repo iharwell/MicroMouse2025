@@ -1,120 +1,151 @@
 # Mission Convergence Next Steps
 
-This note records the next convergent cuts after the current `ManeuverInstance` / `ManeuverPoint` work.
+This note records the next convergent cuts after the `LoopController` callback-plus-context handoff seam.
+
+The target shape is now explicit:
+
+- one boot-selected top-level mode owns one `LoopController` session for the life of that mode,
+- reusable loop-driven infrastructure fixtures run inside that one active session,
+- a fixture returns control by installing a caller-supplied return callback and return context,
+- top-level modes keep policy and phase decisions, not shared drive or mapping execution.
 
 ## Current State
 
-- Documentation now explicitly says:
-  - one boot-selected top-level mode owner owns one `LoopController` session for the life of that mode,
-  - only the active callback runs while motion is active,
-  - waits are only allowed inside `LoopController::RequestPause(...)` callbacks,
-  - mission mode owns goals and replans, not shared motion execution,
-  - `ManeuverInstance` / `ManeuverPoint` are the execution vocabulary, not `SmoothTurnExecutionProfile`.
-- Production code now samples maneuver points from the maneuver owners and feeds them through `DriveBase`.
-- `MissionModeController` still owns too much motion/session machinery and still starts nested loop sessions internally.
+- `LoopController` now supports handing off to the next callback with both function and context through `SetNextModeWorkCallbacks(...)`.
+- `MissionModeController` phase transitions now use that full callback handoff path.
+- This is only the enabling seam. The actual shared fixtures do not exist yet.
+- `MissionModeController` still owns nested `RunLoopSession(...)` launches and still owns shared execution logic that should move out.
+- `ManeuverQueue` execution, simple motion primitives, and mapping/search execution are still mission-owned.
+- The latest full Release verification reached the unit-test phase without reporting `HOST_INTERMEDIATE_STATE_BROKEN`.
+- The latest verification then failed on the existing Release test `DriveBasePointCommandImuYawTrackingChangesCommandWhenYawRateErrorExists`.
+- Latest log path: `C:\Users\thene\source\repos\MicroMouse2025\codex_verify\logs\build_and_verify_latest_20260416_232637_008.txt`
 
-## Immediate Blocker
+## Architectural Target
 
-1. Restore a usable host Release incremental state.
-2. Re-run `build_and_verify_latest.cmd --no-pause`.
-3. Stop again if the script reports `HOST_INTERMEDIATE_STATE_BROKEN`.
-4. If the Release intermediates are healthy but the host link still fails, fix the concrete host build issue before pushing deeper refactors.
+- The selected top-level mode owner is the only code that may call `LoopController::BeginSession(...)`, `Run()`, and `EndSession()`.
+- A reusable fixture may install its own internal callback phases, but it may not start or end a session.
+- A fixture must accept a caller-supplied continuation using `LoopController::ModeCallbacks`.
+- A fixture must return control by installing that continuation when its work is complete.
+- Do not introduce another wrapper registry, fixture manager, or generic forwarding facade around this contract unless a concrete shared need appears.
+- Shared execution fixtures belong with shared runtime and drive/navigation ownership, not in mission policy code.
 
-## Refactor Order
+## Convergent Order
 
-### 1. Move session ownership outward
+### 1. Treat `LoopController::ModeCallbacks` as the fixture continuation contract
 
-The top-level mode owners must become the only places that start the active `LoopController` session:
+- Use `LoopController::ModeCallbacks` directly as the "return control here" contract.
+- A fixture should accept:
+  - caller-owned fixture state/input,
+  - one completion continuation,
+  - any explicit result storage the caller needs.
+- Do not add a second public continuation wrapper unless `ModeCallbacks` proves materially insufficient.
 
-- `MissionRunMode`
-- `ManeuverFileTestMode`
-- `CorridorRepeatabilityMode`
-- `PositionAccuracyAuditMode`
+### 2. Extract one authoritative shared `ManeuverQueue` execution fixture
+
+This should be the first real shared fixture.
+
+Destination:
+
+- one shared drive-execution owner rooted with shared runtime / drive execution ownership,
+- not `MissionModeController`,
+- not a mode-local helper family.
+
+Move out of mission ownership:
+
+- `ExecuteQueuedManeuvers`
+- `ExecuteStraightProfile`
+- `ExecuteTurnProfile`
+- `ExecuteArcProfile`
+- `ExecuteSmoothTurnProfile`
+- `HoldPosition`
+- `HoldBrakedUntilDriveSettles`
+- `HoldZeroVelocityUntilDriveSettles`
+- the loop-state structs and loop callbacks required by that execution path
+
+Required shape:
+
+- consumes a caller-supplied `ManeuverQueue`,
+- uses `ManeuverInstance` as the execution vocabulary,
+- uses `ManeuverPoint` for tracked maneuver progression,
+- accepts a completion continuation as `LoopController::ModeCallbacks`,
+- returns control by installing that continuation instead of ending the session,
+- keeps mode-specific telemetry/logging choices outside the shared fixture unless that logging is truly shared infrastructure.
+
+### 3. Move `ManeuverFileTestMode` onto the shared queue fixture
+
+This should be the first caller migrated to the shared fixture.
 
 Required cut:
 
-- move `RunLoopSession(...)` ownership out of `MissionModeController`,
-- keep callback bodies, but stop letting subordinate helpers launch their own sessions,
-- make session start mean mode startup and session end mean mode shutdown.
+- `ManeuverFileTestMode` owns the one active `LoopController` session,
+- maneuver test setup still happens in the mode owner or directly owned mode-local setup code,
+- the mode invokes the shared `ManeuverQueue` fixture inside that session,
+- when queue execution completes, control returns to a mode-owned continuation callback,
+- the mode-owned continuation performs final hold / shutdown / log completion,
+- no nested `RunLoopSession(...)` launches remain in that workflow.
 
-### 2. Replace outer-stack mission sequencing with callback-owned phase flow
+### 4. Extract the shared maze mapping / search fixture
 
-Replace helper-driven mini-session flow with one callback graph owned by the active session.
+After the queue fixture lands, extract the mapping/search side as another reusable fixture.
+
+Move out of mission ownership:
+
+- observation capture used by search mapping,
+- loop-driven straight search execution,
+- rolling observation stop / replan-stop handling,
+- map-update / fusion work that currently rides inside the mission search executor,
+- queue construction that belongs to shared search execution rather than mission policy
+
+Required shape:
+
+- runs inside the caller's active session,
+- returns control through a caller-supplied continuation,
+- reports completion or replan-needed state through caller-owned result storage,
+- leaves goal choice, retry policy, and mission progression decisions in mission mode.
+
+### 5. Convert mission run mode into a callback-owned phase graph over fixtures
+
+Mission mode should become policy over shared fixtures.
 
 Target shape:
 
 - `MissionStartupCallback`
-- `MappingModeCallback`
-- `SearchPathCallback`
-- `QueuedManeuverCallback`
-- `ReturnToStartCallback`
-- `GoalPauseCallback`
-- `RacingRunCallback`
-- `InterRunServiceCallback`
-- `MissionCompleteCallback`
+- mapping fixture launch callback
+- goal / replan policy callback
+- return-to-start callback
+- race-queue launch callback
+- inter-run service callback
+- mission-complete callback
 
-Required cut:
+Mission mode should decide:
 
-- remove outer-stack sequencing that assumes normal C++ execution resumes after a motion helper returns,
-- move in-motion replans, mapping updates, and maneuver dispatch decisions into callbacks or shared services called by callbacks.
+- what the next mission objective is,
+- when to explore,
+- when to replan,
+- when to return to start,
+- when to launch a speed run,
+- when mission success or failure has occurred.
 
-### 3. Delete remaining mission-owned simple motion executors
+Mission mode should not own:
 
-These are shared motion primitives and should not remain mission-owned:
+- the actual queue executor,
+- shared straight / turn / arc / tracked-maneuver execution,
+- shared mapping execution,
+- nested loop-session ownership.
 
-- `SettleLoopTick`
-- `ReverseStraightLoopTick`
-- `StraightLoopTick`
-- `TurnLoopTick`
+### 6. Delete subordinate session launch paths as each fixture migrates
 
-Required cut:
+- Once a workflow is converted to a fixture running inside the caller's active session, delete the old nested `RunLoopSession(...)` path in that same change.
+- Do not preserve both the fixture path and the nested-session path side by side.
+- Keep the migration convergent: one canonical callback-driven execution path per converted behavior.
 
-- move their state/logic into shared drive execution ownership,
-- update mission callers to request those primitives instead of owning them,
-- delete the mission-side implementations instead of preserving parallel copies.
+### 7. Keep pause behavior narrow
 
-### 4. Collapse maneuver execution onto one shared owner
+As fixtures are introduced:
 
-The remaining maneuver execution layer still lives in the wrong place.
-
-Delete from mission ownership:
-
-- `ExecuteQueuedManeuvers`
-- `ExecuteSearchPath`
-- `ExecuteArcProfile`
-- `ExecuteSmoothTurnProfile`
-- maneuver-speed / queue-shaping helpers that only exist to support that mission-owned executor
-
-Replace with:
-
-- one shared maneuver executor rooted with the drive runtime,
-- consuming `ManeuverInstance`,
-- using `ManeuverSet` / `ManeuverPoint` for derived execution targets,
-- exposing one canonical path for arc/smooth/in-place/straight maneuver progression.
-
-### 5. Remove mission-owned state that belongs with shared execution
-
-As motion ownership moves, delete or relocate:
-
-- per-motion loop state structs,
-- motion watchdog state that belongs to shared execution,
-- maneuver geometry helpers duplicated in mission code,
-- mission-owned pose/motion correction helpers that are really shared execution/fusion behavior.
-
-Mission mode should keep:
-
-- goal selection,
-- replan policy,
-- mission progression,
-- mission success/failure decisions.
-
-### 6. Keep pause behavior narrow
-
-As session ownership moves, preserve these constraints:
-
-- no waits for control progress outside `RequestPause(...)`,
+- no waits for control progress outside `RequestPause(...)` callbacks,
 - no generic pause dispatch hub,
-- each pause callback stays local to the phase that requested it,
+- each pause callback stays local to the fixture or mode phase that requested it,
 - pauses exist only for operator input, settling, or non-real-time work.
 
 ## Verification Steps After Each Cut
@@ -124,16 +155,18 @@ As session ownership moves, preserve these constraints:
 3. Run `build_and_verify_latest.cmd --no-pause`.
 4. If the script reports `HOST_INTERMEDIATE_STATE_BROKEN`, stop immediately.
 5. Record the blocking log path in the work note before continuing later.
+6. If verification reaches unit tests, record whether any failure is new or matches a known pre-existing failing test.
 
 ## Done When
 
-This cleanup is not done when the code merely compiles.
+This convergence stage is not done when the code merely compiles.
 
 It is done when:
 
-- top-level mode owners are the only session owners,
-- no nested `RunLoopSession(...)` launches remain in `MissionModeController`,
-- no waiting for control progress exists outside pause callbacks,
-- mission mode no longer owns shared motion primitives or maneuver execution,
-- `ManeuverInstance` / `ManeuverPoint` are the only execution vocabulary for maneuver tracking,
-- the remaining mission code reads as policy/scheduling instead of as a drive executor.
+- reusable execution fixtures run inside a caller-owned active session,
+- those fixtures return control through caller-supplied `LoopController::ModeCallbacks`,
+- `ManeuverQueue` execution is no longer mission-owned,
+- `ManeuverFileTestMode` uses the shared queue fixture and owns its one top-level session,
+- mapping/search execution is exposed as a reusable fixture instead of mission-local execution,
+- mission run mode reads as policy over fixtures rather than as a drive executor,
+- no converted workflow still relies on nested `RunLoopSession(...)` launches.

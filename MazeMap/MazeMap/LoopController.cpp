@@ -130,13 +130,21 @@ namespace MazeMap::App::Internal
         }
     }
 
-    void LoopController::TickServices::SetNextModeWorkCallback(const ModeWorkCallback callback) noexcept
+    void LoopController::TickServices::SetNextModeWorkCallbacks(const ModeCallbacks& callbacks) noexcept
     {
-        if ((_owner != nullptr) && (callback != nullptr))
+        if ((_owner != nullptr) && (callbacks.onModeWork != nullptr))
         {
             _owner->_requests.nextModeWorkRequested = true;
-            _owner->_requests.nextModeWorkCallback = callback;
+            _owner->_requests.nextModeWork = callbacks;
         }
+    }
+
+    void LoopController::TickServices::SetNextModeWorkCallback(const ModeWorkCallback callback) noexcept
+    {
+        ModeCallbacks callbacks{};
+        callbacks.onModeWork = callback;
+        callbacks.context = (_owner != nullptr) ? _owner->_activeModeWorkContext : nullptr;
+        SetNextModeWorkCallbacks(callbacks);
     }
 
     bool LoopController::BeginSession(const SessionOptions& options, const ModeCallbacks& callbacks)
@@ -160,6 +168,7 @@ namespace MazeMap::App::Internal
         _options = options;
         _callbacks = callbacks;
         _activeModeWorkCallback = callbacks.onModeWork;
+        _activeModeWorkContext = callbacks.context;
         _sessionBegun = true;
         _sessionActive = true;
         _resumePending = false;
@@ -307,12 +316,13 @@ namespace MazeMap::App::Internal
 
             TickServices services(*this);
             ControlVector candidateControl =
-                _activeModeWorkCallback(_callbacks.context, loopEndTimeUs, modeState, services);
+                _activeModeWorkCallback(_activeModeWorkContext, loopEndTimeUs, modeState, services);
             RecordModeReturnTiming(tickStartUs);
 
-            if (_requests.nextModeWorkRequested && (_requests.nextModeWorkCallback != nullptr))
+            if (_requests.nextModeWorkRequested && (_requests.nextModeWork.onModeWork != nullptr))
             {
-                _activeModeWorkCallback = _requests.nextModeWorkCallback;
+                _activeModeWorkCallback = _requests.nextModeWork.onModeWork;
+                _activeModeWorkContext = _requests.nextModeWork.context;
             }
 
             bool faultPathFlushRequired = false;
@@ -805,7 +815,7 @@ namespace MazeMap::App::Internal
         _pauseContextScratch.stateEstimate = settledState;
         _pauseContextScratch.reason = _requests.pauseRequest.reason;
         const PauseDisposition disposition =
-            _requests.pauseRequest.onPauseGranted(_callbacks.context, _pauseContextScratch);
+            _requests.pauseRequest.onPauseGranted(_activeModeWorkContext, _pauseContextScratch);
         switch (disposition.action)
         {
         case PauseDisposition::Action::Complete:
@@ -937,6 +947,7 @@ namespace MazeMap::App::Internal
         _options = SessionOptions{};
         _callbacks = ModeCallbacks{};
         _activeModeWorkCallback = nullptr;
+        _activeModeWorkContext = nullptr;
         _sessionBegun = false;
         _sessionActive = false;
         _resumePending = false;

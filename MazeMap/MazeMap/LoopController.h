@@ -165,6 +165,7 @@ namespace MazeMap::App::Internal
             // work. Do not replace it with caller-driven "tick once, then return to me" control.
             void RequestPause(const PauseRequest& request) noexcept;
             void RequestEndLoop() noexcept;
+            void SetNextModeWorkCallbacks(const ModeCallbacks& callbacks) noexcept;
             void SetNextModeWorkCallback(ModeWorkCallback callback) noexcept;
 
         private:
@@ -221,7 +222,7 @@ namespace MazeMap::App::Internal
             bool pauseRequested{};
             PauseRequest pauseRequest{};
             bool nextModeWorkRequested{};
-            ModeWorkCallback nextModeWorkCallback{};
+            ModeCallbacks nextModeWork{};
         };
 
         struct MotorPwmSink final
@@ -293,6 +294,7 @@ namespace MazeMap::App::Internal
         SessionOptions _options{};
         ModeCallbacks _callbacks{};
         ModeWorkCallback _activeModeWorkCallback{};
+        void* _activeModeWorkContext{};
         bool _sessionBegun{};
         bool _sessionActive{};
         bool _resumePending{};
