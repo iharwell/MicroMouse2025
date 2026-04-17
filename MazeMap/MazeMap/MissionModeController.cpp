@@ -4,6 +4,7 @@
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
 #include "LoopController.h"
+#include "ManeuverInstance.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapSharedRuntime.h"
 
@@ -14,21 +15,6 @@ namespace
     constexpr MazeMap::CommandPD kMissionDriveBaseTrackingCommandPd =
         MazeMap::CommandPD::StateWheelOmegaPD |
         MazeMap::CommandPD::IMUYaw;
-
-    MazeMap::App::Internal::LoopController::ControlVector MakeDriveBaseTrackingRawMotorPwmCommand(
-        DriveBase& drive,
-        const float linearSpeedMps,
-        const float angularSpeedRadps) noexcept
-    {
-        const MazeMap::OpenLoopDriveCommand driveCommand =
-            drive.PointCommand(
-                linearSpeedMps,
-                angularSpeedRadps,
-                kMissionDriveBaseTrackingCommandPd);
-        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
-            driveCommand.leftDriveCommand,
-            driveCommand.rightDriveCommand);
-    }
 
     void SetKnownMazeCellWalls(
         MazeMap::Maze& maze,
@@ -257,19 +243,7 @@ namespace
 
     float UtilityModeManeuverDistanceMeters(const MazeMap::ManeuverCode code)
     {
-        MazeMap::SmoothTurnExecutionProfile profileInCells{};
-        if (MazeMap::ManeuverSet::GetSet()[code].TryGetSmoothTurnExecutionProfile(profileInCells))
-        {
-            MazeMap::SmoothTurnExecutionProfile profile =
-                MazeMap::ScaleSmoothTurnExecutionProfile(profileInCells, Config::kCellSizeM);
-            profile.radians = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
-            if (profile.IsValid())
-            {
-                return profile.totalDistance;
-            }
-        }
-
-        return 0.5f * Config::kCellSizeM * static_cast<float>(MazeMap::ManeuverSet::GetSet().DistanceTravelled(code));
+        return MazeMap::ManeuverSet::GetSet().GetTravelDistanceMeters(code, Config::kCellSizeM);
     }
 
     template <typename WriteEventFn, typename FailFn>
@@ -1120,6 +1094,10 @@ private:
         ActiveLoopTickFn nextTickFn{};
     };
 
+    struct InterRunServicePauseLoopState final
+    {
+    };
+
     struct SettleLoopState final
     {
         const char* timeoutMessage{};
@@ -1278,12 +1256,13 @@ private:
 
     struct SmoothTurnLoopState final
     {
-        MazeMap::SmoothTurnExecutionProfile profile{};
+        MazeMap::ManeuverInstance maneuver{};
         MotionLimits limits{};
         float entrySpeed{};
         float exitSpeed{};
         float cruiseSpeed{};
         float maneuverSpeedMps{};
+        float totalDistanceM{};
         float startDistanceM{};
         unsigned long expectedCompletionDeadlineMs{};
         bool stallLogged{};
@@ -2745,7 +2724,8 @@ private:
             return Fail("Position audit smooth turn reverse path does not return to start");
         }
 
-        const float nominalRadiusM = MazeMap::ManeuverSet::GetSet()[code].GetNominalTurnRadiusInCells() * Config::kCellSizeM;
+        const MazeMap::ManeuverInstance turnManeuver(code, auditStart);
+        const float nominalRadiusM = turnManeuver.GetNominalTurnRadiusMeters(Config::kCellSizeM);
         const MotionLimits straightLimits = PositionAccuracyAuditStraightLimits(requestedCruiseSpeedMps);
         const MotionLimits cornerLimits = PositionAccuracyAuditCornerLimits(requestedCruiseSpeedMps, nominalRadiusM);
         const MotionLimits calibrationLimits = PositionAccuracyAuditTurnLimits();
@@ -2770,10 +2750,11 @@ private:
         const Eigen::Vector2f launchPosition(launchXM, launchYM);
         const Eigen::Vector2f finalPosition(finalTargetXM, finalTargetYM);
         const float launchDistanceM = launchYM - (0.5f * Config::kCellSizeM);
-        const float maneuverDistanceM = ManeuverDistanceMeters(code);
+        const float maneuverExitSpeedMps = turnCruiseSpeedMps;
+        const MazeMap::ManeuverInstance trackedManeuver(code, launchLocation, turnCruiseSpeedMps, maneuverExitSpeedMps);
+        const float maneuverDistanceM = trackedManeuver.GetTravelDistanceMeters(Config::kCellSizeM);
         const float maneuverAngleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
-        MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
-        const bool hasSmoothTurnProfile = TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile);
+        const bool hasTrackedManeuver = trackedManeuver.SupportsPointTracking();
         char phaseName[64] = {};
 
         if (AuxMeasurementConfig::kPositionAuditSmoothTurnFanEnabled)
@@ -2830,13 +2811,10 @@ private:
         {
             break;
         }
-        const float maneuverExitSpeedMps = turnCruiseSpeedMps;
-        if (hasSmoothTurnProfile)
+        if (hasTrackedManeuver)
         {
             if (!ExecuteSmoothTurnProfile(
-                    code,
-                    turnCruiseSpeedMps,
-                    maneuverExitSpeedMps,
+                    trackedManeuver,
                     turnCruiseSpeedMps,
                     cornerLimits))
             {
@@ -3750,8 +3728,7 @@ private:
             wallTouch.result.reverseDistanceM = (std::max)(0.0f, wallTouch.result.seatedTravelM - traveledDistanceM);
             const float headingErrorRad = AngleErrorRad(wallTouch.targetYawRad, pose.yawRad);
             float angularCommandRadps =
-                (Config::kStraightHeadingKp * headingErrorRad) -
-                (Config::kStraightYawD * pose.angularSpeedRadps);
+                Config::kStraightHeadingKp * headingErrorRad;
             angularCommandRadps = (std::clamp)(
                 angularCommandRadps,
                 -Config::kWallTouchReverseMaxAngularCommandRadps,
@@ -3783,10 +3760,10 @@ private:
                 return FaultLoopPhase(services, "Wall touch-off failed to establish front-wall clearance");
             }
 
-            return MakeDriveBaseTrackingRawMotorPwmCommand(
-                _drive,
+            return _drive.PointControlVector(
                 -Config::kWallTouchReverseSpeedMps,
-                angularCommandRadps);
+                angularCommandRadps,
+                kMissionDriveBaseTrackingCommandPd);
         }
 
         return EndLoopPhase(services);
@@ -4588,7 +4565,10 @@ private:
             return FaultLoopPhase(services, "Startup front calibration sweep profile became invalid");
         }
 
-        return MakeDriveBaseTrackingRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
+        return _drive.PointControlVector(
+            0.0f,
+            angularCommandRadps,
+            MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
     bool CaptureAndStoreFrontCalibrationSweep(const MotionLimits& limits, bool& storedBands)
@@ -5415,6 +5395,20 @@ private:
         return (self->*self->_activeLoopTickFn)(self->_activeLoopState, loopEndTimeUs, state, services);
     }
 
+    static LoopController::PauseDisposition InterRunServicePauseThunk(
+        void* context,
+        const LoopController::PauseContext& pause)
+    {
+        auto* const self = static_cast<Implementation*>(context);
+        if (self == nullptr)
+        {
+            return LoopController::PauseDisposition::StopByRuntime(
+                "Mission inter-run service pause callback context was null");
+        }
+
+        return self->OnInterRunServicePauseGranted(pause);
+    }
+
     void TransitionLoopPhase(
         void* nextState,
         const ActiveLoopTickFn nextTickFn,
@@ -5470,6 +5464,60 @@ private:
         }
 
         return true;
+    }
+
+    LoopController::PauseDisposition OnInterRunServicePauseGranted(
+        const LoopController::PauseContext& pause)
+    {
+        (void)pause;
+
+        if (!EmitMissionControllerLineOrFail("Install 34-35 jumper before lifting for tire service"))
+        {
+            return _faulted ?
+                LoopController::PauseDisposition::Complete() :
+                LoopController::PauseDisposition::StopByRuntime(
+                    "Mission inter-run service install prompt failed");
+        }
+
+        _drive.Brake();
+        while (!IsInterRunServiceJumperInstalled())
+        {
+            delay(Config::kInterRunServicePollMs);
+        }
+
+        if (!EmitMissionControllerLineOrFail("Service jumper detected; place robot back at start facing up and remove jumper"))
+        {
+            return _faulted ?
+                LoopController::PauseDisposition::Complete() :
+                LoopController::PauseDisposition::StopByRuntime(
+                    "Mission inter-run service remove prompt failed");
+        }
+
+        while (IsInterRunServiceJumperInstalled())
+        {
+            _drive.Brake();
+            delay(Config::kInterRunServicePollMs);
+        }
+
+        return LoopController::PauseDisposition::Complete();
+    }
+
+    LoopController::ControlVector InterRunServicePauseTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)rawState;
+        (void)loopEndTimeUs;
+        (void)state;
+
+        LoopController::PauseRequest request{};
+        request.onPauseGranted = &Implementation::InterRunServicePauseThunk;
+        request.reason = "mission_inter_run_service";
+        request.flushLogsBeforeGrant = true;
+        services.RequestPause(request);
+        return LoopController::ControlVector::Brake;
     }
 
     bool Fail(const char* message)
@@ -5605,7 +5653,7 @@ private:
 
         return settle.brakeCommand ?
             LoopController::ControlVector::Brake :
-            MakeDriveBaseTrackingRawMotorPwmCommand(_drive, 0.0f, 0.0f);
+            _drive.PointControlVector(0.0f, 0.0f, kMissionDriveBaseTrackingCommandPd);
     }
 
     bool HoldPosition(uint16_t durationMs, const char* phaseName = nullptr)
@@ -5795,16 +5843,15 @@ private:
 
         const float headingErrorRad = HeadingErrorRad(reverse.targetHeading, state.estimate.headingUnit);
         float angularCommandRadps =
-            (Config::kStraightHeadingKp * headingErrorRad) -
-            (Config::kStraightYawD * state.estimate.angularSpeedRadps);
+            Config::kStraightHeadingKp * headingErrorRad;
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
             -reverse.limits.maxAngularSpeedRadps,
             reverse.limits.maxAngularSpeedRadps);
-        return MakeDriveBaseTrackingRawMotorPwmCommand(
-            _drive,
+        return _drive.PointControlVector(
             -reverse.commandedSpeedMps,
-            angularCommandRadps);
+            angularCommandRadps,
+            kMissionDriveBaseTrackingCommandPd);
     }
 
     bool ExecuteReverseStraightProfile(
@@ -6018,15 +6065,14 @@ private:
             else
             {
                 const float angleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
-                MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
-                if (TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile))
+                if (entry.SupportsPointTracking())
                 {
                     const float maneuverSpeedLimit = ManeuverSpeedLimit(code, limits);
-                    ok = ExecuteSmoothTurnProfile(code, entrySpeed, exitSpeed, maneuverSpeedLimit, limits);
+                    ok = ExecuteSmoothTurnProfile(entry, maneuverSpeedLimit, limits);
                 }
                 else
                 {
-                    const float distanceM = ManeuverDistanceMeters(code);
+                    const float distanceM = entry.GetTravelDistanceMeters(Config::kCellSizeM);
                     if (distanceM <= 0.0f)
                     {
                         ok = ExecuteTurnProfile(angleRad, limits);
@@ -6690,17 +6736,16 @@ private:
 
         const float headingErrorRad = HeadingErrorRad(search.targetHeading, state.estimate.headingUnit);
         float angularCommandRadps =
-            (Config::kStraightHeadingKp * headingErrorRad) -
-            (Config::kStraightYawD * state.estimate.angularSpeedRadps) +
+            (Config::kStraightHeadingKp * headingErrorRad) +
             wallOmegaRadps;
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
             -searchLimits.maxAngularSpeedRadps,
             searchLimits.maxAngularSpeedRadps);
-        return MakeDriveBaseTrackingRawMotorPwmCommand(
-            _drive,
+        return _drive.PointControlVector(
             search.commandedSpeedMps,
-            angularCommandRadps);
+            angularCommandRadps,
+            kMissionDriveBaseTrackingCommandPd);
     }
 
     bool ExecuteSearchStraightCellsLoopDriven(
@@ -6919,27 +6964,9 @@ private:
 
     bool HandleInterRunServiceCycle()
     {
-        if (!EmitMissionControllerLineOrFail("Install 34-35 jumper before lifting for tire service"))
-        {
-            return false;
-        }
-        _drive.Brake();
-        while (!IsInterRunServiceJumperInstalled())
-        {
-            delay(Config::kInterRunServicePollMs);
-        }
-
-        if (!EmitMissionControllerLineOrFail("Service jumper detected; place robot back at start facing up and remove jumper"))
-        {
-            return false;
-        }
-        while (IsInterRunServiceJumperInstalled())
-        {
-            _drive.Brake();
-            delay(Config::kInterRunServicePollMs);
-        }
-
-        return PrepareForSecondSpeedRun();
+        InterRunServicePauseLoopState pauseState{};
+        return RunLoopSession(&pauseState, &Implementation::InterRunServicePauseTick) &&
+            PrepareForSecondSpeedRun();
     }
 
     bool PrepareForSecondSpeedRun()
@@ -7741,17 +7768,16 @@ private:
 
         const float headingErrorRad = HeadingErrorRad(straight.targetHeading, state.estimate.headingUnit);
         float angularCommandRadps =
-            (Config::kStraightHeadingKp * headingErrorRad) -
-            (Config::kStraightYawD * state.estimate.angularSpeedRadps) +
+            (Config::kStraightHeadingKp * headingErrorRad) +
             wallOmegaRadps;
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
             -straight.limits.maxAngularSpeedRadps,
             straight.limits.maxAngularSpeedRadps);
-        return MakeDriveBaseTrackingRawMotorPwmCommand(
-            _drive,
+        return _drive.PointControlVector(
             straight.commandedSpeedMps,
-            angularCommandRadps);
+            angularCommandRadps,
+            kMissionDriveBaseTrackingCommandPd);
     }
 
     bool ExecuteStraightProfile(
@@ -7832,7 +7858,10 @@ private:
             return FaultLoopPhase(services, "Turn profile became invalid");
         }
 
-        return MakeDriveBaseTrackingRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
+        return _drive.PointControlVector(
+            0.0f,
+            angularCommandRadps,
+            MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
     bool ExecuteTurnProfile(
@@ -7918,16 +7947,15 @@ private:
         const float headingErrorRad = AngleErrorRad(targetYawRad, state.estimate.yawRad);
         float angularCommandRadps =
             (arc.curvature * arc.commandedSpeedMps) +
-            (Config::kArcHeadingKp * headingErrorRad) -
-            (Config::kArcYawD * state.estimate.angularSpeedRadps);
+            (Config::kArcHeadingKp * headingErrorRad);
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
             -arc.limits.maxAngularSpeedRadps,
             arc.limits.maxAngularSpeedRadps);
-        return MakeDriveBaseTrackingRawMotorPwmCommand(
-            _drive,
+        return _drive.PointControlVector(
             arc.commandedSpeedMps,
-            angularCommandRadps);
+            angularCommandRadps,
+            kMissionDriveBaseTrackingCommandPd);
     }
 
     bool ExecuteArcProfile(float distanceM, float angleRad, float entrySpeed, float exitSpeed, float cruiseSpeed, const MotionLimits& limits)
@@ -7968,7 +7996,7 @@ private:
         }
 
         const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - smoothTurn.startDistanceM);
-        const float remainingM = (std::max)(0.0f, smoothTurn.profile.totalDistance - traveledM);
+        const float remainingM = (std::max)(0.0f, smoothTurn.totalDistanceM - traveledM);
         if (remainingM <= Config::kDistanceToleranceM)
         {
             return EndLoopPhase(services);
@@ -7999,46 +8027,41 @@ private:
                 smoothTurn.maneuverSpeedMps);
         }
 
-        float yawOffsetRad = 0.0f;
-        float nominalOmegaRadps = 0.0f;
-        if (!MazeMap::TryComputeSmoothTurnTarget(
-                smoothTurn.profile,
+        MazeMap::ManeuverPoint point{};
+        if (!smoothTurn.maneuver.TryGetManeuverPoint(
                 traveledM,
                 smoothTurn.maneuverSpeedMps,
-                yawOffsetRad,
-                nominalOmegaRadps))
+                point,
+                Config::kCellSizeM))
         {
-            return FaultLoopPhase(services, "Smooth turn target became invalid");
+            return FaultLoopPhase(services, "Maneuver point became invalid");
         }
 
-        float angularCommandRadps = nominalOmegaRadps;
-        angularCommandRadps = (std::clamp)(
-            angularCommandRadps,
+        point.Omega = (std::clamp)(
+            point.Omega,
             -smoothTurn.limits.maxAngularSpeedRadps,
             smoothTurn.limits.maxAngularSpeedRadps);
-        return MakeDriveBaseTrackingRawMotorPwmCommand(
-            _drive,
-            smoothTurn.maneuverSpeedMps,
-            angularCommandRadps);
+        return _drive.PointControlVector(
+            point,
+            kMissionDriveBaseTrackingCommandPd);
     }
 
     bool ExecuteSmoothTurnProfile(
-        MazeMap::ManeuverCode code,
-        float entrySpeed,
-        float exitSpeed,
+        const MazeMap::ManeuverInstance& maneuver,
         float cruiseSpeed,
         const MotionLimits& limits)
     {
         SmoothTurnLoopState smoothTurn{};
-        if (!TryGetSmoothTurnExecutionProfileMeters(code, smoothTurn.profile))
+        smoothTurn.maneuver = maneuver;
+        if (!smoothTurn.maneuver.SupportsPointTracking())
         {
-            return Fail("Smooth turn geometry is unavailable");
+            return Fail("Tracked maneuver geometry is unavailable");
         }
 
         smoothTurn.maneuverSpeedMps = cruiseSpeed;
         if (!(smoothTurn.maneuverSpeedMps > 0.0f))
         {
-            smoothTurn.maneuverSpeedMps = (std::max)(entrySpeed, exitSpeed);
+            smoothTurn.maneuverSpeedMps = (std::max)(maneuver.getEntrySpeed(), maneuver.getExitSpeed());
         }
         if (!(smoothTurn.maneuverSpeedMps > 0.0f))
         {
@@ -8046,13 +8069,18 @@ private:
         }
 
         smoothTurn.limits = limits;
-        smoothTurn.entrySpeed = entrySpeed;
-        smoothTurn.exitSpeed = exitSpeed;
+        smoothTurn.entrySpeed = maneuver.getEntrySpeed();
+        smoothTurn.exitSpeed = maneuver.getExitSpeed();
         smoothTurn.cruiseSpeed = cruiseSpeed;
+        smoothTurn.totalDistanceM = smoothTurn.maneuver.GetTravelDistanceMeters(Config::kCellSizeM);
+        if (!(smoothTurn.totalDistanceM > 0.0f))
+        {
+            return Fail("Tracked maneuver distance is invalid");
+        }
         smoothTurn.startDistanceM = _drive.GetAverageDistanceMeters();
         smoothTurn.translationWatchdog.Reset(0.0f, millis());
         smoothTurn.expectedCompletionDeadlineMs =
-            millis() + static_cast<unsigned long>(2500.0f + (5000.0f * smoothTurn.profile.totalDistance));
+            millis() + static_cast<unsigned long>(2500.0f + (5000.0f * smoothTurn.totalDistanceM));
         return RunLoopSession(&smoothTurn, &Implementation::SmoothTurnLoopTick);
     }
 
@@ -8069,37 +8097,14 @@ private:
         return xMatch && yMatch;
     }
 
-    static bool TryGetSmoothTurnExecutionProfileMeters(MazeMap::ManeuverCode code, MazeMap::SmoothTurnExecutionProfile& profile)
-    {
-        profile = MazeMap::SmoothTurnExecutionProfile{};
-        if ((code == MazeMap::MC_NONE) || IsStraightCode(code))
-        {
-            return false;
-        }
-
-        MazeMap::SmoothTurnExecutionProfile profileInCells{};
-        if (!MazeMap::ManeuverSet::GetSet()[code].TryGetSmoothTurnExecutionProfile(profileInCells))
-        {
-            return false;
-        }
-
-        profile = MazeMap::ScaleSmoothTurnExecutionProfile(profileInCells, Config::kCellSizeM);
-        profile.radians = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
-        return profile.IsValid();
-    }
-
     static float ManeuverDistanceMeters(MazeMap::ManeuverCode code)
     {
-        MazeMap::SmoothTurnExecutionProfile smoothTurnProfile{};
-        if (TryGetSmoothTurnExecutionProfileMeters(code, smoothTurnProfile))
-        {
-            return smoothTurnProfile.totalDistance;
-        }
-        return 0.5f * Config::kCellSizeM * static_cast<float>(MazeMap::ManeuverSet::GetSet().DistanceTravelled(code));
+        return MazeMap::ManeuverSet::GetSet().GetTravelDistanceMeters(code, Config::kCellSizeM);
     }
 
     static float ManeuverSpeedLimit(MazeMap::ManeuverCode code, const MotionLimits& limits, const MazeMap::Vehicle& vehicle)
     {
+        const MazeMap::ManeuverInstance maneuver(code, MazeMap::DirectionalLocation());
         if (code == MazeMap::MC_NONE)
         {
             return 0.0f;
@@ -8108,7 +8113,7 @@ private:
         {
             return limits.maxSpeedMps;
         }
-        return (std::min)(limits.maxSpeedMps, MazeMap::ManeuverSet::GetSet()[code].GetVMax(vehicle));
+        return (std::min)(limits.maxSpeedMps, maneuver.GetSpeedLimit(vehicle));
     }
 
     float ManeuverSpeedLimit(MazeMap::ManeuverCode code, const MotionLimits& limits) const

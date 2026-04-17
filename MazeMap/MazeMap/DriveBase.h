@@ -3,6 +3,8 @@
 #include "BootUtilityModeFramework.h"
 #include "InPlaceTurnProfile.h"
 #include "LaunchAssistProfile.h"
+#include "LoopController.h"
+#include "Maneuver.h"
 #include "MazeMapRuntimeCore.h"
 #include "MotorEncoderDrive.h"
 #include "MouseUkfFacade.h"
@@ -355,6 +357,25 @@ public:
     EXPORT MazeMap::OpenLoopDriveCommand PointCommand(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
+        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+
+    // PointControlVector resolves the same coupled target as `PointCommand`, but packages the result in
+    // the low-level output type consumed by `LoopController`.
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVector(
+        float desiredLinearSpeedMps,
+        float desiredYawRateRadps,
+        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+
+    // PointCommand consumes the drive-relevant target fields from a maneuver point. Higher-level
+    // maneuver execution should target this overload instead of rebuilding scalar command bridges.
+    EXPORT MazeMap::OpenLoopDriveCommand PointCommand(
+        const MazeMap::ManeuverPoint& point,
+        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+
+    // PointControlVector resolves the same maneuver-point target as `PointCommand`, but returns the
+    // low-level loop output directly for mode code that already operates in loop-controller space.
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVector(
+        const MazeMap::ManeuverPoint& point,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
     // PointYawRateCommand resolves a zero-mean command that drives the present yaw rate toward the

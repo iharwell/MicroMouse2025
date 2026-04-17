@@ -38,20 +38,6 @@ namespace
         constexpr float kForwardSweepCarryThresholdM = 0.180f;
     }
 
-    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
-        DriveBase& drive,
-        const float linearSpeedMps,
-        const float angularSpeedRadps) noexcept
-    {
-        const MazeMap::OpenLoopDriveCommand driveCommand =
-            drive.PointCommand(
-                linearSpeedMps,
-                angularSpeedRadps,
-                MazeMap::CommandPD::StateWheelOmegaPD);
-        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
-            driveCommand.leftDriveCommand,
-            driveCommand.rightDriveCommand);
-    }
 }
 
 class DiagnosticController : public IApplicationMode
@@ -1590,10 +1576,10 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
-        return MakeWheelOmegaRawMotorPwmCommand(
-            _drive,
+        return _drive.PointControlVector(
             _straightPhaseState.commandedSpeedMps,
-            angularCommandRadps);
+            angularCommandRadps,
+            MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
     LoopController::ControlVector KickoffCharacterizationTick(
@@ -1819,7 +1805,10 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
-        return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
+        return _drive.PointControlVector(
+            0.0f,
+            angularCommandRadps,
+            MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
     LoopController::ControlVector ArcPhaseTick(
@@ -1935,10 +1924,10 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
-        return MakeWheelOmegaRawMotorPwmCommand(
-            _drive,
+        return _drive.PointControlVector(
             _arcPhaseState.commandedSpeedMps,
-            angularCommandRadps);
+            angularCommandRadps,
+            MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
 };

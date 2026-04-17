@@ -27,7 +27,7 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `Direction.h` / `Direction.cpp`: directional enums and relative-direction helpers used across mapping and motion code.
 - `DirectionalLocation.h` / `DirectionalLocation.cpp`: combine a maze location with a facing direction.
 - `DirectionalPathFinder.h` / `DirectionalPathFinder.cpp`: path finder that accounts for heading changes and directional costs.
-- `DriveBase.h`: runtime drive subsystem that owns motor actuation, odometry, and closed-loop wheel control.
+- `DriveBase.h`: runtime drive subsystem that owns motor actuation, odometry, closed-loop wheel control, and the concrete drive-command surface that higher-level motion execution should target.
 - `EncoderStallPolicy.h`: stall-detection policy for encoder-driven motion.
 - `EigenCompat.h`: local compatibility helpers for Eigen use inside MazeMap.
 - `FanRampProfile.h`: fan ramp-up and ramp-down profile definitions.
@@ -46,12 +46,12 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `LaunchAssistProfile.h`: launch-assist tuning used to overcome wheel rest friction.
 - `LedCalibrationConfig.h`: LED and wall-sensor calibration constants.
 - `LSV6DSV16X_IMU.h`: IMU driver, register abstractions, and status helpers for the LSV6DSV16X device.
-- `Maneuver.h` / `Maneuver.cpp`: maneuver catalogue, smooth-turn geometry, and maneuver identifiers used by high-level path execution.
-- `ManeuverInstance.h`: one realized maneuver segment, including endpoints and per-step geometry.
+- `Maneuver.h` / `Maneuver.cpp`: maneuver catalogue and maneuver-owned execution geometry/target helpers; do not re-express maneuver execution through parallel smooth-turn profile structs.
+- `ManeuverInstance.h`: one realized maneuver segment and the canonical execution vocabulary for maneuver-driven motion.
 - `ManeuverPath.h` / `ManeuverPath.cpp`: path container expressed as maneuver instances instead of raw cells.
 - `ManeuverPathFinder.h` / `ManeuverPathFinder.cpp`: planner that builds executable maneuver sequences from maze state.
 - `ManeuverQueue.h`: queue used to stage maneuvers for execution.
-- `ManeuverSet.h` / `ManeuverSet.cpp`: registry of legal maneuvers and the movement semantics attached to each maneuver code.
+- `ManeuverSet.h` / `ManeuverSet.cpp`: registry of legal maneuvers and the movement semantics attached to each maneuver code, including derived travel distance and maneuver-target queries used by execution code.
 - `MaskQueue.h` / `MaskQueue.cpp`: queue helpers built on maze masks for flood-fill style searches.
 - `MapEvidenceUpdater.h` / `MapEvidenceUpdater.cpp`: accumulate accepted UKF wall observations into per-edge maze evidence.
 - `Maze.h` / `Maze.cpp`: full maze representation, indexing, wall knowledge, and goal-cell handling.
@@ -63,7 +63,7 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MazeMapApplicationRuntime.h`: declarations for the application runtime boundary between startup and active control loops.
 - `MazeMapControllerRegistry.h`: registry helpers for application controllers and standalone mode selection.
 - `MazeMapCore.cpp`: excluded legacy/experimental core file; retained in the project but not built.
-- `MazeMapMissionController.cpp`: main mission controller that coordinates exploration, speed runs, telemetry, and audits.
+- `MissionModeController.h` / `MissionModeController.cpp`: large mission/policy owner under active convergence; it should retain mission decisions and shed shared motion execution, nested loop-session ownership, and diagnostic workflow execution.
 - `MazeMapMissionModeHost.h`: host interface that mission modes call to enter specific mission workflows.
 - `MazeMapMissionModes.h` / `MazeMapMissionModes.cpp`: concrete mission mode types used by the standalone app.
 - `MazeMapRuntimeCore.h`: shared runtime state, calibration, asynchronous sensor-read helpers, and wall-distance calibration logic.

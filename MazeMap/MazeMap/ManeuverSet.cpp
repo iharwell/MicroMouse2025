@@ -120,4 +120,65 @@ namespace MazeMap
 		}
 		return (*this)[code].GetStep(index);
 	}
+
+	float ManeuverSet::GetTravelDistanceMeters(ManeuverCode code, float cellSizeM) const
+	{
+		if (!std::isfinite(cellSizeM) || !(cellSizeM > 0.0f) || (code == MC_NONE))
+		{
+			return 0.0f;
+		}
+		if (code <= S31)
+		{
+			return 0.5f * cellSizeM * static_cast<float>(static_cast<uint8_t>(code));
+		}
+		return (*this)[code].GetTravelDistanceInCells() * cellSizeM;
+	}
+
+	bool ManeuverSet::SupportsPointTracking(ManeuverCode code) const
+	{
+		if ((code == MC_NONE) || (code <= S31))
+		{
+			return false;
+		}
+		return (*this)[code].SupportsPointTracking();
+	}
+
+	bool ManeuverSet::TryGetManeuverPoint(
+		ManeuverCode code,
+		float traveledDistanceM,
+		float forwardSpeedMps,
+		ManeuverPoint& point,
+		float cellSizeM) const
+	{
+		point = ManeuverPoint{};
+		if ((code == MC_NONE) ||
+			(code <= S31) ||
+			!std::isfinite(traveledDistanceM) ||
+			!std::isfinite(forwardSpeedMps) ||
+			!std::isfinite(cellSizeM) ||
+			!(cellSizeM > 0.0f))
+		{
+			return false;
+		}
+
+		const Maneuver& maneuver = (*this)[code];
+		if (!maneuver.TryGetManeuverPoint(
+				traveledDistanceM / cellSizeM,
+				forwardSpeedMps,
+				cellSizeM,
+				point))
+		{
+			point = ManeuverPoint{};
+			return false;
+		}
+
+		if ((code & MIRRORED_MANEUVER_FLAG) == MIRRORED_MANEUVER_FLAG)
+		{
+			point.X = -point.X;
+			point.Theta = -point.Theta;
+			point.Omega = -point.Omega;
+		}
+
+		return point.IsFinite();
+	}
 }

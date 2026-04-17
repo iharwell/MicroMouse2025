@@ -162,6 +162,19 @@ namespace MazeMap
 			return man.DistanceTravelled();
 		}
 
+		EXPORT float GetTravelDistanceMeters(
+			ManeuverCode code,
+			float cellSizeM = Maze::GetCellDimension()) const;
+
+		EXPORT bool SupportsPointTracking(ManeuverCode code) const;
+
+		EXPORT bool TryGetManeuverPoint(
+			ManeuverCode code,
+			float traveledDistanceM,
+			float forwardSpeedMps,
+			ManeuverPoint& point,
+			float cellSizeM = Maze::GetCellDimension()) const;
+
 		EXPORT void SortByCost(const Vehicle& vehicle, float cellSize);
 	};
 }

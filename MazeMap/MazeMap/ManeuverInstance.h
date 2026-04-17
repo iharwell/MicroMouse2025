@@ -1,26 +1,13 @@
 #pragma once
 
+#include <cmath>
+
 #include "Defines.h"
 #include "DirectionalLocation.h"
 #include "ManeuverSet.h"
 
 namespace MazeMap
 {
-	class ManeuverPoint
-	{
-	public:
-		ManeuverPoint(float x, float y, float theta, float omega, float velocity)
-			: X(x), Y(y), Theta(theta), Omega(omega), Velocity(velocity)
-		{
-		}
-
-		float X;
-		float Y;
-		float Theta;
-		float Omega;
-		float Velocity;
-	};
-
 	class ManeuverInstance
 	{
 	private:
@@ -74,6 +61,52 @@ namespace MazeMap
 		inline bool IsStraight() const
 		{
 			return _code != MC_NONE && _code <= S31;
+		}
+
+		inline float GetTravelDistanceMeters(float cellSizeM = Maze::GetCellDimension()) const
+		{
+			return ManeuverSet::GetSet().GetTravelDistanceMeters(_code, cellSizeM);
+		}
+
+		inline float GetNominalTurnRadiusMeters(float cellSizeM = Maze::GetCellDimension()) const
+		{
+			if ((_code == MC_NONE) || IsStraight() || !std::isfinite(cellSizeM) || !(cellSizeM > 0.0f))
+			{
+				return 0.0f;
+			}
+
+			return ManeuverSet::GetSet()[_code].GetNominalTurnRadiusInCells() * cellSizeM;
+		}
+
+		inline float GetSpeedLimit(const Vehicle& vehicle) const
+		{
+			if (_code == MC_NONE)
+			{
+				return 0.0f;
+			}
+
+			return IsStraight() ?
+				vehicle.GetMaxSpeed() :
+				ManeuverSet::GetSet()[_code].GetVMax(vehicle);
+		}
+
+		inline bool SupportsPointTracking() const
+		{
+			return ManeuverSet::GetSet().SupportsPointTracking(_code);
+		}
+
+		inline bool TryGetManeuverPoint(
+			float traveledDistanceM,
+			float forwardSpeedMps,
+			ManeuverPoint& point,
+			float cellSizeM = Maze::GetCellDimension()) const
+		{
+			return ManeuverSet::GetSet().TryGetManeuverPoint(
+				_code,
+				traveledDistanceM,
+				forwardSpeedMps,
+				point,
+				cellSizeM);
 		}
 	};
 }

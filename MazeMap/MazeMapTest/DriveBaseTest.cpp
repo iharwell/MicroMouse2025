@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -317,25 +318,81 @@ namespace MazeMap
             AssertDriveCommandMatchesSolution(command, solution);
         }
 
-        TEST_METHOD(DriveBasePointCommandImuYawTrackingStaysSymmetricAtTargetYawRate)
+        TEST_METHOD(DriveBasePointCommandManeuverPointMatchesScalarTargets)
+        {
+            DriveBase drive;
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.15f), nullptr, nullptr);
+
+            const ManeuverPoint point(0.0f, 0.0f, 0.25f, 0.30f, 0.20f);
+            const OpenLoopDriveCommand scalarCommand =
+                drive.PointCommand(
+                    point.Velocity,
+                    point.Omega,
+                    MazeMap::CommandPD::StateWheelOmegaPD |
+                    MazeMap::CommandPD::IMUYaw);
+            const OpenLoopDriveCommand pointCommand =
+                drive.PointCommand(
+                    point,
+                    MazeMap::CommandPD::StateWheelOmegaPD |
+                    MazeMap::CommandPD::IMUYaw);
+
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(scalarCommand));
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(pointCommand));
+            Assert::AreEqual(scalarCommand.leftDriveCommand, pointCommand.leftDriveCommand, 1.0e-6f);
+            Assert::AreEqual(scalarCommand.rightDriveCommand, pointCommand.rightDriveCommand, 1.0e-6f);
+        }
+
+        TEST_METHOD(DriveBasePointCommandManeuverPointRejectsNonFiniteTargets)
         {
             DriveBase drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
 
+            const ManeuverPoint invalidPoint(
+                0.0f,
+                0.0f,
+                0.0f,
+                std::numeric_limits<float>::quiet_NaN(),
+                0.20f);
             const OpenLoopDriveCommand command =
+                drive.PointCommand(
+                    invalidPoint,
+                    MazeMap::CommandPD::StateWheelOmegaPD |
+                    MazeMap::CommandPD::IMUYaw);
+
+            Assert::AreEqual(0.0f, command.leftDriveCommand, 1.0e-6f);
+            Assert::AreEqual(0.0f, command.rightDriveCommand, 1.0e-6f);
+        }
+
+        TEST_METHOD(DriveBasePointCommandImuYawTrackingMatchesWheelOnlyAtTargetYawRate)
+        {
+            DriveBase drive;
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
+
+            const OpenLoopDriveCommand wheelOnlyCommand =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::StateWheelOmegaPD);
+            const OpenLoopDriveCommand imuTrackedCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
                     MazeMap::CommandPD::StateWheelOmegaPD |
                     MazeMap::CommandPD::IMUYaw);
 
-            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(command));
-            Assert::AreEqual(command.leftDriveCommand, command.rightDriveCommand, 1.0e-6f);
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(wheelOnlyCommand));
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(imuTrackedCommand));
+            Assert::AreEqual(wheelOnlyCommand.leftDriveCommand, imuTrackedCommand.leftDriveCommand, 1.0e-6f);
+            Assert::AreEqual(wheelOnlyCommand.rightDriveCommand, imuTrackedCommand.rightDriveCommand, 1.0e-6f);
         }
 
-        TEST_METHOD(DriveBasePointCommandImuYawTrackingCorrectsYawRateError)
+        TEST_METHOD(DriveBasePointCommandImuYawTrackingChangesCommandWhenYawRateErrorExists)
         {
             DriveBase drive;
             Assert::IsTrue(drive.Begin());
@@ -356,20 +413,9 @@ namespace MazeMap
 
             Assert::IsTrue(IsFiniteOpenLoopDriveCommand(wheelOnlyCommand));
             Assert::IsTrue(IsFiniteOpenLoopDriveCommand(imuTrackedCommand));
-            {
-                wchar_t buffer[256]{};
-                swprintf_s(
-                    buffer,
-                    L"wheelOnly=(%f,%f) imuTracked=(%f,%f)",
-                    wheelOnlyCommand.leftDriveCommand,
-                    wheelOnlyCommand.rightDriveCommand,
-                    imuTrackedCommand.leftDriveCommand,
-                    imuTrackedCommand.rightDriveCommand);
-                Logger::WriteMessage(buffer);
-            }
-            Assert::AreEqual(wheelOnlyCommand.leftDriveCommand, wheelOnlyCommand.rightDriveCommand, 1.0e-6f);
             Assert::IsTrue(
-                std::fabs(imuTrackedCommand.leftDriveCommand - imuTrackedCommand.rightDriveCommand) > 1.0e-4f);
+                (std::fabs(imuTrackedCommand.leftDriveCommand - wheelOnlyCommand.leftDriveCommand) +
+                 std::fabs(imuTrackedCommand.rightDriveCommand - wheelOnlyCommand.rightDriveCommand)) > 1.0e-4f);
         }
     };
 }

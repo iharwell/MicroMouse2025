@@ -345,41 +345,48 @@ namespace MazeMap
 			Assert::AreEqual(153.0f / 180.0f, ManeuverSet::GetSet()[S90LS].GetNominalTurnRadiusInCells(), 1.0e-6f);
 		}
 
-		TEST_METHOD(SmoothTurnExecutionProfileExposureMatchesSmoothTurnDefinitions)
+		TEST_METHOD(ManeuverTrackedDistanceExposureMatchesSmoothTurnDefinitions)
 		{
-			SmoothTurnExecutionProfile shortProfile{};
-			SmoothTurnExecutionProfile longProfile{};
-			Assert::IsTrue(ManeuverSet::GetSet()[S90SS].TryGetSmoothTurnExecutionProfile(shortProfile));
-			Assert::IsTrue(ManeuverSet::GetSet()[S90LS].TryGetSmoothTurnExecutionProfile(longProfile));
-
-			Assert::AreEqual(63.0f / 180.0f, shortProfile.radius, 1.0e-6f);
-			Assert::AreEqual(PI_F / 2.0f, shortProfile.radians, 1.0e-6f);
-			Assert::AreEqual(33.0f / 180.0f, shortProfile.turnInDistance, 1.0e-6f);
-			Assert::AreEqual(10.0f / 180.0f, shortProfile.preTurnDistance, 1.0e-6f);
-			Assert::AreEqual(((PI_F / 2.0f) * (63.0f / 180.0f)) - (33.0f / 180.0f), shortProfile.constantTurnDistance, 1.0e-6f);
-			Assert::AreEqual((10.0f / 180.0f) + (33.0f / 180.0f) + ((PI_F / 2.0f) * (63.0f / 180.0f)) + (10.0f / 180.0f), shortProfile.totalDistance, 1.0e-6f);
-
-			Assert::AreEqual(153.0f / 180.0f, longProfile.radius, 1.0e-6f);
-			Assert::AreEqual(PI_F / 2.0f, longProfile.radians, 1.0e-6f);
-			Assert::AreEqual(36.0f / 180.0f, longProfile.turnInDistance, 1.0e-6f);
-			Assert::AreEqual(9.0f / 180.0f, longProfile.preTurnDistance, 1.0e-6f);
-			Assert::AreEqual(((PI_F / 2.0f) * (153.0f / 180.0f)) - (36.0f / 180.0f), longProfile.constantTurnDistance, 1.0e-6f);
-			Assert::AreEqual((9.0f / 180.0f) + (36.0f / 180.0f) + ((PI_F / 2.0f) * (153.0f / 180.0f)) + (9.0f / 180.0f), longProfile.totalDistance, 1.0e-6f);
+			const ManeuverSet& set = ManeuverSet::GetSet();
+			Assert::IsTrue(set.SupportsPointTracking(S90SS));
+			Assert::IsTrue(set.SupportsPointTracking(S90LS));
+			Assert::AreEqual(
+				(10.0f / 180.0f) + (33.0f / 180.0f) + ((PI_F / 2.0f) * (63.0f / 180.0f)) + (10.0f / 180.0f),
+				set.GetTravelDistanceMeters(S90SS, 1.0f),
+				1.0e-6f);
+			Assert::AreEqual(
+				(9.0f / 180.0f) + (36.0f / 180.0f) + ((PI_F / 2.0f) * (153.0f / 180.0f)) + (9.0f / 180.0f),
+				set.GetTravelDistanceMeters(S90LS, 1.0f),
+				1.0e-6f);
 		}
 
-		TEST_METHOD(SmoothTurnExecutionProfileTotalDistanceExceedsHalfStepShortcut)
+		TEST_METHOD(ManeuverTrackedDistanceExceedsHalfStepShortcutForSmoothTurns)
 		{
-			SmoothTurnExecutionProfile shortProfile{};
-			SmoothTurnExecutionProfile longProfile{};
-			Assert::IsTrue(ManeuverSet::GetSet()[S90SS].TryGetSmoothTurnExecutionProfile(shortProfile));
-			Assert::IsTrue(ManeuverSet::GetSet()[S90LS].TryGetSmoothTurnExecutionProfile(longProfile));
+			const ManeuverSet& set = ManeuverSet::GetSet();
+			const float shortDistanceCells = set.GetTravelDistanceMeters(S90SS, 1.0f);
+			const float longDistanceCells = set.GetTravelDistanceMeters(S90LS, 1.0f);
 
-			const float shortShortcutCells = 0.5f * static_cast<float>(ManeuverSet::GetSet().DistanceTravelled(S90SS));
-			const float longShortcutCells = 0.5f * static_cast<float>(ManeuverSet::GetSet().DistanceTravelled(S90LS));
+			const float shortShortcutCells = 0.5f * static_cast<float>(set.DistanceTravelled(S90SS));
+			const float longShortcutCells = 0.5f * static_cast<float>(set.DistanceTravelled(S90LS));
 
-			Assert::IsTrue(shortProfile.totalDistance > shortShortcutCells);
-			Assert::IsTrue(longProfile.totalDistance > longShortcutCells);
-			Assert::IsTrue(shortProfile.totalDistance < longProfile.totalDistance);
+			Assert::IsTrue(shortDistanceCells > shortShortcutCells);
+			Assert::IsTrue(longDistanceCells > longShortcutCells);
+			Assert::IsTrue(shortDistanceCells < longDistanceCells);
+		}
+
+		TEST_METHOD(ManeuverPointSamplingMirrorsYawAndOmegaForMirroredCodes)
+		{
+			const ManeuverSet& set = ManeuverSet::GetSet();
+			const float sampleDistanceM = 0.5f * set.GetTravelDistanceMeters(S90SS, 1.0f);
+			ManeuverPoint rightPoint{};
+			ManeuverPoint leftPoint{};
+			Assert::IsTrue(set.TryGetManeuverPoint(S90SS, sampleDistanceM, 0.4f, rightPoint, 1.0f));
+			Assert::IsTrue(set.TryGetManeuverPoint(S90SS_M, sampleDistanceM, 0.4f, leftPoint, 1.0f));
+			Assert::IsTrue(rightPoint.Theta > 0.0f);
+			Assert::IsTrue(rightPoint.Omega > 0.0f);
+			Assert::AreEqual(-rightPoint.Theta, leftPoint.Theta, 1.0e-6f);
+			Assert::AreEqual(-rightPoint.Omega, leftPoint.Omega, 1.0e-6f);
+			Assert::AreEqual(rightPoint.Velocity, leftPoint.Velocity, 1.0e-6f);
 		}
 
 		TEST_METHOD(PositionAuditSmoothTurnValidityAndRunoutDifferentiatesShortAndLongSmooth90)
@@ -520,38 +527,41 @@ namespace MazeMap
 			Assert::AreEqual(static_cast<int>(-90), static_cast<int>(CodeDegrees(S90LS_M)));
 		}
 
-		TEST_METHOD(TryComputeSmoothTurnTargetUsesStraightRampCurveAndRampOutPhases)
+		TEST_METHOD(ManeuverPointSamplingUsesStraightRampCurveAndRampOutPhases)
 		{
-			SmoothTurnExecutionProfile profile{};
-			profile.radius = 0.5f;
-			profile.radians = 1.0f;
-			profile.turnInDistance = 0.2f;
-			profile.preTurnDistance = 0.1f;
-			profile.constantTurnDistance = 0.3f;
-			profile.postTurnDistance = 0.1f;
-			profile.totalDistance = 0.9f;
+			class TestSmoothTurn final : public SmoothTurnManeuver<1, true, false>
+			{
+			public:
+				TestSmoothTurn()
+					: SmoothTurnManeuver<1, true, false>(0.5f, 1.0f, 0.2f, 0.1f, 0.1f)
+				{
+				}
 
-			float yawOffsetRad = 0.0f;
-			float angularVelocityRadps = 0.0f;
-			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.05f, 0.4f, yawOffsetRad, angularVelocityRadps));
-			Assert::AreEqual(0.0f, yawOffsetRad, 1.0e-6f);
-			Assert::AreEqual(0.0f, angularVelocityRadps, 1.0e-6f);
+				ManeuverCode GetManeuverID() const override { return S90SS; }
+				ManeuverCode GetBackwardsManeuverID() const override { return S90SS; }
+			};
 
-			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.2f, 0.4f, yawOffsetRad, angularVelocityRadps));
-			Assert::AreEqual(0.05f, yawOffsetRad, 1.0e-6f);
-			Assert::AreEqual(0.4f, angularVelocityRadps, 1.0e-6f);
+			TestSmoothTurn maneuver{};
+			ManeuverPoint point{};
+			Assert::IsTrue(maneuver.TryGetManeuverPoint(0.05f, 0.4f, 1.0f, point));
+			Assert::AreEqual(0.0f, point.Theta, 1.0e-6f);
+			Assert::AreEqual(0.0f, point.Omega, 1.0e-6f);
 
-			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.45f, 0.4f, yawOffsetRad, angularVelocityRadps));
-			Assert::AreEqual(0.5f, yawOffsetRad, 1.0e-6f);
-			Assert::AreEqual(0.8f, angularVelocityRadps, 1.0e-6f);
+			Assert::IsTrue(maneuver.TryGetManeuverPoint(0.2f, 0.4f, 1.0f, point));
+			Assert::AreEqual(0.05f, point.Theta, 1.0e-6f);
+			Assert::AreEqual(0.4f, point.Omega, 1.0e-6f);
 
-			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.75f, 0.4f, yawOffsetRad, angularVelocityRadps));
-			Assert::AreEqual(0.9875f, yawOffsetRad, 1.0e-6f);
-			Assert::AreEqual(0.2f, angularVelocityRadps, 1.0e-6f);
+			Assert::IsTrue(maneuver.TryGetManeuverPoint(0.45f, 0.4f, 1.0f, point));
+			Assert::AreEqual(0.5f, point.Theta, 1.0e-6f);
+			Assert::AreEqual(0.8f, point.Omega, 1.0e-6f);
 
-			Assert::IsTrue(TryComputeSmoothTurnTarget(profile, 0.85f, 0.4f, yawOffsetRad, angularVelocityRadps));
-			Assert::AreEqual(1.0f, yawOffsetRad, 1.0e-6f);
-			Assert::AreEqual(0.0f, angularVelocityRadps, 1.0e-6f);
+			Assert::IsTrue(maneuver.TryGetManeuverPoint(0.75f, 0.4f, 1.0f, point));
+			Assert::AreEqual(0.9875f, point.Theta, 1.0e-6f);
+			Assert::AreEqual(0.2f, point.Omega, 1.0e-6f);
+
+			Assert::IsTrue(maneuver.TryGetManeuverPoint(0.85f, 0.4f, 1.0f, point));
+			Assert::AreEqual(1.0f, point.Theta, 1.0e-6f);
+			Assert::AreEqual(0.0f, point.Omega, 1.0e-6f);
 		}
 
 		TEST_METHOD(VehicleTurnSpeedRespectsLateralAndMaxSpeedLimits)

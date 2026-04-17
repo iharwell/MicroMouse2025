@@ -5,6 +5,17 @@
 1. catalogs the five existing timing-synchronized loop systems, and
 2. defines what a single configurable singleton `LoopController` must provide to subsume them.
 
+## Current Corrections
+
+This inventory predates the current session-ownership rules. Treat the following constraints as superseding older exploratory suggestions below:
+
+- One top-level `IApplicationMode` owns exactly one active `LoopController` session for the life of that boot-selected mode.
+- Nested `RunLoopSession(...)` launch sites inside subordinate controllers are architectural bugs, not an acceptable steady state.
+- While motion is active, only the installed callback executes and can steer flow, request a pause, end the session, or swap the callback.
+- Waiting, sleeping, or `delay(...)` outside a granted `RequestPause(...)` callback is nonconforming.
+- Mission code owns goals, replans, and phase policy; shared drive and maneuver execution infrastructure should own the actual motion primitives.
+- `ManeuverInstance` is the canonical executable maneuver unit. `SmoothTurnExecutionProfile` should not remain mode-level execution vocabulary.
+
 ## Proposed Home
 
 - `MazeMap/MazeMap/LoopController.h`
@@ -12,7 +23,7 @@
 
 ## Existing Timing Loop Systems
 
-### `MazeMap/MazeMap/MazeMapMissionController.cpp`
+### `MazeMap/MazeMap/MissionModeController.cpp`
 
 - Primary function: `TickControl(bool stationary, float& dtSeconds, SensorSnapshot& snapshot)`
 - Loop shape: full control-tick owner
@@ -157,6 +168,8 @@ The main differences are:
 That implies:
 
 - exactly one active loop session at a time
+- the selected top-level `IApplicationMode` owns session startup and shutdown for the whole boot-selected run
+- subordinate controllers and per-motion helpers must not start nested sessions
 - no mode-local `_lastControlMicros` once migration is complete
 - no parallel timing helpers in individual controllers
 - boot modes remain declared by `BootModeRegistry`; `LoopController` does not own boot-mode selection metadata
@@ -421,6 +434,7 @@ The intended integration model is:
 - drives `LoopController` in managed-tick mode, or
 - requests timing-gate ticks during migration
 - when the mode completes or faults, it closes the session
+- while the robot is moving, only the active callback can change loop flow or request a different phase
 
 The boot-mode-facing shared inputs should therefore be:
 
@@ -516,3 +530,5 @@ It should not replace:
 ## Immediate Design Constraint
 
 When this is implemented for real, `LoopController` must centralize timing, capture orchestration, and shared tick services, but it must not become the owner of mode behavior. The mode callback layer should make one control decision per tick and hand that decision back to the shared loop owner.
+
+Pause callbacks should remain small and phase-specific. They should not become distribution hubs for unrelated work.

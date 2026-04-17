@@ -4,6 +4,7 @@
 #include "BootModeRegistry.h"
 #include "DriveBase.h"
 #include "LoopController.h"
+#include "ManeuverInstance.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
@@ -16,24 +17,6 @@
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
-
-namespace
-{
-    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
-        DriveBase& drive,
-        const float linearSpeedMps,
-        const float angularSpeedRadps) noexcept
-    {
-        const MazeMap::OpenLoopDriveCommand driveCommand =
-            drive.PointCommand(
-                linearSpeedMps,
-                angularSpeedRadps,
-                MazeMap::CommandPD::StateWheelOmegaPD);
-        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
-            driveCommand.leftDriveCommand,
-            driveCommand.rightDriveCommand);
-    }
-}
 
 namespace MazeMap::App::Internal::Runtime
 {
@@ -372,8 +355,9 @@ private:
     struct SmoothTurnState final
     {
         OpenFloorMeasurementLabels labels{};
-        MazeMap::SmoothTurnExecutionProfile profile{};
+        MazeMap::ManeuverInstance maneuver{};
         float cruiseSpeed{};
+        float totalDistanceM{};
         float startDistanceM{};
         EncoderProgressWatchdog translationWatchdog{};
         unsigned long timeoutMs{};
@@ -478,7 +462,6 @@ private:
         const LoopController::ModeState& state,
         LoopController::TickServices& services);
     static uint32_t ReadCycleCounter();
-    static bool TryGetSmoothTurnExecutionProfileMeters(MazeMap::ManeuverCode code, MazeMap::SmoothTurnExecutionProfile& profile);
     static MazeMap::OpenFloorPrimitiveId PrimitiveIdForSmoothCode(MazeMap::ManeuverCode code);
     static unsigned long FailureTimeoutMs(unsigned long requestedTimeoutMs);
     static MazeMap::OpenFloorPhaseId StraightPhaseForProgress(float progress);
@@ -1489,27 +1472,6 @@ uint32_t OpenFloorMeasurementController::ReadCycleCounter()
 #endif
 }
 
-bool OpenFloorMeasurementController::TryGetSmoothTurnExecutionProfileMeters(
-    MazeMap::ManeuverCode code,
-    MazeMap::SmoothTurnExecutionProfile& profile)
-{
-    profile = MazeMap::SmoothTurnExecutionProfile{};
-    if ((code == MazeMap::MC_NONE) || IsStraightCode(code))
-    {
-        return false;
-    }
-
-    MazeMap::SmoothTurnExecutionProfile profileInCells{};
-    if (!MazeMap::ManeuverSet::GetSet()[code].TryGetSmoothTurnExecutionProfile(profileInCells))
-    {
-        return false;
-    }
-
-    profile = MazeMap::ScaleSmoothTurnExecutionProfile(profileInCells, Config::kCellSizeM);
-    profile.radians = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
-    return profile.IsValid();
-}
-
 MazeMap::OpenFloorPrimitiveId OpenFloorMeasurementController::PrimitiveIdForSmoothCode(MazeMap::ManeuverCode code)
 {
     switch (code)
@@ -2068,7 +2030,10 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         _recoveryState.limits.maxAngularSpeedRadps);
 
     StageMainSample(_recoveryState.labels, cycle);
-    return MakeWheelOmegaRawMotorPwmCommand(_drive, linearCommandMps, angularCommandRadps);
+    return _drive.PointControlVector(
+        linearCommandMps,
+        angularCommandRadps,
+        MazeMap::CommandPD::StateWheelOmegaPD);
 }
 
 MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementController::ExecuteLaunchPulseTick(
@@ -2306,10 +2271,10 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         (Config::kStraightHeadingKp * headingErrorRad) - (Config::kStraightYawD * state.estimate.angularSpeedRadps);
 
     StageMainSample(_straightSectionState.labels, cycle);
-    return MakeWheelOmegaRawMotorPwmCommand(
-        _drive,
+    return _drive.PointControlVector(
         _straightSectionState.straightDirectionSign * _straightSectionState.commandedSpeedMagnitudeMps,
-        angularCommandRadps);
+        angularCommandRadps,
+        MazeMap::CommandPD::StateWheelOmegaPD);
 }
 
 bool OpenFloorMeasurementController::StartStraightDistancePhase(
@@ -2579,7 +2544,10 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     }
 
     StageMainSample(_turnSectionState.labels, cycle);
-    return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
+    return _drive.PointControlVector(
+        0.0f,
+        angularCommandRadps,
+        MazeMap::CommandPD::StateWheelOmegaPD);
 }
 
 bool OpenFloorMeasurementController::StartInPlaceTurnPhase(
@@ -2695,8 +2663,11 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     }
 
     const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - _smoothTurnState.startDistanceM);
-    const float remainingM = (std::max)(0.0f, _smoothTurnState.profile.totalDistance - traveledM);
-    _smoothTurnState.labels.progressNorm = (std::clamp)(traveledM / _smoothTurnState.profile.totalDistance, 0.0f, 1.0f);
+    const float remainingM = (std::max)(0.0f, _smoothTurnState.totalDistanceM - traveledM);
+    _smoothTurnState.labels.progressNorm =
+        (_smoothTurnState.totalDistanceM > 0.0f) ?
+        (std::clamp)(traveledM / _smoothTurnState.totalDistanceM, 0.0f, 1.0f) :
+        0.0f;
     _smoothTurnState.labels.phaseId =
         (_smoothTurnState.labels.progressNorm < 0.33f) ? MazeMap::OpenFloorPhaseId::Entry :
         (_smoothTurnState.labels.progressNorm > 0.66f) ? MazeMap::OpenFloorPhaseId::Exit :
@@ -2733,14 +2704,12 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         return LoopController::ControlVector::Brake;
     }
 
-    float yawOffsetRad = 0.0f;
-    float nominalOmegaRadps = 0.0f;
-    if (!MazeMap::TryComputeSmoothTurnTarget(
-            _smoothTurnState.profile,
+    MazeMap::ManeuverPoint point{};
+    if (!_smoothTurnState.maneuver.TryGetManeuverPoint(
             traveledM,
             _smoothTurnState.cruiseSpeed,
-            yawOffsetRad,
-            nominalOmegaRadps))
+            point,
+            Config::kCellSizeM))
     {
         _smoothTurnState.labels.abortMarker = true;
         StageMainFault(
@@ -2748,27 +2717,26 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
             cycle,
             MazeMap::OpenFloorFaultCode::SmoothTargetInvalid,
             true);
-        services.Fault("Smooth-turn target became invalid");
+        services.Fault("Maneuver point became invalid");
         return LoopController::ControlVector::Brake;
     }
     const float yawRateCorrectionRadps = MazeMap::ComputeSmoothTurnYawRatePdCorrection(
-        nominalOmegaRadps,
+        point.Omega,
         state.estimate.angularSpeedRadps,
         state.dtSeconds,
         Config::kSmoothTurnYawRateKp,
         Config::kSmoothTurnYawRateKd,
         _smoothTurnState.yawRateController);
-    float angularCommandRadps = nominalOmegaRadps + yawRateCorrectionRadps;
-    angularCommandRadps = (std::clamp)(
-        angularCommandRadps,
+    point.Omega = point.Omega + yawRateCorrectionRadps;
+    point.Omega = (std::clamp)(
+        point.Omega,
         -_smoothTurnState.limits.maxAngularSpeedRadps,
         _smoothTurnState.limits.maxAngularSpeedRadps);
 
     StageMainSample(_smoothTurnState.labels, cycle);
-    return MakeWheelOmegaRawMotorPwmCommand(
-        _drive,
-        _smoothTurnState.cruiseSpeed,
-        angularCommandRadps);
+    return _drive.PointControlVector(
+        point,
+        MazeMap::CommandPD::StateWheelOmegaPD);
 }
 
 bool OpenFloorMeasurementController::StartSmoothTurnPhase(
@@ -2777,8 +2745,13 @@ bool OpenFloorMeasurementController::StartSmoothTurnPhase(
     const uint16_t repeatIndex,
     const MazeMap::OpenFloorSpeedBin speedBin)
 {
-    MazeMap::SmoothTurnExecutionProfile profile{};
-    if (!TryGetSmoothTurnExecutionProfileMeters(code, profile))
+    const MazeMap::ManeuverInstance maneuver(code, MazeMap::DirectionalLocation());
+    if (!maneuver.SupportsPointTracking())
+    {
+        return false;
+    }
+    const float totalDistanceM = maneuver.GetTravelDistanceMeters(Config::kCellSizeM);
+    if (!(totalDistanceM > 0.0f))
     {
         return false;
     }
@@ -2800,12 +2773,13 @@ bool OpenFloorMeasurementController::StartSmoothTurnPhase(
 
     _smoothTurnState = SmoothTurnState{};
     _smoothTurnState.labels = labels;
-    _smoothTurnState.profile = profile;
+    _smoothTurnState.maneuver = maneuver;
     _smoothTurnState.cruiseSpeed = cruiseSpeed;
+    _smoothTurnState.totalDistanceM = totalDistanceM;
     _smoothTurnState.startDistanceM = _drive.GetAverageDistanceMeters();
     _smoothTurnState.translationWatchdog.Reset(0.0f, millis());
     _smoothTurnState.timeoutMs = millis() +
-        FailureTimeoutMs(static_cast<unsigned long>(2500.0f + (5000.0f * profile.totalDistance)));
+        FailureTimeoutMs(static_cast<unsigned long>(2500.0f + (5000.0f * totalDistanceM)));
     _smoothTurnState.limits = MeasurementLimits(cruiseSpeed);
     _phaseFn = &OpenFloorMeasurementController::ExecuteSmoothTurnTick;
     return true;

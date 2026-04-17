@@ -111,17 +111,6 @@ namespace MazeMap
             return value;
         }
 
-        static float Absf(float value) noexcept
-        {
-            union {
-                float f;
-                uint32_t i;
-            } u;
-            u.f = value;
-            u.i &= 0x7fff'ffff;
-            return u.f;
-        }
-
         static int32_t RoundToInt32(float value) noexcept
         {
             return static_cast<int32_t>((value >= 0.0f) ? (value + 0.5f) : (value - 0.5f));
@@ -164,7 +153,7 @@ namespace MazeMap
 
         static uint16_t DriveCommandToPwmCode(float driveCommand) noexcept
         {
-            const float magnitude = Absf(ClampUnit(driveCommand));
+            const float magnitude = MazeMap::Math::Absf(ClampUnit(driveCommand));
             return static_cast<uint16_t>(magnitude * static_cast<float>(Platform::kMotorPwmMaxCode) + 0.5f);
         }
 
@@ -467,7 +456,7 @@ namespace MazeMap
 
         float getMaxForceAtVelocity(float velocityMetersPerSecond) const noexcept
         {
-            const float groundSpeed = Absf(velocityMetersPerSecond);
+            const float groundSpeed = MazeMap::Math::Absf(velocityMetersPerSecond);
             assert((_wheelDiameter > 0.0f) && (_gearRatio > 0.0f) && (_resistance > 0.0f) && (_speedConstant > 0.0f) && (_torqueConstant > 0.0f) && (_voltage > 0.0f));
 
             const float wheelRadius = getWheelRadius();
@@ -483,7 +472,7 @@ namespace MazeMap
 
         float getSpeedAtForceLimit(float maxTractiveForce) const noexcept
         {
-            const float limitedForce = Absf(maxTractiveForce);
+            const float limitedForce = MazeMap::Math::Absf(maxTractiveForce);
             if (!(_wheelDiameter > 0.0f) || !(_gearRatio > 0.0f) || !(_resistance > 0.0f) || !(_speedConstant > 0.0f) || !(_torqueConstant > 0.0f) || !(_voltage > 0.0f))
             {
                 return 0.0f;

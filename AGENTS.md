@@ -184,6 +184,11 @@ Top-level application modes are selected only at startup by reading designated m
 - Do **not** implement runtime transitions between top-level modes.
 - Entering a different top-level mode requires a reboot.
 - Internal setup, calibration stages, sections, subtests, and recovery paths are **phases** of one mode, not separate modes.
+- The selected top-level mode owner is the only place allowed to start the active `LoopController` session for that mode.
+- Starting that session means the mode is now active; ending that session means the mode is shutting down.
+- Subordinate controllers, helpers, and phase executors must not start nested `LoopController` sessions.
+- While the session is active, only the currently installed loop callback runs and can steer flow, request a pause, end the session, or swap callbacks.
+- Outside a `LoopController::RequestPause(...)` callback, mode code must not wait for another tick, sleep for control progress, or spin on control-state changes.
 
 ### Mode categories
 
@@ -265,6 +270,7 @@ Introduce or extend shared utility-mode infrastructure only when it replaces dup
 - Do **not** encode the set of modes into host interface method names such as `BeginXMode()` or `RunXMode()`.
 - Do **not** create one forwarding wrapper per mode.
 - If utility modes use one class per mode, they must all conform to one common contract and be registered through `BootModeRegistry`.
+- Pause callbacks must stay small and phase-specific. Do **not** build a catch-all pause-dispatch hub that re-routes unrelated behavior.
 - In production runtime, utility modes must use only the shared logging architecture: the one runtime-owned `MmLogLogger` instance for structured data, `logging.txt` for sparse human-readable text, and other runtime-owned logging objects.
 - Utility modes may declare `mmlog` row schemas with the designated macros, including separate schemas for different internal phases.
 - Separate phase schemas are allowed only through the designated macros and only when bound through the one runtime-owned `MmLogLogger` instance by closing/reopening or otherwise reconfiguring that same logger according to the shared runtime logging architecture.
@@ -405,6 +411,13 @@ Reject the design and revise it if any of the following are true:
 - Use `ManeuverPathfinder` only while stationary.
 - In a maze, locomotion should prefer the `Maneuver` classes.
 - For more manual control, generate `ManeuverInstance` objects directly and follow with a small target-yaw PID if needed.
+- `ManeuverInstance` is the canonical execution vocabulary for maneuver-driven motion. Do **not** peel maneuver execution back out into parallel smooth-turn profile structs or mode-local geometry bags.
+- Derive maneuver execution facts from `ManeuverSet`, `ManeuverCode`, and `Maze::GetCellDimension()` at the point of use or through methods on the canonical maneuver owners.
+- `ManeuverPoint` is the per-point drive primitive for higher-level motion execution.
+- Mission-mode code should choose goals, replans, and phase transitions. Shared drive execution owners should own the actual motion primitives and per-tick maneuver tracking.
+- `DriveBase` is the destination for concrete "move in this manner" commands. If a higher-level drive owner is introduced, it must become the authoritative motion owner rather than a forwarding facade over `DriveBase`.
+- While motion is active, only the current `LoopController` callback runs. Mapping, pathfinding response, maneuver dispatch, and phase progression that must happen during motion must therefore be callback-driven or live in shared services called by that callback.
+- Outside `LoopController::RequestPause(...)` callbacks, do **not** wait for "one more tick", sleep for control progress, or spin on control-state changes.
 - Open-loop commands are appropriate for low-level tasks such as wall tapping or certain measurements.
 - Reserve direct position or yaw control for tasks that cannot reasonably be expressed through maneuver-based control.
 

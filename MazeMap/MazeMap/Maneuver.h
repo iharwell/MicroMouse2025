@@ -8,147 +8,53 @@
 #include "Vehicle.h"
 #include "Kinematics.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace MazeMap
 {
-	MAZEMAP_INLINE bool IsFiniteFloat(const float value) noexcept
+	class ManeuverPoint
 	{
-		return isfinite(value);
-	}
+	public:
+		ManeuverPoint() = default;
 
-	MAZEMAP_INLINE float AbsFloat(const float value) noexcept
-	{
-		return fabs(value);
-	}
-
-	MAZEMAP_INLINE float ClampFloat(const float value, const float low, const float high) noexcept
-	{
-		return (value < low) ? low : ((value > high) ? high : value);
-	}
-
-	struct SmoothTurnExecutionProfile
-	{
-		float radius = 0.0f;
-		float radians = 0.0f;
-		float turnInDistance = 0.0f;
-		float preTurnDistance = 0.0f;
-		float constantTurnDistance = 0.0f;
-		float postTurnDistance = 0.0f;
-		float totalDistance = 0.0f;
-
-		MAZEMAP_INLINE bool IsValid() const noexcept
+		ManeuverPoint(float x, float y, float theta, float omega, float velocity)
+			: X(x), Y(y), Theta(theta), Omega(omega), Velocity(velocity)
 		{
-			return isfinite(radius) &&
-				(radius > 0.0f) &&
-				isfinite(radians) &&
-				(fabs(radians) > 0.0f) &&
-				isfinite(turnInDistance) &&
-				(turnInDistance >= 0.0f) &&
-				isfinite(preTurnDistance) &&
-				(preTurnDistance >= 0.0f) &&
-				isfinite(constantTurnDistance) &&
-				(constantTurnDistance >= 0.0f) &&
-				isfinite(postTurnDistance) &&
-				(postTurnDistance >= 0.0f) &&
-				isfinite(totalDistance) &&
-				(totalDistance > 0.0f);
+		}
+
+		// Higher-level drive command synthesis currently consumes the kinematic fields directly.
+		// Cartesian fields remain part of the maneuver vocabulary even when a caller only needs
+		// yaw-rate and forward-speed targets for the current execution slice.
+		float X = 0.0f;
+		float Y = 0.0f;
+		float Theta = 0.0f;
+		float Omega = 0.0f;
+		float Velocity = 0.0f;
+
+		MAZEMAP_INLINE bool IsFinite() const noexcept
+		{
+			return
+				std::isfinite(X) &&
+				std::isfinite(Y) &&
+				std::isfinite(Theta) &&
+				std::isfinite(Omega) &&
+				std::isfinite(Velocity);
 		}
 	};
 
-	MAZEMAP_INLINE SmoothTurnExecutionProfile ScaleSmoothTurnExecutionProfile(
-		const SmoothTurnExecutionProfile& profile,
-		float distanceScale) noexcept
+	namespace Detail
 	{
-		if (!(IsFiniteFloat(distanceScale) && (distanceScale > 0.0f)))
-		{
-			return SmoothTurnExecutionProfile{};
-		}
-
-		SmoothTurnExecutionProfile scaled = profile;
-		scaled.radius *= distanceScale;
-		scaled.turnInDistance *= distanceScale;
-		scaled.preTurnDistance *= distanceScale;
-		scaled.constantTurnDistance *= distanceScale;
-		scaled.postTurnDistance *= distanceScale;
-		scaled.totalDistance *= distanceScale;
-		return scaled;
-	}
-
-	MAZEMAP_INLINE bool TryComputeSmoothTurnTarget(
-		const SmoothTurnExecutionProfile& profile,
-		float traveledDistance,
-		float forwardSpeed,
-		float& yawOffsetRad,
-		float& angularVelocityRadps) noexcept
-	{
-		yawOffsetRad = 0.0f;
-		angularVelocityRadps = 0.0f;
-		if (!profile.IsValid() ||
-			!IsFiniteFloat(traveledDistance) ||
-			!IsFiniteFloat(forwardSpeed))
-		{
-			return false;
-		}
-
-		const float clampedDistance = ClampFloat(traveledDistance, 0.0f, profile.totalDistance);
-		const float turnSign = (profile.radians < 0.0f) ? -1.0f : 1.0f;
-		const float radius = profile.radius;
-		const float rampDistance = profile.turnInDistance;
-		const float preTurnEnd = profile.preTurnDistance;
-		const float rampInEnd = preTurnEnd + rampDistance;
-		const float constantEnd = rampInEnd + profile.constantTurnDistance;
-		const float rampOutEnd = constantEnd + rampDistance;
-
-		if (clampedDistance <= preTurnEnd)
-		{
-			return true;
-		}
-
-		if (rampDistance <= 0.0f)
-		{
-			if (clampedDistance <= constantEnd)
-			{
-				const float curveDistance = clampedDistance - preTurnEnd;
-				yawOffsetRad = turnSign * (curveDistance / radius);
-				angularVelocityRadps = turnSign * (forwardSpeed / radius);
-			}
-			else
-			{
-				yawOffsetRad = profile.radians;
-			}
-			return true;
-		}
-
-		if (clampedDistance <= rampInEnd)
-		{
-			const float rampDistanceTravelled = clampedDistance - preTurnEnd;
-			yawOffsetRad = turnSign * ((rampDistanceTravelled * rampDistanceTravelled) / (2.0f * rampDistance * radius));
-			angularVelocityRadps = turnSign * forwardSpeed * (rampDistanceTravelled / (rampDistance * radius));
-			return true;
-		}
-
-		if (clampedDistance <= constantEnd)
-		{
-			const float curveDistanceTravelled = clampedDistance - rampInEnd;
-			yawOffsetRad = turnSign * ((0.5f * rampDistance) + curveDistanceTravelled) / radius;
-			angularVelocityRadps = turnSign * (forwardSpeed / radius);
-			return true;
-		}
-
-		if (clampedDistance <= rampOutEnd)
-		{
-			const float rampDistanceTravelled = clampedDistance - constantEnd;
-			yawOffsetRad = turnSign *
-				((0.5f * rampDistance) +
-					profile.constantTurnDistance +
-					rampDistanceTravelled -
-					((rampDistanceTravelled * rampDistanceTravelled) / (2.0f * rampDistance))) /
-				radius;
-			angularVelocityRadps = turnSign * forwardSpeed * (1.0f - (rampDistanceTravelled / rampDistance)) / radius;
-			return true;
-		}
-
-		yawOffsetRad = profile.radians;
-		return true;
+		EXPORT bool TryComputeSmoothTurnManeuverPoint(
+			float radiusInCells,
+			float radians,
+			float turnInDistanceCells,
+			float preTurnDistanceCells,
+			float postTurnDistanceCells,
+			float traveledDistanceCells,
+			float forwardSpeedMps,
+			float cellSizeM,
+			ManeuverPoint& point) noexcept;
 	}
 
 	enum ManeuverCode : uint8_t
@@ -307,9 +213,24 @@ namespace MazeMap
 		virtual float GetEntrySpeed(const Vehicle& vehicle) const = 0; //
 		virtual float GetExitSpeed(const Vehicle& vehicle) const = 0; //
 		virtual float GetNominalTurnRadiusInCells() const { return 0.0f; }
-		virtual bool TryGetSmoothTurnExecutionProfile(SmoothTurnExecutionProfile& profile) const
+		virtual float GetTravelDistanceInCells() const
 		{
-			profile = SmoothTurnExecutionProfile{};
+			return 0.5f * static_cast<float>(DistanceTravelled());
+		}
+		virtual bool SupportsPointTracking() const
+		{
+			return false;
+		}
+		virtual bool TryGetManeuverPoint(
+			float traveledDistanceCells,
+			float forwardSpeedMps,
+			float cellSizeM,
+			ManeuverPoint& point) const
+		{
+			(void)traveledDistanceCells;
+			(void)forwardSpeedMps;
+			(void)cellSizeM;
+			point = ManeuverPoint{};
 			return false;
 		}
 
@@ -449,6 +370,10 @@ namespace MazeMap
 			//return _preTurnDist + 2.0f * _turnInDelta + GetArcLengthInCells() + _postTurnDist;
 			return _preTurnDist + _turnInDelta + _radians * _radius_in_cells + _postTurnDist;
 		}
+		virtual MAZEMAP_INLINE float GetTravelDistanceInCells() const override
+		{
+			return GetTravelDistInCells();
+		}
         virtual MAZEMAP_INLINE float GetVMax(const Vehicle& vehicle) const override
         {
             const float cellSize = Maze::GetCellDimension();
@@ -474,16 +399,26 @@ namespace MazeMap
 			return GetVMax(vehicle);
 		}
 		virtual MAZEMAP_INLINE float GetNominalTurnRadiusInCells() const override { return _radius_in_cells; }
-		virtual MAZEMAP_INLINE bool TryGetSmoothTurnExecutionProfile(SmoothTurnExecutionProfile& profile) const override
+		virtual MAZEMAP_INLINE bool SupportsPointTracking() const override
 		{
-			profile.radius = _radius_in_cells;
-			profile.radians = _radians;
-			profile.turnInDistance = _turnInDelta;
-			profile.preTurnDistance = _preTurnDist;
-			profile.constantTurnDistance = GetArcLengthInCells();
-			profile.postTurnDistance = _postTurnDist;
-			profile.totalDistance = GetTravelDistInCells();
-			return profile.IsValid();
+			return true;
+		}
+		virtual MAZEMAP_INLINE bool TryGetManeuverPoint(
+			float traveledDistanceCells,
+			float forwardSpeedMps,
+			float cellSizeM,
+			ManeuverPoint& point) const override
+		{
+			return Detail::TryComputeSmoothTurnManeuverPoint(
+				_radius_in_cells,
+				_radians,
+				_turnInDelta,
+				_preTurnDist,
+				_postTurnDist,
+				traveledDistanceCells,
+				forwardSpeedMps,
+				cellSizeM,
+				point);
 		}
 	};
 	/*

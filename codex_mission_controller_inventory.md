@@ -3,7 +3,7 @@
 ## Scope
 
 This note records the current responsibility inventory for the mission-mode
-control stack in `MazeMap/MazeMap/MazeMapMissionController.cpp` and evaluates
+control stack in `MazeMap/MazeMap/MissionModeController.cpp` and evaluates
 whether each area belongs there under the current cleanup rules. The file now
 exports direct boot-mode owners, and the utility-mode fixture/result helpers
 now live in file-local support functions, but the shared
@@ -17,6 +17,9 @@ The assessment below incorporates these architectural constraints:
 - The maze-solving stack is system-wide infrastructure: the authoritative `Maze`, maze update/fusion logic, pathfinders, maze-aware maneuver procedures, and systems that merge maze knowledge with sensor readings should not be mission-owned.
 - Utility/test/diagnostic workflows should become dedicated boot-selected modes over the shared infrastructure rather than methods on the mission owner.
 - `LoopController` remains the sole cadence owner; mission code may use callback swapping inside loop sessions but must not regain a public per-tick control model.
+- The selected top-level mode owner must be the only code that starts the active `LoopController` session; nested `RunLoopSession(...)` launches inside mission helpers are architectural debt, not an acceptable steady state.
+- Waiting for later ticks, operator input, or settle work outside a `RequestPause(...)` callback is not allowed.
+- `ManeuverInstance` is the canonical maneuver execution vocabulary; peeled-off `SmoothTurnExecutionProfile`-style helpers are non-authoritative.
 
 ## Inventory
 
@@ -42,7 +45,7 @@ The assessment below incorporates these architectural constraints:
 - Why it is currently here:
   - This is the actual mission workflow and phase ordering.
 - Assessment:
-  - This should stay.
+  - This should stay as mission policy, but it should become callback-owned phase logic rather than outer-stack sequencing around nested loop sessions.
   - It is the core legitimate responsibility of the class.
   - The class should decide what the robot must do next, not re-own the shared subsystems used to do it.
 
@@ -73,6 +76,7 @@ The assessment below incorporates these architectural constraints:
 - Assessment:
   - The cadence-preserving pattern is correct.
   - The machinery should not stay in `MissionController` long-term.
+  - The top-level mode object should own the one session for the whole mode lifetime; mission helpers should contribute callbacks and state, not nested session launches.
   - It belongs in runtime-owned maneuver/navigation execution infrastructure presented through `SharedRobotRuntime` or one of its composed members.
 
 ### 5. Logging, telemetry, trace emission, and fault handling
@@ -158,6 +162,7 @@ The assessment below incorporates these architectural constraints:
 - Assessment:
   - This should not stay.
   - Maneuver execution is explicitly shared infrastructure and should be exposed through runtime-owned execution services.
+  - `ManeuverInstance` should be the execution input vocabulary. `SmoothTurnExecutionProfile` and similar peeled-off geometry bags should disappear rather than being preserved behind wrappers.
   - The need for dedicated test/diagnostic modes for these behaviors is additional evidence that they are not mission-owned.
 
 ### 11. Map-grounded pose correction and wall-centering helpers
@@ -211,3 +216,11 @@ It should stop owning:
 - utility/test/diagnostic workflows.
 
 Those responsibilities should move behind `SharedRobotRuntime` or its composed authoritative members so that mission mode and dedicated diagnostic modes can consume the same infrastructure instead of forking it.
+
+The immediate convergence targets are therefore:
+
+- move session ownership outward to the top-level mode owner,
+- reshape the mission flow into callback-owned phases such as mapping/search/racing callbacks instead of outer-stack mini-sessions,
+- remove waits outside `RequestPause(...)` callbacks,
+- converge maneuver execution on `ManeuverInstance`,
+- and move shared motion execution toward `DriveBase`-rooted owners instead of preserving it inside `MissionModeController`.

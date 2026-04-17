@@ -12,24 +12,6 @@
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
-namespace
-{
-    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
-        DriveBase& drive,
-        const float linearSpeedMps,
-        const float angularSpeedRadps) noexcept
-    {
-        const MazeMap::OpenLoopDriveCommand driveCommand =
-            drive.PointCommand(
-                linearSpeedMps,
-                angularSpeedRadps,
-                MazeMap::CommandPD::StateWheelOmegaPD);
-        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
-            driveCommand.leftDriveCommand,
-            driveCommand.rightDriveCommand);
-    }
-}
-
 class AuxMeasurementController : public IApplicationMode
 {
 public:
@@ -695,10 +677,10 @@ private:
                 launchCommands.rightCommand);
         }
 
-        return MakeWheelOmegaRawMotorPwmCommand(
-            _runtime.Drive(),
+        return _runtime.Drive().PointControlVector(
             _turningTractionState.commandedSpeedMps,
-            _turningTractionState.lastCommandedOmegaRadps);
+            _turningTractionState.lastCommandedOmegaRadps,
+            MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
     void SetFanEnabled(bool enabled)

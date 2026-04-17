@@ -25,6 +25,12 @@ That owner should usually implement `IApplicationMode` directly and expose:
 - `const BootModeDescriptor& GetFooBootModeDescriptor()`
 - `IApplicationMode& GetFooMode()`
 
+Session ownership is part of that mode boundary:
+
+- `Begin()` prepares the one `LoopController` session the mode will run.
+- `Run()` launches that session once and owns it until completion.
+- Do not start nested `LoopController` sessions from subordinate controllers, helpers, or motion executors.
+
 For a new top-level mode, the normal file touch list is:
 
 1. Add the mode's authoritative `.h/.cpp`.
@@ -71,6 +77,8 @@ Pathfinder and locomotion rules stay repo-wide:
 - Use `ManeuverPathfinder` only while stationary.
 - In a maze, prefer the `Maneuver` classes for locomotion.
 - For more manual control, generate `ManeuverInstance` objects directly and add only the small target-yaw correction that is actually needed.
+- `ManeuverPoint` is the per-point drive primitive for higher-level motion execution.
+- Do not rebuild runtime maneuver execution around `SmoothTurnExecutionProfile`; treat it as a legacy derived geometry detail instead of a caller-facing contract.
 - Reserve direct position/yaw control for cases that cannot reasonably be expressed through maneuvers.
 
 Fault ownership also stays centralized:
@@ -204,6 +212,9 @@ The expected pattern is:
 4. Supply one mode-work callback.
 5. Use `TickServices` to end, fault, pause, or hand off the active callback.
 
+That session is the whole active life of the boot-selected mode. Do not treat `Run()` as a wrapper that repeatedly starts and stops smaller helper-owned sessions.
+While motion is active, only the installed mode-work callback runs. Mapping, path progression, maneuver dispatch, and other in-motion decisions therefore need to happen through callback swaps or shared services called by callbacks.
+
 Important current semantics:
 
 - The first tick always begins in brake.
@@ -235,6 +246,8 @@ Preferred callback shape:
   - reopening the logger with a new schema
   - exporting persisted artifacts
   - running other non-real-time cleanup or setup
+- Keep pause callbacks small and specific to the phase that requested them. Do not add a generic pause-dispatch hub.
+- Do not wait for a later control tick, sleep, or spin for control progress outside a pause callback.
 
 Pause behavior matters:
 
@@ -242,6 +255,7 @@ Pause behavior matters:
 - Default pause thresholds are `0.01 m/s` linear and `0.05 rad/s` angular for `2` consecutive settled ticks.
 - The pause callback can resume, complete, or stop by runtime fault.
 - If the pause needs a clean logging state before it runs, set `flushLogsBeforeGrant=true`.
+- Any waiting for operator input, settling, or non-real-time work must happen through `RequestPause()`. Do not add mode-local waits or "just wait one tick" paths outside the pause callback.
 
 Use loop-owned timing instead of rebuilding your own timing capture:
 
@@ -292,6 +306,7 @@ Before considering a new mode done, audit it against this list.
 
 - The mode uses `LoopController`.
 - The mode does not introduce another control-period timing helper.
+- The top-level mode owner is the only code that starts the active session.
 - The mode uses `RequestPause()` for non-real-time phase work instead of doing unbounded file work inside the hot path.
 - The command path is raw open-loop unless there is a documented reason otherwise.
 

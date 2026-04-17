@@ -21,6 +21,8 @@ It is not responsible for:
 
 `SharedRobotRuntime` remains the owner of runtime-wide faults and shared logging.
 
+One boot-selected top-level mode owns one active `LoopController` session. Helper objects may supply callbacks and durable phase state, but they must not start nested sessions or recreate the cadence boundary themselves.
+
 ## Ownership Rules
 
 `LoopController` should be owned by `SharedRobotRuntime`, but its public API should not expose runtime plumbing.
@@ -527,6 +529,7 @@ Pause rules:
 - `PauseRequest::onPauseGranted` must never be null.
 - A pause request without a callback has no useful meaning and should be represented as end-of-session or some other explicit control-flow action instead.
 - The pause callback uses the same durable mode `context` already stored in the active session callback set.
+- While motion is active, only the currently installed mode-work callback runs. Outer-stack mode code does not regain control until the session pauses or ends.
 
 Suggested phase-switch direction:
 
@@ -540,10 +543,14 @@ The actual heavy-work body is supplied through the pause callback passed into `R
 - a pause request is a request to be honored at a safe point, not an immediate demand,
 - it must not happen through silent caller-driven gaps between ticks,
 - it must not happen through ad hoc idle-sleep configuration.
+- waiting for a later tick is not a separate mode-code primitive; if work must leave the hot loop, it does so through the pause callback,
+- and pause callbacks should remain narrow, phase-specific handlers instead of a generic distribution hub.
 
 ## Run Loop
 
 `Run()` should own the entire active cadence.
+
+The selected top-level `IApplicationMode` owns the session boundary. Starting the session is mode startup and ending it is mode shutdown. Nested per-motion sessions inside subordinate controllers violate this ownership.
 
 The production flow should be:
 
@@ -589,6 +596,8 @@ That prevents schedule drift.
 
 Pause is the only legitimate way to leave the strict periodic loop for non-periodic work.
 
+Single-tick waits or ad hoc sleeps outside pause handling are not a valid substitute.
+
 Desired pause flow:
 
 1. mode requests pause,
@@ -601,6 +610,8 @@ Desired pause flow:
 8. resume returns to the loop with brake as the active command until a later tick requests otherwise.
 
 There should be no public idle-sleep configuration used as a substitute for pause.
+
+There should also be no mode-local "wait one more tick" helper outside `RequestPause(...)`. If the work can remain in the periodic callback, keep it there. If it cannot, request pause explicitly.
 
 ## Fault Ownership
 

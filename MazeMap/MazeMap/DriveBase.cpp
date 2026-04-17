@@ -126,6 +126,43 @@ MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
 }
 
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointControlVector(
+    float desiredLinearSpeedMps,
+    float desiredYawRateRadps,
+    MazeMap::CommandPD pd) const
+{
+    const MazeMap::OpenLoopDriveCommand command =
+        PointCommand(
+            desiredLinearSpeedMps,
+            desiredYawRateRadps,
+            pd);
+    return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+        command.leftDriveCommand,
+        command.rightDriveCommand);
+}
+
+MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
+    const MazeMap::ManeuverPoint& point,
+    MazeMap::CommandPD pd) const
+{
+    if (!point.IsFinite())
+    {
+        return {};
+    }
+
+    return PointCommand(point.Velocity, point.Omega, pd);
+}
+
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointControlVector(
+    const MazeMap::ManeuverPoint& point,
+    MazeMap::CommandPD pd) const
+{
+    const MazeMap::OpenLoopDriveCommand command = PointCommand(point, pd);
+    return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+        command.leftDriveCommand,
+        command.rightDriveCommand);
+}
+
 MazeMap::OpenLoopDriveCommand DriveBase::PointYawRateCommand(
     float desiredYawRateRadps,
     MazeMap::CommandPD pd) const

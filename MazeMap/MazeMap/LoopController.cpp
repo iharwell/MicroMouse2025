@@ -22,11 +22,6 @@ namespace MazeMap::App::Internal
         constexpr float kDefaultPauseAngularThresholdRadps = 0.05f;
         constexpr std::uint8_t kDefaultPauseSettledTicks = 2U;
 
-        inline std::uint32_t NowUs() noexcept
-        {
-            return static_cast<std::uint32_t>(micros());
-        }
-
         inline bool IsFinitePositive(const float value) noexcept
         {
             return std::isfinite(value) && (value > 0.0f);
@@ -47,9 +42,10 @@ namespace MazeMap::App::Internal
         // being the strict timing authority it exists to be.
         inline void WaitUntilUs(const std::uint32_t absoluteDeadlineUs) noexcept
         {
-            while (static_cast<std::int32_t>(absoluteDeadlineUs - NowUs()) > 0)
+            while (static_cast<std::int32_t>(absoluteDeadlineUs - static_cast<std::uint32_t>(micros())) > 0)
             {
-                const std::uint32_t remainingUs = static_cast<std::uint32_t>(absoluteDeadlineUs - NowUs());
+                const std::uint32_t remainingUs =
+                    static_cast<std::uint32_t>(absoluteDeadlineUs - static_cast<std::uint32_t>(micros()));
                 if (remainingUs > 10U)
                 {
                     delayMicroseconds(5U);
@@ -169,7 +165,7 @@ namespace MazeMap::App::Internal
         _resumePending = false;
         _publishedTimingValid = false;
         _tickCount = 0U;
-        const std::uint32_t nowUs = NowUs();
+        const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
         _lastTickStartUs = nowUs - _options.controlPeriodUs;
         _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
         _queuedControl = ControlVector::Brake;
@@ -207,7 +203,7 @@ namespace MazeMap::App::Internal
             // caller can wedge its own "just one tick" orchestration into the cadence path.
             if (_deferredTerminalOutcome != DeferredTerminalOutcome::None)
             {
-                const std::uint32_t nowUs = NowUs();
+                const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
                 const std::uint32_t dtUs = nowUs - _lastTickStartUs;
                 _lastTickStartUs = nowUs;
                 (void)dtUs;
@@ -233,7 +229,7 @@ namespace MazeMap::App::Internal
                 return result;
             }
 
-            const std::uint32_t tickStartUs = NowUs();
+            const std::uint32_t tickStartUs = static_cast<std::uint32_t>(micros());
             const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
             _lastTickStartUs = tickStartUs;
@@ -266,7 +262,8 @@ namespace MazeMap::App::Internal
                 _nextSyncTargetUs += _options.controlPeriodUs;
                 continue;
             }
-            timing.tActuationAppliedUs = RelativeTickUs(tickStartUs, NowUs());
+            timing.tActuationAppliedUs =
+                RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
 
             if (_sessionStartWallSensorAdcProbePending)
             {
@@ -621,7 +618,7 @@ namespace MazeMap::App::Internal
 
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
         MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
-        timing.controlTiming.encoderLatchUs = NowUs();
+        timing.controlTiming.encoderLatchUs = static_cast<std::uint32_t>(micros());
         struct CaptureContext final
         {
             LoopController* owner{};
@@ -636,7 +633,7 @@ namespace MazeMap::App::Internal
             [](void* rawContext, SensorSnapshot& captureSnapshot, RuntimeSensorSuite::CaptureServices& services) noexcept
             {
                 auto& context = *static_cast<CaptureContext*>(rawContext);
-                context.timing->controlTiming.encoderReadDoneUs = NowUs();
+                context.timing->controlTiming.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
                 context.owner->_runtime->Drive().UpdateOdometry(
                     context.observed->dtSeconds,
                     captureSnapshot,
@@ -727,18 +724,20 @@ namespace MazeMap::App::Internal
 
     void LoopController::RecordModeReturnTiming(const std::uint32_t tickStartUs) noexcept
     {
-        WorkingTiming().tModeReturnUs = RelativeTickUs(tickStartUs, NowUs());
+        WorkingTiming().tModeReturnUs =
+            RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
     }
 
     void LoopController::RecordPostServiceTiming(const std::uint32_t tickStartUs) noexcept
     {
-        WorkingTiming().tPostServiceDoneUs = RelativeTickUs(tickStartUs, NowUs());
+        WorkingTiming().tPostServiceDoneUs =
+            RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
     }
 
     void LoopController::FinalizeTiming(const std::uint32_t tickStartUs) noexcept
     {
         TimingDiagnostics& timing = WorkingTiming();
-        const std::uint32_t finalizeUs = NowUs();
+        const std::uint32_t finalizeUs = static_cast<std::uint32_t>(micros());
         timing.controlTiming.pwmLatchUs = finalizeUs;
         timing.controlTiming.controlEndUs = finalizeUs;
         timing.controlTiming.cycleCounterEnd = ReadCycleCounter();
@@ -779,7 +778,8 @@ namespace MazeMap::App::Internal
 
     std::uint32_t LoopController::ComputeRemainingSlackUs(const std::uint32_t absoluteDeadlineUs) const noexcept
     {
-        const std::int32_t remainingUs = static_cast<std::int32_t>(absoluteDeadlineUs - NowUs());
+        const std::int32_t remainingUs =
+            static_cast<std::int32_t>(absoluteDeadlineUs - static_cast<std::uint32_t>(micros()));
         return (remainingUs > 0) ? static_cast<std::uint32_t>(remainingUs) : 0U;
     }
 
@@ -827,7 +827,7 @@ namespace MazeMap::App::Internal
         {
             if (disposition.resetClockOnResume || _requests.pauseRequest.resetClockOnResume)
             {
-                const std::uint32_t nowUs = NowUs();
+                const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
                 _lastTickStartUs = nowUs - _options.controlPeriodUs;
                 _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
             }
@@ -864,7 +864,7 @@ namespace MazeMap::App::Internal
         std::uint8_t settledCount = 0U;
         while (settledCount < settledTicks)
         {
-            const std::uint32_t tickStartUs = NowUs();
+            const std::uint32_t tickStartUs = static_cast<std::uint32_t>(micros());
             const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
             const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
             const std::uint32_t deadlineUs = tickStartUs + _options.controlPeriodUs;
@@ -887,7 +887,8 @@ namespace MazeMap::App::Internal
                 ServiceRuntimeLogsForFaultPath();
                 return false;
             }
-            timing.tActuationAppliedUs = RelativeTickUs(tickStartUs, NowUs());
+            timing.tActuationAppliedUs =
+                RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
 
             _observedScratch = ObservedTickState{};
             _observedScratch.sequence = _tickCount;
