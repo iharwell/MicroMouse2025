@@ -2,22 +2,36 @@
 #include "MissionRunMode.h"
 
 #include "MazeMapSharedRuntime.h"
+#include "MissionModeController.h"
 
 namespace MazeMap::App::Internal
 {
+    class MissionRunMode::Implementation final
+    {
+    public:
+        explicit Implementation(SharedRobotRuntime& runtime)
+            : routineController(runtime)
+        {
+        }
+
+        MissionModeController routineController;
+    };
+
     MissionRunMode::MissionRunMode(SharedRobotRuntime& runtime)
-        : _controller(runtime)
+        : _impl(std::make_unique<Implementation>(runtime))
     {
     }
 
+    MissionRunMode::~MissionRunMode() = default;
+
     bool MissionRunMode::Begin()
     {
-        return _controller.BeginMissionRunMode();
+        return _impl->routineController.BeginMissionRunRoutine();
     }
 
     void MissionRunMode::Run()
     {
-        _controller.RunMissionRunMode();
+        _impl->routineController.RunMissionRunRoutine();
     }
 
     const BootModeDescriptor& GetMissionRunBootModeDescriptor()
@@ -30,7 +44,7 @@ namespace MazeMap::App::Internal
             "logging.txt; mission telemetry; maze snapshot when exported",
             &GetMissionRunMode,
             "GetMissionRunMode",
-            "MissionRunMode.cpp",
+            "MissionModeController.cpp",
             "mission initialization; startup wall calibration; exploration; return; speed runs; service cycle",
             "CoreConfig mission tuning; shared runtime pathfinders; persisted front-wall characterization when available",
             "none",

@@ -1,8 +1,9 @@
 #pragma once
 
+#include <memory>
+
 #include "BootModeDescriptor.h"
 #include "MazeMapApplicationMode.h"
-#include "MissionModeController.h"
 
 namespace MazeMap::App::Internal
 {
@@ -12,12 +13,14 @@ namespace MazeMap::App::Internal
     {
     public:
         explicit CorridorRepeatabilityMode(SharedRobotRuntime& runtime);
+        ~CorridorRepeatabilityMode();
 
         bool Begin() override;
         void Run() override;
 
     private:
-        MissionModeController _controller;
+        class Implementation;
+        std::unique_ptr<Implementation> _impl;
     };
 
     IApplicationMode& GetCorridorRepeatabilityMode();

@@ -293,7 +293,6 @@ namespace MazeMap {
             MetadataEntry& slot = m_metadata[m_metadataCount++];
             std::strcpy(slot.key, key);
             std::strcpy(slot.value, value);
-            slot.used = true;
             return true;
         }
 
@@ -322,6 +321,16 @@ namespace MazeMap {
             {
                 char line[kLineBufferChars]{};
                 const char* sidecarHeaderError = nullptr;
+                std::size_t requiredSidecarBytes = 0u;
+                auto countSidecarLine = [&line, &requiredSidecarBytes](const int length) -> bool
+                {
+                    if (length <= 0 || length >= static_cast<int>(sizeof(line))) {
+                        return false;
+                    }
+
+                    requiredSidecarBytes += static_cast<std::size_t>(length) + 1u;
+                    return true;
+                };
                 auto queueSidecarLine = [this](const char* const text) -> bool
                 {
                     if (text == nullptr) {
@@ -335,9 +344,35 @@ namespace MazeMap {
                         pushSidecarQueue(&newline, 1u);
                 };
 
-                std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
-                if (!queueSidecarLine(line)) {
-                    sidecarHeaderError = "Failed to queue schema_version.";
+                if (!countSidecarLine(std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion)))) {
+                    sidecarHeaderError = "schema_version line too long.";
+                }
+
+                if (sidecarHeaderError == nullptr) {
+                    if (!countSidecarLine(std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes)))) {
+                        sidecarHeaderError = "row_bytes line too long.";
+                    }
+                }
+
+                for (std::size_t i = 0u; sidecarHeaderError == nullptr && i < m_metadataCount; ++i) {
+                    if (!countSidecarLine(std::snprintf(line, sizeof(line), "%s=%s", m_metadata[i].key, m_metadata[i].value))) {
+                        sidecarHeaderError = "Metadata line too long.";
+                    }
+                }
+
+                if (sidecarHeaderError == nullptr) {
+                    if (!countSidecarLine(std::snprintf(line, sizeof(line), "%s", header))) {
+                        sidecarHeaderError = "Header line too long.";
+                    } else if (requiredSidecarBytes > m_sidecarQueue.freeSpace()) {
+                        sidecarHeaderError = "Sidecar header exceeds queue capacity.";
+                    }
+                }
+
+                if (sidecarHeaderError == nullptr) {
+                    std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
+                    if (!queueSidecarLine(line)) {
+                        sidecarHeaderError = "Failed to queue schema_version.";
+                    }
                 }
 
                 if (sidecarHeaderError == nullptr) {
@@ -348,9 +383,6 @@ namespace MazeMap {
                 }
 
                 for (std::size_t i = 0u; sidecarHeaderError == nullptr && i < m_metadataCount; ++i) {
-                    if (!m_metadata[i].used) {
-                        continue;
-                    }
                     if (std::snprintf(line, sizeof(line), "%s=%s", m_metadata[i].key, m_metadata[i].value) >= static_cast<int>(sizeof(line))) {
                         sidecarHeaderError = "Metadata line too long.";
                         break;
@@ -872,10 +904,9 @@ namespace MazeMap {
                 m_sidecarQueue.clear();
             }
 
-            for (std::size_t i = 0u; i < MMLOG_METADATA_MAX_ENTRIES; ++i) {
+            for (std::size_t i = 0u; i < m_metadataCount; ++i) {
                 m_metadata[i].key[0] = '\0';
                 m_metadata[i].value[0] = '\0';
-                m_metadata[i].used = false;
             }
 
             m_metadataCount = 0u;
@@ -897,7 +928,7 @@ namespace MazeMap {
 
         bool MmLogLogger::metadataKeyExists(const char* const key) const noexcept {
             for (std::size_t i = 0u; i < m_metadataCount; ++i) {
-                if (m_metadata[i].used && std::strcmp(m_metadata[i].key, key) == 0) {
+                if (std::strcmp(m_metadata[i].key, key) == 0) {
                     return true;
                 }
             }

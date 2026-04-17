@@ -43,7 +43,7 @@ namespace MazeMap {
 
 /** Maximum number of application metadata key/value pairs accepted before begin(). */
 #ifndef MMLOG_METADATA_MAX_ENTRIES
-#  define MMLOG_METADATA_MAX_ENTRIES 512u
+#  define MMLOG_METADATA_MAX_ENTRIES 64u
 #endif
 
 /** Maximum metadata-key length, excluding the null terminator. */
@@ -674,7 +674,6 @@ namespace MazeMap {
             struct MetadataEntry final {
                 char key[MMLOG_METADATA_KEY_MAX_LENGTH + 1u]{};
                 char value[MMLOG_METADATA_VALUE_MAX_LENGTH + 1u]{};
-                bool used{ false };
             };
 
             bool beginImpl(const char* header, std::size_t rowBytes, std::uint32_t schemaVersion, std::uint32_t schemaHash);

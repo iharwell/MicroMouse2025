@@ -162,10 +162,8 @@ namespace MazeMap::App::Internal
         {
             Idle,
             StartupSettleStart,
-            StartupSettleActive,
             QueueLaunch,
             FinalHoldStart,
-            FinalHoldActive,
             Complete
         };
 
@@ -205,19 +203,20 @@ namespace MazeMap::App::Internal
             const LoopController::ModeState& state,
             LoopController::TickServices& services)
         {
+            (void)loopEndTimeUs;
+            (void)state;
             switch (_phase)
             {
             case Phase::StartupSettleStart:
-                if (!BeginHoldPhase(Config::kObservationSettleMs, "startup_settle"))
+                if (!LaunchHoldRoutine(
+                        Config::kObservationSettleMs,
+                        "startup_settle",
+                        Phase::QueueLaunch,
+                        services))
                 {
                     services.Fault("Failed to begin maneuver test startup settle");
-                    return LoopController::ControlVector::Brake;
                 }
-                _phase = Phase::StartupSettleActive;
                 return LoopController::ControlVector::Brake;
-
-            case Phase::StartupSettleActive:
-                return ServiceActiveExecutorPhase(loopEndTimeUs, state, services, Phase::QueueLaunch);
 
             case Phase::QueueLaunch:
             {
@@ -240,16 +239,15 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::FinalHoldStart:
-                if (!BeginHoldPhase(kManeuverQueueCompletionHoldMs, "final_hold"))
+                if (!LaunchHoldRoutine(
+                        kManeuverQueueCompletionHoldMs,
+                        "final_hold",
+                        Phase::Complete,
+                        services))
                 {
                     services.Fault("Failed to begin maneuver test completion hold");
-                    return LoopController::ControlVector::Brake;
                 }
-                _phase = Phase::FinalHoldActive;
                 return LoopController::ControlVector::Brake;
-
-            case Phase::FinalHoldActive:
-                return ServiceActiveExecutorPhase(loopEndTimeUs, state, services, Phase::Complete);
 
             case Phase::Complete:
                 services.RequestEndLoop();
@@ -262,43 +260,26 @@ namespace MazeMap::App::Internal
             }
         }
 
-        LoopController::ControlVector ServiceActiveExecutorPhase(
-            const std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services,
-            const Phase nextPhase)
-        {
-            auto& executor = _runtime.ManeuverExecutorService();
-            if (!executor.Active())
-            {
-                _phase = nextPhase;
-                return LoopController::ControlVector::Brake;
-            }
-
-            const LoopController::ControlVector command =
-                executor.DriveActivePhase(loopEndTimeUs, state, services);
-            if (executor.Active())
-            {
-                return command;
-            }
-
-            if (!executor.ActivePhaseFaulted())
-            {
-                _phase = nextPhase;
-            }
-            return LoopController::ControlVector::Brake;
-        }
-
-        bool BeginHoldPhase(const std::uint16_t durationMs, const char* phaseName)
+        bool LaunchHoldRoutine(
+            const std::uint16_t durationMs,
+            const char* phaseName,
+            const Phase nextPhase,
+            LoopController::TickServices& services)
         {
             if (!BeginTelemetryPhase(phaseName))
             {
                 return false;
             }
 
-            return _runtime.ManeuverExecutorService().BeginHoldPhase(
+            LoopController::ModeCallbacks continuation{};
+            continuation.onModeWork = &Implementation::ModeWorkThunk;
+            continuation.context = this;
+            _phase = nextPhase;
+            return _runtime.ManeuverExecutorService().BeginHoldRoutine(
                 durationMs,
                 true,
+                continuation,
+                services,
                 BuildManeuverExecutorHooks(false));
         }
 

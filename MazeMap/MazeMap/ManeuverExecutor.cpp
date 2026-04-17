@@ -89,6 +89,18 @@ namespace MazeMap::App::Internal
         return BeginPhase(&_holdState, &ManeuverExecutor::HoldRoutineTick, hooks);
     }
 
+    bool ManeuverExecutor::BeginHoldRoutine(
+        const std::uint16_t durationMs,
+        const bool stationary,
+        const LoopController::ModeCallbacks& returnCallbacks,
+        LoopController::TickServices& services,
+        const Hooks& hooks)
+    {
+        return
+            BeginHoldPhase(durationMs, stationary, hooks) &&
+            InstallRoutineCallbacks(returnCallbacks, services);
+    }
+
     void ManeuverExecutor::ApplyAsymmetricQueueLimits(
         MazeMap::ManeuverQueue& queue,
         const MotionLimits& limits,
@@ -374,6 +386,19 @@ namespace MazeMap::App::Internal
         return BeginPhase(&_settleState, &ManeuverExecutor::SettleRoutineTick, hooks);
     }
 
+    bool ManeuverExecutor::BeginBrakedSettleRoutine(
+        const char* timeoutMessage,
+        const std::uint16_t stationaryHoldMs,
+        const std::uint16_t timeoutMs,
+        const LoopController::ModeCallbacks& returnCallbacks,
+        LoopController::TickServices& services,
+        const Hooks& hooks)
+    {
+        return
+            BeginBrakedSettlePhase(timeoutMessage, stationaryHoldMs, timeoutMs, hooks) &&
+            InstallRoutineCallbacks(returnCallbacks, services);
+    }
+
     bool ManeuverExecutor::BeginReverseStraightPhase(
         const float distanceM,
         const MotionLimits& limits,
@@ -399,6 +424,25 @@ namespace MazeMap::App::Internal
             millis() + static_cast<unsigned long>(2000.0f + (4000.0f * distanceM));
         _reverseStraightState.translationWatchdog.Reset(0.0f, millis());
         return BeginPhase(&_reverseStraightState, &ManeuverExecutor::ReverseStraightRoutineTick, hooks);
+    }
+
+    bool ManeuverExecutor::BeginReverseStraightRoutine(
+        const float distanceM,
+        const MotionLimits& limits,
+        const LoopController::ModeCallbacks& returnCallbacks,
+        LoopController::TickServices& services,
+        const Hooks& hooks,
+        const Eigen::Vector2f* targetHeadingOverride,
+        const Eigen::Vector2f* targetPositionOverride)
+    {
+        return
+            BeginReverseStraightPhase(
+                distanceM,
+                limits,
+                hooks,
+                targetHeadingOverride,
+                targetPositionOverride) &&
+            InstallRoutineCallbacks(returnCallbacks, services);
     }
 
     bool ManeuverExecutor::BeginStraightPhase(
@@ -437,6 +481,35 @@ namespace MazeMap::App::Internal
         return BeginPhase(&_straightState, &ManeuverExecutor::StraightRoutineTick, hooks);
     }
 
+    bool ManeuverExecutor::BeginStraightRoutine(
+        const float distanceM,
+        const float entrySpeed,
+        const float cruiseSpeed,
+        const float exitSpeed,
+        const MotionLimits& limits,
+        const bool useWallCentering,
+        MazeMap::DirectionalLocation* const currentLocation,
+        const LoopController::ModeCallbacks& returnCallbacks,
+        LoopController::TickServices& services,
+        const Hooks& hooks,
+        const Eigen::Vector2f* targetHeadingOverride,
+        const Eigen::Vector2f* targetPositionOverride)
+    {
+        return
+            BeginStraightPhase(
+                distanceM,
+                entrySpeed,
+                cruiseSpeed,
+                exitSpeed,
+                limits,
+                useWallCentering,
+                currentLocation,
+                hooks,
+                targetHeadingOverride,
+                targetPositionOverride) &&
+            InstallRoutineCallbacks(returnCallbacks, services);
+    }
+
     bool ManeuverExecutor::BeginTurnPhase(
         const float angleRad,
         const MotionLimits& limits,
@@ -448,6 +521,19 @@ namespace MazeMap::App::Internal
         _turnState.turnProfile = BuildSharedInPlaceTurnProfile(limits);
         _turnState.wallEdgeTracker = wallEdgeTracker;
         return BeginPhase(&_turnState, &ManeuverExecutor::TurnRoutineTick, hooks);
+    }
+
+    bool ManeuverExecutor::BeginTurnRoutine(
+        const float angleRad,
+        const MotionLimits& limits,
+        const LoopController::ModeCallbacks& returnCallbacks,
+        LoopController::TickServices& services,
+        const Hooks& hooks,
+        MazeMap::TurnWallEdgeTracker* const wallEdgeTracker)
+    {
+        return
+            BeginTurnPhase(angleRad, limits, hooks, wallEdgeTracker) &&
+            InstallRoutineCallbacks(returnCallbacks, services);
     }
 
     bool ManeuverExecutor::BeginArcPhase(
@@ -476,6 +562,29 @@ namespace MazeMap::App::Internal
         _arcState.commandedSpeedMps = (std::max)(entrySpeed, 0.0f);
         _arcState.translationWatchdog.Reset(0.0f, millis());
         return BeginPhase(&_arcState, &ManeuverExecutor::ArcRoutineTick, hooks);
+    }
+
+    bool ManeuverExecutor::BeginArcRoutine(
+        const float distanceM,
+        const float angleRad,
+        const float entrySpeed,
+        const float exitSpeed,
+        const float cruiseSpeed,
+        const MotionLimits& limits,
+        const LoopController::ModeCallbacks& returnCallbacks,
+        LoopController::TickServices& services,
+        const Hooks& hooks)
+    {
+        return
+            BeginArcPhase(
+                distanceM,
+                angleRad,
+                entrySpeed,
+                exitSpeed,
+                cruiseSpeed,
+                limits,
+                hooks) &&
+            InstallRoutineCallbacks(returnCallbacks, services);
     }
 
     bool ManeuverExecutor::BeginSmoothTurnPhase(
@@ -513,6 +622,19 @@ namespace MazeMap::App::Internal
         _smoothTurnState.startDistanceM = _drive->GetAverageDistanceMeters();
         _smoothTurnState.translationWatchdog.Reset(0.0f, millis());
         return BeginPhase(&_smoothTurnState, &ManeuverExecutor::SmoothTurnRoutineTick, hooks);
+    }
+
+    bool ManeuverExecutor::BeginSmoothTurnRoutine(
+        const MazeMap::ManeuverInstance& maneuver,
+        const float cruiseSpeed,
+        const MotionLimits& limits,
+        const LoopController::ModeCallbacks& returnCallbacks,
+        LoopController::TickServices& services,
+        const Hooks& hooks)
+    {
+        return
+            BeginSmoothTurnPhase(maneuver, cruiseSpeed, limits, hooks) &&
+            InstallRoutineCallbacks(returnCallbacks, services);
     }
 
     bool ManeuverExecutor::ProceedToManeuverExecutionRoutine(

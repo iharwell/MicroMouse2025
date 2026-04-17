@@ -2,22 +2,36 @@
 #include "PositionAccuracyAuditMode.h"
 
 #include "MazeMapSharedRuntime.h"
+#include "MazeRunningAuditController.h"
 
 namespace MazeMap::App::Internal
 {
+    class PositionAccuracyAuditMode::Implementation final
+    {
+    public:
+        explicit Implementation(SharedRobotRuntime& runtime)
+            : routineController(runtime)
+        {
+        }
+
+        MazeRunningAuditController routineController;
+    };
+
     PositionAccuracyAuditMode::PositionAccuracyAuditMode(SharedRobotRuntime& runtime)
-        : _controller(runtime)
+        : _impl(std::make_unique<Implementation>(runtime))
     {
     }
 
+    PositionAccuracyAuditMode::~PositionAccuracyAuditMode() = default;
+
     bool PositionAccuracyAuditMode::Begin()
     {
-        return _controller.BeginPositionAccuracyAuditMode();
+        return _impl->routineController.BeginPositionAccuracyAuditRoutine();
     }
 
     void PositionAccuracyAuditMode::Run()
     {
-        _controller.RunPositionAccuracyAuditMode();
+        _impl->routineController.RunPositionAccuracyAuditRoutine();
     }
 
     const BootModeDescriptor& GetPositionAccuracyAuditBootModeDescriptor()
@@ -30,8 +44,8 @@ namespace MazeMap::App::Internal
             "logging.txt; position-audit mmlog",
             &GetPositionAccuracyAuditMode,
             "GetPositionAccuracyAuditMode",
-            "PositionAccuracyAuditMode.cpp",
-            "mission-family init; log setup; straight, turn, smooth-turn phases",
+            "MazeRunningAuditController.cpp",
+            "mode initialization; log setup; straight, turn, smooth-turn phases",
             "AuxMeasurementConfig position-audit profile; CoreConfig mission tuning; Maneuvers",
             "Fixture geometry, speed points, and fan policy are profile deltas",
             "position_accuracy_audit.mmlog",

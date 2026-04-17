@@ -7,14 +7,15 @@
 
 namespace MazeMap
 {
-    inline constexpr const char* kOpenFloorSelectedRoutineName = "open_floor_measurement";
-    inline constexpr const char* kOpenFloorFormatVersion = "open_floor_measurement_rev_f";
-    inline constexpr const char* kOpenFloorLoggingFormatRevision = "micromouse_logging_spec_rev_h";
-    inline constexpr const char* kOpenFloorPrimitiveScheduleRevision = "open_floor_schedule_rev_f";
-    inline constexpr const char* kOpenFloorPhaseBinningRevision = "open_floor_phase_bins_rev_d";
-    inline constexpr const char* kOpenFloorStartMarkerDefinitionsRevision = "open_floor_markers_rev_d";
-    inline constexpr const char* kOpenFloorImuExtrinsicsRevision = "back_left_imu_extrinsics_v1";
-    inline constexpr const char* kOpenFloorActiveImuId = "IMU_BL";
+    inline constexpr const char* kOpenFloorSelectedRoutineName = "open_floor";
+    inline constexpr const char* kOpenFloorFormatVersion = "ofm:f";
+    inline constexpr const char* kOpenFloorRevisionBundle = "log:h;sched:f;bins:d;marks:d";
+    inline constexpr const char* kOpenFloorImuSetup = "imu:bl;extr:v1";
+    inline constexpr const char* kOpenFloorTimingStreamType = "timing";
+    inline constexpr const char* kOpenFloorMainStreamType = "main";
+    inline constexpr const char* kOpenFloorBootReason = "pins27_28";
+    inline constexpr const char* kOpenFloorLogFormatSpec = "mlog:g";
+    inline constexpr const char* kOpenFloorEndianness = "le";
     inline constexpr const char* kOpenFloorTimingFileName = "open_floor_timing.mmlog";
     inline constexpr const char* kOpenFloorMainFileName = "open_floor_main.mmlog";
 

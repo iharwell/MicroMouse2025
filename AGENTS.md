@@ -188,6 +188,9 @@ Top-level application modes are selected only at startup by reading designated m
 - Starting that session means the mode is now active; ending that session means the mode is shutting down.
 - Subordinate controllers, helpers, and phase executors must not start nested `LoopController` sessions.
 - While the session is active, only the currently installed loop callback runs and can steer flow, request a pause, end the session, or swap callbacks.
+- `Routine` means a callback-driven `LoopController` procedure. Do **not** introduce synchronous/blocking routine wrappers that hide that callback ownership model.
+- Any routine that does not explicitly request a pause must return control to `LoopController` before the provided deadline for that tick.
+- If `LoopController` is paused, the robot must not move. Pause handling is for non-motion work only unless an explicit task says otherwise.
 - Outside a `LoopController::RequestPause(...)` callback, mode code must not wait for another tick, sleep for control progress, or spin on control-state changes.
 
 ### Mode categories
@@ -417,6 +420,8 @@ Reject the design and revise it if any of the following are true:
 - Mission-mode code should choose goals, replans, and phase transitions. Shared drive execution owners should own the actual motion primitives and per-tick maneuver tracking.
 - `DriveBase` is the destination for concrete "move in this manner" commands. If a higher-level drive owner is introduced, it must become the authoritative motion owner rather than a forwarding facade over `DriveBase`.
 - While motion is active, only the current `LoopController` callback runs. Mapping, pathfinding response, maneuver dispatch, and phase progression that must happen during motion must therefore be callback-driven or live in shared services called by that callback.
+- A `Routine` in the maneuver/motion vocabulary is callback-driven work owned by the active `LoopController` flow, following the `ManeuverExecutor` pattern. Do **not** wrap motion routines in synchronous/blocking helper APIs.
+- If the loop is paused, motion must be halted; pauses are not an excuse to keep driving in parallel with non-real-time work.
 - Outside `LoopController::RequestPause(...)` callbacks, do **not** wait for "one more tick", sleep for control progress, or spin on control-state changes.
 - Open-loop commands are appropriate for low-level tasks such as wall tapping or certain measurements.
 - Reserve direct position or yaw control for tasks that cannot reasonably be expressed through maneuver-based control.

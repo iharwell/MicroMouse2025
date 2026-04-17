@@ -2,22 +2,36 @@
 #include "CorridorRepeatabilityMode.h"
 
 #include "MazeMapSharedRuntime.h"
+#include "MazeRunningAuditController.h"
 
 namespace MazeMap::App::Internal
 {
+    class CorridorRepeatabilityMode::Implementation final
+    {
+    public:
+        explicit Implementation(SharedRobotRuntime& runtime)
+            : routineController(runtime)
+        {
+        }
+
+        MazeRunningAuditController routineController;
+    };
+
     CorridorRepeatabilityMode::CorridorRepeatabilityMode(SharedRobotRuntime& runtime)
-        : _controller(runtime)
+        : _impl(std::make_unique<Implementation>(runtime))
     {
     }
 
+    CorridorRepeatabilityMode::~CorridorRepeatabilityMode() = default;
+
     bool CorridorRepeatabilityMode::Begin()
     {
-        return _controller.BeginCorridorRepeatabilityMode();
+        return _impl->routineController.BeginCorridorRepeatabilityRoutine();
     }
 
     void CorridorRepeatabilityMode::Run()
     {
-        _controller.RunCorridorRepeatabilityMode();
+        _impl->routineController.RunCorridorRepeatabilityRoutine();
     }
 
     const BootModeDescriptor& GetCorridorRepeatabilityBootModeDescriptor()
@@ -30,8 +44,8 @@ namespace MazeMap::App::Internal
             "logging.txt; corridor repeatability mmlog",
             &GetCorridorRepeatabilityMode,
             "GetCorridorRepeatabilityMode",
-            "CorridorRepeatabilityMode.cpp",
-            "mission-family init; log setup; corridor speed passes",
+            "MazeRunningAuditController.cpp",
+            "mode initialization; log setup; corridor speed passes",
             "AuxMeasurementConfig corridor profile; CoreConfig mission tuning; Maneuvers",
             "Corridor geometry, speed points, and repeatability limits are profile deltas",
             "corridor_repeatability.mmlog",

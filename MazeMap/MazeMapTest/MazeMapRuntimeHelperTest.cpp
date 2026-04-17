@@ -326,7 +326,7 @@ namespace MazeMap::App
             std::remove(sidecarPath.c_str());
         }
 
-        TEST_METHOD(MmLogLogger_AcceptsLongMetadataKeysUsedByOpenFloorLogs)
+        TEST_METHOD(MmLogLogger_AcceptsLongMetadataKeys)
         {
             using MazeMap::mmlog::MmLogLogger;
 
@@ -343,6 +343,33 @@ namespace MazeMap::App
             const std::string sidecarText = ReadAllBytes(sidecarPath);
             Assert::IsTrue(sidecarText.find("start_marker_definitions_revision=rev_g\n") != std::string::npos);
             Assert::IsTrue(sidecarText.find("imu_gyro_lpf1_cut213_datasheet_ref_hz=223.000\n") != std::string::npos);
+
+            std::remove(primaryPath.c_str());
+            std::remove(sidecarPath.c_str());
+        }
+
+        TEST_METHOD(MmLogLogger_RejectsOversizedMetadataHeaderBeforeQueueOverflow)
+        {
+            using MazeMap::mmlog::MmLogLogger;
+
+            const std::string primaryPath = CreateTempPath(".mmlog");
+            const std::string sidecarPath = ReplaceExtension(primaryPath, ".sidecar");
+
+            MmLogLogger log;
+            Assert::IsTrue(log.open(primaryPath.c_str()));
+
+            const std::string value(static_cast<std::size_t>(MMLOG_METADATA_VALUE_MAX_LENGTH), 'v');
+            for (std::size_t i = 0u; i < 40u; ++i)
+            {
+                char key[32] = {};
+                const int length = snprintf(key, sizeof(key), "overflow_key_%02zu", i);
+                Assert::IsTrue(length > 0 && length < static_cast<int>(sizeof(key)));
+                Assert::IsTrue(log.writeMetadata(key, value.c_str()));
+            }
+
+            Assert::IsFalse(log.begin(RuntimeHelperTestRow{}));
+            Assert::AreEqual("Sidecar header exceeds queue capacity.", log.lastError());
+            Assert::IsTrue(log.close());
 
             std::remove(primaryPath.c_str());
             std::remove(sidecarPath.c_str());

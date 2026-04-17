@@ -17,14 +17,8 @@ namespace MazeMap::App::Internal
         MissionModeController(MissionModeController&&) = delete;
         MissionModeController& operator=(MissionModeController&&) = delete;
 
-        bool BeginMissionRunMode();
-        void RunMissionRunMode();
-
-        bool BeginCorridorRepeatabilityMode();
-        void RunCorridorRepeatabilityMode();
-
-        bool BeginPositionAccuracyAuditMode();
-        void RunPositionAccuracyAuditMode();
+        bool BeginMissionRunRoutine();
+        void RunMissionRunRoutine();
 
     private:
         class Implementation;

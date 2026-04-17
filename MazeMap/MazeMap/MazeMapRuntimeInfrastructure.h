@@ -7,7 +7,6 @@
 #include "OpenFloorMeasurementLabels.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "PinPairStrap.h"
-#include "RuntimeBinaryLogSupport.h"
 
 // Private application infrastructure helpers for the MazeMap runtime.
 
@@ -455,6 +454,81 @@ namespace MazeMap::App::Internal::Runtime
         uint8_t completedFullCycles = 0U;
     };
 
+    struct WallTouchPoseResetTarget final
+    {
+        float xMeters = 0.0f;
+        float yMeters = 0.0f;
+        float yawRad = 0.0f;
+        bool enabled = false;
+    };
+
+    struct WallTouchLoopState final
+    {
+        float targetYawRad{};
+        float minLatchTravelM{};
+        float maxApproachTravelM{};
+        bool allowPassThroughNoWall{};
+        const WallTouchPoseResetTarget* poseResetTarget{};
+        WallTouchExecutionResult result{};
+        DriveTelemetry lastMotionTelemetry{};
+        unsigned long touchStartMs{};
+        unsigned long stateStartMs{};
+        unsigned long contactCandidateStartMs{};
+        unsigned long contactConfirmedStartMs{};
+        unsigned long frontSignalMissingStartMs{};
+        unsigned long lastMotionMs{};
+        float startDistanceM{};
+        float approachDriveCommand{};
+        float ditherTurnFraction{};
+        float previousCycleFrontSkewMagnitudeM{};
+        float currentCycleStartYawRad{};
+        float currentCycleMaxFrontSkewMagnitudeM{};
+        float currentCycleMaxResidualYawRateRadps{};
+        bool currentCycleFrontSignalValid{};
+        bool haveSquareSample{};
+        unsigned long lastHalfCycleIndex{};
+        float lastSquareYawRad{};
+        float lastSquareFrontSkewM{};
+        float lastSquareYawRateRadps{};
+        bool lastSquareFrontSignalValid{};
+        uint8_t completedHalfCycles{};
+        uint8_t consecutiveGoodFullCycles{};
+        bool contactCandidateActive{};
+        bool seatedResetApplied{};
+        WallTouchState runtimeState{ WallTouchState::EntryConditioning };
+    };
+
+    struct WallTouchLoopHooks final
+    {
+        using AppendTraceLineFn = void (*)(void* context, const char* line) noexcept;
+        using BeginPassThroughSettleFn = LoopController::ControlVector (*)(
+            void* context,
+            void* rawState,
+            LoopController::TickServices& services);
+        using OnPoseResetFn = void (*)(void* context) noexcept;
+        using FaultFn = LoopController::ControlVector (*)(
+            void* context,
+            LoopController::TickServices& services,
+            const char* reason) noexcept;
+        using CompleteFn = LoopController::ControlVector (*)(void* context, LoopController::TickServices& services);
+
+        void* context{};
+        AppendTraceLineFn appendTraceLine{};
+        BeginPassThroughSettleFn beginPassThroughSettle{};
+        OnPoseResetFn onPoseReset{};
+        FaultFn fault{};
+        CompleteFn complete{};
+    };
+
+    EXPORT LoopController::ControlVector DriveSharedWallTouchLoopTick(
+        DriveBase& drive,
+        void* rawState,
+        WallTouchLoopState& wallTouch,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services,
+        const WallTouchLoopHooks& hooks,
+        MazeMap::CommandPD trackingCommandPd);
+
     inline bool HasWallTouchEncoderMotion(
         const DriveTelemetry& reference,
         const DriveTelemetry& current,
@@ -525,529 +599,6 @@ namespace MazeMap::App::Internal::Runtime
         return requestedDriveCommand * (std::clamp)(scale, 0.0f, 1.0f);
     }
 
-    template <typename TickFn, typename TraceFn, typename FinishFn, typename FailFn, typename SeatedResetFn>
-    inline bool ExecuteSharedWallTouchOff(
-        DriveBase& drive,
-        float targetYawRad,
-        float minLatchTravelM,
-        float maxApproachTravelM,
-        bool allowPassThroughNoWall,
-        TickFn&& tickControl,
-        TraceFn&& appendTraceLine,
-        FinishFn&& finishWallTouch,
-        FailFn&& fail,
-        SeatedResetFn&& onSeatedHold,
-        WallTouchExecutionResult& result)
-    {
-        result = {};
-        result.outcome = WallTouchOutcome::SeatedContact;
-
-        const float clampedMinLatchTravelM = (std::max)(0.0f, minLatchTravelM);
-        const float clampedMaxApproachTravelM = (std::max)(clampedMinLatchTravelM, maxApproachTravelM);
-        if (!(std::isfinite(clampedMaxApproachTravelM) && (clampedMaxApproachTravelM > 0.0f)))
-        {
-            return fail("Wall touch-off max travel is invalid");
-        }
-
-        const float startDistanceM = drive.GetAverageDistanceMeters();
-        const unsigned long touchStartMs = millis();
-        const float motionEpsilonM = Config::kWallTouchProgressStallDistanceM;
-        DriveTelemetry lastMotionTelemetry = drive.GetTelemetry();
-        unsigned long lastMotionMs = touchStartMs;
-        WallTouchState state = WallTouchState::EntryConditioning;
-        unsigned long stateStartMs = touchStartMs;
-        unsigned long contactCandidateStartMs = 0UL;
-        bool contactCandidateActive = false;
-        unsigned long contactConfirmedStartMs = 0UL;
-        bool seatedResetApplied = false;
-        unsigned long frontSignalMissingStartMs = 0UL;
-        float approachDriveCommand = Config::kWallTouchDriveCommand;
-        float ditherTurnFraction = Config::kWallTouchSeatWiggleTurnFraction;
-        float previousCycleFrontSkewMagnitudeM = std::numeric_limits<float>::infinity();
-        float currentCycleStartYawRad = drive.GetPose().yawRad;
-        float currentCycleMaxFrontSkewMagnitudeM = 0.0f;
-        float currentCycleMaxResidualYawRateRadps = 0.0f;
-        bool currentCycleFrontSignalValid = true;
-        bool haveSquareSample = false;
-        unsigned long lastHalfCycleIndex = 0UL;
-        float lastSquareYawRad = drive.GetPose().yawRad;
-        float lastSquareFrontSkewM = 0.0f;
-        float lastSquareYawRateRadps = 0.0f;
-        bool lastSquareFrontSignalValid = false;
-        uint8_t completedHalfCycles = 0U;
-        uint8_t consecutiveGoodFullCycles = 0U;
-
-        auto traceStateTransition = [&](WallTouchState fromState, WallTouchState toState, float traveledDistanceM)
-        {
-            char line[192] = {};
-            snprintf(
-                line,
-                sizeof(line),
-                "startup_cal_touch:state,from=%s,to=%s,elapsed_ms=%lu,travel=%.4f",
-                WallTouchStateName(fromState),
-                WallTouchStateName(toState),
-                static_cast<unsigned long>(millis() - touchStartMs),
-                traveledDistanceM);
-            appendTraceLine(line);
-        };
-
-        state = WallTouchState::ContactSeek;
-        traceStateTransition(WallTouchState::EntryConditioning, state, 0.0f);
-
-        while (true)
-        {
-            float dtSeconds = 0.0f;
-            WallTouchObservation observation{};
-            if (!tickControl(false, dtSeconds, observation))
-            {
-                return false;
-            }
-
-            const unsigned long nowMs = millis();
-            const unsigned long elapsedMs = nowMs - touchStartMs;
-            const unsigned long stateElapsedMs = nowMs - stateStartMs;
-            const PoseEstimate& pose = drive.GetPose();
-            const DriveTelemetry telemetry = drive.GetTelemetry();
-            const float traveledDistanceM = std::fabs(drive.GetAverageDistanceMeters() - startDistanceM);
-            const bool frontSignalActive =
-                observation.frontWall ||
-                observation.frontLeftWall ||
-                observation.frontRightWall;
-
-            result.finalTravelM = traveledDistanceM;
-            if ((state != WallTouchState::ControlledRelease) &&
-                (state != WallTouchState::ReverseToClearance) &&
-                (traveledDistanceM >= clampedMaxApproachTravelM))
-            {
-                char line[192] = {};
-                snprintf(
-                    line,
-                    sizeof(line),
-                    "startup_cal_touch:max_travel,state=%s,travel=%.4f,expected=%.4f,max=%.4f",
-                    WallTouchStateName(state),
-                    traveledDistanceM,
-                    clampedMinLatchTravelM,
-                    clampedMaxApproachTravelM);
-                appendTraceLine(line);
-                if (allowPassThroughNoWall && (contactConfirmedStartMs == 0UL))
-                {
-                    result.outcome = WallTouchOutcome::PassedThroughNoWall;
-                    return finishWallTouch("Wall touch-off failed to settle after pass-through");
-                }
-                return fail("Wall touch-off exceeded max travel");
-            }
-
-            if (HasWallTouchEncoderMotion(lastMotionTelemetry, telemetry, motionEpsilonM))
-            {
-                lastMotionMs = nowMs;
-                lastMotionTelemetry = telemetry;
-            }
-
-            if (state == WallTouchState::ContactSeek)
-            {
-                approachDriveCommand = ComputeWallTouchApproachDriveCommand(
-                    traveledDistanceM,
-                    clampedMinLatchTravelM);
-                if (ShouldBrakeWallTouchApproachForEncoderSpeed(telemetry))
-                {
-                    drive.Brake();
-                }
-                else
-                {
-                    approachDriveCommand = LimitWallTouchApproachDriveCommandByEncoderSpeed(
-                        approachDriveCommand,
-                        telemetry);
-                    drive.CommandOpenLoopRaw(MazeMap::MakeSymmetricOpenLoopDriveCommand(approachDriveCommand));
-                }
-
-                const bool motionCollapseIndicator = MazeMap::IsWallTouchContactSample(
-                    traveledDistanceM,
-                    pose.linearSpeedMps,
-                    Config::kWallTouchMinApproachDistanceM,
-                    clampedMinLatchTravelM,
-                    Config::kMotionSettleSpeedThresholdMps,
-                    elapsedMs,
-                    Config::kWallTouchMinCommandTimeMs);
-                const bool progressStallIndicator =
-                    (elapsedMs >= Config::kWallTouchMinCommandTimeMs) &&
-                    ((nowMs - lastMotionMs) >= Config::kWallTouchProgressStallWindowMs);
-                const uint8_t indicatorCount = MazeMap::CountWallTouchContactIndicators(
-                    frontSignalActive,
-                    motionCollapseIndicator,
-                    progressStallIndicator);
-                const bool contactIndicatorsSatisfied = indicatorCount >= 2U;
-                if (contactIndicatorsSatisfied)
-                {
-                    if (!contactCandidateActive)
-                    {
-                        contactCandidateStartMs = nowMs;
-                        contactCandidateActive = true;
-                    }
-                    else if (MazeMap::HasWallTouchConfirmedContact(
-                        nowMs - contactCandidateStartMs,
-                        Config::kWallTouchContactConfirmationMs,
-                        indicatorCount))
-                    {
-                        contactConfirmedStartMs = contactCandidateStartMs;
-                        state = WallTouchState::SeatingPreloadRamp;
-                        stateStartMs = nowMs;
-                        char line[224] = {};
-                        snprintf(
-                            line,
-                            sizeof(line),
-                            "startup_cal_touch:contact_confirmed,travel=%.4f,elapsed_ms=%lu,front=%u,collapse=%u,stall=%u",
-                            traveledDistanceM,
-                            elapsedMs,
-                            frontSignalActive ? 1U : 0U,
-                            motionCollapseIndicator ? 1U : 0U,
-                            progressStallIndicator ? 1U : 0U);
-                        appendTraceLine(line);
-                        traceStateTransition(WallTouchState::ContactSeek, state, traveledDistanceM);
-                    }
-                }
-                else
-                {
-                    contactCandidateActive = false;
-                }
-
-                continue;
-            }
-
-            if (state == WallTouchState::SeatingPreloadRamp)
-            {
-                const float rampAlpha =
-                    static_cast<float>((std::min)(stateElapsedMs, static_cast<unsigned long>(Config::kWallTouchSeatRampMs))) /
-                    static_cast<float>((std::max)(Config::kWallTouchSeatRampMs, static_cast<uint16_t>(1U)));
-                const float seatDriveCommand =
-                    approachDriveCommand +
-                    ((Config::kWallTouchSeatRampMaxDriveCommand - approachDriveCommand) * rampAlpha);
-                drive.CommandOpenLoopRaw(MazeMap::MakeSymmetricOpenLoopDriveCommand(seatDriveCommand));
-                if (stateElapsedMs >= Config::kWallTouchSeatRampMs)
-                {
-                    state = WallTouchState::InitialSeatingDwell;
-                    stateStartMs = nowMs;
-                    traceStateTransition(WallTouchState::SeatingPreloadRamp, state, traveledDistanceM);
-                }
-                continue;
-            }
-
-            if (state == WallTouchState::InitialSeatingDwell)
-            {
-                drive.CommandOpenLoopRaw(MazeMap::MakeSymmetricOpenLoopDriveCommand(Config::kWallTouchSeatRampMaxDriveCommand));
-                if (stateElapsedMs >= Config::kWallTouchInitialSeatDwellMs)
-                {
-                    state = WallTouchState::SquareUpDither;
-                    stateStartMs = nowMs;
-                    currentCycleStartYawRad = pose.yawRad;
-                    currentCycleMaxFrontSkewMagnitudeM = 0.0f;
-                    currentCycleMaxResidualYawRateRadps = 0.0f;
-                    currentCycleFrontSignalValid = true;
-                    haveSquareSample = false;
-                    completedHalfCycles = 0U;
-                    result.completedFullCycles = 0U;
-                    consecutiveGoodFullCycles = 0U;
-                    ditherTurnFraction = Config::kWallTouchSeatWiggleTurnFraction;
-                    frontSignalMissingStartMs = 0UL;
-                    traceStateTransition(WallTouchState::InitialSeatingDwell, state, traveledDistanceM);
-                }
-                continue;
-            }
-
-            if (state == WallTouchState::SquareUpDither)
-            {
-                const unsigned long contactDurationMs =
-                    (contactConfirmedStartMs > 0UL) ?
-                    (nowMs - contactConfirmedStartMs) :
-                    0UL;
-                result.confirmedContactMs = contactDurationMs;
-                if (!frontSignalActive)
-                {
-                    if (frontSignalMissingStartMs == 0UL)
-                    {
-                        frontSignalMissingStartMs = nowMs;
-                    }
-                    else if ((nowMs - frontSignalMissingStartMs) >= Config::kWallTouchContactConfirmationMs)
-                    {
-                        char line[192] = {};
-                        snprintf(
-                            line,
-                            sizeof(line),
-                            "startup_cal_touch:front_signal_invalid,elapsed_ms=%lu,travel=%.4f",
-                            contactDurationMs,
-                            traveledDistanceM);
-                        appendTraceLine(line);
-                        return fail("Wall touch-off front sensors invalid during square-up");
-                    }
-                }
-                else
-                {
-                    frontSignalMissingStartMs = 0UL;
-                }
-
-                const MazeMap::OpenLoopDriveCommand ditherCommand = MazeMap::ComputeOpenLoopYawDitherCommand(
-                    Config::kWallTouchSeatRampMaxDriveCommand,
-                    stateElapsedMs,
-                    Config::kWallTouchSeatWiggleHalfPeriodMs,
-                    Config::kWallTouchSeatWiggleBlendMs,
-                    ditherTurnFraction,
-                    Config::kWallTouchSeatWiggleRetainedForwardFraction);
-                drive.CommandOpenLoopRaw(ditherCommand);
-
-                const unsigned long halfCycleIndex =
-                    stateElapsedMs /
-                    (std::max)(Config::kWallTouchSeatWiggleHalfPeriodMs, static_cast<uint16_t>(1U));
-                if (haveSquareSample && (halfCycleIndex != lastHalfCycleIndex))
-                {
-                    ++completedHalfCycles;
-                    currentCycleMaxFrontSkewMagnitudeM = (std::max)(
-                        currentCycleMaxFrontSkewMagnitudeM,
-                        std::fabs(lastSquareFrontSkewM));
-                    currentCycleMaxResidualYawRateRadps = (std::max)(
-                        currentCycleMaxResidualYawRateRadps,
-                        std::fabs(lastSquareYawRateRadps));
-                    currentCycleFrontSignalValid = currentCycleFrontSignalValid && lastSquareFrontSignalValid;
-
-                    char halfCycleLine[256] = {};
-                    snprintf(
-                        halfCycleLine,
-                        sizeof(halfCycleLine),
-                        "startup_cal_touch:half_cycle,index=%u,front_skew_m=%.4f,residual_yaw_rate_radps=%.4f,turn_fraction=%.3f",
-                        static_cast<unsigned>(completedHalfCycles),
-                        std::fabs(lastSquareFrontSkewM),
-                        std::fabs(lastSquareYawRateRadps),
-                        ditherTurnFraction);
-                    appendTraceLine(halfCycleLine);
-
-                    if ((completedHalfCycles & 1U) == 0U)
-                    {
-                        ++result.completedFullCycles;
-                        const float netYawChangeMagnitudeRad = std::fabs(AngleErrorRad(currentCycleStartYawRad, lastSquareYawRad));
-                        const bool cycleGood = MazeMap::IsWallTouchSquareCycleGood(
-                            currentCycleMaxFrontSkewMagnitudeM,
-                            Config::kWallTouchSquareFrontSkewThresholdM,
-                            currentCycleMaxResidualYawRateRadps,
-                            Config::kWallTouchSquareResidualYawRateThresholdRadps,
-                            netYawChangeMagnitudeRad,
-                            Config::kWallTouchSquareNetYawChangeThresholdRad,
-                            currentCycleFrontSignalValid);
-                        consecutiveGoodFullCycles = cycleGood ? (consecutiveGoodFullCycles + 1U) : 0U;
-
-                        char cycleLine[320] = {};
-                        snprintf(
-                            cycleLine,
-                            sizeof(cycleLine),
-                            "startup_cal_touch:full_cycle,index=%u,good=%u,front_skew_m=%.4f,residual_yaw_rate_radps=%.4f,net_yaw_deg=%.2f,contact_ms=%lu,turn_fraction=%.3f",
-                            static_cast<unsigned>(result.completedFullCycles),
-                            cycleGood ? 1U : 0U,
-                            currentCycleMaxFrontSkewMagnitudeM,
-                            currentCycleMaxResidualYawRateRadps,
-                            RAD_TO_DEG_F * netYawChangeMagnitudeRad,
-                            contactDurationMs,
-                            ditherTurnFraction);
-                        appendTraceLine(cycleLine);
-
-                        if (!cycleGood &&
-                            (ditherTurnFraction < Config::kWallTouchSeatWiggleMaxTurnFraction) &&
-                            (MazeMap::HasWallTouchSquareUpSaturated(
-                                previousCycleFrontSkewMagnitudeM,
-                                currentCycleMaxFrontSkewMagnitudeM,
-                                Config::kWallTouchSquareImprovementSaturationThresholdM) ||
-                                (result.completedFullCycles >= Config::kWallTouchSeatMinimumFullCycles)))
-                        {
-                            ditherTurnFraction = MazeMap::ComputeWallTouchSeatWiggleTurnFraction(
-                                result.completedFullCycles,
-                                Config::kWallTouchSeatWiggleTurnFraction,
-                                Config::kWallTouchSeatWiggleTurnFractionStep,
-                                Config::kWallTouchSeatWiggleMaxTurnFraction);
-                        }
-
-                        previousCycleFrontSkewMagnitudeM = currentCycleMaxFrontSkewMagnitudeM;
-                        currentCycleStartYawRad = lastSquareYawRad;
-                        currentCycleMaxFrontSkewMagnitudeM = 0.0f;
-                        currentCycleMaxResidualYawRateRadps = 0.0f;
-                        currentCycleFrontSignalValid = true;
-
-                        if (MazeMap::IsWallTouchSquareSuccessEligible(
-                            contactDurationMs,
-                            Config::kWallTouchMinimumConfirmedContactMs,
-                            result.completedFullCycles,
-                            Config::kWallTouchSeatMinimumFullCycles,
-                            consecutiveGoodFullCycles,
-                            Config::kWallTouchSeatRequiredGoodFullCycles))
-                        {
-                            state = WallTouchState::PostSquareSeatedHold;
-                            stateStartMs = nowMs;
-                            result.seatedTravelM = traveledDistanceM;
-                            result.seatedYawErrorRad = AngleErrorRad(targetYawRad, pose.yawRad);
-                            traceStateTransition(WallTouchState::SquareUpDither, state, traveledDistanceM);
-                            continue;
-                        }
-                    }
-                }
-
-                if (contactDurationMs >= Config::kWallTouchSquareUpTimeoutMs)
-                {
-                    char line[192] = {};
-                    snprintf(
-                        line,
-                        sizeof(line),
-                        "startup_cal_touch:square_timeout,contact_ms=%lu,turn_fraction=%.3f,cycles=%u",
-                        contactDurationMs,
-                        ditherTurnFraction,
-                        static_cast<unsigned>(result.completedFullCycles));
-                    appendTraceLine(line);
-                    return fail("Wall touch-off square-up timed out");
-                }
-
-                haveSquareSample = true;
-                lastHalfCycleIndex = halfCycleIndex;
-                lastSquareYawRad = pose.yawRad;
-                lastSquareFrontSkewM = observation.frontSkewM;
-                lastSquareYawRateRadps = pose.angularSpeedRadps;
-                lastSquareFrontSignalValid = frontSignalActive;
-                continue;
-            }
-
-            if (state == WallTouchState::PostSquareSeatedHold)
-            {
-                drive.CommandOpenLoopRaw(MazeMap::MakeSymmetricOpenLoopDriveCommand(Config::kWallTouchSeatRampMaxDriveCommand));
-                if (!seatedResetApplied &&
-                    (stateElapsedMs >= (Config::kWallTouchPostSquareHoldMs / 2U)))
-                {
-                    if (!onSeatedHold(result))
-                    {
-                        return false;
-                    }
-                    seatedResetApplied = true;
-                }
-                if (stateElapsedMs >= Config::kWallTouchPostSquareHoldMs)
-                {
-                    if (!seatedResetApplied)
-                    {
-                        if (!onSeatedHold(result))
-                        {
-                            return false;
-                        }
-                        seatedResetApplied = true;
-                    }
-                    char line[224] = {};
-                    snprintf(
-                        line,
-                        sizeof(line),
-                        "startup_cal_touch:reset_pose,x=%.4f,y=%.4f,yaw_deg=%.2f,travel=%.4f",
-                        drive.GetPose().xMeters,
-                        drive.GetPose().yMeters,
-                        RAD_TO_DEG_F * drive.GetPose().yawRad,
-                        result.seatedTravelM);
-                    appendTraceLine(line);
-                    state = WallTouchState::ControlledRelease;
-                    stateStartMs = nowMs;
-                    traceStateTransition(WallTouchState::PostSquareSeatedHold, state, traveledDistanceM);
-                }
-                continue;
-            }
-
-            if (state == WallTouchState::ControlledRelease)
-            {
-                const float releaseAlpha =
-                    static_cast<float>((std::min)(stateElapsedMs, static_cast<unsigned long>(Config::kWallTouchReleaseRampMs))) /
-                    static_cast<float>((std::max)(Config::kWallTouchReleaseRampMs, static_cast<uint16_t>(1U)));
-                const float forwardPreloadCommand =
-                    Config::kWallTouchSeatRampMaxDriveCommand * (1.0f - releaseAlpha);
-                float reverseCommand = 0.0f;
-                if (Config::kWallTouchReleaseReverseOverlapMs >= Config::kWallTouchReleaseRampMs)
-                {
-                    reverseCommand = Config::kWallTouchReleaseReverseDriveCommand * releaseAlpha;
-                }
-                else if (stateElapsedMs >= (Config::kWallTouchReleaseRampMs - Config::kWallTouchReleaseReverseOverlapMs))
-                {
-                    const unsigned long reverseElapsedMs =
-                        stateElapsedMs - (Config::kWallTouchReleaseRampMs - Config::kWallTouchReleaseReverseOverlapMs);
-                    const float reverseAlpha =
-                        static_cast<float>((std::min)(reverseElapsedMs, static_cast<unsigned long>(Config::kWallTouchReleaseReverseOverlapMs))) /
-                        static_cast<float>((std::max)(Config::kWallTouchReleaseReverseOverlapMs, static_cast<uint16_t>(1U)));
-                    reverseCommand = Config::kWallTouchReleaseReverseDriveCommand * reverseAlpha;
-                }
-
-                drive.CommandOpenLoopRaw(MazeMap::MakeSymmetricOpenLoopDriveCommand(forwardPreloadCommand - reverseCommand));
-                result.reverseDistanceM = (std::max)(0.0f, result.seatedTravelM - traveledDistanceM);
-                if ((result.reverseDistanceM >= Config::kDistanceToleranceM) && !frontSignalActive)
-                {
-                    char line[224] = {};
-                    snprintf(
-                        line,
-                        sizeof(line),
-                        "startup_cal_touch:release_clear,reverse_m=%.4f,elapsed_ms=%lu",
-                        result.reverseDistanceM,
-                        stateElapsedMs);
-                    appendTraceLine(line);
-                    state = WallTouchState::ReverseToClearance;
-                    stateStartMs = nowMs;
-                    traceStateTransition(WallTouchState::ControlledRelease, state, traveledDistanceM);
-                    continue;
-                }
-
-                if (stateElapsedMs >= Config::kWallTouchReleaseRampMs)
-                {
-                    state = WallTouchState::ReverseToClearance;
-                    stateStartMs = nowMs;
-                    traceStateTransition(WallTouchState::ControlledRelease, state, traveledDistanceM);
-                }
-                continue;
-            }
-
-            if (state == WallTouchState::ReverseToClearance)
-            {
-                result.reverseDistanceM = (std::max)(0.0f, result.seatedTravelM - traveledDistanceM);
-                const float headingErrorRad = AngleErrorRad(targetYawRad, pose.yawRad);
-                float angularCommandRadps =
-                    (Config::kStraightHeadingKp * headingErrorRad) -
-                    (Config::kStraightYawD * pose.angularSpeedRadps);
-                angularCommandRadps = (std::clamp)(
-                    angularCommandRadps,
-                    -Config::kWallTouchReverseMaxAngularCommandRadps,
-                    Config::kWallTouchReverseMaxAngularCommandRadps);
-                (void)dtSeconds;
-                drive.CommandGenerated(
-                    drive.PointCommand(
-                        -Config::kWallTouchReverseSpeedMps,
-                        angularCommandRadps,
-                        MazeMap::CommandPD::StateWheelOmegaPD),
-                    -Config::kWallTouchReverseSpeedMps,
-                    angularCommandRadps);
-
-                if (result.reverseDistanceM >= Config::kWallTouchFrontClearanceDistanceM)
-                {
-                    char line[224] = {};
-                    snprintf(
-                        line,
-                        sizeof(line),
-                        "startup_cal_touch:clearance_reached,reverse_m=%.4f,target_m=%.4f",
-                        result.reverseDistanceM,
-                        Config::kWallTouchFrontClearanceDistanceM);
-                    appendTraceLine(line);
-                    drive.Brake();
-                    state = WallTouchState::Handoff;
-                    traceStateTransition(WallTouchState::ReverseToClearance, state, traveledDistanceM);
-                    return true;
-                }
-
-                if ((stateElapsedMs >= Config::kMotionSettleTimeoutMs) &&
-                    frontSignalActive)
-                {
-                    char line[192] = {};
-                    snprintf(
-                        line,
-                        sizeof(line),
-                        "startup_cal_touch:clearance_failed,reverse_m=%.4f,elapsed_ms=%lu",
-                        result.reverseDistanceM,
-                        stateElapsedMs);
-                    appendTraceLine(line);
-                    return fail("Wall touch-off failed to establish front-wall clearance");
-                }
-            }
-        }
-    }
 }
 
 inline const char* AuxMeasurementRoutineName(AuxMeasurementConfig::Routine routine)

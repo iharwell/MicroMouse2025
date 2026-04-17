@@ -246,6 +246,9 @@
     <ClInclude Include="MazeMask.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="MazeRunningAuditController.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
     <ClInclude Include="MissionModeController.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
@@ -476,6 +479,9 @@
     <ClCompile Include="MouseUkfFacade.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="AuxMeasurementModeSupport.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
     <ClCompile Include="AuxMeasurementController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
@@ -492,6 +498,9 @@
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MissionModeController.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="MazeRunningAuditController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MissionRunMode.cpp">

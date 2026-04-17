@@ -236,6 +236,7 @@
     <ClInclude Include="MazeMapSharedRuntime.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
+    <ClInclude Include="MazeRunningAuditController.h" />
     <ClInclude Include="MissionModeController.h" />
     <ClInclude Include="MissionRunMode.h" />
     <ClInclude Include="ManeuverFileTestMode.h" />
@@ -316,6 +317,7 @@
     </ClCompile>
     <ClCompile Include="MmLog.cpp" />
     <ClCompile Include="MouseUkfFacade.cpp" />
+    <ClCompile Include="AuxMeasurementModeSupport.cpp" />
     <ClCompile Include="AuxMeasurementController.cpp">
       <ObjectFileName>$(IntDir)AuxMeasurementController.obj</ObjectFileName>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -338,6 +340,10 @@
     </ClCompile>
     <ClCompile Include="MissionModeController.cpp">
       <ObjectFileName>$(IntDir)MissionModeController.obj</ObjectFileName>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="MazeRunningAuditController.cpp">
+      <ObjectFileName>$(IntDir)MazeRunningAuditController.obj</ObjectFileName>
       <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MissionRunMode.cpp" />

@@ -2,7 +2,6 @@
 // Declares the shared runtime object that wires together vehicles, planners, sensors, and drive services for the app.
 
 #include "Defines.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -13,6 +12,7 @@ class RuntimeSensorSuite;
 namespace MazeMap::App::Internal
 {
     class LoopController;
+    class ManeuverExecutor;
 }
 
 namespace MazeMap
@@ -26,8 +26,6 @@ namespace MazeMap
 
 namespace MazeMap::App::Internal
 {
-    class ManeuverExecutor;
-
     inline constexpr const char* kSharedRuntimeTextLogFileName = "logging.txt";
 
     // Owns the heavyweight runtime infrastructure that should be shared across all startup modes.

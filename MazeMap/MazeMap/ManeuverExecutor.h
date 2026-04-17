@@ -62,9 +62,11 @@ namespace MazeMap::App::Internal
             MazeMap::ManeuverCode code,
             const MotionLimits& limits) const;
 
-        bool BeginHoldPhase(
+        bool BeginHoldRoutine(
             std::uint16_t durationMs,
             bool stationary,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::TickServices& services,
             const Hooks& hooks = Hooks{});
 
         void ApplyAsymmetricQueueLimits(
@@ -87,6 +89,85 @@ namespace MazeMap::App::Internal
             MazeMap::DirectionalLocation& currentLocation,
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{});
+
+        bool BeginBrakedSettleRoutine(
+            const char* timeoutMessage,
+            std::uint16_t stationaryHoldMs,
+            std::uint16_t timeoutMs,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{});
+
+        bool BeginReverseStraightRoutine(
+            float distanceM,
+            const MotionLimits& limits,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{},
+            const Eigen::Vector2f* targetHeadingOverride = nullptr,
+            const Eigen::Vector2f* targetPositionOverride = nullptr);
+
+        bool BeginStraightRoutine(
+            float distanceM,
+            float entrySpeed,
+            float cruiseSpeed,
+            float exitSpeed,
+            const MotionLimits& limits,
+            bool useWallCentering,
+            MazeMap::DirectionalLocation* currentLocation,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{},
+            const Eigen::Vector2f* targetHeadingOverride = nullptr,
+            const Eigen::Vector2f* targetPositionOverride = nullptr);
+
+        bool BeginTurnRoutine(
+            float angleRad,
+            const MotionLimits& limits,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{},
+            MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr);
+
+        bool BeginArcRoutine(
+            float distanceM,
+            float angleRad,
+            float entrySpeed,
+            float exitSpeed,
+            float cruiseSpeed,
+            const MotionLimits& limits,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{});
+
+        bool BeginSmoothTurnRoutine(
+            const MazeMap::ManeuverInstance& maneuver,
+            float cruiseSpeed,
+            const MotionLimits& limits,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{});
+
+        LoopController::ControlVector DriveActivePhase(
+            std::uint32_t loopEndTimeUs,
+            const LoopController::ModeState& state,
+            LoopController::TickServices& services);
+
+        void CancelActivePhase() noexcept;
+
+    private:
+        friend class SharedRobotRuntime;
+
+        using ActivePhaseTickFn = LoopController::ControlVector (ManeuverExecutor::*)(
+            void* rawState,
+            std::uint32_t loopEndTimeUs,
+            const LoopController::ModeState& state,
+            LoopController::TickServices& services);
+
+        bool BeginHoldPhase(
+            std::uint16_t durationMs,
+            bool stationary,
             const Hooks& hooks = Hooks{});
 
         bool BeginBrakedSettlePhase(
@@ -134,22 +215,6 @@ namespace MazeMap::App::Internal
             float cruiseSpeed,
             const MotionLimits& limits,
             const Hooks& hooks = Hooks{});
-
-        LoopController::ControlVector DriveActivePhase(
-            std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services);
-
-        void CancelActivePhase() noexcept;
-
-    private:
-        friend class SharedRobotRuntime;
-
-        using ActivePhaseTickFn = LoopController::ControlVector (ManeuverExecutor::*)(
-            void* rawState,
-            std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services);
 
         struct HoldRoutineState final
         {

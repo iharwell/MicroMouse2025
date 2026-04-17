@@ -63,7 +63,7 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MazeMapApplicationRuntime.h`: declarations for the application runtime boundary between startup and active control loops.
 - `MazeMapControllerRegistry.h`: registry helpers for application controllers and standalone mode selection.
 - `MazeMapCore.cpp`: excluded legacy/experimental core file; retained in the project but not built.
-- `MissionModeController.h` / `MissionModeController.cpp`: large mission/policy owner under active convergence; it should retain mission decisions and shed shared motion execution, nested loop-session ownership, and diagnostic workflow execution.
+- `MissionRunMode.cpp`, `CorridorRepeatabilityMode.cpp`, and `PositionAccuracyAuditMode.cpp`: the public boot-mode entrypoints for the maze-running family. They currently each carry a large private implementation while convergence continues on session ownership and shared execution mechanics moving into canonical owners like `ManeuverExecutor` and `BootUtilityModeFramework`.
 - `MazeMapMissionModeHost.h`: host interface that mission modes call to enter specific mission workflows.
 - `MazeMapMissionModes.h` / `MazeMapMissionModes.cpp`: concrete mission mode types used by the standalone app.
 - `MazeMapRuntimeCore.h`: shared runtime state, calibration, asynchronous sensor-read helpers, and wall-distance calibration logic.

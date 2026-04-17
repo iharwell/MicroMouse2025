@@ -1011,20 +1011,6 @@ bool OpenFloorMeasurementController::BeginTimingLog()
         }
         return failTimingStep(step);
     };
-    auto failTextMetadata = [&failTimingStep](const char* key)
-    {
-        char step[96] = {};
-        const int length = snprintf(
-            step,
-            sizeof(step),
-            "text metadata %s",
-            (key != nullptr && key[0] != '\0') ? key : "key");
-        if (length <= 0 || length >= static_cast<int>(sizeof(step)))
-        {
-            return failTimingStep("text metadata");
-        }
-        return failTimingStep(step);
-    };
 
     if (!_runtime.OpenUtilityDataLogFile(MazeMap::kOpenFloorTimingFileName))
     {
@@ -1032,15 +1018,12 @@ bool OpenFloorMeasurementController::BeginTimingLog()
     }
 
     if (!_runtime.WriteUtilityDataLogMetadata("mode", MazeMap::kOpenFloorSelectedRoutineName)) return failDataMetadata("mode");
-    if (!_runtime.WriteUtilityDataLogMetadata("stream_type", "open_floor_timing")) return failDataMetadata("stream_type");
+    if (!_runtime.WriteUtilityDataLogMetadata("stream_type", MazeMap::kOpenFloorTimingStreamType)) return failDataMetadata("stream_type");
     if (!_runtime.WriteUtilityDataLogMetadata("format_version", MazeMap::kOpenFloorFormatVersion)) return failDataMetadata("format_version");
-    if (!_runtime.WriteUtilityDataLogMetadata("logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision)) return failDataMetadata("logging_format_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("primitive_schedule_revision", MazeMap::kOpenFloorPrimitiveScheduleRevision)) return failDataMetadata("primitive_schedule_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("phase_binning_revision", MazeMap::kOpenFloorPhaseBinningRevision)) return failDataMetadata("phase_binning_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("start_marker_definitions_revision", MazeMap::kOpenFloorStartMarkerDefinitionsRevision)) return failDataMetadata("start_marker_definitions_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("boot_reason", "pins_27_28_shorted_at_boot")) return failDataMetadata("boot_reason");
-    if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return failDataMetadata("format_spec");
-    if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return failDataMetadata("endianness");
+    if (!_runtime.WriteUtilityDataLogMetadata("revisions", MazeMap::kOpenFloorRevisionBundle)) return failDataMetadata("revisions");
+    if (!_runtime.WriteUtilityDataLogMetadata("boot_reason", MazeMap::kOpenFloorBootReason)) return failDataMetadata("boot_reason");
+    if (!_runtime.WriteUtilityDataLogMetadata("format_spec", MazeMap::kOpenFloorLogFormatSpec)) return failDataMetadata("format_spec");
+    if (!_runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return failDataMetadata("endianness");
     if (_runId[0] != '\0' && !_runtime.WriteUtilityDataLogMetadata("run_id", _runId)) return failDataMetadata("run_id");
     if (!_runtime.WriteUtilityDataLogMetadataFloat("battery_voltage_start", _batteryVoltageStart, 3)) return failDataMetadata("battery_voltage_start");
     if (!_runtime.WriteUtilityDataLogMetadataFloat("fan_duty_cycle_start", _fanDutyCycleStart, 3)) return failDataMetadata("fan_duty_cycle_start");
@@ -1052,19 +1035,24 @@ bool OpenFloorMeasurementController::BeginTimingLog()
         return failTimingStep("schema begin");
     }
 
-    if (!_runtime.WriteTextLogMetadata("file", _runtime.TextLogFileName())) return failTextMetadata("file");
-    if (!_runtime.WriteTextLogMetadata("data_file", MazeMap::kOpenFloorTimingFileName)) return failTextMetadata("data_file");
-    if (!_runtime.WriteTextLogMetadata("mode", MazeMap::kOpenFloorSelectedRoutineName)) return failTextMetadata("mode");
-    if (!_runtime.WriteTextLogMetadata("stream_type", "open_floor_timing_control_log")) return failTextMetadata("stream_type");
-    if (!_runtime.WriteTextLogMetadata("format_version", MazeMap::kOpenFloorFormatVersion)) return failTextMetadata("format_version");
-    if (!_runtime.WriteTextLogMetadata("logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision)) return failTextMetadata("logging_format_revision");
-    if (!_runtime.WriteTextLogMetadata("primitive_schedule_revision", MazeMap::kOpenFloorPrimitiveScheduleRevision)) return failTextMetadata("primitive_schedule_revision");
-    if (!_runtime.WriteTextLogMetadata("phase_binning_revision", MazeMap::kOpenFloorPhaseBinningRevision)) return failTextMetadata("phase_binning_revision");
-    if (!_runtime.WriteTextLogMetadata("start_marker_definitions_revision", MazeMap::kOpenFloorStartMarkerDefinitionsRevision)) return failTextMetadata("start_marker_definitions_revision");
-    if (!_runtime.WriteTextLogMetadata("boot_reason", "pins_27_28_shorted_at_boot")) return failTextMetadata("boot_reason");
-    if (_runId[0] != '\0' && !_runtime.WriteTextLogMetadata("run_id", _runId)) return failTextMetadata("run_id");
-    if (!_runtime.WriteTextLogMetadata("pins_27_28_shorted_at_boot", _pinsLatchedAtBoot ? "true" : "false")) return failTextMetadata("pins_27_28_shorted_at_boot");
-    if (!_runtime.WriteTextLogEntry(micros(), "run_state", _pinsLatchedAtBoot ? "pins_27_28_shorted_at_boot=true" : "pins_27_28_shorted_at_boot=false")) return failTimingStep("text run_state entry");
+    char logOpenMessage[192] = {};
+    const int logOpenLength = snprintf(
+        logOpenMessage,
+        sizeof(logOpenMessage),
+        "data=%s;stream=%s;ver=%s;revs=%s;boot=%s;run=%s;pins=%u",
+        MazeMap::kOpenFloorTimingFileName,
+        MazeMap::kOpenFloorTimingStreamType,
+        MazeMap::kOpenFloorFormatVersion,
+        MazeMap::kOpenFloorRevisionBundle,
+        MazeMap::kOpenFloorBootReason,
+        (_runId[0] != '\0') ? _runId : "na",
+        _pinsLatchedAtBoot ? 1U : 0U);
+    if (logOpenLength <= 0 ||
+        logOpenLength >= static_cast<int>(sizeof(logOpenMessage)) ||
+        !_runtime.WriteTextLogEntry(micros(), "log_open", logOpenMessage))
+    {
+        return failTimingStep("text log_open entry");
+    }
     return true;
 }
 
@@ -1142,20 +1130,6 @@ bool OpenFloorMeasurementController::BeginMainLog()
         }
         return failMainStep(step);
     };
-    auto failTextMetadata = [&failMainStep](const char* key)
-    {
-        char step[96] = {};
-        const int length = snprintf(
-            step,
-            sizeof(step),
-            "text metadata %s",
-            (key != nullptr && key[0] != '\0') ? key : "key");
-        if (length <= 0 || length >= static_cast<int>(sizeof(step)))
-        {
-            return failMainStep("text metadata");
-        }
-        return failMainStep(step);
-    };
 
     if (!_runtime.OpenUtilityDataLogFile(MazeMap::kOpenFloorMainFileName))
     {
@@ -1163,15 +1137,12 @@ bool OpenFloorMeasurementController::BeginMainLog()
     }
 
     if (!_runtime.WriteUtilityDataLogMetadata("mode", MazeMap::kOpenFloorSelectedRoutineName)) return failDataMetadata("mode");
-    if (!_runtime.WriteUtilityDataLogMetadata("stream_type", "open_floor_main")) return failDataMetadata("stream_type");
+    if (!_runtime.WriteUtilityDataLogMetadata("stream_type", MazeMap::kOpenFloorMainStreamType)) return failDataMetadata("stream_type");
     if (!_runtime.WriteUtilityDataLogMetadata("format_version", MazeMap::kOpenFloorFormatVersion)) return failDataMetadata("format_version");
-    if (!_runtime.WriteUtilityDataLogMetadata("logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision)) return failDataMetadata("logging_format_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("primitive_schedule_revision", MazeMap::kOpenFloorPrimitiveScheduleRevision)) return failDataMetadata("primitive_schedule_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("phase_binning_revision", MazeMap::kOpenFloorPhaseBinningRevision)) return failDataMetadata("phase_binning_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("active_imu_id", MazeMap::kOpenFloorActiveImuId)) return failDataMetadata("active_imu_id");
-    if (!_runtime.WriteUtilityDataLogMetadata("imu_extrinsics_revision", MazeMap::kOpenFloorImuExtrinsicsRevision)) return failDataMetadata("imu_extrinsics_revision");
-    if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return failDataMetadata("format_spec");
-    if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return failDataMetadata("endianness");
+    if (!_runtime.WriteUtilityDataLogMetadata("revisions", MazeMap::kOpenFloorRevisionBundle)) return failDataMetadata("revisions");
+    if (!_runtime.WriteUtilityDataLogMetadata("imu_setup", MazeMap::kOpenFloorImuSetup)) return failDataMetadata("imu_setup");
+    if (!_runtime.WriteUtilityDataLogMetadata("format_spec", MazeMap::kOpenFloorLogFormatSpec)) return failDataMetadata("format_spec");
+    if (!_runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return failDataMetadata("endianness");
     if (_runId[0] != '\0' && !_runtime.WriteUtilityDataLogMetadata("run_id", _runId)) return failDataMetadata("run_id");
     if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return failDataMetadata("control_period_us");
     if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return failDataMetadata("imu_gyro_mdps_per_lsb");
@@ -1183,15 +1154,23 @@ bool OpenFloorMeasurementController::BeginMainLog()
         return failMainStep("schema begin");
     }
 
-    if (!_runtime.WriteTextLogMetadata("file", _runtime.TextLogFileName())) return failTextMetadata("file");
-    if (!_runtime.WriteTextLogMetadata("data_file", MazeMap::kOpenFloorMainFileName)) return failTextMetadata("data_file");
-    if (!_runtime.WriteTextLogMetadata("mode", MazeMap::kOpenFloorSelectedRoutineName)) return failTextMetadata("mode");
-    if (!_runtime.WriteTextLogMetadata("stream_type", "open_floor_main_control_log")) return failTextMetadata("stream_type");
-    if (!_runtime.WriteTextLogMetadata("format_version", MazeMap::kOpenFloorFormatVersion)) return failTextMetadata("format_version");
-    if (!_runtime.WriteTextLogMetadata("logging_format_revision", MazeMap::kOpenFloorLoggingFormatRevision)) return failTextMetadata("logging_format_revision");
-    if (!_runtime.WriteTextLogMetadata("primitive_schedule_revision", MazeMap::kOpenFloorPrimitiveScheduleRevision)) return failTextMetadata("primitive_schedule_revision");
-    if (!_runtime.WriteTextLogMetadata("phase_binning_revision", MazeMap::kOpenFloorPhaseBinningRevision)) return failTextMetadata("phase_binning_revision");
-    if (_runId[0] != '\0' && !_runtime.WriteTextLogMetadata("run_id", _runId)) return failTextMetadata("run_id");
+    char logOpenMessage[192] = {};
+    const int logOpenLength = snprintf(
+        logOpenMessage,
+        sizeof(logOpenMessage),
+        "data=%s;stream=%s;ver=%s;revs=%s;imu=%s;run=%s",
+        MazeMap::kOpenFloorMainFileName,
+        MazeMap::kOpenFloorMainStreamType,
+        MazeMap::kOpenFloorFormatVersion,
+        MazeMap::kOpenFloorRevisionBundle,
+        MazeMap::kOpenFloorImuSetup,
+        (_runId[0] != '\0') ? _runId : "na");
+    if (logOpenLength <= 0 ||
+        logOpenLength >= static_cast<int>(sizeof(logOpenMessage)) ||
+        !_runtime.WriteTextLogEntry(micros(), "log_open", logOpenMessage))
+    {
+        return failMainStep("text log_open entry");
+    }
     return true;
 }
 
@@ -1345,7 +1324,7 @@ bool OpenFloorMeasurementController::Begin()
     _yawSequenceState = YawSequenceState{};
     _smoothSequenceState = SmoothSequenceState{};
     _loopSequenceState = LoopSequenceState{};
-    if (!_runtime.RegisterModeFaultHandler(&OpenFloorMeasurementController::HandleRuntimeFault, this, "open_floor_measurement"))
+    if (!_runtime.RegisterModeFaultHandler(&OpenFloorMeasurementController::HandleRuntimeFault, this, MazeMap::kOpenFloorSelectedRoutineName))
     {
         return false;
     }
@@ -1353,7 +1332,7 @@ bool OpenFloorMeasurementController::Begin()
     {
         return Fail("Hardware setup failed");
     }
-    ResetStartupTrace("mode:open_floor_measurement");
+    ResetStartupTrace("mode:open_floor");
     if (!_drive.Begin())
     {
         return Fail("Drive base init failed");
@@ -1376,14 +1355,14 @@ bool OpenFloorMeasurementController::Begin()
     const int runStartLength = snprintf(
         runStartMessage,
         sizeof(runStartMessage),
-        "run_id=%s;pins_27_28_shorted_at_boot=%u;battery_voltage_start=%.3f;fan_duty_cycle_start=%.3f",
+        "run=%s;pins=%u;vbat=%.3f;fan=%.3f",
         _runId,
         _pinsLatchedAtBoot ? 1U : 0U,
         _batteryVoltageStart,
         _fanDutyCycleStart);
     if (runStartLength <= 0 ||
         runStartLength >= static_cast<int>(sizeof(runStartMessage)) ||
-        !_runtime.WriteTextLogEntry("open_floor_measurement", micros(), "run_start", runStartMessage))
+        !_runtime.WriteTextLogEntry(MazeMap::kOpenFloorSelectedRoutineName, micros(), "run_start", runStartMessage))
     {
         return Fail("Open-floor run metadata logging failed");
     }
@@ -1445,7 +1424,7 @@ void OpenFloorMeasurementController::Run()
     ReleasePrimaryDiagnosticSelectorMonitor();
     if (ok)
     {
-        AppendStartupTrace("open_floor_measurement:complete");
+        AppendStartupTrace("open_floor:complete");
     }
     SetMissionLevelFanEnabled(false);
 }
