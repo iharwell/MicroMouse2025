@@ -32,12 +32,22 @@
   - `788df07 Remove accidental UKF sweep artifact commit contents`
 - Fast-forwarded `main` to include the real UKF/DriveBase branch tip:
   - `main: 1fbf1be -> 1befe3f`
+- Added the follow-up main-branch log update:
+  - `028b8f8 Update UKF sweep recovery log after main merge`
 - Ran the required release verification entry point from merged `main`:
   - `codex_verify\build_and_verify_latest.cmd --no-pause`
 - Verification stopped immediately with the repo-mandated blocker:
   - `HOST_INTERMEDIATE_STATE_BROKEN`
   - Missing or damaged host Release intermediates were reported for `MazeMapTest` and `MazeSimulation`.
   - Per repo instructions, no `Clean`, `Rebuild`, or further artifact deletion was attempted.
+- Preserved the root-worktree-only obstacle files under the ignored backup directory:
+  - `C:\Users\thene\source\repos\MicroMouse2025\.tmp\root_to_main_cleanup_backup_20260416_194602`
+- Removed the redundant `.codex-main-merge` worktree so the root checkout could hold `main`.
+- Switched the root checkout itself onto `main`.
+- Confirmed the root worktree is now:
+  - branch: `main`
+  - commit: `028b8f8`
+  - status: clean
 
 ## Next
 
