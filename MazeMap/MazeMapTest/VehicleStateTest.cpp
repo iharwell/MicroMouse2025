@@ -12,6 +12,19 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
+    namespace
+    {
+        struct RuntimeTuningRestoreScope
+        {
+            SrUkfCore::RuntimeTuning original = SrUkfCore::GetRuntimeTuning();
+
+            ~RuntimeTuningRestoreScope()
+            {
+                SrUkfCore::SetRuntimeTuning(original);
+            }
+        };
+    }
+
     TEST_CLASS(VehicleStateTest)
     {
     public:
@@ -49,6 +62,37 @@ namespace MazeMap
             movingVector(VehicleState::kOmegaL) = 1.1f * wheelSpeedThresholdRadps;
             movingState.SetStateVector(movingVector);
             Assert::IsFalse(movingState.IsStationary());
+        }
+
+        TEST_METHOD(VehicleStateIsStationaryTracksRuntimeTuningOverrides)
+        {
+            RuntimeTuningRestoreScope restore{};
+            SrUkfCore::RuntimeTuning tuned = SrUkfCore::BuildDefaultRuntimeTuning();
+            tuned.stationaryEncoderVelocitySigmaMps = 0.020f;
+            tuned.imuYawRateSigmaRadps = 0.10f;
+            SrUkfCore::SetRuntimeTuning(tuned);
+
+            const PlantParams params = PlantParams::Default();
+            const float wheelSpeedThresholdRadps =
+                tuned.stationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
+
+            VehicleState state;
+            state.SetStateVector(BuildUkfState(
+                0.0f,
+                0.0f,
+                0.0f,
+                0.015f,
+                -0.015f,
+                0.25f,
+                0.5f * wheelSpeedThresholdRadps,
+                -0.5f * wheelSpeedThresholdRadps,
+                0.0f));
+            Assert::IsTrue(state.IsStationary());
+
+            VehicleState::StateVector adjusted = state.GetStateVector();
+            adjusted(VehicleState::kR) = 0.31f;
+            state.SetStateVector(adjusted);
+            Assert::IsFalse(state.IsStationary());
         }
 
         TEST_METHOD(VehicleStateStationaryConstraintAnchorsPoseAndCollapsesStationaryStates)

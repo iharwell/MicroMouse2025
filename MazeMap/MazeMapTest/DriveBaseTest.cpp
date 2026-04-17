@@ -98,6 +98,16 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) <= maxLateralVelocityMps);
         }
 
+        void AssertDriveCommandMatchesSolution(
+            const OpenLoopDriveCommand& command,
+            const DriveCommandSolution& solution,
+            float tolerance = 1.0e-6f)
+        {
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(command));
+            Assert::AreEqual(solution.control.leftMotorCommand, command.leftDriveCommand, tolerance);
+            Assert::AreEqual(solution.control.rightMotorCommand, command.rightDriveCommand, tolerance);
+        }
+
         void PrimeDriveBaseWithEncoderDelta(
             DriveBase& drive,
             const int32_t leftCounts,
@@ -148,196 +158,207 @@ namespace MazeMap
             Assert::AreEqual(command.leftDriveCommand, command.rightDriveCommand, 1.0e-6f);
         }
 
-        TEST_METHOD(DriveBaseDeltaCommandRawAgreesWithPredictAtSteadyForwardTarget)
+        TEST_METHOD(DriveBaseDeltaCommandRawMatchesPlantFeedforwardAtSteadyForwardTarget)
         {
             DriveBase drive;
             PlantModel plant;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
+            const PlantParams params = PlantParams::Default();
 
-            PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
-            float leftEncoderRemainderCounts = 0.0f;
-            float rightEncoderRemainderCounts = 0.0f;
+            const OpenLoopDriveCommand command =
+                drive.DeltaCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    0.20f,
+                    0.20f,
+                    0.0f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
 
-            for (int step = 0; step < kDriveBaseHoldFeedforwardSteps; ++step)
-            {
-                const OpenLoopDriveCommand command =
-                    drive.DeltaCommand(
-                        0.20f,
-                        0.0f,
-                        MazeMap::CommandPD::RawCommand);
-                drive.CommandGenerated(command, 0.20f, 0.0f);
-                SimulateDriveBaseCycle(
-                    drive,
-                    plant,
-                    truthState,
-                    leftEncoderRemainderCounts,
-                    rightEncoderRemainderCounts,
-                    kDriveBasePredictDtSeconds);
-            }
-
-            AssertDriveBaseStateNearTarget(truthState, 0.20f, 0.0f, 0.03f, 0.03f, 0.02f);
-            AssertDriveBaseStateNearTarget(drive.GetEstimatorStateVector(), 0.20f, 0.0f, 0.03f, 0.03f, 0.02f);
+            AssertDriveCommandMatchesSolution(command, solution);
         }
 
-        TEST_METHOD(DriveBaseDeltaCommandCombinedRawAgreesWithPredictAtSteadyTarget)
+        TEST_METHOD(DriveBaseDeltaCommandCombinedRawMatchesPlantFeedforwardAtSteadyTarget)
         {
             DriveBase drive;
             PlantModel plant;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
+            const PlantParams params = PlantParams::Default();
 
-            PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
-            float leftEncoderRemainderCounts = 0.0f;
-            float rightEncoderRemainderCounts = 0.0f;
+            const OpenLoopDriveCommand command =
+                drive.DeltaCommand(
+                    0.20f,
+                    0.0f,
+                    0.40f,
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    0.20f,
+                    0.20f,
+                    0.40f,
+                    0.40f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
 
-            for (int step = 0; step < kDriveBaseHoldFeedforwardSteps; ++step)
-            {
-                const OpenLoopDriveCommand command =
-                    drive.DeltaCommand(
-                        0.20f,
-                        0.0f,
-                        0.40f,
-                        0.0f,
-                        MazeMap::CommandPD::RawCommand);
-                drive.CommandGenerated(command, 0.20f, 0.40f);
-                SimulateDriveBaseCycle(
-                    drive,
-                    plant,
-                    truthState,
-                    leftEncoderRemainderCounts,
-                    rightEncoderRemainderCounts,
-                    kDriveBasePredictDtSeconds);
-            }
-
-            AssertDriveBaseStateNearTarget(truthState, 0.20f, 0.40f, 0.04f, 0.06f, 0.04f);
-            AssertDriveBaseStateNearTarget(drive.GetEstimatorStateVector(), 0.20f, 0.40f, 0.04f, 0.06f, 0.04f);
+            AssertDriveCommandMatchesSolution(command, solution);
         }
 
-        TEST_METHOD(DriveBaseDeltaYawRateCommandRawAgreesWithPredictAtSteadyYawRateTarget)
+        TEST_METHOD(DriveBaseDeltaYawRateCommandRawMatchesPlantFeedforwardAtSteadyYawRateTarget)
         {
             DriveBase drive;
             PlantModel plant;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
+            const PlantParams params = PlantParams::Default();
 
-            PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
-            float leftEncoderRemainderCounts = 0.0f;
-            float rightEncoderRemainderCounts = 0.0f;
+            const OpenLoopDriveCommand command =
+                drive.DeltaYawRateCommand(
+                    0.40f,
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    0.0f,
+                    0.0f,
+                    0.40f,
+                    0.40f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
 
-            for (int step = 0; step < kDriveBaseHoldFeedforwardSteps; ++step)
-            {
-                const OpenLoopDriveCommand command =
-                    drive.DeltaYawRateCommand(
-                        0.40f,
-                        0.0f,
-                        MazeMap::CommandPD::RawCommand);
-                drive.CommandGenerated(command, 0.0f, 0.40f);
-                SimulateDriveBaseCycle(
-                    drive,
-                    plant,
-                    truthState,
-                    leftEncoderRemainderCounts,
-                    rightEncoderRemainderCounts,
-                    kDriveBasePredictDtSeconds);
-            }
-
-            AssertDriveBaseStateNearTarget(truthState, 0.0f, 0.40f, 0.03f, 0.06f, 0.04f);
-            AssertDriveBaseStateNearTarget(drive.GetEstimatorStateVector(), 0.0f, 0.40f, 0.03f, 0.06f, 0.04f);
+            AssertDriveCommandMatchesSolution(command, solution);
         }
 
-        TEST_METHOD(DriveBasePointCommandRawAgreesWithPredictAtForwardTarget)
+        TEST_METHOD(DriveBasePointCommandRawMatchesPlantVelocityTargetFeedforwardAtForwardTarget)
         {
             DriveBase drive;
             PlantModel plant;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
+            const PlantParams params = PlantParams::Default();
 
-            PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
-            float leftEncoderRemainderCounts = 0.0f;
-            float rightEncoderRemainderCounts = 0.0f;
+            const OpenLoopDriveCommand command =
+                drive.PointCommand(
+                    0.20f,
+                    MazeMap::CommandPD::RawCommand);
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    drive.GetEstimatorStateVector(),
+                    0.20f,
+                    0.0f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
 
-            for (int step = 0; step < kDriveBaseVelocityTargetSteps; ++step)
-            {
-                const OpenLoopDriveCommand command =
-                    drive.PointCommand(
-                        0.20f,
-                        MazeMap::CommandPD::RawCommand);
-                drive.CommandGenerated(command, 0.20f, 0.0f);
-                SimulateDriveBaseCycle(
-                    drive,
-                    plant,
-                    truthState,
-                    leftEncoderRemainderCounts,
-                    rightEncoderRemainderCounts,
-                    kDriveBasePredictDtSeconds);
-            }
-
-            AssertDriveBaseStateNearTarget(truthState, 0.20f, 0.0f, 0.03f, 0.03f, 0.02f);
-            AssertDriveBaseStateNearTarget(drive.GetEstimatorStateVector(), 0.20f, 0.0f, 0.03f, 0.03f, 0.02f);
+            AssertDriveCommandMatchesSolution(command, solution);
         }
 
-        TEST_METHOD(DriveBasePointCommandCombinedRawAgreesWithPredictAtTarget)
+        TEST_METHOD(DriveBasePointCommandCombinedRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
             DriveBase drive;
             PlantModel plant;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
+            const PlantParams params = PlantParams::Default();
 
-            PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
-            float leftEncoderRemainderCounts = 0.0f;
-            float rightEncoderRemainderCounts = 0.0f;
+            const OpenLoopDriveCommand command =
+                drive.PointCommand(
+                    0.20f,
+                    0.40f,
+                    MazeMap::CommandPD::RawCommand);
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    drive.GetEstimatorStateVector(),
+                    0.20f,
+                    0.40f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
 
-            for (int step = 0; step < kDriveBaseVelocityTargetSteps; ++step)
-            {
-                const OpenLoopDriveCommand command =
-                    drive.PointCommand(
-                        0.20f,
-                        0.40f,
-                        MazeMap::CommandPD::RawCommand);
-                drive.CommandGenerated(command, 0.20f, 0.40f);
-                SimulateDriveBaseCycle(
-                    drive,
-                    plant,
-                    truthState,
-                    leftEncoderRemainderCounts,
-                    rightEncoderRemainderCounts,
-                    kDriveBasePredictDtSeconds);
-            }
-
-            AssertDriveBaseStateNearTarget(truthState, 0.20f, 0.40f, 0.04f, 0.06f, 0.04f);
-            AssertDriveBaseStateNearTarget(drive.GetEstimatorStateVector(), 0.20f, 0.40f, 0.04f, 0.06f, 0.04f);
+            AssertDriveCommandMatchesSolution(command, solution);
         }
 
-        TEST_METHOD(DriveBasePointYawRateCommandRawAgreesWithPredictAtTarget)
+        TEST_METHOD(DriveBasePointYawRateCommandRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
             DriveBase drive;
             PlantModel plant;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
+            const PlantParams params = PlantParams::Default();
 
-            PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
-            float leftEncoderRemainderCounts = 0.0f;
-            float rightEncoderRemainderCounts = 0.0f;
+            const OpenLoopDriveCommand command =
+                drive.PointYawRateCommand(
+                    0.40f,
+                    MazeMap::CommandPD::RawCommand);
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    drive.GetEstimatorStateVector(),
+                    0.0f,
+                    0.40f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
 
-            for (int step = 0; step < kDriveBaseVelocityTargetSteps; ++step)
-            {
-                const OpenLoopDriveCommand command =
-                    drive.PointYawRateCommand(
-                        0.40f,
-                        MazeMap::CommandPD::RawCommand);
-                drive.CommandGenerated(command, 0.0f, 0.40f);
-                SimulateDriveBaseCycle(
-                    drive,
-                    plant,
-                    truthState,
-                    leftEncoderRemainderCounts,
-                    rightEncoderRemainderCounts,
-                    kDriveBasePredictDtSeconds);
-            }
+            AssertDriveCommandMatchesSolution(command, solution);
+        }
 
-            AssertDriveBaseStateNearTarget(truthState, 0.0f, 0.40f, 0.03f, 0.06f, 0.04f);
-            AssertDriveBaseStateNearTarget(drive.GetEstimatorStateVector(), 0.0f, 0.40f, 0.03f, 0.06f, 0.04f);
+        TEST_METHOD(DriveBasePointCommandImuYawTrackingStaysSymmetricAtTargetYawRate)
+        {
+            DriveBase drive;
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
+
+            const OpenLoopDriveCommand command =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::StateWheelOmegaPD |
+                    MazeMap::CommandPD::IMUYaw);
+
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(command));
+            Assert::AreEqual(command.leftDriveCommand, command.rightDriveCommand, 1.0e-6f);
+        }
+
+        TEST_METHOD(DriveBasePointCommandImuYawTrackingCorrectsYawRateError)
+        {
+            DriveBase drive;
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.40f), nullptr, nullptr);
+
+            const OpenLoopDriveCommand wheelOnlyCommand =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::StateWheelOmegaPD);
+            const OpenLoopDriveCommand imuTrackedCommand =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::StateWheelOmegaPD |
+                    MazeMap::CommandPD::IMUYaw);
+
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(wheelOnlyCommand));
+            Assert::IsTrue(IsFiniteOpenLoopDriveCommand(imuTrackedCommand));
+            Assert::AreEqual(wheelOnlyCommand.leftDriveCommand, wheelOnlyCommand.rightDriveCommand, 1.0e-6f);
+            Assert::IsTrue(
+                std::fabs(imuTrackedCommand.leftDriveCommand - imuTrackedCommand.rightDriveCommand) > 1.0e-4f);
         }
     };
 }

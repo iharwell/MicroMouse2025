@@ -46,6 +46,67 @@ namespace MazeMap
             InconsistentOrSaturated = 3U
         };
 
+        struct ModeProcessNoiseTuning
+        {
+            float sigmaUSqrtQ = 0.0f;
+            float sigmaVSqrtQ = 0.0f;
+            float sigmaRSqrtQ = 0.0f;
+            float sigmaOmegaSqrtQ = 0.0f;
+            float sigmaBgzSqrtQ = 0.0f;
+            float stdRMin = 0.0f;
+            float stdVMin = 0.0f;
+        };
+
+        struct RuntimeTuning
+        {
+            float generalEncoderLinearSpeedSigmaMps = 0.004f;
+            float generalEncoderYawRateSigmaRadps = 0.1617f;
+            float stationaryEncoderVelocitySigmaMps = 1.76e-6f;
+            float encoderPairNisThreshold = 13.81551f;
+            float imuYawRateSigmaRadps = 0.0131f;
+            float imuAccelSigmaMps2 = 0.1305f;
+            float pivotScrubMaxCommandLinearMps = 0.03f;
+            float pivotScrubMinCommandAngularRadps = 1.0f;
+            float pivotScrubYawConsistencyThresholdRadps = 0.03f;
+            float pivotScrubYawWindowMismatchThresholdRad = 0.003f;
+            float pivotScrubZeroUSigmaMps = 0.06f;
+            float stationaryGyroBiasTimeConstantS = 30.0f;
+            float stationaryCertificationDwellS = 0.080f;
+            float stationaryCandidateMaxLinearCommandMps = 0.03f;
+            float stationaryCandidateMaxAngularCommandRadps = 0.15f;
+            float stationaryCandidateMaxDriveCommand = 0.08f;
+            float stationaryCandidateMaxEncoderOmegaRadps = 1.0f;
+            float stationaryCandidateMaxCorrectedGyroRadps = 0.06f;
+            float stationaryCandidateMaxAccelMps2 = 0.6f;
+            float commandSignFlipWindowS = 0.025f;
+            float stationaryExitLaunchWindowS = 0.060f;
+            float launchHoldS = 0.030f;
+            float launchLowSpeedThresholdMps = 0.25f;
+            float launchDriveCommandDeltaThreshold = 0.75f;
+            float inconsistentHoldS = 0.080f;
+            float yawConsistencyLowPassTauS = 0.025f;
+            float yawConsistencyLowPassThresholdRadps = 0.08f;
+            float yawConsistencyExceedDwellS = 0.025f;
+            float yawWindowDurationS = 0.080f;
+            float yawWindowMismatchThresholdRad = 0.03f;
+            float nhcResidualTripSigma = 3.0f;
+            float nhcMinimumEnableForwardSpeedMps = 0.08f;
+            float nhcDisableForwardSpeedMps = 0.05f;
+            float nhcMaxDriveCommandDelta = 0.60f;
+            float recoveryNhcReenableDelayS = 0.025f;
+            float nhcBaseSigmaMps = 0.005f;
+            float nhcSpeedSlopePerMps = 0.05f;
+            float nhcMinimumSigmaMps = 0.005f;
+            float nhcMaximumSigmaMps = 0.040f;
+            float movingGyroBiasStdCapRadps = 0.020f;
+            float recoveryYawRateStdFloorRadps = 0.030f;
+            float yawValidityBiasDeltaMaxRadps = 0.02f;
+            ModeProcessNoiseTuning stationaryCertifiedProcessNoise{};
+            ModeProcessNoiseTuning launchOrReversalProcessNoise{};
+            ModeProcessNoiseTuning gripLinearProcessNoise{};
+            ModeProcessNoiseTuning inconsistentOrSaturatedProcessNoise{};
+        };
+
         // April 10, 2026 D:\open_floor_main.csv tuning from tooling/analyze_open_floor.py:
         // - SEC_10_STATIC / STATIC_HOLD set the IMU yaw noise floor,
         // - SEC_20_LAUNCH / OPEN_LOOP_LAUNCH repeatability set the moving encoder noise floor,
@@ -75,6 +136,11 @@ namespace MazeMap
         SrUkfCore(
             const PlantParams& params = PlantParams::Default(),
             const PlantModel& plantModel = PlantModel()) noexcept;
+
+        static RuntimeTuning BuildDefaultRuntimeTuning() noexcept;
+        static RuntimeTuning GetRuntimeTuning() noexcept;
+        static void SetRuntimeTuning(const RuntimeTuning& tuning) noexcept;
+        static void ResetRuntimeTuning() noexcept;
 
         const StateVector& state() const noexcept
         {
@@ -371,7 +437,7 @@ namespace MazeMap
         void updateCommandSignFlipWindow(float dtSeconds) noexcept;
         void updateStationaryCertification(float yawRateRadps) noexcept;
         void pushYawWindowContribution(float dtSeconds, float ukfYawRateRadps, float gyroYawRateRadps) noexcept;
-        void updateYawConsistencyMetrics(float yawRateRadps) noexcept;
+        void updateYawConsistencyMetrics(float yawRateRadps, float ukfYawRateRadps) noexcept;
         void updateOperatingMode(float dtSeconds) noexcept;
         void updateProcessNoiseForMode() noexcept;
         void resetPivotScrubTelemetry() noexcept;

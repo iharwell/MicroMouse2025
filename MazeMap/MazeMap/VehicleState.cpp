@@ -6,8 +6,15 @@
 
 namespace
 {
-    constexpr float kUkfStationaryLinearSpeedThresholdMps = MazeMap::SrUkfCore::kStationaryEncoderVelocitySigmaMps;
-    constexpr float kUkfStationaryYawRateThresholdRadps = 3.0f * MazeMap::SrUkfCore::kImuYawRateSigmaRadps;
+    float UkfStationaryLinearSpeedThresholdMps() noexcept
+    {
+        return MazeMap::SrUkfCore::GetRuntimeTuning().stationaryEncoderVelocitySigmaMps;
+    }
+
+    float UkfStationaryYawRateThresholdRadps() noexcept
+    {
+        return 3.0f * MazeMap::SrUkfCore::GetRuntimeTuning().imuYawRateSigmaRadps;
+    }
 
     Eigen::Vector2f HeadingUnitFromYaw(float yawRad) noexcept
     {
@@ -38,7 +45,7 @@ namespace
             return 0.0f;
         }
 
-        return kUkfStationaryLinearSpeedThresholdMps / params.wheelRadiusM;
+        return UkfStationaryLinearSpeedThresholdMps() / params.wheelRadiusM;
     }
 }
 
@@ -53,9 +60,9 @@ namespace MazeMap
             std::isfinite(_state(kR)) &&
             std::isfinite(_state(kOmegaL)) &&
             std::isfinite(_state(kOmegaR)) &&
-            (std::fabs(_state(kU)) <= kUkfStationaryLinearSpeedThresholdMps) &&
-            (std::fabs(_state(kV)) <= kUkfStationaryLinearSpeedThresholdMps) &&
-            (std::fabs(_state(kR)) <= kUkfStationaryYawRateThresholdRadps) &&
+            (std::fabs(_state(kU)) <= UkfStationaryLinearSpeedThresholdMps()) &&
+            (std::fabs(_state(kV)) <= UkfStationaryLinearSpeedThresholdMps()) &&
+            (std::fabs(_state(kR)) <= UkfStationaryYawRateThresholdRadps()) &&
             (std::fabs(_state(kOmegaL)) <= wheelSpeedThresholdRadps) &&
             (std::fabs(_state(kOmegaR)) <= wheelSpeedThresholdRadps);
     }

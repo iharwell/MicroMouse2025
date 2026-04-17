@@ -11,7 +11,11 @@ using MazeMap::App::Internal::SharedRobotRuntime;
 
 namespace
 {
-    MazeMap::App::Internal::LoopController::ControlVector MakeWheelOmegaRawMotorPwmCommand(
+    constexpr MazeMap::CommandPD kMissionDriveBaseTrackingCommandPd =
+        MazeMap::CommandPD::StateWheelOmegaPD |
+        MazeMap::CommandPD::IMUYaw;
+
+    MazeMap::App::Internal::LoopController::ControlVector MakeDriveBaseTrackingRawMotorPwmCommand(
         DriveBase& drive,
         const float linearSpeedMps,
         const float angularSpeedRadps) noexcept
@@ -20,7 +24,7 @@ namespace
             drive.PointCommand(
                 linearSpeedMps,
                 angularSpeedRadps,
-                MazeMap::CommandPD::StateWheelOmegaPD);
+                kMissionDriveBaseTrackingCommandPd);
         return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
             driveCommand.leftDriveCommand,
             driveCommand.rightDriveCommand);
@@ -1282,7 +1286,6 @@ private:
         float maneuverSpeedMps{};
         float startDistanceM{};
         unsigned long expectedCompletionDeadlineMs{};
-        MazeMap::SmoothTurnYawRateControllerState yawRateController{};
         bool stallLogged{};
         bool durationLogged{};
         EncoderProgressWatchdog translationWatchdog{};
@@ -3780,7 +3783,7 @@ private:
                 return FaultLoopPhase(services, "Wall touch-off failed to establish front-wall clearance");
             }
 
-            return MakeWheelOmegaRawMotorPwmCommand(
+            return MakeDriveBaseTrackingRawMotorPwmCommand(
                 _drive,
                 -Config::kWallTouchReverseSpeedMps,
                 angularCommandRadps);
@@ -4585,7 +4588,7 @@ private:
             return FaultLoopPhase(services, "Startup front calibration sweep profile became invalid");
         }
 
-        return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
+        return MakeDriveBaseTrackingRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
     }
 
     bool CaptureAndStoreFrontCalibrationSweep(const MotionLimits& limits, bool& storedBands)
@@ -5602,7 +5605,7 @@ private:
 
         return settle.brakeCommand ?
             LoopController::ControlVector::Brake :
-            MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, 0.0f);
+            MakeDriveBaseTrackingRawMotorPwmCommand(_drive, 0.0f, 0.0f);
     }
 
     bool HoldPosition(uint16_t durationMs, const char* phaseName = nullptr)
@@ -5798,7 +5801,7 @@ private:
             angularCommandRadps,
             -reverse.limits.maxAngularSpeedRadps,
             reverse.limits.maxAngularSpeedRadps);
-        return MakeWheelOmegaRawMotorPwmCommand(
+        return MakeDriveBaseTrackingRawMotorPwmCommand(
             _drive,
             -reverse.commandedSpeedMps,
             angularCommandRadps);
@@ -6694,7 +6697,7 @@ private:
             angularCommandRadps,
             -searchLimits.maxAngularSpeedRadps,
             searchLimits.maxAngularSpeedRadps);
-        return MakeWheelOmegaRawMotorPwmCommand(
+        return MakeDriveBaseTrackingRawMotorPwmCommand(
             _drive,
             search.commandedSpeedMps,
             angularCommandRadps);
@@ -7745,7 +7748,7 @@ private:
             angularCommandRadps,
             -straight.limits.maxAngularSpeedRadps,
             straight.limits.maxAngularSpeedRadps);
-        return MakeWheelOmegaRawMotorPwmCommand(
+        return MakeDriveBaseTrackingRawMotorPwmCommand(
             _drive,
             straight.commandedSpeedMps,
             angularCommandRadps);
@@ -7829,7 +7832,7 @@ private:
             return FaultLoopPhase(services, "Turn profile became invalid");
         }
 
-        return MakeWheelOmegaRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
+        return MakeDriveBaseTrackingRawMotorPwmCommand(_drive, 0.0f, angularCommandRadps);
     }
 
     bool ExecuteTurnProfile(
@@ -7921,7 +7924,7 @@ private:
             angularCommandRadps,
             -arc.limits.maxAngularSpeedRadps,
             arc.limits.maxAngularSpeedRadps);
-        return MakeWheelOmegaRawMotorPwmCommand(
+        return MakeDriveBaseTrackingRawMotorPwmCommand(
             _drive,
             arc.commandedSpeedMps,
             angularCommandRadps);
@@ -8008,19 +8011,12 @@ private:
             return FaultLoopPhase(services, "Smooth turn target became invalid");
         }
 
-        const float yawRateCorrectionRadps = MazeMap::ComputeSmoothTurnYawRatePdCorrection(
-            nominalOmegaRadps,
-            state.estimate.angularSpeedRadps,
-            state.dtSeconds,
-            Config::kSmoothTurnYawRateKp,
-            Config::kSmoothTurnYawRateKd,
-            smoothTurn.yawRateController);
-        float angularCommandRadps = nominalOmegaRadps + yawRateCorrectionRadps;
+        float angularCommandRadps = nominalOmegaRadps;
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
             -smoothTurn.limits.maxAngularSpeedRadps,
             smoothTurn.limits.maxAngularSpeedRadps);
-        return MakeWheelOmegaRawMotorPwmCommand(
+        return MakeDriveBaseTrackingRawMotorPwmCommand(
             _drive,
             smoothTurn.maneuverSpeedMps,
             angularCommandRadps);

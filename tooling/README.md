@@ -96,6 +96,7 @@ Single-run sample export example:
 powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
   -SkipToolBuild `
   -RunId ofm_10728325 `
+  -KnownStationarySeed `
   -Output TestResults\open_floor_ukf_replay_metrics_ofm_10728325 `
   -SampleCsv TestResults\open_floor_ukf_replay_metrics_ofm_10728325\ofm_10728325_accel_compare.csv `
   -Metrics context,accel_compare
@@ -108,6 +109,8 @@ Notes:
 - The tool binds each decoded CSV to its sibling `open_floor_main.sidecar` and uses the bound `logging.txt` when present.
 - It ignores the highest `section_id` in each run by default so the known failed final section does not contaminate the batch report.
 - The generated report now includes section-phase error association tables and writes `section_phase_summary.csv` so agents can see which canonical `section_id` + `phase_id` buckets concentrate estimator error.
+- `-KnownStationarySeed` seeds replay from the canonical stationary open-floor marker `C` state instead of the first logged UKF state.
+- `-Tuning` loads a simple `key=value` override file and the report writes `aggregate_metrics.json` for machine scoring.
 - `-SampleCsv` exports one replay-aligned per-sample CSV for the selected `-RunId`.
 - `-Metrics` accepts comma-separated metric names or aliases. Current aliases are `context`, `accel_compare`, and `speed_compare`.
 - The default sample-export metric set is the accel comparison layout shown above if you pass `-SampleCsv` without `-Metrics`.

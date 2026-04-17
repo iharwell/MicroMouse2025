@@ -1,4 +1,5 @@
 #include "..\..\MazeMap\MazeMap\MouseUkfFacade.h"
+#include "..\..\MazeMap\MazeMap\OpenFloorMeasurementSpec.h"
 #include "..\..\MazeMap\MazeMap\PlantModel.h"
 
 #include <algorithm>
@@ -27,15 +28,18 @@ namespace
     constexpr const char* kReportFileName = "report.md";
     constexpr const char* kRunSummaryFileName = "run_summary.csv";
     constexpr const char* kSectionPhaseSummaryFileName = "section_phase_summary.csv";
+    constexpr const char* kAggregateMetricsFileName = "aggregate_metrics.json";
     constexpr float kRadiansToDegrees = 57.295779513082320876f;
 
     struct ReplayOptions
     {
         fs::path rootPath;
         fs::path outputPath;
+        fs::path tuningPath;
         std::string runIdFilter;
         fs::path sampleCsvPath;
         std::vector<std::string> sampleMetrics;
+        bool useKnownStationarySeed = false;
     };
 
     struct SidecarInfo
@@ -396,6 +400,163 @@ namespace
         return !(end == text.c_str() || *end != '\0');
     }
 
+    bool ApplyTuningSetting(
+        MazeMap::SrUkfCore::RuntimeTuning& tuning,
+        const std::string& rawKey,
+        float value,
+        std::string& error)
+    {
+        const std::string key = ToLower(Trim(rawKey));
+        if (key == "general_encoder_linear_speed_sigma_mps") tuning.generalEncoderLinearSpeedSigmaMps = value;
+        else if (key == "general_encoder_yaw_rate_sigma_radps") tuning.generalEncoderYawRateSigmaRadps = value;
+        else if (key == "stationary_encoder_velocity_sigma_mps") tuning.stationaryEncoderVelocitySigmaMps = value;
+        else if (key == "encoder_pair_nis_threshold") tuning.encoderPairNisThreshold = value;
+        else if (key == "imu_yaw_rate_sigma_radps") tuning.imuYawRateSigmaRadps = value;
+        else if (key == "imu_accel_sigma_mps2") tuning.imuAccelSigmaMps2 = value;
+        else if (key == "pivot_scrub_max_command_linear_mps") tuning.pivotScrubMaxCommandLinearMps = value;
+        else if (key == "pivot_scrub_min_command_angular_radps") tuning.pivotScrubMinCommandAngularRadps = value;
+        else if (key == "pivot_scrub_yaw_consistency_threshold_radps") tuning.pivotScrubYawConsistencyThresholdRadps = value;
+        else if (key == "pivot_scrub_yaw_window_mismatch_threshold_rad") tuning.pivotScrubYawWindowMismatchThresholdRad = value;
+        else if (key == "pivot_scrub_zero_u_sigma_mps") tuning.pivotScrubZeroUSigmaMps = value;
+        else if (key == "stationary_gyro_bias_time_constant_s") tuning.stationaryGyroBiasTimeConstantS = value;
+        else if (key == "stationary_certification_dwell_s") tuning.stationaryCertificationDwellS = value;
+        else if (key == "stationary_candidate_max_linear_command_mps") tuning.stationaryCandidateMaxLinearCommandMps = value;
+        else if (key == "stationary_candidate_max_angular_command_radps") tuning.stationaryCandidateMaxAngularCommandRadps = value;
+        else if (key == "stationary_candidate_max_drive_command") tuning.stationaryCandidateMaxDriveCommand = value;
+        else if (key == "stationary_candidate_max_encoder_omega_radps") tuning.stationaryCandidateMaxEncoderOmegaRadps = value;
+        else if (key == "stationary_candidate_max_corrected_gyro_radps") tuning.stationaryCandidateMaxCorrectedGyroRadps = value;
+        else if (key == "stationary_candidate_max_accel_mps2") tuning.stationaryCandidateMaxAccelMps2 = value;
+        else if (key == "command_sign_flip_window_s") tuning.commandSignFlipWindowS = value;
+        else if (key == "stationary_exit_launch_window_s") tuning.stationaryExitLaunchWindowS = value;
+        else if (key == "launch_hold_s") tuning.launchHoldS = value;
+        else if (key == "launch_low_speed_threshold_mps") tuning.launchLowSpeedThresholdMps = value;
+        else if (key == "launch_drive_command_delta_threshold") tuning.launchDriveCommandDeltaThreshold = value;
+        else if (key == "inconsistent_hold_s") tuning.inconsistentHoldS = value;
+        else if (key == "yaw_consistency_low_pass_tau_s") tuning.yawConsistencyLowPassTauS = value;
+        else if (key == "yaw_consistency_low_pass_threshold_radps") tuning.yawConsistencyLowPassThresholdRadps = value;
+        else if (key == "yaw_consistency_exceed_dwell_s") tuning.yawConsistencyExceedDwellS = value;
+        else if (key == "yaw_window_duration_s") tuning.yawWindowDurationS = value;
+        else if (key == "yaw_window_mismatch_threshold_rad") tuning.yawWindowMismatchThresholdRad = value;
+        else if (key == "nhc_residual_trip_sigma") tuning.nhcResidualTripSigma = value;
+        else if (key == "nhc_minimum_enable_forward_speed_mps") tuning.nhcMinimumEnableForwardSpeedMps = value;
+        else if (key == "nhc_disable_forward_speed_mps") tuning.nhcDisableForwardSpeedMps = value;
+        else if (key == "nhc_max_drive_command_delta") tuning.nhcMaxDriveCommandDelta = value;
+        else if (key == "recovery_nhc_reenable_delay_s") tuning.recoveryNhcReenableDelayS = value;
+        else if (key == "nhc_base_sigma_mps") tuning.nhcBaseSigmaMps = value;
+        else if (key == "nhc_speed_slope_per_mps") tuning.nhcSpeedSlopePerMps = value;
+        else if (key == "nhc_minimum_sigma_mps") tuning.nhcMinimumSigmaMps = value;
+        else if (key == "nhc_maximum_sigma_mps") tuning.nhcMaximumSigmaMps = value;
+        else if (key == "moving_gyro_bias_std_cap_radps") tuning.movingGyroBiasStdCapRadps = value;
+        else if (key == "recovery_yaw_rate_std_floor_radps") tuning.recoveryYawRateStdFloorRadps = value;
+        else if (key == "yaw_validity_bias_delta_max_radps") tuning.yawValidityBiasDeltaMaxRadps = value;
+        else if (key == "stationary_sigma_u_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaUSqrtQ = value;
+        else if (key == "stationary_sigma_v_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaVSqrtQ = value;
+        else if (key == "stationary_sigma_r_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaRSqrtQ = value;
+        else if (key == "stationary_sigma_omega_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaOmegaSqrtQ = value;
+        else if (key == "stationary_sigma_bgz_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "stationary_std_r_min") tuning.stationaryCertifiedProcessNoise.stdRMin = value;
+        else if (key == "stationary_std_v_min") tuning.stationaryCertifiedProcessNoise.stdVMin = value;
+        else if (key == "launch_sigma_u_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaUSqrtQ = value;
+        else if (key == "launch_sigma_v_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaVSqrtQ = value;
+        else if (key == "launch_sigma_r_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaRSqrtQ = value;
+        else if (key == "launch_sigma_omega_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaOmegaSqrtQ = value;
+        else if (key == "launch_sigma_bgz_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "launch_std_r_min") tuning.launchOrReversalProcessNoise.stdRMin = value;
+        else if (key == "launch_std_v_min") tuning.launchOrReversalProcessNoise.stdVMin = value;
+        else if (key == "grip_sigma_u_sqrt_q") tuning.gripLinearProcessNoise.sigmaUSqrtQ = value;
+        else if (key == "grip_sigma_v_sqrt_q") tuning.gripLinearProcessNoise.sigmaVSqrtQ = value;
+        else if (key == "grip_sigma_r_sqrt_q") tuning.gripLinearProcessNoise.sigmaRSqrtQ = value;
+        else if (key == "grip_sigma_omega_sqrt_q") tuning.gripLinearProcessNoise.sigmaOmegaSqrtQ = value;
+        else if (key == "grip_sigma_bgz_sqrt_q") tuning.gripLinearProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "grip_std_r_min") tuning.gripLinearProcessNoise.stdRMin = value;
+        else if (key == "grip_std_v_min") tuning.gripLinearProcessNoise.stdVMin = value;
+        else if (key == "inconsistent_sigma_u_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaUSqrtQ = value;
+        else if (key == "inconsistent_sigma_v_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaVSqrtQ = value;
+        else if (key == "inconsistent_sigma_r_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaRSqrtQ = value;
+        else if (key == "inconsistent_sigma_omega_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaOmegaSqrtQ = value;
+        else if (key == "inconsistent_sigma_bgz_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "inconsistent_std_r_min") tuning.inconsistentOrSaturatedProcessNoise.stdRMin = value;
+        else if (key == "inconsistent_std_v_min") tuning.inconsistentOrSaturatedProcessNoise.stdVMin = value;
+        else
+        {
+            error = "Unknown tuning key: " + rawKey;
+            return false;
+        }
+
+        return true;
+    }
+
+    bool LoadTuningFile(const fs::path& path, std::string& error)
+    {
+        if (path.empty())
+        {
+            MazeMap::SrUkfCore::ResetRuntimeTuning();
+            return true;
+        }
+
+        std::ifstream input(path);
+        if (!input)
+        {
+            error = "Failed to open tuning file: " + path.string();
+            return false;
+        }
+
+        MazeMap::SrUkfCore::RuntimeTuning tuning = MazeMap::SrUkfCore::BuildDefaultRuntimeTuning();
+        std::string line;
+        std::size_t lineNumber = 0U;
+        while (std::getline(input, line))
+        {
+            ++lineNumber;
+            const std::size_t commentStart = line.find('#');
+            if (commentStart != std::string::npos)
+            {
+                line = line.substr(0, commentStart);
+            }
+
+            line = Trim(line);
+            if (line.empty())
+            {
+                continue;
+            }
+
+            const std::size_t equals = line.find('=');
+            if (equals == std::string::npos)
+            {
+                error = "Malformed tuning line " + std::to_string(lineNumber) + ": " + line;
+                return false;
+            }
+
+            const std::string key = Trim(line.substr(0, equals));
+            const std::string valueText = Trim(line.substr(equals + 1U));
+            float value = 0.0f;
+            if (!ParseFloat(valueText, value))
+            {
+                error = "Invalid float at tuning line " + std::to_string(lineNumber) + ": " + valueText;
+                return false;
+            }
+
+            if (!ApplyTuningSetting(tuning, key, value, error))
+            {
+                error += " at line " + std::to_string(lineNumber);
+                return false;
+            }
+        }
+
+        MazeMap::SrUkfCore::SetRuntimeTuning(tuning);
+        return true;
+    }
+
+    MazeMap::SrUkfCore::StateVector BuildKnownStationaryOpenFloorInitialState() noexcept
+    {
+        MazeMap::SrUkfCore::StateVector state = MazeMap::SrUkfCore::StateVector::Zero();
+        state(MazeMap::VehicleState::kPx) = MazeMap::OpenFloorMarkerXMeters(MazeMap::OpenFloorMarkerId::C);
+        state(MazeMap::VehicleState::kPy) = MazeMap::OpenFloorMarkerYMeters(MazeMap::OpenFloorMarkerId::C);
+        state(MazeMap::VehicleState::kPsi) =
+            MazeMap::DirectionToYawRad(MazeMap::GetOpenFloorMarker(MazeMap::OpenFloorMarkerId::C).heading);
+        MazeMap::VehicleState::NormalizeStateVector(state);
+        return state;
+    }
+
     bool GetToken(
         const std::vector<std::string>& tokens,
         const std::unordered_map<std::string, std::size_t>& indices,
@@ -658,12 +819,28 @@ namespace
 
                 metricSelectionText = argv[++index];
             }
+            else if (argument == "--tuning")
+            {
+                if ((index + 1) >= argc)
+                {
+                    error = "--tuning requires a path";
+                    return false;
+                }
+
+                options.tuningPath = fs::path(argv[++index]);
+            }
+            else if (argument == "--known-stationary-seed")
+            {
+                options.useKnownStationarySeed = true;
+            }
             else if (argument == "--help" || argument == "-h")
             {
                 std::cout
                     << "OpenFloorUkfReplay\n"
                     << "  --root <path>    Root directory to scan for open_floor_main.csv captures.\n"
                     << "  --output <path>  Output directory for the generated report.\n"
+                    << "  --tuning <path>  Optional key=value tuning override file.\n"
+                    << "  --known-stationary-seed  Seed from the canonical open-floor start pose instead of the logged UKF state.\n"
                     << "  --run-id <id>    Optional single-run filter.\n"
                     << "  --sample-csv <path>  Optional per-sample CSV export for the selected run.\n"
                     << "  --metrics <list> Optional sample metric list or aliases: context, accel_compare, speed_compare.\n";
@@ -1489,7 +1666,11 @@ namespace
         }
 
         MazeMap::MouseUkfFacade ukf;
-        if (!ukf.reset(keptRows.front().loggedState, MazeMap::SrUkfCore::BuildDefaultInitialCovariance()))
+        const MazeMap::SrUkfCore::StateVector initialState =
+            options.useKnownStationarySeed ?
+            BuildKnownStationaryOpenFloorInitialState() :
+            keptRows.front().loggedState;
+        if (!ukf.reset(initialState, MazeMap::SrUkfCore::BuildDefaultInitialCovariance()))
         {
             report.completed = false;
             report.failureReason = "Failed to seed replay UKF";
@@ -1827,6 +2008,7 @@ namespace
         const fs::path markdownPath = outputPath / kReportFileName;
         const fs::path csvPath = outputPath / kRunSummaryFileName;
         const fs::path sectionPhaseCsvPath = outputPath / kSectionPhaseSummaryFileName;
+        const fs::path aggregateJsonPath = outputPath / kAggregateMetricsFileName;
 
         std::ofstream markdown(markdownPath);
         if (!markdown)
@@ -1895,7 +2077,12 @@ namespace
             << "- Runs with replay faults: " << replayFaultRuns << "\n"
             << "- Duplicate run IDs skipped: " << corpus.duplicates.size() << "\n"
             << "- Final-section policy: ignore the highest `section_id` present in each run.\n"
-            << "- Replay seed policy: first kept logged state plus `SrUkfCore::BuildDefaultInitialCovariance()`.\n"
+            << "- Replay seed policy: "
+            << (options.useKnownStationarySeed ?
+                "canonical open-floor marker `C` stationary state plus `SrUkfCore::BuildDefaultInitialCovariance()`.\n" :
+                "first kept logged state plus `SrUkfCore::BuildDefaultInitialCovariance()`.\n")
+            << "- Tuning override file: "
+            << (options.tuningPath.empty() ? "`<none>`\n" : (std::string("`") + options.tuningPath.string() + "`\n"))
             << "- Battery policy: use `battery_voltage_start` from the bound `logging.txt` when available; otherwise fall back to the current plant default.\n"
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"
             << "- Post-update replay deltas compare the replayed UKF state against the logged UKF state from the capture; they are consistency checks, not external ground truth.\n"
@@ -2068,10 +2255,45 @@ namespace
                 << FormatDouble(bucket.consistency.headingDeg.mae(), 3) << '\n';
         }
 
+        std::ofstream aggregateJson(aggregateJsonPath);
+        if (!aggregateJson)
+        {
+            error = "Failed to open aggregate metrics JSON file for write: " + aggregateJsonPath.string();
+            return false;
+        }
+
+        aggregateJson
+            << "{\n"
+            << "  \"candidate_csv_count\": " << corpus.candidateCsvCount << ",\n"
+            << "  \"unique_runs\": " << corpus.runs.size() << ",\n"
+            << "  \"completed_runs\": " << completedRuns << ",\n"
+            << "  \"excluded_runs\": " << noRetainedRowsRuns << ",\n"
+            << "  \"replay_fault_runs\": " << replayFaultRuns << ",\n"
+            << "  \"duplicate_run_ids\": " << corpus.duplicates.size() << ",\n"
+            << "  \"seed_policy\": \""
+            << (options.useKnownStationarySeed ? "known_stationary_marker_c" : "logged_first_state")
+            << "\",\n"
+            << "  \"tuning_path\": "
+            << (options.tuningPath.empty() ? "null" : (std::string("\"") + options.tuningPath.generic_string() + "\"")) << ",\n"
+            << "  \"prediction\": {\n"
+            << "    \"encoder_linear_rmse_mps\": " << FormatDouble(corpus.prediction.encoderLinearSpeedMps.rmse(), 12) << ",\n"
+            << "    \"raw_gyro_rmse_radps\": " << FormatDouble(corpus.prediction.rawGyroRadps.rmse(), 12) << ",\n"
+            << "    \"accel_body_x_rmse_mps2\": " << FormatDouble(corpus.prediction.accelBodyXMps2.rmse(), 12) << ",\n"
+            << "    \"accel_body_y_rmse_mps2\": " << FormatDouble(corpus.prediction.accelBodyYMps2.rmse(), 12) << ",\n"
+            << "    \"encoder_yaw_rate_rmse_radps\": " << FormatDouble(corpus.prediction.encoderYawRateRadps.rmse(), 12) << ",\n"
+            << "    \"body_forward_speed_rmse_mps\": " << FormatDouble(corpus.prediction.bodyForwardSpeedMps.rmse(), 12) << "\n"
+            << "  },\n"
+            << "  \"consistency\": {\n"
+            << "    \"post_position_rmse_mm\": " << FormatDouble(corpus.consistency.positionMm.rmse(), 12) << ",\n"
+            << "    \"post_heading_rmse_deg\": " << FormatDouble(corpus.consistency.headingDeg.rmse(), 12) << "\n"
+            << "  }\n"
+            << "}\n";
+
         std::cout
             << "Report written to " << markdownPath.string() << "\n"
             << "Run summary written to " << csvPath.string() << "\n"
-            << "Section-phase summary written to " << sectionPhaseCsvPath.string() << "\n";
+            << "Section-phase summary written to " << sectionPhaseCsvPath.string() << "\n"
+            << "Aggregate metrics written to " << aggregateJsonPath.string() << "\n";
         return true;
     }
 }
@@ -2081,6 +2303,12 @@ int main(int argc, char* argv[])
     ReplayOptions options{};
     std::string error;
     if (!ParseArgs(argc, argv, options, error))
+    {
+        std::cerr << error << "\n";
+        return 1;
+    }
+
+    if (!LoadTuningFile(options.tuningPath, error))
     {
         std::cerr << error << "\n";
         return 1;

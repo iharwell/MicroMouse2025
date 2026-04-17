@@ -7,6 +7,19 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
+    namespace
+    {
+        struct ScopedUkfRuntimeTuningRestore
+        {
+            SrUkfCore::RuntimeTuning saved = SrUkfCore::GetRuntimeTuning();
+
+            ~ScopedUkfRuntimeTuningRestore()
+            {
+                SrUkfCore::SetRuntimeTuning(saved);
+            }
+        };
+    }
+
     TEST_CLASS(SrUkfCoreModeAndDiagnosticsTest)
     {
     public:
@@ -56,6 +69,43 @@ namespace MazeMap
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaL, VehicleState::kOmegaL), 1.0e-9f);
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaR, VehicleState::kOmegaR), 1.0e-9f);
             Assert::AreEqual(0.01f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-9f);
+        }
+
+        TEST_METHOD(SrUkfCoreRuntimeTuningOverridesRoundTripAndDriveStationaryThresholds)
+        {
+            ScopedUkfRuntimeTuningRestore restore;
+
+            const SrUkfCore::RuntimeTuning defaults = SrUkfCore::BuildDefaultRuntimeTuning();
+            SrUkfCore::RuntimeTuning tuning = defaults;
+            tuning.stationaryEncoderVelocitySigmaMps = 0.02f;
+            tuning.imuYawRateSigmaRadps = 0.05f;
+            tuning.generalEncoderLinearSpeedSigmaMps = 0.01f;
+            tuning.gripLinearProcessNoise.sigmaUSqrtQ = 0.123f;
+            SrUkfCore::SetRuntimeTuning(tuning);
+
+            const SrUkfCore::RuntimeTuning applied = SrUkfCore::GetRuntimeTuning();
+            Assert::AreEqual(tuning.stationaryEncoderVelocitySigmaMps, applied.stationaryEncoderVelocitySigmaMps, 1.0e-9f);
+            Assert::AreEqual(tuning.imuYawRateSigmaRadps, applied.imuYawRateSigmaRadps, 1.0e-9f);
+            Assert::AreEqual(tuning.generalEncoderLinearSpeedSigmaMps, applied.generalEncoderLinearSpeedSigmaMps, 1.0e-9f);
+            Assert::AreEqual(tuning.gripLinearProcessNoise.sigmaUSqrtQ, applied.gripLinearProcessNoise.sigmaUSqrtQ, 1.0e-9f);
+
+            VehicleState state;
+            VehicleState::StateVector stateVector = VehicleState::StateVector::Zero();
+            stateVector(VehicleState::kU) = 0.015f;
+            stateVector(VehicleState::kR) = 0.12f;
+            const float wheelOmegaRadps = 0.5f * (tuning.stationaryEncoderVelocitySigmaMps / PlantParams::Default().wheelRadiusM);
+            stateVector(VehicleState::kOmegaL) = wheelOmegaRadps;
+            stateVector(VehicleState::kOmegaR) = wheelOmegaRadps;
+            state.SetStateVector(stateVector);
+            Assert::IsTrue(state.IsStationary());
+
+            SrUkfCore::ResetRuntimeTuning();
+            const SrUkfCore::RuntimeTuning reset = SrUkfCore::GetRuntimeTuning();
+            Assert::AreEqual(defaults.stationaryEncoderVelocitySigmaMps, reset.stationaryEncoderVelocitySigmaMps, 1.0e-9f);
+            Assert::AreEqual(defaults.imuYawRateSigmaRadps, reset.imuYawRateSigmaRadps, 1.0e-9f);
+            Assert::AreEqual(defaults.generalEncoderLinearSpeedSigmaMps, reset.generalEncoderLinearSpeedSigmaMps, 1.0e-9f);
+            Assert::AreEqual(defaults.gripLinearProcessNoise.sigmaUSqrtQ, reset.gripLinearProcessNoise.sigmaUSqrtQ, 1.0e-9f);
+            Assert::IsFalse(state.IsStationary());
         }
 
         TEST_METHOD(SrUkfCoreRegimeHelpersExposeSpecThresholds)
@@ -186,17 +236,17 @@ namespace MazeMap
                 }
             }
 
-            Assert::IsTrue(yawConflictSeeded);
+            Assert::IsTrue(yawConflictSeeded, L"Pivot scrub seed phase never produced a yaw conflict.");
 
             const PivotTickResults pivotResults =
                 runPivotTick(seedLeftCounts + 120, seedRightCounts - 120, 18.0f, -18.0f, 1.80f);
-            Assert::IsTrue(pivotResults.predictAccepted);
-            Assert::IsTrue(pivotResults.encoderResult.attempted);
-            Assert::IsTrue(pivotResults.encoderResult.accepted);
-            Assert::IsTrue(pivotResults.yawResult.attempted);
-            Assert::IsTrue(pivotResults.yawResult.accepted);
+            Assert::IsTrue(pivotResults.predictAccepted, L"Pivot scrub predict step was rejected.");
+            Assert::IsTrue(pivotResults.encoderResult.attempted, L"Pivot scrub encoder update was not attempted.");
+            Assert::IsTrue(pivotResults.encoderResult.accepted, L"Pivot scrub encoder update was rejected.");
+            Assert::IsTrue(pivotResults.yawResult.attempted, L"Pivot scrub yaw update was not attempted.");
+            Assert::IsTrue(pivotResults.yawResult.accepted, L"Pivot scrub yaw update was rejected.");
 
-            Assert::IsTrue(core.pivotScrubMode());
+            Assert::IsTrue(core.pivotScrubMode(), L"Pivot scrub mode did not engage after the conflict tick.");
             Assert::IsTrue(core.pivotScrubEncoderBodyUpdateSkipped());
             Assert::IsTrue(core.pivotScrubZeroUSoftApplied());
             Assert::IsTrue(std::isfinite(core.pivotScrubEncoderWheelMaskedDeltaNorm()));

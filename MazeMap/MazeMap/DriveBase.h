@@ -374,7 +374,8 @@ public:
     EXPORT void CommandGenerated(
         const MazeMap::OpenLoopDriveCommand& command,
         float linearSpeedMps,
-        float angularSpeedRadps);
+        float angularSpeedRadps,
+        bool applyLaunchAssist = true);
 
     void CommandOpenLoop(float leftDriveCommand, float rightDriveCommand)
     {
@@ -1152,6 +1153,11 @@ private:
         float presentYawRateRadps,
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2) const;
+
+    MazeMap::OpenLoopDriveCommand ResolveRawVelocityTargetCommand(
+        const CommandContext& context,
+        float desiredLinearSpeedMps,
+        float desiredYawRateRadps) const;
 
     MazeMap::OpenLoopDriveCommand ResolveLongitudinalCorrectionCommand(
         const CommandContext& context,

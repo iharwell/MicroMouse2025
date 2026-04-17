@@ -2,8 +2,10 @@ param(
     [string]$Root,
     [string]$Output = "",
     [string]$RunId = "",
+    [string]$Tuning = "",
     [string]$SampleCsv = "",
     [string]$Metrics = "",
+    [switch]$KnownStationarySeed,
     [switch]$SkipToolBuild
 )
 
@@ -86,6 +88,9 @@ $arguments = @("--root", $Root)
 if (-not [string]::IsNullOrWhiteSpace($Output)) {
     $arguments += @("--output", $Output)
 }
+if (-not [string]::IsNullOrWhiteSpace($Tuning)) {
+    $arguments += @("--tuning", $Tuning)
+}
 if (-not [string]::IsNullOrWhiteSpace($RunId)) {
     $arguments += @("--run-id", $RunId)
 }
@@ -94,6 +99,9 @@ if (-not [string]::IsNullOrWhiteSpace($SampleCsv)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($Metrics)) {
     $arguments += @("--metrics", $Metrics)
+}
+if ($KnownStationarySeed) {
+    $arguments += "--known-stationary-seed"
 }
 
 & $exePath @arguments

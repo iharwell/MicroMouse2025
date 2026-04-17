@@ -77,7 +77,7 @@ namespace MazeMap
             PlantModel plant;
             SrUkfCore core(params);
 
-            const float driveCommand = 0.2f;
+            constexpr float targetForwardVelocityMps = 0.2f;
 
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -94,19 +94,31 @@ namespace MazeMap
                 BuildUkfCovariance(0.01f, 0.001f, 0.005f, 0, 0, 0, 0.02f);
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            auto control = plant.solveDriveCommands(
-                driveCommand,
+            auto control = plant.solveDriveCommandsForVelocityTarget(
                 0.0f,
-                0, 0, params, 0.8f, 8.4f);
+                targetForwardVelocityMps,
+                0.0f,
+                0.0f,
+                params,
+                0.8f,
+                8.4f);
             Assert::IsTrue(control.control.leftMotorCommand > 0.1f, L"Left motor command should overcome friction."); // Should overcome friction.
             Assert::IsTrue(control.control.rightMotorCommand > 0.1f, L"Right motor command should overcome friction."); // Should overcome friction.
 
             for (size_t i = 0; i < 1000; i++)
             {
+                control = plant.solveDriveCommandsForVelocityTarget(
+                    core.state()(VehicleState::kU),
+                    targetForwardVelocityMps,
+                    core.state()(VehicleState::kR),
+                    0.0f,
+                    params,
+                    0.8f,
+                    8.4f);
                 core.predict(0.001f, control.control);
             }
-            Assert::IsTrue(core.state()(VehicleState::kU) > driveCommand * 0.9f, L"Vehicle speed shouldn't fall too low.");
-            Assert::IsTrue(core.state()(VehicleState::kU) < driveCommand * 1.1f, L"Vehicle speed shouldn't be too high.");
+            Assert::IsTrue(core.state()(VehicleState::kU) > targetForwardVelocityMps * 0.9f, L"Vehicle speed shouldn't fall too low.");
+            Assert::IsTrue(core.state()(VehicleState::kU) < targetForwardVelocityMps * 1.1f, L"Vehicle speed shouldn't be too high.");
         }
 
         TEST_METHOD(SrUkfCoreMovingEncoderUpdateKeepsYawRateVarianceLowAfterPredictAndUpdate)
@@ -918,7 +930,7 @@ namespace MazeMap
         {
 			PlantModel model = PlantModel();
             const PlantParams& params = PlantParams::Default();
-            float accelTarget = 1.0f;
+            constexpr float forwardVelocityTargetMps = 1.0f;
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.0f,
@@ -940,7 +952,13 @@ namespace MazeMap
 
             for (int step = 0; step < 3000; ++step)
             {
-                auto control = model.solveDriveCommands(core.state()(VehicleState::kU), accelTarget, core.state()(VehicleState::kR), 0.0f, params);
+                auto control =
+                    model.solveDriveCommandsForVelocityTarget(
+                        core.state()(VehicleState::kU),
+                        forwardVelocityTargetMps,
+                        core.state()(VehicleState::kR),
+                        0.0f,
+                        params);
 
                 Assert::IsTrue(core.predict(dt, control.control));
 
@@ -950,7 +968,7 @@ namespace MazeMap
             }
 
 			auto state = core.state();
-            Assert::IsTrue(state(VehicleState::kU) > 1.0f,
+            Assert::IsTrue(state(VehicleState::kU) > 0.8f,
                 (std::wstring(L"Forward velocity was too low: ") +
                     std::to_wstring(state(VehicleState::kU))).c_str());
 
@@ -966,14 +984,20 @@ namespace MazeMap
         {
             PlantModel model = PlantModel();
             const PlantParams& params = PlantParams::Default();
-            float accelTarget = 1.0f;
+            constexpr float forwardVelocityTargetMps = 1.0f;
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             auto core = RunUKFCycles(2000, ControlInput{});
 
             for (int step = 0; step < 3000; ++step)
             {
-                auto control = model.solveDriveCommands(core.state()(VehicleState::kU), accelTarget, core.state()(VehicleState::kR), 0.0f, params);
+                auto control =
+                    model.solveDriveCommandsForVelocityTarget(
+                        core.state()(VehicleState::kU),
+                        forwardVelocityTargetMps,
+                        core.state()(VehicleState::kR),
+                        0.0f,
+                        params);
 
                 Assert::IsTrue(core.predict(dt, control.control));
 
@@ -983,7 +1007,7 @@ namespace MazeMap
             }
 
             auto state = core.state();
-            Assert::IsTrue(state(VehicleState::kU) > 1.0f,
+            Assert::IsTrue(state(VehicleState::kU) > 0.8f,
                 (std::wstring(L"Forward velocity was too low: ") +
                     std::to_wstring(state(VehicleState::kU))).c_str());
 
