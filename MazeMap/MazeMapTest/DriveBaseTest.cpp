@@ -356,6 +356,17 @@ namespace MazeMap
 
             Assert::IsTrue(IsFiniteOpenLoopDriveCommand(wheelOnlyCommand));
             Assert::IsTrue(IsFiniteOpenLoopDriveCommand(imuTrackedCommand));
+            {
+                wchar_t buffer[256]{};
+                swprintf_s(
+                    buffer,
+                    L"wheelOnly=(%f,%f) imuTracked=(%f,%f)",
+                    wheelOnlyCommand.leftDriveCommand,
+                    wheelOnlyCommand.rightDriveCommand,
+                    imuTrackedCommand.leftDriveCommand,
+                    imuTrackedCommand.rightDriveCommand);
+                Logger::WriteMessage(buffer);
+            }
             Assert::AreEqual(wheelOnlyCommand.leftDriveCommand, wheelOnlyCommand.rightDriveCommand, 1.0e-6f);
             Assert::IsTrue(
                 std::fabs(imuTrackedCommand.leftDriveCommand - imuTrackedCommand.rightDriveCommand) > 1.0e-4f);

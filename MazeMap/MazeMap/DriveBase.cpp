@@ -611,12 +611,12 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveLongitudinalCorrectionCommand(
     return SubtractDriveCommands(
         ResolveRawAccelerationCommand(
             context.presentLinearSpeedMps,
-            0.0f,
+            context.presentYawRateRadps,
             resolvedCorrectionMps2,
             0.0f),
         ResolveRawAccelerationCommand(
             context.presentLinearSpeedMps,
-            0.0f,
+            context.presentYawRateRadps,
             0.0f,
             0.0f));
 }
@@ -631,12 +631,12 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveYawCorrectionCommand(
             context.maxYawAccelRadps2);
     return SubtractDriveCommands(
         ResolveRawAccelerationCommand(
-            0.0f,
+            context.presentLinearSpeedMps,
             context.presentYawRateRadps,
             0.0f,
             resolvedCorrectionRadps2),
         ResolveRawAccelerationCommand(
-            0.0f,
+            context.presentLinearSpeedMps,
             context.presentYawRateRadps,
             0.0f,
             0.0f));
