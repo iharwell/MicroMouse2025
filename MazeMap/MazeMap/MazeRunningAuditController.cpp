@@ -209,46 +209,25 @@ private:
     unsigned long _telemetryPhaseId;
     unsigned long _telemetrySampleCount;
     DiagnosticLogRow _telemetryLogRow{};
+    const char* _queuedManeuverCompletionHoldPhaseName{};
+    unsigned long _startupStationaryStartMs{};
+    unsigned long _startupStationaryLastResetTraceMs{};
+    bool _startupStationaryWindowActive{};
+    DriveTelemetry _startupStationaryStartTelemetry{};
+    FrontCalibrationSpinSampleSet<Config::kStartupWallCalibrationFrontSpinMaxSamples> _frontCalibrationSweepSamples{};
+    MazeMap::InPlaceTurnProfile _frontCalibrationSweepTurnProfile{};
+    float _frontCalibrationTargetSweepAngleRad{};
+    float _frontCalibrationCaptureStepRad{};
+    float _frontCalibrationAccumulatedSweepAngleRad{};
+    float _frontCalibrationLastStoredSweepAngleRad{};
+    float _frontCalibrationPreviousYawRad{};
+    unsigned long _frontCalibrationExpectedCompletionDeadlineMs{};
+    bool _frontCalibrationDurationLogged{};
     using ActiveLoopTickFn = LoopController::ControlVector (Implementation::*)(
         void* rawState,
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
         LoopController::TickServices& services);
-
-    struct InterRunServicePauseLoopState final
-    {
-    };
-
-    struct QueuedManeuverLoopState final
-    {
-        MazeMap::ManeuverQueue* queue{};
-        MotionLimits limits{};
-        bool snapToExpectedLocation{};
-        const char* completionHoldPhaseName{};
-    };
-
-    struct StartupStationaryHoldLoopState final
-    {
-        unsigned long stationaryStartMs{};
-        unsigned long lastResetTraceMs{};
-        bool stationaryWindowActive{};
-        DriveTelemetry stationaryStartTelemetry{};
-    };
-
-    struct FrontCalibrationSweepLoopState final
-    {
-        FrontCalibrationSpinSampleSet<Config::kStartupWallCalibrationFrontSpinMaxSamples> sweepSamples{};
-        MazeMap::InPlaceTurnProfile turnProfile{};
-        MotionLimits limits{};
-        float targetSweepAngleRad{};
-        float captureStepRad{};
-        float accumulatedSweepAngleRad{};
-        float lastStoredSweepAngleRad{};
-        float previousYawRad{};
-        unsigned long expectedCompletionDeadlineMs{};
-        bool durationLogged{};
-        bool* storedBands{};
-    };
 
     void* _activeLoopState{};
     ActiveLoopTickFn _activeLoopTickFn{};
@@ -339,9 +318,9 @@ private:
         return limits;
     }
 
-    static MazeMap::WallBeliefConfig BuildWallBeliefConfig()
+    static MazeMap::WallBeliefMap::Config BuildWallBeliefConfig()
     {
-        MazeMap::WallBeliefConfig config{};
+        MazeMap::WallBeliefMap::Config config{};
         config.hitLogOdds = Config::kWallBeliefHitLogOdds;
         config.missLogOdds = Config::kWallBeliefMissLogOdds;
         config.contradictoryMissLogOdds = Config::kWallBeliefContradictoryMissLogOdds;
@@ -354,7 +333,7 @@ private:
     void SeedWallBeliefsFromKnownMaze()
     {
         _wallBeliefMap.Reset();
-        const MazeMap::WallBeliefConfig beliefConfig = BuildWallBeliefConfig();
+        const MazeMap::WallBeliefMap::Config beliefConfig = BuildWallBeliefConfig();
         constexpr MazeMap::Direction kDirections[] = {
             MazeMap::Up,
             MazeMap::Down,
@@ -2294,16 +2273,18 @@ private:
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
+        (void)rawState;
         (void)loopEndTimeUs;
-        auto& sweep = *static_cast<FrontCalibrationSweepLoopState*>(rawState);
 
         const PoseEstimate& pose = _drive.GetPose();
-        const float deltaYawRad = WrapAngleRad(pose.yawRad - sweep.previousYawRad);
-        sweep.previousYawRad = pose.yawRad;
-        sweep.accumulatedSweepAngleRad += (std::max)(0.0f, deltaYawRad);
-        sweep.accumulatedSweepAngleRad = (std::min)(sweep.accumulatedSweepAngleRad, sweep.targetSweepAngleRad);
+        const float deltaYawRad = WrapAngleRad(pose.yawRad - _frontCalibrationPreviousYawRad);
+        _frontCalibrationPreviousYawRad = pose.yawRad;
+        _frontCalibrationAccumulatedSweepAngleRad += (std::max)(0.0f, deltaYawRad);
+        _frontCalibrationAccumulatedSweepAngleRad =
+            (std::min)(_frontCalibrationAccumulatedSweepAngleRad, _frontCalibrationTargetSweepAngleRad);
 
-        if ((sweep.accumulatedSweepAngleRad - sweep.lastStoredSweepAngleRad) >= sweep.captureStepRad)
+        if ((_frontCalibrationAccumulatedSweepAngleRad - _frontCalibrationLastStoredSweepAngleRad) >=
+            _frontCalibrationCaptureStepRad)
         {
             RawWallSensorSample frontLeftSample{};
             RawWallSensorSample frontRightSample{};
@@ -2318,7 +2299,7 @@ private:
                 frontRightSample);
             (void)TryComputeNearestStartCellWallDistanceM(pose, _speedVehicle.FrontLeft, frontLeftWallDistanceM);
             (void)TryComputeNearestStartCellWallDistanceM(pose, _speedVehicle.FrontRight, frontRightWallDistanceM);
-            sweep.sweepSamples.Push(
+            _frontCalibrationSweepSamples.Push(
                 MazeMap::ClassifyFrontCalibrationSpinHeadingFromNorth(
                     pose.yawRad,
                     Config::kStartupWallCalibrationFrontNorthOpenHalfWidthRad,
@@ -2328,16 +2309,16 @@ private:
                 frontRightSample.differentialLight,
                 frontLeftWallDistanceM,
                 frontRightWallDistanceM);
-            sweep.lastStoredSweepAngleRad = sweep.accumulatedSweepAngleRad;
+            _frontCalibrationLastStoredSweepAngleRad = _frontCalibrationAccumulatedSweepAngleRad;
         }
 
-        const float remainingRad = sweep.targetSweepAngleRad - sweep.accumulatedSweepAngleRad;
-        if (MazeMap::IsInPlaceTurnComplete(remainingRad, pose.angularSpeedRadps, sweep.turnProfile))
+        const float remainingRad = _frontCalibrationTargetSweepAngleRad - _frontCalibrationAccumulatedSweepAngleRad;
+        if (MazeMap::IsInPlaceTurnComplete(remainingRad, pose.angularSpeedRadps, _frontCalibrationSweepTurnProfile))
         {
             if (!_runtime.ManeuverExecutorService().BeginHoldRoutine(
                     Config::kStartupWallCalibrationSettleMs,
                     true,
-                    PrepareLoopContinuation(rawState, &Implementation::SharedRoutineCompleteTick),
+                    PrepareLoopContinuation(nullptr, &Implementation::SharedRoutineCompleteTick),
                     services,
                     BuildManeuverExecutorHooks(false)))
             {
@@ -2345,9 +2326,10 @@ private:
             }
             return LoopController::ControlVector::Brake;
         }
-        if (!sweep.durationLogged && static_cast<long>(sweep.expectedCompletionDeadlineMs - millis()) <= 0)
+        if (!_frontCalibrationDurationLogged &&
+            static_cast<long>(_frontCalibrationExpectedCompletionDeadlineMs - millis()) <= 0)
         {
-            sweep.durationLogged = true;
+            _frontCalibrationDurationLogged = true;
             AppendStartupTrace("startup_wall_calibration:front_sweep_elapsed_budget_exceeded");
         }
 
@@ -2355,7 +2337,7 @@ private:
         if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
                 remainingRad,
                 pose.angularSpeedRadps,
-                sweep.turnProfile,
+                _frontCalibrationSweepTurnProfile,
                 angularCommandRadps))
         {
             return FaultLoopPhase(services, "Startup front calibration sweep profile became invalid");
@@ -2370,22 +2352,22 @@ private:
     bool CaptureAndStoreFrontCalibrationSweep(const MotionLimits& limits, bool& storedBands)
     {
         storedBands = false;
-        FrontCalibrationSweepLoopState sweep{};
-        sweep.limits = limits;
-        sweep.turnProfile = BuildSharedInPlaceTurnProfile(limits);
-        sweep.targetSweepAngleRad =
+        _frontCalibrationSweepSamples = {};
+        _frontCalibrationSweepTurnProfile = BuildSharedInPlaceTurnProfile(limits);
+        _frontCalibrationTargetSweepAngleRad =
             static_cast<float>(Config::kStartupWallCalibrationFrontSpinTurnCount) * TWO_PI_F;
-        sweep.captureStepRad = Config::kStartupWallCalibrationFrontSpinCaptureStepRad;
-        sweep.lastStoredSweepAngleRad = -sweep.captureStepRad;
-        sweep.previousYawRad = _drive.GetPose().yawRad;
-        sweep.expectedCompletionDeadlineMs =
+        _frontCalibrationCaptureStepRad = Config::kStartupWallCalibrationFrontSpinCaptureStepRad;
+        _frontCalibrationAccumulatedSweepAngleRad = 0.0f;
+        _frontCalibrationLastStoredSweepAngleRad = -_frontCalibrationCaptureStepRad;
+        _frontCalibrationPreviousYawRad = _drive.GetPose().yawRad;
+        _frontCalibrationExpectedCompletionDeadlineMs =
             millis() +
             static_cast<unsigned long>(
                 2500.0f +
-                (1000.0f * sweep.targetSweepAngleRad / (std::max)(0.25f, limits.maxAngularSpeedRadps)));
-        sweep.storedBands = &storedBands;
+                (1000.0f * _frontCalibrationTargetSweepAngleRad / (std::max)(0.25f, limits.maxAngularSpeedRadps)));
+        _frontCalibrationDurationLogged = false;
 
-        if (!RunLoopSession(&sweep, &Implementation::FrontCalibrationSweepLoopTick))
+        if (!RunLoopSession(nullptr, &Implementation::FrontCalibrationSweepLoopTick))
         {
             return false;
         }
@@ -2395,26 +2377,26 @@ private:
             traceLine,
             sizeof(traceLine),
             "startup_front_sweep_samples,fl_open=%u,fl_wall=%u,fr_open=%u,fr_wall=%u",
-            static_cast<unsigned>(sweep.sweepSamples.frontLeftOpenCount),
-            static_cast<unsigned>(sweep.sweepSamples.frontLeftWallCount),
-            static_cast<unsigned>(sweep.sweepSamples.frontRightOpenCount),
-            static_cast<unsigned>(sweep.sweepSamples.frontRightWallCount));
+            static_cast<unsigned>(_frontCalibrationSweepSamples.frontLeftOpenCount),
+            static_cast<unsigned>(_frontCalibrationSweepSamples.frontLeftWallCount),
+            static_cast<unsigned>(_frontCalibrationSweepSamples.frontRightOpenCount),
+            static_cast<unsigned>(_frontCalibrationSweepSamples.frontRightWallCount));
         AppendStartupTrace(traceLine);
 
         const bool storedFrontLeftBands = TryStoreFrontCalibrationSpinSensorBands(
             WallSensorId::FrontLeft,
-            sweep.sweepSamples.frontLeftOpenSamples,
-            sweep.sweepSamples.frontLeftOpenCount,
-            sweep.sweepSamples.frontLeftWallSamples,
-            sweep.sweepSamples.frontLeftWallDistanceSamples,
-            sweep.sweepSamples.frontLeftWallCount);
+            _frontCalibrationSweepSamples.frontLeftOpenSamples,
+            _frontCalibrationSweepSamples.frontLeftOpenCount,
+            _frontCalibrationSweepSamples.frontLeftWallSamples,
+            _frontCalibrationSweepSamples.frontLeftWallDistanceSamples,
+            _frontCalibrationSweepSamples.frontLeftWallCount);
         const bool storedFrontRightBands = TryStoreFrontCalibrationSpinSensorBands(
             WallSensorId::FrontRight,
-            sweep.sweepSamples.frontRightOpenSamples,
-            sweep.sweepSamples.frontRightOpenCount,
-            sweep.sweepSamples.frontRightWallSamples,
-            sweep.sweepSamples.frontRightWallDistanceSamples,
-            sweep.sweepSamples.frontRightWallCount);
+            _frontCalibrationSweepSamples.frontRightOpenSamples,
+            _frontCalibrationSweepSamples.frontRightOpenCount,
+            _frontCalibrationSweepSamples.frontRightWallSamples,
+            _frontCalibrationSweepSamples.frontRightWallDistanceSamples,
+            _frontCalibrationSweepSamples.frontRightWallCount);
 
         snprintf(
             traceLine,
@@ -3296,11 +3278,11 @@ private:
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
+        (void)rawState;
         (void)loopEndTimeUs;
         (void)state;
-        auto& queuedManeuvers = *static_cast<QueuedManeuverLoopState*>(rawState);
-        if ((queuedManeuvers.completionHoldPhaseName != nullptr) &&
-            !BeginTelemetryPhase(queuedManeuvers.completionHoldPhaseName))
+        if ((_queuedManeuverCompletionHoldPhaseName != nullptr) &&
+            !BeginTelemetryPhase(_queuedManeuverCompletionHoldPhaseName))
         {
             return FaultLoopPhase(services, "Failed to begin queued maneuver completion hold phase");
         }
@@ -3308,7 +3290,7 @@ private:
         if (!_runtime.ManeuverExecutorService().BeginHoldRoutine(
                 50U,
                 true,
-                PrepareLoopContinuation(rawState, &Implementation::SharedRoutineCompleteTick),
+                PrepareLoopContinuation(nullptr, &Implementation::SharedRoutineCompleteTick),
                 services,
                 BuildManeuverExecutorHooks(false)))
         {
@@ -3471,46 +3453,46 @@ private:
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
+        (void)rawState;
         (void)loopEndTimeUs;
-        auto& hold = *static_cast<StartupStationaryHoldLoopState*>(rawState);
 
         const unsigned long nowMs = millis();
-        if (!hold.stationaryWindowActive)
+        if (!_startupStationaryWindowActive)
         {
-            hold.stationaryStartMs = nowMs;
-            hold.stationaryStartTelemetry = state.driveTelemetry;
-            hold.stationaryWindowActive = true;
+            _startupStationaryStartMs = nowMs;
+            _startupStationaryStartTelemetry = state.driveTelemetry;
+            _startupStationaryWindowActive = true;
             return LoopController::ControlVector::Brake;
         }
 
         const bool stationary = MazeMap::IsMissionStartupStationaryFromEncoderWindow(
-            state.driveTelemetry.leftDistanceM - hold.stationaryStartTelemetry.leftDistanceM,
-            state.driveTelemetry.rightDistanceM - hold.stationaryStartTelemetry.rightDistanceM,
-            static_cast<float>(nowMs - hold.stationaryStartMs) * 1.0e-3f,
+            state.driveTelemetry.leftDistanceM - _startupStationaryStartTelemetry.leftDistanceM,
+            state.driveTelemetry.rightDistanceM - _startupStationaryStartTelemetry.rightDistanceM,
+            static_cast<float>(nowMs - _startupStationaryStartMs) * 1.0e-3f,
             state.sensors.gyroRadps,
             Config::kMissionStartupStationarySpeedThresholdMps,
             Config::kMissionStartupStationaryMaxAbsYawRateRadps);
         if (!stationary)
         {
-            if ((nowMs - hold.lastResetTraceMs) >= 1000UL)
+            if ((nowMs - _startupStationaryLastResetTraceMs) >= 1000UL)
             {
                 char traceLine[160];
                 snprintf(
                     traceLine,
                     sizeof(traceLine),
                     "startup_stationary_hold:reset,left_dm=%.5f,right_dm=%.5f,gyro=%.5f",
-                    state.driveTelemetry.leftDistanceM - hold.stationaryStartTelemetry.leftDistanceM,
-                    state.driveTelemetry.rightDistanceM - hold.stationaryStartTelemetry.rightDistanceM,
+                    state.driveTelemetry.leftDistanceM - _startupStationaryStartTelemetry.leftDistanceM,
+                    state.driveTelemetry.rightDistanceM - _startupStationaryStartTelemetry.rightDistanceM,
                     state.sensors.gyroRadps);
                 AppendStartupTrace(traceLine);
-                hold.lastResetTraceMs = nowMs;
+                _startupStationaryLastResetTraceMs = nowMs;
             }
-            hold.stationaryStartMs = nowMs;
-            hold.stationaryStartTelemetry = state.driveTelemetry;
+            _startupStationaryStartMs = nowMs;
+            _startupStationaryStartTelemetry = state.driveTelemetry;
             return LoopController::ControlVector::Brake;
         }
 
-        if ((nowMs - hold.stationaryStartMs) >= Config::kMissionStartupStationaryHoldMs)
+        if ((nowMs - _startupStationaryStartMs) >= Config::kMissionStartupStationaryHoldMs)
         {
             AppendStartupTrace("startup_stationary_hold:complete");
             return EndLoopPhase(services);
@@ -3527,8 +3509,11 @@ private:
         }
         AppendStartupTrace("startup_stationary_hold:waiting");
 
-        StartupStationaryHoldLoopState hold{};
-        return RunLoopSession(&hold, &Implementation::StartupStationaryHoldLoopTick);
+        _startupStationaryStartMs = 0UL;
+        _startupStationaryLastResetTraceMs = 0UL;
+        _startupStationaryWindowActive = false;
+        _startupStationaryStartTelemetry = {};
+        return RunLoopSession(nullptr, &Implementation::StartupStationaryHoldLoopTick);
     }
 
     bool ExecuteReverseStraightProfile(
@@ -3572,15 +3557,12 @@ private:
             return HoldPosition(50);
         }
 
-        QueuedManeuverLoopState queuedManeuvers{};
-        queuedManeuvers.queue = &queue;
-        queuedManeuvers.limits = limits;
-        queuedManeuvers.snapToExpectedLocation = snapToExpectedLocation;
-        queuedManeuvers.completionHoldPhaseName = completionHoldPhaseName;
+        _queuedManeuverCompletionHoldPhaseName = completionHoldPhaseName;
         if (!EmitControllerFormattedOrFail(
                 "Queued maneuvers: %u",
                 static_cast<unsigned>(queue.size())))
         {
+            _queuedManeuverCompletionHoldPhaseName = nullptr;
             return false;
         }
 
@@ -3590,13 +3572,16 @@ private:
                 limits,
                 snapToExpectedLocation,
                 _currentDirectionalLocation,
-                PrepareLoopContinuation(&queuedManeuvers, &Implementation::QueuedManeuverFinalHoldTick),
+                PrepareLoopContinuation(nullptr, &Implementation::QueuedManeuverFinalHoldTick),
                 initialCallbacks,
                 BuildManeuverExecutorHooks(true)))
         {
+            _queuedManeuverCompletionHoldPhaseName = nullptr;
             return Fail("Failed to launch queued maneuver routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        const bool sessionRan = RunLoopSession(initialCallbacks);
+        _queuedManeuverCompletionHoldPhaseName = nullptr;
+        if (!sessionRan)
         {
             _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;

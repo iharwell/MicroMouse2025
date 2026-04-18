@@ -26,18 +26,7 @@ public:
         CaptureImuFn _captureImu{};
     };
 
-    struct CaptureCallback final
-    {
-        using InvokeFn = void (*)(void* context, SensorSnapshot& snapshot, CaptureServices& services) noexcept;
-
-        void* context{};
-        InvokeFn invoke{};
-
-        explicit operator bool() const noexcept
-        {
-            return invoke != nullptr;
-        }
-    };
+    using CaptureHandler = void (*)(void* context, SensorSnapshot& snapshot, CaptureServices& services) noexcept;
 
     RuntimeSensorSuite(MazeMap::Vehicle& vehicle, WallDistanceCalibration& wallCalibration);
 
@@ -53,7 +42,8 @@ public:
         bool stationary,
         const PoseEstimate& pose,
         SensorSnapshot& snapshot,
-        const CaptureCallback* callback = nullptr);
+        CaptureHandler callback = nullptr,
+        void* callbackContext = nullptr);
 
     // Reports the active IMU gyro scale used by the runtime sensor owner.
     float GetGyroSensitivityMdpsPerLsb() const noexcept;

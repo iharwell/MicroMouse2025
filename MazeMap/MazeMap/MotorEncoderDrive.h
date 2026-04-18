@@ -5,36 +5,36 @@
 
 namespace MazeMap
 {
-    struct MotorEncoderDrivePhysicalModel
-    {
-        float nominalVoltageV;
-        float nominalNoLoadSpeedRpm;
-        float supplyVoltageV;
-        float resistanceOhms;
-        float torqueConstantNmPerA;
-        float noLoadCurrentA;
-        float speedConstantRadpsPerVolt;
-        float gearRatio;
-        float wheelDiameterM;
-        float wheelYOffsetM;
-        uint16_t pulsesPerRev;
-    };
-
-    struct MotorEncoderDriveHardwareConfig
-    {
-        uint8_t motorOutPinA = Platform::kInvalidPin;
-        uint8_t motorOutPinB = Platform::kInvalidPin;
-        uint8_t encoderInPinA = Platform::kInvalidPin;
-        uint8_t encoderInPinB = Platform::kInvalidPin;
-        uint8_t encoderChannel = Platform::kInvalidEncoderChannel;
-        bool invertMotorDirection = false;
-        bool invertEncoderDirection = false;
-    };
-
     class MotorEncoderDrive
     {
     private:
-        inline static constexpr MotorEncoderDrivePhysicalModel kSharedPhysicalModel = {
+        struct PhysicalModel
+        {
+            float nominalVoltageV;
+            float nominalNoLoadSpeedRpm;
+            float supplyVoltageV;
+            float resistanceOhms;
+            float torqueConstantNmPerA;
+            float noLoadCurrentA;
+            float speedConstantRadpsPerVolt;
+            float gearRatio;
+            float wheelDiameterM;
+            float wheelYOffsetM;
+            uint16_t pulsesPerRev;
+        };
+
+        struct HardwareConfig
+        {
+            uint8_t motorOutPinA = Platform::kInvalidPin;
+            uint8_t motorOutPinB = Platform::kInvalidPin;
+            uint8_t encoderInPinA = Platform::kInvalidPin;
+            uint8_t encoderInPinB = Platform::kInvalidPin;
+            uint8_t encoderChannel = Platform::kInvalidEncoderChannel;
+            bool invertMotorDirection = false;
+            bool invertEncoderDirection = false;
+        };
+
+        inline static constexpr PhysicalModel kSharedPhysicalModel = {
             6.0f,
             14100.0f,
             8.4f,
@@ -56,7 +56,7 @@ namespace MazeMap
             0.01475f,
             4096U
         };
-        inline static constexpr MotorEncoderDriveHardwareConfig kLeftHardwareConfig = {
+        inline static constexpr HardwareConfig kLeftHardwareConfig = {
             24U,
             25U,
             2U,
@@ -65,7 +65,7 @@ namespace MazeMap
             true,
             false
         };
-        inline static constexpr MotorEncoderDriveHardwareConfig kRightHardwareConfig = {
+        inline static constexpr HardwareConfig kRightHardwareConfig = {
             5U,
             6U,
             7U,
@@ -213,17 +213,17 @@ namespace MazeMap
     public:
         MotorEncoderDrive() = default;
 
-        static constexpr const MotorEncoderDrivePhysicalModel& GetSharedPhysicalModel() noexcept
+        static constexpr const PhysicalModel& GetSharedPhysicalModel() noexcept
         {
             return kSharedPhysicalModel;
         }
 
-        static constexpr const MotorEncoderDriveHardwareConfig& GetLeftHardwareConfig() noexcept
+        static constexpr const HardwareConfig& GetLeftHardwareConfig() noexcept
         {
             return kLeftHardwareConfig;
         }
 
-        static constexpr const MotorEncoderDriveHardwareConfig& GetRightHardwareConfig() noexcept
+        static constexpr const HardwareConfig& GetRightHardwareConfig() noexcept
         {
             return kRightHardwareConfig;
         }
@@ -263,8 +263,8 @@ namespace MazeMap
         }
 
         MotorEncoderDrive(
-            const MotorEncoderDrivePhysicalModel& physicalModel,
-            const MotorEncoderDriveHardwareConfig& hardwareConfig) noexcept
+            const PhysicalModel& physicalModel,
+            const HardwareConfig& hardwareConfig) noexcept
             : MotorEncoderDrive(
                 physicalModel.resistanceOhms,
                 physicalModel.supplyVoltageV,

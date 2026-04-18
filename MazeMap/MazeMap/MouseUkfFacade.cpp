@@ -76,7 +76,7 @@ namespace MazeMap
         const WallObs& right,
         const Maze& maze,
         bool freezeMapMutation,
-        const MapEvidenceUpdaterConfig& evidenceConfig) noexcept
+        const MapEvidenceUpdater::Config& evidenceConfig) noexcept
     {
         FrontPairUpdateResult result = _core.updateFrontPair(left, right, maze);
         if (result.filter.accepted && !freezeMapMutation)
@@ -103,7 +103,7 @@ namespace MazeMap
         const WallObs& observation,
         const Maze& maze,
         bool freezeMapMutation,
-        const MapEvidenceUpdaterConfig& evidenceConfig) noexcept
+        const MapEvidenceUpdater::Config& evidenceConfig) noexcept
     {
         WallUpdateResult result = _core.updateSideSensor(which, observation, maze);
         if (result.filter.accepted && !freezeMapMutation)

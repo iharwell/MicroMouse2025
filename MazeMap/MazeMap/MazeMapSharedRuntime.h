@@ -140,6 +140,8 @@ namespace MazeMap::App::Internal
 
         // SharedRobotRuntime owns the production actuation hookup for the shared control loop so
         // LoopController can remain a cadence owner that only forwards raw motor PWM values.
+        // `Drive()` currently returns the concrete `DriveBase` owner. It is not evidence that the
+        // planned higher-level `Drive` translation layer already exists as a separate runtime owner.
         bool SetMotorPWM(float leftMotorPwm, float rightMotorPwm) noexcept;
         DriveBase& Drive() noexcept;
         ManeuverExecutor& ManeuverExecutorService() noexcept;

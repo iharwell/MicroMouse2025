@@ -629,50 +629,76 @@ namespace MazeMap::App::Internal
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
         MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
         timing.controlTiming.encoderLatchUs = static_cast<std::uint32_t>(micros());
-        struct CaptureContext final
+        class CaptureContext final
         {
-            LoopController* owner{};
-            ObservedTickState* observed{};
-            TimingDiagnostics* timing{};
-            MazeMap::Maze* map{};
-        } captureContext{ this, &observed, &timing, map };
+        public:
+            CaptureContext(
+                SharedRobotRuntime* runtime,
+                ObservedTickState* observed,
+                TimingDiagnostics* timing,
+                MazeMap::Maze* map) noexcept
+                : _runtime(runtime)
+                , _observed(observed)
+                , _timing(timing)
+                , _map(map)
+            {
+            }
 
-        const RuntimeSensorSuite::CaptureCallback callback
-        {
-            &captureContext,
+            SharedRobotRuntime& Runtime() const noexcept
+            {
+                return *_runtime;
+            }
+
+            ObservedTickState& Observed() const noexcept
+            {
+                return *_observed;
+            }
+
+            TimingDiagnostics& Timing() const noexcept
+            {
+                return *_timing;
+            }
+
+            MazeMap::Maze* Map() const noexcept
+            {
+                return _map;
+            }
+
+        private:
+            SharedRobotRuntime* _runtime{};
+            ObservedTickState* _observed{};
+            TimingDiagnostics* _timing{};
+            MazeMap::Maze* _map{};
+        } captureContext{ _runtime, &observed, &timing, map };
+
+        const RuntimeSensorSuite::CaptureHandler callback =
             [](void* rawContext, SensorSnapshot& captureSnapshot, RuntimeSensorSuite::CaptureServices& services) noexcept
             {
                 auto& context = *static_cast<CaptureContext*>(rawContext);
-                context.timing->controlTiming.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
-                context.owner->_runtime->Drive().UpdateOdometry(
-                    context.observed->dtSeconds,
+                context.Timing().controlTiming.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
+                context.Runtime().Drive().UpdateOdometry(
+                    context.Observed().dtSeconds,
                     captureSnapshot,
-                    context.map,
-                    &context.timing->controlTiming,
+                    context.Map(),
+                    &context.Timing().controlTiming,
                     [&context, &services]() noexcept
                     {
-                        if (context.owner->_runtime != nullptr)
-                        {
-                            (void)context.owner->_runtime->ServiceUtilityDataLog();
-                        }
+                        (void)context.Runtime().ServiceUtilityDataLog();
                         (void)services.ServiceWallRead();
                     },
                     [&context, &services]() noexcept
                     {
-                        if (context.owner->_runtime != nullptr)
-                        {
-                            (void)context.owner->_runtime->ServiceUtilityDataLog();
-                        }
+                        (void)context.Runtime().ServiceUtilityDataLog();
                         services.CaptureImu();
                     });
-            }
-        };
+            };
 
         _runtime->Sensors().Capture(
             stationaryHint,
             _runtime->Drive().GetPose(),
             observed.sensors,
-            &callback);
+            callback,
+            &captureContext);
 
         timing.frontTiming = observed.sensors.frontTiming;
         timing.leftTiming = observed.sensors.leftTiming;

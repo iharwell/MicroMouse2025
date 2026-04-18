@@ -17,7 +17,9 @@ namespace MazeMap
         }
     }
 
-    const EdgeEvidence& MapEvidenceUpdater::Get(const CellCoordinates& cell, Direction direction) const noexcept
+    const MapEvidenceUpdater::EdgeEvidence& MapEvidenceUpdater::Get(
+        const CellCoordinates& cell,
+        Direction direction) const noexcept
     {
         return _edges[cell.GetX()][cell.GetY()][directionIndex(direction)];
     }
@@ -61,7 +63,7 @@ namespace MazeMap
         return static_cast<int8_t>(candidate);
     }
 
-    WallState MapEvidenceUpdater::stateFromScore(int8_t score, const MapEvidenceUpdaterConfig& config) noexcept
+    WallState MapEvidenceUpdater::stateFromScore(int8_t score, const Config& config) noexcept
     {
         if (score >= config.wallThreshold)
         {
@@ -92,7 +94,17 @@ namespace MazeMap
         Direction direction,
         const WallObs& observation,
         const GeometryPrediction& bestFit,
-        const MapEvidenceUpdaterConfig& config,
+        bool freezeMutation) noexcept
+    {
+        return Apply(cell, direction, observation, bestFit, Config{}, freezeMutation);
+    }
+
+    bool MapEvidenceUpdater::Apply(
+        const CellCoordinates& cell,
+        Direction direction,
+        const WallObs& observation,
+        const GeometryPrediction& bestFit,
+        const Config& config,
         bool freezeMutation) noexcept
     {
         if (freezeMutation ||

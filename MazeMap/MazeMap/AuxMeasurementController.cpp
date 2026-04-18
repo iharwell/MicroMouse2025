@@ -31,8 +31,27 @@ public:
         _faulted = false;
         _fanEnabled = false;
         _phaseFn = nullptr;
-        _holdPhaseState = HoldPhaseState{};
-        _turningTractionState = TurningTractionState{};
+        _holdNextStep = RoutineStep::None;
+        _holdStationary = false;
+        _holdDurationMs = 0U;
+        _holdStartMs = 0UL;
+        _holdStarted = false;
+        _turningTractionDirectionSign = 0.0f;
+        _turningTractionCommandedSpeedMps = 0.0f;
+        _turningTractionHeldSpeedMps = 0.0f;
+        _turningTractionCommandedCurvatureMInv = 0.0f;
+        _turningTractionTargetYawRad = 0.0f;
+        _turningTractionPhaseStartMs = 0UL;
+        _turningTractionSaturationPlateauStartMs = 0UL;
+        _turningTractionSlipCandidateStartMs = 0UL;
+        _turningTractionSlipCandidateActive = false;
+        _turningTractionTighteningTurn = false;
+        _turningTractionLastMetrics = {};
+        _turningTractionLastPlanarAccelMps2 = 0.0f;
+        _turningTractionLastCommandedOmegaRadps = 0.0f;
+        _turningTractionSaturationReferenceSpeedMps = 0.0f;
+        _turningTractionPhaseSucceeded = false;
+        _turningTractionStarted = false;
         if (!_runtime.RegisterModeFaultHandler(&AuxMeasurementController::HandleRuntimeFault, this, "aux_measurement"))
         {
             return false;
@@ -112,36 +131,6 @@ private:
         TurningSweep
     };
 
-    struct HoldPhaseState final
-    {
-        RoutineStep nextStep{ RoutineStep::None };
-        bool stationary{};
-        bool fanEnabled{};
-        std::uint16_t durationMs{};
-        unsigned long startMs{};
-        bool started{};
-    };
-
-    struct TurningTractionState final
-    {
-        float directionSign{};
-        float commandedSpeedMps{};
-        float heldSpeedMps{};
-        float commandedCurvatureMInv{};
-        float targetYawRad{};
-        unsigned long phaseStartMs{};
-        unsigned long saturationPlateauStartMs{};
-        unsigned long slipCandidateStartMs{};
-        bool slipCandidateActive{};
-        bool tighteningTurn{};
-        MazeMap::TurningTractionMetrics lastMetrics{};
-        float lastPlanarAccelMps2{};
-        float lastCommandedOmegaRadps{};
-        float saturationReferenceSpeedMps{};
-        bool phaseSucceeded{};
-        bool started{};
-    };
-
     static LoopController::ControlVector ModeWorkThunk(
         void* context,
         std::uint32_t loopEndTimeUs,
@@ -162,7 +151,7 @@ private:
         self->_logRow.t_us = state.tickStartUs;
         self->_logRow.dt_us = state.dtUs;
         self->_logRow.stationary =
-            (self->_phaseFn == &AuxMeasurementController::HoldPhaseTick && self->_holdPhaseState.stationary) ? 1U : 0U;
+            (self->_phaseFn == &AuxMeasurementController::HoldPhaseTick && self->_holdStationary) ? 1U : 0U;
         self->_logRow.fan_enabled = self->_fanEnabled ? 1U : 0U;
         self->_logRow.pose_x_m = state.estimate.xMeters;
         self->_logRow.pose_y_m = state.estimate.yMeters;
@@ -255,8 +244,27 @@ private:
     unsigned long _sampleCount;
     AuxMeasurementLogRow _logRow{};
     PhaseFn _phaseFn{};
-    HoldPhaseState _holdPhaseState{};
-    TurningTractionState _turningTractionState{};
+    RoutineStep _holdNextStep{ RoutineStep::None };
+    bool _holdStationary{};
+    std::uint16_t _holdDurationMs{};
+    unsigned long _holdStartMs{};
+    bool _holdStarted{};
+    float _turningTractionDirectionSign{};
+    float _turningTractionCommandedSpeedMps{};
+    float _turningTractionHeldSpeedMps{};
+    float _turningTractionCommandedCurvatureMInv{};
+    float _turningTractionTargetYawRad{};
+    unsigned long _turningTractionPhaseStartMs{};
+    unsigned long _turningTractionSaturationPlateauStartMs{};
+    unsigned long _turningTractionSlipCandidateStartMs{};
+    bool _turningTractionSlipCandidateActive{};
+    bool _turningTractionTighteningTurn{};
+    MazeMap::TurningTractionMetrics _turningTractionLastMetrics{};
+    float _turningTractionLastPlanarAccelMps2{};
+    float _turningTractionLastCommandedOmegaRadps{};
+    float _turningTractionSaturationReferenceSpeedMps{};
+    bool _turningTractionPhaseSucceeded{};
+    bool _turningTractionStarted{};
 
     LoopController::SessionOptions BuildLoopOptions() const
     {
@@ -299,11 +307,11 @@ private:
         }
 
         SetFanEnabled(fanEnabled);
-        _holdPhaseState = HoldPhaseState{};
-        _holdPhaseState.nextStep = nextStep;
-        _holdPhaseState.stationary = stationary;
-        _holdPhaseState.fanEnabled = fanEnabled;
-        _holdPhaseState.durationMs = durationMs;
+        _holdNextStep = nextStep;
+        _holdStationary = stationary;
+        _holdDurationMs = durationMs;
+        _holdStartMs = 0UL;
+        _holdStarted = false;
         _phaseFn = &AuxMeasurementController::HoldPhaseTick;
         return true;
     }
@@ -317,16 +325,21 @@ private:
 
         SetFanEnabled(true);
         _runtime.Drive().SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
-        _turningTractionState = TurningTractionState{};
-        _turningTractionState.directionSign = AuxMeasurementConfig::kTurningTractionSweepClockwise ? 1.0f : -1.0f;
-        _turningTractionState.commandedSpeedMps = AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps;
-        _turningTractionState.heldSpeedMps = _turningTractionState.commandedSpeedMps;
-        _turningTractionState.commandedCurvatureMInv =
+        _turningTractionDirectionSign = AuxMeasurementConfig::kTurningTractionSweepClockwise ? 1.0f : -1.0f;
+        _turningTractionCommandedSpeedMps = AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps;
+        _turningTractionHeldSpeedMps = _turningTractionCommandedSpeedMps;
+        _turningTractionCommandedCurvatureMInv =
             (AuxMeasurementConfig::kTurningTractionSweepRadiusM > 1.0e-6f) ?
             (1.0f / AuxMeasurementConfig::kTurningTractionSweepRadiusM) :
             0.0f;
-        _turningTractionState.targetYawRad = _runtime.Drive().GetPose().yawRad;
-        _turningTractionState.phaseStartMs = millis();
+        _turningTractionTargetYawRad = _runtime.Drive().GetPose().yawRad;
+        _turningTractionPhaseStartMs = millis();
+        _turningTractionSaturationPlateauStartMs = 0UL;
+        _turningTractionSlipCandidateStartMs = 0UL;
+        _turningTractionSlipCandidateActive = false;
+        _turningTractionTighteningTurn = false;
+        _turningTractionPhaseSucceeded = false;
+        _turningTractionStarted = false;
         _phaseFn = &AuxMeasurementController::TurningTractionTick;
         return true;
     }
@@ -491,19 +504,19 @@ private:
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
-        if (!_holdPhaseState.started)
+        if (!_holdStarted)
         {
-            _holdPhaseState.started = true;
-            _holdPhaseState.startMs = millis();
+            _holdStarted = true;
+            _holdStartMs = millis();
         }
 
-        if (static_cast<unsigned long>(millis() - _holdPhaseState.startMs) >= _holdPhaseState.durationMs)
+        if (static_cast<unsigned long>(millis() - _holdStartMs) >= _holdDurationMs)
         {
-            if (_holdPhaseState.nextStep == RoutineStep::None)
+            if (_holdNextStep == RoutineStep::None)
             {
                 services.RequestEndLoop();
             }
-            else if (!StartRoutineStep(_holdPhaseState.nextStep))
+            else if (!StartRoutineStep(_holdNextStep))
             {
                 services.Fault("Failed to advance auxiliary measurement routine");
             }
@@ -519,23 +532,23 @@ private:
     {
         (void)loopEndTimeUs;
         const unsigned long nowMs = millis();
-        if (!_turningTractionState.started)
+        if (!_turningTractionStarted)
         {
-            _turningTractionState.started = true;
-            _turningTractionState.phaseStartMs = nowMs;
+            _turningTractionStarted = true;
+            _turningTractionPhaseStartMs = nowMs;
         }
 
-        if (static_cast<unsigned long>(nowMs - _turningTractionState.phaseStartMs) >= AuxMeasurementConfig::kTurningTractionSweepTimeoutMs)
+        if (static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs) >= AuxMeasurementConfig::kTurningTractionSweepTimeoutMs)
         {
-            _turningTractionState.phaseSucceeded = WriteTurningTractionResult(
+            _turningTractionPhaseSucceeded = WriteTurningTractionResult(
                 "timeout",
                 false,
-                static_cast<unsigned long>(nowMs - _turningTractionState.phaseStartMs),
-                _turningTractionState.commandedSpeedMps,
-                _turningTractionState.lastCommandedOmegaRadps,
-                _turningTractionState.lastMetrics,
-                _turningTractionState.lastPlanarAccelMps2);
-            if (!_turningTractionState.phaseSucceeded)
+                static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs),
+                _turningTractionCommandedSpeedMps,
+                _turningTractionLastCommandedOmegaRadps,
+                _turningTractionLastMetrics,
+                _turningTractionLastPlanarAccelMps2);
+            if (!_turningTractionPhaseSucceeded)
             {
                 services.Fault("Failed to write turning traction timeout result");
             }
@@ -544,32 +557,32 @@ private:
         }
 
         const SensorSnapshot& sensorSnapshot = state.sensors;
-        if (!_turningTractionState.tighteningTurn)
+        if (!_turningTractionTighteningTurn)
         {
-            _turningTractionState.commandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * state.dtSeconds;
+            _turningTractionCommandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * state.dtSeconds;
             if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
             {
-                _turningTractionState.commandedSpeedMps = (std::min)(
+                _turningTractionCommandedSpeedMps = (std::min)(
                     AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps,
-                    _turningTractionState.commandedSpeedMps);
+                    _turningTractionCommandedSpeedMps);
             }
-            _turningTractionState.heldSpeedMps = _turningTractionState.commandedSpeedMps;
+            _turningTractionHeldSpeedMps = _turningTractionCommandedSpeedMps;
         }
         else
         {
-            _turningTractionState.commandedSpeedMps = _turningTractionState.heldSpeedMps;
-            _turningTractionState.commandedCurvatureMInv +=
+            _turningTractionCommandedSpeedMps = _turningTractionHeldSpeedMps;
+            _turningTractionCommandedCurvatureMInv +=
                 AuxMeasurementConfig::kTurningTractionCurvatureRampMInvPerSec * state.dtSeconds;
         }
 
         const float nominalOmegaRadps =
-            _turningTractionState.directionSign *
-            (_turningTractionState.commandedSpeedMps * _turningTractionState.commandedCurvatureMInv);
-        _turningTractionState.targetYawRad =
-            WrapAngleRad(_turningTractionState.targetYawRad + (nominalOmegaRadps * state.dtSeconds));
-        _turningTractionState.lastCommandedOmegaRadps = MazeMap::ComputeTurningTractionAngularCommand(
+            _turningTractionDirectionSign *
+            (_turningTractionCommandedSpeedMps * _turningTractionCommandedCurvatureMInv);
+        _turningTractionTargetYawRad =
+            WrapAngleRad(_turningTractionTargetYawRad + (nominalOmegaRadps * state.dtSeconds));
+        _turningTractionLastCommandedOmegaRadps = MazeMap::ComputeTurningTractionAngularCommand(
             nominalOmegaRadps,
-            _turningTractionState.targetYawRad,
+            _turningTractionTargetYawRad,
             state.estimate.yawRad,
             state.estimate.angularSpeedRadps,
             Config::kArcHeadingKp,
@@ -577,8 +590,8 @@ private:
             AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps);
         const float effectiveTrackWidthM =
             MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(
-                _turningTractionState.commandedSpeedMps,
-                _turningTractionState.lastCommandedOmegaRadps);
+                _turningTractionCommandedSpeedMps,
+                _turningTractionLastCommandedOmegaRadps);
         const float planarAccelMps2 = sensorSnapshot.planarAccelMps2;
         const MazeMap::TurningTractionMetrics metrics = MazeMap::ComputeTurningTractionMetrics(
             state.driveTelemetry.leftVelocityMps,
@@ -586,8 +599,8 @@ private:
             effectiveTrackWidthM,
             sensorSnapshot.gyroRadps,
             planarAccelMps2);
-        _turningTractionState.lastMetrics = metrics;
-        _turningTractionState.lastPlanarAccelMps2 = planarAccelMps2;
+        _turningTractionLastMetrics = metrics;
+        _turningTractionLastPlanarAccelMps2 = planarAccelMps2;
 
         const bool slipDetected = MazeMap::IsTurningTractionLossDetected(
             metrics,
@@ -597,22 +610,22 @@ private:
             AuxMeasurementConfig::kTurningTractionSlipPlanarCoherenceFloor);
         if (slipDetected)
         {
-            if (!_turningTractionState.slipCandidateActive)
+            if (!_turningTractionSlipCandidateActive)
             {
-                _turningTractionState.slipCandidateStartMs = nowMs;
-                _turningTractionState.slipCandidateActive = true;
+                _turningTractionSlipCandidateStartMs = nowMs;
+                _turningTractionSlipCandidateActive = true;
             }
-            else if (static_cast<unsigned long>(nowMs - _turningTractionState.slipCandidateStartMs) >= AuxMeasurementConfig::kTurningTractionSlipConfirmMs)
+            else if (static_cast<unsigned long>(nowMs - _turningTractionSlipCandidateStartMs) >= AuxMeasurementConfig::kTurningTractionSlipConfirmMs)
             {
-                _turningTractionState.phaseSucceeded = WriteTurningTractionResult(
+                _turningTractionPhaseSucceeded = WriteTurningTractionResult(
                     "traction_loss",
                     true,
-                    static_cast<unsigned long>(nowMs - _turningTractionState.phaseStartMs),
-                    _turningTractionState.commandedSpeedMps,
-                    _turningTractionState.lastCommandedOmegaRadps,
+                    static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs),
+                    _turningTractionCommandedSpeedMps,
+                    _turningTractionLastCommandedOmegaRadps,
                     metrics,
                     planarAccelMps2);
-                if (!_turningTractionState.phaseSucceeded)
+                if (!_turningTractionPhaseSucceeded)
                 {
                     services.Fault("Failed to write turning traction loss result");
                 }
@@ -622,13 +635,13 @@ private:
         }
         else
         {
-            _turningTractionState.slipCandidateActive = false;
+            _turningTractionSlipCandidateActive = false;
         }
 
         const float maxWheelCommandMagnitude = (std::max)(
             std::fabs(state.driveTelemetry.leftDriveCommand),
             std::fabs(state.driveTelemetry.rightDriveCommand));
-        if (!_turningTractionState.tighteningTurn)
+        if (!_turningTractionTighteningTurn)
         {
             const bool actuatorLimited =
                 (metrics.encoderLinearSpeedMps >= AuxMeasurementConfig::kTurningTractionPlateauMinSpeedMps) &&
@@ -636,26 +649,26 @@ private:
 
             if (!actuatorLimited)
             {
-                _turningTractionState.saturationPlateauStartMs = 0UL;
-                _turningTractionState.saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
+                _turningTractionSaturationPlateauStartMs = 0UL;
+                _turningTractionSaturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
             }
-            else if (_turningTractionState.saturationPlateauStartMs == 0UL)
+            else if (_turningTractionSaturationPlateauStartMs == 0UL)
             {
-                _turningTractionState.saturationPlateauStartMs = nowMs;
-                _turningTractionState.saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
+                _turningTractionSaturationPlateauStartMs = nowMs;
+                _turningTractionSaturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
             }
             else if (metrics.encoderLinearSpeedMps >=
-                (_turningTractionState.saturationReferenceSpeedMps + AuxMeasurementConfig::kTurningTractionPlateauDeltaMps))
+                (_turningTractionSaturationReferenceSpeedMps + AuxMeasurementConfig::kTurningTractionPlateauDeltaMps))
             {
-                _turningTractionState.saturationPlateauStartMs = nowMs;
-                _turningTractionState.saturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
+                _turningTractionSaturationPlateauStartMs = nowMs;
+                _turningTractionSaturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
             }
-            else if (static_cast<unsigned long>(nowMs - _turningTractionState.saturationPlateauStartMs) >=
+            else if (static_cast<unsigned long>(nowMs - _turningTractionSaturationPlateauStartMs) >=
                 AuxMeasurementConfig::kTurningTractionPlateauWindowMs)
             {
-                _turningTractionState.tighteningTurn = true;
-                _turningTractionState.heldSpeedMps = (std::max)(
-                    _turningTractionState.commandedSpeedMps,
+                _turningTractionTighteningTurn = true;
+                _turningTractionHeldSpeedMps = (std::max)(
+                    _turningTractionCommandedSpeedMps,
                     metrics.encoderLinearSpeedMps);
 
                 char message[160] = {};
@@ -663,8 +676,8 @@ private:
                     message,
                     sizeof(message),
                     "reason=speed_plateau;hold_v_mps=%.3f;curvature_m_inv=%.3f;outer_cmd=%.3f",
-                    _turningTractionState.heldSpeedMps,
-                    _turningTractionState.commandedCurvatureMInv,
+                    _turningTractionHeldSpeedMps,
+                    _turningTractionCommandedCurvatureMInv,
                     maxWheelCommandMagnitude);
                 if (messageLength <= 0 || messageLength >= static_cast<int>(sizeof(message)))
                 {
@@ -679,11 +692,11 @@ private:
             }
         }
 
-        if (static_cast<unsigned long>(nowMs - _turningTractionState.phaseStartMs) < AuxMeasurementConfig::kTurningTractionLaunchMs)
+        if (static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs) < AuxMeasurementConfig::kTurningTractionLaunchMs)
         {
             const MazeMap::TurningLaunchCommands launchCommands = MazeMap::ComputeTurningLaunchCommands(
-                _turningTractionState.commandedSpeedMps,
-                _turningTractionState.lastCommandedOmegaRadps,
+                _turningTractionCommandedSpeedMps,
+                _turningTractionLastCommandedOmegaRadps,
                 effectiveTrackWidthM,
                 Config::kWheelRestLaunchDriveCommand);
             return LoopController::ControlVector::RawMotorPwm(
@@ -692,8 +705,8 @@ private:
         }
 
         return _runtime.Drive().PointControlVector(
-            _turningTractionState.commandedSpeedMps,
-            _turningTractionState.lastCommandedOmegaRadps,
+            _turningTractionCommandedSpeedMps,
+            _turningTractionLastCommandedOmegaRadps,
             MazeMap::CommandPD::StateWheelOmegaPD);
     }
 

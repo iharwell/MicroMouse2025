@@ -186,7 +186,8 @@ void RuntimeSensorSuite::Capture(
     const bool stationary,
     const PoseEstimate& pose,
     SensorSnapshot& snapshot,
-    const CaptureCallback* callback)
+    const CaptureHandler callback,
+    void* const callbackContext)
 {
     snapshot = SensorSnapshot{};
     snapshot.wallSensorAdcCfgBeforeStart = MazeMap::Platform::GetWallSensorAdcCurrentCfg();
@@ -210,13 +211,54 @@ void RuntimeSensorSuite::Capture(
     snapshot.wallSensorAdcGcAfterStart = MazeMap::Platform::GetWallSensorAdcCurrentGc();
 
     bool imuCaptured = false;
-    struct CaptureContext final
+    class CaptureContext final
     {
-        AsyncWallSensorSweepRead* wallRead{};
-        bool* imuCaptured{};
-        RuntimeSensorSuite* owner{};
-        bool stationary{};
-        SensorSnapshot* snapshot{};
+    public:
+        CaptureContext(
+            AsyncWallSensorSweepRead* wallRead,
+            bool* imuCaptured,
+            RuntimeSensorSuite* owner,
+            const bool stationary,
+            SensorSnapshot* snapshot) noexcept
+            : _wallRead(wallRead)
+            , _imuCaptured(imuCaptured)
+            , _owner(owner)
+            , _stationary(stationary)
+            , _snapshot(snapshot)
+        {
+        }
+
+        AsyncWallSensorSweepRead& WallRead() const noexcept
+        {
+            return *_wallRead;
+        }
+
+        bool& ImuCaptured() const noexcept
+        {
+            return *_imuCaptured;
+        }
+
+        RuntimeSensorSuite& Owner() const noexcept
+        {
+            return *_owner;
+        }
+
+        bool Stationary() const noexcept
+        {
+            return _stationary;
+        }
+
+        SensorSnapshot& Snapshot() const noexcept
+        {
+            return *_snapshot;
+        }
+
+    private:
+        AsyncWallSensorSweepRead* _wallRead{};
+        bool* _imuCaptured{};
+        RuntimeSensorSuite* _owner{};
+        bool _stationary{};
+        SensorSnapshot* _snapshot{};
     } captureContext{ &wallRead, &imuCaptured, this, stationary, &snapshot };
 
     CaptureServices services{};
@@ -224,23 +266,23 @@ void RuntimeSensorSuite::Capture(
     services._serviceWallRead = [](void* rawContext) noexcept -> bool
     {
         auto& context = *static_cast<CaptureContext*>(rawContext);
-        return ServiceAsyncWallSensorSweepRead(*context.wallRead);
+        return ServiceAsyncWallSensorSweepRead(context.WallRead());
     };
     services._captureImu = [](void* rawContext) noexcept
     {
         auto& context = *static_cast<CaptureContext*>(rawContext);
-        (void)ServiceAsyncWallSensorSweepRead(*context.wallRead);
-        if (!*context.imuCaptured)
+        (void)ServiceAsyncWallSensorSweepRead(context.WallRead());
+        if (!context.ImuCaptured())
         {
-            context.owner->CaptureInertialSnapshot(context.stationary, *context.snapshot);
-            *context.imuCaptured = true;
+            context.Owner().CaptureInertialSnapshot(context.Stationary(), context.Snapshot());
+            context.ImuCaptured() = true;
         }
-        (void)ServiceAsyncWallSensorSweepRead(*context.wallRead);
+        (void)ServiceAsyncWallSensorSweepRead(context.WallRead());
     };
 
-    if ((callback != nullptr) && static_cast<bool>(*callback))
+    if (callback != nullptr)
     {
-        callback->invoke(callback->context, snapshot, services);
+        callback(callbackContext, snapshot, services);
     }
     else
     {

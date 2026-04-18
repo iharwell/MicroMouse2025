@@ -435,10 +435,12 @@ Reject the design and revise it if any of the following are true:
 - `ManeuverInstance` is the canonical execution vocabulary for maneuver-driven motion. Do **not** peel maneuver execution back out into parallel smooth-turn profile structs or mode-local geometry bags.
 - Derive maneuver execution facts from `ManeuverSet`, `ManeuverCode`, and `Maze::GetCellDimension()` at the point of use or through methods on the canonical maneuver owners.
 - `ManeuverPoint` is the per-point drive primitive for higher-level motion execution.
-- Mission-mode code should choose goals, replans, and phase transitions. Shared drive execution owners should own the actual motion primitives and per-tick maneuver tracking.
+- Mission-mode code should choose goals, replans, and phase transitions. Shared drive services should provide the actual motion-primitive calculations and per-tick maneuver-tracking support used by the active mode callback.
+- `Drive`, when introduced, is a shared runtime service, not a mode-owned subsystem or an execution owner. Mode code should call it each tick while motion or maneuver execution is active to compute the present tick's proposed drive output rather than owning a separate per-mode `Drive`.
 - `DriveBase` is the destination for concrete "move in this manner" commands. If a higher-level drive owner is introduced, it must become the authoritative motion owner rather than a forwarding facade over `DriveBase`.
 - While motion is active, only the current `LoopController` callback runs. Mapping, pathfinding response, maneuver dispatch, and phase progression that must happen during motion must therefore be callback-driven or live in shared services called by that callback.
 - A `Routine` in the maneuver/motion vocabulary is callback-driven work owned by the active `LoopController` flow, following the `ManeuverExecutor` pattern. Do **not** wrap motion routines in synchronous/blocking helper APIs.
+- Simple shared motion primitives and a shared `Drive` service should not requisition `LoopController` callback ownership merely to advance per-tick execution state or compute the present tick's drive output; the active mode callback should call them each tick and may choose whether to use that output.
 - If the loop is paused, motion must be halted; pauses are not an excuse to keep driving in parallel with non-real-time work.
 - Outside `LoopController::RequestPause(...)` callbacks, do **not** wait for "one more tick", sleep for control progress, or spin on control-state changes.
 - Open-loop commands are appropriate for low-level tasks such as wall tapping or certain measurements.

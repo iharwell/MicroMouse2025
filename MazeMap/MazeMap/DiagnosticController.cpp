@@ -228,18 +228,6 @@ private:
 
     SharedRobotRuntime& _runtime;
     LoopController& _loopController;
-    struct StraightPhaseMetrics
-    {
-        float peakSpeedMps = 0.0f;
-        float maxHeadingErrorRad = 0.0f;
-    };
-
-    struct TurnPhaseMetrics
-    {
-        float peakOmegaRadps = 0.0f;
-        float maxYawErrorRad = 0.0f;
-    };
-
     struct ArcPhaseMetrics
     {
         float peakSpeedMps = 0.0f;
@@ -264,12 +252,9 @@ private:
     DiagnosticLogRow _logRow{};
     PhaseFn _phaseFn{};
 
-    struct HoldPhaseState final
-    {
-        bool stationary{};
-        unsigned long deadlineMs{};
-        ScenarioStep nextStep{ ScenarioStep::None };
-    } _holdPhaseState{};
+    bool _holdStationary{};
+    unsigned long _holdDeadlineMs{};
+    ScenarioStep _holdNextStep{ ScenarioStep::None };
 
     struct StraightPhaseState final
     {
@@ -282,9 +267,10 @@ private:
         float traveledM{};
         unsigned long timeoutMs{};
         EncoderProgressWatchdog translationWatchdog{};
-        StraightPhaseMetrics metrics{};
         ScenarioStep nextStep{ ScenarioStep::None };
         bool selectReturnDistance{};
+        float peakSpeedMps{};
+        float maxHeadingErrorRad{};
     } _straightPhaseState{};
 
     struct KickoffPhaseState final
@@ -300,10 +286,7 @@ private:
         unsigned long travelLimitSettleDeadlineMs{};
     } _kickoffPhaseState{};
 
-    struct KickoffSweepSequenceState final
-    {
-        std::size_t nextMagnitudeIndex{};
-    } _kickoffSweepSequenceState{};
+    std::size_t _kickoffSweepNextMagnitudeIndex{};
 
     struct ForwardPhaseState final
     {
@@ -324,10 +307,7 @@ private:
         unsigned long travelLimitSettleDeadlineMs{};
     } _forwardPhaseState{};
 
-    struct ForwardSweepSequenceState final
-    {
-        std::uint16_t nextSampleIndex{};
-    } _forwardSweepSequenceState{};
+    std::uint16_t _forwardSweepNextSampleIndex{};
 
     struct TurnPhaseState final
     {
@@ -336,9 +316,10 @@ private:
         float targetYawRad{};
         MazeMap::InPlaceTurnProfile turnProfile{};
         unsigned long timeoutMs{};
-        TurnPhaseMetrics metrics{};
         ScenarioStep nextStep{ ScenarioStep::None };
         bool writeSquareClosure{};
+        float peakOmegaRadps{};
+        float maxYawErrorRad{};
     } _turnPhaseState{};
 
     struct ArcPhaseState final
@@ -361,27 +342,18 @@ private:
         bool writeCircleSummary{};
     } _arcPhaseState{};
 
-    struct CharacterizationRecoveryState final
-    {
-        char label[24]{};
-        float traveledDistanceM{};
-        ScenarioStep nextStep{ ScenarioStep::None };
-    } _characterizationRecoveryState{};
+    char _characterizationRecoveryLabel[24]{};
+    float _characterizationRecoveryTraveledDistanceM{};
+    ScenarioStep _characterizationRecoveryNextStep{ ScenarioStep::None };
 
-    struct CircleSequenceState final
-    {
-        char namePrefix[48]{};
-        float cruiseSpeedMps{};
-        PoseEstimate startPose{};
-        DriveTelemetry startTelemetry{};
-        ArcPhaseMetrics totalMetrics{};
-    } _circleSequenceState{};
+    char _circleSequenceNamePrefix[48]{};
+    float _circleSequenceCruiseSpeedMps{};
+    PoseEstimate _circleSequenceStartPose{};
+    DriveTelemetry _circleSequenceStartTelemetry{};
+    ArcPhaseMetrics _circleSequenceTotalMetrics{};
 
-    struct SquareSequenceState final
-    {
-        char namePrefix[24]{};
-        PoseEstimate startPose{};
-    } _squareSequenceState{};
+    char _squareSequenceNamePrefix[24]{};
+    PoseEstimate _squareSequenceStartPose{};
 
     float _pendingReturnDistanceM;
 
@@ -424,7 +396,7 @@ private:
         self->_logRow.t_us = state.tickStartUs;
         self->_logRow.dt_us = state.dtUs;
         self->_logRow.stationary =
-            (self->_phaseFn == &DiagnosticController::HoldPhaseTick && self->_holdPhaseState.stationary) ? 1U : 0U;
+            (self->_phaseFn == &DiagnosticController::HoldPhaseTick && self->_holdStationary) ? 1U : 0U;
         self->_logRow.pose_x_m = state.estimate.xMeters;
         self->_logRow.pose_y_m = state.estimate.yMeters;
         self->_logRow.yaw_rad = state.estimate.yawRad;
@@ -527,10 +499,9 @@ private:
             return false;
         }
 
-        _holdPhaseState = HoldPhaseState{};
-        _holdPhaseState.stationary = stationary;
-        _holdPhaseState.deadlineMs = millis() + durationMs;
-        _holdPhaseState.nextStep = nextStep;
+        _holdStationary = stationary;
+        _holdDeadlineMs = millis() + durationMs;
+        _holdNextStep = nextStep;
         _phaseFn = &DiagnosticController::HoldPhaseTick;
         return true;
     }
@@ -587,13 +558,13 @@ private:
 
     bool StartNextKickoffCharacterizationSample()
     {
-        if (_kickoffSweepSequenceState.nextMagnitudeIndex >= MazeMap::kOpenFloorLaunchDriveMagnitudes.size())
+        if (_kickoffSweepNextMagnitudeIndex >= MazeMap::kOpenFloorLaunchDriveMagnitudes.size())
         {
             return StartScenarioStep(ScenarioStep::ForwardSweepPrep);
         }
 
-        const float driveCommand = MazeMap::kOpenFloorLaunchDriveMagnitudes[_kickoffSweepSequenceState.nextMagnitudeIndex];
-        ++_kickoffSweepSequenceState.nextMagnitudeIndex;
+        const float driveCommand = MazeMap::kOpenFloorLaunchDriveMagnitudes[_kickoffSweepNextMagnitudeIndex];
+        ++_kickoffSweepNextMagnitudeIndex;
         return StartKickoffCharacterizationSample(driveCommand);
     }
 
@@ -659,13 +630,13 @@ private:
     {
         const float driveCommand =
             LegacyDiagnosticConfig::kForwardSweepMinDriveCommand +
-            (LegacyDiagnosticConfig::kForwardSweepStepDriveCommand * static_cast<float>(_forwardSweepSequenceState.nextSampleIndex));
+            (LegacyDiagnosticConfig::kForwardSweepStepDriveCommand * static_cast<float>(_forwardSweepNextSampleIndex));
         if (driveCommand > (LegacyDiagnosticConfig::kForwardSweepMaxDriveCommand + 0.0001f))
         {
             return StartScenarioStep(ScenarioStep::CharacterizationSettle);
         }
 
-        ++_forwardSweepSequenceState.nextSampleIndex;
+        ++_forwardSweepNextSampleIndex;
         return StartForwardCharacterizationSample(driveCommand);
     }
 
@@ -779,18 +750,17 @@ private:
 
     void ResetCircleSequence(const char* const namePrefix, const float cruiseSpeedMps)
     {
-        _circleSequenceState = CircleSequenceState{};
-        snprintf(_circleSequenceState.namePrefix, sizeof(_circleSequenceState.namePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
-        _circleSequenceState.cruiseSpeedMps = cruiseSpeedMps;
-        _circleSequenceState.startPose = _drive.GetPose();
-        _circleSequenceState.startTelemetry = _drive.GetTelemetry();
+        snprintf(_circleSequenceNamePrefix, sizeof(_circleSequenceNamePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
+        _circleSequenceCruiseSpeedMps = cruiseSpeedMps;
+        _circleSequenceStartPose = _drive.GetPose();
+        _circleSequenceStartTelemetry = _drive.GetTelemetry();
+        _circleSequenceTotalMetrics = ArcPhaseMetrics{};
     }
 
     void ResetSquareSequence(const char* const namePrefix)
     {
-        _squareSequenceState = SquareSequenceState{};
-        snprintf(_squareSequenceState.namePrefix, sizeof(_squareSequenceState.namePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
-        _squareSequenceState.startPose = _drive.GetPose();
+        snprintf(_squareSequenceNamePrefix, sizeof(_squareSequenceNamePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
+        _squareSequenceStartPose = _drive.GetPose();
     }
 
     bool StartCharacterizationRecovery(
@@ -798,14 +768,9 @@ private:
         const float traveledDistanceM,
         const ScenarioStep nextStepAfterRecovery)
     {
-        _characterizationRecoveryState = CharacterizationRecoveryState{};
-        snprintf(
-            _characterizationRecoveryState.label,
-            sizeof(_characterizationRecoveryState.label),
-            "%s",
-            (label != nullptr) ? label : "");
-        _characterizationRecoveryState.traveledDistanceM = traveledDistanceM;
-        _characterizationRecoveryState.nextStep = nextStepAfterRecovery;
+        snprintf(_characterizationRecoveryLabel, sizeof(_characterizationRecoveryLabel), "%s", (label != nullptr) ? label : "");
+        _characterizationRecoveryTraveledDistanceM = traveledDistanceM;
+        _characterizationRecoveryNextStep = nextStepAfterRecovery;
 
         if (traveledDistanceM <= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM)
         {
@@ -835,7 +800,7 @@ private:
                 ScenarioStep::KickoffSweepPrep);
 
         case ScenarioStep::KickoffSweepPrep:
-            _kickoffSweepSequenceState = KickoffSweepSequenceState{};
+            _kickoffSweepNextMagnitudeIndex = 0;
             return StartHoldPhase(
                 "kickoff_sweep_prep",
                 DiagnosticConfig::kCharacterizationSettleMs,
@@ -846,31 +811,31 @@ private:
             return StartNextKickoffCharacterizationSample();
 
         case ScenarioStep::RecoveryTurnaround:
-            snprintf(phaseName, sizeof(phaseName), "%s_turnaround", _characterizationRecoveryState.label);
+            snprintf(phaseName, sizeof(phaseName), "%s_turnaround", _characterizationRecoveryLabel);
             return StartTurnPhase(phaseName, PI_F, ScenarioStep::RecoveryReturn);
 
         case ScenarioStep::RecoveryReturn:
-            snprintf(phaseName, sizeof(phaseName), "%s_return", _characterizationRecoveryState.label);
+            snprintf(phaseName, sizeof(phaseName), "%s_return", _characterizationRecoveryLabel);
             return StartStraightPhase(
                 phaseName,
-                _characterizationRecoveryState.traveledDistanceM,
+                _characterizationRecoveryTraveledDistanceM,
                 DiagnosticConfig::kCharacterizationRecoverySpeedMps,
                 ScenarioStep::RecoveryResetHeading);
 
         case ScenarioStep::RecoveryResetHeading:
-            snprintf(phaseName, sizeof(phaseName), "%s_reset_heading", _characterizationRecoveryState.label);
+            snprintf(phaseName, sizeof(phaseName), "%s_reset_heading", _characterizationRecoveryLabel);
             return StartTurnPhase(phaseName, PI_F, ScenarioStep::RecoverySettle);
 
         case ScenarioStep::RecoverySettle:
-            snprintf(phaseName, sizeof(phaseName), "%s_settle", _characterizationRecoveryState.label);
+            snprintf(phaseName, sizeof(phaseName), "%s_settle", _characterizationRecoveryLabel);
             return StartHoldPhase(
                 phaseName,
                 DiagnosticConfig::kCharacterizationSettleMs,
                 true,
-                _characterizationRecoveryState.nextStep);
+                _characterizationRecoveryNextStep);
 
         case ScenarioStep::ForwardSweepPrep:
-            _forwardSweepSequenceState = ForwardSweepSequenceState{};
+            _forwardSweepNextSampleIndex = 0;
             return StartHoldPhase(
                 "forward_sweep_prep",
                 DiagnosticConfig::kCharacterizationSettleMs,
@@ -1313,7 +1278,8 @@ private:
         float cruiseSpeedMps,
         float traveledM,
         const Eigen::Vector2f& targetHeading,
-        const StraightPhaseMetrics& metrics)
+        float peakSpeedMps,
+        float maxHeadingErrorRad)
     {
         char message[192] = {};
         const float stopErrorM = traveledM - distanceM;
@@ -1325,8 +1291,8 @@ private:
             (phaseName != nullptr) ? phaseName : "",
             distanceM,
             cruiseSpeedMps,
-            metrics.peakSpeedMps,
-            RAD_TO_DEG_F * metrics.maxHeadingErrorRad,
+            peakSpeedMps,
+            RAD_TO_DEG_F * maxHeadingErrorRad,
             stopErrorM,
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
@@ -1336,7 +1302,12 @@ private:
         return WriteEventOrFail("straight_result", message, "Failed to write straight diagnostic result");
     }
 
-    bool WriteTurnResult(const char* phaseName, float angleRad, const TurnPhaseMetrics& metrics, float targetYawRad)
+    bool WriteTurnResult(
+        const char* phaseName,
+        float angleRad,
+        float peakOmegaRadps,
+        float maxYawErrorRad,
+        float targetYawRad)
     {
         char message[176] = {};
         const float finalYawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
@@ -1346,8 +1317,8 @@ private:
             "%s;angle_deg=%.1f;peak_omega_radps=%.3f;peak_yaw_err_deg=%.2f;final_yaw_err_deg=%.2f",
             (phaseName != nullptr) ? phaseName : "",
             RAD_TO_DEG_F * angleRad,
-            metrics.peakOmegaRadps,
-            RAD_TO_DEG_F * metrics.maxYawErrorRad,
+            peakOmegaRadps,
+            RAD_TO_DEG_F * maxYawErrorRad,
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
@@ -1528,10 +1499,11 @@ private:
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
-        if (static_cast<long>(_holdPhaseState.deadlineMs - millis()) <= 0)
+        (void)state;
+        if (static_cast<long>(_holdDeadlineMs - millis()) <= 0)
         {
             (void)AdvanceToNextStep(
-                _holdPhaseState.nextStep,
+                _holdNextStep,
                 services,
                 "Failed to advance diagnostic hold phase");
         }
@@ -1549,8 +1521,8 @@ private:
         _straightPhaseState.traveledM =
             std::fabs(_drive.GetAverageDistanceMeters() - _straightPhaseState.startDistanceM);
         const float remainingM = (std::max)(0.0f, _straightPhaseState.distanceM - _straightPhaseState.traveledM);
-        _straightPhaseState.metrics.peakSpeedMps = (std::max)(
-            _straightPhaseState.metrics.peakSpeedMps,
+        _straightPhaseState.peakSpeedMps = (std::max)(
+            _straightPhaseState.peakSpeedMps,
             std::fabs(state.estimate.linearSpeedMps));
         if ((remainingM <= Config::kDistanceToleranceM) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
@@ -1563,11 +1535,12 @@ private:
             }
             if (!WriteStraightResult(
                     _straightPhaseState.phaseName,
-                    _straightPhaseState.distanceM,
-                    _straightPhaseState.cruiseSpeedMps,
-                    _straightPhaseState.traveledM,
-                    _straightPhaseState.targetHeading,
-                    _straightPhaseState.metrics))
+                _straightPhaseState.distanceM,
+                _straightPhaseState.cruiseSpeedMps,
+                _straightPhaseState.traveledM,
+                _straightPhaseState.targetHeading,
+                _straightPhaseState.peakSpeedMps,
+                _straightPhaseState.maxHeadingErrorRad))
             {
                 services.Fault("Failed to write straight diagnostic result");
                 return LoopController::ControlVector::Brake;
@@ -1600,8 +1573,8 @@ private:
         _straightPhaseState.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
         const float headingErrorRad = HeadingErrorRad(_straightPhaseState.targetHeading, state.estimate.headingUnit);
-        _straightPhaseState.metrics.maxHeadingErrorRad = (std::max)(
-            _straightPhaseState.metrics.maxHeadingErrorRad,
+        _straightPhaseState.maxHeadingErrorRad = (std::max)(
+            _straightPhaseState.maxHeadingErrorRad,
             std::fabs(headingErrorRad));
         float angularCommandRadps =
             (Config::kStraightHeadingKp * headingErrorRad) -
@@ -1763,16 +1736,17 @@ private:
         (void)loopEndTimeUs;
         const float errorRad = AngleErrorRad(_turnPhaseState.targetYawRad, state.estimate.yawRad);
         const float remainingRad = std::fabs(errorRad);
-        _turnPhaseState.metrics.maxYawErrorRad = (std::max)(_turnPhaseState.metrics.maxYawErrorRad, remainingRad);
-        _turnPhaseState.metrics.peakOmegaRadps = (std::max)(
-            _turnPhaseState.metrics.peakOmegaRadps,
+        _turnPhaseState.maxYawErrorRad = (std::max)(_turnPhaseState.maxYawErrorRad, remainingRad);
+        _turnPhaseState.peakOmegaRadps = (std::max)(
+            _turnPhaseState.peakOmegaRadps,
             std::fabs(state.estimate.angularSpeedRadps));
         if (MazeMap::IsInPlaceTurnComplete(errorRad, state.estimate.angularSpeedRadps, _turnPhaseState.turnProfile))
         {
             if (!WriteTurnResult(
                     _turnPhaseState.phaseName,
                     _turnPhaseState.angleRad,
-                    _turnPhaseState.metrics,
+                    _turnPhaseState.peakOmegaRadps,
+                    _turnPhaseState.maxYawErrorRad,
                     _turnPhaseState.targetYawRad))
             {
                 services.Fault("Failed to write turn diagnostic result");
@@ -1786,8 +1760,8 @@ private:
             if (_turnPhaseState.writeSquareClosure &&
                 !WriteClosureResult(
                     "square_result",
-                    _squareSequenceState.namePrefix,
-                    _squareSequenceState.startPose,
+                    _squareSequenceNamePrefix,
+                    _squareSequenceStartPose,
                     "Failed to write square diagnostic result"))
             {
                 services.Fault("Failed to write square diagnostic result");
@@ -1847,7 +1821,7 @@ private:
         if ((remainingM <= Config::kDistanceToleranceM) &&
             (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
         {
-            AccumulateArcMetrics(_circleSequenceState.totalMetrics, _arcPhaseState.metrics);
+            AccumulateArcMetrics(_circleSequenceTotalMetrics, _arcPhaseState.metrics);
             if (!WriteArcResult(
                     _arcPhaseState.phaseName,
                     _arcPhaseState.distanceM,
@@ -1862,18 +1836,18 @@ private:
             if (_arcPhaseState.writeCircleSummary)
             {
                 if (!WriteCircleResult(
-                        _circleSequenceState.namePrefix,
-                        _circleSequenceState.cruiseSpeedMps,
-                        _circleSequenceState.startTelemetry,
-                        _circleSequenceState.totalMetrics))
+                        _circleSequenceNamePrefix,
+                        _circleSequenceCruiseSpeedMps,
+                        _circleSequenceStartTelemetry,
+                        _circleSequenceTotalMetrics))
                 {
                     services.Fault("Failed to write circle diagnostic result");
                     return LoopController::ControlVector::Brake;
                 }
                 if (!WriteClosureResult(
                         "arc_circle_result",
-                        _circleSequenceState.namePrefix,
-                        _circleSequenceState.startPose,
+                        _circleSequenceNamePrefix,
+                        _circleSequenceStartPose,
                         "Failed to write arc circle diagnostic result"))
                 {
                     services.Fault("Failed to write arc circle diagnostic result");

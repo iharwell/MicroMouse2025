@@ -264,39 +264,6 @@ private:
         MainFault
     };
 
-    struct PendingLog final
-    {
-        PendingLogKind kind{ PendingLogKind::None };
-        OpenFloorMeasurementCycle cycle{};
-        OpenFloorMeasurementLabels labels{};
-        MazeMap::OpenFloorFaultCode faultCode{};
-        bool controlHalted{};
-        std::uint32_t extra0{};
-        std::uint32_t extra1{};
-    };
-
-    struct TimingBlockState final
-    {
-        std::uint16_t tickIndex{};
-    };
-
-    struct StaticHoldState final
-    {
-        OpenFloorMeasurementLabels labels{};
-        unsigned long deadlineMs{};
-    };
-
-    struct RecoveryState final
-    {
-        OpenFloorMeasurementLabels labels{};
-        float targetX{};
-        float targetY{};
-        Eigen::Vector2f targetHeading = Eigen::Vector2f(0.0f, 1.0f);
-        MotionLimits limits{};
-        unsigned long deadlineMs{};
-        float initialDistanceOutsideZoneM{};
-    };
-
     struct LaunchPulseState final
     {
         enum class Phase : std::uint8_t
@@ -371,45 +338,12 @@ private:
         TimingToMain
     };
 
-    struct LaunchSequenceState final
-    {
-        std::size_t magnitudeIndex{};
-        std::uint8_t repeatIteration{};
-        bool negativeNext{};
-        std::uint16_t nextRepeatIndex{};
-    };
-
-    struct StraightSequenceState final
-    {
-        std::size_t speedIndex{};
-        std::uint8_t repeatIteration{};
-        bool southboundNext{};
-        std::uint16_t nextRepeatIndex{};
-    };
-
-    struct YawSequenceState final
-    {
-        std::size_t speedIndex{};
-        std::uint8_t repeatIteration{};
-        std::uint8_t primitiveIndex{};
-        std::uint16_t nextRepeatIndex{};
-    };
-
-    struct SmoothSequenceState final
-    {
-        std::size_t speedIndex{};
-        std::size_t codeIndex{};
-        std::uint8_t repeatIteration{};
-        std::uint16_t nextRepeatIndex{};
-    };
-
     struct LoopSequenceState final
     {
         bool clockwise{};
         std::uint16_t repeatIndex{};
         std::uint8_t legIndex{};
         OpenFloorMeasurementLabels loopLabels{};
-        OpenFloorMeasurementLabels recoveryLabels{};
     };
 
     SharedRobotRuntime& _runtime;
@@ -438,19 +372,44 @@ private:
     OpenFloorMainRow _mainLogRow{};
     PhaseFn _phaseFn{};
     PauseAction _pauseAction{};
-    PendingLog _pendingLog{};
-    TimingBlockState _timingBlockState{};
-    StaticHoldState _staticHoldState{};
-    RecoveryState _recoveryState{};
+    PendingLogKind _pendingLogKind{ PendingLogKind::None };
+    OpenFloorMeasurementCycle _pendingCycle{};
+    OpenFloorMeasurementLabels _pendingLabels{};
+    MazeMap::OpenFloorFaultCode _pendingFaultCode{};
+    bool _pendingControlHalted{};
+    std::uint32_t _pendingExtra0{};
+    std::uint32_t _pendingExtra1{};
+    std::uint16_t _timingBlockTickIndex{};
+    OpenFloorMeasurementLabels _staticHoldLabels{};
+    unsigned long _staticHoldDeadlineMs{};
+    OpenFloorMeasurementLabels _recoveryLabels{};
+    float _recoveryTargetX{};
+    float _recoveryTargetY{};
+    Eigen::Vector2f _recoveryTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
+    MotionLimits _recoveryLimits{};
+    unsigned long _recoveryDeadlineMs{};
+    float _recoveryInitialDistanceOutsideZoneM{};
     LaunchPulseState _launchPulseState{};
     StraightSectionState _straightSectionState{};
     SectionSettleState _sectionSettleState{};
     TurnSectionState _turnSectionState{};
     SmoothTurnState _smoothTurnState{};
-    LaunchSequenceState _launchSequenceState{};
-    StraightSequenceState _straightSequenceState{};
-    YawSequenceState _yawSequenceState{};
-    SmoothSequenceState _smoothSequenceState{};
+    std::size_t _launchSequenceMagnitudeIndex{};
+    std::uint8_t _launchSequenceRepeatIteration{};
+    bool _launchSequenceNegativeNext{};
+    std::uint16_t _launchSequenceNextRepeatIndex{};
+    std::size_t _straightSequenceSpeedIndex{};
+    std::uint8_t _straightSequenceRepeatIteration{};
+    bool _straightSequenceSouthboundNext{};
+    std::uint16_t _straightSequenceNextRepeatIndex{};
+    std::size_t _yawSequenceSpeedIndex{};
+    std::uint8_t _yawSequenceRepeatIteration{};
+    std::uint8_t _yawSequencePrimitiveIndex{};
+    std::uint16_t _yawSequenceNextRepeatIndex{};
+    std::size_t _smoothSequenceSpeedIndex{};
+    std::size_t _smoothSequenceCodeIndex{};
+    std::uint8_t _smoothSequenceRepeatIteration{};
+    std::uint16_t _smoothSequenceNextRepeatIndex{};
     LoopSequenceState _loopSequenceState{};
 
     static MotionLimits MeasurementLimits(float maxSpeedMps);
@@ -697,63 +656,75 @@ MazeMap::OpenFloorSpeedBin OpenFloorMeasurementController::SpeedBinForIndex(cons
 
 void OpenFloorMeasurementController::ResetPendingLog() noexcept
 {
-    _pendingLog = PendingLog{};
+    _pendingLogKind = PendingLogKind::None;
+    _pendingCycle = {};
+    _pendingLabels = {};
+    _pendingFaultCode = {};
+    _pendingControlHalted = false;
+    _pendingExtra0 = 0U;
+    _pendingExtra1 = 0U;
 }
 
 bool OpenFloorMeasurementController::EmitPendingLog()
 {
-    if (_pendingLog.kind == PendingLogKind::None)
+    if (_pendingLogKind == PendingLogKind::None)
     {
         return true;
     }
 
-    PendingLog pending = _pendingLog;
+    const PendingLogKind kind = _pendingLogKind;
+    OpenFloorMeasurementCycle cycle = _pendingCycle;
+    const OpenFloorMeasurementLabels labels = _pendingLabels;
+    const MazeMap::OpenFloorFaultCode faultCode = _pendingFaultCode;
+    const bool controlHalted = _pendingControlHalted;
+    const std::uint32_t extra0 = _pendingExtra0;
+    const std::uint32_t extra1 = _pendingExtra1;
     ResetPendingLog();
-    ApplyPublishedTiming(pending.cycle);
-    auto emitTimingSample = [this, &pending]() -> bool
+    ApplyPublishedTiming(cycle);
+    auto emitTimingSample = [this, &cycle]() -> bool
     {
         _timingLogRow = {};
-        _timingLogRow.mono_time_us = pending.cycle.masterTimeUs;
-        _timingLogRow.control_tick_sequence = pending.cycle.controlTickSequence;
-        _timingLogRow.dt_us = pending.cycle.dtUs;
+        _timingLogRow.mono_time_us = cycle.masterTimeUs;
+        _timingLogRow.control_tick_sequence = cycle.controlTickSequence;
+        _timingLogRow.dt_us = cycle.dtUs;
         _timingLogRow.section_id = static_cast<std::uint32_t>(MazeMap::OpenFloorSectionId::Sec00Timing);
-        _timingLogRow.control_start_us = pending.cycle.controlTiming.controlStartUs;
-        _timingLogRow.control_end_us = pending.cycle.controlTiming.controlEndUs;
-        _timingLogRow.pwm_latch_us = pending.cycle.controlTiming.pwmLatchUs;
-        _timingLogRow.encoder_latch_us = pending.cycle.controlTiming.encoderLatchUs;
-        _timingLogRow.encoder_read_done_us = pending.cycle.controlTiming.encoderReadDoneUs;
-        _timingLogRow.ukf_predict_start_us = pending.cycle.controlTiming.ukfPredictStartUs;
-        _timingLogRow.ukf_predict_end_us = pending.cycle.controlTiming.ukfPredictEndUs;
-        _timingLogRow.ukf_predict_duration_us = pending.cycle.controlTiming.ukfPredictDurationUs;
-        _timingLogRow.ukf_update_start_us = pending.cycle.controlTiming.ukfUpdateStartUs;
-        _timingLogRow.ukf_update_end_us = pending.cycle.controlTiming.ukfUpdateEndUs;
-        _timingLogRow.ukf_update_duration_us = pending.cycle.controlTiming.ukfUpdateDurationUs;
-        _timingLogRow.imu_drdy_us = pending.cycle.sensorSnapshot.imuTiming.drdyUs;
-        _timingLogRow.imu_read_start_us = pending.cycle.sensorSnapshot.imuTiming.readStartUs;
-        _timingLogRow.imu_read_done_us = pending.cycle.sensorSnapshot.imuTiming.readDoneUs;
-        _timingLogRow.front_led_on_us = pending.cycle.sensorSnapshot.frontTiming.ledOnCommandUs;
-        _timingLogRow.front_adc_on_us = pending.cycle.sensorSnapshot.frontTiming.adcOnSampleUs;
-        _timingLogRow.front_led_off_us = pending.cycle.sensorSnapshot.frontTiming.ledOffCommandUs;
-        _timingLogRow.front_adc_off_us = pending.cycle.sensorSnapshot.frontTiming.adcOffSampleUs;
-        _timingLogRow.front_ready_us = pending.cycle.sensorSnapshot.frontTiming.observationReadyUs;
-        _timingLogRow.left_led_on_us = pending.cycle.sensorSnapshot.leftTiming.ledOnCommandUs;
-        _timingLogRow.left_adc_on_us = pending.cycle.sensorSnapshot.leftTiming.adcOnSampleUs;
-        _timingLogRow.left_led_off_us = pending.cycle.sensorSnapshot.leftTiming.ledOffCommandUs;
-        _timingLogRow.left_adc_off_us = pending.cycle.sensorSnapshot.leftTiming.adcOffSampleUs;
-        _timingLogRow.left_ready_us = pending.cycle.sensorSnapshot.leftTiming.observationReadyUs;
-        _timingLogRow.right_led_on_us = pending.cycle.sensorSnapshot.rightTiming.ledOnCommandUs;
-        _timingLogRow.right_adc_on_us = pending.cycle.sensorSnapshot.rightTiming.adcOnSampleUs;
-        _timingLogRow.right_led_off_us = pending.cycle.sensorSnapshot.rightTiming.ledOffCommandUs;
-        _timingLogRow.right_adc_off_us = pending.cycle.sensorSnapshot.rightTiming.adcOffSampleUs;
-        _timingLogRow.right_ready_us = pending.cycle.sensorSnapshot.rightTiming.observationReadyUs;
-        _timingLogRow.wall_adc_cfg_before_start = pending.cycle.sensorSnapshot.wallSensorAdcCfgBeforeStart;
-        _timingLogRow.wall_adc_gc_before_start = pending.cycle.sensorSnapshot.wallSensorAdcGcBeforeStart;
-        _timingLogRow.wall_adc_cfg_after_start = pending.cycle.sensorSnapshot.wallSensorAdcCfgAfterStart;
-        _timingLogRow.wall_adc_gc_after_start = pending.cycle.sensorSnapshot.wallSensorAdcGcAfterStart;
-        _timingLogRow.wall_adc_target_cfg = pending.cycle.sensorSnapshot.wallSensorAdcTargetCfg;
-        _timingLogRow.wall_adc_ipg_clock_hz = pending.cycle.sensorSnapshot.wallSensorAdcIpgClockHz;
-        _timingLogRow.cycle_counter_start = pending.cycle.controlTiming.cycleCounterStart;
-        _timingLogRow.cycle_counter_end = pending.cycle.controlTiming.cycleCounterEnd;
+        _timingLogRow.control_start_us = cycle.controlTiming.controlStartUs;
+        _timingLogRow.control_end_us = cycle.controlTiming.controlEndUs;
+        _timingLogRow.pwm_latch_us = cycle.controlTiming.pwmLatchUs;
+        _timingLogRow.encoder_latch_us = cycle.controlTiming.encoderLatchUs;
+        _timingLogRow.encoder_read_done_us = cycle.controlTiming.encoderReadDoneUs;
+        _timingLogRow.ukf_predict_start_us = cycle.controlTiming.ukfPredictStartUs;
+        _timingLogRow.ukf_predict_end_us = cycle.controlTiming.ukfPredictEndUs;
+        _timingLogRow.ukf_predict_duration_us = cycle.controlTiming.ukfPredictDurationUs;
+        _timingLogRow.ukf_update_start_us = cycle.controlTiming.ukfUpdateStartUs;
+        _timingLogRow.ukf_update_end_us = cycle.controlTiming.ukfUpdateEndUs;
+        _timingLogRow.ukf_update_duration_us = cycle.controlTiming.ukfUpdateDurationUs;
+        _timingLogRow.imu_drdy_us = cycle.sensorSnapshot.imuTiming.drdyUs;
+        _timingLogRow.imu_read_start_us = cycle.sensorSnapshot.imuTiming.readStartUs;
+        _timingLogRow.imu_read_done_us = cycle.sensorSnapshot.imuTiming.readDoneUs;
+        _timingLogRow.front_led_on_us = cycle.sensorSnapshot.frontTiming.ledOnCommandUs;
+        _timingLogRow.front_adc_on_us = cycle.sensorSnapshot.frontTiming.adcOnSampleUs;
+        _timingLogRow.front_led_off_us = cycle.sensorSnapshot.frontTiming.ledOffCommandUs;
+        _timingLogRow.front_adc_off_us = cycle.sensorSnapshot.frontTiming.adcOffSampleUs;
+        _timingLogRow.front_ready_us = cycle.sensorSnapshot.frontTiming.observationReadyUs;
+        _timingLogRow.left_led_on_us = cycle.sensorSnapshot.leftTiming.ledOnCommandUs;
+        _timingLogRow.left_adc_on_us = cycle.sensorSnapshot.leftTiming.adcOnSampleUs;
+        _timingLogRow.left_led_off_us = cycle.sensorSnapshot.leftTiming.ledOffCommandUs;
+        _timingLogRow.left_adc_off_us = cycle.sensorSnapshot.leftTiming.adcOffSampleUs;
+        _timingLogRow.left_ready_us = cycle.sensorSnapshot.leftTiming.observationReadyUs;
+        _timingLogRow.right_led_on_us = cycle.sensorSnapshot.rightTiming.ledOnCommandUs;
+        _timingLogRow.right_adc_on_us = cycle.sensorSnapshot.rightTiming.adcOnSampleUs;
+        _timingLogRow.right_led_off_us = cycle.sensorSnapshot.rightTiming.ledOffCommandUs;
+        _timingLogRow.right_adc_off_us = cycle.sensorSnapshot.rightTiming.adcOffSampleUs;
+        _timingLogRow.right_ready_us = cycle.sensorSnapshot.rightTiming.observationReadyUs;
+        _timingLogRow.wall_adc_cfg_before_start = cycle.sensorSnapshot.wallSensorAdcCfgBeforeStart;
+        _timingLogRow.wall_adc_gc_before_start = cycle.sensorSnapshot.wallSensorAdcGcBeforeStart;
+        _timingLogRow.wall_adc_cfg_after_start = cycle.sensorSnapshot.wallSensorAdcCfgAfterStart;
+        _timingLogRow.wall_adc_gc_after_start = cycle.sensorSnapshot.wallSensorAdcGcAfterStart;
+        _timingLogRow.wall_adc_target_cfg = cycle.sensorSnapshot.wallSensorAdcTargetCfg;
+        _timingLogRow.wall_adc_ipg_clock_hz = cycle.sensorSnapshot.wallSensorAdcIpgClockHz;
+        _timingLogRow.cycle_counter_start = cycle.controlTiming.cycleCounterStart;
+        _timingLogRow.cycle_counter_end = cycle.controlTiming.cycleCounterEnd;
 
         if (_runtime.LogUtilityDataRow(_timingLogRow))
         {
@@ -763,47 +734,47 @@ bool OpenFloorMeasurementController::EmitPendingLog()
         RecordTimingLogFailure();
         return false;
     };
-    auto emitMainSample = [this, &pending]() -> bool
+    auto emitMainSample = [this, &cycle, &labels]() -> bool
     {
-        const bool encoderValid = pending.cycle.driveTelemetry.encoderObservationValid;
-        const bool imuValid = std::isfinite(pending.cycle.sensorSnapshot.gyroRawRadps);
+        const bool encoderValid = cycle.driveTelemetry.encoderObservationValid;
+        const bool imuValid = std::isfinite(cycle.sensorSnapshot.gyroRawRadps);
         const float maxRangeM = MazeMap::PlantParams::Default().noHitRangeM;
         MazeMap::WallObs frontLeftObs{};
         MazeMap::WallObs frontRightObs{};
-        DriveBase::BuildLoggedFrontPairObservations(pending.cycle.sensorSnapshot, maxRangeM, frontLeftObs, frontRightObs);
-        const MazeMap::WallObs leftObs = DriveBase::BuildLoggedLeftSideObservation(pending.cycle.sensorSnapshot, maxRangeM);
-        const MazeMap::WallObs rightObs = DriveBase::BuildLoggedRightSideObservation(pending.cycle.sensorSnapshot, maxRangeM);
+        DriveBase::BuildLoggedFrontPairObservations(cycle.sensorSnapshot, maxRangeM, frontLeftObs, frontRightObs);
+        const MazeMap::WallObs leftObs = DriveBase::BuildLoggedLeftSideObservation(cycle.sensorSnapshot, maxRangeM);
+        const MazeMap::WallObs rightObs = DriveBase::BuildLoggedRightSideObservation(cycle.sensorSnapshot, maxRangeM);
         const MazeMap::VehicleState::StateVector& estimatorState = _drive.GetEstimatorStateVector();
 
         _mainLogRow = {};
-        _mainLogRow.master_time_us = pending.cycle.masterTimeUs;
-        _mainLogRow.control_tick_sequence = pending.cycle.controlTickSequence;
-        _mainLogRow.dt_us = pending.cycle.dtUs;
-        _mainLogRow.section_id = static_cast<std::uint8_t>(pending.labels.sectionId);
-        _mainLogRow.primitive_id = static_cast<std::uint8_t>(pending.labels.primitiveId);
-        _mainLogRow.primitive_family = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveFamilyForId(pending.labels.primitiveId));
-        _mainLogRow.direction_id = static_cast<std::uint8_t>(pending.labels.directionId);
-        _mainLogRow.phase_id = static_cast<std::uint8_t>(pending.labels.phaseId);
-        _mainLogRow.speed_bin = static_cast<std::uint8_t>(pending.labels.speedBin);
-        _mainLogRow.start_marker_id = static_cast<std::uint8_t>(pending.labels.startMarkerId);
-        _mainLogRow.repeat_index = pending.labels.repeatIndex;
-        _mainLogRow.progress_norm = pending.labels.progressNorm;
-        _mainLogRow.mode_flags = pending.cycle.driveTelemetry.modeFlags;
-        _mainLogRow.clipping_flags = pending.cycle.clippingFlags;
-        _mainLogRow.saturation_flags = pending.cycle.driveTelemetry.saturationFlags;
-        _mainLogRow.watchdog_flags = pending.cycle.watchdogFlags;
+        _mainLogRow.master_time_us = cycle.masterTimeUs;
+        _mainLogRow.control_tick_sequence = cycle.controlTickSequence;
+        _mainLogRow.dt_us = cycle.dtUs;
+        _mainLogRow.section_id = static_cast<std::uint8_t>(labels.sectionId);
+        _mainLogRow.primitive_id = static_cast<std::uint8_t>(labels.primitiveId);
+        _mainLogRow.primitive_family = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveFamilyForId(labels.primitiveId));
+        _mainLogRow.direction_id = static_cast<std::uint8_t>(labels.directionId);
+        _mainLogRow.phase_id = static_cast<std::uint8_t>(labels.phaseId);
+        _mainLogRow.speed_bin = static_cast<std::uint8_t>(labels.speedBin);
+        _mainLogRow.start_marker_id = static_cast<std::uint8_t>(labels.startMarkerId);
+        _mainLogRow.repeat_index = labels.repeatIndex;
+        _mainLogRow.progress_norm = labels.progressNorm;
+        _mainLogRow.mode_flags = cycle.driveTelemetry.modeFlags;
+        _mainLogRow.clipping_flags = cycle.clippingFlags;
+        _mainLogRow.saturation_flags = cycle.driveTelemetry.saturationFlags;
+        _mainLogRow.watchdog_flags = cycle.watchdogFlags;
         _mainLogRow.measurement_flags = MazeMap::App::Internal::Runtime::BuildOpenFloorMeasurementFlags(
-            pending.labels,
-            pending.cycle,
+            labels,
+            cycle,
             encoderValid,
             imuValid,
             frontLeftObs,
             frontRightObs,
             leftObs,
             rightObs);
-        _mainLogRow.ukf_mode_id = pending.cycle.driveTelemetry.ukfModeId;
-        _mainLogRow.ukf_yaw_valid_for_feedforward = pending.cycle.driveTelemetry.ukfYawValidForFeedforward;
-        _mainLogRow.bias_update_enabled = pending.cycle.driveTelemetry.ukfBiasUpdateEnabled;
+        _mainLogRow.ukf_mode_id = cycle.driveTelemetry.ukfModeId;
+        _mainLogRow.ukf_yaw_valid_for_feedforward = cycle.driveTelemetry.ukfYawValidForFeedforward;
+        _mainLogRow.bias_update_enabled = cycle.driveTelemetry.ukfBiasUpdateEnabled;
         _mainLogRow.ukf_state_px_m = estimatorState(MazeMap::VehicleState::kPx);
         _mainLogRow.ukf_state_py_m = estimatorState(MazeMap::VehicleState::kPy);
         _mainLogRow.ukf_state_psi_rad = estimatorState(MazeMap::VehicleState::kPsi);
@@ -813,55 +784,55 @@ bool OpenFloorMeasurementController::EmitPendingLog()
         _mainLogRow.ukf_state_omega_l_radps = estimatorState(MazeMap::VehicleState::kOmegaL);
         _mainLogRow.ukf_state_omega_r_radps = estimatorState(MazeMap::VehicleState::kOmegaR);
         _mainLogRow.ukf_state_bgz_radps = estimatorState(MazeMap::VehicleState::kBgz);
-        _mainLogRow.gyro_bias_anchor_radps = pending.cycle.driveTelemetry.ukfGyroBiasAnchorRadps;
-        _mainLogRow.yaw_consistency_lp_radps = pending.cycle.driveTelemetry.ukfYawConsistencyLowPassRadps;
-        _mainLogRow.yaw_window_mismatch_rad = pending.cycle.driveTelemetry.ukfYawWindowMismatchRad;
-        _mainLogRow.nhc_sigma_mps = pending.cycle.driveTelemetry.ukfNhcSigmaMps;
-        _mainLogRow.nhc_residual_mps = pending.cycle.driveTelemetry.ukfNhcResidualMps;
-        _mainLogRow.nhc_residual_sigma = pending.cycle.driveTelemetry.ukfNhcResidualSigma;
-        _mainLogRow.measured_linear_speed_mps = pending.cycle.measuredLinearSpeedMps;
-        _mainLogRow.measured_angular_speed_radps = pending.cycle.measuredAngularSpeedRadps;
+        _mainLogRow.gyro_bias_anchor_radps = cycle.driveTelemetry.ukfGyroBiasAnchorRadps;
+        _mainLogRow.yaw_consistency_lp_radps = cycle.driveTelemetry.ukfYawConsistencyLowPassRadps;
+        _mainLogRow.yaw_window_mismatch_rad = cycle.driveTelemetry.ukfYawWindowMismatchRad;
+        _mainLogRow.nhc_sigma_mps = cycle.driveTelemetry.ukfNhcSigmaMps;
+        _mainLogRow.nhc_residual_mps = cycle.driveTelemetry.ukfNhcResidualMps;
+        _mainLogRow.nhc_residual_sigma = cycle.driveTelemetry.ukfNhcResidualSigma;
+        _mainLogRow.measured_linear_speed_mps = cycle.measuredLinearSpeedMps;
+        _mainLogRow.measured_angular_speed_radps = cycle.measuredAngularSpeedRadps;
         _mainLogRow.cmd_linear_mps = _drive.GetLastLinearCommandMps();
         _mainLogRow.cmd_angular_radps = _drive.GetLastAngularCommandRadps();
-        _mainLogRow.left_drive_command = pending.cycle.driveTelemetry.leftDriveCommand;
-        _mainLogRow.right_drive_command = pending.cycle.driveTelemetry.rightDriveCommand;
-        _mainLogRow.left_feedforward_command = pending.cycle.driveTelemetry.leftFeedforwardCommand;
-        _mainLogRow.right_feedforward_command = pending.cycle.driveTelemetry.rightFeedforwardCommand;
-        _mainLogRow.left_feedback_command = pending.cycle.driveTelemetry.leftFeedbackCommand;
-        _mainLogRow.right_feedback_command = pending.cycle.driveTelemetry.rightFeedbackCommand;
-        _mainLogRow.left_target_velocity_mps = pending.cycle.driveTelemetry.leftTargetVelocityMps;
-        _mainLogRow.right_target_velocity_mps = pending.cycle.driveTelemetry.rightTargetVelocityMps;
-        _mainLogRow.left_launch_assist_floor = pending.cycle.driveTelemetry.leftLaunchAssistFloor;
-        _mainLogRow.right_launch_assist_floor = pending.cycle.driveTelemetry.rightLaunchAssistFloor;
-        _mainLogRow.encoder_timestamp_us = pending.cycle.controlTiming.encoderReadDoneUs;
-        _mainLogRow.left_encoder_count = pending.cycle.driveTelemetry.leftEncoderCount;
-        _mainLogRow.right_encoder_count = pending.cycle.driveTelemetry.rightEncoderCount;
-        _mainLogRow.left_encoder_omega_radps = pending.cycle.driveTelemetry.leftEncoderOmegaRadps;
-        _mainLogRow.right_encoder_omega_radps = pending.cycle.driveTelemetry.rightEncoderOmegaRadps;
-        _mainLogRow.left_encoder_distance_m = pending.cycle.driveTelemetry.leftDistanceM;
-        _mainLogRow.right_encoder_distance_m = pending.cycle.driveTelemetry.rightDistanceM;
-        _mainLogRow.left_encoder_velocity_mps = pending.cycle.driveTelemetry.leftVelocityMps;
-        _mainLogRow.right_encoder_velocity_mps = pending.cycle.driveTelemetry.rightVelocityMps;
-        _mainLogRow.imu_timestamp_us = pending.cycle.sensorSnapshot.imuTiming.readDoneUs;
-        _mainLogRow.imu_status = pending.cycle.sensorSnapshot.imuBackLeft.status;
-        _mainLogRow.imu_interrupt_high = pending.cycle.sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
-        _mainLogRow.accel_bias_valid = pending.cycle.sensorSnapshot.accelBiasValid ? 1U : 0U;
-        _mainLogRow.imu_gyro_x = pending.cycle.sensorSnapshot.imuBackLeft.gyroX;
-        _mainLogRow.imu_gyro_y = pending.cycle.sensorSnapshot.imuBackLeft.gyroY;
-        _mainLogRow.imu_gyro_z = pending.cycle.sensorSnapshot.imuBackLeft.gyroZ;
-        _mainLogRow.imu_accel_x = pending.cycle.sensorSnapshot.imuBackLeft.accelX;
-        _mainLogRow.imu_accel_y = pending.cycle.sensorSnapshot.imuBackLeft.accelY;
-        _mainLogRow.imu_accel_z = pending.cycle.sensorSnapshot.imuBackLeft.accelZ;
-        _mainLogRow.imu_temp = pending.cycle.sensorSnapshot.imuBackLeft.temp;
-        _mainLogRow.gyro_raw_radps = pending.cycle.sensorSnapshot.gyroRawRadps;
-        _mainLogRow.gyro_bias_radps = pending.cycle.sensorSnapshot.gyroBiasRadps;
-        _mainLogRow.gyro_radps = pending.cycle.sensorSnapshot.gyroRadps;
-        _mainLogRow.accel_body_x_mps2 = pending.cycle.sensorSnapshot.accelBodyXMps2;
-        _mainLogRow.accel_body_y_mps2 = pending.cycle.sensorSnapshot.accelBodyYMps2;
-        _mainLogRow.planar_accel_mps2 = pending.cycle.planarAccelMps2;
-        _mainLogRow.front_timestamp_us = pending.cycle.sensorSnapshot.frontTiming.observationReadyUs;
-        _mainLogRow.left_timestamp_us = pending.cycle.sensorSnapshot.leftTiming.observationReadyUs;
-        _mainLogRow.right_timestamp_us = pending.cycle.sensorSnapshot.rightTiming.observationReadyUs;
+        _mainLogRow.left_drive_command = cycle.driveTelemetry.leftDriveCommand;
+        _mainLogRow.right_drive_command = cycle.driveTelemetry.rightDriveCommand;
+        _mainLogRow.left_feedforward_command = cycle.driveTelemetry.leftFeedforwardCommand;
+        _mainLogRow.right_feedforward_command = cycle.driveTelemetry.rightFeedforwardCommand;
+        _mainLogRow.left_feedback_command = cycle.driveTelemetry.leftFeedbackCommand;
+        _mainLogRow.right_feedback_command = cycle.driveTelemetry.rightFeedbackCommand;
+        _mainLogRow.left_target_velocity_mps = cycle.driveTelemetry.leftTargetVelocityMps;
+        _mainLogRow.right_target_velocity_mps = cycle.driveTelemetry.rightTargetVelocityMps;
+        _mainLogRow.left_launch_assist_floor = cycle.driveTelemetry.leftLaunchAssistFloor;
+        _mainLogRow.right_launch_assist_floor = cycle.driveTelemetry.rightLaunchAssistFloor;
+        _mainLogRow.encoder_timestamp_us = cycle.controlTiming.encoderReadDoneUs;
+        _mainLogRow.left_encoder_count = cycle.driveTelemetry.leftEncoderCount;
+        _mainLogRow.right_encoder_count = cycle.driveTelemetry.rightEncoderCount;
+        _mainLogRow.left_encoder_omega_radps = cycle.driveTelemetry.leftEncoderOmegaRadps;
+        _mainLogRow.right_encoder_omega_radps = cycle.driveTelemetry.rightEncoderOmegaRadps;
+        _mainLogRow.left_encoder_distance_m = cycle.driveTelemetry.leftDistanceM;
+        _mainLogRow.right_encoder_distance_m = cycle.driveTelemetry.rightDistanceM;
+        _mainLogRow.left_encoder_velocity_mps = cycle.driveTelemetry.leftVelocityMps;
+        _mainLogRow.right_encoder_velocity_mps = cycle.driveTelemetry.rightVelocityMps;
+        _mainLogRow.imu_timestamp_us = cycle.sensorSnapshot.imuTiming.readDoneUs;
+        _mainLogRow.imu_status = cycle.sensorSnapshot.imuBackLeft.status;
+        _mainLogRow.imu_interrupt_high = cycle.sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+        _mainLogRow.accel_bias_valid = cycle.sensorSnapshot.accelBiasValid ? 1U : 0U;
+        _mainLogRow.imu_gyro_x = cycle.sensorSnapshot.imuBackLeft.gyroX;
+        _mainLogRow.imu_gyro_y = cycle.sensorSnapshot.imuBackLeft.gyroY;
+        _mainLogRow.imu_gyro_z = cycle.sensorSnapshot.imuBackLeft.gyroZ;
+        _mainLogRow.imu_accel_x = cycle.sensorSnapshot.imuBackLeft.accelX;
+        _mainLogRow.imu_accel_y = cycle.sensorSnapshot.imuBackLeft.accelY;
+        _mainLogRow.imu_accel_z = cycle.sensorSnapshot.imuBackLeft.accelZ;
+        _mainLogRow.imu_temp = cycle.sensorSnapshot.imuBackLeft.temp;
+        _mainLogRow.gyro_raw_radps = cycle.sensorSnapshot.gyroRawRadps;
+        _mainLogRow.gyro_bias_radps = cycle.sensorSnapshot.gyroBiasRadps;
+        _mainLogRow.gyro_radps = cycle.sensorSnapshot.gyroRadps;
+        _mainLogRow.accel_body_x_mps2 = cycle.sensorSnapshot.accelBodyXMps2;
+        _mainLogRow.accel_body_y_mps2 = cycle.sensorSnapshot.accelBodyYMps2;
+        _mainLogRow.planar_accel_mps2 = cycle.planarAccelMps2;
+        _mainLogRow.front_timestamp_us = cycle.sensorSnapshot.frontTiming.observationReadyUs;
+        _mainLogRow.left_timestamp_us = cycle.sensorSnapshot.leftTiming.observationReadyUs;
+        _mainLogRow.right_timestamp_us = cycle.sensorSnapshot.rightTiming.observationReadyUs;
         _mainLogRow.front_left_obs_class = static_cast<std::uint8_t>(frontLeftObs.cls);
         _mainLogRow.front_right_obs_class = static_cast<std::uint8_t>(frontRightObs.cls);
         _mainLogRow.left_obs_class = static_cast<std::uint8_t>(leftObs.cls);
@@ -874,7 +845,7 @@ bool OpenFloorMeasurementController::EmitPendingLog()
         _mainLogRow.front_right_obs_confidence = frontRightObs.confidence;
         _mainLogRow.left_obs_confidence = leftObs.confidence;
         _mainLogRow.right_obs_confidence = rightObs.confidence;
-        _mainLogRow.fan_duty_cycle = pending.cycle.fanDutyCycle;
+        _mainLogRow.fan_duty_cycle = cycle.fanDutyCycle;
 
         if (_runtime.LogUtilityDataRow(_mainLogRow))
         {
@@ -885,7 +856,7 @@ bool OpenFloorMeasurementController::EmitPendingLog()
         return false;
     };
 
-    switch (pending.kind)
+    switch (kind)
     {
     case PendingLogKind::TimingSample:
         return !_timingLogOpen || emitTimingSample();
@@ -896,11 +867,11 @@ bool OpenFloorMeasurementController::EmitPendingLog()
             return false;
         }
         return !_timingLogOpen || LogTimingFault(
-            pending.cycle,
-            pending.faultCode,
-            pending.controlHalted,
-            pending.extra0,
-            pending.extra1);
+            cycle,
+            faultCode,
+            controlHalted,
+            extra0,
+            extra1);
 
     case PendingLogKind::MainSample:
         return !_mainLogOpen || emitMainSample();
@@ -911,12 +882,12 @@ bool OpenFloorMeasurementController::EmitPendingLog()
             return false;
         }
         return !_mainLogOpen || LogMainFault(
-            pending.labels,
-            pending.cycle,
-            pending.faultCode,
-            pending.controlHalted,
-            pending.extra0,
-            pending.extra1);
+            labels,
+            cycle,
+            faultCode,
+            controlHalted,
+            extra0,
+            extra1);
 
     case PendingLogKind::None:
     default:
@@ -943,9 +914,8 @@ void OpenFloorMeasurementController::ApplyPublishedTiming(OpenFloorMeasurementCy
 
 void OpenFloorMeasurementController::StageTimingSample(const OpenFloorMeasurementCycle& cycle) noexcept
 {
-    _pendingLog = PendingLog{};
-    _pendingLog.kind = PendingLogKind::TimingSample;
-    _pendingLog.cycle = cycle;
+    _pendingLogKind = PendingLogKind::TimingSample;
+    _pendingCycle = cycle;
 }
 
 void OpenFloorMeasurementController::StageTimingFault(
@@ -955,23 +925,21 @@ void OpenFloorMeasurementController::StageTimingFault(
     const std::uint32_t extra0,
     const std::uint32_t extra1) noexcept
 {
-    _pendingLog = PendingLog{};
-    _pendingLog.kind = PendingLogKind::TimingFault;
-    _pendingLog.cycle = cycle;
-    _pendingLog.faultCode = faultCode;
-    _pendingLog.controlHalted = controlHalted;
-    _pendingLog.extra0 = extra0;
-    _pendingLog.extra1 = extra1;
+    _pendingLogKind = PendingLogKind::TimingFault;
+    _pendingCycle = cycle;
+    _pendingFaultCode = faultCode;
+    _pendingControlHalted = controlHalted;
+    _pendingExtra0 = extra0;
+    _pendingExtra1 = extra1;
 }
 
 void OpenFloorMeasurementController::StageMainSample(
     const OpenFloorMeasurementLabels& labels,
     const OpenFloorMeasurementCycle& cycle) noexcept
 {
-    _pendingLog = PendingLog{};
-    _pendingLog.kind = PendingLogKind::MainSample;
-    _pendingLog.labels = labels;
-    _pendingLog.cycle = cycle;
+    _pendingLogKind = PendingLogKind::MainSample;
+    _pendingLabels = labels;
+    _pendingCycle = cycle;
 }
 
 void OpenFloorMeasurementController::StageMainFault(
@@ -982,14 +950,13 @@ void OpenFloorMeasurementController::StageMainFault(
     const std::uint32_t extra0,
     const std::uint32_t extra1) noexcept
 {
-    _pendingLog = PendingLog{};
-    _pendingLog.kind = PendingLogKind::MainFault;
-    _pendingLog.labels = labels;
-    _pendingLog.cycle = cycle;
-    _pendingLog.faultCode = faultCode;
-    _pendingLog.controlHalted = controlHalted;
-    _pendingLog.extra0 = extra0;
-    _pendingLog.extra1 = extra1;
+    _pendingLogKind = PendingLogKind::MainFault;
+    _pendingLabels = labels;
+    _pendingCycle = cycle;
+    _pendingFaultCode = faultCode;
+    _pendingControlHalted = controlHalted;
+    _pendingExtra0 = extra0;
+    _pendingExtra1 = extra1;
 }
 
 bool OpenFloorMeasurementController::BeginTimingLog()
@@ -1311,18 +1278,37 @@ bool OpenFloorMeasurementController::Begin()
     _phaseFn = nullptr;
     _pauseAction = PauseAction::None;
     ResetPendingLog();
-    _timingBlockState = TimingBlockState{};
-    _staticHoldState = StaticHoldState{};
-    _recoveryState = RecoveryState{};
+    _timingBlockTickIndex = 0U;
+    _staticHoldLabels = {};
+    _staticHoldDeadlineMs = 0UL;
+    _recoveryLabels = {};
+    _recoveryTargetX = 0.0f;
+    _recoveryTargetY = 0.0f;
+    _recoveryTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
+    _recoveryLimits = MotionLimits{};
+    _recoveryDeadlineMs = 0UL;
+    _recoveryInitialDistanceOutsideZoneM = 0.0f;
     _launchPulseState = LaunchPulseState{};
     _straightSectionState = StraightSectionState{};
     _sectionSettleState = SectionSettleState{};
     _turnSectionState = TurnSectionState{};
     _smoothTurnState = SmoothTurnState{};
-    _launchSequenceState = LaunchSequenceState{};
-    _straightSequenceState = StraightSequenceState{};
-    _yawSequenceState = YawSequenceState{};
-    _smoothSequenceState = SmoothSequenceState{};
+    _launchSequenceMagnitudeIndex = 0U;
+    _launchSequenceRepeatIteration = 0U;
+    _launchSequenceNegativeNext = false;
+    _launchSequenceNextRepeatIndex = 0U;
+    _straightSequenceSpeedIndex = 0U;
+    _straightSequenceRepeatIteration = 0U;
+    _straightSequenceSouthboundNext = false;
+    _straightSequenceNextRepeatIndex = 0U;
+    _yawSequenceSpeedIndex = 0U;
+    _yawSequenceRepeatIteration = 0U;
+    _yawSequencePrimitiveIndex = 0U;
+    _yawSequenceNextRepeatIndex = 0U;
+    _smoothSequenceSpeedIndex = 0U;
+    _smoothSequenceCodeIndex = 0U;
+    _smoothSequenceRepeatIteration = 0U;
+    _smoothSequenceNextRepeatIndex = 0U;
     _loopSequenceState = LoopSequenceState{};
     if (!_runtime.RegisterModeFaultHandler(&OpenFloorMeasurementController::HandleRuntimeFault, this, MazeMap::kOpenFloorSelectedRoutineName))
     {
@@ -1748,7 +1734,7 @@ bool OpenFloorMeasurementController::StartTimingBlockPhase()
         _timingLogOpen = true;
     }
 
-    _timingBlockState = TimingBlockState{};
+    _timingBlockTickIndex = 0U;
     _phaseFn = &OpenFloorMeasurementController::RunTimingBlockTick;
     return true;
 }
@@ -1769,8 +1755,8 @@ bool OpenFloorMeasurementController::StartStaticSectionPhase()
     labels.phaseId = MazeMap::OpenFloorPhaseId::Hold;
     labels.repeatIndex = 1U;
 
-    _staticHoldState = StaticHoldState{};
-    _staticHoldState.labels = labels;
+    _staticHoldLabels = labels;
+    _staticHoldDeadlineMs = 0UL;
     return StartRecoveryPhase(
         labels,
         labels.startMarkerId,
@@ -1801,14 +1787,13 @@ bool OpenFloorMeasurementController::StartRecoveryPhase(
     const float targetY = MazeMap::OpenFloorMarkerYMeters(markerId);
     const PoseEstimate startPose = _drive.GetPose();
 
-    _recoveryState = RecoveryState{};
-    _recoveryState.labels = recoveryLabels;
-    _recoveryState.targetX = targetX;
-    _recoveryState.targetY = targetY;
-    _recoveryState.targetHeading = DirectionToUnitVector(marker.heading);
-    _recoveryState.limits = MeasurementLimits(maxSpeedMps);
-    _recoveryState.deadlineMs = millis() + FailureTimeoutMs(timeoutMs);
-    _recoveryState.initialDistanceOutsideZoneM = MazeMap::OpenFloorRecoveryDistanceOutsideAcceptanceZoneM(
+    _recoveryLabels = recoveryLabels;
+    _recoveryTargetX = targetX;
+    _recoveryTargetY = targetY;
+    _recoveryTargetHeading = DirectionToUnitVector(marker.heading);
+    _recoveryLimits = MeasurementLimits(maxSpeedMps);
+    _recoveryDeadlineMs = millis() + FailureTimeoutMs(timeoutMs);
+    _recoveryInitialDistanceOutsideZoneM = MazeMap::OpenFloorRecoveryDistanceOutsideAcceptanceZoneM(
         targetX - startPose.xMeters,
         targetY - startPose.yMeters);
     _phaseFn = &OpenFloorMeasurementController::RecoverToMarkerTick;
@@ -1841,8 +1826,8 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     }
 
     StageTimingSample(cycle);
-    ++_timingBlockState.tickIndex;
-    if (_timingBlockState.tickIndex >= DiagnosticConfig::kTimingCaptureCycles)
+    ++_timingBlockTickIndex;
+    if (_timingBlockTickIndex >= DiagnosticConfig::kTimingCaptureCycles)
     {
         if (!StartTimingToMainPausePhase())
         {
@@ -1878,7 +1863,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     (void)loopEndTimeUs;
     OpenFloorMeasurementCycle cycle{};
     PopulateCycleFromState(state, cycle);
-    if (QueueMeasurementCaptureFault(_staticHoldState.labels, cycle))
+    if (QueueMeasurementCaptureFault(_staticHoldLabels, cycle))
     {
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
@@ -1886,16 +1871,19 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         return LoopController::ControlVector::Brake;
     }
 
-    StageMainSample(_staticHoldState.labels, cycle);
-    if (static_cast<long>(_staticHoldState.deadlineMs - millis()) <= 0)
+    StageMainSample(_staticHoldLabels, cycle);
+    if (static_cast<long>(_staticHoldDeadlineMs - millis()) <= 0)
     {
-        if (!EndMainSection(_staticHoldState.labels))
+        if (!EndMainSection(_staticHoldLabels))
         {
             services.Fault("Failed to write static section end marker");
             return LoopController::ControlVector::Brake;
         }
 
-        _launchSequenceState = LaunchSequenceState{};
+        _launchSequenceMagnitudeIndex = 0U;
+        _launchSequenceRepeatIteration = 0U;
+        _launchSequenceNegativeNext = false;
+        _launchSequenceNextRepeatIndex = 0U;
         if (!AdvanceLaunchSequence())
         {
             services.Fault("Failed to advance open-floor launch sequence");
@@ -1913,7 +1901,7 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     (void)loopEndTimeUs;
     OpenFloorMeasurementCycle cycle{};
     PopulateCycleFromState(state, cycle);
-    if (QueueMeasurementCaptureFault(_recoveryState.labels, cycle))
+    if (QueueMeasurementCaptureFault(_recoveryLabels, cycle))
     {
         services.Fault(cycle.estimatorFault ?
             "Estimator fault during open-floor measurement" :
@@ -1922,21 +1910,21 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
     }
 
     const PoseEstimate& pose = state.estimate;
-    const float dx = _recoveryState.targetX - pose.xMeters;
-    const float dy = _recoveryState.targetY - pose.yMeters;
+    const float dx = _recoveryTargetX - pose.xMeters;
+    const float dy = _recoveryTargetY - pose.yMeters;
     const Eigen::Vector2f travelHeading = pose.headingUnit;
     const float recoveryLongitudinalErrorM =
         MazeMap::OpenFloorRecoverySignedLongitudinalDistanceToAcceptanceZoneM(travelHeading, dx, dy);
     const float recoveryLateralErrorM =
         MazeMap::OpenFloorRecoverySignedLateralMissToAcceptanceZoneM(travelHeading, dx, dy);
-    const float targetHeadingErrorRad = HeadingErrorRad(_recoveryState.targetHeading, pose.headingUnit);
+    const float targetHeadingErrorRad = HeadingErrorRad(_recoveryTargetHeading, pose.headingUnit);
     const bool positionArrived = MazeMap::OpenFloorRecoveryWithinAcceptanceRadius(dx, dy);
     const float recoveryDistanceOutsideZoneM =
         MazeMap::OpenFloorRecoveryDistanceOutsideAcceptanceZoneM(dx, dy);
-    _recoveryState.labels.phaseId = MazeMap::OpenFloorPhaseId::Recovery;
-    _recoveryState.labels.progressNorm = (_recoveryState.initialDistanceOutsideZoneM > 0.0f) ?
+    _recoveryLabels.phaseId = MazeMap::OpenFloorPhaseId::Recovery;
+    _recoveryLabels.progressNorm = (_recoveryInitialDistanceOutsideZoneM > 0.0f) ?
         (std::clamp)(
-            1.0f - (recoveryDistanceOutsideZoneM / _recoveryState.initialDistanceOutsideZoneM),
+            1.0f - (recoveryDistanceOutsideZoneM / _recoveryInitialDistanceOutsideZoneM),
             0.0f,
             1.0f) :
         1.0f;
@@ -1946,22 +1934,22 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         std::fabs(pose.linearSpeedMps) <= Config::kSpeedToleranceMps &&
         std::fabs(pose.angularSpeedRadps) <= Config::kAngularSpeedToleranceRadps)
     {
-        StageMainSample(_recoveryState.labels, cycle);
-        if (_mainLogOpen && !EndMainSection(_recoveryState.labels))
+        StageMainSample(_recoveryLabels, cycle);
+        if (_mainLogOpen && !EndMainSection(_recoveryLabels))
         {
             services.Fault("Failed to write recovery section end marker");
             return LoopController::ControlVector::Brake;
         }
 
-        switch (_recoveryState.labels.sectionId)
+        switch (_recoveryLabels.sectionId)
         {
         case MazeMap::OpenFloorSectionId::Sec10Static:
-            if (!BeginMainSection(_staticHoldState.labels))
+            if (!BeginMainSection(_staticHoldLabels))
             {
                 services.Fault("Failed to write static section start marker");
                 return LoopController::ControlVector::Brake;
             }
-            _staticHoldState.deadlineMs = millis() + DiagnosticConfig::kStaticHoldMs;
+            _staticHoldDeadlineMs = millis() + DiagnosticConfig::kStaticHoldMs;
             _phaseFn = &OpenFloorMeasurementController::RunStaticSectionTick;
             break;
 
@@ -1982,12 +1970,12 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
         return LoopController::ControlVector::Brake;
     }
 
-    if (static_cast<long>(_recoveryState.deadlineMs - millis()) <= 0)
+    if (static_cast<long>(_recoveryDeadlineMs - millis()) <= 0)
     {
-        _recoveryState.labels.abortMarker = true;
+        _recoveryLabels.abortMarker = true;
         cycle.watchdogFlags |= kWatchdogFlagRecoveryTimeout;
         StageMainFault(
-            _recoveryState.labels,
+            _recoveryLabels,
             cycle,
             MazeMap::OpenFloorFaultCode::RecoveryTimedOut,
             true);
@@ -1997,16 +1985,16 @@ MazeMap::App::Internal::LoopController::ControlVector OpenFloorMeasurementContro
 
     const float linearCommandMps = positionArrived ?
         0.0f :
-        (std::clamp)(4.0f * recoveryLongitudinalErrorM, -_recoveryState.limits.maxSpeedMps, _recoveryState.limits.maxSpeedMps);
+        (std::clamp)(4.0f * recoveryLongitudinalErrorM, -_recoveryLimits.maxSpeedMps, _recoveryLimits.maxSpeedMps);
     float angularCommandRadps = positionArrived ?
         ((Config::kStraightHeadingKp * targetHeadingErrorRad) - (Config::kStraightYawD * pose.angularSpeedRadps)) :
         (-(3.0f * recoveryLateralErrorM) - (Config::kStraightYawD * pose.angularSpeedRadps));
     angularCommandRadps = (std::clamp)(
         angularCommandRadps,
-        -_recoveryState.limits.maxAngularSpeedRadps,
-        _recoveryState.limits.maxAngularSpeedRadps);
+        -_recoveryLimits.maxAngularSpeedRadps,
+        _recoveryLimits.maxAngularSpeedRadps);
 
-    StageMainSample(_recoveryState.labels, cycle);
+    StageMainSample(_recoveryLabels, cycle);
     return _drive.PointControlVector(
         linearCommandMps,
         angularCommandRadps,
@@ -2136,34 +2124,37 @@ bool OpenFloorMeasurementController::StartLaunchPulsePhase(const float signedDri
 
 bool OpenFloorMeasurementController::AdvanceLaunchSequence()
 {
-    while (_launchSequenceState.magnitudeIndex < MazeMap::kOpenFloorLaunchDriveMagnitudes.size())
+    while (_launchSequenceMagnitudeIndex < MazeMap::kOpenFloorLaunchDriveMagnitudes.size())
     {
-        if (_launchSequenceState.repeatIteration >= DiagnosticConfig::kLaunchRepeatsPerMagnitude)
+        if (_launchSequenceRepeatIteration >= DiagnosticConfig::kLaunchRepeatsPerMagnitude)
         {
-            _launchSequenceState.repeatIteration = 0U;
-            _launchSequenceState.negativeNext = false;
-            ++_launchSequenceState.magnitudeIndex;
+            _launchSequenceRepeatIteration = 0U;
+            _launchSequenceNegativeNext = false;
+            ++_launchSequenceMagnitudeIndex;
             continue;
         }
 
-        const float magnitude = MazeMap::kOpenFloorLaunchDriveMagnitudes[_launchSequenceState.magnitudeIndex];
-        const bool negative = _launchSequenceState.negativeNext;
-        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_launchSequenceState.nextRepeatIndex + 1U);
-        _launchSequenceState.nextRepeatIndex = repeatIndex;
-        if (_launchSequenceState.negativeNext)
+        const float magnitude = MazeMap::kOpenFloorLaunchDriveMagnitudes[_launchSequenceMagnitudeIndex];
+        const bool negative = _launchSequenceNegativeNext;
+        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_launchSequenceNextRepeatIndex + 1U);
+        _launchSequenceNextRepeatIndex = repeatIndex;
+        if (_launchSequenceNegativeNext)
         {
-            _launchSequenceState.negativeNext = false;
-            ++_launchSequenceState.repeatIteration;
+            _launchSequenceNegativeNext = false;
+            ++_launchSequenceRepeatIteration;
         }
         else
         {
-            _launchSequenceState.negativeNext = true;
+            _launchSequenceNegativeNext = true;
         }
 
         return StartLaunchPulsePhase(negative ? -magnitude : magnitude, repeatIndex);
     }
 
-    _straightSequenceState = StraightSequenceState{};
+    _straightSequenceSpeedIndex = 0U;
+    _straightSequenceRepeatIteration = 0U;
+    _straightSequenceSouthboundNext = false;
+    _straightSequenceNextRepeatIndex = 0U;
     return AdvanceStraightSequence();
 }
 
@@ -2296,27 +2287,27 @@ bool OpenFloorMeasurementController::StartStraightDistancePhase(
 bool OpenFloorMeasurementController::AdvanceStraightSequence()
 {
     const float straightDistanceM = MazeMap::OpenFloorStrEquivalentDistanceMeters(4U);
-    while (_straightSequenceState.speedIndex < MazeMap::kOpenFloorStraightSpeedBinsMps.size())
+    while (_straightSequenceSpeedIndex < MazeMap::kOpenFloorStraightSpeedBinsMps.size())
     {
-        if (_straightSequenceState.repeatIteration >= DiagnosticConfig::kStraightRepeatsPerSpeed)
+        if (_straightSequenceRepeatIteration >= DiagnosticConfig::kStraightRepeatsPerSpeed)
         {
-            _straightSequenceState.repeatIteration = 0U;
-            _straightSequenceState.southboundNext = false;
-            ++_straightSequenceState.speedIndex;
+            _straightSequenceRepeatIteration = 0U;
+            _straightSequenceSouthboundNext = false;
+            ++_straightSequenceSpeedIndex;
             continue;
         }
 
-        const bool southbound = _straightSequenceState.southboundNext;
-        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_straightSequenceState.nextRepeatIndex + 1U);
-        _straightSequenceState.nextRepeatIndex = repeatIndex;
-        if (_straightSequenceState.southboundNext)
+        const bool southbound = _straightSequenceSouthboundNext;
+        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_straightSequenceNextRepeatIndex + 1U);
+        _straightSequenceNextRepeatIndex = repeatIndex;
+        if (_straightSequenceSouthboundNext)
         {
-            _straightSequenceState.southboundNext = false;
-            ++_straightSequenceState.repeatIteration;
+            _straightSequenceSouthboundNext = false;
+            ++_straightSequenceRepeatIteration;
         }
         else
         {
-            _straightSequenceState.southboundNext = true;
+            _straightSequenceSouthboundNext = true;
         }
 
         return StartStraightDistancePhase(
@@ -2324,14 +2315,17 @@ bool OpenFloorMeasurementController::AdvanceStraightSequence()
             southbound ? MazeMap::OpenFloorMarkerId::S : MazeMap::OpenFloorMarkerId::N,
             southbound ? MazeMap::OpenFloorDirectionId::Southbound : MazeMap::OpenFloorDirectionId::Northbound,
             straightDistanceM,
-            MazeMap::kOpenFloorStraightSpeedBinsMps[_straightSequenceState.speedIndex],
+            MazeMap::kOpenFloorStraightSpeedBinsMps[_straightSequenceSpeedIndex],
             repeatIndex,
-            SpeedBinForIndex(_straightSequenceState.speedIndex),
+            SpeedBinForIndex(_straightSequenceSpeedIndex),
             MazeMap::OpenFloorPrimitiveId::Str4,
             true);
     }
 
-    _yawSequenceState = YawSequenceState{};
+    _yawSequenceSpeedIndex = 0U;
+    _yawSequenceRepeatIteration = 0U;
+    _yawSequencePrimitiveIndex = 0U;
+    _yawSequenceNextRepeatIndex = 0U;
     OpenFloorMeasurementLabels settleLabels{};
     settleLabels.sectionId = MazeMap::OpenFloorSectionId::Sec40Yaw;
     settleLabels.startMarkerId = MazeMap::OpenFloorMarkerId::C;
@@ -2564,24 +2558,24 @@ bool OpenFloorMeasurementController::StartInPlaceTurnPhase(
 
 bool OpenFloorMeasurementController::AdvanceYawSequence()
 {
-    while (_yawSequenceState.speedIndex < MazeMap::kOpenFloorYawOmegaBinsRadps.size())
+    while (_yawSequenceSpeedIndex < MazeMap::kOpenFloorYawOmegaBinsRadps.size())
     {
-        if (_yawSequenceState.repeatIteration >= DiagnosticConfig::kYawRepeatsPerPrimitiveSpeed)
+        if (_yawSequenceRepeatIteration >= DiagnosticConfig::kYawRepeatsPerPrimitiveSpeed)
         {
-            _yawSequenceState.repeatIteration = 0U;
-            _yawSequenceState.primitiveIndex = 0U;
-            ++_yawSequenceState.speedIndex;
+            _yawSequenceRepeatIteration = 0U;
+            _yawSequencePrimitiveIndex = 0U;
+            ++_yawSequenceSpeedIndex;
             continue;
         }
 
-        const std::uint8_t primitiveIndex = _yawSequenceState.primitiveIndex;
-        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_yawSequenceState.nextRepeatIndex + 1U);
-        _yawSequenceState.nextRepeatIndex = repeatIndex;
-        ++_yawSequenceState.primitiveIndex;
-        if (_yawSequenceState.primitiveIndex >= 3U)
+        const std::uint8_t primitiveIndex = _yawSequencePrimitiveIndex;
+        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_yawSequenceNextRepeatIndex + 1U);
+        _yawSequenceNextRepeatIndex = repeatIndex;
+        ++_yawSequencePrimitiveIndex;
+        if (_yawSequencePrimitiveIndex >= 3U)
         {
-            _yawSequenceState.primitiveIndex = 0U;
-            ++_yawSequenceState.repeatIteration;
+            _yawSequencePrimitiveIndex = 0U;
+            ++_yawSequenceRepeatIteration;
         }
 
         MazeMap::OpenFloorPrimitiveId primitiveId = MazeMap::OpenFloorPrimitiveId::None;
@@ -2613,13 +2607,16 @@ bool OpenFloorMeasurementController::AdvanceYawSequence()
             primitiveId,
             directionId,
             angleRad,
-            MazeMap::kOpenFloorYawOmegaBinsRadps[_yawSequenceState.speedIndex],
+            MazeMap::kOpenFloorYawOmegaBinsRadps[_yawSequenceSpeedIndex],
             repeatIndex,
-            SpeedBinForIndex(_yawSequenceState.speedIndex),
+            SpeedBinForIndex(_yawSequenceSpeedIndex),
             true);
     }
 
-    _smoothSequenceState = SmoothSequenceState{};
+    _smoothSequenceSpeedIndex = 0U;
+    _smoothSequenceCodeIndex = 0U;
+    _smoothSequenceRepeatIteration = 0U;
+    _smoothSequenceNextRepeatIndex = 0U;
     return AdvanceSmoothSequence();
 }
 
@@ -2773,38 +2770,38 @@ bool OpenFloorMeasurementController::AdvanceSmoothSequence()
         MazeMap::S135SS_M,
     };
 
-    while (_smoothSequenceState.speedIndex < MazeMap::kOpenFloorSmoothSpeedBinsMps.size())
+    while (_smoothSequenceSpeedIndex < MazeMap::kOpenFloorSmoothSpeedBinsMps.size())
     {
-        if (_smoothSequenceState.codeIndex >= std::size(kSmoothCodes))
+        if (_smoothSequenceCodeIndex >= std::size(kSmoothCodes))
         {
-            _smoothSequenceState.codeIndex = 0U;
-            _smoothSequenceState.repeatIteration = 0U;
-            ++_smoothSequenceState.speedIndex;
+            _smoothSequenceCodeIndex = 0U;
+            _smoothSequenceRepeatIteration = 0U;
+            ++_smoothSequenceSpeedIndex;
             continue;
         }
 
-        if (_smoothSequenceState.repeatIteration >= DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed)
+        if (_smoothSequenceRepeatIteration >= DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed)
         {
-            _smoothSequenceState.repeatIteration = 0U;
-            ++_smoothSequenceState.codeIndex;
+            _smoothSequenceRepeatIteration = 0U;
+            ++_smoothSequenceCodeIndex;
             continue;
         }
 
-        const MazeMap::ManeuverCode code = kSmoothCodes[_smoothSequenceState.codeIndex];
-        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_smoothSequenceState.nextRepeatIndex + 1U);
-        _smoothSequenceState.nextRepeatIndex = repeatIndex;
-        ++_smoothSequenceState.repeatIteration;
-        if (_smoothSequenceState.repeatIteration >= DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed)
+        const MazeMap::ManeuverCode code = kSmoothCodes[_smoothSequenceCodeIndex];
+        const std::uint16_t repeatIndex = static_cast<std::uint16_t>(_smoothSequenceNextRepeatIndex + 1U);
+        _smoothSequenceNextRepeatIndex = repeatIndex;
+        ++_smoothSequenceRepeatIteration;
+        if (_smoothSequenceRepeatIteration >= DiagnosticConfig::kSmoothRepeatsPerPrimitiveSpeed)
         {
-            _smoothSequenceState.repeatIteration = 0U;
-            ++_smoothSequenceState.codeIndex;
+            _smoothSequenceRepeatIteration = 0U;
+            ++_smoothSequenceCodeIndex;
         }
 
         return StartSmoothTurnPhase(
             code,
-            MazeMap::kOpenFloorSmoothSpeedBinsMps[_smoothSequenceState.speedIndex],
+            MazeMap::kOpenFloorSmoothSpeedBinsMps[_smoothSequenceSpeedIndex],
             repeatIndex,
-            SpeedBinForIndex(_smoothSequenceState.speedIndex));
+            SpeedBinForIndex(_smoothSequenceSpeedIndex));
     }
 
     return StartLoopSequence(true);
@@ -2830,10 +2827,6 @@ bool OpenFloorMeasurementController::AdvanceLoopSequenceAfterRepeat()
     _loopSequenceState.loopLabels.sectionId = sectionId;
     _loopSequenceState.loopLabels.startMarkerId = markerId;
     _loopSequenceState.loopLabels.repeatIndex = _loopSequenceState.repeatIndex;
-    _loopSequenceState.recoveryLabels = _loopSequenceState.loopLabels;
-    _loopSequenceState.recoveryLabels.primitiveId = MazeMap::OpenFloorPrimitiveId::Recovery;
-    _loopSequenceState.recoveryLabels.directionId = MazeMap::OpenFloorDirectionId::None;
-    _loopSequenceState.recoveryLabels.phaseId = MazeMap::OpenFloorPhaseId::Recovery;
     return StartRecoveryPhase(
         _loopSequenceState.loopLabels,
         markerId,

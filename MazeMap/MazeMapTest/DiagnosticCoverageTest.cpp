@@ -260,7 +260,7 @@ namespace MazeMap
 
 		TEST_METHOD(MotorEncoderDriveSharedModelMatchesMeasuredDrivetrain)
 		{
-			const MotorEncoderDrivePhysicalModel& model = MotorEncoderDrive::GetSharedPhysicalModel();
+			const auto& model = MotorEncoderDrive::GetSharedPhysicalModel();
 			Assert::IsTrue(std::fabs(model.nominalVoltageV - 6.0f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.nominalNoLoadSpeedRpm - 14100.0f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(model.supplyVoltageV - 8.4f) < 1.0e-6f);
@@ -290,7 +290,7 @@ namespace MazeMap
 
 		TEST_METHOD(MotorEncoderDriveDefaultFactoriesUseSharedModelAndHardwareMap)
 		{
-			const MotorEncoderDrivePhysicalModel& model = MotorEncoderDrive::GetSharedPhysicalModel();
+			const auto& model = MotorEncoderDrive::GetSharedPhysicalModel();
 			MotorEncoderDrive left = MotorEncoderDrive::CreateDefaultLeftDrive();
 			MotorEncoderDrive right = MotorEncoderDrive::CreateDefaultRightDrive();
 

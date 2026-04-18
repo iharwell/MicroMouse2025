@@ -6,20 +6,25 @@
 
 namespace MazeMap
 {
+    WallSensorPreprocessor::WallSensorPreprocessor() noexcept
+        : WallSensorPreprocessor(Config{})
+    {
+    }
+
     WallSensorPreprocessor::WallSensorPreprocessor(
-        const WallSensorPreprocessorConfig& config) noexcept
+        const Config& config) noexcept
         : _config(config)
     {
     }
 
-    const WallSensorPreprocessorConfig& WallSensorPreprocessor::config() const noexcept
+    const WallSensorPreprocessor::Config& WallSensorPreprocessor::config() const noexcept
     {
         return _config;
     }
 
     WallObs WallSensorPreprocessor::process(
         const WallSensor& sensor,
-        const WallPreprocessorInput& input) const noexcept
+        const Input& input) const noexcept
     {
         WallObs observation{};
         const float differential =

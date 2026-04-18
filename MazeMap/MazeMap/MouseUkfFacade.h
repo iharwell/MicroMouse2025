@@ -67,14 +67,14 @@ namespace MazeMap
             const WallObs& right,
             const Maze& maze,
             bool freezeMapMutation = false,
-            const MapEvidenceUpdaterConfig& evidenceConfig = MapEvidenceUpdaterConfig{}) noexcept;
+            const MapEvidenceUpdater::Config& evidenceConfig = MapEvidenceUpdater::Config{}) noexcept;
 
         WallUpdateResult updateSideSensor(
             Side which,
             const WallObs& observation,
             const Maze& maze,
             bool freezeMapMutation = false,
-            const MapEvidenceUpdaterConfig& evidenceConfig = MapEvidenceUpdaterConfig{}) noexcept;
+            const MapEvidenceUpdater::Config& evidenceConfig = MapEvidenceUpdater::Config{}) noexcept;
 
     private:
         static Direction dominantDirectionForSensor(

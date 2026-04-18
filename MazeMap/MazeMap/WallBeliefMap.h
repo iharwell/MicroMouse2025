@@ -12,40 +12,40 @@
 
 namespace MazeMap
 {
-    struct WallBeliefConfig
-    {
-        float hitLogOdds = 1.20f;
-        float missLogOdds = 1.20f;
-        float contradictoryMissLogOdds = 0.55f;
-        float setThreshold = 1.00f;
-        float clearThreshold = -1.00f;
-        float saturationMagnitude = 3.50f;
-    };
-
-    struct WallBeliefState
-    {
-        float logOdds = 0.0f;
-        WallState hardState = WallState::Unknown;
-        uint16_t visitCount = 0U;
-        uint16_t contradictionCount = 0U;
-        uint32_t lastUpdateTick = 0UL;
-    };
-
-    struct WallBeliefUpdate
-    {
-        bool valid = false;
-        bool changed = false;
-        float logOdds = 0.0f;
-        WallState hardState = WallState::Unknown;
-        uint16_t visitCount = 0U;
-        uint16_t contradictionCount = 0U;
-    };
-
     class WallBeliefMap
     {
     public:
         static constexpr size_t kMazeSize = 16U;
         static constexpr size_t kDirectionCount = 4U;
+
+        struct Config
+        {
+            float hitLogOdds = 1.20f;
+            float missLogOdds = 1.20f;
+            float contradictoryMissLogOdds = 0.55f;
+            float setThreshold = 1.00f;
+            float clearThreshold = -1.00f;
+            float saturationMagnitude = 3.50f;
+        };
+
+        struct State
+        {
+            float logOdds = 0.0f;
+            WallState hardState = WallState::Unknown;
+            uint16_t visitCount = 0U;
+            uint16_t contradictionCount = 0U;
+            uint32_t lastUpdateTick = 0UL;
+        };
+
+        struct Update
+        {
+            bool valid = false;
+            bool changed = false;
+            float logOdds = 0.0f;
+            WallState hardState = WallState::Unknown;
+            uint16_t visitCount = 0U;
+            uint16_t contradictionCount = 0U;
+        };
 
         void Reset() noexcept
         {
@@ -55,13 +55,13 @@ namespace MazeMap
                 {
                     for (auto& state : row)
                     {
-                        state = WallBeliefState{};
+                        state = State{};
                     }
                 }
             }
         }
 
-        const WallBeliefState& Get(const CellCoordinates& cell, Direction direction) const noexcept
+        const State& Get(const CellCoordinates& cell, Direction direction) const noexcept
         {
             return _states[cell.GetX()][cell.GetY()][DirectionIndex(direction)];
         }
@@ -70,7 +70,7 @@ namespace MazeMap
             const CellCoordinates& cell,
             Direction direction,
             WallState hardState,
-            const WallBeliefConfig& config,
+            const Config& config,
             uint32_t tick = 0UL) noexcept
         {
             if (!IsOrdinalDirection(direction) || hardState == WallState::Unknown)
@@ -78,7 +78,7 @@ namespace MazeMap
                 return;
             }
 
-            WallBeliefState state{};
+            State state{};
             state.hardState = hardState;
             state.logOdds = (hardState == WallState::Wall) ?
                 (std::max)(config.setThreshold, 0.0f) :
@@ -88,20 +88,20 @@ namespace MazeMap
             SetMirroredState(cell, direction, state);
         }
 
-        WallBeliefUpdate ApplyObservation(
+        Update ApplyObservation(
             const CellCoordinates& cell,
             Direction direction,
             WallSampleClassification classification,
-            const WallBeliefConfig& config,
+            const Config& config,
             uint32_t tick = 0UL) noexcept
         {
-            WallBeliefUpdate update{};
+            Update update{};
             if (!IsOrdinalDirection(direction) || classification == WallSampleClassification::Unknown)
             {
                 return update;
             }
 
-            WallBeliefState state = Get(cell, direction);
+            State state = Get(cell, direction);
             const WallState previousHardState = state.hardState;
             const float previousLogOdds = state.logOdds;
             const float deltaLogOdds =
@@ -159,7 +159,7 @@ namespace MazeMap
         }
 
     private:
-        using DirectionStateRow = std::array<WallBeliefState, kDirectionCount>;
+        using DirectionStateRow = std::array<State, kDirectionCount>;
         using MazeRow = std::array<DirectionStateRow, kMazeSize>;
         using MazePlane = std::array<MazeRow, kMazeSize>;
 
@@ -194,7 +194,7 @@ namespace MazeMap
         void SetMirroredState(
             const CellCoordinates& cell,
             Direction direction,
-            const WallBeliefState& state) noexcept
+            const State& state) noexcept
         {
             _states[cell.GetX()][cell.GetY()][DirectionIndex(direction)] = state;
             if (cell.IsValidMove(direction))

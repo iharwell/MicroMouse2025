@@ -37,6 +37,7 @@ Use this document together with [AGENTS.md](AGENTS.md) and [project_vocabulary.m
 - Shared execution owners such as `ManeuverExecutor` may host reusable routines.
 - They may own reusable per-tick state, continuation plumbing, and shared drive behavior.
 - They must not invent separate phase systems or claim ownership of mode phase semantics.
+- A shared `Drive`-style service is not a callback owner. The active mode callback should call it each tick while motion or maneuver execution is in progress when it needs the current tick's proposed drive output unless a genuinely higher-level routine is required.
 
 ## What A Phase Is
 
@@ -65,6 +66,8 @@ Typical control flow looks like this:
 6. The mode resumes and decides the next phase step.
 
 That means the mode cannot keep doing other phase work in parallel while the routine is active. If something must happen during motion, it must live in the active routine or in shared services called by that routine's callback.
+
+A simple shared motion primitive or a shared `Drive` service that computes the current tick's drive output is normally one of those called services, not a separate callback owner. The active callback may still choose to ignore that proposed output and do something else.
 
 A routine entrypoint is non-blocking. It uses `SetNextModeWorkCallbacks(...)` or `SetNextModeWorkCallback(...)` to transfer control to the routine work callback, stores the continuation callback it should restore on completion, and then returns.
 

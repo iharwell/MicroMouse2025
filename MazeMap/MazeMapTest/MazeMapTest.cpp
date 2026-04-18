@@ -91,9 +91,9 @@ namespace MazeMap
 		TEST_METHOD(WallBeliefMapConfirmsUnknownWallAndMirrorsNeighbor)
 		{
 			WallBeliefMap beliefs;
-			WallBeliefConfig config{};
+			WallBeliefMap::Config config{};
 			const CellCoordinates cell(4U, 4U);
-			const WallBeliefUpdate update = beliefs.ApplyObservation(
+			const WallBeliefMap::Update update = beliefs.ApplyObservation(
 				cell,
 				Direction::Up,
 				WallSampleClassification::WallHit,
@@ -109,11 +109,11 @@ namespace MazeMap
 		TEST_METHOD(WallBeliefMapSingleContradictoryMissDoesNotClearConfirmedWall)
 		{
 			WallBeliefMap beliefs;
-			WallBeliefConfig config{};
+			WallBeliefMap::Config config{};
 			const CellCoordinates cell(2U, 2U);
 			beliefs.SeedKnownState(cell, Direction::Right, WallState::Wall, config, 1U);
 
-			const WallBeliefUpdate update = beliefs.ApplyObservation(
+			const WallBeliefMap::Update update = beliefs.ApplyObservation(
 				cell,
 				Direction::Right,
 				WallSampleClassification::WallMiss,
@@ -131,7 +131,7 @@ namespace MazeMap
 			WallSensor sensor = MakeTestWallSensor();
 			WallSensorPreprocessor preprocessor;
 
-			WallPreprocessorInput wallInput{};
+			WallSensorPreprocessor::Input wallInput{};
 			wallInput.ledOffLevel = 0.1f;
 			wallInput.ledOnLevel = 10.1f;
 			wallInput.supportSpanM = 0.06f;
@@ -139,13 +139,13 @@ namespace MazeMap
 			Assert::IsTrue(wallObservation.valid);
 			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(wallObservation.cls));
 
-			WallPreprocessorInput postInput = wallInput;
+			WallSensorPreprocessor::Input postInput = wallInput;
 			postInput.supportSpanM = 0.01f;
 			const WallObs postObservation = preprocessor.process(sensor, postInput);
 			Assert::IsTrue(postObservation.valid);
 			Assert::AreEqual(static_cast<int>(ObsClass::PostLike), static_cast<int>(postObservation.cls));
 
-			WallPreprocessorInput openInput{};
+			WallSensorPreprocessor::Input openInput{};
 			openInput.ledOffLevel = 0.1f;
 			openInput.ledOnLevel = 6.1f;
 			openInput.supportSpanM = 0.06f;
@@ -207,7 +207,7 @@ namespace MazeMap
 		TEST_METHOD(MapEvidenceUpdaterPostLikeObservationDoesNotForceWall)
 		{
 			MapEvidenceUpdater updater;
-			MapEvidenceUpdaterConfig config{};
+			MapEvidenceUpdater::Config config{};
 
 			WallObs observation{};
 			observation.valid = true;
@@ -234,7 +234,7 @@ namespace MazeMap
 		TEST_METHOD(MapEvidenceUpdaterCommitsWallAndOpenEvidence)
 		{
 			MapEvidenceUpdater updater;
-			MapEvidenceUpdaterConfig config{};
+			MapEvidenceUpdater::Config config{};
 
 			WallObs wallObservation{};
 			wallObservation.valid = true;

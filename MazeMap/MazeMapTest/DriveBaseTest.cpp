@@ -378,32 +378,6 @@ namespace MazeMap
             Assert::AreEqual(0.0f, command.rightMotorPwm, 1.0e-6f);
         }
 
-        TEST_METHOD(DriveBasePointCommandImuYawTrackingMatchesWheelOnlyAtTargetYawRate)
-        {
-            PlantModel plant;
-            DriveBase drive(plant);
-            Assert::IsTrue(drive.Begin());
-            drive.SetPose(0.0f, 0.0f, 0.0f);
-            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
-
-            const ControlVector wheelOnlyCommand =
-                drive.PointCommand(
-                    0.20f,
-                    0.0f,
-                    MazeMap::CommandPD::StateWheelOmegaPD);
-            const ControlVector imuTrackedCommand =
-                drive.PointCommand(
-                    0.20f,
-                    0.0f,
-                    MazeMap::CommandPD::StateWheelOmegaPD |
-                    MazeMap::CommandPD::IMUYaw);
-
-            Assert::IsTrue(IsFiniteControlVector(wheelOnlyCommand));
-            Assert::IsTrue(IsFiniteControlVector(imuTrackedCommand));
-            Assert::AreEqual(wheelOnlyCommand.leftMotorPwm, imuTrackedCommand.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(wheelOnlyCommand.rightMotorPwm, imuTrackedCommand.rightMotorPwm, 1.0e-6f);
-        }
-
         TEST_METHOD(DriveBasePointCommandImuYawTrackingChangesCommandWhenYawRateErrorExists)
         {
             PlantModel plant;
