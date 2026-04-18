@@ -12,16 +12,16 @@ This file records intentional cleanup residue that remains after the wall-touch 
 
 ## Remaining execution-model drift
 
-- `MissionModeController.cpp` still has `SharedMotionRoutineLaunchTick` / `RunSharedMotionRoutine(...)`.
 - `MazeRunningAuditController.cpp` still has `SharedRoutineLaunchTick` / `RunSharedRoutine(...)`.
-- Those helpers still use the older dedicated-session launch-tick pattern to start maneuver-related routines.
+- `MissionModeController.cpp` now prepares maneuver-executor entry callbacks before starting a dedicated session, which removes the one-cycle launch tick but still preserves session-level bridge debt.
+- `MazeRunningAuditController.cpp` still uses the older dedicated-session launch-tick pattern to start maneuver-related routines.
 
 ## Why it remains
 
 - Removing the wall-touch duplication was the convergent change for this pass.
-- Reworking the remaining shared-motion wrappers requires a broader controller/session rewrite so routine entry happens directly from the active callback chain instead of through a one-cycle launch step.
+- Reworking the remaining bridge code still requires a broader controller/session rewrite so routine entry happens directly from the active callback chain inside the one boot-owned session.
 
 ## Deletion target
 
-- Delete the controller-level launch-tick helpers above once the mission/audit controllers are converted to direct routine handoff.
-- At that point, remove `WallTouchRoutine::BeginSession(...)` as well so `WallTouchRoutine::Begin(...)` is the only public entry path.
+- Delete the controller-level launch-tick helpers and dedicated-session bridge helpers above once the mission/audit controllers are converted to direct routine handoff.
+- At that point, remove `WallTouchRoutine::PrepareInitialCallbacks(...)` as well so `WallTouchRoutine::Begin(...)` is the only public entry path.

@@ -186,12 +186,16 @@ Top-level application modes are selected only at startup by reading designated m
 - Internal setup, calibration stages, sections, subtests, and recovery paths are **phases** of one mode, not separate modes.
 - The selected top-level mode owner is the only place allowed to start the active `LoopController` session for that mode.
 - Starting that session means the mode is now active; ending that session means the mode is shutting down.
+- A boot cycle normally gets one `LoopController` session.
+- A second `LoopController` session is allowed only when the vehicle state is known to be discontinuous, such as after user service or a physical lift that invalidates UKF continuity.
 - Subordinate controllers, helpers, and phase executors must not start nested `LoopController` sessions.
 - While the session is active, only the currently installed loop callback runs and can steer flow, request a pause, end the session, or swap callbacks.
+- `SetNextModeWorkCallbacks(...)` and `SetNextModeWorkCallback(...)` are the control-transfer mechanisms inside that one session.
 - `Routine` means a callback-driven `LoopController` procedure. Do **not** introduce synchronous/blocking routine wrappers that hide that callback ownership model.
 - A routine is a modular behavioral block used by a mode while constructing a phase. Once launched, the routine owns the active `LoopController` callback until it returns through the supplied continuation callback, so it does **not** span phases.
 - Any routine that does not explicitly request a pause must return control to `LoopController` before the provided deadline for that tick.
-- If `LoopController` is paused, the robot must not move. Pause handling is for non-motion work only unless an explicit task says otherwise.
+- If `LoopController` is paused, the robot must not move. Pause handling is for blocking, no-motion calculation, and other non-motion work only unless an explicit task says otherwise.
+- `LoopController` must not be paused, started, or stopped unless there is a fault or the vehicle is stationary.
 - Outside a `LoopController::RequestPause(...)` callback, mode code must not wait for another tick, sleep for control progress, or spin on control-state changes.
 
 ### Mode categories

@@ -68,6 +68,11 @@ namespace MazeMap::App::Internal
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
             const Hooks& hooks = Hooks{});
+        bool PrepareHoldRoutineCallbacks(
+            std::uint16_t durationMs,
+            bool stationary,
+            LoopController::ModeCallbacks& initialCallbacks,
+            const Hooks& hooks = Hooks{});
 
         void ApplyAsymmetricQueueLimits(
             MazeMap::ManeuverQueue& queue,
@@ -90,6 +95,14 @@ namespace MazeMap::App::Internal
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
             const Hooks& hooks = Hooks{});
+        bool ProceedToManeuverExecutionRoutine(
+            MazeMap::ManeuverQueue& queue,
+            const MotionLimits& limits,
+            bool snapToExpectedLocation,
+            MazeMap::DirectionalLocation& currentLocation,
+            const LoopController::ModeCallbacks& returnCallbacks,
+            LoopController::ModeCallbacks& initialCallbacks,
+            const Hooks& hooks = Hooks{});
 
         bool BeginBrakedSettleRoutine(
             const char* timeoutMessage,
@@ -98,12 +111,25 @@ namespace MazeMap::App::Internal
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
             const Hooks& hooks = Hooks{});
+        bool PrepareBrakedSettleRoutineCallbacks(
+            const char* timeoutMessage,
+            std::uint16_t stationaryHoldMs,
+            std::uint16_t timeoutMs,
+            LoopController::ModeCallbacks& initialCallbacks,
+            const Hooks& hooks = Hooks{});
 
         bool BeginReverseStraightRoutine(
             float distanceM,
             const MotionLimits& limits,
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{},
+            const Eigen::Vector2f* targetHeadingOverride = nullptr,
+            const Eigen::Vector2f* targetPositionOverride = nullptr);
+        bool PrepareReverseStraightRoutineCallbacks(
+            float distanceM,
+            const MotionLimits& limits,
+            LoopController::ModeCallbacks& initialCallbacks,
             const Hooks& hooks = Hooks{},
             const Eigen::Vector2f* targetHeadingOverride = nullptr,
             const Eigen::Vector2f* targetPositionOverride = nullptr);
@@ -121,12 +147,30 @@ namespace MazeMap::App::Internal
             const Hooks& hooks = Hooks{},
             const Eigen::Vector2f* targetHeadingOverride = nullptr,
             const Eigen::Vector2f* targetPositionOverride = nullptr);
+        bool PrepareStraightRoutineCallbacks(
+            float distanceM,
+            float entrySpeed,
+            float cruiseSpeed,
+            float exitSpeed,
+            const MotionLimits& limits,
+            bool useWallCentering,
+            MazeMap::DirectionalLocation* currentLocation,
+            LoopController::ModeCallbacks& initialCallbacks,
+            const Hooks& hooks = Hooks{},
+            const Eigen::Vector2f* targetHeadingOverride = nullptr,
+            const Eigen::Vector2f* targetPositionOverride = nullptr);
 
         bool BeginTurnRoutine(
             float angleRad,
             const MotionLimits& limits,
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{},
+            MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr);
+        bool PrepareTurnRoutineCallbacks(
+            float angleRad,
+            const MotionLimits& limits,
+            LoopController::ModeCallbacks& initialCallbacks,
             const Hooks& hooks = Hooks{},
             MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr);
 
@@ -140,6 +184,15 @@ namespace MazeMap::App::Internal
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
             const Hooks& hooks = Hooks{});
+        bool PrepareArcRoutineCallbacks(
+            float distanceM,
+            float angleRad,
+            float entrySpeed,
+            float exitSpeed,
+            float cruiseSpeed,
+            const MotionLimits& limits,
+            LoopController::ModeCallbacks& initialCallbacks,
+            const Hooks& hooks = Hooks{});
 
         bool BeginSmoothTurnRoutine(
             const MazeMap::ManeuverInstance& maneuver,
@@ -147,6 +200,12 @@ namespace MazeMap::App::Internal
             const MotionLimits& limits,
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
+            const Hooks& hooks = Hooks{});
+        bool PrepareSmoothTurnRoutineCallbacks(
+            const MazeMap::ManeuverInstance& maneuver,
+            float cruiseSpeed,
+            const MotionLimits& limits,
+            LoopController::ModeCallbacks& initialCallbacks,
             const Hooks& hooks = Hooks{});
 
         LoopController::ControlVector DriveActivePhase(
@@ -338,6 +397,7 @@ namespace MazeMap::App::Internal
             void* activeState,
             ActivePhaseTickFn activePhaseTick,
             const Hooks& hooks) noexcept;
+        bool BuildRoutineCallbacks(LoopController::ModeCallbacks& callbacks) const noexcept;
         bool InstallRoutineCallbacks(
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services);

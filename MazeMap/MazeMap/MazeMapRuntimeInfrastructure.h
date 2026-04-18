@@ -1,7 +1,10 @@
 #pragma once
 // Declares runtime logging, telemetry, and measurement-capture infrastructure for the MazeMap application runtime.
+#include "CellCoordinates.h"
+#include "Direction.h"
 #include "DriveBase.h"
 #include "LoopController.h"
+#include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementCycle.h"
 #include "OpenFloorMeasurementLabels.h"
@@ -454,21 +457,17 @@ namespace MazeMap::App::Internal::Runtime
         uint8_t completedFullCycles = 0U;
     };
 
-    struct WallTouchPoseResetTarget final
-    {
-        float xMeters = 0.0f;
-        float yMeters = 0.0f;
-        float yawRad = 0.0f;
-        bool enabled = false;
-    };
-
     struct WallTouchLoopState final
     {
+        MazeMap::CellCoordinates wallCell{};
+        MazeMap::Direction wallDirection{ MazeMap::None };
+        CalibrationWall calibrationWall{ CalibrationWall::West };
+        float targetCoordinateM{};
+        float expectedTravelM{};
         float targetYawRad{};
         float minLatchTravelM{};
         float maxApproachTravelM{};
         bool allowPassThroughNoWall{};
-        const WallTouchPoseResetTarget* poseResetTarget{};
         WallTouchExecutionResult result{};
         DriveTelemetry lastMotionTelemetry{};
         unsigned long touchStartMs{};
@@ -477,6 +476,9 @@ namespace MazeMap::App::Internal::Runtime
         unsigned long contactConfirmedStartMs{};
         unsigned long frontSignalMissingStartMs{};
         unsigned long lastMotionMs{};
+        float poseResetXMeters{};
+        float poseResetYMeters{};
+        float poseResetYawRad{};
         float startDistanceM{};
         float approachDriveCommand{};
         float ditherTurnFraction{};
@@ -493,6 +495,8 @@ namespace MazeMap::App::Internal::Runtime
         bool lastSquareFrontSignalValid{};
         uint8_t completedHalfCycles{};
         uint8_t consecutiveGoodFullCycles{};
+        bool poseResetEnabled{};
+        bool launchBaselineCaptured{};
         bool contactCandidateActive{};
         bool seatedResetApplied{};
         WallTouchState runtimeState{ WallTouchState::EntryConditioning };

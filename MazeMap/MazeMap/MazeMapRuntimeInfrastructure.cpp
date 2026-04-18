@@ -541,12 +541,12 @@ namespace MazeMap::App::Internal::Runtime
                 (stateElapsedMs >= (Config::kWallTouchPostSquareHoldMs / 2U)))
             {
                 wallTouch.seatedResetApplied = true;
-                if (wallTouch.poseResetTarget != nullptr && wallTouch.poseResetTarget->enabled)
+                if (wallTouch.poseResetEnabled)
                 {
                     drive.SetPose(
-                        wallTouch.poseResetTarget->xMeters,
-                        wallTouch.poseResetTarget->yMeters,
-                        wallTouch.poseResetTarget->yawRad);
+                        wallTouch.poseResetXMeters,
+                        wallTouch.poseResetYMeters,
+                        wallTouch.poseResetYawRad);
                     if (hooks.onPoseReset != nullptr)
                     {
                         hooks.onPoseReset(hooks.context);

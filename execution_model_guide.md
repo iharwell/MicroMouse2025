@@ -7,6 +7,8 @@ Use this document together with [AGENTS.md](AGENTS.md) and [project_vocabulary.m
 ## Core Model
 
 - A boot-selected mode owns the active `LoopController` session for the boot.
+- A boot cycle normally gets one `LoopController` session.
+- A second `LoopController` session is allowed only when the vehicle state is known to be discontinuous, such as after user service or a physical lift that invalidates UKF continuity.
 - The mode defines the phase boundaries for its workflow.
 - A routine is a reusable callback-driven behavioral block that a mode uses while constructing a phase.
 - When a mode hands control to a routine, that routine owns the active `LoopController` callback for its entire execution.
@@ -18,6 +20,7 @@ Use this document together with [AGENTS.md](AGENTS.md) and [project_vocabulary.m
 ### Mode ownership
 
 - Start and end the top-level `LoopController` session.
+- Do not start a second `LoopController` session for an individual phase, helper, or routine inside the same boot cycle unless the vehicle state is known to be discontinuous and the new session is intentionally re-establishing a valid estimator context.
 - Choose phase boundaries, labels, sequencing, and policy decisions.
 - Decide when to install a routine and which continuation callback receives control after routine completion.
 - Own mode-specific logging labels, artifacts, and result interpretation.
@@ -63,16 +66,22 @@ Typical control flow looks like this:
 
 That means the mode cannot keep doing other phase work in parallel while the routine is active. If something must happen during motion, it must live in the active routine or in shared services called by that routine's callback.
 
+A routine entrypoint is non-blocking. It uses `SetNextModeWorkCallbacks(...)` or `SetNextModeWorkCallback(...)` to transfer control to the routine work callback, stores the continuation callback it should restore on completion, and then returns.
+
 ## Pauses
 
 - `LoopController::RequestPause(...)` is the only sanctioned way to break strict callback cadence for non-real-time work.
+- Pauses exist for blocking, no-motion calculation, and other non-real-time work that cannot be completed inside the active control tick.
 - A pause does not return ordinary control to the mode callback; it is a sanctioned interruption inside the same callback-owned execution flow.
 - If the loop is paused, the robot must not move.
+- `LoopController` must not be paused, started, or stopped unless the vehicle is stationary or the runtime is already faulting.
+- Callback setters are the control-transfer mechanism; pauses are not a second callback-routing API.
 - Do not sleep, spin, or wait for routine completion outside pause handling.
 
 ## Disallowed Patterns
 
 - Synchronous or blocking `Run*Routine(...)` wrappers.
+- Starting a fresh `LoopController` session around one routine or one phase inside a boot-selected mode without a known state discontinuity that justifies a new estimator context.
 - A routine API that accepts or owns phase labels as though phases were routine concepts.
 - A mode callback that expects to regain control before the launched routine completes.
 - Nested `LoopController` sessions started by subordinate helpers or controllers.

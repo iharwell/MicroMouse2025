@@ -14,35 +14,41 @@ This is the only active handoff note for the mission-convergence slice.
   - `execution_model_guide.md`
 - The secondary size target remains `340 KB` of Teensy flash code.
 
-## What Landed In This Pass
+## What Landed In The Current Tree
 
-- Added [MazeMap/MazeMap/WallTouchRoutine.h](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallTouchRoutine.h).
-- Added [MazeMap/MazeMap/WallTouchRoutine.cpp](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallTouchRoutine.cpp).
-- Moved shared wall-touch execution ownership out of:
+- `WallTouchRoutine` remains the shared owner for wall-touch execution:
+  - [MazeMap/MazeMap/WallTouchRoutine.h](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallTouchRoutine.h)
+  - [MazeMap/MazeMap/WallTouchRoutine.cpp](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\WallTouchRoutine.cpp)
+- The wall-touch routine no longer writes through a caller-provided result sink.
+- `WallTouchRoutine` now owns its completed result and exposes `LastResult()`.
+- Mission and audit now read wall-touch completion data from the routine-owned result instead of passing a sink pointer:
   - [MazeMap/MazeMap/MissionModeController.cpp](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MissionModeController.cpp)
   - [MazeMap/MazeMap/MazeRunningAuditController.cpp](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeRunningAuditController.cpp)
-- Both controllers now hand wall-touch execution to `WallTouchRoutine` instead of carrying controller-local wall-touch loop implementations.
-- `WallTouchRoutine` owns the pass-through settle behavior internally instead of routing that behavior through `ManeuverExecutor`.
-- Project wiring was updated in:
-  - [MazeMap/MazeMap/MazeMap.vcxproj](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj)
-  - [MazeMap/MazeMap/MazeMap.vcxproj.filters](C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj.filters)
+- The bridge API name `WallTouchRoutine::BeginSession(...)` was removed.
+- The current bridge helper is now `WallTouchRoutine::PrepareInitialCallbacks(...)` to make it explicit that it prepares callback transfer state but does not start a `LoopController` session.
+- `ManeuverExecutor` bridge helpers were renamed to `Prepare*RoutineCallbacks(...)` so the callback-transfer bridge path is named honestly instead of looking like the canonical non-blocking routine entrypoint.
 
-## Policy Updates Landed
+## Execution-Model And Vocabulary Corrections Landed
 
-- [AGENTS.md](C:\Users\thene\source\repos\MicroMouse2025\AGENTS.md) now explicitly says:
-  - there are no size-based exceptions to convergence rules,
-  - a partial migration that preserves the old owner is worse than not migrating,
-  - wrappers/redirection shells are not acceptable migration steps,
-  - the preferred migration sequence is:
-    - copy to an external non-compiled reference file,
-    - delete from compiled source immediately,
-    - move into the final authoritative destination.
+The repository documentation now reflects the clarified session and callback model:
+
+- [AGENTS.md](C:\Users\thene\source\repos\MicroMouse2025\AGENTS.md)
+- [project_vocabulary.md](C:\Users\thene\source\repos\MicroMouse2025\project_vocabulary.md)
+- [execution_model_guide.md](C:\Users\thene\source\repos\MicroMouse2025\execution_model_guide.md)
+
+The important wording now in force is:
+
+- a boot cycle normally gets one `LoopController` session,
+- a second session is allowed only when vehicle state is known to be discontinuous, such as user service or a physical lift that invalidates UKF continuity,
+- `LoopController` must not be paused, started, or stopped unless the vehicle is stationary or the runtime is faulting,
+- `SetNextModeWorkCallbacks(...)` / `SetNextModeWorkCallback(...)` are the control-transfer mechanisms inside an active session,
+- pauses are for blocking, no-motion calculation, and other non-real-time work.
 
 ## Verified Result
 
 Latest verification log:
 
-- [codex_verify/logs/build_and_verify_latest_20260417_201658_182.txt](C:\Users\thene\source\repos\MicroMouse2025\codex_verify\logs\build_and_verify_latest_20260417_201658_182.txt)
+- [codex_verify/logs/build_and_verify_latest_20260417_213645_679.txt](C:\Users\thene\source\repos\MicroMouse2025\codex_verify\logs\build_and_verify_latest_20260417_213645_679.txt)
 
 Result:
 
@@ -56,8 +62,8 @@ Result:
 
 Size snapshot from that verify run:
 
-- `FLASH: code:403200`
-- `RAM1: code:400248`
+- `FLASH: code:401728`
+- `RAM1: code:398776`
 
 ## Explicit Remaining Drift
 
@@ -65,102 +71,84 @@ Residual execution-model drift is documented in:
 
 - [codex_cleanup_execution_model_20260417.md](C:\Users\thene\source\repos\MicroMouse2025\codex_cleanup_execution_model_20260417.md)
 
-Current documented residue:
+Current highest-signal residue:
 
-- `MissionModeController.cpp` still has `SharedMotionRoutineLaunchTick` / `RunSharedMotionRoutine(...)`.
-- `MazeRunningAuditController.cpp` still has `SharedRoutineLaunchTick` / `RunSharedRoutine(...)`.
-- Those helpers still use the older launch-tick/session pattern for maneuver-related routine start.
-- `WallTouchRoutine::BeginSession(...)` remains only as bridge debt until that larger controller/session rewrite is completed.
+- `MissionModeController.cpp` no longer uses the old one-cycle shared-motion launch tick, but it still starts dedicated `LoopController` sessions around routine bridges.
+- `MazeRunningAuditController.cpp` still carries the older `SharedRoutineLaunchTick` / `RunSharedRoutine(...)` pattern above the shared owners.
+- `WallTouchRoutine::PrepareInitialCallbacks(...)` remains bridge debt. The converged target is still `WallTouchRoutine::Begin(...)` as the only public entry path.
+- `WallTouchRoutine::Begin(...)` / `PrepareInitialCallbacks(...)` still accept physical execution parameters (`targetYawRad`, `minLatchTravelM`, `maxApproachTravelM`, pose-reset target) instead of maze-grid intent.
+- `WallTouchRoutine::PrepareWallTouchPhase(...)` still samples vehicle launch baseline too early. It captures state before the routine owns a tick, which violates the clarified execution model.
+- Mission and audit still each own duplicated startup wall-touch policy and wall-calibration derivation above the shared routine.
+
+## Important Design Correction Agreed In This Thread
+
+The next agent should treat the following as authoritative for the wall-touch API:
+
+- The parameters of `Begin(...)` should only describe what the routine should do.
+- `Begin(...)` must not sample vehicle state that belongs to the caller's current tick.
+- The routine does not own the tick in which `Begin(...)` is called.
+- Launch baselines must be captured on the first routine-owned tick, not during callback installation.
+- Completed wall-touch results should be obtained from a getter on the routine owner, not through a sink parameter.
+- The wall-touch command surface should be maze-grid intent:
+  - which wall
+  - from which side
+- Both of those inputs should use maze-grid/domain types, not an external physical-parameter bag.
 
 ## Important Constraint For The Next Pass
 
 - Do not justify any wrapper, duplicate path, or partial migration because it is small, temporary, local, or easy to review.
 - If a migration cannot be completed into the final owner, stop and record the blocker instead of leaving ambiguous compiled ownership behind.
+- Do not preserve the current physical-parameter wall-touch API as the final design.
 
-## Dirty Tree Note
+## Recommended Next Cut
 
-This workspace still contains unrelated dirty/untracked items outside the wall-touch change, including:
+The next convergent cut should be the wall-touch API and startup-calibration intent cleanup, not another naming-only pass.
 
-- `MazeMap/MazeMap/MazeMapSharedRuntime.cpp`
-- `MazeMap/MazeMap/MazeMapSharedRuntime.h`
-- `project_vocabulary.md`
-- `codex_verify/build_and_verify_latest.ps1`
+Required target shape:
 
-Do not treat those as part of the wall-touch convergence unless they are deliberately re-audited.
-- The temporary blocking helper surface introduced earlier was removed.
+- `WallTouchRoutine::Begin(...)` should accept maze-grid intent only.
+- Wall-touch result access should remain routine-owned through `LastResult()`.
+- The first routine-owned tick should capture the real launch baseline.
+- Shared wall-touch policy and wall-selection derivation should move inward toward the shared owner as far as possible without inventing a wrapper family.
+- Mode code should retain only workflow policy, phase labels, and interpretation of the result.
 
-## What Landed In This Pass
+Explicitly avoid:
 
-The execution-model and vocabulary correction is now explicit and durable in repository documentation:
-
-- `AGENTS.md`
-- `project_vocabulary.md`
-- `execution_model_guide.md`
-
-This pass corrected the earlier wording drift that implied a routine could span phases. That wording is now superseded.
-
-## What Did Not Land In This Pass
-
-- The shared wall-touch / startup wall-calibration convergence is **not** landed.
-- The duplicated controller-local wall-touch execution glue is still present.
-- Mission and audit still each own controller-local wall-touch setup and callback plumbing around:
-  - `ExecuteWallTouchOffLoopDriven(...)`
-  - `WallTouchLoopTick(...)`
-  - `TryTouchWallAndMaybeSetKnownWallCoordinate(...)`
-- The broader duplicated controller-local `LoopController` mini-framework is still present in both controllers.
-- Search/mapping extraction did not move.
-- Shared session/logging convergence did not move.
-
-## Important Non-Landed Attempt
-
-During this pass, a partial code attempt explored moving wall-touch initialization/tick helper logic toward `ManeuverExecutor`.
-
-That attempt was **backed out** and must be treated as non-landed. The repository should not be understood as having a finished shared wall-touch routine yet.
-
-The rejected shape was not sufficient because it only moved helper pieces while leaving the controller-local routine/session scaffolding in place. That is not the converged cut.
-
-## Current Highest-Value Clean-Audit Blockers
-
-1. `MissionModeController.cpp` and `MazeRunningAuditController.cpp` still each own duplicated controller-local `LoopController` mini-framework code.
-2. Startup wall calibration and wall-touch are still duplicated across mission and audit and remain the best immediate convergence and flash-recovery target.
-3. Mission search and mapping execution are still trapped inside `MissionModeController.cpp` instead of a shared callback-driven owner.
-4. Controller-local logging/bootstrap lifecycle is still duplicated above the runtime-owned logger.
-5. Boot modes are still thinner wrappers than they should be, but that remains lower priority than motion/session duplication.
-
-## Immediate Next Cut
-
-The next cut should still be the shared wall-touch / startup wall-calibration extraction, but it must follow the clarified execution model.
-
-### Required target shape
-
-- The mode owns the phase boundary, labels, and policy.
-- The shared owner hosts a reusable wall-touch routine or equivalent callback-driven behavioral block.
-- That shared routine owns all ticks from launch until completion.
-- The mode regains control only through the supplied continuation callback.
-- The routine API must not accept or own phase labels as though phases were routine concepts.
-- Keep controller code responsible only for workflow policy, labels, target selection, and result interpretation.
-
-### Explicitly avoid
-
-- Blocking `Run*Routine(...)` wrappers.
-- A helper split that only moves initialization/tick code without eliminating the duplicated controller-local routine/session scaffolding.
-- A second execution model.
-- A new wrapper family around `SharedRobotRuntime` or `ManeuverExecutor`.
-- Naming or contracts that imply a routine spans phases.
+- reintroducing sink-style result plumbing,
+- passing physical target coordinates / yaw / travel windows as the final public wall-touch API,
+- claiming routine ownership of the caller's current tick,
+- using a second execution model,
+- preserving the dedicated-session bridge code as the final architecture.
 
 ## Recommended Next File Focus
 
+- `MazeMap/MazeMap/WallTouchRoutine.h`
+- `MazeMap/MazeMap/WallTouchRoutine.cpp`
 - `MazeMap/MazeMap/MissionModeController.cpp`
 - `MazeMap/MazeMap/MazeRunningAuditController.cpp`
-- `MazeMap/MazeMap/ManeuverExecutor.h`
-- `MazeMap/MazeMap/ManeuverExecutor.cpp`
-- `MazeMap/MazeMap/MazeMapSharedRuntime.h`
-- `MazeMap/MazeMap/MazeMapSharedRuntime.cpp`
 - `MazeMap/MazeMap/MazeMapRuntimeInfrastructure.h`
 - `MazeMap/MazeMap/MazeMapRuntimeInfrastructure.cpp`
+- `MazeMap/MazeMap/MazeMapRuntimeCore.h`
 - `AGENTS.md`
 - `project_vocabulary.md`
 - `execution_model_guide.md`
+
+## Dirty Tree Note
+
+The current worktree intentionally includes active edits in:
+
+- `AGENTS.md`
+- `project_vocabulary.md`
+- `execution_model_guide.md`
+- `codex_cleanup_execution_model_20260417.md`
+- `MazeMap/MazeMap/ManeuverExecutor.h`
+- `MazeMap/MazeMap/ManeuverExecutor.cpp`
+- `MazeMap/MazeMap/WallTouchRoutine.h`
+- `MazeMap/MazeMap/WallTouchRoutine.cpp`
+- `MazeMap/MazeMap/MissionModeController.cpp`
+- `MazeMap/MazeMap/MazeRunningAuditController.cpp`
+
+There may also be unrelated dirty files elsewhere in the workspace. Re-audit before broadening the task.
 
 ## Verification Rules For The Next Pass
 
@@ -174,4 +162,4 @@ The next cut should still be the shared wall-touch / startup wall-calibration ex
 
 ## Best Short Instruction For The Next Agent
 
-Continue from the verified callback-driven baseline, treat `AGENTS.md`, `project_vocabulary.md`, and `execution_model_guide.md` as authoritative for every individual step, and extract the shared wall-touch / startup wall-calibration behavior without inventing a second execution model or implying that routines span phases.
+Continue from the verified callback-driven baseline, keep the corrected session/pause rules intact, and converge `WallTouchRoutine` so its public entrypoint takes maze-grid intent only, captures launch baseline on the first routine-owned tick, and remains the shared owner of completed wall-touch result state without sink-based plumbing.

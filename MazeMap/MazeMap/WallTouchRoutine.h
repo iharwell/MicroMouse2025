@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CellCoordinates.h"
+#include "Direction.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeInfrastructure.h"
@@ -39,25 +41,20 @@ namespace MazeMap::App::Internal
 
         bool Active() const noexcept;
         bool ActivePhaseFaulted() const noexcept;
+        const Runtime::WallTouchExecutionResult& LastResult() const noexcept;
 
         bool Begin(
-            float targetYawRad,
-            float minLatchTravelM,
-            float maxApproachTravelM,
+            const MazeMap::CellCoordinates& wallCell,
+            MazeMap::Direction wallDirection,
             bool allowPassThroughNoWall,
-            const Runtime::WallTouchPoseResetTarget* poseResetTarget,
-            Runtime::WallTouchExecutionResult* resultSink,
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::TickServices& services,
             const Hooks& hooks = Hooks{});
 
-        bool BeginSession(
-            float targetYawRad,
-            float minLatchTravelM,
-            float maxApproachTravelM,
+        bool PrepareInitialCallbacks(
+            const MazeMap::CellCoordinates& wallCell,
+            MazeMap::Direction wallDirection,
             bool allowPassThroughNoWall,
-            const Runtime::WallTouchPoseResetTarget* poseResetTarget,
-            Runtime::WallTouchExecutionResult* resultSink,
             const LoopController::ModeCallbacks& returnCallbacks,
             LoopController::ModeCallbacks& initialCallbacks,
             const Hooks& hooks = Hooks{});
@@ -90,14 +87,13 @@ namespace MazeMap::App::Internal
             LoopController::TickServices& services);
 
         bool PrepareWallTouchPhase(
-            float targetYawRad,
-            float minLatchTravelM,
-            float maxApproachTravelM,
+            const MazeMap::CellCoordinates& wallCell,
+            MazeMap::Direction wallDirection,
             bool allowPassThroughNoWall,
-            const Runtime::WallTouchPoseResetTarget* poseResetTarget,
-            Runtime::WallTouchExecutionResult* resultSink,
-            const LoopController::ModeCallbacks& returnCallbacks,
             const Hooks& hooks) noexcept;
+        bool CaptureLaunchBaseline(
+            Runtime::WallTouchLoopState& wallTouch,
+            const LoopController::ModeState& state) noexcept;
 
         bool CanBeginPhase() const noexcept;
         bool BuildInitialCallbacks(LoopController::ModeCallbacks& callbacks) const noexcept;
@@ -153,7 +149,7 @@ namespace MazeMap::App::Internal
         void* _activeState{};
         ActivePhaseTickFn _activePhaseTick{};
         bool _activePhaseFaulted{};
-        Runtime::WallTouchExecutionResult* _resultSink{};
+        Runtime::WallTouchExecutionResult _lastResult{};
         LoopController::ModeCallbacks _returnCallbacks{};
         Hooks _hooks{};
         Runtime::WallTouchLoopState _wallTouchState{};

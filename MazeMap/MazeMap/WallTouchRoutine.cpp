@@ -16,6 +16,56 @@ namespace MazeMap::App::Internal
         constexpr MazeMap::CommandPD kWallTouchTrackingCommandPd =
             MazeMap::CommandPD::StateWheelOmegaPD |
             MazeMap::CommandPD::IMUYaw;
+
+        constexpr float AverageDistanceMeters(const DriveTelemetry& telemetry) noexcept
+        {
+            return 0.5f * (telemetry.leftDistanceM + telemetry.rightDistanceM);
+        }
+
+        bool TryComputeWallTouchLaunchPose(
+            const PoseEstimate& pose,
+            const MazeMap::CellCoordinates& wallCell,
+            const MazeMap::Direction wallDirection,
+            CalibrationWall& calibrationWall,
+            float& targetCoordinateM,
+            float& expectedTravelM,
+            float& poseResetXMeters,
+            float& poseResetYMeters) noexcept
+        {
+            targetCoordinateM = 0.0f;
+            expectedTravelM = 0.0f;
+            poseResetXMeters = pose.xMeters;
+            poseResetYMeters = pose.yMeters;
+            if (!TryComputeWallTouchTargetCoordinateForCellWall(
+                    wallCell,
+                    wallDirection,
+                    targetCoordinateM,
+                    calibrationWall))
+            {
+                return false;
+            }
+
+            switch (calibrationWall)
+            {
+            case CalibrationWall::West:
+            case CalibrationWall::East:
+                poseResetXMeters = targetCoordinateM;
+                expectedTravelM = std::fabs(targetCoordinateM - pose.xMeters);
+                break;
+            case CalibrationWall::South:
+            case CalibrationWall::North:
+                poseResetYMeters = targetCoordinateM;
+                expectedTravelM = std::fabs(targetCoordinateM - pose.yMeters);
+                break;
+            default:
+                return false;
+            }
+
+            return std::isfinite(targetCoordinateM) &&
+                std::isfinite(expectedTravelM) &&
+                std::isfinite(poseResetXMeters) &&
+                std::isfinite(poseResetYMeters);
+        }
     }
 
     WallTouchRoutine::WallTouchRoutine(DriveBase& drive) noexcept
@@ -49,54 +99,54 @@ namespace MazeMap::App::Internal
         return _activePhaseFaulted;
     }
 
+    const Runtime::WallTouchExecutionResult& WallTouchRoutine::LastResult() const noexcept
+    {
+        return _lastResult;
+    }
+
     bool WallTouchRoutine::Begin(
-        const float targetYawRad,
-        const float minLatchTravelM,
-        const float maxApproachTravelM,
+        const MazeMap::CellCoordinates& wallCell,
+        const MazeMap::Direction wallDirection,
         const bool allowPassThroughNoWall,
-        const Runtime::WallTouchPoseResetTarget* const poseResetTarget,
-        Runtime::WallTouchExecutionResult* const resultSink,
         const LoopController::ModeCallbacks& returnCallbacks,
         LoopController::TickServices& services,
         const Hooks& hooks)
     {
         LoopController::ModeCallbacks initialCallbacks{};
-        return
-            BeginSession(
-                targetYawRad,
-                minLatchTravelM,
-                maxApproachTravelM,
+        if (!PrepareWallTouchPhase(
+                wallCell,
+                wallDirection,
                 allowPassThroughNoWall,
-                poseResetTarget,
-                resultSink,
-                returnCallbacks,
-                initialCallbacks,
-                hooks) &&
-            (services.SetNextModeWorkCallbacks(initialCallbacks), true);
+                hooks) ||
+            !BuildInitialCallbacks(initialCallbacks))
+        {
+            return false;
+        }
+
+        services.SetNextModeWorkCallbacks(initialCallbacks);
+        _returnCallbacks = returnCallbacks;
+        return true;
     }
 
-    bool WallTouchRoutine::BeginSession(
-        const float targetYawRad,
-        const float minLatchTravelM,
-        const float maxApproachTravelM,
+    bool WallTouchRoutine::PrepareInitialCallbacks(
+        const MazeMap::CellCoordinates& wallCell,
+        const MazeMap::Direction wallDirection,
         const bool allowPassThroughNoWall,
-        const Runtime::WallTouchPoseResetTarget* const poseResetTarget,
-        Runtime::WallTouchExecutionResult* const resultSink,
         const LoopController::ModeCallbacks& returnCallbacks,
         LoopController::ModeCallbacks& initialCallbacks,
         const Hooks& hooks)
     {
-        return
-            PrepareWallTouchPhase(
-                targetYawRad,
-                minLatchTravelM,
-                maxApproachTravelM,
+        if (!PrepareWallTouchPhase(
+                wallCell,
+                wallDirection,
                 allowPassThroughNoWall,
-                poseResetTarget,
-                resultSink,
-                returnCallbacks,
-                hooks) &&
-            BuildInitialCallbacks(initialCallbacks);
+                hooks))
+        {
+            return false;
+        }
+
+        _returnCallbacks = returnCallbacks;
+        return BuildInitialCallbacks(initialCallbacks);
     }
 
     void WallTouchRoutine::CancelActiveRoutine() noexcept
@@ -106,63 +156,113 @@ namespace MazeMap::App::Internal
     }
 
     bool WallTouchRoutine::PrepareWallTouchPhase(
-        const float targetYawRad,
-        const float minLatchTravelM,
-        const float maxApproachTravelM,
+        const MazeMap::CellCoordinates& wallCell,
+        const MazeMap::Direction wallDirection,
         const bool allowPassThroughNoWall,
-        const Runtime::WallTouchPoseResetTarget* const poseResetTarget,
-        Runtime::WallTouchExecutionResult* const resultSink,
-        const LoopController::ModeCallbacks& returnCallbacks,
         const Hooks& hooks) noexcept
     {
-        if (!CanBeginPhase())
+        float ignoredTargetCoordinateM = 0.0f;
+        CalibrationWall ignoredCalibrationWall = CalibrationWall::West;
+        if (!CanBeginPhase() ||
+            !TryComputeWallTouchTargetCoordinateForCellWall(
+                wallCell,
+                wallDirection,
+                ignoredTargetCoordinateM,
+                ignoredCalibrationWall))
         {
             return false;
         }
 
         _activePhaseFaulted = false;
-        _resultSink = resultSink;
-        if (_resultSink != nullptr)
-        {
-            *_resultSink = Runtime::WallTouchExecutionResult{};
-        }
-
-        _returnCallbacks = returnCallbacks;
+        _lastResult = Runtime::WallTouchExecutionResult{};
         _hooks = hooks;
         _wallTouchState = Runtime::WallTouchLoopState{};
         _settleState = SettleRoutineState{};
-        _wallTouchState.targetYawRad = targetYawRad;
-        _wallTouchState.minLatchTravelM = minLatchTravelM;
-        _wallTouchState.maxApproachTravelM = maxApproachTravelM;
+        _wallTouchState.wallCell = wallCell;
+        _wallTouchState.wallDirection = wallDirection;
         _wallTouchState.allowPassThroughNoWall = allowPassThroughNoWall;
-        _wallTouchState.poseResetTarget = poseResetTarget;
-        _wallTouchState.startDistanceM = _drive->GetAverageDistanceMeters();
-        _wallTouchState.touchStartMs = millis();
-        _wallTouchState.stateStartMs = _wallTouchState.touchStartMs;
-        _wallTouchState.lastMotionMs = _wallTouchState.touchStartMs;
-        _wallTouchState.lastMotionTelemetry = _drive->GetTelemetry();
-        _wallTouchState.approachDriveCommand = Config::kWallTouchDriveCommand;
-        _wallTouchState.ditherTurnFraction = Config::kWallTouchSeatWiggleTurnFraction;
-        _wallTouchState.previousCycleFrontSkewMagnitudeM = std::numeric_limits<float>::infinity();
-        _wallTouchState.currentCycleStartYawRad = _drive->GetPose().yawRad;
-        _wallTouchState.runtimeState = Runtime::WallTouchState::ContactSeek;
         ActivatePhase(&_wallTouchState, &WallTouchRoutine::WallTouchRoutineTick);
+        return true;
+    }
+
+    bool WallTouchRoutine::CaptureLaunchBaseline(
+        Runtime::WallTouchLoopState& wallTouch,
+        const LoopController::ModeState& state) noexcept
+    {
+        if ((_drive == nullptr) || wallTouch.launchBaselineCaptured)
+        {
+            return _drive != nullptr;
+        }
+
+        const PoseEstimate& pose = state.estimate;
+        float poseResetXMeters = pose.xMeters;
+        float poseResetYMeters = pose.yMeters;
+        if (!TryComputeWallTouchLaunchPose(
+                pose,
+                wallTouch.wallCell,
+                wallTouch.wallDirection,
+                wallTouch.calibrationWall,
+                wallTouch.targetCoordinateM,
+                wallTouch.expectedTravelM,
+                poseResetXMeters,
+                poseResetYMeters))
+        {
+            return false;
+        }
+
+        wallTouch.targetYawRad = DirectionToYawRad(wallTouch.wallDirection);
+        wallTouch.minLatchTravelM = MazeMap::ComputeWallTouchMinimumLatchTravelM(
+            wallTouch.expectedTravelM,
+            Config::kWallTouchMinApproachDistanceM,
+            Config::kWallTouchExpectedTravelSlackM);
+        wallTouch.maxApproachTravelM = MazeMap::ComputeWallTouchMaximumApproachDistanceM(
+            wallTouch.expectedTravelM,
+            Config::kWallTouchBaseMaxApproachDistanceM,
+            Config::kWallTouchExpectedTravelSlackM);
+        wallTouch.poseResetXMeters = poseResetXMeters;
+        wallTouch.poseResetYMeters = poseResetYMeters;
+        wallTouch.poseResetYawRad = wallTouch.targetYawRad;
+        wallTouch.poseResetEnabled = true;
+        wallTouch.startDistanceM = AverageDistanceMeters(state.driveTelemetry);
+        wallTouch.touchStartMs = millis();
+        wallTouch.stateStartMs = wallTouch.touchStartMs;
+        wallTouch.lastMotionMs = wallTouch.touchStartMs;
+        wallTouch.lastMotionTelemetry = state.driveTelemetry;
+        wallTouch.approachDriveCommand = Config::kWallTouchDriveCommand;
+        wallTouch.ditherTurnFraction = Config::kWallTouchSeatWiggleTurnFraction;
+        wallTouch.previousCycleFrontSkewMagnitudeM = std::numeric_limits<float>::infinity();
+        wallTouch.currentCycleStartYawRad = pose.yawRad;
+        wallTouch.runtimeState = Runtime::WallTouchState::ContactSeek;
+        wallTouch.launchBaselineCaptured = true;
 
         if (_hooks.onTraceLine != nullptr)
         {
-            char line[192] = {};
+            char line[256] = {};
+            snprintf(
+                line,
+                sizeof(line),
+                "startup_cal_touch_plan:wall=%s,expected=%.4f,min_latch=%.4f,max_travel=%.4f,target_yaw_deg=%.2f",
+                CalibrationWallName(wallTouch.calibrationWall),
+                wallTouch.expectedTravelM,
+                wallTouch.minLatchTravelM,
+                wallTouch.maxApproachTravelM,
+                wallTouch.targetYawRad * RAD_TO_DEG_F);
+            _hooks.onTraceLine(_hooks.context, line);
+
             snprintf(
                 line,
                 sizeof(line),
                 "startup_cal_touch:state,from=%s,to=%s,elapsed_ms=%lu,travel=%.4f",
                 Runtime::WallTouchStateName(Runtime::WallTouchState::EntryConditioning),
-                Runtime::WallTouchStateName(_wallTouchState.runtimeState),
+                Runtime::WallTouchStateName(wallTouch.runtimeState),
                 0UL,
                 0.0f);
             _hooks.onTraceLine(_hooks.context, line);
         }
 
-        return true;
+        return std::isfinite(wallTouch.targetYawRad) &&
+            std::isfinite(wallTouch.minLatchTravelM) &&
+            std::isfinite(wallTouch.maxApproachTravelM);
     }
 
     bool WallTouchRoutine::CanBeginPhase() const noexcept
@@ -214,7 +314,6 @@ namespace MazeMap::App::Internal
     {
         _activeState = nullptr;
         _activePhaseTick = nullptr;
-        _resultSink = nullptr;
         _returnCallbacks = LoopController::ModeCallbacks{};
         _hooks = Hooks{};
         _wallTouchState = Runtime::WallTouchLoopState{};
@@ -230,10 +329,7 @@ namespace MazeMap::App::Internal
 
     void WallTouchRoutine::PersistResult() noexcept
     {
-        if (_resultSink != nullptr)
-        {
-            *_resultSink = _wallTouchState.result;
-        }
+        _lastResult = _wallTouchState.result;
     }
 
     bool WallTouchRoutine::IsDriveMotionSettled(
@@ -257,6 +353,25 @@ namespace MazeMap::App::Internal
         LoopController::TickServices& services) noexcept
     {
         const LoopController::ModeCallbacks callbacks = _returnCallbacks;
+        if ((_hooks.onTraceLine != nullptr) &&
+            _wallTouchState.launchBaselineCaptured &&
+            (_wallTouchState.result.outcome == WallTouchOutcome::SeatedContact))
+        {
+            const DriveTelemetry telemetry = _drive->GetTelemetry();
+            char line[256] = {};
+            snprintf(
+                line,
+                sizeof(line),
+                "startup_cal_touch:wall=%s,travel=%.4f,expected=%.4f,min_latch=%.4f,final_yaw_err_deg=%.2f,left_v=%.4f,right_v=%.4f",
+                CalibrationWallName(_wallTouchState.calibrationWall),
+                _wallTouchState.result.seatedTravelM,
+                _wallTouchState.expectedTravelM,
+                _wallTouchState.minLatchTravelM,
+                _wallTouchState.result.seatedYawErrorRad * RAD_TO_DEG_F,
+                telemetry.leftVelocityMps,
+                telemetry.rightVelocityMps);
+            _hooks.onTraceLine(_hooks.context, line);
+        }
         PersistResult();
         ResetActiveRoutine();
         if (callbacks.onModeWork != nullptr)
@@ -373,6 +488,10 @@ namespace MazeMap::App::Internal
     {
         (void)loopEndTimeUs;
         auto& wallTouch = *static_cast<Runtime::WallTouchLoopState*>(rawState);
+        if (!CaptureLaunchBaseline(wallTouch, state))
+        {
+            return FaultPhase(services, "WallTouchRoutine launch baseline is invalid");
+        }
         if (!InvokeSampleHook(false, state))
         {
             return FaultPhase(services, "WallTouchRoutine sample hook failed");
