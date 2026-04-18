@@ -99,6 +99,9 @@
     <ClInclude Include="CircularBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CommandPD.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="CompactPath.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -134,6 +137,9 @@
     </ClInclude>
     <ClInclude Include="DirectionalPathFinder.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Drive.h">
+      <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="DriveBase.h">
       <Filter>Header Files</Filter>
@@ -433,6 +439,9 @@
     </ClCompile>
     <ClCompile Include="DirectionalPathFinder.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Drive.cpp">
+      <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="DriveBase.cpp">
       <Filter>Source Files</Filter>

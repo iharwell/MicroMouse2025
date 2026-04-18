@@ -2,6 +2,7 @@
 #include "MazeMapSharedRuntime.h"
 #include "TeensyLayout.h"
 #include "MazeMapApplicationPrivate.h"
+#include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
 #include "ManeuverExecutor.h"
@@ -462,6 +463,7 @@ namespace MazeMap::App::Internal
         MazeMap::WallBeliefMap wallBeliefMap;
         MazeMap::PlantModel plantModel;
         DriveBase drive;
+        MazeMap::App::Internal::Drive driveService;
         ManeuverExecutor maneuverExecutor;
         LoopController controlLoop;
         RuntimeSensorSuite sensors;
@@ -485,6 +487,7 @@ namespace MazeMap::App::Internal
     SharedRobotRuntime::SharedRobotRuntime()
         : _impl(std::make_unique<Implementation>())
     {
+        _impl->driveService.AttachRuntime(*this);
         _impl->maneuverExecutor.AttachRuntime(*this);
         _impl->controlLoop.AttachRuntime(*this);
     }
@@ -1105,6 +1108,11 @@ namespace MazeMap::App::Internal
     DriveBase& SharedRobotRuntime::Drive() noexcept
     {
         return _impl->drive;
+    }
+
+    MazeMap::App::Internal::Drive& SharedRobotRuntime::DriveService() noexcept
+    {
+        return _impl->driveService;
     }
 
     ManeuverExecutor& SharedRobotRuntime::ManeuverExecutorService() noexcept

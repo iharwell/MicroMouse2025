@@ -2,10 +2,10 @@
 #include "MazeRunningAuditController.h"
 
 #include "MazeMapApplicationPrivate.h"
+#include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
 #include "AuxMeasurementModeSupport.h"
-#include "ManeuverExecutor.h"
 #include "ManeuverInstance.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeSignalHelpers.h"
@@ -229,8 +229,35 @@ private:
         const LoopController::ModeState& state,
         LoopController::TickServices& services);
 
+    struct SharedDriveLoopState final
+    {
+        void* nextState{};
+        ActiveLoopTickFn nextTickFn{};
+        bool stationarySample{};
+    };
+
+    enum class QueuedManeuverPhase : std::uint8_t
+    {
+        Dispatch,
+        ActiveEntry,
+        CompletionHold
+    };
+
+    struct QueuedManeuverLoopState final
+    {
+        MazeMap::ManeuverQueue* queue{};
+        MotionLimits limits{};
+        std::uint16_t nextIndex{};
+        std::uint16_t activeIndex{};
+        bool snapToExpectedLocation{};
+        bool currentEntryNeedsCompletionHold{};
+        QueuedManeuverPhase phase{ QueuedManeuverPhase::Dispatch };
+    };
+
     void* _activeLoopState{};
     ActiveLoopTickFn _activeLoopTickFn{};
+    SharedDriveLoopState _sharedDriveLoopState{};
+    QueuedManeuverLoopState _queuedManeuverLoopState{};
 
     bool BeginTelemetryLog(const char* fileName, const char* modeName)
     {
@@ -1172,7 +1199,7 @@ private:
         const MotionLimits calibrationLimits = PositionAccuracyAuditTurnLimits();
         const MotionLimits centeringLimits = StartupWallCalibrationCenteringLimits();
         const float turnCruiseSpeedMps =
-            _runtime.ManeuverExecutorService().ComputeManeuverSpeedLimit(code, cornerLimits);
+            (std::min)(cornerLimits.maxSpeedMps, turnManeuver.GetSpeedLimit(_speedVehicle));
         if (!(turnCruiseSpeedMps > 0.0f))
         {
             return Fail("Position audit smooth turn speed is invalid");
@@ -1397,12 +1424,6 @@ private:
             _currentCell = static_cast<MazeMap::CellCoordinates>(_currentDirectionalLocation.GetLocation());
             MazeMap::ManeuverQueue queue(reversePath, _currentDirectionalLocation);
             queue.ComputeSpeeds(_speedVehicle, 0.0f, 0.0f);
-            _runtime.ManeuverExecutorService().ApplyAsymmetricQueueLimits(
-                queue,
-                cornerLimits,
-                _speedVehicle,
-                0.0f,
-                0.0f);
             ok = ExecuteQueuedManeuvers(queue, cornerLimits, false);
         }
         while (false);
@@ -1675,7 +1696,7 @@ private:
     {
         MazeMap::App::Internal::WallTouchRoutine::Hooks hooks{};
         hooks.context = this;
-        hooks.onSample = &Implementation::ManeuverExecutorSampleHook;
+        hooks.onSample = &Implementation::WriteTelemetrySample;
         hooks.onTraceLine = [](void* context, const char* line) noexcept
         {
             auto* const self = static_cast<Implementation*>(context);
@@ -2315,12 +2336,9 @@ private:
         const float remainingRad = _frontCalibrationTargetSweepAngleRad - _frontCalibrationAccumulatedSweepAngleRad;
         if (MazeMap::IsInPlaceTurnComplete(remainingRad, pose.angularSpeedRadps, _frontCalibrationSweepTurnProfile))
         {
-            if (!_runtime.ManeuverExecutorService().BeginHoldRoutine(
-                    Config::kStartupWallCalibrationSettleMs,
-                    true,
-                    PrepareLoopContinuation(nullptr, &Implementation::SharedRoutineCompleteTick),
-                    services,
-                    BuildManeuverExecutorHooks(false)))
+            _runtime.DriveService().Cancel();
+            _runtime.DriveService().StartHold(Config::kStartupWallCalibrationSettleMs, true);
+            if (!BeginSharedDrivePrimitive(nullptr, &Implementation::SharedRoutineCompleteTick, true, services))
             {
                 return FaultLoopPhase(services, "Failed to begin startup front-sweep settle hold");
             }
@@ -3144,7 +3162,7 @@ private:
         {
             const bool stationary =
                 self->_activeLoopTickFn == &Implementation::StartupStationaryHoldLoopTick;
-            if (!Implementation::ManeuverExecutorSampleHook(self, stationary, state))
+            if (!Implementation::WriteTelemetrySample(self, stationary, state))
             {
                 services.Fault("Failed to write maneuver test sample");
                 return LoopController::ControlVector::Brake;
@@ -3174,7 +3192,7 @@ private:
         _currentCell = static_cast<MazeMap::CellCoordinates>(location.GetLocation());
     }
 
-    static bool ManeuverExecutorSampleHook(
+    static bool WriteTelemetrySample(
         void* context,
         bool stationary,
         const LoopController::ModeState& state)
@@ -3200,7 +3218,7 @@ private:
         return self->Fail("Failed to write maneuver test sample");
     }
 
-    static bool ManeuverExecutorQueueEntryBeginHook(
+    static bool QueueEntryBeginTrace(
         void* context,
         std::uint16_t index,
         const MazeMap::ManeuverInstance& entry,
@@ -3231,7 +3249,7 @@ private:
         return true;
     }
 
-    static bool ManeuverExecutorQueueEntryCompleteHook(
+    static bool QueueEntryCompleteTrace(
         void* context,
         std::uint16_t index,
         const MazeMap::ManeuverInstance& entry,
@@ -3259,17 +3277,158 @@ private:
         return true;
     }
 
-    ManeuverExecutor::Hooks BuildManeuverExecutorHooks(const bool includeQueueHooks) noexcept
+    bool QueueEntryNeedsCompletionHold(const MazeMap::ManeuverInstance& entry) const noexcept
     {
-        ManeuverExecutor::Hooks hooks{};
-        hooks.context = this;
-        hooks.onSample = &Implementation::ManeuverExecutorSampleHook;
-        if (includeQueueHooks)
+        const float distanceM = entry.GetTravelDistanceMeters(Config::kCellSizeM);
+        if (distanceM <= Config::kDistanceToleranceM)
         {
-            hooks.onQueueEntryBegin = &Implementation::ManeuverExecutorQueueEntryBeginHook;
-            hooks.onQueueEntryComplete = &Implementation::ManeuverExecutorQueueEntryCompleteHook;
+            return true;
         }
-        return hooks;
+
+        return !entry.SupportsPointTracking() && (entry.getExitSpeed() <= 0.05f);
+    }
+
+    bool StartQueuedManeuverEntry(
+        QueuedManeuverLoopState& queueState,
+        const MazeMap::ManeuverInstance& entry)
+    {
+        _runtime.DriveService().Cancel();
+        ConfigureSharedDrive(queueState.limits, true);
+        _runtime.DriveService().StartManeuver(entry);
+        return _runtime.DriveService().Active();
+    }
+
+    LoopController::ControlVector QueuedManeuverLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+
+        auto* const queueState = static_cast<QueuedManeuverLoopState*>(rawState);
+        if ((queueState == nullptr) || (queueState->queue == nullptr))
+        {
+            return FaultLoopPhase(services, "Maze-running queued maneuver state was not initialized");
+        }
+
+        switch (queueState->phase)
+        {
+        case QueuedManeuverPhase::Dispatch:
+        {
+            if (queueState->nextIndex >= queueState->queue->size())
+            {
+                if (_queuedManeuverCompletionHoldPhaseName != nullptr)
+                {
+                    TransitionLoopPhase(nullptr, &Implementation::QueuedManeuverFinalHoldTick, services);
+                    return LoopController::ControlVector::Brake;
+                }
+
+                return EndLoopPhase(services);
+            }
+
+            queueState->activeIndex = queueState->nextIndex;
+            const MazeMap::ManeuverInstance& entry = (*queueState->queue)[queueState->activeIndex];
+            queueState->currentEntryNeedsCompletionHold = QueueEntryNeedsCompletionHold(entry);
+            _currentDirectionalLocation = entry.getStart();
+            _currentDirection = _currentDirectionalLocation.GetDirection();
+            _currentCell = static_cast<MazeMap::CellCoordinates>(_currentDirectionalLocation.GetLocation());
+            if (!QueueEntryBeginTrace(
+                    this,
+                    queueState->activeIndex,
+                    entry,
+                    _currentDirectionalLocation))
+            {
+                return FaultLoopPhase(services, "Maze-running queued maneuver begin hook failed");
+            }
+            if (!StartQueuedManeuverEntry(*queueState, entry))
+            {
+                return FaultLoopPhase(services, "Failed to arm queued maneuver drive primitive");
+            }
+
+            queueState->phase = QueuedManeuverPhase::ActiveEntry;
+            return LoopController::ControlVector::Brake;
+        }
+
+        case QueuedManeuverPhase::ActiveEntry:
+        {
+            if (!Implementation::WriteTelemetrySample(this, false, state))
+            {
+                return FaultLoopPhase(services, "Maze-running queued maneuver sample hook failed");
+            }
+
+            bool done = false;
+            const LoopController::ControlVector control = _runtime.DriveService().GetNextControls(done);
+            if (_faulted)
+            {
+                return LoopController::ControlVector::Brake;
+            }
+            if (!done)
+            {
+                return control;
+            }
+
+            const MazeMap::ManeuverInstance& entry = (*queueState->queue)[queueState->activeIndex];
+            _currentDirectionalLocation = entry.getEnd();
+            _currentDirection = _currentDirectionalLocation.GetDirection();
+            _currentCell = static_cast<MazeMap::CellCoordinates>(_currentDirectionalLocation.GetLocation());
+            if (!QueueEntryCompleteTrace(
+                    this,
+                    queueState->activeIndex,
+                    entry,
+                    _currentDirectionalLocation))
+            {
+                return FaultLoopPhase(services, "Maze-running queued maneuver completion hook failed");
+            }
+
+            if (queueState->snapToExpectedLocation)
+            {
+                _drive.SetStartPoint(_currentDirectionalLocation);
+            }
+
+            ++queueState->nextIndex;
+            if (queueState->currentEntryNeedsCompletionHold)
+            {
+                _runtime.DriveService().Cancel();
+                _runtime.DriveService().StartHold(Config::kMotionSettleHoldMs, true);
+                if (!_runtime.DriveService().Active())
+                {
+                    return FaultLoopPhase(services, "Maze-running queued maneuver completion settle could not start");
+                }
+
+                queueState->phase = QueuedManeuverPhase::CompletionHold;
+                return LoopController::ControlVector::Brake;
+            }
+
+            queueState->phase = QueuedManeuverPhase::Dispatch;
+            return LoopController::ControlVector::Brake;
+        }
+
+        case QueuedManeuverPhase::CompletionHold:
+        {
+            if (!Implementation::WriteTelemetrySample(this, true, state))
+            {
+                return FaultLoopPhase(services, "Maze-running queued maneuver sample hook failed");
+            }
+
+            bool done = false;
+            const LoopController::ControlVector control = _runtime.DriveService().GetNextControls(done);
+            if (_faulted)
+            {
+                return LoopController::ControlVector::Brake;
+            }
+            if (!done)
+            {
+                return control;
+            }
+
+            queueState->phase = QueuedManeuverPhase::Dispatch;
+            return LoopController::ControlVector::Brake;
+        }
+
+        default:
+            return FaultLoopPhase(services, "Maze-running queued maneuver phase was invalid");
+        }
     }
 
     LoopController::ControlVector QueuedManeuverFinalHoldTick(
@@ -3287,12 +3446,9 @@ private:
             return FaultLoopPhase(services, "Failed to begin queued maneuver completion hold phase");
         }
 
-        if (!_runtime.ManeuverExecutorService().BeginHoldRoutine(
-                50U,
-                true,
-                PrepareLoopContinuation(nullptr, &Implementation::SharedRoutineCompleteTick),
-                services,
-                BuildManeuverExecutorHooks(false)))
+        _runtime.DriveService().Cancel();
+        _runtime.DriveService().StartHold(50U, true);
+        if (!BeginSharedDrivePrimitive(nullptr, &Implementation::SharedRoutineCompleteTick, true, services))
         {
             return FaultLoopPhase(services, "Failed to begin queued maneuver completion hold");
         }
@@ -3309,6 +3465,90 @@ private:
         (void)loopEndTimeUs;
         (void)state;
         return EndLoopPhase(services);
+    }
+
+    LoopController::ControlVector SharedDriveLoopTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)loopEndTimeUs;
+        auto* const driveState = static_cast<SharedDriveLoopState*>(rawState);
+        if (driveState == nullptr)
+        {
+            return FaultLoopPhase(services, "Maze-running shared drive loop state was not initialized");
+        }
+
+        if (!Implementation::WriteTelemetrySample(this, driveState->stationarySample, state))
+        {
+            return FaultLoopPhase(services, "Maze-running shared drive sample hook failed");
+        }
+
+        bool done = false;
+        const LoopController::ControlVector control = _runtime.DriveService().GetNextControls(done);
+        if (_faulted)
+        {
+            return LoopController::ControlVector::Brake;
+        }
+        if (!done)
+        {
+            return control;
+        }
+
+        if (driveState->nextTickFn != nullptr)
+        {
+            TransitionLoopPhase(driveState->nextState, driveState->nextTickFn, services);
+            return LoopController::ControlVector::Brake;
+        }
+
+        return EndLoopPhase(services);
+    }
+
+    void ConfigureSharedDrive(const MotionLimits& limits, const bool mazeMode)
+    {
+        auto& driveService = _runtime.DriveService();
+        driveService.Cancel();
+        driveService.SetLimits(limits);
+        driveService.SetOperationMode(
+            mazeMode ?
+                Drive::OperationMode::Maze :
+                Drive::OperationMode::OpenFloor);
+    }
+
+    bool BeginSharedDrivePrimitive(
+        void* nextState,
+        const ActiveLoopTickFn nextTickFn,
+        const bool stationarySample,
+        LoopController::TickServices& services) noexcept
+    {
+        if (!_runtime.DriveService().Active())
+        {
+            return false;
+        }
+
+        _sharedDriveLoopState = { nextState, nextTickFn, stationarySample };
+        services.SetNextModeWorkCallbacks(
+            PrepareLoopContinuation(&_sharedDriveLoopState, &Implementation::SharedDriveLoopTick));
+        return true;
+    }
+
+    bool RunSharedDriveSession(const bool stationarySample)
+    {
+        if (!_runtime.DriveService().Active())
+        {
+            return false;
+        }
+
+        _sharedDriveLoopState = { nullptr, nullptr, stationarySample };
+        const LoopController::ModeCallbacks initialCallbacks =
+            PrepareLoopContinuation(&_sharedDriveLoopState, &Implementation::SharedDriveLoopTick);
+        if (!RunLoopSession(initialCallbacks))
+        {
+            _runtime.DriveService().Cancel();
+            return false;
+        }
+        return true;
     }
 
     void TransitionLoopPhase(
@@ -3405,18 +3645,14 @@ private:
             return false;
         }
 
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().PrepareHoldRoutineCallbacks(
-                durationMs,
-                true,
-                initialCallbacks,
-                BuildManeuverExecutorHooks(false)))
+        _runtime.DriveService().Cancel();
+        _runtime.DriveService().StartHold(durationMs, true);
+        if (!_runtime.DriveService().Active())
         {
             return Fail("Failed to begin shared hold routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunSharedDriveSession(true))
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;
         }
         return true;
@@ -3429,19 +3665,14 @@ private:
             timeoutMessage = "Drive settle timed out";
         }
 
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().PrepareBrakedSettleRoutineCallbacks(
-                timeoutMessage,
-                stationaryHoldMs,
-                timeoutMs,
-                initialCallbacks,
-                BuildManeuverExecutorHooks(false)))
+        _runtime.DriveService().Cancel();
+        _runtime.DriveService().StartHold(stationaryHoldMs, true);
+        if (!_runtime.DriveService().Active())
         {
             return Fail("Failed to begin shared braked-settle routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunSharedDriveSession(true))
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;
         }
         return true;
@@ -3527,20 +3758,19 @@ private:
             return true;
         }
 
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().PrepareReverseStraightRoutineCallbacks(
-                distanceM,
-                limits,
-                initialCallbacks,
-                BuildManeuverExecutorHooks(false),
-                targetHeadingOverride,
-                targetPositionOverride))
+        ConfigureSharedDrive(limits, false);
+        _runtime.DriveService().StartStraight(
+            distanceM,
+            -limits.maxSpeedMps,
+            0.0f,
+            targetHeadingOverride,
+            targetPositionOverride);
+        if (!_runtime.DriveService().Active())
         {
             return Fail("Failed to begin shared reverse-straight routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunSharedDriveSession(false))
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;
         }
         return true;
@@ -3566,24 +3796,19 @@ private:
             return false;
         }
 
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().ProceedToManeuverExecutionRoutine(
-                queue,
-                limits,
-                snapToExpectedLocation,
-                _currentDirectionalLocation,
-                PrepareLoopContinuation(nullptr, &Implementation::QueuedManeuverFinalHoldTick),
-                initialCallbacks,
-                BuildManeuverExecutorHooks(true)))
-        {
-            _queuedManeuverCompletionHoldPhaseName = nullptr;
-            return Fail("Failed to launch queued maneuver routine");
-        }
-        const bool sessionRan = RunLoopSession(initialCallbacks);
+        ConfigureSharedDrive(limits, true);
+        _queuedManeuverLoopState = {};
+        _queuedManeuverLoopState.queue = &queue;
+        _queuedManeuverLoopState.limits = limits;
+        _queuedManeuverLoopState.snapToExpectedLocation = snapToExpectedLocation;
+
+        const bool sessionRan =
+            RunLoopSession(&_queuedManeuverLoopState, &Implementation::QueuedManeuverLoopTick);
         _queuedManeuverCompletionHoldPhaseName = nullptr;
+        _queuedManeuverLoopState = {};
         if (!sessionRan)
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
+            _runtime.DriveService().Cancel();
             return false;
         }
         return true;
@@ -3608,25 +3833,23 @@ private:
             return true;
         }
 
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().PrepareStraightRoutineCallbacks(
-                distanceM,
-                entrySpeed,
-                cruiseSpeed,
-                exitSpeed,
-                limits,
-                useWallCentering,
-                useWallCentering ? &_currentDirectionalLocation : nullptr,
-                initialCallbacks,
-                BuildManeuverExecutorHooks(false),
-                targetHeadingOverride,
-                targetPositionOverride))
+        ConfigureSharedDrive(limits, useWallCentering);
+        const float armedCruiseSpeed =
+            (std::isfinite(cruiseSpeed) && (std::fabs(cruiseSpeed) > 0.0f)) ?
+            cruiseSpeed :
+            entrySpeed;
+        _runtime.DriveService().StartStraight(
+            distanceM,
+            armedCruiseSpeed,
+            exitSpeed,
+            targetHeadingOverride,
+            targetPositionOverride);
+        if (!_runtime.DriveService().Active())
         {
             return Fail("Failed to begin shared straight routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunSharedDriveSession(false))
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;
         }
         return true;
@@ -3637,19 +3860,14 @@ private:
         const MotionLimits& limits,
         MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr)
     {
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().PrepareTurnRoutineCallbacks(
-                angleRad,
-                limits,
-                initialCallbacks,
-                BuildManeuverExecutorHooks(false),
-                wallEdgeTracker))
+        ConfigureSharedDrive(limits, false);
+        _runtime.DriveService().StartTurn(angleRad, wallEdgeTracker);
+        if (!_runtime.DriveService().Active())
         {
             return Fail("Failed to begin shared turn routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunSharedDriveSession(false))
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;
         }
         return true;
@@ -3657,22 +3875,22 @@ private:
 
     bool ExecuteArcProfile(float distanceM, float angleRad, float entrySpeed, float exitSpeed, float cruiseSpeed, const MotionLimits& limits)
     {
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().PrepareArcRoutineCallbacks(
-                distanceM,
-                angleRad,
-                entrySpeed,
-                exitSpeed,
-                cruiseSpeed,
-                limits,
-                initialCallbacks,
-                BuildManeuverExecutorHooks(false)))
+        (void)entrySpeed;
+        (void)exitSpeed;
+        (void)cruiseSpeed;
+        if (!(std::isfinite(distanceM) && (distanceM > 0.0f) && std::isfinite(angleRad)))
+        {
+            return true;
+        }
+
+        ConfigureSharedDrive(limits, false);
+        _runtime.DriveService().StartArc(distanceM, angleRad / distanceM);
+        if (!_runtime.DriveService().Active())
         {
             return Fail("Failed to begin shared arc routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunSharedDriveSession(false))
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;
         }
         return true;
@@ -3683,19 +3901,17 @@ private:
         float cruiseSpeed,
         const MotionLimits& limits)
     {
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_runtime.ManeuverExecutorService().PrepareSmoothTurnRoutineCallbacks(
-                maneuver,
-                cruiseSpeed,
-                limits,
-                initialCallbacks,
-                BuildManeuverExecutorHooks(false)))
+        MazeMap::ManeuverInstance armedManeuver = maneuver;
+        armedManeuver.setEntrySpeed(cruiseSpeed);
+        armedManeuver.setExitSpeed(cruiseSpeed);
+        ConfigureSharedDrive(limits, false);
+        _runtime.DriveService().StartManeuver(armedManeuver);
+        if (!_runtime.DriveService().Active())
         {
             return Fail("Failed to begin shared smooth-turn routine");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunSharedDriveSession(false))
         {
-            _runtime.ManeuverExecutorService().CancelActivePhase();
             return false;
         }
         return true;

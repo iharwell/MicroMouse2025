@@ -315,8 +315,11 @@ namespace MazeMap::App::Internal
                 BuildModeState(_observedScratch, projectionAnchorUs, loopEndTimeUs, overrunBeforeModeWork);
 
             TickServices services(*this);
+            _callbackModeState = modeState;
+            _callbackModeStateValid = true;
             ControlVector candidateControl =
                 _activeModeWorkCallback(_activeModeWorkContext, loopEndTimeUs, modeState, services);
+            _callbackModeStateValid = false;
             RecordModeReturnTiming(tickStartUs);
 
             if (_requests.nextModeWorkRequested && (_requests.nextModeWork.onModeWork != nullptr))
@@ -707,6 +710,11 @@ namespace MazeMap::App::Internal
         return true;
     }
 
+    const LoopController::ModeState* LoopController::CurrentModeState() const noexcept
+    {
+        return _callbackModeStateValid ? &_callbackModeState : nullptr;
+    }
+
     LoopController::ModeState LoopController::BuildModeState(
         const ObservedTickState& observed,
         const std::uint32_t projectionAnchorUs,
@@ -988,6 +996,8 @@ namespace MazeMap::App::Internal
         _deferredTerminalOutcome = DeferredTerminalOutcome::None;
         _deferredTerminalReason = nullptr;
         _observedScratch = ObservedTickState{};
+        _callbackModeState = ModeState{};
+        _callbackModeStateValid = false;
         _pauseContextScratch = PauseContext{};
     }
 }

@@ -1,8 +1,10 @@
 #include "pch.h"
 #include "ManeuverFileTestMode.h"
 
+#include "DriveBase.h"
+#include "Drive.h"
 #include "LoopController.h"
-#include "ManeuverExecutor.h"
+#include "ManeuverQueue.h"
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapSharedRuntime.h"
@@ -70,10 +72,6 @@ namespace MazeMap::App::Internal
             _currentLocation = ManeuverFileTestStartLocation();
             _drive.SetStartPoint(_currentLocation);
             _drive.Brake();
-            if (_runtime.ManeuverExecutorService().Active())
-            {
-                _runtime.ManeuverExecutorService().CancelActivePhase();
-            }
 
             if (!_runtime.AppendTextLogFormatted(
                     "Maneuver file test start pose: cell=(%d,%d),dir=%s",
@@ -144,10 +142,7 @@ namespace MazeMap::App::Internal
                 _loopController.EndSession();
             }
 
-            if (_runtime.ManeuverExecutorService().Active())
-            {
-                _runtime.ManeuverExecutorService().CancelActivePhase();
-            }
+            _runtime.DriveService().Cancel();
 
             _drive.Brake();
             CloseTelemetryLog();
@@ -162,7 +157,9 @@ namespace MazeMap::App::Internal
         {
             Idle,
             StartupSettleStart,
+            SharedHold,
             QueueLaunch,
+            QueueRun,
             FinalHoldStart,
             Complete
         };
@@ -204,46 +201,40 @@ namespace MazeMap::App::Internal
             LoopController::TickServices& services)
         {
             (void)loopEndTimeUs;
-            (void)state;
             switch (_phase)
             {
             case Phase::StartupSettleStart:
                 if (!LaunchHoldRoutine(
                         Config::kObservationSettleMs,
                         "startup_settle",
-                        Phase::QueueLaunch,
-                        services))
+                        Phase::QueueLaunch))
                 {
                     services.Fault("Failed to begin maneuver test startup settle");
                 }
                 return LoopController::ControlVector::Brake;
 
+            case Phase::SharedHold:
+                return DriveHoldTick(state, services);
+
             case Phase::QueueLaunch:
-            {
-                LoopController::ModeCallbacks continuation{};
-                continuation.onModeWork = &Implementation::ModeWorkThunk;
-                continuation.context = this;
-                _phase = Phase::FinalHoldStart;
-                if (!_runtime.ManeuverExecutorService().ProceedToManeuverExecutionRoutine(
-                        _queue,
-                        FinalLimits(),
-                        false,
-                        _currentLocation,
-                        continuation,
-                        services,
-                        BuildManeuverExecutorHooks(true)))
+                if (!StartQueueEntry(0U))
                 {
                     services.Fault("Failed to launch maneuver test queue routine");
                 }
+                else
+                {
+                    _phase = Phase::QueueRun;
+                }
                 return LoopController::ControlVector::Brake;
-            }
+
+            case Phase::QueueRun:
+                return DriveQueueTick(state, services);
 
             case Phase::FinalHoldStart:
                 if (!LaunchHoldRoutine(
                         kManeuverQueueCompletionHoldMs,
                         "final_hold",
-                        Phase::Complete,
-                        services))
+                        Phase::Complete))
                 {
                     services.Fault("Failed to begin maneuver test completion hold");
                 }
@@ -263,80 +254,128 @@ namespace MazeMap::App::Internal
         bool LaunchHoldRoutine(
             const std::uint16_t durationMs,
             const char* phaseName,
-            const Phase nextPhase,
-            LoopController::TickServices& services)
+            const Phase nextPhase)
         {
             if (!BeginTelemetryPhase(phaseName))
             {
                 return false;
             }
 
-            LoopController::ModeCallbacks continuation{};
-            continuation.onModeWork = &Implementation::ModeWorkThunk;
-            continuation.context = this;
-            _phase = nextPhase;
-            return _runtime.ManeuverExecutorService().BeginHoldRoutine(
-                durationMs,
-                true,
-                continuation,
-                services,
-                BuildManeuverExecutorHooks(false));
-        }
-
-        ManeuverExecutor::Hooks BuildManeuverExecutorHooks(const bool includeQueueHooks) noexcept
-        {
-            ManeuverExecutor::Hooks hooks{};
-            hooks.context = this;
-            hooks.onSample = &Implementation::ManeuverExecutorSampleHook;
-            if (includeQueueHooks)
-            {
-                hooks.onQueueEntryBegin = &Implementation::ManeuverExecutorQueueEntryBeginHook;
-                hooks.onQueueEntryComplete = &Implementation::ManeuverExecutorQueueEntryCompleteHook;
-            }
-            return hooks;
-        }
-
-        static bool ManeuverExecutorSampleHook(
-            void* context,
-            const bool stationary,
-            const LoopController::ModeState& state)
-        {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self == nullptr || !self->_telemetryLoggingEnabled)
-            {
-                return self != nullptr;
-            }
-
-            Runtime::PopulateDiagnosticLogRow(
-                self->_telemetryLogRow,
-                static_cast<std::uint32_t>(self->_telemetrySampleCount),
-                static_cast<std::uint32_t>(self->_telemetryPhaseId),
-                stationary,
-                state,
-                self->_drive);
-            if (self->_runtime.LogUtilityDataRow(self->_telemetryLogRow))
-            {
-                ++self->_telemetrySampleCount;
-                return true;
-            }
-
-            return self->Fail("Failed to write maneuver test sample");
-        }
-
-        static bool ManeuverExecutorQueueEntryBeginHook(
-            void* context,
-            const std::uint16_t index,
-            const MazeMap::ManeuverInstance& entry,
-            const MazeMap::DirectionalLocation& location)
-        {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self == nullptr)
+            _runtime.DriveService().Cancel();
+            _runtime.DriveService().StartHold(durationMs, true);
+            if (!_runtime.DriveService().Active())
             {
                 return false;
             }
 
-            self->_currentLocation = location;
-            const MazeMap::CellCoordinates cell = static_cast<MazeMap::CellCoordinates>(location.GetLocation());
+            _holdCompletionPhase = nextPhase;
+            _phase = Phase::SharedHold;
+            return true;
+        }
+
+        LoopController::ControlVector DriveHoldTick(
+            const LoopController::ModeState& state,
+            LoopController::TickServices& services)
+        {
+            if (!LogTelemetrySample(true, state))
+            {
+                services.Fault("Failed to write maneuver test hold sample");
+                return LoopController::ControlVector::Brake;
+            }
+
+            bool done = false;
+            const LoopController::ControlVector control = _runtime.DriveService().GetNextControls(done);
+            if (!done)
+            {
+                return control;
+            }
+
+            if (_faulted)
+            {
+                return LoopController::ControlVector::Brake;
+            }
+
+            _phase = _holdCompletionPhase;
+            return LoopController::ControlVector::Brake;
+        }
+
+        LoopController::ControlVector DriveQueueTick(
+            const LoopController::ModeState& state,
+            LoopController::TickServices& services)
+        {
+            if (!LogTelemetrySample(false, state))
+            {
+                services.Fault("Failed to write maneuver test queue sample");
+                return LoopController::ControlVector::Brake;
+            }
+
+            bool done = false;
+            const LoopController::ControlVector control = _runtime.DriveService().GetNextControls(done);
+            if (!done)
+            {
+                return control;
+            }
+
+            if (_faulted)
+            {
+                return LoopController::ControlVector::Brake;
+            }
+
+            if (!FinishQueueEntry())
+            {
+                services.Fault("Failed to complete maneuver test queue entry");
+                return LoopController::ControlVector::Brake;
+            }
+
+            if (_queueActiveIndex >= _queue.size())
+            {
+                _phase = Phase::FinalHoldStart;
+                return LoopController::ControlVector::Brake;
+            }
+
+            if (!StartQueueEntry(_queueActiveIndex))
+            {
+                services.Fault("Failed to launch next maneuver test queue entry");
+                return LoopController::ControlVector::Brake;
+            }
+
+            return LoopController::ControlVector::Brake;
+        }
+
+        bool LogTelemetrySample(const bool stationary, const LoopController::ModeState& state)
+        {
+            if (!_telemetryLoggingEnabled)
+            {
+                return true;
+            }
+
+            Runtime::PopulateDiagnosticLogRow(
+                _telemetryLogRow,
+                static_cast<std::uint32_t>(_telemetrySampleCount),
+                static_cast<std::uint32_t>(_telemetryPhaseId),
+                stationary,
+                state,
+                _drive);
+            if (_runtime.LogUtilityDataRow(_telemetryLogRow))
+            {
+                ++_telemetrySampleCount;
+                return true;
+            }
+
+            return Fail("Failed to write maneuver test sample");
+        }
+
+        bool StartQueueEntry(const std::uint16_t index)
+        {
+            if (index >= _queue.size())
+            {
+                return false;
+            }
+
+            _queueActiveIndex = index;
+            const MazeMap::ManeuverInstance& entry = _queue[_queueActiveIndex];
+            _currentLocation = entry.getStart();
+
             char codeName[24] = {};
             char traceLine[160] = {};
             FormatManeuverCodeName(entry.getCode(), codeName, sizeof(codeName));
@@ -344,34 +383,41 @@ namespace MazeMap::App::Internal
                 traceLine,
                 sizeof(traceLine),
                 "begin,index=%u,code=%s,cell=(%d,%d),dir=%s,entry_v=%.4f,exit_v=%.4f",
-                static_cast<unsigned>(index),
+                static_cast<unsigned>(_queueActiveIndex),
                 codeName,
-                cell.GetX(),
-                cell.GetY(),
-                DirectionName(location.GetDirection()),
+                static_cast<int>(static_cast<MazeMap::CellCoordinates>(_currentLocation.GetLocation()).GetX()),
+                static_cast<int>(static_cast<MazeMap::CellCoordinates>(_currentLocation.GetLocation()).GetY()),
+                DirectionName(_currentLocation.GetDirection()),
                 entry.getEntrySpeed(),
                 entry.getExitSpeed());
-            (void)self->WriteTextLogEvent("maneuver_begin", traceLine);
-
-            char phaseName[48] = {};
-            snprintf(phaseName, sizeof(phaseName), "maneuver_%u_%s", static_cast<unsigned>(index), codeName);
-            return self->BeginTelemetryPhase(phaseName);
-        }
-
-        static bool ManeuverExecutorQueueEntryCompleteHook(
-            void* context,
-            const std::uint16_t index,
-            const MazeMap::ManeuverInstance& entry,
-            const MazeMap::DirectionalLocation& location)
-        {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self == nullptr)
+            if (!WriteTextLogEvent("maneuver_begin", traceLine))
             {
                 return false;
             }
 
-            self->_currentLocation = location;
-            const MazeMap::CellCoordinates cell = static_cast<MazeMap::CellCoordinates>(location.GetLocation());
+            char phaseName[48] = {};
+            snprintf(phaseName, sizeof(phaseName), "maneuver_%u_%s", static_cast<unsigned>(_queueActiveIndex), codeName);
+            if (!BeginTelemetryPhase(phaseName))
+            {
+                return false;
+            }
+
+            _runtime.DriveService().Cancel();
+            _runtime.DriveService().StartManeuver(entry);
+            return _runtime.DriveService().Active();
+        }
+
+        bool FinishQueueEntry()
+        {
+            if (_queueActiveIndex >= _queue.size())
+            {
+                return false;
+            }
+
+            const MazeMap::ManeuverInstance& entry = _queue[_queueActiveIndex];
+            _currentLocation = entry.getEnd();
+
+            const MazeMap::CellCoordinates cell = static_cast<MazeMap::CellCoordinates>(_currentLocation.GetLocation());
             char codeName[24] = {};
             char traceLine[160] = {};
             FormatManeuverCodeName(entry.getCode(), codeName, sizeof(codeName));
@@ -379,15 +425,20 @@ namespace MazeMap::App::Internal
                 traceLine,
                 sizeof(traceLine),
                 "end,index=%u,code=%s,cell=(%d,%d),dir=%s,x=%.4f,y=%.4f,yaw_deg=%.2f",
-                static_cast<unsigned>(index),
+                static_cast<unsigned>(_queueActiveIndex),
                 codeName,
                 cell.GetX(),
                 cell.GetY(),
-                DirectionName(location.GetDirection()),
-                self->_drive.GetPose().xMeters,
-                self->_drive.GetPose().yMeters,
-                RAD_TO_DEG_F * self->_drive.GetPose().yawRad);
-            (void)self->WriteTextLogEvent("maneuver_end", traceLine);
+                DirectionName(_currentLocation.GetDirection()),
+                _drive.GetPose().xMeters,
+                _drive.GetPose().yMeters,
+                RAD_TO_DEG_F * _drive.GetPose().yawRad);
+            if (!WriteTextLogEvent("maneuver_end", traceLine))
+            {
+                return false;
+            }
+
+            ++_queueActiveIndex;
             return true;
         }
 
@@ -475,11 +526,6 @@ namespace MazeMap::App::Internal
             }
 
             queue.ComputeSpeeds(_speedVehicle, 0.0f, 0.0f);
-            _runtime.ManeuverExecutorService().ApplyAsymmetricQueueLimits(
-                queue,
-                FinalLimits(),
-                0.0f,
-                0.0f);
             return true;
 #else
             (void)fileName;
@@ -606,7 +652,10 @@ namespace MazeMap::App::Internal
             _telemetryLogRow = {};
             _queue.clear();
             _currentLocation = ManeuverFileTestStartLocation();
+            _queueActiveIndex = 0U;
+            _runtime.DriveService().Cancel();
             _phase = Phase::Idle;
+            _holdCompletionPhase = Phase::Idle;
         }
 
         SharedRobotRuntime& _runtime;
@@ -622,6 +671,8 @@ namespace MazeMap::App::Internal
         unsigned long _telemetrySampleCount{};
         DiagnosticLogRow _telemetryLogRow{};
         Phase _phase{ Phase::Idle };
+        Phase _holdCompletionPhase{ Phase::Idle };
+        std::uint16_t _queueActiveIndex{};
     };
 
     ManeuverFileTestMode::ManeuverFileTestMode(SharedRobotRuntime& runtime)

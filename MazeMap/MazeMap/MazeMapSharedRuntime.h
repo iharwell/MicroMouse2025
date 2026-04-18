@@ -11,6 +11,7 @@ class DriveBase;
 class RuntimeSensorSuite;
 namespace MazeMap::App::Internal
 {
+    class Drive;
     class LoopController;
     class ManeuverExecutor;
 }
@@ -144,6 +145,7 @@ namespace MazeMap::App::Internal
         // planned higher-level `Drive` translation layer already exists as a separate runtime owner.
         bool SetMotorPWM(float leftMotorPwm, float rightMotorPwm) noexcept;
         DriveBase& Drive() noexcept;
+        MazeMap::App::Internal::Drive& DriveService() noexcept;
         ManeuverExecutor& ManeuverExecutorService() noexcept;
         LoopController& ControlLoop() noexcept;
         RuntimeSensorSuite& Sensors() noexcept;

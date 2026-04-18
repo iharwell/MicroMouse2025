@@ -324,10 +324,14 @@ If a migration cannot be completed into the final authoritative destination, sto
 ### During implementation
 
 - extend the authoritative owner rather than creating a parallel type,
-- when migrating implementation, prefer this sequence: copy the source into a temporary external **non-compiled** file for reference, delete it from the compiled source immediately after the save lands, then move it into the final authoritative destination in the appropriate final compliant form.
-- do **not** use forwarding wrappers, delegating shells, or other thin redirection layers as a migration step; they are treated as false completion and rejected,
-- do **not** preserve the old owner alongside the new one for any reason; if the migration cannot be completed, stop rather than introducing ambiguous authority,
-- move behavior inward toward the owner,
+- for any migration, unless explicitly instructed otherwise, you MUST use the copy-delete-stitch protocol:
+  1. copy the source to a temporary non-compiled reference,
+  2. delete the old implementation from compiled source immediately,
+  3. stitch the behavior into the final authoritative owner,
+  4. migrate all callers to that owner,
+  5. delete the temporary reference before the task is complete.
+- parallel compiled ownership is forbidden during migration. Do **not** leave the old and new implementations side by side. Do **not** use wrappers, forwarding layers, compatibility shims, staged redirects, or split ownership as migration steps.
+- if you cannot complete copy-delete-stitch through caller migration and cleanup, stop and report the blocker. Do **not** leave an intermediate compiled state behind.
 - keep non-vocabulary helpers private or file-local,
 - prefer one authoritative class with private helpers over several thin cooperating classes,
 - do **not** fix an ownership problem at the call site when the owner is known,
@@ -435,12 +439,16 @@ Reject the design and revise it if any of the following are true:
 - `ManeuverInstance` is the canonical execution vocabulary for maneuver-driven motion. Do **not** peel maneuver execution back out into parallel smooth-turn profile structs or mode-local geometry bags.
 - Derive maneuver execution facts from `ManeuverSet`, `ManeuverCode`, and `Maze::GetCellDimension()` at the point of use or through methods on the canonical maneuver owners.
 - `ManeuverPoint` is the per-point drive primitive for higher-level motion execution.
-- Mission-mode code should choose goals, replans, and phase transitions. Shared drive services should provide the actual motion-primitive calculations and per-tick maneuver-tracking support used by the active mode callback.
-- `Drive`, when introduced, is a shared runtime service, not a mode-owned subsystem or an execution owner. Mode code should call it each tick while motion or maneuver execution is active to compute the present tick's proposed drive output rather than owning a separate per-mode `Drive`.
+- Mission-mode code should choose goals, replans, and phase transitions. Shared drive services should provide the actual motion-primitive calculations and per-tick maneuver-tracking support while the active mode callback remains the place where the mode decides whether to return `Drive`'s proposed output for the present tick.
+- `Drive` is the exemplar template of a solid shared multi-tick service: a shared runtime service, not a mode-owned subsystem or an execution owner. Mode logic should arm or reconfigure it for the active primitive or maneuver, and the active mode callback may then call a generic per-tick method such as `GetNextControls(bool& done)` and return that result when it wants the motion applied, rather than owning separate per-mode `Drive` instances or exposing primitive-specific per-tick logic throughout the mode.
+- The important motion-architecture boundary is `tick-budget ownership`.
+- A shared motion service such as `Drive` is low-involvement convenience infrastructure. It runs inside the currently active callback, does bounded per-tick work, and returns proposed controls or completion state. The active callback can ignore, override, cancel, or reconfigure it on any tick. It does **not** own callback continuation flow, phase handoff, or long-lived callback control.
+- A callback-owned execution owner such as `ManeuverExecutor` is the heavyweight maneuver machine. While active, it owns the callback stream. Its job is aggressive maneuver-native tracking, risk analysis, and last-moment corrective action, and it is the place where spending most of the tick budget on those tasks is acceptable.
+- A convenience service is subordinate infrastructure when used by a heavyweight executor; it does **not** replace it. Do **not** collapse the heavyweight maneuver machine into the lightweight `Drive` service, and do **not** force generic convenience primitives into callback-owning routines when bounded per-tick service behavior is sufficient.
 - `DriveBase` is the destination for concrete "move in this manner" commands. If a higher-level drive owner is introduced, it must become the authoritative motion owner rather than a forwarding facade over `DriveBase`.
 - While motion is active, only the current `LoopController` callback runs. Mapping, pathfinding response, maneuver dispatch, and phase progression that must happen during motion must therefore be callback-driven or live in shared services called by that callback.
 - A `Routine` in the maneuver/motion vocabulary is callback-driven work owned by the active `LoopController` flow, following the `ManeuverExecutor` pattern. Do **not** wrap motion routines in synchronous/blocking helper APIs.
-- Simple shared motion primitives and a shared `Drive` service should not requisition `LoopController` callback ownership merely to advance per-tick execution state or compute the present tick's drive output; the active mode callback should call them each tick and may choose whether to use that output.
+- Simple shared motion primitives and a shared `Drive` service should not requisition `LoopController` callback ownership merely to advance per-tick execution state or compute the present tick's drive output; instead, mode logic should start or reconfigure them and the active mode callback should query the next proposed controls through a generic per-tick API.
 - If the loop is paused, motion must be halted; pauses are not an excuse to keep driving in parallel with non-real-time work.
 - Outside `LoopController::RequestPause(...)` callbacks, do **not** wait for "one more tick", sleep for control progress, or spin on control-state changes.
 - Open-loop commands are appropriate for low-level tasks such as wall tapping or certain measurements.

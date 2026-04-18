@@ -183,6 +183,7 @@
     <ClInclude Include="Cell.h" />
     <ClInclude Include="CellCoordinates.h" />
     <ClInclude Include="CircularBuffer.h" />
+    <ClInclude Include="CommandPD.h" />
     <ClInclude Include="CompactPath.h" />
     <ClInclude Include="CoreConfig.h" />
     <ClInclude Include="CruiseSpeedFloor.h" />
@@ -195,6 +196,7 @@
     <ClInclude Include="Direction.h" />
     <ClInclude Include="DirectionalLocation.h" />
     <ClInclude Include="DirectionalPathFinder.h" />
+    <ClInclude Include="Drive.h" />
     <ClInclude Include="DriveBase.h" />
     <ClInclude Include="EigenCompat.h" />
     <ClInclude Include="EncoderStallPolicy.h" />
@@ -296,6 +298,7 @@
     <ClCompile Include="Direction.cpp" />
     <ClCompile Include="DirectionalLocation.cpp" />
     <ClCompile Include="DirectionalPathFinder.cpp" />
+    <ClCompile Include="Drive.cpp" />
     <ClCompile Include="DriveBase.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="Fresnel.cpp" />

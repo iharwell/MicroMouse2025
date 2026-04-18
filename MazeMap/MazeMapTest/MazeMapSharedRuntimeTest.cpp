@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CppUnitTest.h"
+#include "..\MazeMap\Drive.h"
 #include "..\MazeMap\MazeMapSharedRuntime.h"
 #include "..\MazeMap\Vehicle.h"
 
@@ -156,6 +157,15 @@ namespace MazeMap::App
             Assert::IsTrue(
                 static_cast<const void*>(&first) ==
                 static_cast<const void*>(&second));
+        }
+
+        TEST_METHOD(SharedRuntime_ProvidesOneCanonicalDriveService)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Internal::Drive& first = runtime.DriveService();
+            Internal::Drive& second = runtime.DriveService();
+
+            Assert::IsTrue(&first == &second);
         }
 
         TEST_METHOD(SharedRuntime_SingletonIsStable)

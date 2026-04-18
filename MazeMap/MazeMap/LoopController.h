@@ -6,6 +6,7 @@
 
 namespace MazeMap::App::Internal
 {
+    class Drive;
     class SharedRobotRuntime;
 
     // LoopController owns one uninterrupted fixed-period control session. Its sole job is to lock
@@ -191,6 +192,7 @@ namespace MazeMap::App::Internal
         const ControlVector& LastAppliedCommand() const noexcept;
 
     private:
+        friend class Drive;
         friend class SharedRobotRuntime;
 
         struct ObservedTickState final
@@ -267,6 +269,7 @@ namespace MazeMap::App::Internal
         bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
         bool ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing);
         bool CaptureTickState(ObservedTickState& observed, TimingDiagnostics& timing);
+        const ModeState* CurrentModeState() const noexcept;
         ModeState BuildModeState(
             const ObservedTickState& observed,
             std::uint32_t projectionAnchorUs,
@@ -313,6 +316,8 @@ namespace MazeMap::App::Internal
         DeferredTerminalOutcome _deferredTerminalOutcome{ DeferredTerminalOutcome::None };
         const char* _deferredTerminalReason{};
         ObservedTickState _observedScratch{};
+        ModeState _callbackModeState{};
+        bool _callbackModeStateValid{};
         PauseContext _pauseContextScratch{};
     };
 }
