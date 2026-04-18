@@ -189,6 +189,7 @@ Top-level application modes are selected only at startup by reading designated m
 - Subordinate controllers, helpers, and phase executors must not start nested `LoopController` sessions.
 - While the session is active, only the currently installed loop callback runs and can steer flow, request a pause, end the session, or swap callbacks.
 - `Routine` means a callback-driven `LoopController` procedure. Do **not** introduce synchronous/blocking routine wrappers that hide that callback ownership model.
+- A routine is a modular behavioral block used by a mode while constructing a phase. Once launched, the routine owns the active `LoopController` callback until it returns through the supplied continuation callback, so it does **not** span phases.
 - Any routine that does not explicitly request a pause must return control to `LoopController` before the provided deadline for that tick.
 - If `LoopController` is paused, the robot must not move. Pause handling is for non-motion work only unless an explicit task says otherwise.
 - Outside a `LoopController::RequestPause(...)` callback, mode code must not wait for another tick, sleep for control progress, or spin on control-state changes.
