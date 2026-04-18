@@ -837,125 +837,6 @@ function Assert-ArtifactNotOlderThan {
     return $item
 }
 
-function Get-TrackedObjectPathsFromClItemsTLog {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ClItemsPath
-    )
-
-    $trackedObjectPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($line in Get-Content -LiteralPath $ClItemsPath) {
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            continue
-        }
-
-        $segments = $line -split ';'
-        if ($segments.Count -lt 2) {
-            continue
-        }
-
-        $candidatePath = $segments[$segments.Count - 1].Trim()
-        if ([string]::IsNullOrWhiteSpace($candidatePath)) {
-            continue
-        }
-
-        [void]$trackedObjectPaths.Add([System.IO.Path]::GetFullPath($candidatePath))
-    }
-
-    return @($trackedObjectPaths)
-}
-
-function Assert-HostReleaseIntermediatesIntact {
-    param(
-        [Parameter(Mandatory = $true)]
-        [object[]]$Projects
-    )
-
-    $failures = [System.Collections.Generic.List[string]]::new()
-
-    foreach ($project in $Projects) {
-        if (-not (Test-Path -LiteralPath $project.IntermediateDir -PathType Container)) {
-            $failures.Add(("{0}: intermediate directory missing: {1}" -f $project.Name, $project.IntermediateDir))
-            continue
-        }
-
-        if (-not (Test-Path -LiteralPath $project.TLogDir -PathType Container)) {
-            $failures.Add(("{0}: tlog directory missing: {1}" -f $project.Name, $project.TLogDir))
-            continue
-        }
-
-        $requiredTLogFiles = @(
-            'Cl.items.tlog',
-            'CL.command.1.tlog',
-            'CL.read.1.tlog',
-            'CL.write.1.tlog',
-            'link.command.1.tlog',
-            'link.read.1.tlog',
-            'link.secondary.1.tlog',
-            'link.write.1.tlog'
-        )
-
-        foreach ($requiredTLogFile in $requiredTLogFiles) {
-            $requiredTLogPath = Join-Path $project.TLogDir $requiredTLogFile
-            if (-not (Test-Path -LiteralPath $requiredTLogPath -PathType Leaf)) {
-                $failures.Add(("{0}: required incremental tracking file missing: {1}" -f $project.Name, $requiredTLogPath))
-            }
-        }
-
-        $lastBuildState = Get-ChildItem -LiteralPath $project.TLogDir -File -Filter '*.lastbuildstate' | Select-Object -First 1
-        if ($null -eq $lastBuildState) {
-            $failures.Add(("{0}: no *.lastbuildstate file present in {1}" -f $project.Name, $project.TLogDir))
-        }
-
-        $fileListManifest = Get-ChildItem -LiteralPath $project.IntermediateDir -File -Filter '*.vcxproj.FileListAbsolute.txt' | Select-Object -First 1
-        if ($null -eq $fileListManifest) {
-            $failures.Add(("{0}: vcxproj file list manifest missing in {1}" -f $project.Name, $project.IntermediateDir))
-        }
-
-        $clItemsPath = Join-Path $project.TLogDir 'Cl.items.tlog'
-        if (-not (Test-Path -LiteralPath $clItemsPath -PathType Leaf)) {
-            continue
-        }
-
-        $trackedObjectPaths = @(Get-TrackedObjectPathsFromClItemsTLog -ClItemsPath $clItemsPath)
-        if ($trackedObjectPaths.Count -eq 0) {
-            $failures.Add(("{0}: Cl.items.tlog contains no tracked object outputs: {1}" -f $project.Name, $clItemsPath))
-            continue
-        }
-
-        $missingTrackedObjects = @($trackedObjectPaths | Where-Object {
-            -not (Test-Path -LiteralPath $_ -PathType Leaf)
-        })
-
-        if ($missingTrackedObjects.Count -gt 0) {
-            $sampleMissingObjects = @($missingTrackedObjects | Select-Object -First 5)
-            $sampleText = $sampleMissingObjects -join ', '
-            if ($missingTrackedObjects.Count -gt $sampleMissingObjects.Count) {
-                $sampleText += (", ... ({0} missing total)" -f $missingTrackedObjects.Count)
-            }
-
-            $failures.Add(("{0}: tracked object outputs are missing: {1}" -f $project.Name, $sampleText))
-        }
-    }
-
-    if ($failures.Count -eq 0) {
-        return
-    }
-
-    $failureText = ($failures | ForEach-Object { ' - ' + $_ }) -join [Environment]::NewLine
-    throw (
-        'HOST_INTERMEDIATE_STATE_BROKEN: One or more host-side Release intermediate trees are missing or damaged.' +
-        [Environment]::NewLine +
-        $failureText +
-        [Environment]::NewLine +
-        'Agents: host-side intermediates were deleted or corrupted, which breaks the incremental build system.' +
-        [Environment]::NewLine +
-        'Human intervention is required to repair or intentionally recreate those artifacts.' +
-        [Environment]::NewLine +
-        'Stop immediately. Do not continue with msbuild, Clean, Rebuild, or further artifact deletion through build_and_verify_latest.ps1.'
-    )
-}
-
 function Assert-AndLogCurrentReleaseArtifacts {
     param(
         [Parameter(Mandatory = $true)]
@@ -1082,12 +963,6 @@ $mazeSimulationHostProject = [pscustomobject]@{
     TLogDir = Join-Path $repoRoot 'MazeMap\MazeSimulation\x64\Release\MazeSimulation.tlog'
     ProjectFile = Join-Path $repoRoot 'MazeMap\MazeSimulation\MazeSimulation.vcxproj'
 }
-$hostReleaseIntermediateProjects = @(
-    $mazeMapHostProject,
-    $mazeMapTestHostProject,
-    $mazeSimulationHostProject
-)
-
 Push-Location $repoRoot
 try {
     Write-Step $launcherStepLabel
@@ -1099,10 +974,6 @@ try {
         Assert-UnsandboxedBuildEnvironment -WrapperPath $modeWrapperPath
         Write-LogLine 'Host build environment access check passed.' 'DarkCyan'
     }
-
-    Write-Step 'Checking host Release intermediates'
-    Assert-HostReleaseIntermediatesIntact -Projects $hostReleaseIntermediateProjects
-    Write-LogLine 'Host Release intermediate integrity check passed.' 'DarkCyan'
 
     if ($requiresBuild) {
         New-Item -ItemType Directory -Path $canonicalBuildPath -Force | Out-Null

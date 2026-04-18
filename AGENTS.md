@@ -14,7 +14,7 @@ During cleanup:
 4. update callers to the canonical interface,
 5. remove dead code and superseded files.
 
-Do **not** preserve nonconforming structure or compatibility shims unless the task explicitly requires staged compatibility.
+Do **not** preserve nonconforming structure or compatibility shims unless the user prompt explicitly requires staged compatibility.
 
 Preserve buildability, host/Teensy verification paths, and explicitly required external behavior. This repository is nonfunctional in places; current behavior is **not** automatically authoritative merely because it exists.
 
@@ -296,7 +296,15 @@ Deletion is preferred over preservation when a type, file, or subsystem is:
 - a nearly identical duplicate,
 - a compatibility layer preserving a nonstandard pattern.
 
-Do **not** leave old and new systems side by side unless the task explicitly requires staged compatibility.
+Do **not** leave old and new systems side by side unless the user prompt explicitly requires staged compatibility.
+
+### No Size-Based Exceptions
+
+Do **not** weaken any migration or convergence rule because the change seems small, local, temporary, low-risk, or easy to review.
+
+A partial migration that preserves the old owner for any reason is worse than not migrating at all. It introduces architectural and dialectic ambiguity by making ownership appear to have moved when it has not.
+
+If a migration cannot be completed into the final authoritative destination, stop and record the blocker. Do **not** leave compiled intermediate ownership, forwarding layers, split behavior, or partial redirection behind.
 
 ### Before writing code
 
@@ -312,6 +320,9 @@ Do **not** leave old and new systems side by side unless the task explicitly req
 ### During implementation
 
 - extend the authoritative owner rather than creating a parallel type,
+- when migrating implementation, prefer this sequence: copy the source into a temporary external **non-compiled** file for reference, delete it from the compiled source immediately after the save lands, then move it into the final authoritative destination in the appropriate final compliant form.
+- do **not** use forwarding wrappers, delegating shells, or other thin redirection layers as a migration step; they are treated as false completion and rejected,
+- do **not** preserve the old owner alongside the new one for any reason; if the migration cannot be completed, stop rather than introducing ambiguous authority,
 - move behavior inward toward the owner,
 - keep non-vocabulary helpers private or file-local,
 - prefer one authoritative class with private helpers over several thin cooperating classes,
@@ -338,6 +349,8 @@ Reject the design and revise it if any of the following are true:
 - a subsystem ends up with multiple overlapping public entry points,
 - a public type mainly represents one class's internal pipeline or peeled-off internals,
 - old and new implementations remain in parallel after the change,
+- a wrapper, duplicate path, or partial migration is justified because the change is small, temporary, local, or easier to stage,
+- the old owner is preserved alongside the new owner for any reason, creating ambiguous authority about where the implementation really lives,
 - a wrapper or adapter is introduced only to reduce local edits, testing effort, or mock setup,
 - a new mode requires copied config, a new per-mode host interface, a forwarding wrapper, or a new logging architecture,
 - a boot condition or selector rule is hidden outside `BootModeRegistry` or the platform pin map,

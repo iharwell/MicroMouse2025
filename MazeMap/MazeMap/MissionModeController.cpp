@@ -9,6 +9,7 @@
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeSignalHelpers.h"
 #include "MazeMapSharedRuntime.h"
+#include "WallTouchRoutine.h"
 
 using MazeMap::App::Internal::SharedRobotRuntime;
 
@@ -33,6 +34,7 @@ public:
         , _wallBeliefMap(runtime.WallBeliefMap())
         , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
+        , _wallTouchRoutine(_drive)
         , _currentCell(0, 0)
         , _currentDirection(MazeMap::Up)
         , _currentDirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up)
@@ -145,6 +147,7 @@ private:
     MazeMap::WallBeliefMap& _wallBeliefMap;
     RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
+    MazeMap::App::Internal::WallTouchRoutine _wallTouchRoutine;
     MazeMap::CellCoordinates _currentCell;
     MazeMap::Direction _currentDirection;
     MazeMap::DirectionalLocation _currentDirectionalLocation;
@@ -248,7 +251,7 @@ private:
         EncoderProgressWatchdog translationWatchdog{};
     };
 
-    struct SharedManeuverRoutineLoopState final
+    struct SharedMotionRoutineLoopState final
     {
         enum class Routine : std::uint8_t
         {
@@ -1374,57 +1377,23 @@ private:
         float& traveledDistanceM,
         float* seatedYawErrorRad = nullptr)
     {
-        return ExecuteWallTouchOffLoopDriven(
-            targetYawRad,
-            minLatchTravelM,
-            maxApproachTravelM,
-            allowPassThroughNoWall,
-            poseResetTarget,
-            outcome,
-            traveledDistanceM,
-            seatedYawErrorRad);
-    }
+        outcome = WallTouchOutcome::SeatedContact;
+        traveledDistanceM = 0.0f;
+        if (seatedYawErrorRad != nullptr)
+        {
+            *seatedYawErrorRad = 0.0f;
+        }
 
-    LoopController::ControlVector WallTouchLoopTick(
-        void* rawState,
-        std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
-        LoopController::TickServices& services)
-    {
-        (void)loopEndTimeUs;
-        auto& wallTouch = *static_cast<MazeMap::App::Internal::Runtime::WallTouchLoopState*>(rawState);
-        MazeMap::App::Internal::Runtime::WallTouchLoopHooks hooks{};
+        MazeMap::App::Internal::Runtime::WallTouchExecutionResult result{};
+        MazeMap::App::Internal::WallTouchRoutine::Hooks hooks{};
         hooks.context = this;
-        hooks.appendTraceLine = [](void* context, const char* line) noexcept
+        hooks.onTraceLine = [](void* context, const char* line) noexcept
         {
             auto* const self = static_cast<Implementation*>(context);
-            if (self != nullptr && line != nullptr)
+            if ((self != nullptr) && (line != nullptr))
             {
                 AppendStartupTrace(line);
             }
-        };
-        hooks.beginPassThroughSettle =
-            [](void* context, void* continuationState, LoopController::TickServices& services) -> LoopController::ControlVector
-        {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self == nullptr)
-            {
-                services.Fault("Mission wall-touch continuation context was not installed");
-                return LoopController::ControlVector::Brake;
-            }
-
-            if (!self->_runtime.ManeuverExecutorService().BeginBrakedSettleRoutine(
-                    "Wall touch-off failed to settle after pass-through",
-                    Config::kStartupWallCalibrationSettleMs,
-                    0U,
-                    self->PrepareLoopContinuation(continuationState, &Implementation::SharedManeuverRoutineCompleteTick),
-                    services,
-                    self->BuildManeuverExecutorHooks(false)))
-            {
-                return self->FaultLoopPhase(services, "Failed to begin wall-touch pass-through settle phase");
-            }
-
-            return LoopController::ControlVector::Brake;
         };
         hooks.onPoseReset = [](void* context) noexcept
         {
@@ -1434,100 +1403,46 @@ private:
                 self->AppendStartupCalibrationStateTrace("touch_pose_set");
             }
         };
-        hooks.fault =
-            [](void* context, LoopController::TickServices& services, const char* reason) noexcept -> LoopController::ControlVector
+
+        LoopController::ModeCallbacks initialCallbacks{};
+        if (!_wallTouchRoutine.BeginSession(
+                targetYawRad,
+                minLatchTravelM,
+                maxApproachTravelM,
+                allowPassThroughNoWall,
+                poseResetTarget,
+                &result,
+                PrepareLoopContinuation(this, &Implementation::WallTouchRoutineCompleteTick),
+                initialCallbacks,
+                hooks))
         {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self == nullptr)
-            {
-                services.Fault(reason);
-                return LoopController::ControlVector::Brake;
-            }
-
-            return self->FaultLoopPhase(services, reason);
-        };
-        hooks.complete =
-            [](void* context, LoopController::TickServices& services) -> LoopController::ControlVector
-        {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self == nullptr)
-            {
-                services.RequestEndLoop();
-                return LoopController::ControlVector::Brake;
-            }
-
-            return self->EndLoopPhase(services);
-        };
-
-        return MazeMap::App::Internal::Runtime::DriveSharedWallTouchLoopTick(
-            _drive,
-            rawState,
-            wallTouch,
-            state,
-            services,
-            hooks,
-            kMissionDriveBaseTrackingCommandPd);
-    }
-
-    bool ExecuteWallTouchOffLoopDriven(
-        float targetYawRad,
-        float minLatchTravelM,
-        float maxApproachTravelM,
-        bool allowPassThroughNoWall,
-        const MazeMap::App::Internal::Runtime::WallTouchPoseResetTarget* poseResetTarget,
-        WallTouchOutcome& outcome,
-        float& traveledDistanceM,
-        float* seatedYawErrorRad = nullptr)
-    {
-        outcome = WallTouchOutcome::SeatedContact;
-        traveledDistanceM = 0.0f;
-        if (seatedYawErrorRad != nullptr)
-        {
-            *seatedYawErrorRad = 0.0f;
+            return Fail("Failed to prepare wall-touch routine");
         }
-
-        MazeMap::App::Internal::Runtime::WallTouchLoopState wallTouch{};
-        wallTouch.targetYawRad = targetYawRad;
-        wallTouch.minLatchTravelM = minLatchTravelM;
-        wallTouch.maxApproachTravelM = maxApproachTravelM;
-        wallTouch.allowPassThroughNoWall = allowPassThroughNoWall;
-        wallTouch.poseResetTarget = poseResetTarget;
-        wallTouch.startDistanceM = _drive.GetAverageDistanceMeters();
-        wallTouch.touchStartMs = millis();
-        wallTouch.stateStartMs = wallTouch.touchStartMs;
-        wallTouch.lastMotionMs = wallTouch.touchStartMs;
-        wallTouch.lastMotionTelemetry = _drive.GetTelemetry();
-        wallTouch.approachDriveCommand = Config::kWallTouchDriveCommand;
-        wallTouch.ditherTurnFraction = Config::kWallTouchSeatWiggleTurnFraction;
-        wallTouch.previousCycleFrontSkewMagnitudeM = std::numeric_limits<float>::infinity();
-        wallTouch.currentCycleStartYawRad = _drive.GetPose().yawRad;
-        wallTouch.runtimeState = MazeMap::App::Internal::Runtime::WallTouchState::ContactSeek;
+        if (!RunLoopSession(initialCallbacks))
         {
-            char line[192] = {};
-            snprintf(
-                line,
-                sizeof(line),
-                "startup_cal_touch:state,from=%s,to=%s,elapsed_ms=%lu,travel=%.4f",
-                MazeMap::App::Internal::Runtime::WallTouchStateName(
-                    MazeMap::App::Internal::Runtime::WallTouchState::EntryConditioning),
-                MazeMap::App::Internal::Runtime::WallTouchStateName(wallTouch.runtimeState),
-                0UL,
-                0.0f);
-            AppendStartupTrace(line);
-        }
-
-        if (!RunLoopSession(&wallTouch, &Implementation::WallTouchLoopTick))
-        {
+            _wallTouchRoutine.CancelActiveRoutine();
             return false;
         }
 
-        outcome = wallTouch.result.outcome;
-        traveledDistanceM = wallTouch.result.seatedTravelM;
+        outcome = result.outcome;
+        traveledDistanceM = result.seatedTravelM;
         if (seatedYawErrorRad != nullptr)
         {
-            *seatedYawErrorRad = wallTouch.result.seatedYawErrorRad;
+            *seatedYawErrorRad = result.seatedYawErrorRad;
         }
         return true;
+    }
+
+    LoopController::ControlVector WallTouchRoutineCompleteTick(
+        void* rawState,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
+    {
+        (void)rawState;
+        (void)loopEndTimeUs;
+        (void)state;
+        return EndLoopPhase(services);
     }
 
     bool TryTouchWallAndMaybeSetKnownWallCoordinate(
@@ -2242,7 +2157,7 @@ private:
             if (!_runtime.ManeuverExecutorService().BeginHoldRoutine(
                     Config::kStartupWallCalibrationSettleMs,
                     true,
-                    PrepareLoopContinuation(rawState, &Implementation::SharedManeuverRoutineCompleteTick),
+                    PrepareLoopContinuation(rawState, &Implementation::SharedMotionRoutineCompleteTick),
                     services,
                     BuildManeuverExecutorHooks(false)))
             {
@@ -2770,7 +2685,7 @@ private:
         if (!_runtime.ManeuverExecutorService().BeginHoldRoutine(
                 50U,
                 true,
-                PrepareLoopContinuation(rawState, &Implementation::SharedManeuverRoutineCompleteTick),
+                PrepareLoopContinuation(rawState, &Implementation::SharedMotionRoutineCompleteTick),
                 services,
                 BuildManeuverExecutorHooks(false)))
         {
@@ -2779,7 +2694,7 @@ private:
         return LoopController::ControlVector::Brake;
     }
 
-    LoopController::ControlVector SharedManeuverRoutineLaunchTick(
+    LoopController::ControlVector SharedMotionRoutineLaunchTick(
         void* rawState,
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
@@ -2787,14 +2702,14 @@ private:
     {
         (void)loopEndTimeUs;
         (void)state;
-        auto& routine = *static_cast<SharedManeuverRoutineLoopState*>(rawState);
+        auto& routine = *static_cast<SharedMotionRoutineLoopState*>(rawState);
         const LoopController::ModeCallbacks continuation =
-            PrepareLoopContinuation(rawState, &Implementation::SharedManeuverRoutineCompleteTick);
+            PrepareLoopContinuation(rawState, &Implementation::SharedMotionRoutineCompleteTick);
 
         bool begun = false;
         switch (routine.routine)
         {
-        case SharedManeuverRoutineLoopState::Routine::Hold:
+        case SharedMotionRoutineLoopState::Routine::Hold:
             begun = _runtime.ManeuverExecutorService().BeginHoldRoutine(
                 routine.durationMs,
                 routine.stationary,
@@ -2803,7 +2718,7 @@ private:
                 routine.hooks);
             break;
 
-        case SharedManeuverRoutineLoopState::Routine::BrakedSettle:
+        case SharedMotionRoutineLoopState::Routine::BrakedSettle:
             begun = _runtime.ManeuverExecutorService().BeginBrakedSettleRoutine(
                 routine.timeoutMessage,
                 routine.stationaryHoldMs,
@@ -2813,7 +2728,7 @@ private:
                 routine.hooks);
             break;
 
-        case SharedManeuverRoutineLoopState::Routine::ReverseStraight:
+        case SharedMotionRoutineLoopState::Routine::ReverseStraight:
             begun = _runtime.ManeuverExecutorService().BeginReverseStraightRoutine(
                 routine.distanceM,
                 routine.limits,
@@ -2824,7 +2739,7 @@ private:
                 routine.targetPositionOverride);
             break;
 
-        case SharedManeuverRoutineLoopState::Routine::Straight:
+        case SharedMotionRoutineLoopState::Routine::Straight:
             begun = _runtime.ManeuverExecutorService().BeginStraightRoutine(
                 routine.distanceM,
                 routine.entrySpeed,
@@ -2840,7 +2755,7 @@ private:
                 routine.targetPositionOverride);
             break;
 
-        case SharedManeuverRoutineLoopState::Routine::Turn:
+        case SharedMotionRoutineLoopState::Routine::Turn:
             begun = _runtime.ManeuverExecutorService().BeginTurnRoutine(
                 routine.angleRad,
                 routine.limits,
@@ -2850,7 +2765,7 @@ private:
                 routine.wallEdgeTracker);
             break;
 
-        case SharedManeuverRoutineLoopState::Routine::Arc:
+        case SharedMotionRoutineLoopState::Routine::Arc:
             begun = _runtime.ManeuverExecutorService().BeginArcRoutine(
                 routine.distanceM,
                 routine.angleRad,
@@ -2863,7 +2778,7 @@ private:
                 routine.hooks);
             break;
 
-        case SharedManeuverRoutineLoopState::Routine::SmoothTurn:
+        case SharedMotionRoutineLoopState::Routine::SmoothTurn:
             begun = (routine.maneuver != nullptr) &&
                 _runtime.ManeuverExecutorService().BeginSmoothTurnRoutine(
                     *routine.maneuver,
@@ -2909,15 +2824,9 @@ private:
         return LoopController::ControlVector::Brake;
     }
 
-    bool RunLoopSession(void* initialState, const ActiveLoopTickFn initialTickFn)
+    bool RunLoopSession(const LoopController::ModeCallbacks& initialCallbacks)
     {
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &Implementation::ActiveLoopThunk;
-        callbacks.context = this;
-        _activeLoopState = initialState;
-        _activeLoopTickFn = initialTickFn;
-
-        const bool began = _loopController.BeginSession(BuildLoopOptions(), callbacks);
+        const bool began = _loopController.BeginSession(BuildLoopOptions(), initialCallbacks);
         if (!began)
         {
             _activeLoopState = nullptr;
@@ -2942,12 +2851,23 @@ private:
         return true;
     }
 
-    bool RunSharedManeuverRoutine(SharedManeuverRoutineLoopState& routine)
+    bool RunLoopSession(void* initialState, const ActiveLoopTickFn initialTickFn)
     {
-        return RunLoopSession(&routine, &Implementation::SharedManeuverRoutineLaunchTick);
+        LoopController::ModeCallbacks callbacks{};
+        callbacks.onModeWork = &Implementation::ActiveLoopThunk;
+        callbacks.context = this;
+        _activeLoopState = initialState;
+        _activeLoopTickFn = initialTickFn;
+
+        return RunLoopSession(callbacks);
     }
 
-    LoopController::ControlVector SharedManeuverRoutineCompleteTick(
+    bool RunSharedMotionRoutine(SharedMotionRoutineLoopState& routine)
+    {
+        return RunLoopSession(&routine, &Implementation::SharedMotionRoutineLaunchTick);
+    }
+
+    LoopController::ControlVector SharedMotionRoutineCompleteTick(
         void* rawState,
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
@@ -3040,13 +2960,13 @@ private:
             return false;
         }
 
-        SharedManeuverRoutineLoopState routine{};
-        routine.routine = SharedManeuverRoutineLoopState::Routine::Hold;
+        SharedMotionRoutineLoopState routine{};
+        routine.routine = SharedMotionRoutineLoopState::Routine::Hold;
         routine.failureReason = "Failed to begin shared hold routine";
         routine.hooks = BuildManeuverExecutorHooks(false);
         routine.durationMs = durationMs;
         routine.stationary = true;
-        return RunSharedManeuverRoutine(routine);
+        return RunSharedMotionRoutine(routine);
     }
 
     bool HoldBrakedUntilDriveSettles(const char* timeoutMessage, uint16_t stationaryHoldMs = Config::kMotionSettleHoldMs, uint16_t timeoutMs = Config::kMotionSettleTimeoutMs)
@@ -3056,14 +2976,14 @@ private:
             timeoutMessage = "Drive settle timed out";
         }
 
-        SharedManeuverRoutineLoopState routine{};
-        routine.routine = SharedManeuverRoutineLoopState::Routine::BrakedSettle;
+        SharedMotionRoutineLoopState routine{};
+        routine.routine = SharedMotionRoutineLoopState::Routine::BrakedSettle;
         routine.failureReason = "Failed to begin shared braked-settle routine";
         routine.hooks = BuildManeuverExecutorHooks(false);
         routine.timeoutMessage = timeoutMessage;
         routine.stationaryHoldMs = stationaryHoldMs;
         routine.timeoutMs = timeoutMs;
-        return RunSharedManeuverRoutine(routine);
+        return RunSharedMotionRoutine(routine);
     }
 
     LoopController::ControlVector StartupStationaryHoldLoopTick(
@@ -3143,15 +3063,15 @@ private:
             return true;
         }
 
-        SharedManeuverRoutineLoopState routine{};
-        routine.routine = SharedManeuverRoutineLoopState::Routine::ReverseStraight;
+        SharedMotionRoutineLoopState routine{};
+        routine.routine = SharedMotionRoutineLoopState::Routine::ReverseStraight;
         routine.failureReason = "Failed to begin shared reverse-straight routine";
         routine.hooks = BuildManeuverExecutorHooks(false);
         routine.distanceM = distanceM;
         routine.limits = limits;
         routine.targetHeadingOverride = targetHeadingOverride;
         routine.targetPositionOverride = targetPositionOverride;
-        return RunSharedManeuverRoutine(routine);
+        return RunSharedMotionRoutine(routine);
     }
 
     bool ExecuteQueuedManeuvers(
@@ -3699,7 +3619,7 @@ private:
                             nullptr,
                             Config::kMotionSettleHoldMs,
                             0U,
-                            PrepareLoopContinuation(rawState, &Implementation::SharedManeuverRoutineCompleteTick),
+                            PrepareLoopContinuation(rawState, &Implementation::SharedMotionRoutineCompleteTick),
                             services,
                             BuildManeuverExecutorHooks(false)))
                     {
@@ -3724,7 +3644,7 @@ private:
                     nullptr,
                     Config::kMotionSettleHoldMs,
                     0U,
-                    PrepareLoopContinuation(rawState, &Implementation::SharedManeuverRoutineCompleteTick),
+                    PrepareLoopContinuation(rawState, &Implementation::SharedMotionRoutineCompleteTick),
                     services,
                     BuildManeuverExecutorHooks(false)))
             {
@@ -4519,8 +4439,8 @@ private:
             return true;
         }
 
-        SharedManeuverRoutineLoopState routine{};
-        routine.routine = SharedManeuverRoutineLoopState::Routine::Straight;
+        SharedMotionRoutineLoopState routine{};
+        routine.routine = SharedMotionRoutineLoopState::Routine::Straight;
         routine.failureReason = "Failed to begin shared straight routine";
         routine.hooks = BuildManeuverExecutorHooks(false);
         routine.distanceM = distanceM;
@@ -4532,7 +4452,7 @@ private:
         routine.currentLocation = useWallCentering ? &_currentDirectionalLocation : nullptr;
         routine.targetHeadingOverride = targetHeadingOverride;
         routine.targetPositionOverride = targetPositionOverride;
-        return RunSharedManeuverRoutine(routine);
+        return RunSharedMotionRoutine(routine);
     }
 
     bool ExecuteTurnProfile(
@@ -4540,20 +4460,20 @@ private:
         const MotionLimits& limits,
         MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr)
     {
-        SharedManeuverRoutineLoopState routine{};
-        routine.routine = SharedManeuverRoutineLoopState::Routine::Turn;
+        SharedMotionRoutineLoopState routine{};
+        routine.routine = SharedMotionRoutineLoopState::Routine::Turn;
         routine.failureReason = "Failed to begin shared turn routine";
         routine.hooks = BuildManeuverExecutorHooks(false);
         routine.angleRad = angleRad;
         routine.limits = limits;
         routine.wallEdgeTracker = wallEdgeTracker;
-        return RunSharedManeuverRoutine(routine);
+        return RunSharedMotionRoutine(routine);
     }
 
     bool ExecuteArcProfile(float distanceM, float angleRad, float entrySpeed, float exitSpeed, float cruiseSpeed, const MotionLimits& limits)
     {
-        SharedManeuverRoutineLoopState routine{};
-        routine.routine = SharedManeuverRoutineLoopState::Routine::Arc;
+        SharedMotionRoutineLoopState routine{};
+        routine.routine = SharedMotionRoutineLoopState::Routine::Arc;
         routine.failureReason = "Failed to begin shared arc routine";
         routine.hooks = BuildManeuverExecutorHooks(false);
         routine.distanceM = distanceM;
@@ -4562,7 +4482,7 @@ private:
         routine.exitSpeed = exitSpeed;
         routine.cruiseSpeed = cruiseSpeed;
         routine.limits = limits;
-        return RunSharedManeuverRoutine(routine);
+        return RunSharedMotionRoutine(routine);
     }
 
     bool ExecuteSmoothTurnProfile(
@@ -4570,14 +4490,14 @@ private:
         float cruiseSpeed,
         const MotionLimits& limits)
     {
-        SharedManeuverRoutineLoopState routine{};
-        routine.routine = SharedManeuverRoutineLoopState::Routine::SmoothTurn;
+        SharedMotionRoutineLoopState routine{};
+        routine.routine = SharedMotionRoutineLoopState::Routine::SmoothTurn;
         routine.failureReason = "Failed to begin shared smooth-turn routine";
         routine.hooks = BuildManeuverExecutorHooks(false);
         routine.maneuver = &maneuver;
         routine.cruiseSpeed = cruiseSpeed;
         routine.limits = limits;
-        return RunSharedManeuverRoutine(routine);
+        return RunSharedMotionRoutine(routine);
     }
 
     bool IsInGoalCell(MazeMap::CellCoordinates coords) const
