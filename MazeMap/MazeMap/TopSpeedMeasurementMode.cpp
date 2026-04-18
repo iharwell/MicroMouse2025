@@ -706,7 +706,7 @@ namespace MazeMap::App::Internal
                     ((yawRateCorrectionRadps - measuredYawRateRadps) / responseTimeS) :
                     0.0f;
 
-                const MazeMap::OpenLoopDriveCommand driveCommand =
+                const LoopController::ControlVector driveCommand =
                     _drive.DeltaCommand(
                         resolvedLinearSpeedMps,
                         kTopSpeedMeasurementForwardAccelerationMps2,
@@ -715,9 +715,7 @@ namespace MazeMap::App::Internal
                         MazeMap::CommandPD::RawCommand);
 
                 SetLastCommandInputs(resolvedLinearSpeedMps, yawRateCorrectionRadps);
-                return LoopController::ControlVector::RawMotorPwm(
-                    driveCommand.leftDriveCommand,
-                    driveCommand.rightDriveCommand);
+                return driveCommand;
             };
 
             if (_measurementStartUs == 0U)

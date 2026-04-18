@@ -86,7 +86,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `OpenFloorMainLoggerV2.h`: row-definition header for the standardized open-floor primary sample stream.
 - `OpenFloorRunManifestWriter.h`: class-named entry header for the open-floor manifest writer defined in the runtime infrastructure layer.
 - `OpenFloorTimingLoggerV2.h`: row-definition header for the standardized open-floor timing stream.
-- `OpenLoopDriveCommand.h`: open-loop motor command payload.
 - `OptionalRuntimeEventLog.h`: class-named entry header for the optional runtime event log defined in the runtime infrastructure layer.
 - `Path.h` / `Path.cpp`: fixed-capacity path container for cell-by-cell routes.
 - `PathFinder.h` / `PathFinder.cpp`: abstract path-finding contract and shared gradient-descent implementation.

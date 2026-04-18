@@ -2473,35 +2473,37 @@ namespace MazeMap
     float SrUkfCore::wallPredictionForSensor(
         const StateVector& sigmaPoint,
         const SensorExtrinsics& sensor,
-        const LocalMapView& map) const noexcept
+        const Maze& maze) const noexcept
     {
-        const WallGeometryModel::GeometryStateFrame frame = _geometryModel.buildStateFrame(sigmaPoint, map);
-        const GeometryPrediction prediction = _geometryModel.predictRay(frame, sensor, map);
-        return prediction.hit ? prediction.rangeM : map.noHitRangeM;
+        const WallGeometryModel::GeometryStateFrame frame = _geometryModel.buildStateFrame(sigmaPoint);
+        const GeometryPrediction prediction = _geometryModel.predictRay(frame, sensor, maze, _params.noHitRangeM);
+        return prediction.hit ? prediction.rangeM : _params.noHitRangeM;
     }
 
     Eigen::Matrix<float, 2, 1> SrUkfCore::frontPairPredictionForState(
         const StateVector& sigmaPoint,
-        const LocalMapView& map) const noexcept
+        const Maze& maze) const noexcept
     {
         Eigen::Matrix<float, 2, 1> prediction{};
-        const WallGeometryModel::GeometryStateFrame frame = _geometryModel.buildStateFrame(sigmaPoint, map);
-        const GeometryPrediction leftPrediction = _geometryModel.predictRay(frame, _params.frontLeftSensor, map);
-        const GeometryPrediction rightPrediction = _geometryModel.predictRay(frame, _params.frontRightSensor, map);
-        prediction(0) = leftPrediction.hit ? leftPrediction.rangeM : map.noHitRangeM;
-        prediction(1) = rightPrediction.hit ? rightPrediction.rangeM : map.noHitRangeM;
+        const WallGeometryModel::GeometryStateFrame frame = _geometryModel.buildStateFrame(sigmaPoint);
+        const GeometryPrediction leftPrediction =
+            _geometryModel.predictRay(frame, _params.frontLeftSensor, maze, _params.noHitRangeM);
+        const GeometryPrediction rightPrediction =
+            _geometryModel.predictRay(frame, _params.frontRightSensor, maze, _params.noHitRangeM);
+        prediction(0) = leftPrediction.hit ? leftPrediction.rangeM : _params.noHitRangeM;
+        prediction(1) = rightPrediction.hit ? rightPrediction.rangeM : _params.noHitRangeM;
         return prediction;
     }
 
     FrontPairUpdateResult SrUkfCore::updateFrontPair(
         const WallObs& left,
         const WallObs& right,
-        const LocalMapView& map) noexcept
+        const Maze& maze) noexcept
     {
         FrontPairUpdateResult result{};
-        result.leftPrediction = _geometryModel.predictRay(_filter.state(), _params.frontLeftSensor, map);
-        result.rightPrediction = _geometryModel.predictRay(_filter.state(), _params.frontRightSensor, map);
-        result.filter.attempted = left.valid && right.valid && map.IsValid();
+        result.leftPrediction = _geometryModel.predictRay(_filter.state(), _params.frontLeftSensor, maze, _params.noHitRangeM);
+        result.rightPrediction = _geometryModel.predictRay(_filter.state(), _params.frontRightSensor, maze, _params.noHitRangeM);
+        result.filter.attempted = left.valid && right.valid;
         if (!result.filter.attempted)
         {
             return result;
@@ -2517,9 +2519,9 @@ namespace MazeMap
             z,
             sqrtNoise,
             9.21034f,
-            [this, &map](const StateVector& sigmaPoint) noexcept
+            [this, &maze](const StateVector& sigmaPoint) noexcept
             {
-                return frontPairPredictionForState(sigmaPoint, map);
+                return frontPairPredictionForState(sigmaPoint, maze);
             });
         result.filter.nis = _filter.lastNis();
         return result;
@@ -2528,13 +2530,13 @@ namespace MazeMap
     WallUpdateResult SrUkfCore::updateSideSensor(
         Side which,
         const WallObs& observation,
-        const LocalMapView& map) noexcept
+        const Maze& maze) noexcept
     {
         WallUpdateResult result{};
         const SensorExtrinsics& sensor =
             (which == Side::Left) ? _params.sideLeftSensor : _params.sideRightSensor;
-        result.prediction = _geometryModel.predictRay(_filter.state(), sensor, map);
-        result.filter.attempted = observation.valid && map.IsValid();
+        result.prediction = _geometryModel.predictRay(_filter.state(), sensor, maze, _params.noHitRangeM);
+        result.filter.attempted = observation.valid;
         if (!result.filter.attempted)
         {
             return result;
@@ -2549,10 +2551,10 @@ namespace MazeMap
             z,
             sqrtNoise,
             7.87944f,
-            [this, &map, &sensor](const StateVector& sigmaPoint) noexcept
+            [this, &maze, &sensor](const StateVector& sigmaPoint) noexcept
             {
                 Eigen::Matrix<float, 1, 1> prediction;
-                prediction(0) = wallPredictionForSensor(sigmaPoint, sensor, map);
+                prediction(0) = wallPredictionForSensor(sigmaPoint, sensor, maze);
                 return prediction;
             });
         result.filter.nis = _filter.lastNis();

@@ -1,12 +1,16 @@
 #include "pch.h"
 #include "WallGeometryModel.h"
 
+#include "PlantModel.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace
 {
+    constexpr std::uint8_t kWallPredictionRadiusCells = 2U;
+
     Eigen::Vector2f HeadingUnitFromYaw(float yaw) noexcept
     {
         float s = 0.0f;
@@ -48,7 +52,7 @@ namespace MazeMap
         const VehicleState::StateVector& state,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
-        return sensorOriginWorld(buildStateFrame(state, LocalMapView{}), sensorExtrinsics);
+        return sensorOriginWorld(buildStateFrame(state), sensorExtrinsics);
     }
 
     Eigen::Vector2f WallGeometryModel::sensorOriginWorld(
@@ -62,7 +66,7 @@ namespace MazeMap
         const VehicleState::StateVector& state,
         const SensorExtrinsics& sensorExtrinsics) const noexcept
     {
-        return sensorDirectionWorld(buildStateFrame(state, LocalMapView{}), sensorExtrinsics);
+        return sensorDirectionWorld(buildStateFrame(state), sensorExtrinsics);
     }
 
     Eigen::Vector2f WallGeometryModel::sensorDirectionWorld(
@@ -73,19 +77,18 @@ namespace MazeMap
     }
 
     WallGeometryModel::GeometryStateFrame WallGeometryModel::buildStateFrame(
-        const VehicleState::StateVector& state,
-        const LocalMapView& map) const noexcept
+        const VehicleState::StateVector& state) const noexcept
     {
         GeometryStateFrame frame{};
         frame.positionWorldM = Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy));
         frame.heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
-        frame.centerCell = WorldToCell(frame.positionWorldM.x(), frame.positionWorldM.y(), map.cellSizeM);
+        frame.centerCell = WorldToCell(frame.positionWorldM.x(), frame.positionWorldM.y());
         return frame;
     }
 
-    CellCoordinates WallGeometryModel::WorldToCell(float xMeters, float yMeters, float cellSizeM) noexcept
+    CellCoordinates WallGeometryModel::WorldToCell(float xMeters, float yMeters) noexcept
     {
-        const float safeCellSize = (cellSizeM > 0.0f) ? cellSizeM : 0.18f;
+        const float safeCellSize = Config::kCellSizeM;
         int x = static_cast<int>(std::floor(xMeters / safeCellSize));
         int y = static_cast<int>(std::floor(yMeters / safeCellSize));
         x = (std::clamp)(x, 0, 15);
@@ -151,7 +154,6 @@ namespace MazeMap
         const CellCoordinates& cell,
         Direction direction,
         WallState state,
-        const LocalMapView& map,
         GeometryPrediction& best) noexcept
     {
         if (state != WallState::Wall)
@@ -159,29 +161,41 @@ namespace MazeMap
             return;
         }
 
-        const float cellX = static_cast<float>(cell.GetX()) * map.cellSizeM;
-        const float cellY = static_cast<float>(cell.GetY()) * map.cellSizeM;
+        const float cellX = static_cast<float>(cell.GetX()) * Config::kCellSizeM;
+        const float cellY = static_cast<float>(cell.GetY()) * Config::kCellSizeM;
 
         Eigen::Vector2f minCorner = Eigen::Vector2f::Zero();
         Eigen::Vector2f maxCorner = Eigen::Vector2f::Zero();
         switch (direction)
         {
         case Direction::Up:
-            minCorner = Eigen::Vector2f(cellX, cellY + map.cellSizeM - (0.5f * map.wallThicknessM));
-            maxCorner = Eigen::Vector2f(cellX + map.cellSizeM, cellY + map.cellSizeM + (0.5f * map.wallThicknessM));
+            minCorner = Eigen::Vector2f(
+                cellX,
+                cellY + Config::kCellSizeM - (0.5f * Config::kMazeWallThicknessM));
+            maxCorner = Eigen::Vector2f(
+                cellX + Config::kCellSizeM,
+                cellY + Config::kCellSizeM + (0.5f * Config::kMazeWallThicknessM));
             break;
         case Direction::Down:
-            minCorner = Eigen::Vector2f(cellX, cellY - (0.5f * map.wallThicknessM));
-            maxCorner = Eigen::Vector2f(cellX + map.cellSizeM, cellY + (0.5f * map.wallThicknessM));
+            minCorner = Eigen::Vector2f(cellX, cellY - (0.5f * Config::kMazeWallThicknessM));
+            maxCorner = Eigen::Vector2f(
+                cellX + Config::kCellSizeM,
+                cellY + (0.5f * Config::kMazeWallThicknessM));
             break;
         case Direction::Left:
-            minCorner = Eigen::Vector2f(cellX - (0.5f * map.wallThicknessM), cellY);
-            maxCorner = Eigen::Vector2f(cellX + (0.5f * map.wallThicknessM), cellY + map.cellSizeM);
+            minCorner = Eigen::Vector2f(cellX - (0.5f * Config::kMazeWallThicknessM), cellY);
+            maxCorner = Eigen::Vector2f(
+                cellX + (0.5f * Config::kMazeWallThicknessM),
+                cellY + Config::kCellSizeM);
             break;
         case Direction::Right:
         default:
-            minCorner = Eigen::Vector2f(cellX + map.cellSizeM - (0.5f * map.wallThicknessM), cellY);
-            maxCorner = Eigen::Vector2f(cellX + map.cellSizeM + (0.5f * map.wallThicknessM), cellY + map.cellSizeM);
+            minCorner = Eigen::Vector2f(
+                cellX + Config::kCellSizeM - (0.5f * Config::kMazeWallThicknessM),
+                cellY);
+            maxCorner = Eigen::Vector2f(
+                cellX + Config::kCellSizeM + (0.5f * Config::kMazeWallThicknessM),
+                cellY + Config::kCellSizeM);
             break;
         }
 
@@ -206,47 +220,61 @@ namespace MazeMap
     GeometryPrediction WallGeometryModel::predictRay(
         const VehicleState::StateVector& state,
         const SensorExtrinsics& sensorExtrinsics,
-        const LocalMapView& map) const noexcept
+        const Maze& maze) const noexcept
     {
-        return predictRay(buildStateFrame(state, map), sensorExtrinsics, map);
+        return predictRay(state, sensorExtrinsics, maze, PlantParams::Default().noHitRangeM);
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
         const GeometryStateFrame& frame,
         const SensorExtrinsics& sensorExtrinsics,
-        const LocalMapView& map) const noexcept
+        const Maze& maze) const noexcept
+    {
+        return predictRay(frame, sensorExtrinsics, maze, PlantParams::Default().noHitRangeM);
+    }
+
+    GeometryPrediction WallGeometryModel::predictRay(
+        const VehicleState::StateVector& state,
+        const SensorExtrinsics& sensorExtrinsics,
+        const Maze& maze,
+        float maxRangeM) const noexcept
+    {
+        return predictRay(buildStateFrame(state), sensorExtrinsics, maze, maxRangeM);
+    }
+
+    GeometryPrediction WallGeometryModel::predictRay(
+        const GeometryStateFrame& frame,
+        const SensorExtrinsics& sensorExtrinsics,
+        const Maze& maze,
+        float maxRangeM) const noexcept
     {
         GeometryPrediction best{};
-        best.rangeM = map.noHitRangeM;
-        if (!map.IsValid())
-        {
-            return best;
-        }
+        best.rangeM = (maxRangeM > 0.0f) ? maxRangeM : PlantParams::Default().noHitRangeM;
 
         const Eigen::Vector2f rayOrigin = sensorOriginWorld(frame, sensorExtrinsics);
         const Eigen::Vector2f rayDirection = sensorDirectionWorld(frame, sensorExtrinsics);
         const CellCoordinates centerCell = frame.centerCell;
 
-        const int minX = (std::max)(0, static_cast<int>(centerCell.GetX()) - static_cast<int>(map.radiusCells));
-        const int maxX = (std::min)(15, static_cast<int>(centerCell.GetX()) + static_cast<int>(map.radiusCells));
-        const int minY = (std::max)(0, static_cast<int>(centerCell.GetY()) - static_cast<int>(map.radiusCells));
-        const int maxY = (std::min)(15, static_cast<int>(centerCell.GetY()) + static_cast<int>(map.radiusCells));
+        const int minX = (std::max)(0, static_cast<int>(centerCell.GetX()) - static_cast<int>(kWallPredictionRadiusCells));
+        const int maxX = (std::min)(15, static_cast<int>(centerCell.GetX()) + static_cast<int>(kWallPredictionRadiusCells));
+        const int minY = (std::max)(0, static_cast<int>(centerCell.GetY()) - static_cast<int>(kWallPredictionRadiusCells));
+        const int maxY = (std::min)(15, static_cast<int>(centerCell.GetY()) + static_cast<int>(kWallPredictionRadiusCells));
 
         for (int x = minX; x <= maxX; ++x)
         {
             for (int y = minY; y <= maxY; ++y)
             {
                 const CellCoordinates cell(static_cast<uint8_t>(x), static_cast<uint8_t>(y));
-                const Cell& mazeCell = (*map.maze)[cell];
-                testUniqueWall(rayOrigin, rayDirection, cell, Direction::Up, mazeCell.GetUp(), map, best);
-                testUniqueWall(rayOrigin, rayDirection, cell, Direction::Right, mazeCell.GetRight(), map, best);
+                const Cell& mazeCell = maze[cell];
+                testUniqueWall(rayOrigin, rayDirection, cell, Direction::Up, mazeCell.GetUp(), best);
+                testUniqueWall(rayOrigin, rayDirection, cell, Direction::Right, mazeCell.GetRight(), best);
                 if (y == 0)
                 {
-                    testUniqueWall(rayOrigin, rayDirection, cell, Direction::Down, mazeCell.GetDown(), map, best);
+                    testUniqueWall(rayOrigin, rayDirection, cell, Direction::Down, mazeCell.GetDown(), best);
                 }
                 if (x == 0)
                 {
-                    testUniqueWall(rayOrigin, rayDirection, cell, Direction::Left, mazeCell.GetLeft(), map, best);
+                    testUniqueWall(rayOrigin, rayDirection, cell, Direction::Left, mazeCell.GetLeft(), best);
                 }
             }
         }
@@ -255,10 +283,11 @@ namespace MazeMap
         {
             for (int gridY = minY; gridY <= maxY + 1; ++gridY)
             {
-                const float gridXM = static_cast<float>(gridX) * map.cellSizeM;
-                const float gridYM = static_cast<float>(gridY) * map.cellSizeM;
-                const Eigen::Vector2f minCorner(gridXM - map.postHalfWidthM, gridYM - map.postHalfWidthM);
-                const Eigen::Vector2f maxCorner(gridXM + map.postHalfWidthM, gridYM + map.postHalfWidthM);
+                const float gridXM = static_cast<float>(gridX) * Config::kCellSizeM;
+                const float gridYM = static_cast<float>(gridY) * Config::kCellSizeM;
+                const float postHalfWidthM = 0.5f * Config::kMazeWallThicknessM;
+                const Eigen::Vector2f minCorner(gridXM - postHalfWidthM, gridYM - postHalfWidthM);
+                const Eigen::Vector2f maxCorner(gridXM + postHalfWidthM, gridYM + postHalfWidthM);
                 float rangeM = 0.0f;
                 if (!intersectRayAabb(rayOrigin, rayDirection, minCorner, maxCorner, rangeM))
                 {

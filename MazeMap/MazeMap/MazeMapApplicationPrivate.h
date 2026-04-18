@@ -32,7 +32,6 @@
 #include "MissionStartPolicy.h"
 #include "MissionMazeExport.h"
 #include "MotorModelUnits.h"
-#include "OpenLoopDriveCommand.h"
 #include "RollingAverageWindow.h"
 #include "SmoothTurnYawRateController.h"
 #include "TrackWidthEstimate.h"

@@ -159,10 +159,6 @@ namespace MazeMap
 			Maze maze;
 			maze.SetWall(maze(0, 0), Direction::Up, WallState::Wall);
 
-			LocalMapView map{};
-			map.maze = &maze;
-			map.radiusCells = 1U;
-
 			WallGeometryModel geometry;
 			PlantParams params = PlantParams::Default();
 
@@ -171,13 +167,13 @@ namespace MazeMap
 			state(VehicleState::kPy) = 0.09f;
 			state(VehicleState::kPsi) = 0.0f;
 
-			GeometryPrediction baseline = geometry.predictRay(state, params.frontLeftSensor, map);
+			GeometryPrediction baseline = geometry.predictRay(state, params.frontLeftSensor, maze);
 			Assert::IsTrue(baseline.hit);
 			Assert::AreEqual(static_cast<int>(GeometryHitType::WallFace), static_cast<int>(baseline.type));
 
 			SensorExtrinsics rotatedSensor = params.frontLeftSensor;
 			rotatedSensor.yawOffsetRad += 0.35f;
-			GeometryPrediction rotated = geometry.predictRay(state, rotatedSensor, map);
+			GeometryPrediction rotated = geometry.predictRay(state, rotatedSensor, maze);
 			Assert::IsTrue(rotated.rangeM > baseline.rangeM);
 		}
 
@@ -191,9 +187,6 @@ namespace MazeMap
 		TEST_METHOD(WallGeometryModelCanIdentifyPostHits)
 		{
 			Maze maze;
-			LocalMapView map{};
-			map.maze = &maze;
-			map.radiusCells = 1U;
 
 			WallGeometryModel geometry;
 			SensorExtrinsics sensor{};
@@ -206,7 +199,7 @@ namespace MazeMap
 			state(VehicleState::kPy) = 0.09f;
 			state(VehicleState::kPsi) = 0.0f;
 
-			const GeometryPrediction prediction = geometry.predictRay(state, sensor, map);
+			const GeometryPrediction prediction = geometry.predictRay(state, sensor, maze);
 			Assert::IsTrue(prediction.hit);
 			Assert::AreEqual(static_cast<int>(GeometryHitType::Post), static_cast<int>(prediction.type));
 		}
@@ -279,4 +272,3 @@ namespace MazeMap
 
 	};
 }
-

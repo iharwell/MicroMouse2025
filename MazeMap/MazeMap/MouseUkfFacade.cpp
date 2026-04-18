@@ -64,30 +64,36 @@ namespace MazeMap
 
     CellCoordinates MouseUkfFacade::estimateSensorCell(
         const SensorExtrinsics& sensor,
-        const VehicleState::StateVector& state,
-        float cellSizeM) noexcept
+        const VehicleState::StateVector& state) noexcept
     {
         const WallGeometryModel geometryModel{};
         const Eigen::Vector2f sensorPositionWorld = geometryModel.sensorOriginWorld(state, sensor);
-        return WallGeometryModel::WorldToCell(sensorPositionWorld.x(), sensorPositionWorld.y(), cellSizeM);
+        return WallGeometryModel::WorldToCell(sensorPositionWorld.x(), sensorPositionWorld.y());
     }
 
     FrontPairUpdateResult MouseUkfFacade::updateFrontPair(
         const WallObs& left,
         const WallObs& right,
-        const LocalMapView& map,
+        const Maze& maze,
+        bool freezeMapMutation,
         const MapEvidenceUpdaterConfig& evidenceConfig) noexcept
     {
-        FrontPairUpdateResult result = _core.updateFrontPair(left, right, map);
-        if (result.filter.accepted && !map.freezeMapMutation)
+        FrontPairUpdateResult result = _core.updateFrontPair(left, right, maze);
+        if (result.filter.accepted && !freezeMapMutation)
         {
             const PlantParams& params = _core.params();
             const Direction leftDirection = dominantDirectionForSensor(params.frontLeftSensor, _core.state());
             const Direction rightDirection = dominantDirectionForSensor(params.frontRightSensor, _core.state());
-            const CellCoordinates leftCell = estimateSensorCell(params.frontLeftSensor, _core.state(), map.cellSizeM);
-            const CellCoordinates rightCell = estimateSensorCell(params.frontRightSensor, _core.state(), map.cellSizeM);
-            _mapEvidence.Apply(leftCell, leftDirection, left, result.leftPrediction, evidenceConfig, map.freezeMapMutation);
-            _mapEvidence.Apply(rightCell, rightDirection, right, result.rightPrediction, evidenceConfig, map.freezeMapMutation);
+            const CellCoordinates leftCell = estimateSensorCell(params.frontLeftSensor, _core.state());
+            const CellCoordinates rightCell = estimateSensorCell(params.frontRightSensor, _core.state());
+            _mapEvidence.Apply(leftCell, leftDirection, left, result.leftPrediction, evidenceConfig, freezeMapMutation);
+            _mapEvidence.Apply(
+                rightCell,
+                rightDirection,
+                right,
+                result.rightPrediction,
+                evidenceConfig,
+                freezeMapMutation);
         }
         return result;
     }
@@ -95,18 +101,19 @@ namespace MazeMap
     WallUpdateResult MouseUkfFacade::updateSideSensor(
         Side which,
         const WallObs& observation,
-        const LocalMapView& map,
+        const Maze& maze,
+        bool freezeMapMutation,
         const MapEvidenceUpdaterConfig& evidenceConfig) noexcept
     {
-        WallUpdateResult result = _core.updateSideSensor(which, observation, map);
-        if (result.filter.accepted && !map.freezeMapMutation)
+        WallUpdateResult result = _core.updateSideSensor(which, observation, maze);
+        if (result.filter.accepted && !freezeMapMutation)
         {
             const PlantParams& params = _core.params();
             const SensorExtrinsics& sensor =
                 (which == Side::Left) ? params.sideLeftSensor : params.sideRightSensor;
             const Direction direction = dominantDirectionForSensor(sensor, _core.state());
-            const CellCoordinates cell = estimateSensorCell(sensor, _core.state(), map.cellSizeM);
-            _mapEvidence.Apply(cell, direction, observation, result.prediction, evidenceConfig, map.freezeMapMutation);
+            const CellCoordinates cell = estimateSensorCell(sensor, _core.state());
+            _mapEvidence.Apply(cell, direction, observation, result.prediction, evidenceConfig, freezeMapMutation);
         }
         return result;
     }

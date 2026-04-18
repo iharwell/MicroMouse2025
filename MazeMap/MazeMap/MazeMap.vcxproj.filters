@@ -19,6 +19,9 @@
     <Filter Include="Source Files\App\Internal">
       <UniqueIdentifier>{33743099-4C24-18FC-BAF3-BB33244E8D37}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\App\Internal\AuxMeasurementModeSupport">
+      <UniqueIdentifier>{BFA14C77-4FF5-486E-8FD4-CBA00F582DF7}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\App\Internal\BootUtilityModeFramework">
       <UniqueIdentifier>{7D5E5EE6-2B86-5DEC-AC00-FBC9696FBE5D}</UniqueIdentifier>
     </Filter>
@@ -30,6 +33,9 @@
     </Filter>
     <Filter Include="Header Files\App\Internal">
       <UniqueIdentifier>{EA5A345E-3D34-18F4-2EB6-E168186F3C55}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\App\Internal\AuxMeasurementModeSupport">
+      <UniqueIdentifier>{224D3698-D6D2-4FCF-9311-C82B1D0B11AB}</UniqueIdentifier>
     </Filter>
     <Filter Include="Header Files\App\Internal\BootUtilityModeFramework">
       <UniqueIdentifier>{BFA84A39-A36F-FA1D-30E0-25ABAC2A21D0}</UniqueIdentifier>
@@ -61,13 +67,19 @@
     <Filter Include="Header Files\Platform">
       <UniqueIdentifier>{F7ED3245-A357-FB46-99F1-18096E1E9B1D}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\mmlog">
+      <UniqueIdentifier>{A9BB26DB-3CD4-44C8-BD64-E6CD6EA0C4DB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\mmlog">
+      <UniqueIdentifier>{5B35AA05-BB8D-49B6-9F63-6092F24A6C87}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AuxMeasurementConfig.h">
       <Filter>Header Files\AuxMeasurementConfig</Filter>
     </ClInclude>
     <ClInclude Include="AuxMeasurementModeSupport.h">
-      <Filter>Header Files\App\Internal</Filter>
+      <Filter>Header Files\App\Internal\AuxMeasurementModeSupport</Filter>
     </ClInclude>
     <ClInclude Include="BootModeDescriptor.h">
       <Filter>Header Files\App</Filter>
@@ -280,7 +292,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MmLog.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\mmlog</Filter>
     </ClInclude>
     <ClInclude Include="LoopController.h">
       <Filter>Header Files\App\Internal</Filter>
@@ -301,9 +313,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OpenFloorMeasurementLabels.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="OpenLoopDriveCommand.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Path.h">
@@ -331,7 +340,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="RuntimeSensorSuite.h">
-      <Filter>Header Files\App\Internal\Runtime</Filter>
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="RuntimeBinaryLogSupport.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
@@ -426,7 +435,7 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DriveBase.cpp">
-      <Filter>Source Files\App\Internal</Filter>
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
@@ -480,13 +489,13 @@
       <Filter>Source Files\App</Filter>
     </ClCompile>
     <ClCompile Include="MmLog.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\mmlog</Filter>
     </ClCompile>
     <ClCompile Include="MouseUkfFacade.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="AuxMeasurementModeSupport.cpp">
-      <Filter>Source Files\App\Internal</Filter>
+      <Filter>Source Files\App\Internal\AuxMeasurementModeSupport</Filter>
     </ClCompile>
     <ClCompile Include="AuxMeasurementController.cpp">
       <Filter>Source Files\App\Internal</Filter>
@@ -534,7 +543,7 @@
       <Filter>Source Files\App\Internal\Runtime</Filter>
     </ClCompile>
     <ClCompile Include="RuntimeSensorSuite.cpp">
-      <Filter>Source Files\App\Internal\Runtime</Filter>
+      <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeLocation.cpp">
       <Filter>Source Files</Filter>

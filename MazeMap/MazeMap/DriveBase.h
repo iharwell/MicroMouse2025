@@ -8,7 +8,6 @@
 #include "MazeMapRuntimeCore.h"
 #include "MotorEncoderDrive.h"
 #include "MouseUkfFacade.h"
-#include "OpenLoopDriveCommand.h"
 #include "PlantModel.h"
 #include "WheelControlProfile.h"
 
@@ -128,7 +127,6 @@ private:
     bool startSet = false;
 public:
     static constexpr uint16_t kModeClosedLoop = 1u << 0;
-    static constexpr uint16_t kModeOpenLoop = 1u << 1;
     static constexpr uint16_t kModeRawOpenLoop = 1u << 2;
     static constexpr uint16_t kModeBraking = 1u << 3;
     static constexpr uint16_t kModeLaunchAssistLeft = 1u << 4;
@@ -322,7 +320,7 @@ public:
     // longitudinal acceleration request. The result is symmetric by construction. If `pd` contains
     // additional loops whose setpoints are not explicit in the signature, those loops default to
     // holding their present values.
-    EXPORT MazeMap::OpenLoopDriveCommand DeltaCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -330,7 +328,7 @@ public:
     // DeltaCommand resolves the fully coupled plant feedforward from an explicit body-speed operating
     // point and explicit longitudinal/yaw acceleration requests. This is the canonical "delta from the
     // current state" entry point when both translation and rotation matter at once.
-    EXPORT MazeMap::OpenLoopDriveCommand DeltaCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
         float presentYawRateRadps,
@@ -339,7 +337,7 @@ public:
 
     // DeltaYawRateCommand resolves a zero-mean command from the present yaw rate and a desired yaw
     // acceleration. This is the single-axis rotational variant of `DeltaCommand`.
-    EXPORT MazeMap::OpenLoopDriveCommand DeltaYawRateCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaYawRateCommand(
         float presentYawRateRadps,
         float desiredYawAccelRadps2,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -348,20 +346,20 @@ public:
     // forward speed over the canonical roll-off horizon while respecting the plant-reported acceleration
     // envelope. Wheel-speed or other optional loops use `desiredLinearSpeedMps` as their setpoint when
     // that association is meaningful; all unrelated loops hold their present values.
-    EXPORT MazeMap::OpenLoopDriveCommand PointCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
         float desiredLinearSpeedMps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
     // PointCommand resolves the fully coupled command that drives the present forward speed and yaw rate
     // toward the requested targets over the canonical roll-off horizon while respecting the plant envelope.
     // This replaces the old ambiguous "velocity command" entry point.
-    EXPORT MazeMap::OpenLoopDriveCommand PointCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
-    // PointControlVector resolves the same coupled target as `PointCommand`, but packages the result in
-    // the low-level output type consumed by `LoopController`.
+    // PointControlVector resolves the same coupled target as `PointCommand`. It remains as the
+    // stable entry point for loop-controller call sites that already operate in control-vector space.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVector(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
@@ -369,12 +367,12 @@ public:
 
     // PointCommand consumes the drive-relevant target fields from a maneuver point. Higher-level
     // maneuver execution should target this overload instead of rebuilding scalar command bridges.
-    EXPORT MazeMap::OpenLoopDriveCommand PointCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
         const MazeMap::ManeuverPoint& point,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
-    // PointControlVector resolves the same maneuver-point target as `PointCommand`, but returns the
-    // low-level loop output directly for mode code that already operates in loop-controller space.
+    // PointControlVector resolves the same maneuver-point target as `PointCommand`. It remains as the
+    // stable entry point for loop-controller call sites that already operate in control-vector space.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVector(
         const MazeMap::ManeuverPoint& point,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -382,109 +380,24 @@ public:
     // PointYawRateCommand resolves a zero-mean command that drives the present yaw rate toward the
     // requested yaw-rate target over the canonical roll-off horizon while respecting the yaw-acceleration
     // limit reported by the plant.
-    EXPORT MazeMap::OpenLoopDriveCommand PointYawRateCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointYawRateCommand(
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
     // FeedbackCommand produces a pure feedback command cluster. Each selected loop uses `setpoint` as
     // its target. Unselected loops contribute nothing. The returned command starts from the plant command
     // that preserves the present motion state, then layers the requested feedback objectives on top.
-    EXPORT MazeMap::OpenLoopDriveCommand FeedbackCommand(
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector FeedbackCommand(
         float setpoint,
         MazeMap::CommandPD pd) const;
 
     EXPORT void CommandGenerated(
-        const MazeMap::OpenLoopDriveCommand& command,
+        const MazeMap::App::Internal::LoopController::ControlVector& command,
         float linearSpeedMps,
         float angularSpeedRadps,
         bool applyLaunchAssist = true);
 
-    void CommandOpenLoop(float leftDriveCommand, float rightDriveCommand)
-    {
-        if (_estimatorFaulted)
-        {
-            Brake();
-            return;
-        }
-
-        const float leftMeasuredMps = _leftEncoderVelocityMps;
-        const float rightMeasuredMps = _rightEncoderVelocityMps;
-        const unsigned long nowMs = millis();
-        if (UpdateWheelLaunchAssistState(_leftLaunchAssist, leftMeasuredMps, leftDriveCommand, _leftMotor.getDriveCommand(), nowMs))
-        {
-            _lastLeftLaunchAssistFloor = GetWheelLaunchAssistFloor(_leftLaunchAssist, nowMs);
-            leftDriveCommand = ApplyLaunchAssistFloor(
-                leftDriveCommand,
-                leftDriveCommand,
-                _lastLeftLaunchAssistFloor);
-        }
-        else
-        {
-            _lastLeftLaunchAssistFloor = 0.0f;
-        }
-        if (UpdateWheelLaunchAssistState(_rightLaunchAssist, rightMeasuredMps, rightDriveCommand, _rightMotor.getDriveCommand(), nowMs))
-        {
-            _lastRightLaunchAssistFloor = GetWheelLaunchAssistFloor(_rightLaunchAssist, nowMs);
-            rightDriveCommand = ApplyLaunchAssistFloor(
-                rightDriveCommand,
-                rightDriveCommand,
-                _lastRightLaunchAssistFloor);
-        }
-        else
-        {
-            _lastRightLaunchAssistFloor = 0.0f;
-        }
-
-        _lastLeftFeedforwardCommand = 0.0f;
-        _lastRightFeedforwardCommand = 0.0f;
-        _lastLeftFeedbackCommand = leftDriveCommand;
-        _lastRightFeedbackCommand = rightDriveCommand;
-        _lastLeftTargetVelocityMps = 0.0f;
-        _lastRightTargetVelocityMps = 0.0f;
-        _lastModeFlags = kModeOpenLoop |
-            ((_lastLeftLaunchAssistFloor > 0.0f) ? kModeLaunchAssistLeft : 0u) |
-            ((_lastRightLaunchAssistFloor > 0.0f) ? kModeLaunchAssistRight : 0u);
-        _lastSaturationFlags =
-            ((std::fabs(leftDriveCommand) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(rightDriveCommand) >= 0.999f) ? 0x2u : 0u);
-        SetOpenLoopRaw(leftDriveCommand, rightDriveCommand);
-    }
-
-    void CommandOpenLoop(const MazeMap::OpenLoopDriveCommand& command)
-    {
-        CommandOpenLoop(command.leftDriveCommand, command.rightDriveCommand);
-    }
-
-    void CommandOpenLoopRaw(float leftDriveCommand, float rightDriveCommand)
-    {
-        if (_estimatorFaulted)
-        {
-            Brake();
-            return;
-        }
-
-        _lastLinearCommandMps = 0.0f;
-        _lastAngularCommandRadps = 0.0f;
-        ResetLaunchAssist();
-        _lastLeftFeedforwardCommand = 0.0f;
-        _lastRightFeedforwardCommand = 0.0f;
-        _lastLeftFeedbackCommand = leftDriveCommand;
-        _lastRightFeedbackCommand = rightDriveCommand;
-        _lastLeftTargetVelocityMps = 0.0f;
-        _lastRightTargetVelocityMps = 0.0f;
-        _lastLeftLaunchAssistFloor = 0.0f;
-        _lastRightLaunchAssistFloor = 0.0f;
-        _lastModeFlags = kModeRawOpenLoop;
-        _lastSaturationFlags =
-            ((std::fabs(leftDriveCommand) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(rightDriveCommand) >= 0.999f) ? 0x2u : 0u);
-        SetOpenLoopRaw(leftDriveCommand, rightDriveCommand);
-    }
-
-    void CommandOpenLoopRaw(const MazeMap::OpenLoopDriveCommand& command)
-    {
-        CommandOpenLoopRaw(command.leftDriveCommand, command.rightDriveCommand);
-    }
+    EXPORT void CommandOpenLoopRaw(const MazeMap::App::Internal::LoopController::ControlVector& command);
 
     void Brake()
     {
@@ -704,23 +617,6 @@ private:
         _poseCache.headingUnit = HeadingUnitFromYawRad(_poseCache.yawRad);
         _poseCache.linearSpeedMps = state(MazeMap::VehicleState::kU);
         _poseCache.angularSpeedRadps = state(MazeMap::VehicleState::kR);
-    }
-
-    MazeMap::LocalMapView BuildUkfMapView(const MazeMap::Maze* map) const
-    {
-        MazeMap::LocalMapView view{};
-        if (map == nullptr)
-        {
-            return view;
-        }
-
-        view.maze = map;
-        view.cellSizeM = Config::kCellSizeM;
-        view.wallThicknessM = Config::kMazeWallThicknessM;
-        view.postHalfWidthM = 0.5f * Config::kMazeWallThicknessM;
-        view.noHitRangeM = _ukf.ukf().params().noHitRangeM;
-        view.freezeMapMutation = true;
-        return view;
     }
 
     static bool IsFinitePositive(float value) noexcept
@@ -967,25 +863,24 @@ private:
 
         if (map != nullptr)
         {
-            const MazeMap::LocalMapView mapView = BuildUkfMapView(map);
             MazeMap::WallObs frontLeftObs{};
             MazeMap::WallObs frontRightObs{};
             BuildUkfFrontPairObservations(snapshot, params.noHitRangeM, frontLeftObs, frontRightObs);
             if (frontLeftObs.valid && frontRightObs.valid)
             {
-                (void)_ukf.updateFrontPair(frontLeftObs, frontRightObs, mapView);
+                (void)_ukf.updateFrontPair(frontLeftObs, frontRightObs, *map, true);
             }
 
             const MazeMap::WallObs leftSideObs = BuildUkfLeftSideObservation(snapshot, params.noHitRangeM);
             if (leftSideObs.valid)
             {
-                (void)_ukf.updateSideSensor(MazeMap::Side::Left, leftSideObs, mapView);
+                (void)_ukf.updateSideSensor(MazeMap::Side::Left, leftSideObs, *map, true);
             }
 
             const MazeMap::WallObs rightSideObs = BuildUkfRightSideObservation(snapshot, params.noHitRangeM);
             if (rightSideObs.valid)
             {
-                (void)_ukf.updateSideSensor(MazeMap::Side::Right, rightSideObs, mapView);
+                (void)_ukf.updateSideSensor(MazeMap::Side::Right, rightSideObs, *map, true);
             }
         }
         if (timing != nullptr)
@@ -1090,7 +985,7 @@ private:
     };
     struct ResolvedVelocityDriveSignal
     {
-        MazeMap::OpenLoopDriveCommand driveCommand{};
+        MazeMap::App::Internal::LoopController::ControlVector driveCommand{};
         float leftTargetMps = 0.0f;
         float rightTargetMps = 0.0f;
         float leftFeedforwardCommand = 0.0f;
@@ -1128,18 +1023,13 @@ private:
 
     static float ResolveCommandResponseTimeS() noexcept;
 
-    static MazeMap::OpenLoopDriveCommand AddDriveCommands(
-        const MazeMap::OpenLoopDriveCommand& lhs,
-        const MazeMap::OpenLoopDriveCommand& rhs) noexcept;
+    static MazeMap::App::Internal::LoopController::ControlVector AddDriveCommands(
+        const MazeMap::App::Internal::LoopController::ControlVector& lhs,
+        const MazeMap::App::Internal::LoopController::ControlVector& rhs) noexcept;
 
-    static MazeMap::OpenLoopDriveCommand SubtractDriveCommands(
-        const MazeMap::OpenLoopDriveCommand& lhs,
-        const MazeMap::OpenLoopDriveCommand& rhs) noexcept;
-
-    static MazeMap::OpenLoopDriveCommand MakeSymmetricDriveCommand(float driveCommand) noexcept
-    {
-        return MazeMap::MakeSymmetricOpenLoopDriveCommand(driveCommand);
-    }
+    static MazeMap::App::Internal::LoopController::ControlVector SubtractDriveCommands(
+        const MazeMap::App::Internal::LoopController::ControlVector& lhs,
+        const MazeMap::App::Internal::LoopController::ControlVector& rhs) noexcept;
 
     static float ResolvePositiveOrZero(float value) noexcept;
 
@@ -1171,27 +1061,27 @@ private:
         float& desiredLongitudinalAccelMps2,
         float& desiredYawAccelRadps2) const noexcept;
 
-    MazeMap::OpenLoopDriveCommand ResolveRawAccelerationCommand(
+    MazeMap::App::Internal::LoopController::ControlVector ResolveRawAccelerationCommand(
         float presentLinearSpeedMps,
         float presentYawRateRadps,
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2) const;
 
-    MazeMap::OpenLoopDriveCommand ResolveRawVelocityTargetCommand(
+    MazeMap::App::Internal::LoopController::ControlVector ResolveRawVelocityTargetCommand(
         const CommandContext& context,
         float desiredLinearSpeedMps,
         float desiredYawRateRadps) const;
 
-    MazeMap::OpenLoopDriveCommand ResolveLongitudinalCorrectionCommand(
+    MazeMap::App::Internal::LoopController::ControlVector ResolveLongitudinalCorrectionCommand(
         const CommandContext& context,
         float desiredLongitudinalAccelCorrectionMps2) const;
 
-    MazeMap::OpenLoopDriveCommand ResolveYawCorrectionCommand(
+    MazeMap::App::Internal::LoopController::ControlVector ResolveYawCorrectionCommand(
         const CommandContext& context,
         float desiredYawAccelCorrectionRadps2) const;
 
-    MazeMap::OpenLoopDriveCommand ComposeGeneratedCommand(
-        const MazeMap::OpenLoopDriveCommand& baseCommand,
+    MazeMap::App::Internal::LoopController::ControlVector ComposeGeneratedCommand(
+        const MazeMap::App::Internal::LoopController::ControlVector& baseCommand,
         const CommandContext& context,
         const CommandTargets& targets,
         MazeMap::CommandPD pd) const;
@@ -1433,7 +1323,8 @@ private:
                 resolved.rightLaunchAssistFloor);
         }
 
-        resolved.driveCommand = MazeMap::MakeOpenLoopDriveCommand(leftCommand, rightCommand);
+        resolved.driveCommand =
+            MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(leftCommand, rightCommand);
         return resolved;
     }
 

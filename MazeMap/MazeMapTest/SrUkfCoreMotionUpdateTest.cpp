@@ -838,7 +838,6 @@ namespace MazeMap
         {
             Maze maze;
             maze.SetWall(maze(0, 0), Direction::Up, WallState::Wall);
-            const LocalMapView map = BuildLocalMapView(maze);
             const PlantParams params = PlantParams::Default();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -852,8 +851,8 @@ namespace MazeMap
                     0.0f);
 
             WallGeometryModel geometry;
-            const GeometryPrediction leftPrediction = geometry.predictRay(initialState, params.frontLeftSensor, map);
-            const GeometryPrediction rightPrediction = geometry.predictRay(initialState, params.frontRightSensor, map);
+            const GeometryPrediction leftPrediction = geometry.predictRay(initialState, params.frontLeftSensor, maze);
+            const GeometryPrediction rightPrediction = geometry.predictRay(initialState, params.frontRightSensor, maze);
             Assert::IsTrue(leftPrediction.hit);
             Assert::IsTrue(rightPrediction.hit);
 
@@ -871,7 +870,7 @@ namespace MazeMap
             WallObs rightObservation = leftObservation;
             rightObservation.rho = rightPrediction.rangeM - 0.012f;
 
-            const FrontPairUpdateResult result = core.updateFrontPair(leftObservation, rightObservation, map);
+            const FrontPairUpdateResult result = core.updateFrontPair(leftObservation, rightObservation, maze);
             Assert::IsTrue(result.filter.attempted);
             Assert::IsTrue(result.filter.accepted);
 
@@ -887,7 +886,6 @@ namespace MazeMap
         {
             Maze maze;
             maze.SetWall(maze(0, 0), Direction::Left, WallState::Wall);
-            const LocalMapView map = BuildLocalMapView(maze);
             const PlantParams params = PlantParams::Default();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -901,7 +899,7 @@ namespace MazeMap
                     0.0f);
 
             WallGeometryModel geometry;
-            const GeometryPrediction baseline = geometry.predictRay(initialState, params.sideLeftSensor, map);
+            const GeometryPrediction baseline = geometry.predictRay(initialState, params.sideLeftSensor, maze);
             Assert::IsTrue(baseline.hit);
 
             SrUkfCore core(params);
@@ -915,7 +913,7 @@ namespace MazeMap
             observation.cls = ObsClass::WallLike;
             observation.rho = baseline.rangeM - 0.012f;
 
-            const WallUpdateResult result = core.updateSideSensor(Side::Left, observation, map);
+            const WallUpdateResult result = core.updateSideSensor(Side::Left, observation, maze);
             Assert::IsTrue(result.filter.attempted);
             Assert::IsTrue(result.filter.accepted);
 

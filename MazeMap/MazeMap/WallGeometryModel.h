@@ -19,23 +19,6 @@ namespace MazeMap
         Post = 2U
     };
 
-    // Read-only map view used by UKF wall prediction.
-    struct LocalMapView
-    {
-        const Maze* maze = nullptr;
-        float cellSizeM = Maze::GetCellDimension();
-        float wallThicknessM = WALL_THICKNESS;
-        float postHalfWidthM = 0.5f * WALL_THICKNESS;
-        float noHitRangeM = 0.30f;
-        uint8_t radiusCells = 2U;
-        bool freezeMapMutation = false;
-
-        bool IsValid() const noexcept
-        {
-            return maze != nullptr;
-        }
-    };
-
     // One predicted wall-sensor ray-cast result.
     struct GeometryPrediction
     {
@@ -64,12 +47,24 @@ namespace MazeMap
         GeometryPrediction predictRay(
             const VehicleState::StateVector& state,
             const SensorExtrinsics& sensorExtrinsics,
-            const LocalMapView& map) const noexcept;
+            const Maze& maze) const noexcept;
 
         GeometryPrediction predictRay(
             const GeometryStateFrame& frame,
             const SensorExtrinsics& sensorExtrinsics,
-            const LocalMapView& map) const noexcept;
+            const Maze& maze) const noexcept;
+
+        GeometryPrediction predictRay(
+            const VehicleState::StateVector& state,
+            const SensorExtrinsics& sensorExtrinsics,
+            const Maze& maze,
+            float maxRangeM) const noexcept;
+
+        GeometryPrediction predictRay(
+            const GeometryStateFrame& frame,
+            const SensorExtrinsics& sensorExtrinsics,
+            const Maze& maze,
+            float maxRangeM) const noexcept;
 
         Eigen::Vector2f sensorOriginWorld(
             const VehicleState::StateVector& state,
@@ -88,10 +83,9 @@ namespace MazeMap
             const SensorExtrinsics& sensorExtrinsics) const noexcept;
 
         GeometryStateFrame buildStateFrame(
-            const VehicleState::StateVector& state,
-            const LocalMapView& map) const noexcept;
+            const VehicleState::StateVector& state) const noexcept;
 
-        static CellCoordinates WorldToCell(float xMeters, float yMeters, float cellSizeM) noexcept;
+        static CellCoordinates WorldToCell(float xMeters, float yMeters) noexcept;
 
     private:
         static bool intersectRayAabb(
@@ -106,7 +100,6 @@ namespace MazeMap
             const CellCoordinates& cell,
             Direction direction,
             WallState state,
-            const LocalMapView& map,
             GeometryPrediction& best) noexcept;
     };
 }

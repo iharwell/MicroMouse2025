@@ -3,7 +3,24 @@
 
 #include "PlantModel.h"
 
-MazeMap::OpenLoopDriveCommand DriveBase::DeltaCommand(
+namespace
+{
+    using ControlVector = MazeMap::App::Internal::LoopController::ControlVector;
+
+    ControlVector MakeClampedDriveControlVector(float leftMotorPwm, float rightMotorPwm) noexcept
+    {
+        if (!std::isfinite(leftMotorPwm) || !std::isfinite(rightMotorPwm))
+        {
+            return {};
+        }
+
+        return ControlVector::RawMotorPwm(
+            MazeMap::ClampWheelDriveCommand(leftMotorPwm),
+            MazeMap::ClampWheelDriveCommand(rightMotorPwm));
+    }
+}
+
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::DeltaCommand(
     float presentLinearSpeedMps,
     float desiredLongitudinalAccelMps2,
     MazeMap::CommandPD pd) const
@@ -18,7 +35,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::DeltaCommand(
     targets.hasLongitudinalAccelTarget = true;
     targets.longitudinalAccelTargetMps2 = desiredLongitudinalAccelMps2;
 
-    const MazeMap::OpenLoopDriveCommand baseCommand =
+    const ControlVector baseCommand =
         ResolveRawAccelerationCommand(
             presentLinearSpeedMps,
             0.0f,
@@ -27,7 +44,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::DeltaCommand(
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::DeltaCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::DeltaCommand(
     float presentLinearSpeedMps,
     float desiredLongitudinalAccelMps2,
     float presentYawRateRadps,
@@ -46,7 +63,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::DeltaCommand(
     targets.hasYawAccelTarget = true;
     targets.yawAccelTargetRadps2 = desiredYawAccelRadps2;
 
-    const MazeMap::OpenLoopDriveCommand baseCommand =
+    const ControlVector baseCommand =
         ResolveRawAccelerationCommand(
             presentLinearSpeedMps,
             presentYawRateRadps,
@@ -55,7 +72,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::DeltaCommand(
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::DeltaYawRateCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::DeltaYawRateCommand(
     float presentYawRateRadps,
     float desiredYawAccelRadps2,
     MazeMap::CommandPD pd) const
@@ -70,7 +87,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::DeltaYawRateCommand(
     targets.hasYawAccelTarget = true;
     targets.yawAccelTargetRadps2 = desiredYawAccelRadps2;
 
-    const MazeMap::OpenLoopDriveCommand baseCommand =
+    const ControlVector baseCommand =
         ResolveRawAccelerationCommand(
             0.0f,
             presentYawRateRadps,
@@ -79,7 +96,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::DeltaYawRateCommand(
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointCommand(
     float desiredLinearSpeedMps,
     MazeMap::CommandPD pd) const
 {
@@ -94,7 +111,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
     targets.velocityTargetMps = desiredLinearSpeedMps;
     ResolveWheelTargets(desiredLinearSpeedMps, 0.0f, targets);
 
-    const MazeMap::OpenLoopDriveCommand baseCommand =
+    const ControlVector baseCommand =
         ResolveRawVelocityTargetCommand(
             context,
             desiredLinearSpeedMps,
@@ -102,7 +119,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointCommand(
     float desiredLinearSpeedMps,
     float desiredYawRateRadps,
     MazeMap::CommandPD pd) const
@@ -120,7 +137,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
     targets.yawRateTargetRadps = desiredYawRateRadps;
     ResolveWheelTargets(desiredLinearSpeedMps, desiredYawRateRadps, targets);
 
-    const MazeMap::OpenLoopDriveCommand baseCommand =
+    const ControlVector baseCommand =
         ResolveRawVelocityTargetCommand(
             context,
             desiredLinearSpeedMps,
@@ -133,17 +150,13 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointControlVec
     float desiredYawRateRadps,
     MazeMap::CommandPD pd) const
 {
-    const MazeMap::OpenLoopDriveCommand command =
-        PointCommand(
-            desiredLinearSpeedMps,
-            desiredYawRateRadps,
-            pd);
-    return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
-        command.leftDriveCommand,
-        command.rightDriveCommand);
+    return PointCommand(
+        desiredLinearSpeedMps,
+        desiredYawRateRadps,
+        pd);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::PointCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointCommand(
     const MazeMap::ManeuverPoint& point,
     MazeMap::CommandPD pd) const
 {
@@ -159,13 +172,10 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointControlVec
     const MazeMap::ManeuverPoint& point,
     MazeMap::CommandPD pd) const
 {
-    const MazeMap::OpenLoopDriveCommand command = PointCommand(point, pd);
-    return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
-        command.leftDriveCommand,
-        command.rightDriveCommand);
+    return PointCommand(point, pd);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::PointYawRateCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::PointYawRateCommand(
     float desiredYawRateRadps,
     MazeMap::CommandPD pd) const
 {
@@ -180,7 +190,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::PointYawRateCommand(
     targets.yawRateTargetRadps = desiredYawRateRadps;
     ResolveWheelTargets(0.0f, desiredYawRateRadps, targets);
 
-    const MazeMap::OpenLoopDriveCommand baseCommand =
+    const ControlVector baseCommand =
         ResolveRawVelocityTargetCommand(
             context,
             context.presentLinearSpeedMps,
@@ -188,7 +198,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::PointYawRateCommand(
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::FeedbackCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::FeedbackCommand(
     float setpoint,
     MazeMap::CommandPD pd) const
 {
@@ -229,7 +239,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::FeedbackCommand(
         targets.rightWheelLinearTargetMps = setpoint;
     }
 
-    const MazeMap::OpenLoopDriveCommand baseCommand =
+    const ControlVector baseCommand =
         ResolveRawAccelerationCommand(
             context.presentLinearSpeedMps,
             context.presentYawRateRadps,
@@ -239,7 +249,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::FeedbackCommand(
 }
 
 void DriveBase::CommandGenerated(
-    const MazeMap::OpenLoopDriveCommand& command,
+    const MazeMap::App::Internal::LoopController::ControlVector& command,
     float linearSpeedMps,
     float angularSpeedRadps,
     bool applyLaunchAssist)
@@ -252,8 +262,8 @@ void DriveBase::CommandGenerated(
 
     const float leftMeasuredMps = _leftEncoderVelocityMps;
     const float rightMeasuredMps = _rightEncoderVelocityMps;
-    float leftDriveCommand = command.leftDriveCommand;
-    float rightDriveCommand = command.rightDriveCommand;
+    float leftDriveCommand = command.leftMotorPwm;
+    float rightDriveCommand = command.rightMotorPwm;
     const unsigned long nowMs = millis();
     if (applyLaunchAssist &&
         UpdateWheelLaunchAssistState(_leftLaunchAssist, leftMeasuredMps, leftDriveCommand, _leftMotor.getDriveCommand(), nowMs))
@@ -299,6 +309,33 @@ void DriveBase::CommandGenerated(
         ((std::fabs(leftDriveCommand) >= 0.999f) ? 0x1u : 0u) |
         ((std::fabs(rightDriveCommand) >= 0.999f) ? 0x2u : 0u);
     SetOpenLoopRaw(leftDriveCommand, rightDriveCommand);
+}
+
+void DriveBase::CommandOpenLoopRaw(
+    const MazeMap::App::Internal::LoopController::ControlVector& command)
+{
+    if (_estimatorFaulted)
+    {
+        Brake();
+        return;
+    }
+
+    _lastLinearCommandMps = 0.0f;
+    _lastAngularCommandRadps = 0.0f;
+    ResetLaunchAssist();
+    _lastLeftFeedforwardCommand = 0.0f;
+    _lastRightFeedforwardCommand = 0.0f;
+    _lastLeftFeedbackCommand = command.leftMotorPwm;
+    _lastRightFeedbackCommand = command.rightMotorPwm;
+    _lastLeftTargetVelocityMps = 0.0f;
+    _lastRightTargetVelocityMps = 0.0f;
+    _lastLeftLaunchAssistFloor = 0.0f;
+    _lastRightLaunchAssistFloor = 0.0f;
+    _lastModeFlags = kModeRawOpenLoop;
+    _lastSaturationFlags =
+        ((std::fabs(command.leftMotorPwm) >= 0.999f) ? 0x1u : 0u) |
+        ((std::fabs(command.rightMotorPwm) >= 0.999f) ? 0x2u : 0u);
+    SetOpenLoopRaw(command.leftMotorPwm, command.rightMotorPwm);
 }
 
 void DriveBase::GetVelocityCommandOperatingState(
@@ -368,22 +405,22 @@ float DriveBase::ResolveCommandResponseTimeS() noexcept
         1.0f;
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::AddDriveCommands(
-    const MazeMap::OpenLoopDriveCommand& lhs,
-    const MazeMap::OpenLoopDriveCommand& rhs) noexcept
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::AddDriveCommands(
+    const MazeMap::App::Internal::LoopController::ControlVector& lhs,
+    const MazeMap::App::Internal::LoopController::ControlVector& rhs) noexcept
 {
-    return MazeMap::MakeOpenLoopDriveCommand(
-        lhs.leftDriveCommand + rhs.leftDriveCommand,
-        lhs.rightDriveCommand + rhs.rightDriveCommand);
+    return ControlVector::RawMotorPwm(
+        lhs.leftMotorPwm + rhs.leftMotorPwm,
+        lhs.rightMotorPwm + rhs.rightMotorPwm);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::SubtractDriveCommands(
-    const MazeMap::OpenLoopDriveCommand& lhs,
-    const MazeMap::OpenLoopDriveCommand& rhs) noexcept
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::SubtractDriveCommands(
+    const MazeMap::App::Internal::LoopController::ControlVector& lhs,
+    const MazeMap::App::Internal::LoopController::ControlVector& rhs) noexcept
 {
-    return MazeMap::MakeOpenLoopDriveCommand(
-        lhs.leftDriveCommand - rhs.leftDriveCommand,
-        lhs.rightDriveCommand - rhs.rightDriveCommand);
+    return ControlVector::RawMotorPwm(
+        lhs.leftMotorPwm - rhs.leftMotorPwm,
+        lhs.rightMotorPwm - rhs.rightMotorPwm);
 }
 
 float DriveBase::ResolvePositiveOrZero(float value) noexcept
@@ -557,7 +594,7 @@ void DriveBase::ResolveVelocityPointAccelerations(
         desiredYawAccelRadps2);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::ResolveRawAccelerationCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::ResolveRawAccelerationCommand(
     float presentLinearSpeedMps,
     float presentYawRateRadps,
     float desiredLongitudinalAccelMps2,
@@ -606,13 +643,12 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveRawAccelerationCommand(
             _ukf.ukf().preparedParams(),
             GetMissionFanDutyCycle(),
             batteryVoltageV);
-    return MazeMap::ClampOpenLoopDriveCommand(
-        MazeMap::MakeOpenLoopDriveCommand(
-            solution.control.leftMotorCommand,
-            solution.control.rightMotorCommand));
+    return MakeClampedDriveControlVector(
+        solution.control.leftMotorCommand,
+        solution.control.rightMotorCommand);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::ResolveRawVelocityTargetCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::ResolveRawVelocityTargetCommand(
     const CommandContext& context,
     float desiredLinearSpeedMps,
     float desiredYawRateRadps) const
@@ -626,13 +662,12 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveRawVelocityTargetCommand(
             GetMissionFanDutyCycle(),
             context.batteryVoltageV,
             ResolveCommandResponseTimeS());
-    return MazeMap::ClampOpenLoopDriveCommand(
-        MazeMap::MakeOpenLoopDriveCommand(
-            solution.control.leftMotorCommand,
-            solution.control.rightMotorCommand));
+    return MakeClampedDriveControlVector(
+        solution.control.leftMotorCommand,
+        solution.control.rightMotorCommand);
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::ResolveLongitudinalCorrectionCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::ResolveLongitudinalCorrectionCommand(
     const CommandContext& context,
     float desiredLongitudinalAccelCorrectionMps2) const
 {
@@ -653,7 +688,7 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveLongitudinalCorrectionCommand(
             0.0f));
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::ResolveYawCorrectionCommand(
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::ResolveYawCorrectionCommand(
     const CommandContext& context,
     float desiredYawAccelCorrectionRadps2) const
 {
@@ -674,18 +709,18 @@ MazeMap::OpenLoopDriveCommand DriveBase::ResolveYawCorrectionCommand(
             0.0f));
 }
 
-MazeMap::OpenLoopDriveCommand DriveBase::ComposeGeneratedCommand(
-    const MazeMap::OpenLoopDriveCommand& baseCommand,
+MazeMap::App::Internal::LoopController::ControlVector DriveBase::ComposeGeneratedCommand(
+    const MazeMap::App::Internal::LoopController::ControlVector& baseCommand,
     const CommandContext& context,
     const CommandTargets& targets,
     MazeMap::CommandPD pd) const
 {
     if (pd == MazeMap::CommandPD::RawCommand)
     {
-        return MazeMap::ClampOpenLoopDriveCommand(baseCommand);
+        return MakeClampedDriveControlVector(baseCommand.leftMotorPwm, baseCommand.rightMotorPwm);
     }
 
-    MazeMap::OpenLoopDriveCommand command = baseCommand;
+    ControlVector command = baseCommand;
 
     if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::StateVelocityPD))
     {
@@ -812,10 +847,10 @@ MazeMap::OpenLoopDriveCommand DriveBase::ComposeGeneratedCommand(
             targets.hasWheelOmegaTargets ?
             targets.rightWheelOmegaTargetRadps :
             context.presentState(MazeMap::VehicleState::kOmegaR);
-        command.leftDriveCommand +=
+        command.leftMotorPwm +=
             GetWheelVelocityKp() *
             (wheelRadiusM * (leftTargetOmegaRadps - context.presentState(MazeMap::VehicleState::kOmegaL)));
-        command.rightDriveCommand +=
+        command.rightMotorPwm +=
             GetWheelVelocityKp() *
             (wheelRadiusM * (rightTargetOmegaRadps - context.presentState(MazeMap::VehicleState::kOmegaR)));
     }
@@ -830,15 +865,15 @@ MazeMap::OpenLoopDriveCommand DriveBase::ComposeGeneratedCommand(
             targets.hasWheelLinearTargets ?
             targets.rightWheelLinearTargetMps :
             context.encoderRightVelocityMps;
-        command.leftDriveCommand +=
+        command.leftMotorPwm +=
             GetWheelVelocityKp() *
             (leftTargetVelocityMps - context.encoderLeftVelocityMps);
-        command.rightDriveCommand +=
+        command.rightMotorPwm +=
             GetWheelVelocityKp() *
             (rightTargetVelocityMps - context.encoderRightVelocityMps);
     }
 
-    return MazeMap::ClampOpenLoopDriveCommand(command);
+    return MakeClampedDriveControlVector(command.leftMotorPwm, command.rightMotorPwm);
 }
 
 float DriveBase::GetWheelVelocityKp() const

@@ -53,14 +53,6 @@ namespace MazeMap
         return covariance;
     }
 
-    inline LocalMapView BuildLocalMapView(const Maze& maze) noexcept
-    {
-        LocalMapView map{};
-        map.maze = &maze;
-        map.radiusCells = 1U;
-        return map;
-    }
-
     inline float DistancePerEncoderCountMeters(const PlantParams& params) noexcept
     {
         return

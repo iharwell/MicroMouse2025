@@ -18,7 +18,6 @@
 #include "..\MazeMap\MotorModelUnits.h"
 #include "..\MazeMap\MotionTargetProjection.h"
 #include "..\MazeMap\CruiseSpeedFloor.h"
-#include "..\MazeMap\OpenLoopDriveCommand.h"
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\RollingAverageWindow.h"
 #include "..\MazeMap\SearchRunPlanner.h"
@@ -623,55 +622,6 @@ namespace MazeMap
 				0.0f,
 				0.0f,
 				projectedDistanceM));
-		}
-
-		TEST_METHOD(OpenLoopDriveCommandHelpersBuildSymmetricAndDifferentialCommands)
-		{
-			const OpenLoopDriveCommand symmetric = MakeSymmetricOpenLoopDriveCommand(0.42f);
-			Assert::AreEqual(0.42f, symmetric.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.42f, symmetric.rightDriveCommand, 1.0e-6f);
-
-			const OpenLoopDriveCommand differential = MakeDifferentialOpenLoopDriveCommand(0.40f, 0.15f);
-			Assert::AreEqual(0.25f, differential.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.55f, differential.rightDriveCommand, 1.0e-6f);
-		}
-
-		TEST_METHOD(ClampOpenLoopDriveCommandLimitsAndRejectsInvalidInputs)
-		{
-			const OpenLoopDriveCommand clamped = ClampOpenLoopDriveCommand(MakeOpenLoopDriveCommand(-1.25f, 1.40f));
-			Assert::AreEqual(-1.0f, clamped.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(1.0f, clamped.rightDriveCommand, 1.0e-6f);
-
-			const OpenLoopDriveCommand invalid = ClampOpenLoopDriveCommand(
-				MakeOpenLoopDriveCommand(std::numeric_limits<float>::quiet_NaN(), 0.25f));
-			Assert::AreEqual(0.0f, invalid.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.0f, invalid.rightDriveCommand, 1.0e-6f);
-		}
-
-		TEST_METHOD(ComputeOpenLoopYawWiggleCommandAlternatesDriveBiasAcrossHalfPeriods)
-		{
-			const OpenLoopDriveCommand firstHalf = ComputeOpenLoopYawWiggleCommand(0.80f, 0UL, 120UL, 0.25f);
-			Assert::AreEqual(0.60f, firstHalf.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(1.00f, firstHalf.rightDriveCommand, 1.0e-6f);
-
-			const OpenLoopDriveCommand secondHalf = ComputeOpenLoopYawWiggleCommand(0.80f, 120UL, 120UL, 0.25f);
-			Assert::AreEqual(1.00f, secondHalf.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.60f, secondHalf.rightDriveCommand, 1.0e-6f);
-
-			const OpenLoopDriveCommand disabled = ComputeOpenLoopYawWiggleCommand(0.80f, 0UL, 0UL, 0.25f);
-			Assert::AreEqual(0.80f, disabled.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.80f, disabled.rightDriveCommand, 1.0e-6f);
-		}
-
-		TEST_METHOD(ComputeOpenLoopYawWiggleCommandRetainsForwardSeatBiasOnBothWheels)
-		{
-			const OpenLoopDriveCommand firstHalf = ComputeOpenLoopYawWiggleCommand(1.00f, 0UL, 120UL, 0.20f, 0.90f);
-			Assert::AreEqual(0.90f, firstHalf.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(1.00f, firstHalf.rightDriveCommand, 1.0e-6f);
-
-			const OpenLoopDriveCommand secondHalf = ComputeOpenLoopYawWiggleCommand(1.00f, 120UL, 120UL, 0.20f, 0.90f);
-			Assert::AreEqual(1.00f, secondHalf.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.90f, secondHalf.rightDriveCommand, 1.0e-6f);
 		}
 
 		TEST_METHOD(SmoothTurnYawRatePdControllerUsesProportionalTermAndDelayedDerivative)
@@ -2047,21 +1997,6 @@ namespace MazeMap
 			Assert::AreEqual(0.20f, ComputeWallTouchSeatWiggleTurnFraction(1U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
 			Assert::AreEqual(0.28f, ComputeWallTouchSeatWiggleTurnFraction(4U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
 			Assert::AreEqual(0.0f, ComputeWallTouchSeatWiggleTurnFraction(1U, std::numeric_limits<float>::quiet_NaN(), 0.04f, 0.28f), 1.0e-6f);
-		}
-
-		TEST_METHOD(ComputeOpenLoopYawDitherCommandBlendsAcrossPolarityReversal)
-		{
-			const OpenLoopDriveCommand initial = ComputeOpenLoopYawDitherCommand(0.50f, 0UL, 80UL, 12UL, 0.20f, 0.85f);
-			Assert::AreEqual(0.425f, initial.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.625f, initial.rightDriveCommand, 1.0e-6f);
-
-			const OpenLoopDriveCommand blended = ComputeOpenLoopYawDitherCommand(0.50f, 86UL, 80UL, 12UL, 0.20f, 0.85f);
-			Assert::AreEqual(0.50f, blended.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.50f, blended.rightDriveCommand, 1.0e-6f);
-
-			const OpenLoopDriveCommand reversed = ComputeOpenLoopYawDitherCommand(0.50f, 92UL, 80UL, 12UL, 0.20f, 0.85f);
-			Assert::AreEqual(0.625f, reversed.leftDriveCommand, 1.0e-6f);
-			Assert::AreEqual(0.425f, reversed.rightDriveCommand, 1.0e-6f);
 		}
 
 		TEST_METHOD(IsWallTouchSquareCycleGoodRequiresFrontSkewYawAndSignalAgreement)

@@ -1,6 +1,7 @@
 #pragma once
 // Declares the square-root UKF core that owns the process model and measurement updates.
 
+#include "Maze.h"
 #include "PlantModel.h"
 #include "WallGeometryModel.h"
 #include "UKF.h"
@@ -339,11 +340,11 @@ namespace MazeMap
         FrontPairUpdateResult updateFrontPair(
             const WallObs& left,
             const WallObs& right,
-            const LocalMapView& map) noexcept;
+            const Maze& maze) noexcept;
         WallUpdateResult updateSideSensor(
             Side which,
             const WallObs& observation,
-            const LocalMapView& map) noexcept;
+            const Maze& maze) noexcept;
 
         static Eigen::Matrix<float, 2, 2> ComputeGeneralEncoderPairCovarianceRadps(
             const PlantParams& params) noexcept;
@@ -451,11 +452,11 @@ namespace MazeMap
         void sanitizeLaunchRecoveryIfNeeded(OperatingMode previousMode, OperatingMode newMode) noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
             const StateVector& sigmaPoint,
-            const LocalMapView& map) const noexcept;
+            const Maze& maze) const noexcept;
         float wallPredictionForSensor(
             const StateVector& sigmaPoint,
             const SensorExtrinsics& sensor,
-            const LocalMapView& map) const noexcept;
+            const Maze& maze) const noexcept;
 
         PlantModel _plantModel;
         WallGeometryModel _geometryModel;

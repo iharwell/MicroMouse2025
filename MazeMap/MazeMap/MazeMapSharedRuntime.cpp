@@ -1095,7 +1095,8 @@ namespace MazeMap::App::Internal
         }
         else
         {
-            _impl->drive.CommandOpenLoopRaw(leftMotorPwm, rightMotorPwm);
+            _impl->drive.CommandOpenLoopRaw(
+                LoopController::ControlVector::RawMotorPwm(leftMotorPwm, rightMotorPwm));
         }
 
         return true;

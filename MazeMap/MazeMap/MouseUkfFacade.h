@@ -1,6 +1,7 @@
 #pragma once
 // Declares the high-level micromouse estimator facade that combines the SR-UKF core with maze-evidence updates.
 
+#include "Maze.h"
 #include "MapEvidenceUpdater.h"
 #include "SrUkfCore.h"
 
@@ -64,13 +65,15 @@ namespace MazeMap
         FrontPairUpdateResult updateFrontPair(
             const WallObs& left,
             const WallObs& right,
-            const LocalMapView& map,
+            const Maze& maze,
+            bool freezeMapMutation = false,
             const MapEvidenceUpdaterConfig& evidenceConfig = MapEvidenceUpdaterConfig{}) noexcept;
 
         WallUpdateResult updateSideSensor(
             Side which,
             const WallObs& observation,
-            const LocalMapView& map,
+            const Maze& maze,
+            bool freezeMapMutation = false,
             const MapEvidenceUpdaterConfig& evidenceConfig = MapEvidenceUpdaterConfig{}) noexcept;
 
     private:
@@ -79,8 +82,7 @@ namespace MazeMap
             const VehicleState::StateVector& state) noexcept;
         static CellCoordinates estimateSensorCell(
             const SensorExtrinsics& sensor,
-            const VehicleState::StateVector& state,
-            float cellSizeM) noexcept;
+            const VehicleState::StateVector& state) noexcept;
 
         SrUkfCore _core;
         MapEvidenceUpdater _mapEvidence;

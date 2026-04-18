@@ -405,17 +405,35 @@ namespace MazeMap::App::Internal::Runtime
                 wallTouch.frontSignalMissingStartMs = 0UL;
             }
 
-            const MazeMap::OpenLoopDriveCommand ditherCommand = MazeMap::ComputeOpenLoopYawDitherCommand(
-                Config::kWallTouchSeatRampMaxDriveCommand,
-                stateElapsedMs,
-                Config::kWallTouchSeatWiggleHalfPeriodMs,
-                Config::kWallTouchSeatWiggleBlendMs,
-                wallTouch.ditherTurnFraction,
-                Config::kWallTouchSeatWiggleRetainedForwardFraction);
-
-            const unsigned long halfCycleIndex =
-                stateElapsedMs /
+            const unsigned long halfPeriodMs =
                 (std::max)(Config::kWallTouchSeatWiggleHalfPeriodMs, static_cast<std::uint16_t>(1U));
+            const unsigned long halfCycleIndex = stateElapsedMs / halfPeriodMs;
+            const unsigned long phaseMs = stateElapsedMs % halfPeriodMs;
+            float yawRateBlendSign = ((halfCycleIndex & 1UL) == 0UL) ? 1.0f : -1.0f;
+            if ((Config::kWallTouchSeatWiggleBlendMs > 0U) &&
+                (phaseMs < Config::kWallTouchSeatWiggleBlendMs) &&
+                (stateElapsedMs >= halfPeriodMs))
+            {
+                const float blendAlpha =
+                    static_cast<float>(phaseMs) /
+                    static_cast<float>((std::max)(Config::kWallTouchSeatWiggleBlendMs, static_cast<std::uint16_t>(1U)));
+                const float previousYawRateBlendSign = -yawRateBlendSign;
+                yawRateBlendSign =
+                    previousYawRateBlendSign +
+                    ((yawRateBlendSign - previousYawRateBlendSign) * blendAlpha);
+            }
+            const float seatSpeedMps =
+                Config::kWallTouchMaxSeatEncoderSpeedMps *
+                Config::kWallTouchSeatWiggleRetainedForwardFraction;
+            const float targetYawRateRadps =
+                yawRateBlendSign *
+                wallTouch.ditherTurnFraction *
+                Config::kWallTouchReverseMaxAngularCommandRadps;
+            const LoopController::ControlVector ditherCommand =
+                drive.PointControlVector(
+                    seatSpeedMps,
+                    targetYawRateRadps,
+                    trackingCommandPd);
             if (wallTouch.haveSquareSample && (halfCycleIndex != wallTouch.lastHalfCycleIndex))
             {
                 ++wallTouch.completedHalfCycles;
@@ -530,9 +548,7 @@ namespace MazeMap::App::Internal::Runtime
             wallTouch.lastSquareFrontSkewM = observation.frontSkewM;
             wallTouch.lastSquareYawRateRadps = pose.angularSpeedRadps;
             wallTouch.lastSquareFrontSignalValid = frontSignalActive;
-            return LoopController::ControlVector::RawMotorPwm(
-                ditherCommand.leftDriveCommand,
-                ditherCommand.rightDriveCommand);
+            return ditherCommand;
         }
 
         if (wallTouch.runtimeState == WallTouchState::PostSquareSeatedHold)
