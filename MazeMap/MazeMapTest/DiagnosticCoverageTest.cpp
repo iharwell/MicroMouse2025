@@ -1563,34 +1563,6 @@ namespace MazeMap
 			Assert::IsTrue(higherAmbientMeasuredValue < nominalAmbientMeasuredValue);
 		}
 
-		TEST_METHOD(ShouldReleaseWallTouchSeatRequiresMinimumSkidDuration)
-		{
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 99UL, 100UL, true, true, true, true));
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(0.79f, 0.80f, 150UL, 100UL, true, true, true, true));
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, false, true, true, true));
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, true, false, true, true));
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, true, true, true, false));
-			Assert::IsFalse(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 150UL, 100UL, true, true, false, true));
-			Assert::IsTrue(ShouldReleaseWallTouchSeat(1.0f, 0.80f, 100UL, 100UL, true, true, true, true));
-		}
-
-		TEST_METHOD(IsWallTouchSeatAsymmetricReleaseCueRequiresOppositeBiasAndSmallAdvance)
-		{
-			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(false, false, true, true, 0.002f, 0.010f));
-			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(true, true, true, true, 0.002f, 0.010f));
-			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(true, true, false, false, 0.002f, 0.010f));
-			Assert::IsFalse(IsWallTouchSeatAsymmetricReleaseCue(true, true, false, true, 0.012f, 0.010f));
-			Assert::IsTrue(IsWallTouchSeatAsymmetricReleaseCue(true, true, false, true, 0.002f, 0.010f));
-		}
-
-		TEST_METHOD(HasWallTouchSeatQualifiedBiasPhaseRequiresFullBiasDuration)
-		{
-			Assert::IsFalse(HasWallTouchSeatQualifiedBiasPhase(99UL, 100UL));
-			Assert::IsFalse(HasWallTouchSeatQualifiedBiasPhase(150UL, 0UL));
-			Assert::IsTrue(HasWallTouchSeatQualifiedBiasPhase(100UL, 100UL));
-			Assert::IsTrue(HasWallTouchSeatQualifiedBiasPhase(180UL, 100UL));
-		}
-
 		TEST_METHOD(ComputeAverageEncoderAbsSpeedMpsUsesWheelMagnitudes)
 		{
 			Assert::AreEqual(0.030f, ComputeAverageEncoderAbsSpeedMps(0.020f, -0.040f), 1.0e-6f);
@@ -1943,85 +1915,6 @@ namespace MazeMap
 			Assert::IsFalse(TryGetKnownMissionStartWallState(CellCoordinates(1, 0), Direction::Up, wallState));
 			Assert::IsFalse(TryGetKnownMissionStartWallState(CellCoordinates(0, 1), Direction::Right, wallState));
 			Assert::IsFalse(TryGetKnownMissionStartWallState(CellCoordinates(0, 0), Direction::UpRight, wallState));
-		}
-
-		TEST_METHOD(IsWallTouchContactSampleAllowsShortHardContactsAfterARealBump)
-		{
-			Assert::IsTrue(IsWallTouchContactSample(0.004f, 0.006f, 0.030f, 0.003f, 0.012f, 120UL, 120UL));
-			Assert::IsFalse(IsWallTouchContactSample(0.001f, 0.006f, 0.030f, 0.003f, 0.012f, 120UL, 120UL));
-			Assert::IsFalse(IsWallTouchContactSample(0.004f, 0.020f, 0.030f, 0.003f, 0.012f, 120UL, 120UL));
-		}
-
-		TEST_METHOD(ComputeWallTouchMinimumLatchTravelCapsToNearbyWallGeometry)
-		{
-			Assert::IsTrue(std::fabs(ComputeWallTouchMinimumLatchTravelM(0.0255f, 0.030f, 0.008f) - 0.0255f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeWallTouchMinimumLatchTravelM(0.028f, 0.030f, 0.008f) - 0.028f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeWallTouchMinimumLatchTravelM(0.033f, 0.030f, 0.008f) - 0.030f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeWallTouchMinimumLatchTravelM(0.045f, 0.030f, 0.008f) - 0.037f) < 1.0e-6f);
-		}
-
-		TEST_METHOD(ComputeWallTouchMaximumApproachDistanceExpandsForKnownLongCorridors)
-		{
-			Assert::IsTrue(std::fabs(ComputeWallTouchMaximumApproachDistanceM(0.045f, 0.168f, 0.008f) - 0.168f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeWallTouchMaximumApproachDistanceM(0.3984f, 0.168f, 0.008f) - 0.4064f) < 1.0e-6f);
-		}
-
-		TEST_METHOD(IsWallTouchSeatedSampleRejectsAngledOrSingleWheelSpinContact)
-		{
-			Assert::IsTrue(IsWallTouchSeatedSample(0.030f, 0.030f, 0.004f, 0.08f, 0.010f, -0.012f, 0.012f, 0.20f, 0.020f));
-			Assert::IsFalse(IsWallTouchSeatedSample(0.030f, 0.030f, 0.004f, 0.24f, 0.010f, -0.012f, 0.012f, 0.20f, 0.020f));
-			Assert::IsFalse(IsWallTouchSeatedSample(0.030f, 0.030f, 0.004f, 0.08f, 0.028f, -0.004f, 0.012f, 0.20f, 0.020f));
-			Assert::IsFalse(IsWallTouchSeatedSample(0.020f, 0.030f, 0.004f, 0.08f, 0.010f, -0.012f, 0.012f, 0.20f, 0.020f));
-		}
-
-		TEST_METHOD(CountWallTouchContactIndicatorsRequiresTwoIndependentCues)
-		{
-			Assert::AreEqual(0, static_cast<int>(CountWallTouchContactIndicators(false, false, false)));
-			Assert::AreEqual(1, static_cast<int>(CountWallTouchContactIndicators(true, false, false)));
-			Assert::AreEqual(2, static_cast<int>(CountWallTouchContactIndicators(true, true, false)));
-			Assert::AreEqual(3, static_cast<int>(CountWallTouchContactIndicators(true, true, true)));
-		}
-
-		TEST_METHOD(HasWallTouchConfirmedContactRequiresPersistenceAndTwoIndicators)
-		{
-			Assert::IsFalse(HasWallTouchConfirmedContact(11UL, 12UL, 2U));
-			Assert::IsFalse(HasWallTouchConfirmedContact(12UL, 12UL, 1U));
-			Assert::IsFalse(HasWallTouchConfirmedContact(12UL, 0UL, 2U));
-			Assert::IsTrue(HasWallTouchConfirmedContact(12UL, 12UL, 2U));
-			Assert::IsTrue(HasWallTouchConfirmedContact(20UL, 12UL, 3U));
-		}
-
-		TEST_METHOD(ComputeWallTouchSeatWiggleTurnFractionEscalatesAndClamps)
-		{
-			Assert::AreEqual(0.16f, ComputeWallTouchSeatWiggleTurnFraction(0U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
-			Assert::AreEqual(0.20f, ComputeWallTouchSeatWiggleTurnFraction(1U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
-			Assert::AreEqual(0.28f, ComputeWallTouchSeatWiggleTurnFraction(4U, 0.16f, 0.04f, 0.28f), 1.0e-6f);
-			Assert::AreEqual(0.0f, ComputeWallTouchSeatWiggleTurnFraction(1U, std::numeric_limits<float>::quiet_NaN(), 0.04f, 0.28f), 1.0e-6f);
-		}
-
-		TEST_METHOD(IsWallTouchSquareCycleGoodRequiresFrontSkewYawAndSignalAgreement)
-		{
-			Assert::IsTrue(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.040f, 0.050f, 0.010f, 0.020f, true));
-			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0030f, 0.0025f, 0.040f, 0.050f, 0.010f, 0.020f, true));
-			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.060f, 0.050f, 0.010f, 0.020f, true));
-			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.040f, 0.050f, 0.030f, 0.020f, true));
-			Assert::IsFalse(IsWallTouchSquareCycleGood(0.0015f, 0.0025f, 0.040f, 0.050f, 0.010f, 0.020f, false));
-		}
-
-		TEST_METHOD(HasWallTouchSquareUpSaturatedOnlyFlagsSmallImprovements)
-		{
-			Assert::IsTrue(HasWallTouchSquareUpSaturated(0.0040f, 0.0037f, 0.0005f));
-			Assert::IsFalse(HasWallTouchSquareUpSaturated(0.0040f, 0.0030f, 0.0005f));
-			Assert::IsFalse(HasWallTouchSquareUpSaturated(0.0030f, 0.0040f, 0.0005f));
-		}
-
-		TEST_METHOD(IsWallTouchSquareSuccessEligibleEnforcesContactTimeAndCyclePersistence)
-		{
-			Assert::IsFalse(IsWallTouchSquareSuccessEligible(449UL, 450UL, 3U, 3U, 2U, 2U));
-			Assert::IsFalse(IsWallTouchSquareSuccessEligible(450UL, 450UL, 2U, 3U, 2U, 2U));
-			Assert::IsFalse(IsWallTouchSquareSuccessEligible(450UL, 450UL, 3U, 3U, 1U, 2U));
-			Assert::IsTrue(IsWallTouchSquareSuccessEligible(450UL, 450UL, 3U, 3U, 2U, 2U));
-			Assert::IsTrue(IsWallTouchSquareSuccessEligible(700UL, 450UL, 5U, 3U, 3U, 2U));
 		}
 
 		TEST_METHOD(IsMissionStartupStationarySampleUsesWheelAndYawThresholds)

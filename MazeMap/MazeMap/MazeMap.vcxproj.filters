@@ -207,7 +207,10 @@
     <ClInclude Include="ManeuverExecutor.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="WallTouchRoutine.h">
+    <ClInclude Include="StartupCalibration.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
+    <ClInclude Include="WallTouch.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="ManeuverPath.h">
@@ -464,7 +467,10 @@
     <ClCompile Include="ManeuverExecutor.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
-    <ClCompile Include="WallTouchRoutine.cpp">
+    <ClCompile Include="StartupCalibration.cpp">
+      <Filter>Source Files\App\Internal</Filter>
+    </ClCompile>
+    <ClCompile Include="WallTouch.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="ManeuverPath.cpp">

@@ -11,7 +11,7 @@
 #include "MazeMapRuntimeSignalHelpers.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
-#include "WallTouchRoutine.h"
+#include "WallTouch.h"
 
 using MazeMap::App::Internal::SharedRobotRuntime;
 using namespace MazeMap::App::Internal::AuxMeasurementModeSupport;
@@ -35,7 +35,7 @@ public:
         , _wallBeliefMap(runtime.WallBeliefMap())
         , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
-        , _wallTouchRoutine(_drive)
+        , _wallTouch(runtime.WallTouchService())
         , _currentCell(0, 0)
         , _currentDirection(MazeMap::Up)
         , _currentDirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up)
@@ -43,8 +43,6 @@ public:
         , _telemetryLoggingEnabled(false)
         , _textLoggingEnabled(false)
         , _mazeSnapshotWritten(false)
-        , _lastWallTouchStandoffEstimateM(0.0f)
-        , _hasWallTouchStandoffEstimate(false)
         , _activeModeFaultSource("utility_audit")
         , _telemetryPhaseId(0UL)
         , _telemetrySampleCount(0UL)
@@ -194,7 +192,7 @@ private:
     MazeMap::WallBeliefMap& _wallBeliefMap;
     RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
-    MazeMap::App::Internal::WallTouchRoutine _wallTouchRoutine;
+    MazeMap::App::Internal::WallTouch& _wallTouch;
     MazeMap::CellCoordinates _currentCell;
     MazeMap::Direction _currentDirection;
     MazeMap::DirectionalLocation _currentDirectionalLocation;
@@ -202,8 +200,6 @@ private:
     bool _telemetryLoggingEnabled;
     bool _textLoggingEnabled;
     bool _mazeSnapshotWritten;
-    float _lastWallTouchStandoffEstimateM;
-    bool _hasWallTouchStandoffEstimate;
     const char* _activeModeFaultSource;
     char _telemetryLogFileName[64];
     unsigned long _telemetryPhaseId;
@@ -437,7 +433,6 @@ private:
         _activeModeFaultSource =
             (activeModeFaultSource != nullptr && activeModeFaultSource[0] != '\0') ? activeModeFaultSource : "utility_audit";
         _runtime.FlushTextLog();
-        _hasWallTouchStandoffEstimate = false;
     }
 
     void ShutdownTelemetryMode(bool disableFan)
@@ -1014,7 +1009,15 @@ private:
         {
             return false;
         }
-        const float northTouchCorrectionM = _wallTouchRoutine.LastResult().seatedTravelM;
+        float northTouchCorrectionM = 0.0f;
+        if (!TryEstimateWallTouchCorrectionM(
+                poseBeforeTouch,
+                MazeMap::CellCoordinates(0U, static_cast<std::uint8_t>(geometry.northCorridorCellCount - 1U)),
+                MazeMap::Up,
+                northTouchCorrectionM))
+        {
+            return Fail("Position audit north wall-touch correction estimate is invalid");
+        }
 
         snprintf(phaseName, sizeof(phaseName), "position_straight_%u_center_far", static_cast<unsigned>(speedIndex));
         if (!BeginTelemetryPhase(phaseName))
@@ -1131,11 +1134,20 @@ private:
         {
             return false;
         }
+        const PoseEstimate poseBeforeTouch = _drive.GetPose();
         if (!TouchCellWall(MazeMap::CellCoordinates(0U, 0U), targetDirection))
         {
             return false;
         }
-        const float touchCorrectionM = _wallTouchRoutine.LastResult().seatedTravelM;
+        float touchCorrectionM = 0.0f;
+        if (!TryEstimateWallTouchCorrectionM(
+                poseBeforeTouch,
+                MazeMap::CellCoordinates(0U, 0U),
+                targetDirection,
+                touchCorrectionM))
+        {
+            return Fail("Position audit in-place wall-touch correction estimate is invalid");
+        }
 
         if (!WritePositionInPlaceTurnAuditResult(
                 &Implementation::WriteAuxMeasurementEventCallback,
@@ -1355,7 +1367,17 @@ private:
         {
             break;
         }
-        const float eastTouchCorrectionM = _wallTouchRoutine.LastResult().seatedTravelM;
+        float eastTouchCorrectionM = 0.0f;
+        if (!TryEstimateWallTouchCorrectionM(
+                poseBeforeTouch,
+                MazeMap::CellCoordinates(
+                    geometry.eastTotalCellCount - 1U,
+                    static_cast<MazeMap::CellCoordinates>(finalLocation.GetLocation()).GetY()),
+                MazeMap::Right,
+                eastTouchCorrectionM))
+        {
+            return Fail("Position audit east wall-touch correction estimate is invalid");
+        }
 
         if (!WritePositionSmoothTurnAuditResult(
                 &Implementation::WriteAuxMeasurementEventCallback,
@@ -1689,51 +1711,29 @@ private:
         return DriveCalibrationPoseToKnownX(targetXMeters, limits);
     }
 
-    bool ExecuteWallTouchRoutine(
+    bool ExecuteWallTouch(
         const MazeMap::CellCoordinates& wallCell,
         const MazeMap::Direction wallDirection,
         const bool allowPassThroughNoWall)
     {
-        MazeMap::App::Internal::WallTouchRoutine::Hooks hooks{};
-        hooks.context = this;
-        hooks.onSample = &Implementation::WriteTelemetrySample;
-        hooks.onTraceLine = [](void* context, const char* line) noexcept
+        _wallTouch.Cancel();
+        _wallTouch.SetLimits(StartupWallCalibrationLimits());
+        _wallTouch.SetTrackingCommandPD(kMazeRunningDriveBaseTrackingCommandPd);
+        _wallTouch.SetAllowPassThroughNoWall(allowPassThroughNoWall);
+        _wallTouch.Start(wallCell, wallDirection);
+        if (!_wallTouch.Active())
         {
-            auto* const self = static_cast<Implementation*>(context);
-            if ((self != nullptr) && (line != nullptr))
-            {
-                AppendStartupTrace(line);
-            }
-        };
-        hooks.onPoseReset = [](void* context) noexcept
-        {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self != nullptr)
-            {
-                self->AppendStartupCalibrationStateTrace("touch_pose_set");
-            }
-        };
-
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_wallTouchRoutine.PrepareInitialCallbacks(
-                wallCell,
-                wallDirection,
-                allowPassThroughNoWall,
-                PrepareLoopContinuation(this, &Implementation::WallTouchRoutineCompleteTick),
-                initialCallbacks,
-                hooks))
-        {
-            return Fail("Failed to prepare wall-touch routine");
+            return Fail("Failed to start wall-touch service");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunLoopSession(nullptr, &Implementation::WallTouchLoopTick))
         {
-            _wallTouchRoutine.CancelActiveRoutine();
+            _wallTouch.Cancel();
             return false;
         }
         return true;
     }
 
-    LoopController::ControlVector WallTouchRoutineCompleteTick(
+    LoopController::ControlVector WallTouchLoopTick(
         void* rawState,
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
@@ -1741,8 +1741,57 @@ private:
     {
         (void)rawState;
         (void)loopEndTimeUs;
-        (void)state;
+        if (!Implementation::WriteTelemetrySample(this, false, state))
+        {
+            return FaultLoopPhase(services, "Maze-running wall-touch sample hook failed");
+        }
+
+        bool done = false;
+        const LoopController::ControlVector control = _wallTouch.GetNextControls(done);
+        if (!done)
+        {
+            return control;
+        }
+
         return EndLoopPhase(services);
+    }
+
+    bool TryEstimateWallTouchCorrectionM(
+        const PoseEstimate& poseBeforeTouch,
+        const MazeMap::CellCoordinates& wallCell,
+        const MazeMap::Direction wallDirection,
+        float& correctionM) const
+    {
+        correctionM = 0.0f;
+
+        float targetCoordinateM = 0.0f;
+        CalibrationWall calibrationWall = CalibrationWall::West;
+        if (!TryComputeWallTouchTargetCoordinateForCellWall(
+                wallCell,
+                wallDirection,
+                targetCoordinateM,
+                calibrationWall))
+        {
+            return false;
+        }
+
+        switch (calibrationWall)
+        {
+        case CalibrationWall::West:
+            correctionM = (std::max)(0.0f, poseBeforeTouch.xMeters - targetCoordinateM);
+            return true;
+        case CalibrationWall::East:
+            correctionM = (std::max)(0.0f, targetCoordinateM - poseBeforeTouch.xMeters);
+            return true;
+        case CalibrationWall::South:
+            correctionM = (std::max)(0.0f, poseBeforeTouch.yMeters - targetCoordinateM);
+            return true;
+        case CalibrationWall::North:
+            correctionM = (std::max)(0.0f, targetCoordinateM - poseBeforeTouch.yMeters);
+            return true;
+        default:
+            return false;
+        }
     }
 
     bool TryTouchCellWall(
@@ -1760,7 +1809,7 @@ private:
             return false;
         }
 
-        if (!ExecuteWallTouchRoutine(
+        if (!ExecuteWallTouch(
                 wallCell,
                 wallDirection,
                 allowPassThroughNoWall))
@@ -2494,7 +2543,6 @@ private:
             return false;
         }
         gWallDistanceCalibration.Clear();
-        _hasWallTouchStandoffEstimate = false;
         SeedStartupWallCalibrationPoseFromSouthWall();
         if (!WaitForStartupStationaryHold())
         {
@@ -2752,19 +2800,6 @@ private:
         {
             return Fail("Unable to write wall calibration metadata");
         }
-        if (_hasWallTouchStandoffEstimate)
-        {
-            snprintf(
-                line,
-                sizeof(line),
-                "estimated_touch_standoff_m,%.6f",
-                _lastWallTouchStandoffEstimateM);
-            if (!WriteTelemetryEvent("wall_calibration", line))
-            {
-                return Fail("Unable to write wall calibration metadata");
-            }
-        }
-
         float sideWallOnThresholdM = Config::kSideWallOnThresholdM;
         float sideWallOffThresholdM = Config::kSideWallOffThresholdM;
         if (gWallDistanceCalibration.TryComputeSideWallDistanceThresholds(

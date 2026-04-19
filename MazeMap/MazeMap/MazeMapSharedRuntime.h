@@ -14,6 +14,8 @@ namespace MazeMap::App::Internal
     class Drive;
     class LoopController;
     class ManeuverExecutor;
+    class StartupCalibration;
+    class WallTouch;
 }
 
 namespace MazeMap
@@ -146,6 +148,8 @@ namespace MazeMap::App::Internal
         bool SetMotorPWM(float leftMotorPwm, float rightMotorPwm) noexcept;
         DriveBase& Drive() noexcept;
         MazeMap::App::Internal::Drive& DriveService() noexcept;
+        StartupCalibration& StartupCalibrationService() noexcept;
+        WallTouch& WallTouchService() noexcept;
         ManeuverExecutor& ManeuverExecutorService() noexcept;
         LoopController& ControlLoop() noexcept;
         RuntimeSensorSuite& Sensors() noexcept;

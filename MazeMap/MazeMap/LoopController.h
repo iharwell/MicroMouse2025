@@ -8,6 +8,8 @@ namespace MazeMap::App::Internal
 {
     class Drive;
     class SharedRobotRuntime;
+    class StartupCalibration;
+    class WallTouch;
 
     // LoopController owns one uninterrupted fixed-period control session. Its sole job is to lock
     // cadence, command-application timing, sensing/update timing, and the final sync wait into one
@@ -194,6 +196,8 @@ namespace MazeMap::App::Internal
     private:
         friend class Drive;
         friend class SharedRobotRuntime;
+        friend class StartupCalibration;
+        friend class WallTouch;
 
         struct ObservedTickState final
         {

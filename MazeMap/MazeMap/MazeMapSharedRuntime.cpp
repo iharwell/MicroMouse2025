@@ -9,6 +9,9 @@
 #include "MazeMapRuntimeInfrastructure.h"
 #include "PlantModel.h"
 #include "RuntimeBinaryLogSupport.h"
+#include "StartupCalibration.h"
+#include "WallTouch.h"
+#include "WallTouch.h"
 
 #include <cmath>
 #include <cstdarg>
@@ -464,6 +467,8 @@ namespace MazeMap::App::Internal
         MazeMap::PlantModel plantModel;
         DriveBase drive;
         MazeMap::App::Internal::Drive driveService;
+        StartupCalibration startupCalibrationService;
+        WallTouch wallTouchService;
         ManeuverExecutor maneuverExecutor;
         LoopController controlLoop;
         RuntimeSensorSuite sensors;
@@ -488,6 +493,8 @@ namespace MazeMap::App::Internal
         : _impl(std::make_unique<Implementation>())
     {
         _impl->driveService.AttachRuntime(*this);
+        _impl->startupCalibrationService.AttachRuntime(*this);
+        _impl->wallTouchService.AttachRuntime(*this);
         _impl->maneuverExecutor.AttachRuntime(*this);
         _impl->controlLoop.AttachRuntime(*this);
     }
@@ -1113,6 +1120,16 @@ namespace MazeMap::App::Internal
     MazeMap::App::Internal::Drive& SharedRobotRuntime::DriveService() noexcept
     {
         return _impl->driveService;
+    }
+
+    StartupCalibration& SharedRobotRuntime::StartupCalibrationService() noexcept
+    {
+        return _impl->startupCalibrationService;
+    }
+
+    WallTouch& SharedRobotRuntime::WallTouchService() noexcept
+    {
+        return _impl->wallTouchService;
     }
 
     ManeuverExecutor& SharedRobotRuntime::ManeuverExecutorService() noexcept

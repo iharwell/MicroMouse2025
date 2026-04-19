@@ -219,7 +219,8 @@
     <ClInclude Include="Maneuver.h" />
     <ClInclude Include="ManeuverInstance.h" />
     <ClInclude Include="ManeuverExecutor.h" />
-    <ClInclude Include="WallTouchRoutine.h" />
+    <ClInclude Include="StartupCalibration.h" />
+    <ClInclude Include="WallTouch.h" />
     <ClInclude Include="ManeuverPath.h" />
     <ClInclude Include="ManeuverPathFinder.h" />
     <ClInclude Include="ManeuverQueue.h" />
@@ -306,7 +307,8 @@
     <ClCompile Include="LoopController.cpp" />
     <ClCompile Include="Maneuver.cpp" />
     <ClCompile Include="ManeuverExecutor.cpp" />
-    <ClCompile Include="WallTouchRoutine.cpp" />
+    <ClCompile Include="StartupCalibration.cpp" />
+    <ClCompile Include="WallTouch.cpp" />
     <ClCompile Include="ManeuverPath.cpp" />
     <ClCompile Include="ManeuverPathFinder.cpp" />
     <ClCompile Include="ManeuverSet.cpp" />

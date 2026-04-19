@@ -10,7 +10,7 @@
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeSignalHelpers.h"
 #include "MazeMapSharedRuntime.h"
-#include "WallTouchRoutine.h"
+#include "WallTouch.h"
 
 using MazeMap::App::Internal::SharedRobotRuntime;
 
@@ -35,7 +35,7 @@ public:
         , _wallBeliefMap(runtime.WallBeliefMap())
         , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
-        , _wallTouchRoutine(_drive)
+        , _wallTouch(runtime.WallTouchService())
         , _currentCell(0, 0)
         , _currentDirection(MazeMap::Up)
         , _currentDirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up)
@@ -46,8 +46,6 @@ public:
         , _missionMazeSnapshotWritten(false)
         , _frontWallCharacterization()
         , _frontWallCharacterizationAvailable(false)
-        , _lastWallTouchStandoffEstimateM(0.0f)
-        , _hasWallTouchStandoffEstimate(false)
         , _activeModeFaultSource("mission")
     {
     }
@@ -148,7 +146,7 @@ private:
     MazeMap::WallBeliefMap& _wallBeliefMap;
     RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
-    MazeMap::App::Internal::WallTouchRoutine _wallTouchRoutine;
+    MazeMap::App::Internal::WallTouch& _wallTouch;
     MazeMap::CellCoordinates _currentCell;
     MazeMap::Direction _currentDirection;
     MazeMap::DirectionalLocation _currentDirectionalLocation;
@@ -159,8 +157,6 @@ private:
     bool _missionMazeSnapshotWritten;
     MazeMap::FrontWallCharacterizationStorage _frontWallCharacterization;
     bool _frontWallCharacterizationAvailable;
-    float _lastWallTouchStandoffEstimateM;
-    bool _hasWallTouchStandoffEstimate;
     const char* _activeModeFaultSource;
     const char* _queuedManeuverCompletionHoldPhaseName{};
     unsigned long _startupStationaryStartMs{};
@@ -411,7 +407,6 @@ private:
         _activeModeFaultSource =
             (activeModeFaultSource != nullptr && activeModeFaultSource[0] != '\0') ? activeModeFaultSource : "mission";
         _runtime.FlushTextLog();
-        _hasWallTouchStandoffEstimate = false;
     }
 
     bool OpenMissionTextLog()
@@ -1286,46 +1281,25 @@ private:
         const MazeMap::Direction wallDirection,
         const bool allowPassThroughNoWall)
     {
-        MazeMap::App::Internal::WallTouchRoutine::Hooks hooks{};
-        hooks.context = this;
-        hooks.onTraceLine = [](void* context, const char* line) noexcept
+        _wallTouch.Cancel();
+        _wallTouch.SetLimits(StartupWallCalibrationLimits());
+        _wallTouch.SetTrackingCommandPD(kMissionDriveBaseTrackingCommandPd);
+        _wallTouch.SetAllowPassThroughNoWall(allowPassThroughNoWall);
+        _wallTouch.Start(wallCell, wallDirection);
+        if (!_wallTouch.Active())
         {
-            auto* const self = static_cast<Implementation*>(context);
-            if ((self != nullptr) && (line != nullptr))
-            {
-                AppendStartupTrace(line);
-            }
-        };
-        hooks.onPoseReset = [](void* context) noexcept
-        {
-            auto* const self = static_cast<Implementation*>(context);
-            if (self != nullptr)
-            {
-                self->AppendStartupCalibrationStateTrace("touch_pose_set");
-            }
-        };
-
-        LoopController::ModeCallbacks initialCallbacks{};
-        if (!_wallTouchRoutine.PrepareInitialCallbacks(
-                wallCell,
-                wallDirection,
-                allowPassThroughNoWall,
-                PrepareLoopContinuation(this, &Implementation::WallTouchRoutineCompleteTick),
-                initialCallbacks,
-                hooks))
-        {
-            return Fail("Failed to prepare wall-touch routine");
+            return Fail("Failed to start wall-touch service");
         }
-        if (!RunLoopSession(initialCallbacks))
+        if (!RunLoopSession(nullptr, &Implementation::WallTouchLoopTick))
         {
-            _wallTouchRoutine.CancelActiveRoutine();
+            _wallTouch.Cancel();
             return false;
         }
 
         return true;
     }
 
-    LoopController::ControlVector WallTouchRoutineCompleteTick(
+    LoopController::ControlVector WallTouchLoopTick(
         void* rawState,
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
@@ -1334,6 +1308,13 @@ private:
         (void)rawState;
         (void)loopEndTimeUs;
         (void)state;
+        bool done = false;
+        const LoopController::ControlVector control = _wallTouch.GetNextControls(done);
+        if (!done)
+        {
+            return control;
+        }
+
         return EndLoopPhase(services);
     }
 
@@ -2089,7 +2070,6 @@ private:
             return false;
         }
         gWallDistanceCalibration.Clear();
-        _hasWallTouchStandoffEstimate = false;
         SeedStartupWallCalibrationPoseFromSouthWall();
         if (!WaitForMissionStartupStationaryHold())
         {
