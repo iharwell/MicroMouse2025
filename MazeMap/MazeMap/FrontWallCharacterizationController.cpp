@@ -51,31 +51,13 @@ public:
         , _drive(runtime.Drive())
         , _driveService(runtime.DriveService())
         , _startupCalibration(runtime.StartupCalibrationService())
-        , _faulted(false)
     {
     }
 
     bool Begin() override
     {
-        _faulted = false;
-        _phaseFn = nullptr;
-        _pauseAction = PauseAction::None;
-        _holdCompletionAction = CompletionAction::StartCapture;
-        _holdPhaseName = nullptr;
-        _holdDurationMs = 0U;
-        _holdStartMs = 0UL;
-        _holdStarted = false;
-        _captureStorage = {};
-        _captureTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
-        _captureStartDistanceM = 0.0f;
-        _captureNextStoredDistanceM = 0.0f;
-        _captureCollapsedConsecutiveSamples = 0U;
-        _captureStartMs = 0UL;
-        _captureTimeoutMs = 0UL;
-        _captureCompletionReason = "unknown";
-        _captureElapsedBudgetLogged = false;
-        _captureStarted = false;
-        if (!_runtime.RegisterModeFaultHandler(&FrontWallCharacterizationController::HandleRuntimeFault, this, "front_wall_characterization"))
+        ResetState();
+        if (!_runtime.RegisterModeFaultHandler(&FrontWallCharacterizationController::TeardownOnRuntimeFault, this, "front_wall_characterization"))
         {
             return false;
         }
@@ -133,37 +115,28 @@ public:
 
     void Run() override
     {
-        if (_faulted)
-        {
-            return;
-        }
+        _phase = Phase::LaunchStartupSettle;
 
-        bool ok = StartHoldPhase(
-            "startup_settle",
-            FrontWallCharacterizationConfig::kStartupSettleMs,
-            CompletionAction::StartCapture);
-        if (ok)
+        bool ok = false;
+        LoopController::ModeCallbacks callbacks{};
+        callbacks.onModeWork = &FrontWallCharacterizationController::ModeWorkThunk;
+        callbacks.context = this;
+        if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
         {
-            LoopController::ModeCallbacks callbacks{};
-            callbacks.onModeWork = &FrontWallCharacterizationController::ModeWorkThunk;
-            callbacks.context = this;
-            if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-            {
-                _phaseFn = nullptr;
-                ok = Fail("Front wall characterization loop session start failed");
-            }
-            else
-            {
-                const LoopController::SessionResult result = _loopController.Run();
-                _phaseFn = nullptr;
-                _pauseAction = PauseAction::None;
-                ok = (result.status == LoopController::SessionResult::Status::Completed) && !_faulted;
-            }
+            ok = Fail("Front wall characterization loop session start failed");
+        }
+        else
+        {
+            const LoopController::SessionResult result = _loopController.Run();
+            ok = (result.status == LoopController::SessionResult::Status::Completed);
+            _loopController.EndSession();
         }
 
         _driveService.Cancel();
         _startupCalibration.Cancel();
         _drive.Brake();
+        _phase = Phase::Idle;
+        _pauseAction = PauseAction::None;
         SetMissionLevelFanEnabled(false);
         if (ok)
         {
@@ -173,15 +146,15 @@ public:
 
 private:
     using LoopController = MazeMap::App::Internal::LoopController;
-    using PhaseFn = LoopController::ControlVector (FrontWallCharacterizationController::*)(
-        std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
-        LoopController::TickServices& services);
-
-    enum class CompletionAction : std::uint8_t
+    enum class Phase : std::uint8_t
     {
-        StartCapture,
-        CompleteSession
+        Idle,
+        LaunchStartupSettle,
+        RunStartupSettle,
+        Capture,
+        LaunchPostCaptureSettle,
+        RunPostCaptureSettle,
+        Complete
     };
 
     enum class PauseAction : std::uint8_t
@@ -197,23 +170,30 @@ private:
         LoopController::TickServices& services)
     {
         auto* const self = static_cast<FrontWallCharacterizationController*>(context);
-        if ((self == nullptr) || (self->_phaseFn == nullptr))
+        if (self == nullptr)
         {
-            services.Fault("Front wall characterization phase callback was not installed");
+            services.Fault("Front wall characterization callback context was null");
             return LoopController::ControlVector::Brake;
         }
 
-        return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
+        return self->RunTick(loopEndTimeUs, state, services);
     }
 
-    static void HandleRuntimeFault(void* context, const char* reason) noexcept
+    static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
     {
-        if (context == nullptr)
+        (void)reason;
+        auto* const self = static_cast<FrontWallCharacterizationController*>(context);
+        if (self == nullptr)
         {
             return;
         }
 
-        static_cast<FrontWallCharacterizationController*>(context)->OnRuntimeFault(reason);
+        self->_phase = Phase::Idle;
+        self->_pauseAction = PauseAction::None;
+        self->_driveService.Cancel();
+        self->_startupCalibration.Cancel();
+        self->_drive.Brake();
+        SetMissionLevelFanEnabled(false);
     }
 
     SharedRobotRuntime& _runtime;
@@ -222,15 +202,9 @@ private:
     DriveBase& _drive;
     Drive& _driveService;
     StartupCalibration& _startupCalibration;
-    bool _faulted;
     FrontWallCharacterizationLogRow _logRow{};
-    PhaseFn _phaseFn{};
+    Phase _phase{ Phase::Idle };
     PauseAction _pauseAction{ PauseAction::None };
-    CompletionAction _holdCompletionAction{ CompletionAction::StartCapture };
-    const char* _holdPhaseName{};
-    std::uint16_t _holdDurationMs{};
-    unsigned long _holdStartMs{};
-    bool _holdStarted{};
     MazeMap::FrontWallCharacterizationStorage _captureStorage{};
     Eigen::Vector2f _captureTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
     float _captureStartDistanceM = 0.0f;
@@ -263,10 +237,24 @@ private:
         return options;
     }
 
-    bool StartHoldPhase(
-        const char* phaseName,
-        uint16_t durationMs,
-        CompletionAction completionAction)
+    void ResetState() noexcept
+    {
+        _phase = Phase::Idle;
+        _pauseAction = PauseAction::None;
+        _logRow = {};
+        _captureStorage = {};
+        _captureTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
+        _captureStartDistanceM = 0.0f;
+        _captureNextStoredDistanceM = 0.0f;
+        _captureCollapsedConsecutiveSamples = 0U;
+        _captureStartMs = 0UL;
+        _captureTimeoutMs = 0UL;
+        _captureCompletionReason = "unknown";
+        _captureElapsedBudgetLogged = false;
+        _captureStarted = false;
+    }
+
+    bool StartHoldPhase(const char* phaseName, std::uint16_t durationMs)
     {
         if (phaseName != nullptr && phaseName[0] != '\0')
         {
@@ -275,17 +263,15 @@ private:
             AppendStartupTrace(line);
         }
 
-        _holdCompletionAction = completionAction;
-        _holdPhaseName = phaseName;
-        _holdDurationMs = durationMs;
-        _holdStartMs = 0UL;
-        _holdStarted = false;
-        _phaseFn = &FrontWallCharacterizationController::HoldStationaryTick;
-        return true;
+        _driveService.Cancel();
+        _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+        _driveService.StartHold(durationMs, true);
+        return _driveService.Active();
     }
 
     bool StartCaptureCurvePhase()
     {
+        AppendStartupTrace("front_wall_characterization:phase=reverse_capture");
         _captureStorage = {};
         _captureStorage.distanceStepM = FrontWallCharacterizationConfig::kStoredDistanceStepM;
         _captureStorage.commandedReverseSpeedMps = FrontWallCharacterizationConfig::kReverseSpeedMps;
@@ -302,8 +288,7 @@ private:
         _captureCompletionReason = "unknown";
         _captureElapsedBudgetLogged = false;
         _captureStarted = false;
-        _driveService.Cancel();
-        _phaseFn = &FrontWallCharacterizationController::CaptureCurveTick;
+        _phase = Phase::Capture;
         return true;
     }
 
@@ -346,51 +331,104 @@ private:
 
         if (!PersistCurve(storage) || !ExportCurveToSd(storage))
         {
-            return _faulted ?
-                LoopController::PauseDisposition::Complete() :
-                LoopController::PauseDisposition::StopByRuntime(
-                    "Front wall characterization persist/export failed");
+            return LoopController::PauseDisposition::StopByRuntime(
+                "Front wall characterization persist/export failed");
         }
 
         _captureStorage = storage;
-        if (!StartHoldPhase(
-                "post_capture_settle",
-                FrontWallCharacterizationConfig::kPostCaptureSettleMs,
-                CompletionAction::CompleteSession))
-        {
-            return LoopController::PauseDisposition::StopByRuntime(
-                "Front wall characterization post-capture settle start failed");
-        }
-
+        _phase = Phase::LaunchPostCaptureSettle;
         return LoopController::PauseDisposition::Resume();
     }
 
-    LoopController::ControlVector HoldStationaryTick(
+    LoopController::ControlVector PollDrivePhase(
+        const Phase nextPhase,
+        const char* inactiveReason,
+        LoopController::TickServices& services)
+    {
+        if (!_driveService.Active())
+        {
+            services.Fault(inactiveReason);
+            return LoopController::ControlVector::Brake;
+        }
+
+        bool done = false;
+        const LoopController::ControlVector control = _driveService.GetNextControls(done);
+        if (!done)
+        {
+            return control;
+        }
+
+        _phase = nextPhase;
+        return LoopController::ControlVector::Brake;
+    }
+
+    LoopController::ControlVector RunTick(
         std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
-        (void)state;
-        if (!_holdStarted)
+        switch (_phase)
         {
-            _holdStarted = true;
-            _holdStartMs = millis();
+        case Phase::LaunchStartupSettle:
+            if (!StartHoldPhase("startup_settle", FrontWallCharacterizationConfig::kStartupSettleMs))
+            {
+                services.Fault("Front wall characterization startup settle could not start");
+            }
+            else
+            {
+                _phase = Phase::RunStartupSettle;
+            }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunStartupSettle:
+            return PollDrivePhase(
+                Phase::Capture,
+                "Front wall characterization startup settle was not active",
+                services);
+
+        case Phase::Capture:
+            return CaptureCurveTick(loopEndTimeUs, state, services);
+
+        case Phase::LaunchPostCaptureSettle:
+            if (!StartHoldPhase("post_capture_settle", FrontWallCharacterizationConfig::kPostCaptureSettleMs))
+            {
+                services.Fault("Front wall characterization post-capture settle could not start");
+            }
+            else
+            {
+                _phase = Phase::RunPostCaptureSettle;
+            }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunPostCaptureSettle:
+        {
+            if (!_driveService.Active())
+            {
+                services.Fault("Front wall characterization post-capture settle was not active");
+                return LoopController::ControlVector::Brake;
+            }
+
+            bool done = false;
+            const LoopController::ControlVector control = _driveService.GetNextControls(done);
+            if (!done)
+            {
+                return control;
+            }
+
+            _phase = Phase::Complete;
+            services.RequestEndLoop();
+            return LoopController::ControlVector::Brake;
         }
 
-        if (static_cast<unsigned long>(millis() - _holdStartMs) >= _holdDurationMs)
-        {
-            if (_holdCompletionAction == CompletionAction::CompleteSession)
-            {
-                services.RequestEndLoop();
-            }
-            else if (!StartCaptureCurvePhase())
-            {
-                services.Fault("Front wall characterization capture phase start failed");
-            }
-        }
+        case Phase::Complete:
+            return LoopController::ControlVector::Brake;
 
-        return LoopController::ControlVector::Brake;
+        case Phase::Idle:
+        default:
+            services.Fault("Front wall characterization phase was not initialized");
+            return LoopController::ControlVector::Brake;
+        }
     }
 
     LoopController::ControlVector CaptureCurveTick(
@@ -416,12 +454,19 @@ private:
         const SensorSnapshot& snapshot = state.sensors;
         if (!_captureStarted)
         {
+            if (!StartCaptureCurvePhase())
+            {
+                services.Fault("Front wall characterization capture phase start failed");
+                return LoopController::ControlVector::Brake;
+            }
+
             _captureStarted = true;
             _captureTargetHeading = state.estimate.headingUnit;
             _captureStartDistanceM = _drive.GetAverageDistanceMeters();
             _captureStartMs = millis();
             StoreCurveSample(_captureStorage, 0.0f, snapshot);
 
+            _driveService.Cancel();
             _driveService.SetLimits(BuildReverseCaptureLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartStraight(
@@ -619,16 +664,6 @@ private:
         return _runtime.FailActiveMode(reason);
     }
 
-    void OnRuntimeFault(const char* reason) noexcept
-    {
-        _faulted = true;
-        _driveService.Cancel();
-        _startupCalibration.Cancel();
-        if (reason != nullptr && reason[0] != '\0')
-        {
-            AppendStartupTrace(reason);
-        }
-    }
 };
 
 namespace MazeMap::App::Internal

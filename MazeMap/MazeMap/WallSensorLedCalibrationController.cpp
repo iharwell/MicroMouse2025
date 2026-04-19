@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
+#include "BootUtilityModeFramework.h"
 #include "BootModeDescriptor.h"
 #include "BootModeRegistry.h"
 #include "LoopController.h"
@@ -12,6 +13,8 @@ using MazeMap::App::Internal::SharedRobotRuntime;
 
 namespace
 {
+    constexpr const char* kWallSensorLedCalibrationStableId = "wall_sensor_led_calibration";
+
     enum class LedCalibrationPhase : std::uint8_t
     {
         Front,
@@ -47,6 +50,15 @@ public:
 
     bool Begin() override
     {
+        ResetState();
+        if (!_runtime.RegisterModeFaultHandler(
+                &WallSensorLedCalibrationController::TeardownOnRuntimeFault,
+                this,
+                kWallSensorLedCalibrationStableId))
+        {
+            return false;
+        }
+
         if (!SetupHardware())
         {
             return _runtime.FailActiveMode("Wall sensor LED calibration hardware setup failed");
@@ -69,12 +81,12 @@ public:
         pinMode(Pins::LED_Ctrl_Forward_Right, OUTPUT);
         pinMode(Pins::LED_Ctrl_Side_Left, OUTPUT);
         pinMode(Pins::LED_Ctrl_Side_Right, OUTPUT);
-        SetFrontLeds(false);
-        SetSideLeds(false);
+        SetAllLeds(false);
         BeginPinPairStrapMonitor(_monitorDrivePin, _monitorSensePin);
+        _monitorArmed = true;
 
         (void)_runtime.AppendTextLogLine("Wall sensor LED calibration mode");
-        ResetStartupTrace("mode:wall_sensor_led_calibration");
+        (void)MazeMap::App::Internal::BootUtilityModeFramework::ResetStartupTrace("mode:wall_sensor_led_calibration");
         (void)_runtime.AppendTextLogLine("Front calibration active; side LEDs held off");
         PrintFrequency("Front LED square wave (Hz): ", WallSensorLedCalibrationHalfPeriodUs(WallSensorId::FrontLeft));
         (void)_runtime.AppendTextLogLine("Remove selector jumper to switch to side calibration");
@@ -98,9 +110,7 @@ public:
             (void)_runtime.FailActiveMode("Wall sensor LED calibration loop session start failed");
         }
 
-        EndPinPairStrapMonitor(_monitorDrivePin, _monitorSensePin);
-        SetFrontLeds(false);
-        SetSideLeds(false);
+        CleanupHardware();
         if (ok)
         {
             (void)_runtime.AppendTextLogLine("Wall sensor LED calibration complete");
@@ -126,10 +136,18 @@ private:
         return self->RunTick(loopEndTimeUs, state, services);
     }
 
+    static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+    {
+        if (context != nullptr)
+        {
+            static_cast<WallSensorLedCalibrationController*>(context)->CleanupOnRuntimeFault(reason);
+        }
+    }
+
     LoopController::SessionOptions BuildLoopOptions() const noexcept
     {
         LoopController::SessionOptions options{};
-        options.controlPeriodUs = 1000U;
+        options.controlPeriodUs = Config::kControlPeriodUs;
         options.workPlan.wallMask = LoopController::WallMask::None;
         options.workPlan.readEncoders = false;
         options.workPlan.readImuBundle = false;
@@ -150,6 +168,12 @@ private:
     {
         digitalWriteFast(Pins::LED_Ctrl_Side_Left, enabled ? HIGH : LOW);
         digitalWriteFast(Pins::LED_Ctrl_Side_Right, enabled ? HIGH : LOW);
+    }
+
+    static void SetAllLeds(const bool enabled)
+    {
+        SetFrontLeds(enabled);
+        SetSideLeds(enabled);
     }
 
     void ToggleActiveLeds()
@@ -226,6 +250,34 @@ private:
         return LoopController::ControlVector::Brake;
     }
 
+    void ResetState() noexcept
+    {
+        _phase = LedCalibrationPhase::Front;
+        _ledEnabled = false;
+        _lastToggleUs = 0UL;
+        _monitorDrivePin = 0U;
+        _monitorSensePin = 0U;
+        _monitorArmed = false;
+    }
+
+    void CleanupHardware() noexcept
+    {
+        if (_monitorArmed)
+        {
+            EndPinPairStrapMonitor(_monitorDrivePin, _monitorSensePin);
+            _monitorArmed = false;
+        }
+
+        SetAllLeds(false);
+        _ledEnabled = false;
+    }
+
+    void CleanupOnRuntimeFault(const char* reason) noexcept
+    {
+        (void)reason;
+        CleanupHardware();
+    }
+
     SharedRobotRuntime& _runtime;
     LoopController& _loopController;
     std::uint8_t _monitorDrivePin{};
@@ -233,6 +285,7 @@ private:
     LedCalibrationPhase _phase{ LedCalibrationPhase::Front };
     bool _ledEnabled{};
     unsigned long _lastToggleUs{};
+    bool _monitorArmed{};
 };
 
 namespace MazeMap::App::Internal
@@ -245,13 +298,13 @@ namespace MazeMap::App::Internal
             BootModeId::WallSensorLedCalibration,
             BootModeCategory::Utility,
             "wall_sensor_led_calibration",
-            "Drive front and side wall-sensor LEDs for optical calibration.",
+            "Blink front and side wall-sensor LEDs for optical calibration.",
             "logging.txt; operator-visible LED square waves",
             &GetWallSensorLedCalibrationMode,
             "GetWallSensorLedCalibrationMode",
             "WallSensorLedCalibrationController.cpp",
             "front LED calibration; side LED calibration",
-            "BootModeRegistry selector pins and wall-sensor LED timing helpers",
+            "none",
             "none",
             "calibration frequency trace in logging.txt",
         };

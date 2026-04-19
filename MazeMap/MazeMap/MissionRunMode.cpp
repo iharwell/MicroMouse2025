@@ -11,7 +11,6 @@
 
 namespace
 {
-    constexpr const char* kMissionStableId = "mission";
     constexpr std::uint16_t kMissionPostStartupHoldMs = 250U;
 }
 
@@ -32,14 +31,9 @@ namespace MazeMap::App::Internal
         bool Begin() override
         {
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&MissionRunMode::HandleRuntimeFault, this, kMissionStableId))
-            {
-                return false;
-            }
-
             if (!SetupHardware())
             {
-                return Fail("Mission hardware setup failed");
+                return _runtime.FailActiveMode("Mission hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:mission");
@@ -48,7 +42,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return Fail("Mission drive base init failed");
+                return _runtime.FailActiveMode("Mission drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -56,7 +50,7 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(true);
             if (!_startupCalibration.BringUp())
             {
-                return Fail("Mission startup calibration bring-up failed");
+                return _runtime.FailActiveMode("Mission startup calibration bring-up failed");
             }
 
             return true;
@@ -64,11 +58,6 @@ namespace MazeMap::App::Internal
 
         void Run() override
         {
-            if (_faulted)
-            {
-                return;
-            }
-
             _phase = Phase::LaunchStartupCalibration;
 
             LoopController::ModeCallbacks callbacks{};
@@ -76,26 +65,25 @@ namespace MazeMap::App::Internal
             callbacks.context = this;
             if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
             {
-                (void)Fail("Mission loop session start failed");
+                (void)_runtime.FailActiveMode("Mission loop session start failed");
             }
             else
             {
                 const LoopController::SessionResult result = _loopController.Run();
-                _completed =
-                    !_faulted &&
+                const bool completed =
                     (result.status == LoopController::SessionResult::Status::Completed);
                 _loopController.EndSession();
+
+                if (completed)
+                {
+                    (void)_runtime.AppendTextLogLine("Mission startup audit complete");
+                }
             }
 
             _startupCalibration.Cancel();
             _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
-
-            if (_completed)
-            {
-                (void)_runtime.AppendTextLogLine("Mission startup audit complete");
-            }
         }
 
     private:
@@ -108,14 +96,6 @@ namespace MazeMap::App::Internal
             RunPostStartupHold,
             Complete
         };
-
-        static void HandleRuntimeFault(void* context, const char* reason) noexcept
-        {
-            if (context != nullptr)
-            {
-                static_cast<MissionRunMode*>(context)->OnRuntimeFault(reason);
-            }
-        }
 
         static LoopController::ControlVector ModeWorkThunk(
             void* context,
@@ -142,31 +122,15 @@ namespace MazeMap::App::Internal
 
         void ResetState() noexcept
         {
-            _faulted = false;
-            _completed = false;
             _phase = Phase::Idle;
             _startupCalibration.Cancel();
             _driveService.Cancel();
         }
 
-        bool Fail(const char* reason)
-        {
-            return _runtime.FailActiveMode(reason);
-        }
-
-        void OnRuntimeFault(const char* reason) noexcept
-        {
-            _faulted = true;
-            (void)_runtime.AppendTextLogLine(
-                (reason != nullptr && reason[0] != '\0') ?
-                    reason :
-                    "mission_fault");
-        }
-
         bool StartMissionHold(const std::uint16_t durationMs) noexcept
         {
             _driveService.Cancel();
-            _driveService.SetOperationMode(Drive::OperationMode::Maze);
+            _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartHold(durationMs, true);
             return _driveService.Active();
         }
@@ -246,8 +210,6 @@ namespace MazeMap::App::Internal
         DriveBase& _drive;
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
-        bool _faulted{};
-        bool _completed{};
         Phase _phase{ Phase::Idle };
     };
 
@@ -262,9 +224,9 @@ namespace MazeMap::App::Internal
             &GetMissionRunMode,
             "GetMissionRunMode",
             "MissionRunMode.cpp",
-            "hardware bring-up; shared startup calibration; post-startup settle",
+            "hardware bring-up; shared startup calibration; post-startup hold",
             "SharedRobotRuntime drive and startup-calibration services",
-            "Mission run flow is temporarily reduced to the clean shared-service startup path",
+            "Mission run flow is intentionally reduced to the clean shared-service startup path",
             "none",
         };
         return descriptor;

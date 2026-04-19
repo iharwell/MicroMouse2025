@@ -2,34 +2,35 @@
 // Declares the shared runtime object that wires together vehicles, planners, sensors, and drive services for the app.
 
 #include "Defines.h"
+#include "Drive.h"
+#include "DriveBase.h"
+#include "FloodFillPathFinder.h"
+#include "LoopController.h"
+#include "ManeuverExecutor.h"
+#include "ManeuverPathFinder.h"
+#include "Maze.h"
 #include <cstddef>
 #include <cstdint>
-#include <memory>
+#include <cstdio>
 #include "MmLog.h"
-
-class DriveBase;
-class RuntimeSensorSuite;
-namespace MazeMap::App::Internal
-{
-    class Drive;
-    class LoopController;
-    class ManeuverExecutor;
-    class StartupCalibration;
-    class WallTouch;
-}
-
-namespace MazeMap
-{
-    class Vehicle;
-    class Maze;
-    class FloodFillPathFinder;
-    class ManeuverPathFinder;
-    class WallBeliefMap;
-}
+#include "PlantModel.h"
+#include "RuntimeSensorSuite.h"
+#include "StartupCalibration.h"
+#include "Vehicle.h"
+#include "WallBeliefMap.h"
+#include "WallTouch.h"
 
 namespace MazeMap::App::Internal
 {
     inline constexpr const char* kSharedRuntimeTextLogFileName = "logging.txt";
+
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+    using SharedRuntimeTextLogFileHandle = FsFile;
+#elif defined(ARDUINO)
+    using SharedRuntimeTextLogFileHandle = File;
+#else
+    using SharedRuntimeTextLogFileHandle = std::FILE*;
+#endif
 
     // Owns the heavyweight runtime infrastructure that should be shared across all startup modes.
     // Mode implementations stay small by borrowing references from this hub instead of allocating
@@ -164,8 +165,39 @@ namespace MazeMap::App::Internal
         void LogUtilityDataLoggerFailure(const char* type) noexcept;
         void CloseRuntimeLogsForFault() noexcept;
 
-        class Implementation;
-        std::unique_ptr<Implementation> _impl;
+        static constexpr std::size_t kTextLogSourceLength = 64U;
+        static constexpr std::size_t kTextLogQueueBytes = 4096U;
+        static_assert((kTextLogQueueBytes % MazeMap::mmlog::kSdSectorBytes) == 0U);
+
+        MazeMap::Vehicle speedVehicle;
+        MazeMap::Vehicle searchVehicle;
+        MazeMap::Maze maze;
+        MazeMap::FloodFillPathFinder searchPathFinder;
+        MazeMap::ManeuverPathFinder speedPathFinder;
+        MazeMap::WallBeliefMap wallBeliefMap;
+        MazeMap::PlantModel plantModel;
+        DriveBase drive;
+        MazeMap::App::Internal::Drive driveService;
+        StartupCalibration startupCalibrationService;
+        WallTouch wallTouchService;
+        ManeuverExecutor maneuverExecutor;
+        LoopController controlLoop;
+        RuntimeSensorSuite sensors;
+        mmlog::MmLogLogger dataLogger;
+        SharedRuntimeTextLogFileHandle textLogFile{};
+        mmlog::detail::ByteRing textLogQueue;
+        alignas(32) std::uint8_t textLogStorage[kTextLogQueueBytes]{};
+        bool textLogFaulted{};
+        bool textLogInitialized{};
+        bool runtimeLogsClosedForFault{};
+        bool modeFaultHandlerRegistered{};
+        bool modeFaulted{};
+        ModeFaultCleanupCallback modeFaultCleanupCallback{};
+        void* modeFaultCleanupContext{};
+        char activeDataLogFileName[MMLOG_MAX_PATH_LENGTH + 1U]{};
+        char activeDataLogSource[kTextLogSourceLength]{};
+        char activeModeFaultSource[kTextLogSourceLength]{};
+        char lastRuntimeLogError[MMLOG_ERROR_TEXT_LENGTH + 1U]{};
     };
 
     EXPORT void LogWallSensorAdcRegisterWrite(

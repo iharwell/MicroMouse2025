@@ -51,14 +51,14 @@ namespace MazeMap::App::Internal
         bool Begin() override
         {
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&OpenFloorMeasurementController::HandleRuntimeFault, this, kPrimaryDiagnosticStableId))
+            if (!_runtime.RegisterModeFaultHandler(&OpenFloorMeasurementController::TeardownOnRuntimeFault, this, kPrimaryDiagnosticStableId))
             {
                 return false;
             }
 
             if (!SetupHardware())
             {
-                return Fail("Primary diagnostic hardware setup failed");
+                return _runtime.FailActiveMode("Primary diagnostic hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:primary_diagnostic");
@@ -67,7 +67,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return Fail("Primary diagnostic drive base init failed");
+                return _runtime.FailActiveMode("Primary diagnostic drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -75,13 +75,13 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(false);
             if (!_startupCalibration.BringUp())
             {
-                return Fail("Primary diagnostic startup bring-up failed");
+                return _runtime.FailActiveMode("Primary diagnostic startup bring-up failed");
             }
 
             ConfigureSelectorMonitor();
             if (SelectorRemoved())
             {
-                return Fail(kPrimaryDiagnosticSelectorRemovedReason);
+                return _runtime.FailActiveMode(kPrimaryDiagnosticSelectorRemovedReason);
             }
 
             return true;
@@ -89,11 +89,6 @@ namespace MazeMap::App::Internal
 
         void Run() override
         {
-            if (_faulted)
-            {
-                return;
-            }
-
             _phase = Phase::LaunchStartupHold;
 
             LoopController::ModeCallbacks callbacks{};
@@ -101,15 +96,19 @@ namespace MazeMap::App::Internal
             callbacks.context = this;
             if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
             {
-                (void)Fail("Primary diagnostic loop session start failed");
+                (void)_runtime.FailActiveMode("Primary diagnostic loop session start failed");
             }
             else
             {
                 const LoopController::SessionResult result = _loopController.Run();
-                _completed =
-                    !_faulted &&
+                const bool completed =
                     (result.status == LoopController::SessionResult::Status::Completed);
                 _loopController.EndSession();
+
+                if (completed)
+                {
+                    (void)_runtime.AppendTextLogLine("Primary diagnostic complete");
+                }
             }
 
             ReleaseSelectorMonitor();
@@ -117,11 +116,6 @@ namespace MazeMap::App::Internal
             _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
-
-            if (_completed)
-            {
-                (void)_runtime.AppendTextLogLine("Primary diagnostic complete");
-            }
         }
 
     private:
@@ -143,12 +137,21 @@ namespace MazeMap::App::Internal
             Complete
         };
 
-        static void HandleRuntimeFault(void* context, const char* reason) noexcept
+        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
         {
-            if (context != nullptr)
+            (void)reason;
+            auto* const self = static_cast<OpenFloorMeasurementController*>(context);
+            if (self == nullptr)
             {
-                static_cast<OpenFloorMeasurementController*>(context)->OnRuntimeFault(reason);
+                return;
             }
+
+            self->ReleaseSelectorMonitor();
+            self->_phase = Phase::Idle;
+            self->_startupCalibration.Cancel();
+            self->_driveService.Cancel();
+            self->_drive.Brake();
+            self->_drive.UseNominalWheelControlProfile();
         }
 
         static LoopController::ControlVector ModeWorkThunk(
@@ -177,29 +180,12 @@ namespace MazeMap::App::Internal
 
         void ResetState() noexcept
         {
-            _faulted = false;
-            _completed = false;
             _phase = Phase::Idle;
             _selectorDrivePin = 0U;
             _selectorSensePin = 0U;
             _selectorMonitorArmed = false;
             _startupCalibration.Cancel();
             _driveService.Cancel();
-        }
-
-        bool Fail(const char* reason)
-        {
-            return _runtime.FailActiveMode(reason);
-        }
-
-        void OnRuntimeFault(const char* reason) noexcept
-        {
-            _faulted = true;
-            ReleaseSelectorMonitor();
-            (void)_runtime.AppendTextLogLine(
-                (reason != nullptr && reason[0] != '\0') ?
-                    reason :
-                    "primary_diagnostic_fault");
         }
 
         void ConfigureSelectorMonitor() noexcept
@@ -395,8 +381,6 @@ namespace MazeMap::App::Internal
         DriveBase& _drive;
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
-        bool _faulted{};
-        bool _completed{};
         Phase _phase{ Phase::Idle };
         std::uint8_t _selectorDrivePin{};
         std::uint8_t _selectorSensePin{};

@@ -6,44 +6,292 @@
 #include <algorithm>
 #include <cmath>
 
-namespace
+template <typename TImu>
+static ImuTelemetry CaptureImuTelemetry(TImu& imu, const uint8_t interruptPin, ImuObservationTiming* timing = nullptr)
 {
-    template <typename TImu>
-    ImuTelemetry CaptureImuTelemetry(TImu& imu, const uint8_t interruptPin, ImuObservationTiming* timing = nullptr)
-    {
-        ImuTelemetry telemetry{};
+    ImuTelemetry telemetry{};
 #if defined(ARDUINO_TEENSY41)
-        const uint32_t readStartUs = micros();
-        if (timing != nullptr)
-        {
-            timing->readStartUs = readStartUs;
-            timing->drdyUs = (digitalRead(interruptPin) == HIGH) ? readStartUs : 0UL;
-        }
-
-        const typename TImu::StatusReg status = imu.ReadStatus();
-        const typename TImu::Axes gyro = imu.ReadGyro();
-        const typename TImu::Axes accel = imu.ReadAccel();
-
-        telemetry.status = status.Raw();
-        telemetry.gyroX = gyro.x;
-        telemetry.gyroY = gyro.y;
-        telemetry.gyroZ = gyro.z;
-        telemetry.accelX = accel.x;
-        telemetry.accelY = accel.y;
-        telemetry.accelZ = accel.z;
-        telemetry.temp = imu.ReadTemp();
-        telemetry.interruptHigh = (digitalRead(interruptPin) == HIGH);
-        if (timing != nullptr)
-        {
-            timing->readDoneUs = micros();
-        }
-#else
-        (void)imu;
-        (void)interruptPin;
-        (void)timing;
-#endif
-        return telemetry;
+    const uint32_t readStartUs = micros();
+    if (timing != nullptr)
+    {
+        timing->readStartUs = readStartUs;
+        timing->drdyUs = (digitalRead(interruptPin) == HIGH) ? readStartUs : 0UL;
     }
+
+    const typename TImu::StatusReg status = imu.ReadStatus();
+    const typename TImu::Axes gyro = imu.ReadGyro();
+    const typename TImu::Axes accel = imu.ReadAccel();
+
+    telemetry.status = status.Raw();
+    telemetry.gyroX = gyro.x;
+    telemetry.gyroY = gyro.y;
+    telemetry.gyroZ = gyro.z;
+    telemetry.accelX = accel.x;
+    telemetry.accelY = accel.y;
+    telemetry.accelZ = accel.z;
+    telemetry.temp = imu.ReadTemp();
+    telemetry.interruptHigh = (digitalRead(interruptPin) == HIGH);
+    if (timing != nullptr)
+    {
+        timing->readDoneUs = micros();
+    }
+#else
+    (void)imu;
+    (void)interruptPin;
+    (void)timing;
+#endif
+    return telemetry;
+}
+
+#if defined(ARDUINO_TEENSY41)
+static bool ConfigureLoopMatchedBackLeftImu(
+    MazeMap::Vehicle::ImuBackLeft& imu,
+    unsigned long controlPeriodUs,
+    bool enableAccel)
+{
+    using Imu = MazeMap::Vehicle::ImuBackLeft;
+
+    switch (MazeMap::SelectUiImuSamplingProfile(controlPeriodUs))
+    {
+    case MazeMap::UiImuSamplingProfile::Exact1000Hz:
+        imu.ConfigureUiHighAccuracyOdr(
+            Imu::HAODR_SELECTION::EXACT_1000_2000_4000_8000,
+            enableAccel ? Imu::ODR_SETTING::ODR_0960HZ_HP_N_LP : Imu::ODR_SETTING::DISABLE,
+            Imu::ODR_SETTING::ODR_0960HZ_HP_N_LP);
+        return true;
+    case MazeMap::UiImuSamplingProfile::Exact2000Hz:
+        imu.ConfigureUiHighAccuracyOdr(
+            Imu::HAODR_SELECTION::EXACT_1000_2000_4000_8000,
+            enableAccel ? Imu::ODR_SETTING::ODR_1920HZ_HP_N_LP : Imu::ODR_SETTING::DISABLE,
+            Imu::ODR_SETTING::ODR_1920HZ_HP_N_LP);
+        return true;
+    default:
+        (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+            "Unsupported IMU control period us: %lu",
+            controlPeriodUs);
+        return false;
+    }
+}
+
+static bool ConfigureBackLeftImuForRuntime(
+    MazeMap::Vehicle::ImuBackLeft& imu,
+    unsigned long controlPeriodUs,
+    bool enableAccel,
+    MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
+        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
+{
+    const bool imuConfigured = ConfigureLoopMatchedBackLeftImu(imu, controlPeriodUs, enableAccel);
+    if (!imuConfigured)
+    {
+        return false;
+    }
+
+    imu.SetSelfTest(
+        MazeMap::Vehicle::ImuBackLeft::SELF_TEST_MODE::DISABLED,
+        MazeMap::Vehicle::ImuBackLeft::SELF_TEST_MODE::DISABLED);
+    if (enableAccel)
+    {
+        imu.SetAccelRange(
+            accelFilterFreq,
+            MazeMap::Vehicle::ImuBackLeft::ACCEL_FULLSCALE::G8);
+    }
+
+    imu.SetGyroRange(
+        MazeMap::Vehicle::ImuBackLeft::GYRO_LPF1_MODE::CUT_213,
+        MazeMap::Vehicle::ImuBackLeft::GYRO_FULLSCALE_RANGE::DPS2000);
+    return true;
+}
+
+static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
+    MazeMap::Vehicle::ImuBackLeft& imu,
+    unsigned long controlPeriodUs,
+    const MazeMap::EncoderCountPair& startCounts,
+    MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
+        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
+{
+    if (!ConfigureBackLeftImuForRuntime(imu, controlPeriodUs, true, accelFilterFreq))
+    {
+        return StationaryImuCalibrationResult::Failure;
+    }
+
+    using SelfTestMode = MazeMap::Vehicle::ImuBackLeft::SELF_TEST_MODE;
+
+    imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
+    StationaryImuCalibrationResult settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
+    if (settleResult != StationaryImuCalibrationResult::Success)
+    {
+        return settleResult;
+    }
+
+    AveragedBackLeftImuSample baseline{};
+    StationaryImuCalibrationResult sampleResult =
+        AverageBackLeftImuSelfTestSample(imu, kImuSelfTestAverageSamples, startCounts, baseline);
+    if (sampleResult != StationaryImuCalibrationResult::Success)
+    {
+        return sampleResult;
+    }
+
+    imu.SetSelfTest(SelfTestMode::POSITIVE, SelfTestMode::POSITIVE);
+    settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
+    if (settleResult != StationaryImuCalibrationResult::Success)
+    {
+        imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
+        return settleResult;
+    }
+
+    AveragedBackLeftImuSample stimulated{};
+    sampleResult = AverageBackLeftImuSelfTestSample(imu, kImuSelfTestAverageSamples, startCounts, stimulated);
+    imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
+    if (sampleResult != StationaryImuCalibrationResult::Success)
+    {
+        return sampleResult;
+    }
+
+    settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
+    if (settleResult != StationaryImuCalibrationResult::Success)
+    {
+        return settleResult;
+    }
+
+    const float accelDeltaMgX = std::fabs(stimulated.accelMgX - baseline.accelMgX);
+    const float accelDeltaMgY = std::fabs(stimulated.accelMgY - baseline.accelMgY);
+    const float accelDeltaMgZ = std::fabs(stimulated.accelMgZ - baseline.accelMgZ);
+    const float gyroDeltaDpsX = std::fabs(stimulated.gyroDpsX - baseline.gyroDpsX);
+    const float gyroDeltaDpsY = std::fabs(stimulated.gyroDpsY - baseline.gyroDpsY);
+    const float gyroDeltaDpsZ = std::fabs(stimulated.gyroDpsZ - baseline.gyroDpsZ);
+    const bool accelOk =
+        MazeMap::IsAccelSelfTestDeltaValidMg(accelDeltaMgX) &&
+        MazeMap::IsAccelSelfTestDeltaValidMg(accelDeltaMgY) &&
+        MazeMap::IsAccelSelfTestDeltaValidMg(accelDeltaMgZ);
+    const bool gyroOk =
+        MazeMap::IsGyroSelfTestDeltaValidDps(gyroDeltaDpsX, kImuSelfTestGyroFullScaleDps) &&
+        MazeMap::IsGyroSelfTestDeltaValidDps(gyroDeltaDpsY, kImuSelfTestGyroFullScaleDps) &&
+        MazeMap::IsGyroSelfTestDeltaValidDps(gyroDeltaDpsZ, kImuSelfTestGyroFullScaleDps);
+    if (accelOk && gyroOk)
+    {
+        return StationaryImuCalibrationResult::Success;
+    }
+
+    (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
+        "IMU stationary self-test failed; accel_delta_mg=[%.1f,%.1f,%.1f], gyro_delta_dps=[%.1f,%.1f,%.1f]",
+        accelDeltaMgX,
+        accelDeltaMgY,
+        accelDeltaMgZ,
+        gyroDeltaDpsX,
+        gyroDeltaDpsY,
+        gyroDeltaDpsZ);
+    return StationaryImuCalibrationResult::Failure;
+}
+#endif
+
+static bool CalibrateStationaryBackLeftGyroBias(
+    MazeMap::Vehicle& vehicle,
+    unsigned long controlPeriodUs,
+    bool enableAccelRuntime,
+    float& gyroBiasRadps,
+    float* accelBiasXG = nullptr,
+    float* accelBiasYG = nullptr,
+    bool* accelBiasInitialized = nullptr,
+    MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
+        MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
+{
+    if (accelBiasInitialized != nullptr)
+    {
+        *accelBiasInitialized = false;
+    }
+
+#if defined(ARDUINO_TEENSY41)
+    const bool captureAccelBias =
+        enableAccelRuntime &&
+        (accelBiasXG != nullptr) &&
+        (accelBiasYG != nullptr);
+    while (true)
+    {
+        const MazeMap::EncoderCountPair startCounts = CaptureDriveEncoderCounts();
+        const StationaryImuCalibrationResult selfTestResult =
+            RunStationaryBackLeftImuSelfTest(vehicle.IMU_BL, controlPeriodUs, startCounts, accelFilterFreq);
+        if (selfTestResult == StationaryImuCalibrationResult::RestartEncoderMotion)
+        {
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
+                "Encoder motion detected during stationary IMU self-test; restarting bias calibration");
+            continue;
+        }
+        if (selfTestResult != StationaryImuCalibrationResult::Success)
+        {
+            return false;
+        }
+
+        if (!ConfigureBackLeftImuForRuntime(vehicle.IMU_BL, controlPeriodUs, enableAccelRuntime, accelFilterFreq))
+        {
+            return false;
+        }
+
+        const unsigned long requiredSamples = MazeMap::ComputeGyroBiasSampleCount(
+            static_cast<unsigned long>(MazeMap::Config::kGyroBiasSamples),
+            kImuCalibrationSampleIntervalMs,
+            static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs));
+        const unsigned long measurementStartMs = millis();
+        double accumulatedRadps = 0.0;
+        double accumulatedAccelXG = 0.0;
+        double accumulatedAccelYG = 0.0;
+        unsigned long collectedSamples = 0UL;
+        while ((collectedSamples < requiredSamples) ||
+            ((millis() - measurementStartMs) < static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs)))
+        {
+            if (HaveDriveEncodersMovedSince(startCounts))
+            {
+                (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
+                    "Encoder motion detected during gyro bias measurement; restarting IMU self-test");
+                accumulatedRadps = 0.0;
+                collectedSamples = 0UL;
+                break;
+            }
+
+            if (captureAccelBias)
+            {
+                const MazeMap::Vehicle::ImuBackLeft::Axes accel = vehicle.IMU_BL.ReadAccel();
+                accumulatedAccelXG += static_cast<double>(vehicle.IMU_BL.AccelRawToG(accel.x));
+                accumulatedAccelYG += static_cast<double>(vehicle.IMU_BL.AccelRawToG(accel.y));
+            }
+            accumulatedRadps += static_cast<double>(ReadBackLeftGyroZRadpsRaw(vehicle));
+            ++collectedSamples;
+            delay(kImuCalibrationSampleIntervalMs);
+        }
+
+        if (collectedSamples == 0UL)
+        {
+            continue;
+        }
+
+        if (HaveDriveEncodersMovedSince(startCounts))
+        {
+            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
+                "Encoder motion detected after gyro bias capture; restarting IMU self-test");
+            continue;
+        }
+
+        gyroBiasRadps = static_cast<float>(accumulatedRadps / static_cast<double>(collectedSamples));
+        if (captureAccelBias)
+        {
+            *accelBiasXG = static_cast<float>(accumulatedAccelXG / static_cast<double>(collectedSamples));
+            *accelBiasYG = static_cast<float>(accumulatedAccelYG / static_cast<double>(collectedSamples));
+        }
+        if (accelBiasInitialized != nullptr)
+        {
+            *accelBiasInitialized = captureAccelBias;
+        }
+        return true;
+    }
+#else
+    (void)controlPeriodUs;
+    (void)enableAccelRuntime;
+    (void)accelBiasXG;
+    (void)accelBiasYG;
+    (void)accelBiasInitialized;
+    (void)accelFilterFreq;
+    gyroBiasRadps = EstimateMissionGyroBiasRadps(vehicle);
+    return true;
+#endif
 }
 
 bool RuntimeSensorSuite::CaptureServices::ServiceWallRead() noexcept

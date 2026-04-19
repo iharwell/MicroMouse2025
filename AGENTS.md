@@ -104,7 +104,7 @@ Working junk is still junk. Do not keep it just because replacing it touches man
 
 ### Default shape
 
-For each substantive subsystem, expose **one authoritative public owner**.
+For each subsystem with a public API, expose **one authoritative public owner**.
 
 Supporting public types are allowed only when they are one of the following:
 
@@ -127,7 +127,7 @@ Do **not** introduce or preserve:
 - parallel systems with slightly different naming or access patterns,
 - compatibility wrappers kept after the canonical pattern already exists,
 - copy-and-fork architecture for new modes or subsystems,
-- companion `Params`, `State`, `Context`, `Data`, or similar public structs created mainly to simplify access, refactoring, or testing for one substantive owner,
+- companion `Params`, `State`, `Context`, `Data`, or similar public structs created mainly to simplify access, refactoring, or testing for one existing owner,
 - scattered thin adapters or `#ifdef` wrappers outside the centralized cross-build boundary.
 
 ### Supporting types
@@ -141,6 +141,7 @@ A public supporting type is acceptable only if all of the following are true unl
 - it does not merely expose one owner's internals through a smaller surface area.
 
 If a type mainly supports one class's implementation, keep it private, nested, or file-local in the `.cpp`.
+`file-local` here means genuinely small support code only. Any non-template class, top-level mode owner, or file-local implementation block over 100 lines is not file-local for audit purposes. Code that large must be declared in a same-named authoritative header, implemented in a `.cpp`, and use the appropriate `EXPORT` macro where cross-translation-unit declarations require it.
 
 Public fields are disallowed by default. They are acceptable only for:
 
@@ -371,7 +372,8 @@ Reject the design and revise it if any of the following are true:
 - production code creates another `MmLogLogger` instance or another production pathfinder instance outside `SharedRobotRuntime`,
 - production code dynamically allocates a large shared pathfinder instead of using the runtime-owned instance,
 - shared boot-mode/session infrastructure is introduced or widened without satisfying the shared framework introduction rule,
-- a file builds only because of incidental transitive includes or forwarding headers.
+- a file builds only because of incidental transitive includes or forwarding headers,
+- any non-template class, top-level mode owner, or file-local implementation block over 100 lines is kept file-local in a `.cpp`, lacks a same-named authoritative header, is not declared in that header, or is not implemented in a `.cpp` with the appropriate `EXPORT` macro where cross-translation-unit declarations require it. Template code is the exception. Treat this as an audit failure on context-pressure grounds: code that large is not ignorable implementation detail.
 
 ---
 
@@ -382,7 +384,11 @@ Reject the design and revise it if any of the following are true:
 - Include every direct dependency needed by the file's declarations, inline definitions, templates, and constants.
 - Use forward declarations only when they are truly sufficient and stable.
 - Every edited non-template `.cpp` must include its own header first after the project precompiled header if one is required.
-- Substantive classes must live in same-named authoritative files.
+- Any non-template class over 100 lines, and any top-level mode owner over 100 lines, must live in same-named authoritative files.
+- File-local implementation is reserved for small helpers only. Nothing over 100 lines is justifiably file-local.
+- Any non-template class, top-level mode owner, or file-local implementation block over 100 lines must be declared in a same-named authoritative header and implemented in a `.cpp`.
+- Use the appropriate `EXPORT` macro on those non-template declarations wherever cross-translation-unit visibility requires it. Template code is the exception and may remain header-defined when appropriate.
+- Do **not** hide code that large entirely inside a `.cpp` and call it file-local.
 - Do **not** create or preserve alias headers, forwarding headers, or fake entry headers that only include another file while pretending to define a separate subsystem.
 - Prefer private helpers, nested types, and file-local functions over fake public decomposition.
 - Prefer direct concrete owners and composition.

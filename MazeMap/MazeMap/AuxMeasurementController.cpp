@@ -1,282 +1,173 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
+
 #include "BootModeDescriptor.h"
+#include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
-#include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
-#include "RuntimeBinaryLogSupport.h"
+#include "StartupCalibration.h"
 
+using MazeMap::App::Internal::Drive;
 using MazeMap::App::Internal::GetSharedRobotRuntime;
+using LoopController = MazeMap::App::Internal::LoopController;
 using MazeMap::App::Internal::SharedRobotRuntime;
+using MazeMap::App::Internal::StartupCalibration;
 
-class AuxMeasurementController : public IApplicationMode
+namespace
 {
+    constexpr const char* kAuxMeasurementStableId = "auxiliary_measurement";
+
+    MotionLimits BuildAuxiliaryDriveLimits(const MazeMap::Vehicle& vehicle) noexcept
+    {
+        MotionLimits limits{};
+        limits.maxSpeedMps = vehicle.GetMaxSpeed();
+        limits.accelMps2 = vehicle.GetMaxForwardAcceleration();
+        limits.decelMps2 = vehicle.GetMaxForwardAcceleration();
+        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
+        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        return limits;
+    }
+
+    void PopulateAuxMeasurementLogRow(
+        AuxMeasurementLogRow& row,
+        const std::uint32_t sample,
+        const std::uint32_t phaseId,
+        const bool stationary,
+        const bool fanEnabled,
+        const LoopController::ModeState& state,
+        const DriveBase& drive)
+    {
+        row = {};
+        row.sample = sample;
+        row.phase_id = phaseId;
+        row.t_us = state.tickStartUs;
+        row.dt_us = state.dtUs;
+        row.stationary = stationary ? 1U : 0U;
+        row.fan_enabled = fanEnabled ? 1U : 0U;
+        row.pose_x_m = state.estimate.xMeters;
+        row.pose_y_m = state.estimate.yMeters;
+        row.yaw_rad = state.estimate.yawRad;
+        row.linear_speed_mps = state.estimate.linearSpeedMps;
+        row.angular_speed_radps = state.estimate.angularSpeedRadps;
+        row.planar_accel_mps2 = state.sensors.planarAccelMps2;
+        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
+        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
+        row.left_drive_cmd = state.driveTelemetry.leftDriveCommand;
+        row.right_drive_cmd = state.driveTelemetry.rightDriveCommand;
+        row.left_encoder_count = state.driveTelemetry.leftEncoderCount;
+        row.right_encoder_count = state.driveTelemetry.rightEncoderCount;
+        row.left_distance_m = state.driveTelemetry.leftDistanceM;
+        row.right_distance_m = state.driveTelemetry.rightDistanceM;
+        row.left_velocity_mps = state.driveTelemetry.leftVelocityMps;
+        row.right_velocity_mps = state.driveTelemetry.rightVelocityMps;
+        row.front_wall = state.sensors.frontWall ? 1U : 0U;
+        row.left_wall = state.sensors.leftWall ? 1U : 0U;
+        row.right_wall = state.sensors.rightWall ? 1U : 0U;
+        row.corridor_error_m = state.sensors.corridorErrorM;
+        row.front_skew_m = state.sensors.frontSkewM;
+        row.gyro_bias_radps = state.sensors.gyroBiasRadps;
+        row.gyro_raw_radps = state.sensors.gyroRawRadps;
+        row.gyro_radps = state.sensors.gyroRadps;
+    }
+}
+
+class AuxMeasurementController final : public IApplicationMode
+{
+private:
+    enum class Phase : std::uint8_t
+    {
+        Idle,
+        LaunchStartupCalibration,
+        RunStartupCalibration,
+        LaunchBaselineHold,
+        RunBaselineHold,
+        LaunchFanOnHold,
+        RunFanOnHold,
+        LaunchRecoveryHold,
+        RunRecoveryHold,
+        LaunchStartupHold,
+        RunStartupHold,
+        LaunchFanSpinupHold,
+        RunFanSpinupHold,
+        TurningTractionSweep,
+        Complete
+    };
+
 public:
     explicit AuxMeasurementController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _faulted(false)
-        , _fanEnabled(false)
-        , _phaseId(0UL)
-        , _sampleCount(0UL)
+        , _vehicle(runtime.SpeedVehicle())
+        , _drive(runtime.Drive())
+        , _driveService(runtime.DriveService())
+        , _startupCalibration(runtime.StartupCalibrationService())
     {
         _logFileName[0] = '\0';
     }
 
     bool Begin() override
     {
-        _faulted = false;
-        _fanEnabled = false;
-        _phaseFn = nullptr;
-        _holdNextStep = RoutineStep::None;
-        _holdStationary = false;
-        _holdDurationMs = 0U;
-        _holdStartMs = 0UL;
-        _holdStarted = false;
-        _turningTractionDirectionSign = 0.0f;
-        _turningTractionCommandedSpeedMps = 0.0f;
-        _turningTractionHeldSpeedMps = 0.0f;
-        _turningTractionCommandedCurvatureMInv = 0.0f;
-        _turningTractionTargetYawRad = 0.0f;
-        _turningTractionPhaseStartMs = 0UL;
-        _turningTractionSaturationPlateauStartMs = 0UL;
-        _turningTractionSlipCandidateStartMs = 0UL;
-        _turningTractionSlipCandidateActive = false;
-        _turningTractionTighteningTurn = false;
-        _turningTractionLastMetrics = {};
-        _turningTractionLastPlanarAccelMps2 = 0.0f;
-        _turningTractionLastCommandedOmegaRadps = 0.0f;
-        _turningTractionSaturationReferenceSpeedMps = 0.0f;
-        _turningTractionPhaseSucceeded = false;
-        _turningTractionStarted = false;
-        if (!_runtime.RegisterModeFaultHandler(&AuxMeasurementController::HandleRuntimeFault, this, "aux_measurement"))
+        ResetState();
+        if (!_runtime.RegisterModeFaultHandler(&AuxMeasurementController::TeardownOnRuntimeFault, this, kAuxMeasurementStableId))
         {
             return false;
         }
-
         if (!SetupHardware())
         {
-            return Fail("Hardware setup failed");
+            return _runtime.FailActiveMode("Auxiliary measurement hardware setup failed");
         }
-        ResetStartupTrace("mode:aux_measurement");
+
+        (void)ResetStartupTrace("mode:aux_measurement");
         (void)_runtime.AppendTextLogLine("Auxiliary measurement mode");
-        if (!_runtime.Drive().Begin())
+        (void)_runtime.AppendTextLogFormatted(
+            "Routine: %s",
+            AuxMeasurementRoutineName(AuxMeasurementConfig::kRoutine));
+
+        if (!_drive.Begin())
         {
-            return Fail("Drive base init failed");
+            return _runtime.FailActiveMode("Auxiliary measurement drive base init failed");
         }
+
+        _startupCalibration.Cancel();
         if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
         {
-            _runtime.Drive().SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
+            _drive.SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
+            _startupCalibration.SetIsInMaze(false);
+            _drive.SetPose(0.5f * Config::kCellSizeM, 0.5f * Config::kCellSizeM, DirectionToYawRad(MazeMap::Up));
         }
         else
         {
-            _runtime.Drive().UseNominalWheelControlProfile();
+            _drive.UseNominalWheelControlProfile();
+            _startupCalibration.SetIsInMaze(true);
         }
-        SetFanEnabled(false);
-        gWallDistanceCalibration.Clear();
-        if (!_runtime.Sensors().Begin(AuxMeasurementConfig::kControlPeriodUs))
+
+        if (!_startupCalibration.BringUp())
         {
-            return Fail("Auxiliary sensor init failed");
+            return _runtime.FailActiveMode("Auxiliary measurement startup bring-up failed");
         }
         if (!BeginLog())
         {
-            return Fail("Auxiliary measurement log open failed");
+            return _runtime.FailActiveMode("Auxiliary measurement log open failed");
         }
-
-        _runtime.Drive().SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
         return true;
     }
 
     void Run() override
     {
-        if (_faulted)
+        if (_runtimeFaulted)
         {
             return;
         }
 
-        (void)_runtime.AppendTextLogLine("Entered by shorting pins 28-29 at boot.");
-        (void)_runtime.AppendTextLogLine("Internal-sensor auxiliary mode; change AuxMeasurementConfig::kRoutine for other one-offs.");
-
-        const bool ok = RunSelectedRoutine();
-
-        _runtime.Drive().Brake();
-        _runtime.Drive().UseNominalWheelControlProfile();
-        SetFanEnabled(false);
-        if (ok)
+        if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
         {
-            (void)_runtime.AppendTextLogFormatted("Auxiliary measurement complete, log saved to %s", GetLogFileName());
+            _phase = Phase::LaunchStartupHold;
         }
-        CloseLog();
-    }
-
-private:
-    using LoopController = MazeMap::App::Internal::LoopController;
-    using PhaseFn = LoopController::ControlVector (AuxMeasurementController::*)(
-        std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
-        LoopController::TickServices& services);
-
-    enum class RoutineStep : std::uint8_t
-    {
-        None,
-        FanStartupSettle,
-        FanOffBaseline,
-        FanOnHold,
-        FanOffRecovery,
-        TurningStartupSettle,
-        TurningFanSpinup,
-        TurningSweep
-    };
-
-    static LoopController::ControlVector ModeWorkThunk(
-        void* context,
-        std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
-        LoopController::TickServices& services)
-    {
-        auto* const self = static_cast<AuxMeasurementController*>(context);
-        if ((self == nullptr) || (self->_phaseFn == nullptr))
+        else
         {
-            services.Fault("Aux measurement phase callback was not installed");
-            return LoopController::ControlVector::Brake;
-        }
-
-        const SensorSnapshot& sensorSnapshot = state.sensors;
-        self->_logRow = {};
-        self->_logRow.sample = static_cast<std::uint32_t>(self->_sampleCount);
-        self->_logRow.phase_id = static_cast<std::uint32_t>(self->_phaseId);
-        self->_logRow.t_us = state.tickStartUs;
-        self->_logRow.dt_us = state.dtUs;
-        self->_logRow.stationary =
-            (self->_phaseFn == &AuxMeasurementController::HoldPhaseTick && self->_holdStationary) ? 1U : 0U;
-        self->_logRow.fan_enabled = self->_fanEnabled ? 1U : 0U;
-        self->_logRow.pose_x_m = state.estimate.xMeters;
-        self->_logRow.pose_y_m = state.estimate.yMeters;
-        self->_logRow.yaw_rad = state.estimate.yawRad;
-        self->_logRow.linear_speed_mps = state.estimate.linearSpeedMps;
-        self->_logRow.angular_speed_radps = state.estimate.angularSpeedRadps;
-        self->_logRow.planar_accel_mps2 = sensorSnapshot.planarAccelMps2;
-        self->_logRow.cmd_linear_mps = self->_runtime.Drive().GetLastLinearCommandMps();
-        self->_logRow.cmd_angular_radps = self->_runtime.Drive().GetLastAngularCommandRadps();
-        self->_logRow.left_drive_cmd = state.driveTelemetry.leftDriveCommand;
-        self->_logRow.right_drive_cmd = state.driveTelemetry.rightDriveCommand;
-        self->_logRow.left_encoder_count = state.driveTelemetry.leftEncoderCount;
-        self->_logRow.right_encoder_count = state.driveTelemetry.rightEncoderCount;
-        self->_logRow.left_distance_m = state.driveTelemetry.leftDistanceM;
-        self->_logRow.right_distance_m = state.driveTelemetry.rightDistanceM;
-        self->_logRow.left_velocity_mps = state.driveTelemetry.leftVelocityMps;
-        self->_logRow.right_velocity_mps = state.driveTelemetry.rightVelocityMps;
-        self->_logRow.imu_fr_status = sensorSnapshot.imuFrontRight.status;
-        self->_logRow.imu_fr_gyro_x = sensorSnapshot.imuFrontRight.gyroX;
-        self->_logRow.imu_fr_gyro_y = sensorSnapshot.imuFrontRight.gyroY;
-        self->_logRow.imu_fr_gyro_z = sensorSnapshot.imuFrontRight.gyroZ;
-        self->_logRow.imu_fr_accel_x = sensorSnapshot.imuFrontRight.accelX;
-        self->_logRow.imu_fr_accel_y = sensorSnapshot.imuFrontRight.accelY;
-        self->_logRow.imu_fr_accel_z = sensorSnapshot.imuFrontRight.accelZ;
-        self->_logRow.imu_fr_temp = sensorSnapshot.imuFrontRight.temp;
-        self->_logRow.imu_fr_int = sensorSnapshot.imuFrontRight.interruptHigh ? 1U : 0U;
-        self->_logRow.imu_bl_status = sensorSnapshot.imuBackLeft.status;
-        self->_logRow.imu_bl_gyro_x = sensorSnapshot.imuBackLeft.gyroX;
-        self->_logRow.imu_bl_gyro_y = sensorSnapshot.imuBackLeft.gyroY;
-        self->_logRow.imu_bl_gyro_z = sensorSnapshot.imuBackLeft.gyroZ;
-        self->_logRow.imu_bl_accel_x = sensorSnapshot.imuBackLeft.accelX;
-        self->_logRow.imu_bl_accel_y = sensorSnapshot.imuBackLeft.accelY;
-        self->_logRow.imu_bl_accel_z = sensorSnapshot.imuBackLeft.accelZ;
-        self->_logRow.imu_bl_temp = sensorSnapshot.imuBackLeft.temp;
-        self->_logRow.imu_bl_int = sensorSnapshot.imuBackLeft.interruptHigh ? 1U : 0U;
-        self->_logRow.ws_fl_ambient = sensorSnapshot.frontLeft.ambientLight;
-        self->_logRow.ws_fl_lit = sensorSnapshot.frontLeft.litLight;
-        self->_logRow.ws_fl_delta = sensorSnapshot.frontLeft.differentialLight;
-        self->_logRow.ws_fl_raw_distance_m = sensorSnapshot.frontLeft.rawDistanceM;
-        self->_logRow.ws_fl_distance_m = sensorSnapshot.frontLeft.distanceM;
-        self->_logRow.ws_fr_ambient = sensorSnapshot.frontRight.ambientLight;
-        self->_logRow.ws_fr_lit = sensorSnapshot.frontRight.litLight;
-        self->_logRow.ws_fr_delta = sensorSnapshot.frontRight.differentialLight;
-        self->_logRow.ws_fr_raw_distance_m = sensorSnapshot.frontRight.rawDistanceM;
-        self->_logRow.ws_fr_distance_m = sensorSnapshot.frontRight.distanceM;
-        self->_logRow.ws_sl_ambient = sensorSnapshot.sideLeft.ambientLight;
-        self->_logRow.ws_sl_lit = sensorSnapshot.sideLeft.litLight;
-        self->_logRow.ws_sl_delta = sensorSnapshot.sideLeft.differentialLight;
-        self->_logRow.ws_sl_raw_distance_m = sensorSnapshot.sideLeft.rawDistanceM;
-        self->_logRow.ws_sl_distance_m = sensorSnapshot.sideLeft.distanceM;
-        self->_logRow.ws_sr_ambient = sensorSnapshot.sideRight.ambientLight;
-        self->_logRow.ws_sr_lit = sensorSnapshot.sideRight.litLight;
-        self->_logRow.ws_sr_delta = sensorSnapshot.sideRight.differentialLight;
-        self->_logRow.ws_sr_raw_distance_m = sensorSnapshot.sideRight.rawDistanceM;
-        self->_logRow.ws_sr_distance_m = sensorSnapshot.sideRight.distanceM;
-        self->_logRow.front_wall = sensorSnapshot.frontWall ? 1U : 0U;
-        self->_logRow.left_wall = sensorSnapshot.leftWall ? 1U : 0U;
-        self->_logRow.right_wall = sensorSnapshot.rightWall ? 1U : 0U;
-        self->_logRow.corridor_error_m = sensorSnapshot.corridorErrorM;
-        self->_logRow.front_skew_m = sensorSnapshot.frontSkewM;
-        self->_logRow.gyro_bias_radps = sensorSnapshot.gyroBiasRadps;
-        self->_logRow.gyro_raw_radps = sensorSnapshot.gyroRawRadps;
-        self->_logRow.gyro_radps = sensorSnapshot.gyroRadps;
-        if (!self->_runtime.LogUtilityDataRow(self->_logRow))
-        {
-            services.Fault("Failed to write auxiliary measurement sample");
-            return LoopController::ControlVector::Brake;
-        }
-        ++self->_sampleCount;
-
-        return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
-    }
-
-    static void HandleRuntimeFault(void* context, const char* reason) noexcept
-    {
-        if (context == nullptr)
-        {
-            return;
-        }
-
-        static_cast<AuxMeasurementController*>(context)->OnRuntimeFault(reason);
-    }
-
-    SharedRobotRuntime& _runtime;
-    LoopController& _loopController;
-    char _logFileName[64];
-    bool _faulted;
-    bool _fanEnabled;
-    unsigned long _phaseId;
-    unsigned long _sampleCount;
-    AuxMeasurementLogRow _logRow{};
-    PhaseFn _phaseFn{};
-    RoutineStep _holdNextStep{ RoutineStep::None };
-    bool _holdStationary{};
-    std::uint16_t _holdDurationMs{};
-    unsigned long _holdStartMs{};
-    bool _holdStarted{};
-    float _turningTractionDirectionSign{};
-    float _turningTractionCommandedSpeedMps{};
-    float _turningTractionHeldSpeedMps{};
-    float _turningTractionCommandedCurvatureMInv{};
-    float _turningTractionTargetYawRad{};
-    unsigned long _turningTractionPhaseStartMs{};
-    unsigned long _turningTractionSaturationPlateauStartMs{};
-    unsigned long _turningTractionSlipCandidateStartMs{};
-    bool _turningTractionSlipCandidateActive{};
-    bool _turningTractionTighteningTurn{};
-    MazeMap::TurningTractionMetrics _turningTractionLastMetrics{};
-    float _turningTractionLastPlanarAccelMps2{};
-    float _turningTractionLastCommandedOmegaRadps{};
-    float _turningTractionSaturationReferenceSpeedMps{};
-    bool _turningTractionPhaseSucceeded{};
-    bool _turningTractionStarted{};
-
-    LoopController::SessionOptions BuildLoopOptions() const
-    {
-        LoopController::SessionOptions options{};
-        options.controlPeriodUs = AuxMeasurementConfig::kControlPeriodUs;
-        return options;
-    }
-
-    bool RunRoutineSession(const RoutineStep initialStep)
-    {
-        if (!StartRoutineStep(initialStep))
-        {
-            return false;
+            _phase = Phase::LaunchStartupCalibration;
         }
 
         LoopController::ModeCallbacks callbacks{};
@@ -284,178 +175,108 @@ private:
         callbacks.context = this;
         if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
         {
-            _phaseFn = nullptr;
-            return Fail("Aux measurement loop session start failed");
+            (void)_runtime.FailActiveMode("Auxiliary measurement loop session start failed");
+        }
+        else
+        {
+            const LoopController::SessionResult result = _loopController.Run();
+            const bool completed =
+                !_runtimeFaulted &&
+                (result.status == LoopController::SessionResult::Status::Completed);
+            _loopController.EndSession();
+            if (completed)
+            {
+                (void)_runtime.AppendTextLogFormatted("Auxiliary measurement complete, log saved to %s", _logFileName);
+            }
         }
 
-        const LoopController::SessionResult result = _loopController.Run();
-        _phaseFn = nullptr;
-        return (result.status == LoopController::SessionResult::Status::Completed) && !_faulted;
+        _startupCalibration.Cancel();
+        _driveService.Cancel();
+        _drive.Brake();
+        _drive.UseNominalWheelControlProfile();
+        SetFanEnabled(false);
+        (void)_runtime.CloseUtilityDataLog();
     }
 
-    bool StartHoldPhase(
-        const char* phaseName,
-        uint16_t durationMs,
-        bool stationary,
-        bool fanEnabled,
-        RoutineStep nextStep)
+private:
+    static LoopController::ControlVector ModeWorkThunk(
+        void* context,
+        std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
     {
-        if (!BeginPhase(phaseName))
+        auto* const self = static_cast<AuxMeasurementController*>(context);
+        if (self == nullptr)
         {
-            return Fail("Failed to begin auxiliary measurement phase");
+            services.Fault("Auxiliary measurement callback context was not installed");
+            return LoopController::ControlVector::Brake;
         }
-
-        SetFanEnabled(fanEnabled);
-        _holdNextStep = nextStep;
-        _holdStationary = stationary;
-        _holdDurationMs = durationMs;
-        _holdStartMs = 0UL;
-        _holdStarted = false;
-        _phaseFn = &AuxMeasurementController::HoldPhaseTick;
-        return true;
+        return self->RunTick(loopEndTimeUs, state, services);
     }
 
-    bool StartTurningTractionSweepPhase()
+    static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
     {
-        if (!BeginPhase("turning_traction_sweep"))
+        auto* const self = static_cast<AuxMeasurementController*>(context);
+        if (self == nullptr)
         {
-            return Fail("Failed to begin turning traction sweep phase");
+            return;
         }
 
-        SetFanEnabled(true);
-        _runtime.Drive().SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
-        _turningTractionDirectionSign = AuxMeasurementConfig::kTurningTractionSweepClockwise ? 1.0f : -1.0f;
-        _turningTractionCommandedSpeedMps = AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps;
-        _turningTractionHeldSpeedMps = _turningTractionCommandedSpeedMps;
-        _turningTractionCommandedCurvatureMInv =
-            (AuxMeasurementConfig::kTurningTractionSweepRadiusM > 1.0e-6f) ?
-            (1.0f / AuxMeasurementConfig::kTurningTractionSweepRadiusM) :
-            0.0f;
-        _turningTractionTargetYawRad = _runtime.Drive().GetPose().yawRad;
-        _turningTractionPhaseStartMs = millis();
-        _turningTractionSaturationPlateauStartMs = 0UL;
-        _turningTractionSlipCandidateStartMs = 0UL;
-        _turningTractionSlipCandidateActive = false;
-        _turningTractionTighteningTurn = false;
-        _turningTractionPhaseSucceeded = false;
+        (void)reason;
+        self->_runtimeFaulted = true;
+        self->_phase = Phase::Idle;
+        self->_driveService.Cancel();
+        self->_startupCalibration.Cancel();
+        self->_drive.Brake();
+        self->SetFanEnabled(false);
+    }
+
+    LoopController::SessionOptions BuildLoopOptions() const noexcept
+    {
+        LoopController::SessionOptions options{};
+        options.controlPeriodUs = AuxMeasurementConfig::kControlPeriodUs;
+        return options;
+    }
+
+    void ResetState() noexcept
+    {
+        _phase = Phase::Idle;
+        _runtimeFaulted = false;
+        _fanEnabled = false;
+        _phaseId = 0U;
+        _sampleCount = 0U;
+        _logFileName[0] = '\0';
+        _logRow = {};
+        ResetTurningTractionState();
+        _startupCalibration.Cancel();
+        _driveService.Cancel();
+    }
+
+    void ResetTurningTractionState() noexcept
+    {
+        _turningTractionDirectionSign = 0.0f;
+        _turningTractionCommandedSpeedMps = 0.0f;
+        _turningTractionPhaseStartMs = 0UL;
         _turningTractionStarted = false;
-        _phaseFn = &AuxMeasurementController::TurningTractionTick;
-        return true;
-    }
-
-    bool StartRoutineStep(const RoutineStep step)
-    {
-        switch (step)
-        {
-        case RoutineStep::FanStartupSettle:
-            return StartHoldPhase(
-                "startup_settle",
-                AuxMeasurementConfig::kStartupSettleMs,
-                true,
-                false,
-                RoutineStep::FanOffBaseline);
-
-        case RoutineStep::FanOffBaseline:
-            return StartHoldPhase(
-                "fan_off_baseline",
-                AuxMeasurementConfig::kBaselineHoldMs,
-                true,
-                false,
-                RoutineStep::FanOnHold);
-
-        case RoutineStep::FanOnHold:
-            return StartHoldPhase(
-                "fan_on_hold",
-                AuxMeasurementConfig::kFanHoldMs,
-                true,
-                true,
-                RoutineStep::FanOffRecovery);
-
-        case RoutineStep::FanOffRecovery:
-            return StartHoldPhase(
-                "fan_off_recovery",
-                AuxMeasurementConfig::kRecoveryHoldMs,
-                true,
-                false,
-                RoutineStep::None);
-
-        case RoutineStep::TurningStartupSettle:
-            return StartHoldPhase(
-                "startup_settle",
-                AuxMeasurementConfig::kStartupSettleMs,
-                true,
-                false,
-                RoutineStep::TurningFanSpinup);
-
-        case RoutineStep::TurningFanSpinup:
-            return StartHoldPhase(
-                "fan_spinup",
-                AuxMeasurementConfig::kTurningTractionSweepFanSettleMs,
-                true,
-                true,
-                RoutineStep::TurningSweep);
-
-        case RoutineStep::TurningSweep:
-            return StartTurningTractionSweepPhase();
-
-        case RoutineStep::None:
-        default:
-            return false;
-        }
     }
 
     bool BeginLog()
     {
-        _phaseId = 0UL;
-        _sampleCount = 0UL;
-        if (!_runtime.OpenUtilityDataLog(
-                _logFileName,
-                sizeof(_logFileName),
-                nullptr,
-                "aux%03u.mmlog",
-                "aux_measurement_log.mmlog"))
-        {
-            return false;
-        }
-        if (!_runtime.WriteUtilityDataLogMetadata("mode", "aux_measurement")) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("routine", AuxMeasurementRoutineName(AuxMeasurementConfig::kRoutine))) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", AuxMeasurementConfig::kControlPeriodUs)) return false;
-        {
-            const unsigned long imuSampleRateHz = MazeMap::GetUiImuSampleRateHzForControlPeriodUs(AuxMeasurementConfig::kControlPeriodUs);
-            if (imuSampleRateHz > 0UL && !_runtime.WriteUtilityDataLogMetadataUnsigned("imu_sample_rate_hz", imuSampleRateHz)) return false;
-        }
-        {
-            const float imuAccelLpf2CutoffHz = MazeMap::GetUiAccelLpf2CutoffHzForControlPeriodUs(
-                AuxMeasurementConfig::kControlPeriodUs,
-                Config::kMissionRuntimeAccelFilterFreq);
-            if (imuAccelLpf2CutoffHz > 0.0f && !_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_lpf2_cutoff_hz", imuAccelLpf2CutoffHz, 3)) return false;
-        }
-        {
-            const float imuGyroLpf1ReferenceHz = MazeMap::GetUiGyroCut213DatasheetReferenceHzForControlPeriodUs(AuxMeasurementConfig::kControlPeriodUs);
-            if (imuGyroLpf1ReferenceHz > 0.0f && !_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_lpf1_cut213_datasheet_ref_hz", imuGyroLpf1ReferenceHz, 3)) return false;
-        }
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("startup_settle_ms", static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs))) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _runtime.Sensors().GetGyroSensitivityMdpsPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _runtime.Sensors().GetAccelSensitivityMgPerLsb(), 3)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _runtime.Sensors().GetGyroBiasRadps(), 6)) return false;
-        if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_runtime.Sensors())) return false;
-        if (!WriteEvent("summary", "Enter by shorting pins 28-29 at boot when BootSelectedMode selects auxiliary_measurement.")) return false;
-        if (!WriteEvent("summary", "AuxiliaryMeasurement owns only FanStaticSurvey and TurningTractionSweep.")) return false;
-        if (!WriteEvent("summary", "Corridor repeatability and position accuracy audit are separate boot modes.")) return false;
-        if (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
-        {
-            if (!WriteEvent("summary", "Default routine enables the fan, ramps circle speed, then tightens curvature after speed plateaus until encoder-vs-gyro/IMU mismatch marks traction loss.")) return false;
-            if (!WriteEvent("summary", "Use traction_limit_result and the last steady samples to estimate max sustainable circle speed, yaw rate, and lateral acceleration.")) return false;
-        }
-        else
-        {
-            if (!WriteEvent("summary", "Default routine logs stationary fan-off, fan-on, and recovery phases to measure fan-induced sensor/vibration shifts.")) return false;
-        }
-        if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
-        if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return false;
+        return
+            _runtime.OpenUtilityDataLog(_logFileName, sizeof(_logFileName), nullptr, "aux%03u.mmlog", "aux_measurement_log.mmlog") &&
+            _runtime.WriteUtilityDataLogMetadata("mode", "auxiliary_measurement") &&
+            _runtime.WriteUtilityDataLogMetadata("routine", AuxMeasurementRoutineName(AuxMeasurementConfig::kRoutine)) &&
+            _runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", static_cast<unsigned long>(AuxMeasurementConfig::kControlPeriodUs)) &&
+            _runtime.WriteUtilityDataLogMetadataUnsigned("startup_settle_ms", static_cast<unsigned long>(AuxMeasurementConfig::kStartupSettleMs)) &&
+            _runtime.WriteUtilityDataLogAccelBiasMetadata(_runtime.Sensors()) &&
+            _runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g") &&
+            _runtime.WriteUtilityDataLogMetadata("endianness", "little") &&
+            _runtime.BeginUtilityDataLogSchema(_logRow);
+    }
 
-        _logRow = {};
-        return _runtime.BeginUtilityDataLogSchema(_logRow);
+    bool WriteEvent(const char* type, const char* message)
+    {
+        return _runtime.WriteTextLogEntry(micros(), type, message);
     }
 
     bool BeginPhase(const char* name)
@@ -464,253 +285,36 @@ private:
         return _runtime.WriteTextLogPhase(_phaseId, micros(), name);
     }
 
-    bool WriteEvent(const char* type, const char* message)
+    bool PhaseIsStationary() const noexcept
     {
-        return _runtime.WriteTextLogEntry(micros(), type, message);
-    }
-
-    void ServiceLog()
-    {
-        (void)_runtime.ServiceUtilityDataLog();
-    }
-
-    void CloseLog()
-    {
-        (void)_runtime.CloseUtilityDataLog();
-        _runtime.CloseTextLog();
-    }
-
-    const char* GetLogFileName() const
-    {
-        return _logFileName;
-    }
-
-    bool RunSelectedRoutine()
-    {
-        switch (AuxMeasurementConfig::kRoutine)
+        switch (_phase)
         {
-        case AuxMeasurementConfig::Routine::FanStaticSurvey:
-            return RunRoutineSession(RoutineStep::FanStartupSettle);
-        case AuxMeasurementConfig::Routine::TurningTractionSweep:
-            return RunRoutineSession(RoutineStep::TurningStartupSettle);
+        case Phase::RunBaselineHold:
+        case Phase::RunFanOnHold:
+        case Phase::RunRecoveryHold:
+        case Phase::RunStartupHold:
+        case Phase::RunFanSpinupHold:
+            return true;
         default:
-            return Fail("Unknown auxiliary measurement routine");
+            return false;
         }
     }
 
-    LoopController::ControlVector HoldPhaseTick(
-        std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
-        LoopController::TickServices& services)
+    bool LogSample(const LoopController::ModeState& state)
     {
-        (void)loopEndTimeUs;
-        if (!_holdStarted)
-        {
-            _holdStarted = true;
-            _holdStartMs = millis();
-        }
-
-        if (static_cast<unsigned long>(millis() - _holdStartMs) >= _holdDurationMs)
-        {
-            if (_holdNextStep == RoutineStep::None)
-            {
-                services.RequestEndLoop();
-            }
-            else if (!StartRoutineStep(_holdNextStep))
-            {
-                services.Fault("Failed to advance auxiliary measurement routine");
-            }
-        }
-
-        return LoopController::ControlVector::Brake;
+        PopulateAuxMeasurementLogRow(
+            _logRow,
+            static_cast<std::uint32_t>(_sampleCount),
+            static_cast<std::uint32_t>(_phaseId),
+            PhaseIsStationary(),
+            _fanEnabled,
+            state,
+            _drive);
+        ++_sampleCount;
+        return _runtime.LogUtilityDataRow(_logRow);
     }
 
-    LoopController::ControlVector TurningTractionTick(
-        std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
-        LoopController::TickServices& services)
-    {
-        (void)loopEndTimeUs;
-        const unsigned long nowMs = millis();
-        if (!_turningTractionStarted)
-        {
-            _turningTractionStarted = true;
-            _turningTractionPhaseStartMs = nowMs;
-        }
-
-        if (static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs) >= AuxMeasurementConfig::kTurningTractionSweepTimeoutMs)
-        {
-            _turningTractionPhaseSucceeded = WriteTurningTractionResult(
-                "timeout",
-                false,
-                static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs),
-                _turningTractionCommandedSpeedMps,
-                _turningTractionLastCommandedOmegaRadps,
-                _turningTractionLastMetrics,
-                _turningTractionLastPlanarAccelMps2);
-            if (!_turningTractionPhaseSucceeded)
-            {
-                services.Fault("Failed to write turning traction timeout result");
-            }
-            services.RequestEndLoop();
-            return LoopController::ControlVector::Brake;
-        }
-
-        const SensorSnapshot& sensorSnapshot = state.sensors;
-        if (!_turningTractionTighteningTurn)
-        {
-            _turningTractionCommandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * state.dtSeconds;
-            if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
-            {
-                _turningTractionCommandedSpeedMps = (std::min)(
-                    AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps,
-                    _turningTractionCommandedSpeedMps);
-            }
-            _turningTractionHeldSpeedMps = _turningTractionCommandedSpeedMps;
-        }
-        else
-        {
-            _turningTractionCommandedSpeedMps = _turningTractionHeldSpeedMps;
-            _turningTractionCommandedCurvatureMInv +=
-                AuxMeasurementConfig::kTurningTractionCurvatureRampMInvPerSec * state.dtSeconds;
-        }
-
-        const float nominalOmegaRadps =
-            _turningTractionDirectionSign *
-            (_turningTractionCommandedSpeedMps * _turningTractionCommandedCurvatureMInv);
-        _turningTractionTargetYawRad =
-            WrapAngleRad(_turningTractionTargetYawRad + (nominalOmegaRadps * state.dtSeconds));
-        _turningTractionLastCommandedOmegaRadps = MazeMap::ComputeTurningTractionAngularCommand(
-            nominalOmegaRadps,
-            _turningTractionTargetYawRad,
-            state.estimate.yawRad,
-            state.estimate.angularSpeedRadps,
-            Config::kArcHeadingKp,
-            Config::kArcYawD,
-            AuxMeasurementConfig::kTurningTractionSweepMaxAngularCommandRadps);
-        const float effectiveTrackWidthM =
-            MazeMap::Vehicle::GetEffectiveTrackWidthForMotion(
-                _turningTractionCommandedSpeedMps,
-                _turningTractionLastCommandedOmegaRadps);
-        const float planarAccelMps2 = sensorSnapshot.planarAccelMps2;
-        const MazeMap::TurningTractionMetrics metrics = MazeMap::ComputeTurningTractionMetrics(
-            state.driveTelemetry.leftVelocityMps,
-            state.driveTelemetry.rightVelocityMps,
-            effectiveTrackWidthM,
-            sensorSnapshot.gyroRadps,
-            planarAccelMps2);
-        _turningTractionLastMetrics = metrics;
-        _turningTractionLastPlanarAccelMps2 = planarAccelMps2;
-
-        const bool slipDetected = MazeMap::IsTurningTractionLossDetected(
-            metrics,
-            AuxMeasurementConfig::kTurningTractionSlipMinSpeedMps,
-            AuxMeasurementConfig::kTurningTractionSlipMinLatAccelMps2,
-            AuxMeasurementConfig::kTurningTractionSlipYawCoherenceFloor,
-            AuxMeasurementConfig::kTurningTractionSlipPlanarCoherenceFloor);
-        if (slipDetected)
-        {
-            if (!_turningTractionSlipCandidateActive)
-            {
-                _turningTractionSlipCandidateStartMs = nowMs;
-                _turningTractionSlipCandidateActive = true;
-            }
-            else if (static_cast<unsigned long>(nowMs - _turningTractionSlipCandidateStartMs) >= AuxMeasurementConfig::kTurningTractionSlipConfirmMs)
-            {
-                _turningTractionPhaseSucceeded = WriteTurningTractionResult(
-                    "traction_loss",
-                    true,
-                    static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs),
-                    _turningTractionCommandedSpeedMps,
-                    _turningTractionLastCommandedOmegaRadps,
-                    metrics,
-                    planarAccelMps2);
-                if (!_turningTractionPhaseSucceeded)
-                {
-                    services.Fault("Failed to write turning traction loss result");
-                }
-                services.RequestEndLoop();
-                return LoopController::ControlVector::Brake;
-            }
-        }
-        else
-        {
-            _turningTractionSlipCandidateActive = false;
-        }
-
-        const float maxWheelCommandMagnitude = (std::max)(
-            std::fabs(state.driveTelemetry.leftDriveCommand),
-            std::fabs(state.driveTelemetry.rightDriveCommand));
-        if (!_turningTractionTighteningTurn)
-        {
-            const bool actuatorLimited =
-                (metrics.encoderLinearSpeedMps >= AuxMeasurementConfig::kTurningTractionPlateauMinSpeedMps) &&
-                (maxWheelCommandMagnitude >= AuxMeasurementConfig::kTurningTractionActuatorCeilingCommand);
-
-            if (!actuatorLimited)
-            {
-                _turningTractionSaturationPlateauStartMs = 0UL;
-                _turningTractionSaturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
-            }
-            else if (_turningTractionSaturationPlateauStartMs == 0UL)
-            {
-                _turningTractionSaturationPlateauStartMs = nowMs;
-                _turningTractionSaturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
-            }
-            else if (metrics.encoderLinearSpeedMps >=
-                (_turningTractionSaturationReferenceSpeedMps + AuxMeasurementConfig::kTurningTractionPlateauDeltaMps))
-            {
-                _turningTractionSaturationPlateauStartMs = nowMs;
-                _turningTractionSaturationReferenceSpeedMps = metrics.encoderLinearSpeedMps;
-            }
-            else if (static_cast<unsigned long>(nowMs - _turningTractionSaturationPlateauStartMs) >=
-                AuxMeasurementConfig::kTurningTractionPlateauWindowMs)
-            {
-                _turningTractionTighteningTurn = true;
-                _turningTractionHeldSpeedMps = (std::max)(
-                    _turningTractionCommandedSpeedMps,
-                    metrics.encoderLinearSpeedMps);
-
-                char message[160] = {};
-                const int messageLength = snprintf(
-                    message,
-                    sizeof(message),
-                    "reason=speed_plateau;hold_v_mps=%.3f;curvature_m_inv=%.3f;outer_cmd=%.3f",
-                    _turningTractionHeldSpeedMps,
-                    _turningTractionCommandedCurvatureMInv,
-                    maxWheelCommandMagnitude);
-                if (messageLength <= 0 || messageLength >= static_cast<int>(sizeof(message)))
-                {
-                    services.Fault("Failed to format turning traction mode event");
-                    return LoopController::ControlVector::Brake;
-                }
-                if (!WriteEvent("turning_traction_mode", message))
-                {
-                    services.Fault("Failed to write turning traction mode event");
-                    return LoopController::ControlVector::Brake;
-                }
-            }
-        }
-
-        if (static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs) < AuxMeasurementConfig::kTurningTractionLaunchMs)
-        {
-            const MazeMap::TurningLaunchCommands launchCommands = MazeMap::ComputeTurningLaunchCommands(
-                _turningTractionCommandedSpeedMps,
-                _turningTractionLastCommandedOmegaRadps,
-                effectiveTrackWidthM,
-                Config::kWheelRestLaunchDriveCommand);
-            return LoopController::ControlVector::RawMotorPwm(
-                launchCommands.leftCommand,
-                launchCommands.rightCommand);
-        }
-
-        return _runtime.Drive().PointControlVector(
-            _turningTractionCommandedSpeedMps,
-            _turningTractionLastCommandedOmegaRadps,
-            MazeMap::CommandPD::StateWheelOmegaPD);
-    }
-
-    void SetFanEnabled(bool enabled)
+    void SetFanEnabled(const bool enabled)
     {
         if (_fanEnabled == enabled)
         {
@@ -721,63 +325,221 @@ private:
         SetMissionLevelFanEnabled(enabled);
     }
 
-    bool WriteTurningTractionResult(
-        const char* reason,
-        bool slipDetected,
-        unsigned long elapsedMs,
-        float commandedSpeedMps,
-        float commandedOmegaRadps,
-        const MazeMap::TurningTractionMetrics& metrics,
-        float planarAccelMps2)
+    LoopController::ControlVector PollDriveHold(const Phase nextPhase, const char* inactiveReason, LoopController::TickServices& services)
     {
-        char message[256] = {};
-        const int length = snprintf(
-            message,
-            sizeof(message),
-            "reason=%s;slip=%u;elapsed_ms=%lu;cmd_v_mps=%.3f;cmd_w_radps=%.3f;enc_v_mps=%.3f;enc_w_radps=%.3f;pred_lat_mps2=%.3f;planar_accel_mps2=%.3f;yaw_ratio=%.3f;planar_ratio=%.3f",
-            (reason != nullptr) ? reason : "unknown",
-            slipDetected ? 1U : 0U,
-            elapsedMs,
-            commandedSpeedMps,
-            commandedOmegaRadps,
-            metrics.encoderLinearSpeedMps,
-            metrics.encoderOmegaRadps,
-            metrics.predictedLateralAccelMps2,
-            planarAccelMps2,
-            metrics.yawCoherence,
-            metrics.planarCoherence);
+        if (!_driveService.Active())
+        {
+            services.Fault(inactiveReason);
+            return LoopController::ControlVector::Brake;
+        }
 
-        if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+        bool done = false;
+        const LoopController::ControlVector control = _driveService.GetNextControls(done);
+        if (!done)
         {
-            return Fail("Turning traction result event overflowed");
+            return control;
         }
-        if (WriteEvent("traction_limit_result", message))
-        {
-            return true;
-        }
-        return Fail("Failed to write turning traction result");
+
+        _phase = nextPhase;
+        return LoopController::ControlVector::Brake;
     }
 
-    bool Fail(const char* reason)
+    LoopController::ControlVector RunTurningTractionSweep(const LoopController::ModeState& state, LoopController::TickServices& services)
     {
-        return _runtime.FailActiveMode(reason);
+        const unsigned long nowMs = millis();
+        if (!_turningTractionStarted)
+        {
+            _turningTractionStarted = true;
+            _turningTractionPhaseStartMs = nowMs;
+        }
+
+        if (static_cast<unsigned long>(nowMs - _turningTractionPhaseStartMs) >= AuxMeasurementConfig::kTurningTractionSweepTimeoutMs)
+        {
+            (void)WriteEvent("summary", "Turning traction sweep finished; analyze the logged run offline.");
+            _phase = Phase::Complete;
+            services.RequestEndLoop();
+            return LoopController::ControlVector::Brake;
+        }
+
+        _turningTractionCommandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * state.dtSeconds;
+        if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
+        {
+            _turningTractionCommandedSpeedMps =
+                (std::min)(AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps, _turningTractionCommandedSpeedMps);
+        }
+
+        const float yawRateRadps =
+            (AuxMeasurementConfig::kTurningTractionSweepRadiusM > 1.0e-6f) ?
+            (_turningTractionDirectionSign * (_turningTractionCommandedSpeedMps / AuxMeasurementConfig::kTurningTractionSweepRadiusM)) :
+            0.0f;
+        return _drive.PointControlVector(
+            _turningTractionCommandedSpeedMps,
+            yawRateRadps,
+            MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
-    void OnRuntimeFault(const char* reason) noexcept
+    LoopController::ControlVector RunTick(
+        const std::uint32_t loopEndTimeUs,
+        const LoopController::ModeState& state,
+        LoopController::TickServices& services)
     {
-        _faulted = true;
-        _fanEnabled = false;
-        if (reason != nullptr && reason[0] != '\0')
+        (void)loopEndTimeUs;
+        if (!LogSample(state))
         {
-            (void)WriteEvent("fault", reason);
+            services.Fault("Failed to write auxiliary measurement sample");
+            return LoopController::ControlVector::Brake;
         }
-        AppendStartupTrace((reason != nullptr) ? reason : "aux_measurement_fault");
+
+        switch (_phase)
+        {
+        case Phase::LaunchStartupCalibration:
+            if (!BeginPhase("startup_calibration"))
+            {
+                services.Fault("Failed to log auxiliary startup calibration phase");
+                return LoopController::ControlVector::Brake;
+            }
+            _startupCalibration.Start();
+            if (!_startupCalibration.Active())
+            {
+                services.Fault("Auxiliary measurement startup calibration could not start");
+            }
+            else
+            {
+                _phase = Phase::RunStartupCalibration;
+            }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunStartupCalibration:
+        {
+            bool done = false;
+            const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
+            if (!done)
+            {
+                return control;
+            }
+            _phase = Phase::LaunchBaselineHold;
+            return LoopController::ControlVector::Brake;
+        }
+
+        case Phase::LaunchBaselineHold:
+            if (!BeginPhase("fan_off_baseline")) { services.Fault("Failed to log auxiliary baseline phase"); return LoopController::ControlVector::Brake; }
+            SetFanEnabled(false);
+            _driveService.Cancel();
+            _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
+            _driveService.SetOperationMode(Drive::OperationMode::Maze);
+            _driveService.StartHold(AuxMeasurementConfig::kBaselineHoldMs, true);
+            if (!_driveService.Active()) { services.Fault("Auxiliary baseline Drive hold could not start"); } else { _phase = Phase::RunBaselineHold; }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunBaselineHold:
+            return PollDriveHold(Phase::LaunchFanOnHold, "Auxiliary baseline Drive hold was not active", services);
+
+        case Phase::LaunchFanOnHold:
+            if (!BeginPhase("fan_on_hold")) { services.Fault("Failed to log auxiliary fan-on phase"); return LoopController::ControlVector::Brake; }
+            SetFanEnabled(true);
+            _driveService.Cancel();
+            _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
+            _driveService.SetOperationMode(Drive::OperationMode::Maze);
+            _driveService.StartHold(AuxMeasurementConfig::kFanHoldMs, true);
+            if (!_driveService.Active()) { services.Fault("Auxiliary fan-on Drive hold could not start"); } else { _phase = Phase::RunFanOnHold; }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunFanOnHold:
+            return PollDriveHold(Phase::LaunchRecoveryHold, "Auxiliary fan-on Drive hold was not active", services);
+
+        case Phase::LaunchRecoveryHold:
+            if (!BeginPhase("fan_off_recovery")) { services.Fault("Failed to log auxiliary recovery phase"); return LoopController::ControlVector::Brake; }
+            SetFanEnabled(false);
+            _driveService.Cancel();
+            _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
+            _driveService.SetOperationMode(Drive::OperationMode::Maze);
+            _driveService.StartHold(AuxMeasurementConfig::kRecoveryHoldMs, true);
+            if (!_driveService.Active()) { services.Fault("Auxiliary recovery Drive hold could not start"); } else { _phase = Phase::RunRecoveryHold; }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunRecoveryHold:
+            return PollDriveHold(Phase::Complete, "Auxiliary recovery Drive hold was not active", services);
+
+        case Phase::LaunchStartupHold:
+            if (!BeginPhase("startup_settle")) { services.Fault("Failed to log auxiliary startup phase"); return LoopController::ControlVector::Brake; }
+            SetFanEnabled(false);
+            _driveService.Cancel();
+            _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
+            _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+            _driveService.StartHold(AuxMeasurementConfig::kStartupSettleMs, true);
+            if (!_driveService.Active()) { services.Fault("Auxiliary startup Drive hold could not start"); } else { _phase = Phase::RunStartupHold; }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunStartupHold:
+            return PollDriveHold(Phase::LaunchFanSpinupHold, "Auxiliary startup Drive hold was not active", services);
+
+        case Phase::LaunchFanSpinupHold:
+            if (!BeginPhase("fan_spinup")) { services.Fault("Failed to log auxiliary fan-spinup phase"); return LoopController::ControlVector::Brake; }
+            SetFanEnabled(true);
+            _driveService.Cancel();
+            _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
+            _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+            _driveService.StartHold(AuxMeasurementConfig::kTurningTractionSweepFanSettleMs, true);
+            if (!_driveService.Active()) { services.Fault("Auxiliary fan-spinup Drive hold could not start"); } else { _phase = Phase::RunFanSpinupHold; }
+            return LoopController::ControlVector::Brake;
+
+        case Phase::RunFanSpinupHold:
+        {
+            const LoopController::ControlVector control = PollDriveHold(Phase::TurningTractionSweep, "Auxiliary fan-spinup Drive hold was not active", services);
+            if (_phase == Phase::TurningTractionSweep)
+            {
+                if (!BeginPhase("turning_traction_sweep"))
+                {
+                    services.Fault("Failed to log turning traction sweep phase");
+                    return LoopController::ControlVector::Brake;
+                }
+                ResetTurningTractionState();
+                _turningTractionDirectionSign = AuxMeasurementConfig::kTurningTractionSweepClockwise ? 1.0f : -1.0f;
+                _turningTractionCommandedSpeedMps = AuxMeasurementConfig::kTurningTractionSweepStartSpeedMps;
+                (void)WriteEvent(
+                    "summary",
+                    "Turning traction sweep now uses DriveBase point commands only; any traction-loss interpretation is offline from the log.");
+            }
+            return control;
+        }
+
+        case Phase::TurningTractionSweep:
+            return RunTurningTractionSweep(state, services);
+
+        case Phase::Complete:
+            services.RequestEndLoop();
+            return LoopController::ControlVector::Brake;
+
+        case Phase::Idle:
+        default:
+            services.Fault("Auxiliary measurement phase was not initialized");
+            return LoopController::ControlVector::Brake;
+        }
     }
 
     static MazeMap::WheelControlProfile BuildTurningTractionWheelControlProfile()
     {
         return BuildNominalWheelControlProfile();
     }
+
+    SharedRobotRuntime& _runtime;
+    LoopController& _loopController;
+    MazeMap::Vehicle& _vehicle;
+    DriveBase& _drive;
+    Drive& _driveService;
+    StartupCalibration& _startupCalibration;
+    char _logFileName[64];
+    Phase _phase{ Phase::Idle };
+    bool _runtimeFaulted{};
+    bool _fanEnabled{};
+    unsigned long _phaseId{};
+    unsigned long _sampleCount{};
+    AuxMeasurementLogRow _logRow{};
+
+    float _turningTractionDirectionSign{};
+    float _turningTractionCommandedSpeedMps{};
+    unsigned long _turningTractionPhaseStartMs{};
+    bool _turningTractionStarted{};
 };
 
 namespace MazeMap::App::Internal
@@ -790,14 +552,14 @@ namespace MazeMap::App::Internal
             BootModeId::AuxiliaryMeasurement,
             BootModeCategory::Utility,
             "auxiliary_measurement",
-            "Run the selected auxiliary fan or turning-traction routine.",
+            "Run the selected auxiliary survey or traction sweep on the shared startup and Drive path.",
             "logging.txt; auxiliary measurement mmlog",
             &GetAuxMeasurementMode,
             "GetAuxMeasurementMode",
             "AuxMeasurementController.cpp",
-            "startup settle; selected auxiliary routine; final log close",
-            "AuxMeasurementConfig; shared mission drive and sensor tuning",
-            "AuxMeasurementConfig::kRoutine selects fan survey or turning-traction sweep only",
+            "shared startup path; Drive hold phases; optional traction sweep",
+            "AuxMeasurementConfig plus shared StartupCalibration and Drive services",
+            "TurningTractionSweep uses DriveBase point commands only; traction-loss inference is offline",
             "aux%03u.mmlog or aux_measurement_log.mmlog",
         };
         return descriptor;
@@ -809,4 +571,3 @@ namespace MazeMap::App::Internal
         return mode;
     }
 }
-

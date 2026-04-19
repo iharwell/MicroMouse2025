@@ -2,6 +2,7 @@
 #include "PositionAccuracyAuditMode.h"
 
 #include "AuxMeasurementConfig.h"
+#include "AuxMeasurementModeSupport.h"
 #include "BootUtilityModeFramework.h"
 #include "CommandPD.h"
 #include "Drive.h"
@@ -15,24 +16,13 @@
 namespace
 {
     constexpr const char* kPositionAuditStableId = "position_accuracy_audit";
-
-    MotionLimits BuildPositionDriveLimits(const MazeMap::Vehicle& vehicle, const float cruiseSpeedMps) noexcept
-    {
-        MotionLimits limits{};
-        limits.maxSpeedMps = cruiseSpeedMps;
-        limits.accelMps2 = AuxMeasurementConfig::kPositionAuditAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kPositionAuditDecelMps2;
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
-        return limits;
-    }
+    constexpr float kPositionAuditWallTouchSpeedMps = 0.35f;
 
     MotionLimits BuildPositionWallTouchLimits(const MazeMap::Vehicle& vehicle) noexcept
     {
-        MotionLimits limits{};
-        limits.maxSpeedMps = 0.35f;
-        limits.accelMps2 = AuxMeasurementConfig::kPositionAuditAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kPositionAuditDecelMps2;
+        MotionLimits limits =
+            MazeMap::App::Internal::AuxMeasurementModeSupport::PositionAccuracyAuditStraightLimits(
+                kPositionAuditWallTouchSpeedMps);
         limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
         limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
         return limits;
@@ -58,23 +48,24 @@ namespace MazeMap::App::Internal
         bool Begin() override
         {
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&PositionAccuracyAuditMode::HandleRuntimeFault, this, kPositionAuditStableId))
+            if (!_runtime.RegisterModeFaultHandler(&PositionAccuracyAuditMode::TeardownOnRuntimeFault, this, kPositionAuditStableId))
             {
                 return false;
             }
 
             if (!SetupHardware())
             {
-                return Fail("Position accuracy audit hardware setup failed");
+                return _runtime.FailActiveMode("Position accuracy audit hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:position_accuracy_audit");
             (void)_runtime.AppendTextLogLine("Position accuracy audit mode");
             (void)_runtime.AppendTextLogLine("Single-session shared-service straight audit");
+            _fixture = AuxMeasurementModeSupport::BuildPositionAuditFixtureGeometry();
 
             if (!_drive.Begin())
             {
-                return Fail("Position accuracy audit drive base init failed");
+                return _runtime.FailActiveMode("Position accuracy audit drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -82,7 +73,7 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(true);
             if (!_startupCalibration.BringUp())
             {
-                return Fail("Position accuracy audit startup bring-up failed");
+                return _runtime.FailActiveMode("Position accuracy audit startup bring-up failed");
             }
 
             return true;
@@ -90,11 +81,6 @@ namespace MazeMap::App::Internal
 
         void Run() override
         {
-            if (_faulted)
-            {
-                return;
-            }
-
             _phase = Phase::LaunchStartupCalibration;
 
             LoopController::ModeCallbacks callbacks{};
@@ -102,15 +88,19 @@ namespace MazeMap::App::Internal
             callbacks.context = this;
             if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
             {
-                (void)Fail("Position accuracy audit loop session start failed");
+                (void)_runtime.FailActiveMode("Position accuracy audit loop session start failed");
             }
             else
             {
                 const LoopController::SessionResult result = _loopController.Run();
-                _completed =
-                    !_faulted &&
+                const bool completed =
                     (result.status == LoopController::SessionResult::Status::Completed);
                 _loopController.EndSession();
+
+                if (completed)
+                {
+                    (void)_runtime.AppendTextLogLine("Position accuracy audit complete");
+                }
             }
 
             _wallTouch.Cancel();
@@ -118,11 +108,6 @@ namespace MazeMap::App::Internal
             _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
-
-            if (_completed)
-            {
-                (void)_runtime.AppendTextLogLine("Position accuracy audit complete");
-            }
         }
 
     private:
@@ -147,12 +132,21 @@ namespace MazeMap::App::Internal
             Complete
         };
 
-        static void HandleRuntimeFault(void* context, const char* reason) noexcept
+        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
         {
-            if (context != nullptr)
+            (void)reason;
+            auto* const self = static_cast<PositionAccuracyAuditMode*>(context);
+            if (self == nullptr)
             {
-                static_cast<PositionAccuracyAuditMode*>(context)->OnRuntimeFault(reason);
+                return;
             }
+
+            self->_phase = Phase::Idle;
+            self->_wallTouch.Cancel();
+            self->_startupCalibration.Cancel();
+            self->_driveService.Cancel();
+            self->_drive.Brake();
+            self->_drive.UseNominalWheelControlProfile();
         }
 
         static LoopController::ControlVector ModeWorkThunk(
@@ -180,34 +174,17 @@ namespace MazeMap::App::Internal
 
         void ResetState() noexcept
         {
-            _faulted = false;
-            _completed = false;
             _speedIndex = 0U;
             _phase = Phase::Idle;
+            _fixture = {};
             _wallTouch.Cancel();
             _startupCalibration.Cancel();
             _driveService.Cancel();
         }
 
-        bool Fail(const char* reason)
-        {
-            return _runtime.FailActiveMode(reason);
-        }
-
-        void OnRuntimeFault(const char* reason) noexcept
-        {
-            _faulted = true;
-            (void)_runtime.AppendTextLogLine(
-                (reason != nullptr && reason[0] != '\0') ?
-                    reason :
-                    "position_accuracy_audit_fault");
-        }
-
         float OutboundDistanceM() const noexcept
         {
-            return
-                Config::kCellSizeM *
-                static_cast<float>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount - 1U);
+            return _fixture.outDistanceM;
         }
 
         Eigen::Vector2f StartCellCenter() const noexcept
@@ -217,15 +194,15 @@ namespace MazeMap::App::Internal
 
         Eigen::Vector2f FarCellCenter() const noexcept
         {
-            return Eigen::Vector2f(
-                0.5f * Config::kCellSizeM,
-                (0.5f * Config::kCellSizeM) + OutboundDistanceM());
+            return Eigen::Vector2f(0.5f * Config::kCellSizeM, _fixture.farCellCenterYM);
         }
 
         bool StartDriveHold(const std::uint16_t durationMs) noexcept
         {
             _driveService.Cancel();
-            _driveService.SetLimits(BuildPositionDriveLimits(_vehicle, AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[_speedIndex]));
+            _driveService.SetLimits(
+                AuxMeasurementModeSupport::PositionAccuracyAuditStraightLimits(
+                    AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[_speedIndex]));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(durationMs, true);
             return _driveService.Active();
@@ -238,7 +215,7 @@ namespace MazeMap::App::Internal
             const Eigen::Vector2f& targetPosition) noexcept
         {
             _driveService.Cancel();
-            _driveService.SetLimits(BuildPositionDriveLimits(_vehicle, cruiseSpeedMps));
+            _driveService.SetLimits(AuxMeasurementModeSupport::PositionAccuracyAuditStraightLimits(cruiseSpeedMps));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartStraight(distanceM, cruiseSpeedMps, 0.0f, &heading, &targetPosition);
             return _driveService.Active();
@@ -247,7 +224,7 @@ namespace MazeMap::App::Internal
         bool StartTurnAround() noexcept
         {
             _driveService.Cancel();
-            _driveService.SetLimits(BuildPositionDriveLimits(_vehicle, AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[_speedIndex]));
+            _driveService.SetLimits(AuxMeasurementModeSupport::PositionAccuracyAuditTurnLimits());
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartTurn(PI_F);
             return _driveService.Active();
@@ -264,7 +241,7 @@ namespace MazeMap::App::Internal
             _wallTouch.Start(
                 MazeMap::CellCoordinates(
                     0U,
-                    static_cast<std::uint8_t>(AuxMeasurementConfig::kPositionAuditNorthCorridorCellCount - 1U)),
+                    static_cast<std::uint8_t>(_fixture.northCorridorCellCount - 1U)),
                 MazeMap::Up);
             return _wallTouch.Active();
         }
@@ -451,8 +428,7 @@ namespace MazeMap::App::Internal
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
         WallTouch& _wallTouch;
-        bool _faulted{};
-        bool _completed{};
+        AuxMeasurementModeSupport::PositionAuditFixtureGeometry _fixture{};
         std::uint8_t _speedIndex{};
         Phase _phase{ Phase::Idle };
     };
@@ -463,14 +439,14 @@ namespace MazeMap::App::Internal
             BootModeId::PositionAccuracyAudit,
             BootModeCategory::Utility,
             "position_accuracy_audit",
-            "Run clean single-session straight position audit passes.",
+            "Run clean single-session shared-service position audit passes.",
             "logging.txt",
             &GetPositionAccuracyAuditMode,
             "GetPositionAccuracyAuditMode",
             "PositionAccuracyAuditMode.cpp",
-            "shared startup calibration; start settle; outbound drive; north-wall touch; return drive",
-            "AuxMeasurementConfig straight-speed points; shared runtime drive and wall-touch services",
-            "Structured telemetry export and smooth-turn sections are temporarily removed during the execution-model cleanup",
+            "shared startup calibration; start settle; outbound drive; north-wall touch; return drive; face north; speed advance",
+            "AuxMeasurementConfig straight-speed points; shared runtime drive and wall-touch services; shared audit fixture geometry",
+            "Smooth-turn audit sections remain intentionally absent from this mode's shared-service path",
             "none",
         };
         return descriptor;

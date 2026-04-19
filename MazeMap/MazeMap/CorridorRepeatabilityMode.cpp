@@ -16,21 +16,10 @@ namespace
 {
     constexpr const char* kCorridorStableId = "corridor_repeatability";
 
-    MotionLimits BuildCorridorDriveLimits(const MazeMap::Vehicle& vehicle, const float cruiseSpeedMps) noexcept
+    MotionLimits BuildCorridorMotionLimits(const MazeMap::Vehicle& vehicle, const float maxSpeedMps) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = cruiseSpeedMps;
-        limits.accelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2;
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
-        return limits;
-    }
-
-    MotionLimits BuildWallTouchLimits(const MazeMap::Vehicle& vehicle) noexcept
-    {
-        MotionLimits limits{};
-        limits.maxSpeedMps = 0.35f;
+        limits.maxSpeedMps = maxSpeedMps;
         limits.accelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2;
         limits.decelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2;
         limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
@@ -58,14 +47,14 @@ namespace MazeMap::App::Internal
         bool Begin() override
         {
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&CorridorRepeatabilityMode::HandleRuntimeFault, this, kCorridorStableId))
+            if (!_runtime.RegisterModeFaultHandler(&CorridorRepeatabilityMode::TeardownOnRuntimeFault, this, kCorridorStableId))
             {
                 return false;
             }
 
             if (!SetupHardware())
             {
-                return Fail("Corridor repeatability hardware setup failed");
+                return _runtime.FailActiveMode("Corridor repeatability hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:corridor_repeatability");
@@ -74,7 +63,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return Fail("Corridor repeatability drive base init failed");
+                return _runtime.FailActiveMode("Corridor repeatability drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -82,7 +71,7 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(true);
             if (!_startupCalibration.BringUp())
             {
-                return Fail("Corridor repeatability startup bring-up failed");
+                return _runtime.FailActiveMode("Corridor repeatability startup bring-up failed");
             }
 
             return true;
@@ -90,11 +79,6 @@ namespace MazeMap::App::Internal
 
         void Run() override
         {
-            if (_faulted)
-            {
-                return;
-            }
-
             _phase = Phase::LaunchStartupCalibration;
 
             LoopController::ModeCallbacks callbacks{};
@@ -102,15 +86,19 @@ namespace MazeMap::App::Internal
             callbacks.context = this;
             if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
             {
-                (void)Fail("Corridor repeatability loop session start failed");
+                (void)_runtime.FailActiveMode("Corridor repeatability loop session start failed");
             }
             else
             {
                 const LoopController::SessionResult result = _loopController.Run();
-                _completed =
-                    !_faulted &&
+                const bool completed =
                     (result.status == LoopController::SessionResult::Status::Completed);
                 _loopController.EndSession();
+
+                if (completed)
+                {
+                    (void)_runtime.AppendTextLogLine("Corridor repeatability complete");
+                }
             }
 
             _wallTouch.Cancel();
@@ -118,11 +106,6 @@ namespace MazeMap::App::Internal
             _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
-
-            if (_completed)
-            {
-                (void)_runtime.AppendTextLogLine("Corridor repeatability complete");
-            }
         }
 
     private:
@@ -147,12 +130,21 @@ namespace MazeMap::App::Internal
             Complete
         };
 
-        static void HandleRuntimeFault(void* context, const char* reason) noexcept
+        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
         {
-            if (context != nullptr)
+            (void)reason;
+            auto* const self = static_cast<CorridorRepeatabilityMode*>(context);
+            if (self == nullptr)
             {
-                static_cast<CorridorRepeatabilityMode*>(context)->OnRuntimeFault(reason);
+                return;
             }
+
+            self->_phase = Phase::Idle;
+            self->_wallTouch.Cancel();
+            self->_startupCalibration.Cancel();
+            self->_driveService.Cancel();
+            self->_drive.Brake();
+            self->_drive.UseNominalWheelControlProfile();
         }
 
         static LoopController::ControlVector ModeWorkThunk(
@@ -180,27 +172,11 @@ namespace MazeMap::App::Internal
 
         void ResetState() noexcept
         {
-            _faulted = false;
-            _completed = false;
             _speedIndex = 0U;
             _phase = Phase::Idle;
             _wallTouch.Cancel();
             _startupCalibration.Cancel();
             _driveService.Cancel();
-        }
-
-        bool Fail(const char* reason)
-        {
-            return _runtime.FailActiveMode(reason);
-        }
-
-        void OnRuntimeFault(const char* reason) noexcept
-        {
-            _faulted = true;
-            (void)_runtime.AppendTextLogLine(
-                (reason != nullptr && reason[0] != '\0') ?
-                    reason :
-                    "corridor_repeatability_fault");
         }
 
         float OutboundDistanceM() const noexcept
@@ -220,92 +196,6 @@ namespace MazeMap::App::Internal
             return Eigen::Vector2f(
                 0.5f * Config::kCellSizeM,
                 (0.5f * Config::kCellSizeM) + OutboundDistanceM());
-        }
-
-        bool StartDriveHold(const std::uint16_t durationMs) noexcept
-        {
-            _driveService.Cancel();
-            _driveService.SetLimits(BuildCorridorDriveLimits(_vehicle, AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
-            _driveService.SetOperationMode(Drive::OperationMode::Maze);
-            _driveService.StartHold(durationMs, true);
-            return _driveService.Active();
-        }
-
-        bool StartDriveStraight(
-            const float distanceM,
-            const float cruiseSpeedMps,
-            const Eigen::Vector2f& heading,
-            const Eigen::Vector2f& targetPosition) noexcept
-        {
-            _driveService.Cancel();
-            _driveService.SetLimits(BuildCorridorDriveLimits(_vehicle, cruiseSpeedMps));
-            _driveService.SetOperationMode(Drive::OperationMode::Maze);
-            _driveService.StartStraight(distanceM, cruiseSpeedMps, 0.0f, &heading, &targetPosition);
-            return _driveService.Active();
-        }
-
-        bool StartTurnAround() noexcept
-        {
-            _driveService.Cancel();
-            _driveService.SetLimits(BuildCorridorDriveLimits(_vehicle, AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
-            _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            _driveService.StartTurn(PI_F);
-            return _driveService.Active();
-        }
-
-        bool StartWallTouch() noexcept
-        {
-            _wallTouch.Cancel();
-            _wallTouch.SetLimits(BuildWallTouchLimits(_vehicle));
-            _wallTouch.SetTrackingCommandPD(
-                MazeMap::CommandPD::StateWheelOmegaPD |
-                MazeMap::CommandPD::IMUYaw);
-            _wallTouch.SetAllowPassThroughNoWall(false);
-            _wallTouch.Start(
-                MazeMap::CellCoordinates(
-                    0U,
-                    static_cast<std::uint8_t>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount - 1U)),
-                MazeMap::Up);
-            return _wallTouch.Active();
-        }
-
-        LoopController::ControlVector PollStartupCalibration()
-        {
-            bool done = false;
-            const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
-            if (!done)
-            {
-                return control;
-            }
-
-            _phase = Phase::LaunchStartHold;
-            return LoopController::ControlVector::Brake;
-        }
-
-        LoopController::ControlVector PollDrive(const Phase nextPhase)
-        {
-            bool done = false;
-            const LoopController::ControlVector control = _driveService.GetNextControls(done);
-            if (!done)
-            {
-                return control;
-            }
-
-            _phase = nextPhase;
-            return LoopController::ControlVector::Brake;
-        }
-
-        LoopController::ControlVector PollWallTouch(const Phase nextPhase)
-        {
-            bool done = false;
-            const LoopController::ControlVector control = _wallTouch.GetNextControls(done);
-            if (!done)
-            {
-                return control;
-            }
-
-            _phase = nextPhase;
-            return LoopController::ControlVector::Brake;
         }
 
         LoopController::ControlVector RunTick(
@@ -331,10 +221,27 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunStartupCalibration:
-                return PollStartupCalibration();
+            {
+                bool done = false;
+                const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
+                if (!done)
+                {
+                    return control;
+                }
+
+                _phase = Phase::LaunchStartHold;
+                return LoopController::ControlVector::Brake;
+            }
 
             case Phase::LaunchStartHold:
-                if (!StartDriveHold(AuxMeasurementConfig::kCorridorRepeatabilityStartSettleMs))
+                _driveService.Cancel();
+                _driveService.SetLimits(
+                    BuildCorridorMotionLimits(
+                        _vehicle,
+                        AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
+                _driveService.SetOperationMode(Drive::OperationMode::Maze);
+                _driveService.StartHold(AuxMeasurementConfig::kCorridorRepeatabilityStartSettleMs, true);
+                if (!_driveService.Active())
                 {
                     services.Fault("Corridor repeatability start hold could not start");
                 }
@@ -345,14 +252,35 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunStartHold:
-                return PollDrive(Phase::LaunchOutbound);
+            {
+                bool done = false;
+                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                if (!done)
+                {
+                    return control;
+                }
+
+                _phase = Phase::LaunchOutbound;
+                return LoopController::ControlVector::Brake;
+            }
 
             case Phase::LaunchOutbound:
-                if (!StartDriveStraight(
-                        OutboundDistanceM(),
-                        AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex],
-                        DirectionToUnitVector(MazeMap::Up),
-                        FarCellCenter()))
+            {
+                const Eigen::Vector2f heading = DirectionToUnitVector(MazeMap::Up);
+                const Eigen::Vector2f targetPosition = FarCellCenter();
+                _driveService.Cancel();
+                _driveService.SetLimits(
+                    BuildCorridorMotionLimits(
+                        _vehicle,
+                        AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
+                _driveService.SetOperationMode(Drive::OperationMode::Maze);
+                _driveService.StartStraight(
+                    OutboundDistanceM(),
+                    AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex],
+                    0.0f,
+                    &heading,
+                    &targetPosition);
+                if (!_driveService.Active())
                 {
                     services.Fault("Corridor repeatability outbound drive could not start");
                 }
@@ -361,12 +289,34 @@ namespace MazeMap::App::Internal
                     _phase = Phase::RunOutbound;
                 }
                 return LoopController::ControlVector::Brake;
+            }
 
             case Phase::RunOutbound:
-                return PollDrive(Phase::LaunchFarTouch);
+            {
+                bool done = false;
+                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                if (!done)
+                {
+                    return control;
+                }
+
+                _phase = Phase::LaunchFarTouch;
+                return LoopController::ControlVector::Brake;
+            }
 
             case Phase::LaunchFarTouch:
-                if (!StartWallTouch())
+                _wallTouch.Cancel();
+                _wallTouch.SetLimits(BuildCorridorMotionLimits(_vehicle, 0.35f));
+                _wallTouch.SetTrackingCommandPD(
+                    MazeMap::CommandPD::StateWheelOmegaPD |
+                    MazeMap::CommandPD::IMUYaw);
+                _wallTouch.SetAllowPassThroughNoWall(false);
+                _wallTouch.Start(
+                    MazeMap::CellCoordinates(
+                        0U,
+                        static_cast<std::uint8_t>(AuxMeasurementConfig::kCorridorRepeatabilityRowCellCount - 1U)),
+                    MazeMap::Up);
+                if (!_wallTouch.Active())
                 {
                     services.Fault("Corridor repeatability wall touch could not start");
                 }
@@ -377,10 +327,27 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunFarTouch:
-                return PollWallTouch(Phase::LaunchTurnHome);
+            {
+                bool done = false;
+                const LoopController::ControlVector control = _wallTouch.GetNextControls(done);
+                if (!done)
+                {
+                    return control;
+                }
+
+                _phase = Phase::LaunchTurnHome;
+                return LoopController::ControlVector::Brake;
+            }
 
             case Phase::LaunchTurnHome:
-                if (!StartTurnAround())
+                _driveService.Cancel();
+                _driveService.SetLimits(
+                    BuildCorridorMotionLimits(
+                        _vehicle,
+                        AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
+                _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+                _driveService.StartTurn(PI_F);
+                if (!_driveService.Active())
                 {
                     services.Fault("Corridor repeatability turn-home could not start");
                 }
@@ -391,14 +358,35 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunTurnHome:
-                return PollDrive(Phase::LaunchReturn);
+            {
+                bool done = false;
+                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                if (!done)
+                {
+                    return control;
+                }
+
+                _phase = Phase::LaunchReturn;
+                return LoopController::ControlVector::Brake;
+            }
 
             case Phase::LaunchReturn:
-                if (!StartDriveStraight(
-                        OutboundDistanceM(),
-                        AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex],
-                        DirectionToUnitVector(MazeMap::Down),
-                        StartCellCenter()))
+            {
+                const Eigen::Vector2f heading = DirectionToUnitVector(MazeMap::Down);
+                const Eigen::Vector2f targetPosition = StartCellCenter();
+                _driveService.Cancel();
+                _driveService.SetLimits(
+                    BuildCorridorMotionLimits(
+                        _vehicle,
+                        AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
+                _driveService.SetOperationMode(Drive::OperationMode::Maze);
+                _driveService.StartStraight(
+                    OutboundDistanceM(),
+                    AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex],
+                    0.0f,
+                    &heading,
+                    &targetPosition);
+                if (!_driveService.Active())
                 {
                     services.Fault("Corridor repeatability return drive could not start");
                 }
@@ -407,12 +395,30 @@ namespace MazeMap::App::Internal
                     _phase = Phase::RunReturn;
                 }
                 return LoopController::ControlVector::Brake;
+            }
 
             case Phase::RunReturn:
-                return PollDrive(Phase::LaunchFaceNorth);
+            {
+                bool done = false;
+                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                if (!done)
+                {
+                    return control;
+                }
+
+                _phase = Phase::LaunchFaceNorth;
+                return LoopController::ControlVector::Brake;
+            }
 
             case Phase::LaunchFaceNorth:
-                if (!StartTurnAround())
+                _driveService.Cancel();
+                _driveService.SetLimits(
+                    BuildCorridorMotionLimits(
+                        _vehicle,
+                        AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
+                _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+                _driveService.StartTurn(PI_F);
+                if (!_driveService.Active())
                 {
                     services.Fault("Corridor repeatability face-north turn could not start");
                 }
@@ -423,7 +429,17 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunFaceNorth:
-                return PollDrive(Phase::AdvanceSpeed);
+            {
+                bool done = false;
+                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                if (!done)
+                {
+                    return control;
+                }
+
+                _phase = Phase::AdvanceSpeed;
+                return LoopController::ControlVector::Brake;
+            }
 
             case Phase::AdvanceSpeed:
                 ++_speedIndex;
@@ -451,8 +467,6 @@ namespace MazeMap::App::Internal
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
         WallTouch& _wallTouch;
-        bool _faulted{};
-        bool _completed{};
         std::uint8_t _speedIndex{};
         Phase _phase{ Phase::Idle };
     };

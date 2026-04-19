@@ -2,16 +2,8 @@
 #include "MazeMapSharedRuntime.h"
 #include "TeensyLayout.h"
 #include "MazeMapApplicationPrivate.h"
-#include "Drive.h"
-#include "DriveBase.h"
-#include "LoopController.h"
-#include "ManeuverExecutor.h"
 #include "MazeMapRuntimeInfrastructure.h"
-#include "PlantModel.h"
 #include "RuntimeBinaryLogSupport.h"
-#include "StartupCalibration.h"
-#include "WallTouch.h"
-#include "WallTouch.h"
 
 #include <cmath>
 #include <cstdarg>
@@ -20,483 +12,456 @@
 #include <limits>
 #include <stdexcept>
 
-namespace
-{
-    constexpr std::size_t kTextLogSourceLength = 64U;
-    constexpr std::size_t kTextLogQueueBytes = 4096U;
-    constexpr std::size_t kTextLogServiceBudgetBytes = MazeMap::mmlog::kSdSectorBytes;
-    static_assert((kTextLogQueueBytes % MazeMap::mmlog::kSdSectorBytes) == 0U);
+using MazeMap::App::Internal::SharedRuntimeTextLogFileHandle;
+
+static constexpr std::size_t kTextLogServiceBudgetBytes = MazeMap::mmlog::kSdSectorBytes;
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-    constexpr std::uint64_t kTextLogPreallocateBytes = MMLOG_TEENSY_MIN_PREALLOCATE_BYTES;
-    static_assert(kTextLogPreallocateBytes >= MMLOG_TEENSY_MIN_PREALLOCATE_BYTES);
+static constexpr std::uint64_t kTextLogPreallocateBytes = MMLOG_TEENSY_MIN_PREALLOCATE_BYTES;
+static_assert(kTextLogPreallocateBytes >= MMLOG_TEENSY_MIN_PREALLOCATE_BYTES);
 
-    using TextLogFileHandle = FsFile;
-
-    bool OpenFreshTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
+static bool OpenFreshTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
+{
+    file.close();
+    if (SD.sdfs.exists(path) && !SD.sdfs.remove(path))
+    {
+        return false;
+    }
+    if (!file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_TRUNC))
+    {
+        return false;
+    }
+    if (!file.preAllocate(kTextLogPreallocateBytes))
     {
         file.close();
-        if (SD.sdfs.exists(path) && !SD.sdfs.remove(path))
-        {
-            return false;
-        }
-        if (!file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_TRUNC))
-        {
-            return false;
-        }
-        if (!file.preAllocate(kTextLogPreallocateBytes))
-        {
-            file.close();
-            return false;
-        }
+        return false;
+    }
+    return true;
+}
+
+static bool OpenAppendTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
+{
+    file.close();
+    if (!file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_AT_END))
+    {
+        return false;
+    }
+    if (file.fileSize() == 0U && !file.preAllocate(kTextLogPreallocateBytes))
+    {
+        file.close();
+        return false;
+    }
+    return true;
+}
+
+static bool TextLogFileIsOpen(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return static_cast<bool>(file);
+}
+
+static bool WriteTextLogBytes(
+    SharedRuntimeTextLogFileHandle& file,
+    const char* const text,
+    const std::size_t length) noexcept
+{
+    return file.write(reinterpret_cast<const std::uint8_t*>(text), length) == length;
+}
+
+static bool FlushTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return file.sync();
+}
+
+static bool TextLogTransferBusy(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return file.isBusy();
+}
+
+static void CloseTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    if (file)
+    {
+        file.close();
+    }
+}
+
+static bool FinalizeTextLogFileLength(
+    SharedRuntimeTextLogFileHandle& file,
+    const std::uint64_t logicalLength) noexcept
+{
+    if (!file.seekSet(logicalLength))
+    {
+        return false;
+    }
+    if (!file.truncate())
+    {
+        return false;
+    }
+    if (!file.seekSet(logicalLength))
+    {
+        return false;
+    }
+    return FlushTextLogFile(file);
+}
+
+static bool FlushPartialTextLogTail(
+    SharedRuntimeTextLogFileHandle& file,
+    MazeMap::mmlog::detail::ByteRing& queue) noexcept
+{
+    if (queue.empty())
+    {
         return true;
     }
 
-    bool OpenAppendTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
+    std::uint8_t sector[MazeMap::mmlog::kSdSectorBytes] = {};
+    const std::size_t tailBytes = queue.size();
+    if (tailBytes >= MazeMap::mmlog::kSdSectorBytes)
     {
-        file.close();
-        if (!file.open(&SD.sdfs, path, O_RDWR | O_CREAT | O_AT_END))
-        {
-            return false;
-        }
-        if (file.fileSize() == 0U && !file.preAllocate(kTextLogPreallocateBytes))
-        {
-            file.close();
-            return false;
-        }
-        return true;
+        return false;
     }
 
-    bool TextLogFileIsOpen(TextLogFileHandle& file) noexcept
+    queue.readCopy(sector, tailBytes);
+    const std::uint64_t logicalLength = file.curPosition() + tailBytes;
+    if (file.write(sector, MazeMap::mmlog::kSdSectorBytes) != MazeMap::mmlog::kSdSectorBytes)
     {
-        return static_cast<bool>(file);
+        return false;
     }
 
-    bool WriteTextLogBytes(TextLogFileHandle& file, const char* const text, const std::size_t length) noexcept
+    queue.consume(tailBytes);
+    while (file.isBusy())
     {
-        return file.write(reinterpret_cast<const std::uint8_t*>(text), length) == length;
     }
 
-    bool FlushTextLogFile(TextLogFileHandle& file) noexcept
-    {
-        return file.sync();
-    }
-
-    bool TextLogTransferBusy(TextLogFileHandle& file) noexcept
-    {
-        return file.isBusy();
-    }
-
-    void CloseTextLogFile(TextLogFileHandle& file) noexcept
-    {
-        if (file)
-        {
-            file.close();
-        }
-    }
-
-    bool FinalizeTextLogFileLength(TextLogFileHandle& file, const std::uint64_t logicalLength) noexcept
-    {
-        if (!file.seekSet(logicalLength))
-        {
-            return false;
-        }
-        if (!file.truncate())
-        {
-            return false;
-        }
-        if (!file.seekSet(logicalLength))
-        {
-            return false;
-        }
-        return FlushTextLogFile(file);
-    }
-
-    bool FlushPartialTextLogTail(
-        TextLogFileHandle& file,
-        MazeMap::mmlog::detail::ByteRing& queue) noexcept
-    {
-        if (queue.empty())
-        {
-            return true;
-        }
-
-        std::uint8_t sector[MazeMap::mmlog::kSdSectorBytes] = {};
-        const std::size_t tailBytes = queue.size();
-        if (tailBytes >= MazeMap::mmlog::kSdSectorBytes)
-        {
-            return false;
-        }
-
-        queue.readCopy(sector, tailBytes);
-        const std::uint64_t logicalLength = file.curPosition() + tailBytes;
-        if (file.write(sector, MazeMap::mmlog::kSdSectorBytes) != MazeMap::mmlog::kSdSectorBytes)
-        {
-            return false;
-        }
-
-        queue.consume(tailBytes);
-        while (file.isBusy())
-        {
-        }
-
-        // Keep physical writes sector-sized, then trim the file back to the true byte count.
-        return FinalizeTextLogFileLength(file, logicalLength);
-    }
+    // Keep physical writes sector-sized, then trim the file back to the true byte count.
+    return FinalizeTextLogFileLength(file, logicalLength);
+}
 #elif defined(ARDUINO)
-    using TextLogFileHandle = File;
+static bool OpenFreshTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
+{
+    file.close();
+    SD.remove(path);
+    file = SD.open(path, FILE_WRITE);
+    return static_cast<bool>(file);
+}
 
-    bool OpenFreshTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
+static bool OpenAppendTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
+{
+    file.close();
+    file = SD.open(path, FILE_WRITE);
+    return static_cast<bool>(file);
+}
+
+static bool TextLogFileIsOpen(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return static_cast<bool>(file);
+}
+
+static bool WriteTextLogBytes(
+    SharedRuntimeTextLogFileHandle& file,
+    const char* const text,
+    const std::size_t length) noexcept
+{
+    return file.write(reinterpret_cast<const std::uint8_t*>(text), length) == length;
+}
+
+static bool FlushTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    file.flush();
+    return static_cast<bool>(file);
+}
+
+static bool TextLogTransferBusy(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    (void)file;
+    return false;
+}
+
+static void CloseTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    if (file)
     {
         file.close();
-        SD.remove(path);
-        file = SD.open(path, FILE_WRITE);
-        return static_cast<bool>(file);
     }
-
-    bool OpenAppendTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
-    {
-        file.close();
-        file = SD.open(path, FILE_WRITE);
-        return static_cast<bool>(file);
-    }
-
-    bool TextLogFileIsOpen(TextLogFileHandle& file) noexcept
-    {
-        return static_cast<bool>(file);
-    }
-
-    bool WriteTextLogBytes(TextLogFileHandle& file, const char* const text, const std::size_t length) noexcept
-    {
-        return file.write(reinterpret_cast<const std::uint8_t*>(text), length) == length;
-    }
-
-    bool FlushTextLogFile(TextLogFileHandle& file) noexcept
-    {
-        file.flush();
-        return static_cast<bool>(file);
-    }
-
-    bool TextLogTransferBusy(TextLogFileHandle& file) noexcept
-    {
-        (void)file;
-        return false;
-    }
-
-    void CloseTextLogFile(TextLogFileHandle& file) noexcept
-    {
-        if (file)
-        {
-            file.close();
-        }
-    }
+}
 #else
-    using TextLogFileHandle = std::FILE*;
-
-    bool OpenFreshTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
+static bool OpenFreshTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
+{
+    if (file != nullptr)
     {
-        if (file != nullptr)
-        {
-            std::fclose(file);
-            file = nullptr;
-        }
-
-        file = std::fopen(path, "wb");
-        return file != nullptr;
+        std::fclose(file);
+        file = nullptr;
     }
 
-    bool OpenAppendTextLogFile(TextLogFileHandle& file, const char* const path) noexcept
-    {
-        if (file != nullptr)
-        {
-            std::fclose(file);
-            file = nullptr;
-        }
+    file = std::fopen(path, "wb");
+    return file != nullptr;
+}
 
-        file = std::fopen(path, "ab");
-        return file != nullptr;
+static bool OpenAppendTextLogFile(SharedRuntimeTextLogFileHandle& file, const char* const path) noexcept
+{
+    if (file != nullptr)
+    {
+        std::fclose(file);
+        file = nullptr;
     }
 
-    bool TextLogFileIsOpen(TextLogFileHandle& file) noexcept
-    {
-        return file != nullptr;
-    }
+    file = std::fopen(path, "ab");
+    return file != nullptr;
+}
 
-    bool WriteTextLogBytes(TextLogFileHandle& file, const char* const text, const std::size_t length) noexcept
-    {
-        return (file != nullptr) && (std::fwrite(text, 1U, length, file) == length);
-    }
+static bool TextLogFileIsOpen(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return file != nullptr;
+}
 
-    bool FlushTextLogFile(TextLogFileHandle& file) noexcept
-    {
-        return (file == nullptr) || (std::fflush(file) == 0);
-    }
+static bool WriteTextLogBytes(
+    SharedRuntimeTextLogFileHandle& file,
+    const char* const text,
+    const std::size_t length) noexcept
+{
+    return (file != nullptr) && (std::fwrite(text, 1U, length, file) == length);
+}
 
-    bool TextLogTransferBusy(TextLogFileHandle& file) noexcept
-    {
-        (void)file;
-        return false;
-    }
+static bool FlushTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    return (file == nullptr) || (std::fflush(file) == 0);
+}
 
-    void CloseTextLogFile(TextLogFileHandle& file) noexcept
+static bool TextLogTransferBusy(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    (void)file;
+    return false;
+}
+
+static void CloseTextLogFile(SharedRuntimeTextLogFileHandle& file) noexcept
+{
+    if (file != nullptr)
     {
-        if (file != nullptr)
-        {
-            std::fclose(file);
-            file = nullptr;
-        }
+        std::fclose(file);
+        file = nullptr;
     }
+}
 #endif
 
-    void ResetUtilityLogIdentity(char* activeFileName, std::size_t activeFileNameSize, char* activeSource, std::size_t activeSourceSize) noexcept
+static void ResetUtilityLogIdentity(
+    char* activeFileName,
+    std::size_t activeFileNameSize,
+    char* activeSource,
+    std::size_t activeSourceSize) noexcept
+{
+    if (activeFileName != nullptr && activeFileNameSize > 0U)
     {
-        if (activeFileName != nullptr && activeFileNameSize > 0U)
-        {
-            activeFileName[0] = '\0';
-        }
-        if (activeSource != nullptr && activeSourceSize > 0U)
-        {
-            activeSource[0] = '\0';
-        }
+        activeFileName[0] = '\0';
+    }
+    if (activeSource != nullptr && activeSourceSize > 0U)
+    {
+        activeSource[0] = '\0';
+    }
+}
+
+static void SetRuntimeLogErrorText(char* destination, std::size_t destinationSize, const char* message) noexcept
+{
+    if (destination == nullptr || destinationSize == 0U)
+    {
+        return;
     }
 
-    void SetRuntimeLogErrorText(char* destination, std::size_t destinationSize, const char* message) noexcept
-    {
-        if (destination == nullptr || destinationSize == 0U)
-        {
-            return;
-        }
+    std::snprintf(destination, destinationSize, "%s", (message != nullptr) ? message : "");
+}
 
-        std::snprintf(destination, destinationSize, "%s", (message != nullptr) ? message : "");
+static void AssignUtilityLogSourceFromFileName(
+    char* destination,
+    std::size_t destinationSize,
+    const char* fileName) noexcept
+{
+    if (destination == nullptr || destinationSize == 0U)
+    {
+        return;
     }
 
-    void AssignUtilityLogSourceFromFileName(char* destination, std::size_t destinationSize, const char* fileName) noexcept
+    destination[0] = '\0';
+    const char* component = MazeMap::App::Internal::Runtime::FileNameComponent(fileName);
+    if (component == nullptr || component[0] == '\0')
     {
-        if (destination == nullptr || destinationSize == 0U)
-        {
-            return;
-        }
-
-        destination[0] = '\0';
-        const char* component = MazeMap::App::Internal::Runtime::FileNameComponent(fileName);
-        if (component == nullptr || component[0] == '\0')
-        {
-            return;
-        }
-
-        const char* extension = std::strrchr(component, '.');
-        std::size_t sourceLength =
-            (extension != nullptr) ? static_cast<std::size_t>(extension - component) : std::strlen(component);
-        if (sourceLength >= destinationSize)
-        {
-            sourceLength = destinationSize - 1U;
-        }
-
-        std::memcpy(destination, component, sourceLength);
-        destination[sourceLength] = '\0';
+        return;
     }
 
-    bool DrainTextLogQueueToFile(
-        TextLogFileHandle& file,
-        MazeMap::mmlog::detail::ByteRing& queue,
-        std::size_t budget) noexcept
+    const char* extension = std::strrchr(component, '.');
+    std::size_t sourceLength =
+        (extension != nullptr) ? static_cast<std::size_t>(extension - component) : std::strlen(component);
+    if (sourceLength >= destinationSize)
     {
-        if (!TextLogFileIsOpen(file))
+        sourceLength = destinationSize - 1U;
+    }
+
+    std::memcpy(destination, component, sourceLength);
+    destination[sourceLength] = '\0';
+}
+
+static bool DrainTextLogQueueToFile(
+    SharedRuntimeTextLogFileHandle& file,
+    MazeMap::mmlog::detail::ByteRing& queue,
+    std::size_t budget) noexcept
+{
+    if (!TextLogFileIsOpen(file))
+    {
+        return false;
+    }
+
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+    std::uint8_t sector[MazeMap::mmlog::kSdSectorBytes] = {};
+    std::size_t sectorsWritten = 0U;
+    while (budget >= MazeMap::mmlog::kSdSectorBytes &&
+           queue.size() >= MazeMap::mmlog::kSdSectorBytes)
+    {
+        if (TextLogTransferBusy(file))
+        {
+            break;
+        }
+
+        const std::uint8_t* writePtr = queue.readPtr();
+        const std::size_t contiguous = queue.contiguousReadSize();
+        if (contiguous < MazeMap::mmlog::kSdSectorBytes)
+        {
+            queue.readCopy(sector, MazeMap::mmlog::kSdSectorBytes);
+            writePtr = sector;
+        }
+
+        if (writePtr == nullptr ||
+            !WriteTextLogBytes(
+                file,
+                reinterpret_cast<const char*>(writePtr),
+                MazeMap::mmlog::kSdSectorBytes))
         {
             return false;
         }
 
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-        std::uint8_t sector[MazeMap::mmlog::kSdSectorBytes] = {};
-        std::size_t sectorsWritten = 0U;
-        while (budget >= MazeMap::mmlog::kSdSectorBytes &&
-               queue.size() >= MazeMap::mmlog::kSdSectorBytes)
-        {
-            if (TextLogTransferBusy(file))
-            {
-                break;
-            }
-
-            const std::uint8_t* writePtr = queue.readPtr();
-            const std::size_t contiguous = queue.contiguousReadSize();
-            if (contiguous < MazeMap::mmlog::kSdSectorBytes)
-            {
-                queue.readCopy(sector, MazeMap::mmlog::kSdSectorBytes);
-                writePtr = sector;
-            }
-
-            if (writePtr == nullptr ||
-                !WriteTextLogBytes(
-                    file,
-                    reinterpret_cast<const char*>(writePtr),
-                    MazeMap::mmlog::kSdSectorBytes))
-            {
-                return false;
-            }
-
-            queue.consume(MazeMap::mmlog::kSdSectorBytes);
-            budget -= MazeMap::mmlog::kSdSectorBytes;
-            ++sectorsWritten;
+        queue.consume(MazeMap::mmlog::kSdSectorBytes);
+        budget -= MazeMap::mmlog::kSdSectorBytes;
+        ++sectorsWritten;
 
 #  if MMLOG_TEENSY_SERVICE_AT_MOST_ONE_SECTOR_PER_CALL
-            if (sectorsWritten >= 1U)
-            {
-                break;
-            }
-#  endif
-        }
-        return true;
-#else
-        while (budget != 0U && !queue.empty())
+        if (sectorsWritten >= 1U)
         {
-            const std::size_t chunk = queue.contiguousReadSize();
-            const std::size_t toWrite = (chunk < budget) ? chunk : budget;
-            const std::uint8_t* const ptr = queue.readPtr();
-            if (ptr == nullptr || toWrite == 0U)
-            {
-                break;
-            }
-
-            if (!WriteTextLogBytes(file, reinterpret_cast<const char*>(ptr), toWrite))
-            {
-                return false;
-            }
-
-            queue.consume(toWrite);
-            budget -= toWrite;
+            break;
         }
-        return true;
-#endif
+#  endif
     }
-
-    bool FlushTextLogQueueToFile(
-        TextLogFileHandle& file,
-        MazeMap::mmlog::detail::ByteRing& queue) noexcept
+    return true;
+#else
+    while (budget != 0U && !queue.empty())
     {
-        if (!TextLogFileIsOpen(file))
+        const std::size_t chunk = queue.contiguousReadSize();
+        const std::size_t toWrite = (chunk < budget) ? chunk : budget;
+        const std::uint8_t* const ptr = queue.readPtr();
+        if (ptr == nullptr || toWrite == 0U)
+        {
+            break;
+        }
+
+        if (!WriteTextLogBytes(file, reinterpret_cast<const char*>(ptr), toWrite))
         {
             return false;
         }
 
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-        while (queue.size() >= MazeMap::mmlog::kSdSectorBytes)
-        {
-            if (!DrainTextLogQueueToFile(file, queue, MazeMap::mmlog::kSdSectorBytes))
-            {
-                return false;
-            }
-            while (TextLogTransferBusy(file))
-            {
-            }
-        }
-
-        return FlushPartialTextLogTail(file, queue);
-#else
-        while (!queue.empty())
-        {
-            const std::size_t chunk = queue.contiguousReadSize();
-            const std::uint8_t* const ptr = queue.readPtr();
-            if (ptr == nullptr || chunk == 0U)
-            {
-                break;
-            }
-
-            if (!WriteTextLogBytes(file, reinterpret_cast<const char*>(ptr), chunk))
-            {
-                return false;
-            }
-
-            queue.consume(chunk);
-        }
-
-        return true;
+        queue.consume(toWrite);
+        budget -= toWrite;
+    }
+    return true;
 #endif
+}
+
+static bool FlushTextLogQueueToFile(
+    SharedRuntimeTextLogFileHandle& file,
+    MazeMap::mmlog::detail::ByteRing& queue) noexcept
+{
+    if (!TextLogFileIsOpen(file))
+    {
+        return false;
     }
 
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+    while (queue.size() >= MazeMap::mmlog::kSdSectorBytes)
+    {
+        if (!DrainTextLogQueueToFile(file, queue, MazeMap::mmlog::kSdSectorBytes))
+        {
+            return false;
+        }
+        while (TextLogTransferBusy(file))
+        {
+        }
+    }
+
+    return FlushPartialTextLogTail(file, queue);
+#else
+    while (!queue.empty())
+    {
+        const std::size_t chunk = queue.contiguousReadSize();
+        const std::uint8_t* const ptr = queue.readPtr();
+        if (ptr == nullptr || chunk == 0U)
+        {
+            break;
+        }
+
+        if (!WriteTextLogBytes(file, reinterpret_cast<const char*>(ptr), chunk))
+        {
+            return false;
+        }
+
+        queue.consume(chunk);
+    }
+
+    return true;
+#endif
 }
 
 namespace MazeMap::App::Internal
 {
-    class SharedRobotRuntime::Implementation final
-    {
-    public:
-        Implementation()
-            : speedVehicle()
-            , searchVehicle()
-            , maze()
-            , searchPathFinder(maze, speedVehicle)
-            , speedPathFinder(maze, speedVehicle)
-            , wallBeliefMap()
-            , plantModel()
-            , drive(plantModel)
-            , controlLoop()
-            , sensors(speedVehicle, gWallDistanceCalibration)
-            , dataLogger()
-            , textLogFile()
-            , textLogQueue()
-            , textLogFaulted(false)
-            , textLogInitialized(false)
-            , runtimeLogsClosedForFault(false)
-            , modeFaultHandlerRegistered(false)
-            , modeFaulted(false)
-            , modeFaultCleanupCallback(nullptr)
-            , modeFaultCleanupContext(nullptr)
-        {
-            ResetUtilityLogIdentity(
-                activeDataLogFileName,
-                sizeof(activeDataLogFileName),
-                activeDataLogSource,
-                sizeof(activeDataLogSource));
-            activeModeFaultSource[0] = '\0';
-            lastRuntimeLogError[0] = '\0';
-            (void)textLogQueue.attach(textLogStorage, sizeof(textLogStorage));
-
-            // Search-mode queue timing stays intentionally conservative even though the shared
-            // physical vehicle model is reused everywhere else.
-            searchVehicle.SetMaxSpeed(Config::kSearchMaxSpeedMps);
-            searchVehicle.SetMaxForwardAcceleration(Config::kSearchAccelMps2);
-            searchVehicle.SetMaxLateralAcceleration(Config::kSearchMaxLateralAccelerationMps2);
-        }
-
-        MazeMap::Vehicle speedVehicle;
-        MazeMap::Vehicle searchVehicle;
-        MazeMap::Maze maze;
-        MazeMap::FloodFillPathFinder searchPathFinder;
-        MazeMap::ManeuverPathFinder speedPathFinder;
-        MazeMap::WallBeliefMap wallBeliefMap;
-        MazeMap::PlantModel plantModel;
-        DriveBase drive;
-        MazeMap::App::Internal::Drive driveService;
-        StartupCalibration startupCalibrationService;
-        WallTouch wallTouchService;
-        ManeuverExecutor maneuverExecutor;
-        LoopController controlLoop;
-        RuntimeSensorSuite sensors;
-        MazeMap::mmlog::MmLogLogger dataLogger;
-        TextLogFileHandle textLogFile{};
-        MazeMap::mmlog::detail::ByteRing textLogQueue;
-        alignas(32) std::uint8_t textLogStorage[kTextLogQueueBytes]{};
-        bool textLogFaulted;
-        bool textLogInitialized;
-        bool runtimeLogsClosedForFault;
-        bool modeFaultHandlerRegistered;
-        bool modeFaulted;
-        ModeFaultCleanupCallback modeFaultCleanupCallback;
-        void* modeFaultCleanupContext;
-        char activeDataLogFileName[MMLOG_MAX_PATH_LENGTH + 1U];
-        char activeDataLogSource[kTextLogSourceLength];
-        char activeModeFaultSource[kTextLogSourceLength];
-        char lastRuntimeLogError[MMLOG_ERROR_TEXT_LENGTH + 1U];
-    };
-
     SharedRobotRuntime::SharedRobotRuntime()
-        : _impl(std::make_unique<Implementation>())
+        : speedVehicle()
+        , searchVehicle()
+        , maze()
+        , searchPathFinder(maze, speedVehicle)
+        , speedPathFinder(maze, speedVehicle)
+        , wallBeliefMap()
+        , plantModel()
+        , drive(plantModel)
+        , driveService()
+        , startupCalibrationService()
+        , wallTouchService()
+        , maneuverExecutor()
+        , controlLoop()
+        , sensors(speedVehicle, gWallDistanceCalibration)
+        , dataLogger()
+        , textLogFile()
+        , textLogQueue()
+        , textLogFaulted(false)
+        , textLogInitialized(false)
+        , runtimeLogsClosedForFault(false)
+        , modeFaultHandlerRegistered(false)
+        , modeFaulted(false)
+        , modeFaultCleanupCallback(nullptr)
+        , modeFaultCleanupContext(nullptr)
     {
-        _impl->driveService.AttachRuntime(*this);
-        _impl->startupCalibrationService.AttachRuntime(*this);
-        _impl->wallTouchService.AttachRuntime(*this);
-        _impl->maneuverExecutor.AttachRuntime(*this);
-        _impl->controlLoop.AttachRuntime(*this);
+        ResetUtilityLogIdentity(
+            activeDataLogFileName,
+            sizeof(activeDataLogFileName),
+            activeDataLogSource,
+            sizeof(activeDataLogSource));
+        activeModeFaultSource[0] = '\0';
+        lastRuntimeLogError[0] = '\0';
+        (void)textLogQueue.attach(textLogStorage, sizeof(textLogStorage));
+
+        // Search-mode queue timing stays intentionally conservative even though the shared
+        // physical vehicle model is reused everywhere else.
+        searchVehicle.SetMaxSpeed(Config::kSearchMaxSpeedMps);
+        searchVehicle.SetMaxForwardAcceleration(Config::kSearchAccelMps2);
+        searchVehicle.SetMaxLateralAcceleration(Config::kSearchMaxLateralAccelerationMps2);
+
+        driveService.AttachRuntime(*this);
+        startupCalibrationService.AttachRuntime(*this);
+        wallTouchService.AttachRuntime(*this);
+        maneuverExecutor.AttachRuntime(*this);
+        controlLoop.AttachRuntime(*this);
     }
 
     SharedRobotRuntime::~SharedRobotRuntime()
@@ -506,47 +471,47 @@ namespace MazeMap::App::Internal
 
     MazeMap::Vehicle& SharedRobotRuntime::SpeedVehicle() noexcept
     {
-        return _impl->speedVehicle;
+        return speedVehicle;
     }
 
     const MazeMap::Vehicle& SharedRobotRuntime::SpeedVehicle() const noexcept
     {
-        return _impl->speedVehicle;
+        return speedVehicle;
     }
 
     MazeMap::Vehicle& SharedRobotRuntime::SearchVehicle() noexcept
     {
-        return _impl->searchVehicle;
+        return searchVehicle;
     }
 
     const MazeMap::Vehicle& SharedRobotRuntime::SearchVehicle() const noexcept
     {
-        return _impl->searchVehicle;
+        return searchVehicle;
     }
 
     MazeMap::Maze& SharedRobotRuntime::Maze() noexcept
     {
-        return _impl->maze;
+        return maze;
     }
 
     const MazeMap::Maze& SharedRobotRuntime::Maze() const noexcept
     {
-        return _impl->maze;
+        return maze;
     }
 
     MazeMap::FloodFillPathFinder& SharedRobotRuntime::SearchPathFinder() noexcept
     {
-        return _impl->searchPathFinder;
+        return searchPathFinder;
     }
 
     MazeMap::ManeuverPathFinder& SharedRobotRuntime::SpeedPathFinder() noexcept
     {
-        return _impl->speedPathFinder;
+        return speedPathFinder;
     }
 
     MazeMap::WallBeliefMap& SharedRobotRuntime::WallBeliefMap() noexcept
     {
-        return _impl->wallBeliefMap;
+        return wallBeliefMap;
     }
 
     bool SharedRobotRuntime::OpenUtilityDataLog(
@@ -583,17 +548,17 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        snprintf(_impl->activeDataLogFileName, sizeof(_impl->activeDataLogFileName), "%s", fileName);
-        AssignUtilityLogSourceFromFileName(_impl->activeDataLogSource, sizeof(_impl->activeDataLogSource), fileName);
+        snprintf(activeDataLogFileName, sizeof(activeDataLogFileName), "%s", fileName);
+        AssignUtilityLogSourceFromFileName(activeDataLogSource, sizeof(activeDataLogSource), fileName);
         if (!UtilityDataLogger().open(fileName))
         {
             SetLastRuntimeLogErrorFromUtilityDataLogger("Failed to open utility data log file.");
             LogUtilityDataLoggerFailure("data_log_open_failed");
             ResetUtilityLogIdentity(
-                _impl->activeDataLogFileName,
-                sizeof(_impl->activeDataLogFileName),
-                _impl->activeDataLogSource,
-                sizeof(_impl->activeDataLogSource));
+                activeDataLogFileName,
+                sizeof(activeDataLogFileName),
+                activeDataLogSource,
+                sizeof(activeDataLogSource));
             return false;
         }
 
@@ -612,7 +577,7 @@ namespace MazeMap::App::Internal
 
     const char* SharedRobotRuntime::ActiveUtilityDataLogFileName() const noexcept
     {
-        return _impl->activeDataLogFileName;
+        return activeDataLogFileName;
     }
 
     const char* SharedRobotRuntime::TextLogFileName() const noexcept
@@ -622,17 +587,17 @@ namespace MazeMap::App::Internal
 
     const char* SharedRobotRuntime::LastRuntimeLogError() const noexcept
     {
-        return _impl->lastRuntimeLogError;
+        return lastRuntimeLogError;
     }
 
     void SharedRobotRuntime::ClearLastRuntimeLogError() noexcept
     {
-        SetRuntimeLogErrorText(_impl->lastRuntimeLogError, sizeof(_impl->lastRuntimeLogError), nullptr);
+        SetRuntimeLogErrorText(lastRuntimeLogError, sizeof(lastRuntimeLogError), nullptr);
     }
 
     void SharedRobotRuntime::SetLastRuntimeLogError(const char* message) noexcept
     {
-        SetRuntimeLogErrorText(_impl->lastRuntimeLogError, sizeof(_impl->lastRuntimeLogError), message);
+        SetRuntimeLogErrorText(lastRuntimeLogError, sizeof(lastRuntimeLogError), message);
     }
 
     void SharedRobotRuntime::SetLastRuntimeLogErrorFromUtilityDataLogger(const char* fallback) noexcept
@@ -643,33 +608,33 @@ namespace MazeMap::App::Internal
 
     bool SharedRobotRuntime::EnsureTextLogOpen()
     {
-        if (_impl->textLogFaulted || _impl->runtimeLogsClosedForFault)
+        if (textLogFaulted || runtimeLogsClosedForFault)
         {
             return false;
         }
 
-        if (TextLogFileIsOpen(_impl->textLogFile))
+        if (TextLogFileIsOpen(textLogFile))
         {
             return true;
         }
 
         const bool opened =
-            _impl->textLogInitialized
-            ? OpenAppendTextLogFile(_impl->textLogFile, kSharedRuntimeTextLogFileName)
-            : OpenFreshTextLogFile(_impl->textLogFile, kSharedRuntimeTextLogFileName);
+            textLogInitialized
+            ? OpenAppendTextLogFile(textLogFile, kSharedRuntimeTextLogFileName)
+            : OpenFreshTextLogFile(textLogFile, kSharedRuntimeTextLogFileName);
         if (!opened)
         {
-            _impl->textLogFaulted = true;
+            textLogFaulted = true;
             CloseRuntimeLogsForFault();
             return false;
         }
-        _impl->textLogInitialized = true;
+        textLogInitialized = true;
         return true;
     }
 
     bool SharedRobotRuntime::TextLogIsOpen() noexcept
     {
-        return TextLogFileIsOpen(_impl->textLogFile);
+        return TextLogFileIsOpen(textLogFile);
     }
 
     bool SharedRobotRuntime::AppendTextLogLine(const char* line)
@@ -683,12 +648,12 @@ namespace MazeMap::App::Internal
         const std::size_t length = std::strlen(line);
         static constexpr std::uint8_t newline = '\n';
         const std::size_t required = length + 1U;
-        if (required > _impl->textLogQueue.freeSpace() ||
-            !_impl->textLogQueue.push(reinterpret_cast<const std::uint8_t*>(line), length) ||
-            !_impl->textLogQueue.push(&newline, 1U))
+        if (required > textLogQueue.freeSpace() ||
+            !textLogQueue.push(reinterpret_cast<const std::uint8_t*>(line), length) ||
+            !textLogQueue.push(&newline, 1U))
         {
             SetLastRuntimeLogError("logging.txt queue overflow.");
-            _impl->textLogFaulted = true;
+            textLogFaulted = true;
             CloseRuntimeLogsForFault();
             return false;
         }
@@ -743,14 +708,14 @@ namespace MazeMap::App::Internal
 
     const char* SharedRobotRuntime::DefaultTextLogSource() const noexcept
     {
-        if (_impl->activeDataLogSource[0] != '\0')
+        if (activeDataLogSource[0] != '\0')
         {
-            return _impl->activeDataLogSource;
+            return activeDataLogSource;
         }
 
-        if (_impl->activeModeFaultSource[0] != '\0')
+        if (activeModeFaultSource[0] != '\0')
         {
-            return _impl->activeModeFaultSource;
+            return activeModeFaultSource;
         }
 
         return "runtime";
@@ -836,14 +801,14 @@ namespace MazeMap::App::Internal
         // Explicit text flushes are complete writes. They are separate from normal
         // per-cycle servicing, which is arbitrated only by ServiceUtilityDataLog.
         ClearLastRuntimeLogError();
-        if (TextLogFileIsOpen(_impl->textLogFile))
+        if (TextLogFileIsOpen(textLogFile))
         {
-            if ((!_impl->textLogQueue.empty() &&
-                 !FlushTextLogQueueToFile(_impl->textLogFile, _impl->textLogQueue)) ||
-                !FlushTextLogFile(_impl->textLogFile))
+            if ((!textLogQueue.empty() &&
+                 !FlushTextLogQueueToFile(textLogFile, textLogQueue)) ||
+                !FlushTextLogFile(textLogFile))
             {
                 SetLastRuntimeLogError("logging.txt flush failed.");
-                _impl->textLogFaulted = true;
+                textLogFaulted = true;
                 CloseRuntimeLogsForFault();
             }
         }
@@ -854,21 +819,21 @@ namespace MazeMap::App::Internal
         // Text-log close is a lifecycle/fault finalization path; normal control-loop
         // dispatch remains centralized in ServiceUtilityDataLog.
         ClearLastRuntimeLogError();
-        if (TextLogFileIsOpen(_impl->textLogFile))
+        if (TextLogFileIsOpen(textLogFile))
         {
-            if ((!_impl->textLogQueue.empty() &&
-                 !FlushTextLogQueueToFile(_impl->textLogFile, _impl->textLogQueue)) ||
-                !FlushTextLogFile(_impl->textLogFile))
+            if ((!textLogQueue.empty() &&
+                 !FlushTextLogQueueToFile(textLogFile, textLogQueue)) ||
+                !FlushTextLogFile(textLogFile))
             {
                 SetLastRuntimeLogError("logging.txt close failed.");
-                _impl->textLogFaulted = true;
-                CloseTextLogFile(_impl->textLogFile);
-                _impl->textLogQueue.clear();
+                textLogFaulted = true;
+                CloseTextLogFile(textLogFile);
+                textLogQueue.clear();
                 return;
             }
-            CloseTextLogFile(_impl->textLogFile);
+            CloseTextLogFile(textLogFile);
         }
-        _impl->textLogQueue.clear();
+        textLogQueue.clear();
     }
 
     bool SharedRobotRuntime::RegisterModeFaultHandler(
@@ -876,7 +841,7 @@ namespace MazeMap::App::Internal
         void* context,
         const char* source)
     {
-        if (_impl->modeFaultHandlerRegistered)
+        if (modeFaultHandlerRegistered)
         {
 #ifdef ARDUINO_TEENSY41
             assert(false && "SharedRobotRuntime mode fault handler already registered; top-level mode switching is not supported.");
@@ -887,41 +852,41 @@ namespace MazeMap::App::Internal
 #endif
         }
 
-        _impl->modeFaultHandlerRegistered = true;
-        _impl->modeFaulted = false;
-        _impl->modeFaultCleanupCallback = callback;
-        _impl->modeFaultCleanupContext = context;
+        modeFaultHandlerRegistered = true;
+        modeFaulted = false;
+        modeFaultCleanupCallback = callback;
+        modeFaultCleanupContext = context;
         if (source == nullptr || source[0] == '\0')
         {
-            _impl->activeModeFaultSource[0] = '\0';
+            activeModeFaultSource[0] = '\0';
         }
         else
         {
-            snprintf(_impl->activeModeFaultSource, sizeof(_impl->activeModeFaultSource), "%s", source);
+            snprintf(activeModeFaultSource, sizeof(activeModeFaultSource), "%s", source);
         }
         return true;
     }
 
     bool SharedRobotRuntime::FailActiveMode(const char* reason) noexcept
     {
-        if (_impl->modeFaulted)
+        if (modeFaulted)
         {
             return false;
         }
 
-        _impl->modeFaulted = true;
+        modeFaulted = true;
         SetMissionLevelFanEnabled(false);
-        _impl->drive.Brake();
-        _impl->drive.UseNominalWheelControlProfile();
+        drive.Brake();
+        drive.UseNominalWheelControlProfile();
         (void)WriteTextLogEntry(
-            (_impl->activeModeFaultSource[0] != '\0') ? _impl->activeModeFaultSource : nullptr,
+            (activeModeFaultSource[0] != '\0') ? activeModeFaultSource : nullptr,
             micros(),
             "fault",
             (reason != nullptr) ? reason : "unknown");
 
-        if (_impl->modeFaultCleanupCallback != nullptr)
+        if (modeFaultCleanupCallback != nullptr)
         {
-            _impl->modeFaultCleanupCallback(_impl->modeFaultCleanupContext, reason);
+            modeFaultCleanupCallback(modeFaultCleanupContext, reason);
         }
 
         CloseRuntimeLogsForFault();
@@ -931,7 +896,7 @@ namespace MazeMap::App::Internal
 
     void SharedRobotRuntime::FinalizeSuccessfulModeExit() noexcept
     {
-        if (_impl->modeFaulted || _impl->runtimeLogsClosedForFault)
+        if (modeFaulted || runtimeLogsClosedForFault)
         {
             return;
         }
@@ -941,7 +906,7 @@ namespace MazeMap::App::Internal
             (void)CloseUtilityDataLog();
         }
 
-        if (TextLogFileIsOpen(_impl->textLogFile))
+        if (TextLogFileIsOpen(textLogFile))
         {
             CloseTextLog();
         }
@@ -1002,23 +967,23 @@ namespace MazeMap::App::Internal
         // arbitrates logging.txt first, then delegates sidecar/primary arbitration to the
         // one runtime-owned MmLogLogger instance.
         ClearLastRuntimeLogError();
-        if (_impl->runtimeLogsClosedForFault)
+        if (runtimeLogsClosedForFault)
         {
             return false;
         }
 
-        if (TextLogTransferBusy(_impl->textLogFile) || UtilityDataLogger().isTransferBusy())
+        if (TextLogTransferBusy(textLogFile) || UtilityDataLogger().isTransferBusy())
         {
             return true;
         }
 
-        if (TextLogFileIsOpen(_impl->textLogFile) &&
-            _impl->textLogQueue.size() >= MazeMap::mmlog::kSdSectorBytes)
+        if (TextLogFileIsOpen(textLogFile) &&
+            textLogQueue.size() >= MazeMap::mmlog::kSdSectorBytes)
         {
-            if (!DrainTextLogQueueToFile(_impl->textLogFile, _impl->textLogQueue, kTextLogServiceBudgetBytes))
+            if (!DrainTextLogQueueToFile(textLogFile, textLogQueue, kTextLogServiceBudgetBytes))
             {
                 SetLastRuntimeLogError("logging.txt service drain failed.");
-                _impl->textLogFaulted = true;
+                textLogFaulted = true;
                 CloseRuntimeLogsForFault();
                 return false;
             }
@@ -1058,22 +1023,22 @@ namespace MazeMap::App::Internal
             SetLastRuntimeLogErrorFromUtilityDataLogger("Failed to close utility data log.");
         }
         ResetUtilityLogIdentity(
-            _impl->activeDataLogFileName,
-            sizeof(_impl->activeDataLogFileName),
-            _impl->activeDataLogSource,
-            sizeof(_impl->activeDataLogSource));
+            activeDataLogFileName,
+            sizeof(activeDataLogFileName),
+            activeDataLogSource,
+            sizeof(activeDataLogSource));
         return ok;
     }
 
     void SharedRobotRuntime::CloseRuntimeLogsForFault() noexcept
     {
-        _impl->runtimeLogsClosedForFault = true;
+        runtimeLogsClosedForFault = true;
 
-        if (TextLogFileIsOpen(_impl->textLogFile))
+        if (TextLogFileIsOpen(textLogFile))
         {
             (void)CloseTextLog();
         }
-        _impl->textLogQueue.clear();
+        textLogQueue.clear();
 
         if (UtilityDataLogger().isOpen())
         {
@@ -1081,10 +1046,10 @@ namespace MazeMap::App::Internal
         }
 
         ResetUtilityLogIdentity(
-            _impl->activeDataLogFileName,
-            sizeof(_impl->activeDataLogFileName),
-            _impl->activeDataLogSource,
-            sizeof(_impl->activeDataLogSource));
+            activeDataLogFileName,
+            sizeof(activeDataLogFileName),
+            activeDataLogSource,
+            sizeof(activeDataLogSource));
     }
 
     void SharedRobotRuntime::CaptureUtilityDataLogFailure(bool& overflowed, bool& writeFailed) const noexcept
@@ -1094,18 +1059,13 @@ namespace MazeMap::App::Internal
 
     bool SharedRobotRuntime::SetMotorPWM(const float leftMotorPwm, const float rightMotorPwm) noexcept
     {
-        if (_impl == nullptr)
-        {
-            return false;
-        }
-
         if (!std::isfinite(leftMotorPwm) || !std::isfinite(rightMotorPwm))
         {
-            _impl->drive.Brake();
+            drive.Brake();
         }
         else
         {
-            _impl->drive.CommandOpenLoopRaw(
+            drive.CommandOpenLoopRaw(
                 LoopController::ControlVector::RawMotorPwm(leftMotorPwm, rightMotorPwm));
         }
 
@@ -1114,47 +1074,47 @@ namespace MazeMap::App::Internal
 
     DriveBase& SharedRobotRuntime::Drive() noexcept
     {
-        return _impl->drive;
+        return drive;
     }
 
     MazeMap::App::Internal::Drive& SharedRobotRuntime::DriveService() noexcept
     {
-        return _impl->driveService;
+        return driveService;
     }
 
     StartupCalibration& SharedRobotRuntime::StartupCalibrationService() noexcept
     {
-        return _impl->startupCalibrationService;
+        return startupCalibrationService;
     }
 
     WallTouch& SharedRobotRuntime::WallTouchService() noexcept
     {
-        return _impl->wallTouchService;
+        return wallTouchService;
     }
 
     ManeuverExecutor& SharedRobotRuntime::ManeuverExecutorService() noexcept
     {
-        return _impl->maneuverExecutor;
+        return maneuverExecutor;
     }
 
     LoopController& SharedRobotRuntime::ControlLoop() noexcept
     {
-        return _impl->controlLoop;
+        return controlLoop;
     }
 
     RuntimeSensorSuite& SharedRobotRuntime::Sensors() noexcept
     {
-        return _impl->sensors;
+        return sensors;
     }
 
     MazeMap::mmlog::MmLogLogger& SharedRobotRuntime::UtilityDataLogger() noexcept
     {
-        return _impl->dataLogger;
+        return dataLogger;
     }
 
     const MazeMap::mmlog::MmLogLogger& SharedRobotRuntime::UtilityDataLogger() const noexcept
     {
-        return _impl->dataLogger;
+        return dataLogger;
     }
 
     void LogWallSensorAdcRegisterWrite(

@@ -133,7 +133,7 @@ namespace MazeMap::App::Internal
         bool Begin() override
         {
             ResetState();
-            if (!_runtime.RegisterModeFaultHandler(&ManeuverFileTestMode::HandleRuntimeFault, this, kManeuverFileTestStableId))
+            if (!_runtime.RegisterModeFaultHandler(&ManeuverFileTestMode::TeardownOnRuntimeFault, this, kManeuverFileTestStableId))
             {
                 return false;
             }
@@ -145,7 +145,8 @@ namespace MazeMap::App::Internal
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:maneuver_file_test");
             (void)_runtime.AppendTextLogLine("Maneuver file test mode");
-            (void)_runtime.AppendTextLogLine("Load and execute the maneuver queue stored in test.txt.");
+            (void)_runtime.AppendTextLogLine(
+                "Load and execute the maneuver queue stored in test.txt through shared startup calibration and Drive.");
 
             if (!_drive.Begin())
             {
@@ -173,11 +174,6 @@ namespace MazeMap::App::Internal
 
         void Run() override
         {
-            if (_faulted)
-            {
-                return;
-            }
-
             _phase = Phase::LaunchStartupCalibration;
 
             LoopController::ModeCallbacks callbacks{};
@@ -190,21 +186,20 @@ namespace MazeMap::App::Internal
             else
             {
                 const LoopController::SessionResult result = _loopController.Run();
-                _completed =
-                    !_faulted &&
+                const bool completed =
                     (result.status == LoopController::SessionResult::Status::Completed);
                 _loopController.EndSession();
+
+                if (completed)
+                {
+                    (void)_runtime.AppendTextLogLine("Maneuver file test complete");
+                }
             }
 
             _startupCalibration.Cancel();
             _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
-
-            if (_completed)
-            {
-                (void)_runtime.AppendTextLogLine("Maneuver file test complete");
-            }
         }
 
     private:
@@ -221,14 +216,6 @@ namespace MazeMap::App::Internal
             RunCompletionHold,
             Complete
         };
-
-        static void HandleRuntimeFault(void* context, const char* reason) noexcept
-        {
-            if (context != nullptr)
-            {
-                static_cast<ManeuverFileTestMode*>(context)->OnRuntimeFault(reason);
-            }
-        }
 
         static LoopController::ControlVector ModeWorkThunk(
             void* context,
@@ -255,10 +242,7 @@ namespace MazeMap::App::Internal
 
         void ResetState() noexcept
         {
-            _faulted = false;
-            _completed = false;
             _queue.clear();
-            _currentLocation = ManeuverFileTestStartLocation();
             _queueActiveIndex = 0U;
             _phase = Phase::Idle;
             _startupCalibration.Cancel();
@@ -270,72 +254,19 @@ namespace MazeMap::App::Internal
             return _runtime.FailActiveMode(reason);
         }
 
-        void OnRuntimeFault(const char* reason) noexcept
+        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
         {
-            _faulted = true;
-            (void)_runtime.AppendTextLogLine(
-                (reason != nullptr && reason[0] != '\0') ?
-                    reason :
-                    "maneuver_file_test_fault");
-        }
-
-        bool StartHold(const std::uint16_t durationMs) noexcept
-        {
-            _driveService.Cancel();
-            _driveService.SetOperationMode(Drive::OperationMode::Maze);
-            _driveService.StartHold(durationMs, true);
-            return _driveService.Active();
-        }
-
-        bool StartQueueEntry(const std::uint16_t index)
-        {
-            if (index >= _queue.size())
+            (void)reason;
+            if (context == nullptr)
             {
-                return false;
+                return;
             }
 
-            _queueActiveIndex = index;
-            const MazeMap::ManeuverInstance& entry = _queue[_queueActiveIndex];
-            _currentLocation = entry.getStart();
-
-            char codeName[24] = {};
-            FormatManeuverCodeName(entry.getCode(), codeName, sizeof(codeName));
-            (void)_runtime.AppendTextLogFormatted(
-                "Maneuver %u start: %s from (%d,%d) %s",
-                static_cast<unsigned>(_queueActiveIndex),
-                codeName,
-                static_cast<int>(static_cast<MazeMap::CellCoordinates>(_currentLocation.GetLocation()).GetX()),
-                static_cast<int>(static_cast<MazeMap::CellCoordinates>(_currentLocation.GetLocation()).GetY()),
-                DirectionName(_currentLocation.GetDirection()));
-
-            _driveService.Cancel();
-            _driveService.SetOperationMode(Drive::OperationMode::Maze);
-            _driveService.StartManeuver(entry);
-            return _driveService.Active();
-        }
-
-        bool FinishQueueEntry()
-        {
-            if (_queueActiveIndex >= _queue.size())
-            {
-                return false;
-            }
-
-            const MazeMap::ManeuverInstance& entry = _queue[_queueActiveIndex];
-            _currentLocation = entry.getEnd();
-
-            char codeName[24] = {};
-            FormatManeuverCodeName(entry.getCode(), codeName, sizeof(codeName));
-            (void)_runtime.AppendTextLogFormatted(
-                "Maneuver %u complete: %s at (%d,%d) %s",
-                static_cast<unsigned>(_queueActiveIndex),
-                codeName,
-                static_cast<int>(static_cast<MazeMap::CellCoordinates>(_currentLocation.GetLocation()).GetX()),
-                static_cast<int>(static_cast<MazeMap::CellCoordinates>(_currentLocation.GetLocation()).GetY()),
-                DirectionName(_currentLocation.GetDirection()));
-
-            ++_queueActiveIndex;
-            return true;
+            auto* const self = static_cast<ManeuverFileTestMode*>(context);
+            self->_startupCalibration.Cancel();
+            self->_driveService.Cancel();
+            self->_drive.Brake();
+            self->_drive.UseNominalWheelControlProfile();
         }
 
         LoopController::ControlVector RunTick(
@@ -374,7 +305,10 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::LaunchPostStartupHold:
-                if (!StartHold(kManeuverFilePostStartupHoldMs))
+                _driveService.Cancel();
+                _driveService.SetOperationMode(Drive::OperationMode::Maze);
+                _driveService.StartHold(kManeuverFilePostStartupHoldMs, true);
+                if (!_driveService.Active())
                 {
                     services.Fault("Maneuver file test post-startup hold could not start");
                 }
@@ -402,13 +336,31 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::LaunchCompletionHold;
                 }
-                else if (!StartQueueEntry(_queueActiveIndex))
-                {
-                    services.Fault("Maneuver file test queue entry could not start");
-                }
                 else
                 {
-                    _phase = Phase::RunQueueEntry;
+                    const MazeMap::ManeuverInstance& entry = _queue[_queueActiveIndex];
+
+                    char codeName[24] = {};
+                    FormatManeuverCodeName(entry.getCode(), codeName, sizeof(codeName));
+                    (void)_runtime.AppendTextLogFormatted(
+                        "Maneuver %u start: %s from (%d,%d) %s",
+                        static_cast<unsigned>(_queueActiveIndex),
+                        codeName,
+                        static_cast<int>(static_cast<MazeMap::CellCoordinates>(entry.getStart().GetLocation()).GetX()),
+                        static_cast<int>(static_cast<MazeMap::CellCoordinates>(entry.getStart().GetLocation()).GetY()),
+                        DirectionName(entry.getStart().GetDirection()));
+
+                    _driveService.Cancel();
+                    _driveService.SetOperationMode(Drive::OperationMode::Maze);
+                    _driveService.StartManeuver(entry);
+                    if (!_driveService.Active())
+                    {
+                        services.Fault("Maneuver file test queue entry could not start");
+                    }
+                    else
+                    {
+                        _phase = Phase::RunQueueEntry;
+                    }
                 }
                 return LoopController::ControlVector::Brake;
 
@@ -421,23 +373,42 @@ namespace MazeMap::App::Internal
                     return control;
                 }
 
-                if (!FinishQueueEntry())
+                if (_queueActiveIndex >= _queue.size())
                 {
-                    services.Fault("Maneuver file test queue entry could not complete");
-                }
-                else if (_queueActiveIndex >= _queue.size())
-                {
-                    _phase = Phase::LaunchCompletionHold;
+                    services.Fault("Maneuver file test queue entry completion index was invalid");
                 }
                 else
                 {
-                    _phase = Phase::LaunchQueueEntry;
+                    const MazeMap::ManeuverInstance& entry = _queue[_queueActiveIndex];
+
+                    char codeName[24] = {};
+                    FormatManeuverCodeName(entry.getCode(), codeName, sizeof(codeName));
+                    (void)_runtime.AppendTextLogFormatted(
+                        "Maneuver %u complete: %s at (%d,%d) %s",
+                        static_cast<unsigned>(_queueActiveIndex),
+                        codeName,
+                        static_cast<int>(static_cast<MazeMap::CellCoordinates>(entry.getEnd().GetLocation()).GetX()),
+                        static_cast<int>(static_cast<MazeMap::CellCoordinates>(entry.getEnd().GetLocation()).GetY()),
+                        DirectionName(entry.getEnd().GetDirection()));
+
+                    ++_queueActiveIndex;
+                    if (_queueActiveIndex >= _queue.size())
+                    {
+                        _phase = Phase::LaunchCompletionHold;
+                    }
+                    else
+                    {
+                        _phase = Phase::LaunchQueueEntry;
+                    }
                 }
                 return LoopController::ControlVector::Brake;
             }
 
             case Phase::LaunchCompletionHold:
-                if (!StartHold(kManeuverFileCompletionHoldMs))
+                _driveService.Cancel();
+                _driveService.SetOperationMode(Drive::OperationMode::Maze);
+                _driveService.StartHold(kManeuverFileCompletionHoldMs, true);
+                if (!_driveService.Active())
                 {
                     services.Fault("Maneuver file test completion hold could not start");
                 }
@@ -478,10 +449,7 @@ namespace MazeMap::App::Internal
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
         MazeMap::ManeuverQueue _queue{};
-        MazeMap::DirectionalLocation _currentLocation{ ManeuverFileTestStartLocation() };
         std::uint16_t _queueActiveIndex{};
-        bool _faulted{};
-        bool _completed{};
         Phase _phase{ Phase::Idle };
     };
 
@@ -491,15 +459,15 @@ namespace MazeMap::App::Internal
             BootModeId::ManeuverFileTest,
             BootModeCategory::Utility,
             "maneuver_file_test",
-            "Load and execute test.txt after shared maze startup calibration.",
-            "logging.txt",
+            "Load and execute test.txt after shared maze startup calibration and shared Drive execution.",
+            "logging.txt; maneuver queue execution trace",
             &GetManeuverFileTestMode,
             "GetManeuverFileTestMode",
             "ManeuverFileTestMode.cpp",
             "shared startup calibration; post-startup settle; maneuver queue execution; completion settle",
-            "Shared startup calibration and drive services; ManeuverQueue speed synthesis",
-            "Behavior is intentionally reduced to the clean shared-service queue path",
-            "test.txt",
+            "Shared startup calibration (including WallTouch) and Drive services; ManeuverQueue speed synthesis",
+            "Behavior is intentionally reduced to the canonical shared-service queue path",
+            "test.txt; logging.txt",
         };
         return descriptor;
     }
