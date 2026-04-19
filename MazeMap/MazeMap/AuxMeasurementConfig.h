@@ -9,8 +9,13 @@ namespace MazeMap::AuxMeasurementConfig
     {
         FanStaticSurvey = 0U,
         TurningTractionSweep = 1U,
-        CorridorRepeatabilitySweep = 2U,
-        PositionAccuracyAudit = 3U,
+    };
+
+    enum class BootSelectedMode : uint8_t
+    {
+        AuxiliaryMeasurement = 0U,
+        CorridorRepeatability = 1U,
+        PositionAccuracyAudit = 2U,
     };
 
     // Likelihood tags for the auxiliary one-off measurement mode:
@@ -20,7 +25,8 @@ namespace MazeMap::AuxMeasurementConfig
 
     // [Medium] Selected one-off routine. Change this when you need a different internal measurement script without
     // disturbing the main characterization battery.
-    constexpr Routine kRoutine = Routine::PositionAccuracyAudit;
+    constexpr Routine kRoutine = Routine::TurningTractionSweep;
+    constexpr BootSelectedMode kBootSelectedMode = BootSelectedMode::PositionAccuracyAudit;
     // [Medium] Control/log period for auxiliary capture. Shorten it only if SD logging still keeps up and the extra
     // temporal resolution is actually useful.
     constexpr unsigned long kControlPeriodUs = 1000UL;

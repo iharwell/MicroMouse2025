@@ -12,15 +12,15 @@ namespace
     constexpr MazeMap::App::BootModeId GetAuxiliarySelectorBootModeId() noexcept
     {
         if constexpr (
-            MazeMap::AuxMeasurementConfig::kRoutine ==
-            MazeMap::AuxMeasurementConfig::Routine::CorridorRepeatabilitySweep)
+            MazeMap::AuxMeasurementConfig::kBootSelectedMode ==
+            MazeMap::AuxMeasurementConfig::BootSelectedMode::CorridorRepeatability)
         {
             return MazeMap::App::BootModeId::CorridorRepeatability;
         }
 
         if constexpr (
-            MazeMap::AuxMeasurementConfig::kRoutine ==
-            MazeMap::AuxMeasurementConfig::Routine::PositionAccuracyAudit)
+            MazeMap::AuxMeasurementConfig::kBootSelectedMode ==
+            MazeMap::AuxMeasurementConfig::BootSelectedMode::PositionAccuracyAudit)
         {
             return MazeMap::App::BootModeId::PositionAccuracyAudit;
         }
@@ -31,15 +31,15 @@ namespace
     const MazeMap::App::BootModeDescriptor& GetAuxiliarySelectorDescriptor() noexcept
     {
         if constexpr (
-            MazeMap::AuxMeasurementConfig::kRoutine ==
-            MazeMap::AuxMeasurementConfig::Routine::CorridorRepeatabilitySweep)
+            MazeMap::AuxMeasurementConfig::kBootSelectedMode ==
+            MazeMap::AuxMeasurementConfig::BootSelectedMode::CorridorRepeatability)
         {
             return MazeMap::App::Internal::GetCorridorRepeatabilityBootModeDescriptor();
         }
 
         if constexpr (
-            MazeMap::AuxMeasurementConfig::kRoutine ==
-            MazeMap::AuxMeasurementConfig::Routine::PositionAccuracyAudit)
+            MazeMap::AuxMeasurementConfig::kBootSelectedMode ==
+            MazeMap::AuxMeasurementConfig::BootSelectedMode::PositionAccuracyAudit)
         {
             return MazeMap::App::Internal::GetPositionAccuracyAuditBootModeDescriptor();
         }

@@ -390,10 +390,6 @@ inline const char* AuxMeasurementRoutineName(AuxMeasurementConfig::Routine routi
         return "fan_static_survey";
     case AuxMeasurementConfig::Routine::TurningTractionSweep:
         return "turning_traction_sweep";
-    case AuxMeasurementConfig::Routine::CorridorRepeatabilitySweep:
-        return "corridor_repeatability_sweep";
-    case AuxMeasurementConfig::Routine::PositionAccuracyAudit:
-        return "position_accuracy_audit";
     default:
         return "unknown";
     }

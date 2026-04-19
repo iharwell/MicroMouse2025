@@ -270,12 +270,6 @@
     <ClInclude Include="MazeMask.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MazeRunningAuditController.h">
-      <Filter>Header Files\App\Internal</Filter>
-    </ClInclude>
-    <ClInclude Include="MissionModeController.h">
-      <Filter>Header Files\App\Internal</Filter>
-    </ClInclude>
     <ClInclude Include="MissionRunMode.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
@@ -414,9 +408,6 @@
     <ClInclude Include="WallSensorCalibration.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="WallSensorLedCalibrationPhase.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="WallSensorPreprocessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -525,12 +516,6 @@
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="OpenFloorMeasurementController.cpp">
-      <Filter>Source Files\App\Internal</Filter>
-    </ClCompile>
-    <ClCompile Include="MissionModeController.cpp">
-      <Filter>Source Files\App\Internal</Filter>
-    </ClCompile>
-    <ClCompile Include="MazeRunningAuditController.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MissionRunMode.cpp">

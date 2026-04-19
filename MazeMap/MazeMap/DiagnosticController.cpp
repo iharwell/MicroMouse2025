@@ -7,7 +7,6 @@
 #include "MazeMapSharedRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "RuntimeBinaryLogSupport.h"
-#include "WallSensorLedCalibrationPhase.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;

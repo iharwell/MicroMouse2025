@@ -5,7 +5,6 @@
 #include "..\MazeMap\MazeMapApplicationRuntime.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\PinPairStrap.h"
-#include "..\MazeMap\WallSensorLedCalibrationPhase.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -195,21 +194,6 @@ namespace MazeMap::App
             EndPinPairStrapMonitor(27U, 28U);
         }
 
-        TEST_METHOD(AdvanceWallSensorLedCalibrationPhase_CompletesAfterSideCapture)
-        {
-            Assert::IsTrue(
-                AdvanceWallSensorLedCalibrationPhase(WallSensorLedCalibrationPhase::Front, true) ==
-                WallSensorLedCalibrationPhase::Front);
-            Assert::IsTrue(
-                AdvanceWallSensorLedCalibrationPhase(WallSensorLedCalibrationPhase::Front, false) ==
-                WallSensorLedCalibrationPhase::Side);
-            Assert::IsTrue(
-                AdvanceWallSensorLedCalibrationPhase(WallSensorLedCalibrationPhase::Side, false) ==
-                WallSensorLedCalibrationPhase::Side);
-            Assert::IsTrue(
-                AdvanceWallSensorLedCalibrationPhase(WallSensorLedCalibrationPhase::Side, true) ==
-                WallSensorLedCalibrationPhase::Complete);
-        }
     };
 }
 

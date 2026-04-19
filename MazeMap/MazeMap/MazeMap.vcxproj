@@ -240,8 +240,6 @@
     <ClInclude Include="MazeMapSharedRuntime.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
-    <ClInclude Include="MazeRunningAuditController.h" />
-    <ClInclude Include="MissionModeController.h" />
     <ClInclude Include="MissionRunMode.h" />
     <ClInclude Include="ManeuverFileTestMode.h" />
     <ClInclude Include="CorridorRepeatabilityMode.h" />
@@ -288,7 +286,6 @@
     <ClInclude Include="WallObservationPipeline.h" />
     <ClInclude Include="WallSensor.h" />
     <ClInclude Include="WallSensorCalibration.h" />
-    <ClInclude Include="WallSensorLedCalibrationPhase.h" />
     <ClInclude Include="WallSensorPreprocessor.h" />
     <ClInclude Include="WheelControlProfile.h" />
   </ItemGroup>
@@ -342,14 +339,6 @@
     </ClCompile>
     <ClCompile Include="OpenFloorMeasurementController.cpp">
       <ObjectFileName>$(IntDir)OpenFloorMeasurementController.obj</ObjectFileName>
-      <PrecompiledHeader>Use</PrecompiledHeader>
-    </ClCompile>
-    <ClCompile Include="MissionModeController.cpp">
-      <ObjectFileName>$(IntDir)MissionModeController.obj</ObjectFileName>
-      <PrecompiledHeader>Use</PrecompiledHeader>
-    </ClCompile>
-    <ClCompile Include="MazeRunningAuditController.cpp">
-      <ObjectFileName>$(IntDir)MazeRunningAuditController.obj</ObjectFileName>
       <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MissionRunMode.cpp" />

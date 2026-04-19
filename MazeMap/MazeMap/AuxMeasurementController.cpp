@@ -7,7 +7,6 @@
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
-#include "WallSensorLedCalibrationPhase.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;
@@ -440,8 +439,9 @@ private:
         if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _runtime.Sensors().GetAccelSensitivityMgPerLsb(), 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _runtime.Sensors().GetGyroBiasRadps(), 6)) return false;
         if (!_runtime.WriteUtilityDataLogAccelBiasMetadata(_runtime.Sensors())) return false;
-        if (!WriteEvent("summary", "Enter by shorting pins 28-29 at boot; those pins select the mode only.")) return false;
-        if (!WriteEvent("summary", "Change AuxMeasurementConfig::kRoutine and RunSelectedRoutine() to repurpose this mode.")) return false;
+        if (!WriteEvent("summary", "Enter by shorting pins 28-29 at boot when BootSelectedMode selects auxiliary_measurement.")) return false;
+        if (!WriteEvent("summary", "AuxiliaryMeasurement owns only FanStaticSurvey and TurningTractionSweep.")) return false;
+        if (!WriteEvent("summary", "Corridor repeatability and position accuracy audit are separate boot modes.")) return false;
         if (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
         {
             if (!WriteEvent("summary", "Default routine enables the fan, ramps circle speed, then tightens curvature after speed plateaus until encoder-vs-gyro/IMU mismatch marks traction loss.")) return false;
@@ -790,14 +790,14 @@ namespace MazeMap::App::Internal
             BootModeId::AuxiliaryMeasurement,
             BootModeCategory::Utility,
             "auxiliary_measurement",
-            "Run the selected one-off auxiliary measurement routine.",
+            "Run the selected auxiliary fan or turning-traction routine.",
             "logging.txt; auxiliary measurement mmlog",
             &GetAuxMeasurementMode,
             "GetAuxMeasurementMode",
             "AuxMeasurementController.cpp",
             "startup settle; selected auxiliary routine; final log close",
             "AuxMeasurementConfig; shared mission drive and sensor tuning",
-            "AuxMeasurementConfig::kRoutine selects the scenario",
+            "AuxMeasurementConfig::kRoutine selects fan survey or turning-traction sweep only",
             "aux%03u.mmlog or aux_measurement_log.mmlog",
         };
         return descriptor;

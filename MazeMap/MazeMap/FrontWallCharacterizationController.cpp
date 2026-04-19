@@ -1,16 +1,19 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 #include "BootModeDescriptor.h"
+#include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "MazeMapSharedRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
-#include "WallSensorLedCalibrationPhase.h"
+#include "StartupCalibration.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
+using MazeMap::App::Internal::Drive;
 using MazeMap::App::Internal::SharedRobotRuntime;
+using MazeMap::App::Internal::StartupCalibration;
 
 #define FRONT_WALL_CHARACTERIZATION_LOG_FIELDS(X) \
     X(std::uint32_t, index) \
@@ -24,14 +27,30 @@ using MazeMap::App::Internal::SharedRobotRuntime;
 
 MMLOG_DEFINE_ROW(FrontWallCharacterizationLogRow, FRONT_WALL_CHARACTERIZATION_LOG_FIELDS);
 
+namespace
+{
+    MotionLimits BuildReverseCaptureLimits(const MazeMap::Vehicle& vehicle) noexcept
+    {
+        MotionLimits limits{};
+        limits.maxSpeedMps = FrontWallCharacterizationConfig::kReverseSpeedMps;
+        limits.accelMps2 = FrontWallCharacterizationConfig::kReverseAccelMps2;
+        limits.decelMps2 = FrontWallCharacterizationConfig::kReverseAccelMps2;
+        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
+        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        return limits;
+    }
+}
+
 class FrontWallCharacterizationController : public IApplicationMode
 {
 public:
     explicit FrontWallCharacterizationController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _sensors(runtime.Sensors())
+        , _vehicle(runtime.SpeedVehicle())
         , _drive(runtime.Drive())
+        , _driveService(runtime.DriveService())
+        , _startupCalibration(runtime.StartupCalibrationService())
         , _faulted(false)
     {
     }
@@ -49,7 +68,6 @@ public:
         _captureStorage = {};
         _captureTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
         _captureStartDistanceM = 0.0f;
-        _captureCommandedSpeedMps = 0.0f;
         _captureNextStoredDistanceM = 0.0f;
         _captureCollapsedConsecutiveSamples = 0U;
         _captureStartMs = 0UL;
@@ -81,7 +99,9 @@ public:
         SetMissionLevelFanEnabled(false);
 
         const bool driveOk = _drive.Begin();
-        const bool sensorsOk = _sensors.Begin(FrontWallCharacterizationConfig::kControlPeriodUs);
+        _startupCalibration.Cancel();
+        _startupCalibration.SetIsInMaze(false);
+        const bool sensorsOk = _startupCalibration.BringUp();
         _drive.UseNominalWheelControlProfile();
 
         MazeMap::FrontWallCharacterizationStorage storedCurve{};
@@ -141,13 +161,14 @@ public:
             }
         }
 
+        _driveService.Cancel();
+        _startupCalibration.Cancel();
         _drive.Brake();
         SetMissionLevelFanEnabled(false);
         if (ok)
         {
             (void)_runtime.AppendTextLogLine("Front wall characterization complete and persisted.");
         }
-        _runtime.CloseTextLog();
     }
 
 private:
@@ -197,8 +218,10 @@ private:
 
     SharedRobotRuntime& _runtime;
     LoopController& _loopController;
-    RuntimeSensorSuite& _sensors;
+    MazeMap::Vehicle& _vehicle;
     DriveBase& _drive;
+    Drive& _driveService;
+    StartupCalibration& _startupCalibration;
     bool _faulted;
     FrontWallCharacterizationLogRow _logRow{};
     PhaseFn _phaseFn{};
@@ -211,7 +234,6 @@ private:
     MazeMap::FrontWallCharacterizationStorage _captureStorage{};
     Eigen::Vector2f _captureTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
     float _captureStartDistanceM = 0.0f;
-    float _captureCommandedSpeedMps = 0.0f;
     float _captureNextStoredDistanceM = 0.0f;
     std::uint8_t _captureCollapsedConsecutiveSamples = 0U;
     unsigned long _captureStartMs = 0UL;
@@ -275,12 +297,12 @@ private:
                     (std::max)(FrontWallCharacterizationConfig::kReverseSpeedMps, 0.01f)));
         _captureTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
         _captureStartDistanceM = 0.0f;
-        _captureCommandedSpeedMps = 0.0f;
         _captureCollapsedConsecutiveSamples = 0U;
         _captureStartMs = 0UL;
         _captureCompletionReason = "unknown";
         _captureElapsedBudgetLogged = false;
         _captureStarted = false;
+        _driveService.Cancel();
         _phaseFn = &FrontWallCharacterizationController::CaptureCurveTick;
         return true;
     }
@@ -399,6 +421,19 @@ private:
             _captureStartDistanceM = _drive.GetAverageDistanceMeters();
             _captureStartMs = millis();
             StoreCurveSample(_captureStorage, 0.0f, snapshot);
+
+            _driveService.SetLimits(BuildReverseCaptureLimits(_vehicle));
+            _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+            _driveService.StartStraight(
+                FrontWallCharacterizationConfig::kMaxReverseTravelM,
+                -FrontWallCharacterizationConfig::kReverseSpeedMps,
+                0.0f,
+                &_captureTargetHeading);
+            if (!_driveService.Active())
+            {
+                services.Fault("Front wall characterization reverse capture could not start");
+                return LoopController::ControlVector::Brake;
+            }
         }
 
         const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _captureStartDistanceM);
@@ -428,11 +463,13 @@ private:
 
         if (_captureCollapsedConsecutiveSamples >= FrontWallCharacterizationConfig::kCollapsedConsecutiveSamples)
         {
+            _driveService.Cancel();
             return requestPersistPause(traveledDistanceM, "collapsed_to_zero");
         }
 
         if (traveledDistanceM >= FrontWallCharacterizationConfig::kMaxReverseTravelM)
         {
+            _driveService.Cancel();
             return requestPersistPause(traveledDistanceM, "max_reverse_travel");
         }
 
@@ -451,22 +488,15 @@ private:
             _captureElapsedBudgetLogged = true;
         }
 
-        _captureCommandedSpeedMps = (std::min)(
-            FrontWallCharacterizationConfig::kReverseSpeedMps,
-            _captureCommandedSpeedMps + (FrontWallCharacterizationConfig::kReverseAccelMps2 * state.dtSeconds));
+        bool driveDone = false;
+        const LoopController::ControlVector control = _driveService.GetNextControls(driveDone);
+        if (driveDone)
+        {
+            _driveService.Cancel();
+            return requestPersistPause(traveledDistanceM, "drive_complete");
+        }
 
-        const float headingErrorRad = HeadingErrorRad(_captureTargetHeading, state.estimate.headingUnit);
-        float angularCommandRadps =
-            (Config::kStraightHeadingKp * headingErrorRad) -
-            (Config::kStraightYawD * state.estimate.angularSpeedRadps);
-        angularCommandRadps = (std::clamp)(
-            angularCommandRadps,
-            -FrontWallCharacterizationConfig::kMaxAngularCommandRadps,
-            FrontWallCharacterizationConfig::kMaxAngularCommandRadps);
-        return _drive.PointControlVector(
-            -_captureCommandedSpeedMps,
-            angularCommandRadps,
-            MazeMap::CommandPD::StateWheelOmegaPD);
+        return control;
     }
 
     static void StoreCurveSample(
@@ -592,6 +622,8 @@ private:
     void OnRuntimeFault(const char* reason) noexcept
     {
         _faulted = true;
+        _driveService.Cancel();
+        _startupCalibration.Cancel();
         if (reason != nullptr && reason[0] != '\0')
         {
             AppendStartupTrace(reason);
