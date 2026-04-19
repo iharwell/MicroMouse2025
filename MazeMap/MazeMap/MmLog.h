@@ -573,9 +573,9 @@ namespace MazeMap {
             bool open(const char* file_name);
 
             /**
-             * Queues one application-defined metadata entry for the sidecar.
+             * Writes one application-defined metadata entry to the sidecar in call order.
              *
-             * This may only be called after open() and before begin(). Duplicate keys are rejected.
+             * This may only be called after open() and before begin().
              * The reserved keys schema_version and row_bytes are written automatically by begin().
              */
             bool writeMetadata(const char* key, const char* value);
@@ -671,11 +671,6 @@ namespace MazeMap {
             const char* lastError() const noexcept { return m_lastError; }
 
         private:
-            struct MetadataEntry final {
-                char key[MMLOG_METADATA_KEY_MAX_LENGTH + 1u]{};
-                char value[MMLOG_METADATA_VALUE_MAX_LENGTH + 1u]{};
-            };
-
             bool beginImpl(const char* header, std::size_t rowBytes, std::uint32_t schemaVersion, std::uint32_t schemaHash);
             bool attachStorage() noexcept;
             void releaseStorage() noexcept;
@@ -697,7 +692,6 @@ namespace MazeMap {
             void clearError() noexcept;
             void resetSessionState() noexcept;
             void resetAllState() noexcept;
-            bool metadataKeyExists(const char* key) const noexcept;
             bool isReservedMetadataKey(const char* key) const noexcept;
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
@@ -718,9 +712,6 @@ namespace MazeMap {
             alignas(32) std::uint8_t m_primaryStorage[MMLOG_PRIMARY_QUEUE_BYTES]{};
             alignas(32) std::uint8_t m_sidecarStorage[MMLOG_SIDECAR_QUEUE_BYTES]{};
 #endif
-
-            MetadataEntry m_metadata[MMLOG_METADATA_MAX_ENTRIES]{};
-            std::size_t m_metadataCount{ 0u };
 
             char m_primaryPath[MMLOG_MAX_PATH_LENGTH + 1u]{};
             char m_sidecarPath[MMLOG_MAX_PATH_LENGTH + 1u]{};

@@ -23,6 +23,8 @@
 namespace MazeMap::App::Internal
 {
     inline constexpr const char* kSharedRuntimeTextLogFileName = "logging.txt";
+    inline constexpr std::size_t kSharedRuntimeTextLogQueueBytes = 4096U;
+    static_assert((kSharedRuntimeTextLogQueueBytes % MazeMap::mmlog::kSdSectorBytes) == 0U);
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
     using SharedRuntimeTextLogFileHandle = FsFile;
@@ -166,8 +168,6 @@ namespace MazeMap::App::Internal
         void CloseRuntimeLogsForFault() noexcept;
 
         static constexpr std::size_t kTextLogSourceLength = 64U;
-        static constexpr std::size_t kTextLogQueueBytes = 4096U;
-        static_assert((kTextLogQueueBytes % MazeMap::mmlog::kSdSectorBytes) == 0U);
 
         MazeMap::Vehicle speedVehicle;
         MazeMap::Vehicle searchVehicle;
@@ -186,7 +186,9 @@ namespace MazeMap::App::Internal
         mmlog::MmLogLogger dataLogger;
         SharedRuntimeTextLogFileHandle textLogFile{};
         mmlog::detail::ByteRing textLogQueue;
-        alignas(32) std::uint8_t textLogStorage[kTextLogQueueBytes]{};
+#if !MAZEMAP_USE_RAM2_FILE_BUFFERS
+        alignas(32) std::uint8_t textLogStorage[kSharedRuntimeTextLogQueueBytes]{};
+#endif
         bool textLogFaulted{};
         bool textLogInitialized{};
         bool runtimeLogsClosedForFault{};

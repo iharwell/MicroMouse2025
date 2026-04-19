@@ -143,6 +143,14 @@ inline constexpr double RAD_TO_DEG = 57.295779513082320876798154814105;
 #define DMAMEM
 #endif
 
+#ifndef MAZEMAP_USE_RAM2_FILE_BUFFERS
+#if defined(CORE_TEENSY) && defined(__IMXRT1062__)
+#define MAZEMAP_USE_RAM2_FILE_BUFFERS 1
+#else
+#define MAZEMAP_USE_RAM2_FILE_BUFFERS 0
+#endif
+#endif
+
 template <typename TBit>
 constexpr unsigned long bit(TBit bitIndex) noexcept
 {

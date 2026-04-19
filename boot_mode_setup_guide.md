@@ -335,7 +335,8 @@ Before considering a new mode done, audit it against this list.
 - Verify behavior through the canonical path, not through a compatibility wrapper.
 - Run the repository's latest-build verification path after code changes.
 - Before testing, confirm the active binaries already correspond to the latest sources; do not rebuild from scratch unless a specific problem requires it.
-- When building or verifying, use `codex_verify/build_and_verify_latest.cmd` or `codex_verify/build_and_verify_latest.ps1`.
+- When building, use `codex_verify/build_and_verify_latest.cmd` or `codex_verify/build_and_verify_latest.ps1`.
+- When testing the current binaries without building, use `codex_verify/test_latest_binaries.cmd`.
 - If `build_and_verify_latest` reports `HOST_INTERMEDIATE_STATE_BROKEN`, stop immediately and do not try to recover with `Clean`, `Rebuild`, or more artifact deletion.
 
 ## Current Best Starting Point

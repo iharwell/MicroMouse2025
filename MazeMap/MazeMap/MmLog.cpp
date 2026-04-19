@@ -254,12 +254,6 @@ namespace MazeMap {
             if (isReservedMetadataKey(key)) {
                 return fail("Reserved metadata key.");
             }
-            if (metadataKeyExists(key)) {
-                return fail("Duplicate metadata key.");
-            }
-            if (m_metadataCount >= MMLOG_METADATA_MAX_ENTRIES) {
-                return fail("Metadata entry capacity exceeded.");
-            }
             const std::size_t keyLength = std::strlen(key);
             if (keyLength > MMLOG_METADATA_KEY_MAX_LENGTH) {
                 char message[kLineBufferChars]{};
@@ -290,9 +284,14 @@ namespace MazeMap {
                 return fail(message);
             }
 
-            MetadataEntry& slot = m_metadata[m_metadataCount++];
-            std::strcpy(slot.key, key);
-            std::strcpy(slot.value, value);
+            char line[kLineBufferChars]{};
+            const int length = std::snprintf(line, sizeof(line), "%s=%s", key, value);
+            if (length <= 0 || length >= static_cast<int>(sizeof(line))) {
+                return fail("Metadata line too long.");
+            }
+            if (!writeLineDirect(m_sidecarFile, line)) {
+                return fail("Failed to write metadata line.");
+            }
             return true;
         }
 
@@ -354,12 +353,6 @@ namespace MazeMap {
                     }
                 }
 
-                for (std::size_t i = 0u; sidecarHeaderError == nullptr && i < m_metadataCount; ++i) {
-                    if (!countSidecarLine(std::snprintf(line, sizeof(line), "%s=%s", m_metadata[i].key, m_metadata[i].value))) {
-                        sidecarHeaderError = "Metadata line too long.";
-                    }
-                }
-
                 if (sidecarHeaderError == nullptr) {
                     if (!countSidecarLine(std::snprintf(line, sizeof(line), "%s", header))) {
                         sidecarHeaderError = "Header line too long.";
@@ -379,17 +372,6 @@ namespace MazeMap {
                     std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes));
                     if (!queueSidecarLine(line)) {
                         sidecarHeaderError = "Failed to queue row_bytes.";
-                    }
-                }
-
-                for (std::size_t i = 0u; sidecarHeaderError == nullptr && i < m_metadataCount; ++i) {
-                    if (std::snprintf(line, sizeof(line), "%s=%s", m_metadata[i].key, m_metadata[i].value) >= static_cast<int>(sizeof(line))) {
-                        sidecarHeaderError = "Metadata line too long.";
-                        break;
-                    }
-                    if (!queueSidecarLine(line)) {
-                        sidecarHeaderError = "Failed to queue metadata line.";
-                        break;
                     }
                 }
 
@@ -904,12 +886,6 @@ namespace MazeMap {
                 m_sidecarQueue.clear();
             }
 
-            for (std::size_t i = 0u; i < m_metadataCount; ++i) {
-                m_metadata[i].key[0] = '\0';
-                m_metadata[i].value[0] = '\0';
-            }
-
-            m_metadataCount = 0u;
             m_primaryPath[0] = '\0';
             m_sidecarPath[0] = '\0';
             m_sidecarBinding[0] = '\0';
@@ -924,15 +900,6 @@ namespace MazeMap {
             resetSessionState();
             m_isOpen = false;
             clearError();
-        }
-
-        bool MmLogLogger::metadataKeyExists(const char* const key) const noexcept {
-            for (std::size_t i = 0u; i < m_metadataCount; ++i) {
-                if (std::strcmp(m_metadata[i].key, key) == 0) {
-                    return true;
-                }
-            }
-            return false;
         }
 
         bool MmLogLogger::isReservedMetadataKey(const char* const key) const noexcept {

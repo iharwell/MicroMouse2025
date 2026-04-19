@@ -348,7 +348,7 @@ namespace MazeMap::App
             std::remove(sidecarPath.c_str());
         }
 
-        TEST_METHOD(MmLogLogger_RejectsOversizedMetadataHeaderBeforeQueueOverflow)
+        TEST_METHOD(MmLogLogger_WritesManyMetadataLinesWithoutUsingSidecarQueueStorage)
         {
             using MazeMap::mmlog::MmLogLogger;
 
@@ -367,9 +367,21 @@ namespace MazeMap::App
                 Assert::IsTrue(log.writeMetadata(key, value.c_str()));
             }
 
-            Assert::IsFalse(log.begin(RuntimeHelperTestRow{}));
-            Assert::AreEqual("Sidecar header exceeds queue capacity.", log.lastError());
+            Assert::IsTrue(log.begin(RuntimeHelperTestRow{}));
             Assert::IsTrue(log.close());
+
+            const std::string sidecarText = ReadAllBytes(sidecarPath);
+            const std::size_t firstMetadata = sidecarText.find("overflow_key_00=");
+            const std::size_t lastMetadata = sidecarText.find("overflow_key_39=");
+            const std::size_t schemaVersion = sidecarText.find("schema_version=");
+            const std::size_t header = sidecarText.find("u32_seq,f32_value,s32_kind\n");
+            Assert::IsTrue(firstMetadata != std::string::npos);
+            Assert::IsTrue(lastMetadata != std::string::npos);
+            Assert::IsTrue(schemaVersion != std::string::npos);
+            Assert::IsTrue(header != std::string::npos);
+            Assert::IsTrue(firstMetadata < lastMetadata);
+            Assert::IsTrue(lastMetadata < schemaVersion);
+            Assert::IsTrue(schemaVersion < header);
 
             std::remove(primaryPath.c_str());
             std::remove(sidecarPath.c_str());

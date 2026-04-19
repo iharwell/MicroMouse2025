@@ -39,7 +39,7 @@ switch ($Mode) {
         $logPathLabel = 'Verify log'
         $launcherStepLabel = 'Checking verify launcher'
         $launcherSuccessLabel = 'Verify launcher check passed.'
-        $modeWrapperPath = Join-Path $scriptRoot 'verify_latest_build.cmd'
+        $modeWrapperPath = Join-Path $scriptRoot 'test_latest_binaries.cmd'
         $launcherEnvironmentVariables = @(
             'MM_VERIFY_LAUNCHED_FROM_CMD',
             'MM_BUILD_AND_VERIFY_LAUNCHED_FROM_CMD'

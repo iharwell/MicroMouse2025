@@ -259,7 +259,7 @@ namespace MazeMap::App
             std::remove(controlPath.c_str());
         }
 
-        TEST_METHOD(SharedRuntime_UtilityDataMetadataFailurePreservesLastError)
+        TEST_METHOD(SharedRuntime_UtilityDataMetadataWritesDuplicatesInCallOrder)
         {
             const std::string dataPath = CreateTempPath("codex_shared_runtime_error");
             const std::string sidecarPath = ReplaceExtension(dataPath, ".sidecar");
@@ -272,12 +272,19 @@ namespace MazeMap::App
                 Assert::IsTrue(runtime.OpenUtilityDataLogFile(dataPath.c_str()));
                 Assert::IsTrue(std::string(runtime.LastRuntimeLogError()).empty());
                 Assert::IsTrue(runtime.WriteUtilityDataLogMetadata("mode", "first"));
-                Assert::IsFalse(runtime.WriteUtilityDataLogMetadata("mode", "second"));
-                Assert::IsTrue(std::string(runtime.LastRuntimeLogError()) == "Duplicate metadata key.");
+                Assert::IsTrue(runtime.WriteUtilityDataLogMetadata("mode", "second"));
+                Assert::IsTrue(std::string(runtime.LastRuntimeLogError()).empty());
             }
 
+            const std::string sidecarText = ReadAllBytes(sidecarPath);
+            const std::size_t firstMetadata = sidecarText.find("mode=first\n");
+            const std::size_t secondMetadata = sidecarText.find("mode=second\n");
+            Assert::IsTrue(firstMetadata != std::string::npos);
+            Assert::IsTrue(secondMetadata != std::string::npos);
+            Assert::IsTrue(firstMetadata < secondMetadata);
+
             const std::string controlText = ReadAllBytes(controlPath);
-            Assert::IsTrue(controlText.find("data_log_metadata_failed: Duplicate metadata key.") != std::string::npos);
+            Assert::IsTrue(controlText.find("data_log_metadata_failed:") == std::string::npos);
 
             std::remove(dataPath.c_str());
             std::remove(sidecarPath.c_str());

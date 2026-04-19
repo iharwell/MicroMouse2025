@@ -16,6 +16,11 @@ using MazeMap::App::Internal::SharedRuntimeTextLogFileHandle;
 
 static constexpr std::size_t kTextLogServiceBudgetBytes = MazeMap::mmlog::kSdSectorBytes;
 
+#if MAZEMAP_USE_RAM2_FILE_BUFFERS
+DMAMEM alignas(32) static std::uint8_t g_sharedRuntimeTextLogStorage[
+    MazeMap::App::Internal::kSharedRuntimeTextLogQueueBytes];
+#endif
+
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
 static constexpr std::uint64_t kTextLogPreallocateBytes = MMLOG_TEENSY_MIN_PREALLOCATE_BYTES;
 static_assert(kTextLogPreallocateBytes >= MMLOG_TEENSY_MIN_PREALLOCATE_BYTES);
@@ -449,7 +454,11 @@ namespace MazeMap::App::Internal
             sizeof(activeDataLogSource));
         activeModeFaultSource[0] = '\0';
         lastRuntimeLogError[0] = '\0';
+#if MAZEMAP_USE_RAM2_FILE_BUFFERS
+        (void)textLogQueue.attach(g_sharedRuntimeTextLogStorage, kSharedRuntimeTextLogQueueBytes);
+#else
         (void)textLogQueue.attach(textLogStorage, sizeof(textLogStorage));
+#endif
 
         // Search-mode queue timing stays intentionally conservative even though the shared
         // physical vehicle model is reused everywhere else.
