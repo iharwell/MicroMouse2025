@@ -4,6 +4,7 @@
 // Declares one captured open-floor control-cycle sample, including timing, drivetrain, sensor, and diagnostic state.
 
 #include "MazeMapRuntimeCore.h"
+#include "VehicleState.h"
 
 #include <limits>
 
@@ -15,6 +16,7 @@ struct OpenFloorMeasurementCycle
     ControlCycleTiming controlTiming{};
     DriveTelemetry driveTelemetry{};
     SensorSnapshot sensorSnapshot{};
+    MazeMap::VehicleState::StateVector estimatorState = MazeMap::VehicleState::StateVector::Zero();
     float measuredLinearSpeedMps = 0.0f;
     float measuredAngularSpeedRadps = 0.0f;
     float planarAccelMps2 = 0.0f;

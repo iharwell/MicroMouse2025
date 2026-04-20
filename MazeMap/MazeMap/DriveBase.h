@@ -395,6 +395,10 @@ public:
         _lastLinearCommandMps = 0.0f;
         _lastAngularCommandRadps = 0.0f;
         ResetLaunchAssist();
+        _lastFeedforwardCommandAverage = 0.0f;
+        _lastFeedforwardCommandDelta = 0.0f;
+        _lastFeedbackCommandAverage = 0.0f;
+        _lastFeedbackCommandDelta = 0.0f;
         _lastLeftFeedforwardCommand = 0.0f;
         _lastRightFeedforwardCommand = 0.0f;
         _lastLeftFeedbackCommand = 0.0f;
@@ -450,6 +454,29 @@ public:
     float GetLastAngularCommandRadps() const
     {
         return _lastAngularCommandRadps;
+    }
+
+    // The generated-command decomposition is cached at the point where DriveBase still owns both
+    // the plant-model feedforward command and the PD-only correction. The avg/delta convention is
+    // `left = average + delta`, `right = average - delta`.
+    float GetLastFeedforwardCommandAverage() const noexcept
+    {
+        return _lastFeedforwardCommandAverage;
+    }
+
+    float GetLastFeedforwardCommandDelta() const noexcept
+    {
+        return _lastFeedforwardCommandDelta;
+    }
+
+    float GetLastFeedbackCommandAverage() const noexcept
+    {
+        return _lastFeedbackCommandAverage;
+    }
+
+    float GetLastFeedbackCommandDelta() const noexcept
+    {
+        return _lastFeedbackCommandDelta;
     }
 
     DriveTelemetry GetTelemetry() const
@@ -898,6 +925,10 @@ private:
     float _rightIntegral;
     float _lastLinearCommandMps;
     float _lastAngularCommandRadps;
+    mutable float _lastFeedforwardCommandAverage = 0.0f;
+    mutable float _lastFeedforwardCommandDelta = 0.0f;
+    mutable float _lastFeedbackCommandAverage = 0.0f;
+    mutable float _lastFeedbackCommandDelta = 0.0f;
     float _lastLeftFeedforwardCommand = 0.0f;
     float _lastRightFeedforwardCommand = 0.0f;
     float _lastLeftFeedbackCommand = 0.0f;
@@ -1004,6 +1035,12 @@ private:
         const MazeMap::App::Internal::LoopController::ControlVector& lhs,
         const MazeMap::App::Internal::LoopController::ControlVector& rhs) noexcept;
 
+    static float AverageDriveCommand(
+        const MazeMap::App::Internal::LoopController::ControlVector& command) noexcept;
+
+    static float DeltaDriveCommand(
+        const MazeMap::App::Internal::LoopController::ControlVector& command) noexcept;
+
     static float ResolvePositiveOrZero(float value) noexcept;
 
     static float ClampMagnitude(float value, float limit) noexcept;
@@ -1058,6 +1095,10 @@ private:
         const CommandContext& context,
         const CommandTargets& targets,
         MazeMap::CommandPD pd) const;
+
+    void CacheGeneratedCommandTelemetry(
+        const MazeMap::App::Internal::LoopController::ControlVector& feedforwardCommand,
+        const MazeMap::App::Internal::LoopController::ControlVector& feedbackCommand) const noexcept;
 
     float ResolveStraightHeadingYawRateCommand(
         float targetYawRad,

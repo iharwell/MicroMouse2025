@@ -9,7 +9,7 @@ namespace MazeMap {
 
         namespace {
 
-            constexpr std::size_t kLineBufferChars = 192u;
+            constexpr std::size_t kLineBufferChars = 513u;
 
             bool endsWith(const char* const text, const char* const suffix) noexcept {
                 const std::size_t textLen = std::strlen(text);
@@ -320,16 +320,6 @@ namespace MazeMap {
             {
                 char line[kLineBufferChars]{};
                 const char* sidecarHeaderError = nullptr;
-                std::size_t requiredSidecarBytes = 0u;
-                auto countSidecarLine = [&line, &requiredSidecarBytes](const int length) -> bool
-                {
-                    if (length <= 0 || length >= static_cast<int>(sizeof(line))) {
-                        return false;
-                    }
-
-                    requiredSidecarBytes += static_cast<std::size_t>(length) + 1u;
-                    return true;
-                };
                 auto queueSidecarLine = [this](const char* const text) -> bool
                 {
                     if (text == nullptr) {
@@ -343,29 +333,9 @@ namespace MazeMap {
                         pushSidecarQueue(&newline, 1u);
                 };
 
-                if (!countSidecarLine(std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion)))) {
-                    sidecarHeaderError = "schema_version line too long.";
-                }
-
-                if (sidecarHeaderError == nullptr) {
-                    if (!countSidecarLine(std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes)))) {
-                        sidecarHeaderError = "row_bytes line too long.";
-                    }
-                }
-
-                if (sidecarHeaderError == nullptr) {
-                    if (!countSidecarLine(std::snprintf(line, sizeof(line), "%s", header))) {
-                        sidecarHeaderError = "Header line too long.";
-                    } else if (requiredSidecarBytes > m_sidecarQueue.freeSpace()) {
-                        sidecarHeaderError = "Sidecar header exceeds queue capacity.";
-                    }
-                }
-
-                if (sidecarHeaderError == nullptr) {
-                    std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
-                    if (!queueSidecarLine(line)) {
-                        sidecarHeaderError = "Failed to queue schema_version.";
-                    }
+                std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
+                if (!queueSidecarLine(line)) {
+                    sidecarHeaderError = "Failed to queue schema_version.";
                 }
 
                 if (sidecarHeaderError == nullptr) {

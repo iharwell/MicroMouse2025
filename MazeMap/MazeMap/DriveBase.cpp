@@ -423,6 +423,18 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::SubtractDriveCo
         lhs.rightMotorPwm - rhs.rightMotorPwm);
 }
 
+float DriveBase::AverageDriveCommand(
+    const MazeMap::App::Internal::LoopController::ControlVector& command) noexcept
+{
+    return 0.5f * (command.leftMotorPwm + command.rightMotorPwm);
+}
+
+float DriveBase::DeltaDriveCommand(
+    const MazeMap::App::Internal::LoopController::ControlVector& command) noexcept
+{
+    return 0.5f * (command.leftMotorPwm - command.rightMotorPwm);
+}
+
 float DriveBase::ResolvePositiveOrZero(float value) noexcept
 {
     return (std::isfinite(value) && (value > 0.0f)) ? value : 0.0f;
@@ -717,6 +729,7 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::ComposeGenerate
 {
     if (pd == MazeMap::CommandPD::RawCommand)
     {
+        CacheGeneratedCommandTelemetry(baseCommand, ControlVector::RawMotorPwm(0.0f, 0.0f));
         return MakeClampedDriveControlVector(baseCommand.leftMotorPwm, baseCommand.rightMotorPwm);
     }
 
@@ -871,7 +884,20 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::ComposeGenerate
             (rightTargetVelocityMps - context.encoderRightVelocityMps);
     }
 
+    CacheGeneratedCommandTelemetry(
+        baseCommand,
+        SubtractDriveCommands(command, baseCommand));
     return MakeClampedDriveControlVector(command.leftMotorPwm, command.rightMotorPwm);
+}
+
+void DriveBase::CacheGeneratedCommandTelemetry(
+    const MazeMap::App::Internal::LoopController::ControlVector& feedforwardCommand,
+    const MazeMap::App::Internal::LoopController::ControlVector& feedbackCommand) const noexcept
+{
+    _lastFeedforwardCommandAverage = AverageDriveCommand(feedforwardCommand);
+    _lastFeedforwardCommandDelta = DeltaDriveCommand(feedforwardCommand);
+    _lastFeedbackCommandAverage = AverageDriveCommand(feedbackCommand);
+    _lastFeedbackCommandDelta = DeltaDriveCommand(feedbackCommand);
 }
 
 float DriveBase::GetWheelVelocityKp() const

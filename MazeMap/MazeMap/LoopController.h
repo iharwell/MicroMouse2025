@@ -60,13 +60,15 @@ namespace MazeMap::App::Internal
         // belongs in the mode callback rather than in LoopController dispatch.
         static constexpr std::uint32_t kInitialModeCallbackTick = 1U;
 
-        struct ControlVector final
+        struct EXPORT ControlVector final
         {
             float leftMotorPwm{};
             float rightMotorPwm{};
 
             static const ControlVector Brake;
-            static ControlVector RawMotorPwm(float leftMotorPwm, float rightMotorPwm) noexcept;
+            static ControlVector RawMotorPwm(
+                float leftMotorPwm,
+                float rightMotorPwm) noexcept;
         };
 
         struct TimingDiagnostics final
