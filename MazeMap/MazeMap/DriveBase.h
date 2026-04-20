@@ -12,6 +12,7 @@
 #include "MotorEncoderDrive.h"
 #include "MouseUkfFacade.h"
 #include "PlantModel.h"
+#include "ProportionalDerivativeCluster.h"
 #include "WheelControlProfile.h"
 
 #include <algorithm>
@@ -89,11 +90,14 @@ public:
     static constexpr uint16_t kModeLaunchAssistLeft = 1u << 4;
     static constexpr uint16_t kModeLaunchAssistRight = 1u << 5;
 
-    explicit DriveBase(const MazeMap::PlantModel& plantModel)
+    explicit DriveBase(
+        const MazeMap::PlantModel& plantModel,
+        const MazeMap::ProportionalDerivativeCluster& proportionalDerivativeCluster)
         : _leftMotor(MazeMap::MotorEncoderDrive::CreateDefaultLeftDrive())
         , _rightMotor(MazeMap::MotorEncoderDrive::CreateDefaultRightDrive())
         , _ukf(MazeMap::PlantParams::Default())
         , _plantModel(plantModel)
+        , _proportionalDerivativeCluster(&proportionalDerivativeCluster)
         , _poseCache{}
         , _leftIntegral(0.0f)
         , _rightIntegral(0.0f)
@@ -102,6 +106,14 @@ public:
         , _wheelControlProfile(BuildNominalWheelControlProfile())
     {
     }
+
+    void SetProportionalDerivativeCluster(const MazeMap::ProportionalDerivativeCluster& proportionalDerivativeCluster) noexcept
+    {
+        _proportionalDerivativeCluster = &proportionalDerivativeCluster;
+    }
+
+    const MazeMap::ProportionalDerivativeCluster& GetProportionalDerivativeCluster() noexcept { return *_proportionalDerivativeCluster; }
+    const MazeMap::ProportionalDerivativeCluster& GetProportionalDerivativeCluster() const noexcept { return *_proportionalDerivativeCluster; }
 
     bool Begin()
     {
@@ -274,9 +286,10 @@ public:
     }
 
     // DeltaCommand resolves a feedforward command from an explicit operating point and an explicit
-    // longitudinal acceleration request. The result is symmetric by construction. If `pd` contains
-    // additional loops whose setpoints are not explicit in the signature, those loops default to
-    // holding their present values.
+    // longitudinal acceleration request. The result is symmetric by construction.
+    // Supported `pd` flags here: `StateAccelerationPD`, `IMUForwardAccel`.
+    // Any heading, yaw-rate, wheel-speed, encoder, or lateral-accel selection has no explicit target
+    // on this overload and therefore defaults to hold/no-op behavior.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
@@ -285,6 +298,9 @@ public:
     // DeltaCommand resolves the fully coupled plant feedforward from an explicit body-speed operating
     // point and explicit longitudinal/yaw acceleration requests. This is the canonical "delta from the
     // current state" entry point when both translation and rotation matter at once.
+    // Supported `pd` flags here: `StateAccelerationPD`, `IMUForwardAccel`.
+    // This overload does not expose a separate yaw-acceleration feedback-source selector, so heading,
+    // yaw-rate, wheel-speed, encoder, and lateral-accel flags remain hold/no-op selections.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
@@ -294,6 +310,8 @@ public:
 
     // DeltaYawRateCommand resolves a zero-mean command from the present yaw rate and a desired yaw
     // acceleration. This is the single-axis rotational variant of `DeltaCommand`.
+    // No additional `pd` feedback target is currently exposed on this overload; every flag presently
+    // behaves the same as `RawCommand`.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaYawRateCommand(
         float presentYawRateRadps,
         float desiredYawAccelRadps2,
@@ -303,6 +321,9 @@ public:
     // forward speed over the canonical roll-off horizon while respecting the plant-reported acceleration
     // envelope. Wheel-speed or other optional loops use `desiredLinearSpeedMps` as their setpoint when
     // that association is meaningful; all unrelated loops hold their present values.
+    // Supported `pd` flags here: `StateVelocityPD`, `StateWheelOmegaPD`, `EncoderVelocity`.
+    // This overload does not set a new heading, yaw-rate, longitudinal-acceleration, or
+    // lateral-acceleration target.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
         float desiredLinearSpeedMps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -310,6 +331,9 @@ public:
     // PointCommand resolves the fully coupled command that drives the present forward speed and yaw rate
     // toward the requested targets over the canonical roll-off horizon while respecting the plant envelope.
     // This replaces the old ambiguous "velocity command" entry point.
+    // Supported `pd` flags here: `StateVelocityPD`, `StateYawPD`, `StateWheelOmegaPD`,
+    // `EncoderVelocity`, `IMUYaw`.
+    // This overload does not set a heading, longitudinal-acceleration, or lateral-acceleration target.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
@@ -324,6 +348,8 @@ public:
 
     // PointCommand consumes the drive-relevant target fields from a maneuver point. Higher-level
     // maneuver execution should target this overload instead of rebuilding scalar command bridges.
+    // It exposes the same `pd` selections as the scalar `(desiredLinearSpeedMps, desiredYawRateRadps)`
+    // overload because it forwards directly to that entry point.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
         const MazeMap::ManeuverPoint& point,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -337,6 +363,9 @@ public:
     // PointYawRateCommand resolves a zero-mean command that drives the present yaw rate toward the
     // requested yaw-rate target over the canonical roll-off horizon while respecting the yaw-acceleration
     // limit reported by the plant.
+    // Supported `pd` flags here: `StateYawPD`, `StateWheelOmegaPD`, `EncoderVelocity`, `IMUYaw`.
+    // This overload does not set a new linear-speed, heading, longitudinal-acceleration, or
+    // lateral-acceleration target.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector PointYawRateCommand(
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -344,6 +373,11 @@ public:
     // FeedbackCommand produces a pure feedback command cluster. Each selected loop uses `setpoint` as
     // its target. Unselected loops contribute nothing. The returned command starts from the plant command
     // that preserves the present motion state, then layers the requested feedback objectives on top.
+    // Supported `pd` flags here: `StateHeadingPD`, `StateYawPD`, `StateWheelOmegaPD`,
+    // `StateVelocityPD`, `StateAccelerationPD`, `EncoderVelocity`, `IMUYaw`,
+    // `IMUForwardAccel`, `IMULateralAccel`.
+    // `IMULateralAccel` still requires a nonzero present or target speed so the requested lateral
+    // acceleration can be converted into a yaw-rate correction.
     EXPORT MazeMap::App::Internal::LoopController::ControlVector FeedbackCommand(
         float setpoint,
         MazeMap::CommandPD pd) const;
@@ -858,6 +892,7 @@ private:
     MazeMap::MotorEncoderDrive _rightMotor;
     MazeMap::MouseUkfFacade _ukf;
     const MazeMap::PlantModel& _plantModel;
+    const MazeMap::ProportionalDerivativeCluster* _proportionalDerivativeCluster;
     PoseEstimate _poseCache;
     float _leftIntegral;
     float _rightIntegral;
@@ -1042,9 +1077,10 @@ private:
             HeadingErrorRad(
                 HeadingUnitFromYawRad(targetYawRad),
                 HeadingUnitFromYawRad(measuredYawRad));
-        float angularCommandRadps =
-            (Config::kStraightHeadingKp * headingErrorRad) -
-            (Config::kStraightYawD * resolvedEstimatedYawRateRadps);
+        const MazeMap::ProportionalDerivative& headingPD =
+            GetProportionalDerivativeCluster().GetHeadingPD(MazeMap::CommandPD::StateHeadingPD);
+        const float angularCommandRadps =
+            headingPD.Compute(headingErrorRad, -resolvedEstimatedYawRateRadps);
         if (!std::isfinite(angularCommandRadps))
         {
             return 0.0f;

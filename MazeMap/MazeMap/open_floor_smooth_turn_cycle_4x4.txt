@@ -1,0 +1,36 @@
+# Closed 4x4 open-floor smooth-turn cycle for primary diagnostic mode.
+# The 26-maneuver loop below respects straight-entry versus diagonal-entry
+# validity and returns to its loop-start pose.
+#
+# Runtime queue structure:
+# - initial pose before bin 1 lead-in: half-step (2,3), facing Up (+Y)
+# - each smooth-speed bin begins with one half-cell S1 straight to change speed
+# - bins 1-3 therefore enter the loop from (2,4), (2,5), and (2,6)
+# - the final bin adds one more half-cell S1 straight to decelerate before hold
+# - retained smooth-speed bins: 0.40, 0.45, and 0.45 m/s
+S135LS
+S90SD
+S90SD_M
+S135LD_M
+S135LS_M
+S135LD
+S135SS
+S45LD
+S135SS_M
+S45LD_M
+S180LS_M
+S45LS
+S135SD
+S45LS_M
+S135SD_M
+S45SS_M
+S45SD_M
+S90LS_M
+S180LS
+S45SS
+S45SD
+S90SS
+S90LS
+S180SS_M
+S90SS_M
+S180SS

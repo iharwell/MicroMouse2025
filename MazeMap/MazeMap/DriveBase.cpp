@@ -770,17 +770,15 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::ComposeGenerate
             targets.hasHeadingTarget ?
             targets.headingTargetYawRad :
             context.presentYawRad;
-        const float headingErrorRad =
-            HeadingErrorRad(
-                HeadingUnitFromYawRad(targetYawRad),
-                HeadingUnitFromYawRad(context.presentYawRad));
-        const float desiredYawRateCorrectionRadps =
-            Config::kStraightHeadingKp * headingErrorRad;
         command = AddDriveCommands(
             command,
             ResolveYawCorrectionCommand(
                 context,
-                desiredYawRateCorrectionRadps / ResolveCommandResponseTimeS()));
+                ResolveStraightHeadingYawRateCommand(
+                    targetYawRad,
+                    context.presentYawRad,
+                    context.presentYawRateRadps) /
+                ResolveCommandResponseTimeS()));
     }
 
     if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::StateYawPD))

@@ -31,6 +31,22 @@ namespace MazeMap
             return snapshot;
         }
 
+        SensorSnapshot BuildDriveBaseSensorSnapshot(
+            float gyroRawRadps,
+            float gyroRadps,
+            float accelBodyXMps2,
+            float accelBodyYMps2,
+            bool accelBiasValid) noexcept
+        {
+            SensorSnapshot snapshot{};
+            snapshot.gyroRawRadps = gyroRawRadps;
+            snapshot.gyroRadps = gyroRadps;
+            snapshot.accelBodyXMps2 = accelBodyXMps2;
+            snapshot.accelBodyYMps2 = accelBodyYMps2;
+            snapshot.accelBiasValid = accelBiasValid;
+            return snapshot;
+        }
+
         int32_t ConsumeWholeEncoderCounts(
             float deltaCounts,
             float& remainderCounts) noexcept
@@ -106,6 +122,36 @@ namespace MazeMap
             return std::isfinite(command.leftMotorPwm) && std::isfinite(command.rightMotorPwm);
         }
 
+        float ControlVectorDifferenceMagnitude(
+            const ControlVector& lhs,
+            const ControlVector& rhs) noexcept
+        {
+            return
+                std::fabs(lhs.leftMotorPwm - rhs.leftMotorPwm) +
+                std::fabs(lhs.rightMotorPwm - rhs.rightMotorPwm);
+        }
+
+        void AssertDriveCommandsEqual(
+            const ControlVector& expected,
+            const ControlVector& actual,
+            float tolerance = 1.0e-4f)
+        {
+            Assert::IsTrue(IsFiniteControlVector(expected));
+            Assert::IsTrue(IsFiniteControlVector(actual));
+            Assert::AreEqual(expected.leftMotorPwm, actual.leftMotorPwm, tolerance);
+            Assert::AreEqual(expected.rightMotorPwm, actual.rightMotorPwm, tolerance);
+        }
+
+        void AssertDriveCommandsDiffer(
+            const ControlVector& lhs,
+            const ControlVector& rhs,
+            float minimumDifference = 1.0e-4f)
+        {
+            Assert::IsTrue(IsFiniteControlVector(lhs));
+            Assert::IsTrue(IsFiniteControlVector(rhs));
+            Assert::IsTrue(ControlVectorDifferenceMagnitude(lhs, rhs) > minimumDifference);
+        }
+
         void AssertDriveCommandMatchesSolution(
             const ControlVector& command,
             const DriveCommandSolution& solution,
@@ -127,6 +173,18 @@ namespace MazeMap
             const SensorSnapshot snapshot = BuildDriveBaseSensorSnapshot();
             drive.UpdateOdometry(dtSeconds, snapshot, nullptr, nullptr);
         }
+
+        void UpdateDriveBaseSignals(
+            DriveBase& drive,
+            const SensorSnapshot& snapshot,
+            const int32_t leftCounts = 0,
+            const int32_t rightCounts = 0,
+            const float dtSeconds = 0.001f)
+        {
+            MazeMap::Platform::WriteEncoderCount(kDriveBaseLeftEncoderChannel, leftCounts);
+            MazeMap::Platform::WriteEncoderCount(kDriveBaseRightEncoderChannel, rightCounts);
+            drive.UpdateOdometry(dtSeconds, snapshot, nullptr, nullptr);
+        }
     }
 
     TEST_CLASS(DriveBaseTest)
@@ -135,7 +193,7 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandStaysSymmetricAcrossWheelSpeedMismatch)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
 
             PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
@@ -153,7 +211,7 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandHeadingHoldStaysSymmetricWhenAlreadyAligned)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
 
             PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
@@ -171,7 +229,7 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandRawMatchesPlantFeedforwardAtSteadyForwardTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -198,7 +256,7 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandCombinedRawMatchesPlantFeedforwardAtSteadyTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -227,7 +285,7 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaYawRateCommandRawMatchesPlantFeedforwardAtSteadyYawRateTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -254,7 +312,7 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandRawMatchesPlantVelocityTargetFeedforwardAtForwardTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -279,7 +337,7 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandCombinedRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -305,7 +363,7 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointYawRateCommandRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -330,7 +388,7 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandManeuverPointMatchesScalarTargets)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.15f), nullptr, nullptr);
@@ -357,7 +415,7 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandManeuverPointRejectsNonFiniteTargets)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
@@ -378,31 +436,248 @@ namespace MazeMap
             Assert::AreEqual(0.0f, command.rightMotorPwm, 1.0e-6f);
         }
 
-        TEST_METHOD(DriveBasePointCommandImuYawTrackingChangesCommandWhenYawRateErrorExists)
+        TEST_METHOD(DriveBasePointCommandCoupledStateYawPdUsesEstimatorYawRateSignal)
         {
             PlantModel plant;
-            DriveBase drive(plant);
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.40f), nullptr, nullptr);
+            UpdateDriveBaseSignals(
+                drive,
+                BuildDriveBaseSensorSnapshot(
+                    0.40f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    false));
 
-            const ControlVector wheelOnlyCommand =
+            const ControlVector rawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
-                    MazeMap::CommandPD::StateWheelOmegaPD);
-            const ControlVector imuTrackedCommand =
+                    MazeMap::CommandPD::RawCommand);
+            const ControlVector stateYawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
-                    MazeMap::CommandPD::StateWheelOmegaPD |
+                    MazeMap::CommandPD::StateYawPD);
+            const ControlVector imuYawCommand =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
                     MazeMap::CommandPD::IMUYaw);
 
-            Assert::IsTrue(IsFiniteControlVector(wheelOnlyCommand));
-            Assert::IsTrue(IsFiniteControlVector(imuTrackedCommand));
-            Assert::IsTrue(
-                (std::fabs(imuTrackedCommand.leftMotorPwm - wheelOnlyCommand.leftMotorPwm) +
-                 std::fabs(imuTrackedCommand.rightMotorPwm - wheelOnlyCommand.rightMotorPwm)) > 1.0e-4f);
+            AssertDriveCommandsDiffer(rawCommand, stateYawCommand);
+            AssertDriveCommandsEqual(rawCommand, imuYawCommand);
+        }
+
+        TEST_METHOD(DriveBasePointCommandCoupledImuYawUsesCorrectedImuSignal)
+        {
+            PlantModel plant;
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            UpdateDriveBaseSignals(
+                drive,
+                BuildDriveBaseSensorSnapshot(
+                    0.0f,
+                    0.40f,
+                    0.0f,
+                    0.0f,
+                    false));
+
+            const ControlVector rawCommand =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const ControlVector stateYawCommand =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::StateYawPD);
+            const ControlVector imuYawCommand =
+                drive.PointCommand(
+                    0.20f,
+                    0.0f,
+                    MazeMap::CommandPD::IMUYaw);
+
+            AssertDriveCommandsEqual(rawCommand, stateYawCommand);
+            AssertDriveCommandsDiffer(rawCommand, imuYawCommand);
+        }
+
+        TEST_METHOD(DriveBaseDeltaCommandStateAccelerationPdUsesStateAccelerationSignal)
+        {
+            PlantModel plant;
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            ControlVector commandedMotorPwm{};
+            commandedMotorPwm.leftMotorPwm = 0.10f;
+            commandedMotorPwm.rightMotorPwm = 0.10f;
+            drive.CommandGenerated(commandedMotorPwm, 0.0f, 0.0f, false);
+            UpdateDriveBaseSignals(
+                drive,
+                BuildDriveBaseSensorSnapshot(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    true));
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+
+            const ControlVector rawCommand =
+                drive.DeltaCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const ControlVector stateAccelerationCommand =
+                drive.DeltaCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::StateAccelerationPD);
+            const ControlVector imuAccelerationCommand =
+                drive.DeltaCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::IMUForwardAccel);
+
+            AssertDriveCommandsDiffer(rawCommand, stateAccelerationCommand);
+            AssertDriveCommandsDiffer(stateAccelerationCommand, imuAccelerationCommand);
+        }
+
+        TEST_METHOD(DriveBaseDeltaCommandImuForwardAccelUsesCorrectedImuSignal)
+        {
+            PlantModel plant;
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            UpdateDriveBaseSignals(
+                drive,
+                BuildDriveBaseSensorSnapshot(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    1.50f,
+                    true));
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+
+            const ControlVector rawCommand =
+                drive.DeltaCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const ControlVector stateAccelerationCommand =
+                drive.DeltaCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::StateAccelerationPD);
+            const ControlVector imuAccelerationCommand =
+                drive.DeltaCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::IMUForwardAccel);
+
+            AssertDriveCommandsEqual(rawCommand, stateAccelerationCommand);
+            AssertDriveCommandsDiffer(rawCommand, imuAccelerationCommand);
+        }
+
+        TEST_METHOD(DriveBasePointCommandLinearOnlyOffersStateAndEncoderSpeedLoops)
+        {
+            PlantModel plant;
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            PrimeDriveBaseWithEncoderDelta(drive, 48, 48);
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+
+            const ControlVector rawCommand =
+                drive.PointCommand(
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const ControlVector stateVelocityCommand =
+                drive.PointCommand(
+                    0.0f,
+                    MazeMap::CommandPD::StateVelocityPD);
+            const ControlVector stateWheelOmegaCommand =
+                drive.PointCommand(
+                    0.0f,
+                    MazeMap::CommandPD::StateWheelOmegaPD);
+            const ControlVector encoderVelocityCommand =
+                drive.PointCommand(
+                    0.0f,
+                    MazeMap::CommandPD::EncoderVelocity);
+
+            AssertDriveCommandsEqual(rawCommand, stateVelocityCommand);
+            AssertDriveCommandsEqual(rawCommand, stateWheelOmegaCommand);
+            AssertDriveCommandsDiffer(rawCommand, encoderVelocityCommand);
+        }
+
+        TEST_METHOD(DriveBasePointCommandLinearOnlyIgnoresYawSourcePdFlags)
+        {
+            PlantModel plant;
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            UpdateDriveBaseSignals(
+                drive,
+                BuildDriveBaseSensorSnapshot(
+                    0.0f,
+                    0.40f,
+                    0.0f,
+                    0.0f,
+                    false));
+
+            const ControlVector rawCommand =
+                drive.PointCommand(
+                    0.20f,
+                    MazeMap::CommandPD::RawCommand);
+            const ControlVector stateYawCommand =
+                drive.PointCommand(
+                    0.20f,
+                    MazeMap::CommandPD::StateYawPD);
+            const ControlVector imuYawCommand =
+                drive.PointCommand(
+                    0.20f,
+                    MazeMap::CommandPD::IMUYaw);
+
+            AssertDriveCommandsEqual(rawCommand, stateYawCommand);
+            AssertDriveCommandsEqual(rawCommand, imuYawCommand);
+        }
+
+        TEST_METHOD(DriveBaseDeltaYawRateCommandIgnoresYawRatePdFlags)
+        {
+            PlantModel plant;
+            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            UpdateDriveBaseSignals(
+                drive,
+                BuildDriveBaseSensorSnapshot(
+                    0.40f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    false));
+
+            const ControlVector rawCommand =
+                drive.DeltaYawRateCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::RawCommand);
+            const ControlVector stateYawCommand =
+                drive.DeltaYawRateCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::StateYawPD);
+            const ControlVector imuYawCommand =
+                drive.DeltaYawRateCommand(
+                    0.0f,
+                    0.0f,
+                    MazeMap::CommandPD::IMUYaw);
+
+            AssertDriveCommandsEqual(rawCommand, stateYawCommand);
+            AssertDriveCommandsEqual(rawCommand, imuYawCommand);
         }
     };
 }

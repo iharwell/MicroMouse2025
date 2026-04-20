@@ -263,6 +263,8 @@
     <ClInclude Include="PinPairStrap.h" />
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
+    <ClInclude Include="ProportionalDerivative.h" />
+    <ClInclude Include="ProportionalDerivativeCluster.h" />
     <ClInclude Include="RollingAverageWindow.h" />
     <ClInclude Include="RuntimeSensorSuite.h" />
     <ClInclude Include="RuntimeBinaryLogSupport.h" />
@@ -367,6 +369,8 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PlantModel.cpp" />
+    <ClCompile Include="ProportionalDerivative.cpp" />
+    <ClCompile Include="ProportionalDerivativeCluster.cpp" />
     <ClCompile Include="SrUkfCore.cpp" />
     <ClCompile Include="WallGeometryModel.cpp" />
     <ClCompile Include="WallSensorPreprocessor.cpp" />

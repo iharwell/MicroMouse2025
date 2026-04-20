@@ -9,6 +9,7 @@
 #include "Maze.h"
 #include "MissionStartPolicy.h"
 #include "MotorEncoderDrive.h"
+#include "ProportionalDerivativeCluster.h"
 #include "RollingAverageWindow.h"
 #include "Vehicle.h"
 #include "WallDetectionThresholds.h"
@@ -532,6 +533,26 @@ namespace MazeMap::Config
     // [High] In-place turn damping. Increase if turn-stop oscillation remains; decrease if in-place turns feel too
     // sluggish to settle on target heading.
     constexpr float kTurnYawD = 0.12f;
+    // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
+    // current DriveBase PD setup family, with concrete starting values for every supported
+    // control/signal pairing already represented by the new naming scheme.
+    inline constexpr MazeMap::ProportionalDerivativeCluster kDriveBasePDCluster(
+        /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
+        /* headingGyroPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
+        /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kArcYawD),
+        /* velocityStatePD */ MazeMap::ProportionalDerivative(20.0f, 0.0f),
+        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(15.0f, 0.0f),
+        /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
+        /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
+        /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.0f),
+        /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
+        /* longitudinalAccelerationStatePD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
+        /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
+        /* wheelVelocityStatePD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, 0.0f),
+        /* wheelVelocityEncoderPD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, 0.0f),
+        /* yawAccelerationStatePD */ MazeMap::ProportionalDerivative(0.065f, 0.0f),
+        /* yawAccelerationGyroPD */ MazeMap::ProportionalDerivative(0.015f, 0.0f),
+        /* yawAccelerationEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.001f, 0.0f));
 
     // [Medium] Position tolerance used to declare straight and arc profiles complete. Tighten it if stop error is too
     // large and the robot can settle cleanly; loosen it if profiles dither near the endpoint.

@@ -429,7 +429,7 @@ namespace MazeMap::App::Internal
         , speedPathFinder(maze, speedVehicle)
         , wallBeliefMap()
         , plantModel()
-        , drive(plantModel)
+        , drive(plantModel, MazeMap::Config::kDriveBasePDCluster)
         , driveService()
         , startupCalibrationService()
         , wallTouchService()
