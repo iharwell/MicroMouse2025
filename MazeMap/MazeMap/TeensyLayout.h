@@ -62,11 +62,6 @@ namespace MazeMap::Platform
 
         if (static_cast<FsVolume&>(SD.sdfs).begin(card, true, part))
         {
-            (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
-                "SD mounted via %s %s%s",
-                GetSdioModeName(sdioMode),
-                part == 0U ? "sector 0 as " : "partition 1 as ",
-                GetVolumeTypeName(SD.sdfs.fatType()));
             return true;
         }
 
@@ -201,18 +196,15 @@ inline bool SetupHardware()
     // waiting state instead of failing startup so the operator can insert the card or use this as a manual delay.
     // Do not attempt text logging until a filesystem is actually mounted; the SD path cannot report its own
     // failures before that point, and such attempts would permanently fault the runtime text log state.
-    unsigned long waitStartMs = millis();
     bool waitingForSd = false;
     while (true)
     {
         if (MazeMap::Platform::TryMountPreferredSdVolume())
         {
-            if (waitingForSd)
-            {
-                (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogFormatted(
-                    "SD init recovered after waiting %lu ms",
-                    static_cast<unsigned long>(millis() - waitStartMs));
-            }
+            // Give the card/filesystem a brief settle window before modes start opening logging.txt
+            // or mmlog files. Boot-time file traffic was intermittently faulting when the card was
+            // already present at power-on.
+            delay(HardwareConfig::kSdInitRetryDelayMs);
             MazeMap::Platform::StopBuiltinLedBlink();
             return true;
         }
@@ -220,7 +212,6 @@ inline bool SetupHardware()
         if (!waitingForSd)
         {
             waitingForSd = true;
-            waitStartMs = millis();
             MazeMap::Platform::StartStartupWaitIndicatorBlink();
         }
 

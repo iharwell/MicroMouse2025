@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CppUnitTest.h"
+#include "EstimatorTestSupport.h"
 #include "..\MazeMap\Drive.h"
 #include "..\MazeMap\MazeMapSharedRuntime.h"
 #include "..\MazeMap\Vehicle.h"
@@ -23,6 +24,9 @@ MMLOG_DEFINE_ROW(SharedRuntimeTestLogRow, SHARED_RUNTIME_TEST_LOG_FIELDS);
 
 namespace
 {
+    constexpr std::uint8_t kSharedRuntimeRightEncoderChannel = 1U;
+    constexpr std::uint8_t kSharedRuntimeLeftEncoderChannel = 2U;
+
     struct FaultCallbackState
     {
         unsigned int count = 0U;
@@ -34,6 +38,45 @@ namespace
         MazeMap::App::Internal::SharedRobotRuntime* runtime = nullptr;
         unsigned int linesWritten = 0U;
     };
+
+    struct ScopedMissionFanDuty final
+    {
+        explicit ScopedMissionFanDuty(const float dutyCycle) noexcept
+            : previousDutyCycle(GetMissionFanDutyCycle())
+        {
+            WriteFanDutyCycle(dutyCycle);
+        }
+
+        ~ScopedMissionFanDuty() noexcept
+        {
+            WriteFanDutyCycle(previousDutyCycle);
+        }
+
+        float previousDutyCycle = 0.0f;
+    };
+
+    SensorSnapshot BuildSharedRuntimeSensorSnapshot(const float yawRateRadps = 0.0f) noexcept
+    {
+        SensorSnapshot snapshot{};
+        snapshot.gyroRawRadps = yawRateRadps;
+        snapshot.gyroRadps = yawRateRadps;
+        return snapshot;
+    }
+
+    void PrimeSharedRuntimeDriveWheelSpeed(
+        MazeMap::App::Internal::SharedRobotRuntime& runtime,
+        const float leftWheelSpeedMps,
+        const float rightWheelSpeedMps,
+        const float dtSeconds = 0.01f) noexcept
+    {
+        const MazeMap::PlantParams params = MazeMap::PlantParams::Default();
+        const float distancePerCountM = MazeMap::DistancePerEncoderCountMeters(params);
+        const int32_t leftCounts = static_cast<int32_t>(std::round((leftWheelSpeedMps * dtSeconds) / distancePerCountM));
+        const int32_t rightCounts = static_cast<int32_t>(std::round((rightWheelSpeedMps * dtSeconds) / distancePerCountM));
+        MazeMap::Platform::WriteEncoderCount(kSharedRuntimeLeftEncoderChannel, leftCounts);
+        MazeMap::Platform::WriteEncoderCount(kSharedRuntimeRightEncoderChannel, rightCounts);
+        runtime.Drive().UpdateOdometry(dtSeconds, BuildSharedRuntimeSensorSnapshot(), nullptr, nullptr);
+    }
 
     void CaptureFaultCallback(void* context, const char* reason) noexcept
     {
@@ -217,6 +260,23 @@ namespace MazeMap::App
             Assert::IsFalse(done);
             Assert::IsTrue(std::isfinite(control.leftMotorPwm));
             Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+        }
+
+        TEST_METHOD(SharedRuntime_DriveHoldRejectsFanOffWheelSpeedAboveBaseSettleThreshold)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            PrimeSharedRuntimeDriveWheelSpeed(runtime, 0.06f, 0.06f);
+            ScopedMissionFanDuty fanDuty(0.0f);
+
+            Internal::Drive& drive = runtime.DriveService();
+            drive.StartHold(1U, true);
+            Assert::IsTrue(drive.Active());
+
+            bool done = false;
+            (void)drive.GetNextControls(done);
+            Assert::IsFalse(done);
+            Assert::IsTrue(drive.Active());
         }
 
         TEST_METHOD(SharedRuntime_DriveServiceOmitsUnavailableLimitsInCommandPath)

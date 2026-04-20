@@ -22,7 +22,6 @@ namespace MazeMap::App::Internal
         constexpr std::size_t kPrimitiveStorageBytes = 16U * sizeof(std::uint32_t);
         constexpr std::size_t kPrimitiveStorageAlignment = 16U;
         constexpr float kMinimumTrackedSpeedMps = 1.0e-4f;
-
         struct HoldState final
         {
             std::uint16_t requestedTicks{};
@@ -101,6 +100,14 @@ namespace MazeMap::App::Internal
         float FallbackMagnitude(const float preferred, const float replacement) noexcept
         {
             return (std::isfinite(preferred) && (std::fabs(preferred) > 0.0f)) ? preferred : replacement;
+        }
+
+        float ResolveMotionSettleSpeedThresholdMps() noexcept
+        {
+            const float baseThresholdMps = Config::kMotionSettleSpeedThresholdMps;
+            return (GetMissionFanDutyCycle() > 0.0f) ?
+                (baseThresholdMps * 5.0f) :
+                baseThresholdMps;
         }
 
         float LimitByConfiguredMagnitude(const float command, const float configuredLimit) noexcept
@@ -611,7 +618,7 @@ namespace MazeMap::App::Internal
             state.driveTelemetry.leftVelocityMps,
             state.driveTelemetry.rightVelocityMps,
             state.sensors.gyroRadps,
-            Config::kMotionSettleSpeedThresholdMps,
+            ResolveMotionSettleSpeedThresholdMps(),
             Config::kMotionSettleAngularSpeedThresholdRadps);
         if (stationary)
         {
@@ -666,7 +673,7 @@ namespace MazeMap::App::Internal
                     state.driveTelemetry.leftVelocityMps,
                     state.driveTelemetry.rightVelocityMps,
                     state.sensors.gyroRadps,
-                    Config::kMotionSettleSpeedThresholdMps,
+                    ResolveMotionSettleSpeedThresholdMps(),
                     Config::kMotionSettleAngularSpeedThresholdRadps) :
                 (std::fabs(state.estimate.linearSpeedMps - desiredSpeedMps) <= Config::kSpeedToleranceMps);
         }
@@ -831,7 +838,7 @@ namespace MazeMap::App::Internal
                     state.driveTelemetry.leftVelocityMps,
                     state.driveTelemetry.rightVelocityMps,
                     state.sensors.gyroRadps,
-                    Config::kMotionSettleSpeedThresholdMps,
+                    ResolveMotionSettleSpeedThresholdMps(),
                     Config::kMotionSettleAngularSpeedThresholdRadps) :
                 (std::fabs(state.estimate.linearSpeedMps - desiredStraightSpeedMps) <= Config::kSpeedToleranceMps));
 
