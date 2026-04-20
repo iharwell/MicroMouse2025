@@ -38,13 +38,13 @@ namespace
         "side_range_m"
     };
 
-    constexpr float kStationaryCertificationDwellS = 0.080f;
+    constexpr float kStationaryCertificationDwellS = 0.150f;
     constexpr float kStationaryCandidateMaxLinearCommandMps = 0.03f;
     constexpr float kStationaryCandidateMaxAngularCommandRadps = 0.15f;
     constexpr float kStationaryCandidateMaxDriveCommand = 0.08f;
     constexpr float kStationaryCandidateMaxEncoderOmegaRadps = 1.0f;
-    constexpr float kStationaryCandidateMaxCorrectedGyroRadps = 0.06f;
-    constexpr float kStationaryCandidateMaxAccelMps2 = 0.6f;
+    constexpr float kStationaryCandidateMaxCorrectedGyroRadps = 0.12f;
+    constexpr float kStationaryCandidateMaxAccelMps2 = 1.0f;
 
     constexpr float kCommandSignFlipWindowS = 0.025f;
     constexpr float kStationaryExitLaunchWindowS = 0.060f;

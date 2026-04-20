@@ -148,9 +148,9 @@ namespace MazeMap
         float trackWidthM;
         float contactPatchLongitudinalOffsetM;
         float wheelRadiusM;
-        // April 10, 2026 D:\open_floor_main.csv 0.08 launch-pulse torque balance fit. This is the wheel-bank
-        // equivalent inertia used by the plant, not the bare Faulhaber rotor inertia.
-        float equivalentWheelInertiaKgM2 = 1.6e-5f;
+        // April 20, 2026 SEC_40_YAW FFT high-frequency wheel-side recommendation from the latest usable yaw
+        // oscillation card. This excludes the rigid-body yaw term that PlantModel already handles separately.
+        float equivalentWheelInertiaKgM2 = 2.4e-7f;
 
         float supplyVoltageV;
         float driveResistanceOhms;
@@ -331,7 +331,7 @@ namespace MazeMap
         using StateVector = VehicleState::StateVector;
         using PreparedParams = PlantPreparedParams;
 
-        static constexpr float kDefaultVelocityTargetResponseTimeS = 0.015f;
+        static constexpr float kDefaultVelocityTargetResponseTimeS = 0.025f;
         static constexpr float kClosedLoopTractionReserveScale = 0.90f;
 
         static PreparedParams Prepare(const PlantParams& params) noexcept;
@@ -398,14 +398,14 @@ namespace MazeMap
             float desiredYawAccelRadps2,
             const PlantParams& params,
             float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f) const noexcept;
+            float batteryVoltageV = 8.4f) const noexcept;
         DriveCommandSolution solveDriveCommands(
             const StateVector& currentState,
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
             const PreparedParams& params,
             float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f) const noexcept;
+            float batteryVoltageV = 8.4f) const noexcept;
         DriveCommandSolution solveDriveCommands(
             float forwardVelocityMps,
             float desiredLongitudinalAccelMps2,

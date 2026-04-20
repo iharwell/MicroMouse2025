@@ -9,7 +9,7 @@ namespace MazeMap
 {
     inline constexpr const char* kOpenFloorSelectedRoutineName = "open_floor";
     inline constexpr const char* kOpenFloorFormatVersion = "ofm:f";
-    inline constexpr const char* kOpenFloorRevisionBundle = "log:h;sched:f;bins:d;marks:d";
+    inline constexpr const char* kOpenFloorRevisionBundle = "log:h;sched:g;bins:d;marks:d";
     inline constexpr const char* kOpenFloorImuSetup = "imu:bl;extr:v1";
     inline constexpr const char* kOpenFloorTimingStreamType = "timing";
     inline constexpr const char* kOpenFloorMainStreamType = "main";
@@ -306,11 +306,18 @@ namespace MazeMap
     inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { 0.1f, 0.30f, 0.55f };
     inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 9.0f, 18.0f, 27.0f };
     inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.4f, 0.45f, 0.45f };
+    inline constexpr std::uint8_t kOpenFloorLaunchRepeatsPerMagnitude = 3U;
+    inline constexpr std::uint8_t kOpenFloorStraightRepeatsPerSpeed = 3U;
     inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
     // After a launch pulse leaves the estimator's stationary regime, or after the straight battery
     // before entering the yaw battery, hold brake while stationary for this long so the next section
     // begins from a settled UKF state instead of motion transients.
     inline constexpr unsigned long kOpenFloorLaunchSettleMs = 200UL;
+    // Short brake hold between launch or straight samples so the next motion starts from a clean stop
+    // without reusing whatever residual wheel motion the previous sample left behind.
+    inline constexpr unsigned long kOpenFloorInterMotionHoldMs = 100UL;
+    // Longer brake hold between major sections so the next battery starts from a fully settled state.
+    inline constexpr unsigned long kOpenFloorInterPhaseHoldMs = 500UL;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.25f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeEnd = 0.35f;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStep = 0.05f;

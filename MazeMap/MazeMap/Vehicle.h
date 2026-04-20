@@ -53,12 +53,12 @@ namespace MazeMap
             // scrub dynamics, so these remain informational rather than hard bounds.
             0.07004f,
             0.07868f,
-            // Investigation note: PlantParams currently places tire contacts from the effective track width. Split
-            // physical tire-contact geometry from kinematic track width when the next track-width audit is done.
-            // March 22, 2026 aux006 short smooth-turn encoder/gyro fit before left-wall contact implied 96.49 mm
-            // effective at the 63 mm nominal radius. The 153 mm point is scaled by the same 1.174285x factor as a
-            // better starting point for the next wide-radius audit pass.
-            { 0.063f, 0.096491f, 0.153f, 0.097348f }
+            // Investigation note: PlantParams still places tire contacts from the effective track width. Keep the
+            // kinematic fit here authoritative until physical contact geometry is split explicitly.
+            // April 20, 2026 post-fan-swap open-floor smooth card `12:10:58` is the current hardware baseline and
+            // implies about 132.35 mm effective track width in SEC_50_SMOOTH. Only one usable post-swap smooth card
+            // exists so both anchor radii currently share that fit.
+            { 0.063f, 0.13235f, 0.153f, 0.13235f }
         };
         VehicleState _state;
         float _peakForwardAcceleration;

@@ -539,7 +539,7 @@ namespace MazeMap::Config
     inline constexpr MazeMap::ProportionalDerivativeCluster kDriveBasePDCluster(
         /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         /* headingGyroPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
-        /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kArcYawD),
+        /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kArcYawD),
         /* velocityStatePD */ MazeMap::ProportionalDerivative(2.0f, 0.01f),
         /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(2.0f, 0.01f),
         /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),

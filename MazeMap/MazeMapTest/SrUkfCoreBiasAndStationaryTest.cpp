@@ -3,14 +3,30 @@
 
 #include "SrUkfCoreTestSupport.h"
 
+#include <algorithm>
+#include <cmath>
+
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
+    namespace
+    {
+        struct ScopedUkfRuntimeTuningRestore
+        {
+            SrUkfCore::RuntimeTuning saved = SrUkfCore::GetRuntimeTuning();
+
+            ~ScopedUkfRuntimeTuningRestore()
+            {
+                SrUkfCore::SetRuntimeTuning(saved);
+            }
+        };
+    }
+
     TEST_CLASS(SrUkfCoreBiasAndStationaryTest)
     {
     public:
-        TEST_METHOD(SrUkfCoreStationaryYawConstraintCollapsesMotionStateBeforeBiasSeedWindowCompletes)
+        TEST_METHOD(SrUkfCoreStationaryYawConstraintCollapsesMotionStateOncePostSwapStationaryDwellCompletes)
         {
             SrUkfCore core;
             const VehicleState::StateVector initialState = BuildUkfState(
@@ -26,9 +42,11 @@ namespace MazeMap
 
             ControlInput control{};
             EncoderObs encoder{};
-            constexpr float dt = 0.001f;
+            constexpr float dt = 0.002f;
             constexpr float rawStationaryGyroRadps = 0.04f;
-            for (int step = 0; step < 100; ++step)
+            const int kSteps =
+                static_cast<int>(std::ceil(SrUkfCore::GetRuntimeTuning().stationaryCertificationDwellS / dt)) + 10;
+            for (int step = 0; step < kSteps; ++step)
             {
                 core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control));
@@ -68,7 +86,10 @@ namespace MazeMap
             ControlInput control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
-            constexpr int kSteps = 200;
+            const int kSteps =
+                (std::max)(
+                    200,
+                    static_cast<int>(std::ceil(SrUkfCore::GetRuntimeTuning().stationaryCertificationDwellS / dt)) + 20);
             InitialStationaryGyroBiasExpectation expected{};
 
             for (int step = 0; step < kSteps; ++step)
@@ -241,6 +262,8 @@ namespace MazeMap
         }
         TEST_METHOD(SrUkfCoreRepeatedZeroEncoderUpdatesDriveYawRateVarianceExtremelyLow)
         {
+            const ScopedUkfRuntimeTuningRestore restore{};
+            SrUkfCore::ResetRuntimeTuning();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.0f,
@@ -274,9 +297,18 @@ namespace MazeMap
 
             const VehicleState::StateMatrix covariance = core.covariance();
             const float finalYawRateVarianceRadps2 = covariance(VehicleState::kR, VehicleState::kR);
+            const PlantParams params = PlantParams::Default();
+            const float stationaryEncoderOmegaSigmaRadps =
+                SrUkfCore::ComputeStationaryEncoderOmegaSigmaRadps(params);
+            const float stationaryYawRateSigmaRadps =
+                std::sqrt(2.0f) * params.wheelRadiusM * stationaryEncoderOmegaSigmaRadps / params.trackWidthM;
+            const float stationaryYawMeasurementVarianceRadps2 =
+                stationaryYawRateSigmaRadps * stationaryYawRateSigmaRadps;
+            const float acceptableYawRateVarianceRadps2 =
+                (std::max)(1.01f * stationaryYawMeasurementVarianceRadps2, 1.0e-8f);
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kR, VehicleState::kR)));
             Assert::IsTrue(
-                finalYawRateVarianceRadps2 <= 1.0e-4f,
+                finalYawRateVarianceRadps2 <= acceptableYawRateVarianceRadps2,
                 (std::wstring(L"Final yaw-rate variance was ") + std::to_wstring(finalYawRateVarianceRadps2)).c_str());
         }
 

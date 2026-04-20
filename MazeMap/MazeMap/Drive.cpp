@@ -145,25 +145,6 @@ namespace MazeMap::App::Internal
                 WithinConfiguredTolerance(measuredYawRateRadps, limits.angularSpeedToleranceRadps);
         }
 
-        float ComputeTurnCommandRadps(
-            const float remainingRad,
-            const float measuredYawRateRadps,
-            const MotionLimits& limits) noexcept
-        {
-            const float resolvedRemainingRad = FallbackFinite(remainingRad, 0.0f);
-            const float resolvedYawRateRadps = FallbackFinite(measuredYawRateRadps, 0.0f);
-            const float feedforwardRadps =
-                HasPositiveLimit(limits.angularAccelRadps2) ?
-                (SignF(resolvedRemainingRad) *
-                    ReachableSpeedWithBoundary(0.0f, std::fabs(resolvedRemainingRad), limits.angularAccelRadps2)) :
-                0.0f;
-            const float angularCommandRadps =
-                feedforwardRadps +
-                (Config::kTurnHeadingKp * resolvedRemainingRad) -
-                (Config::kTurnYawD * resolvedYawRateRadps);
-            return LimitByConfiguredMagnitude(angularCommandRadps, limits.maxAngularSpeedRadps);
-        }
-
         template <typename T>
         T* StorageAs(void* storage) noexcept
         {
@@ -717,10 +698,18 @@ namespace MazeMap::App::Internal
             return LoopController::ControlVector::Brake;
         }
 
-        return _drive->PointControlVector(
+        const float resolvedRemainingRad = FallbackFinite(remainingRad, 0.0f);
+        const float feedforwardYawRateRadps =
+            HasPositiveLimit(_limits.angularAccelRadps2) ?
+            (SignF(resolvedRemainingRad) *
+                ReachableSpeedWithBoundary(0.0f, std::fabs(resolvedRemainingRad), _limits.angularAccelRadps2)) :
+            0.0f;
+        return _drive->PointControlVectorWithHeadingTarget(
             0.0f,
-            ComputeTurnCommandRadps(remainingRad, state.estimate.angularSpeedRadps, _limits),
-            _commandPdSettings.yawRate);
+            LimitByConfiguredMagnitude(feedforwardYawRateRadps, _limits.maxAngularSpeedRadps),
+            turn.targetYawRad,
+            _commandPdSettings.yawRate,
+            _commandPdSettings.heading);
     }
 
     LoopController::ControlVector Drive::TurnTransitionControls(
@@ -803,10 +792,18 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
             }
 
-            return _drive->PointControlVector(
+            const float resolvedRemainingRad = FallbackFinite(remainingRad, 0.0f);
+            const float feedforwardYawRateRadps =
+                HasPositiveLimit(_limits.angularAccelRadps2) ?
+                (SignF(resolvedRemainingRad) *
+                    ReachableSpeedWithBoundary(0.0f, std::fabs(resolvedRemainingRad), _limits.angularAccelRadps2)) :
+                0.0f;
+            return _drive->PointControlVectorWithHeadingTarget(
                 0.0f,
-                ComputeTurnCommandRadps(remainingRad, state.estimate.angularSpeedRadps, _limits),
-                _commandPdSettings.yawRate);
+                LimitByConfiguredMagnitude(feedforwardYawRateRadps, _limits.maxAngularSpeedRadps),
+                targetYawRad,
+                _commandPdSettings.yawRate,
+                _commandPdSettings.heading);
         }
 
         if (std::fabs(angleRad) > 0.0f)

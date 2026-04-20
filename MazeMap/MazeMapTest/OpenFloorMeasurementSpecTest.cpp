@@ -39,6 +39,14 @@ namespace MazeMap
             Assert::IsTrue(MazeMap::kOpenFloorLaunchSettleMs > 0UL);
         }
 
+        TEST_METHOD(LaunchAndStraightSampleScheduleMatchesCurrentOpenFloorPlan)
+        {
+            Assert::AreEqual(static_cast<std::uint8_t>(3U), MazeMap::kOpenFloorLaunchRepeatsPerMagnitude);
+            Assert::AreEqual(static_cast<std::uint8_t>(3U), MazeMap::kOpenFloorStraightRepeatsPerSpeed);
+            Assert::AreEqual(100UL, MazeMap::kOpenFloorInterMotionHoldMs);
+            Assert::AreEqual(500UL, MazeMap::kOpenFloorInterPhaseHoldMs);
+        }
+
         TEST_METHOD(SelectorRemovalFaultRequiresHalfSecondOfContinuousLoss)
         {
             Assert::AreEqual(500UL, MazeMap::kOpenFloorSelectorRemovalFaultDelayMs);

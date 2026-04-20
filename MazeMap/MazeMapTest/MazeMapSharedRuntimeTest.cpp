@@ -262,6 +262,41 @@ namespace MazeMap::App
             Assert::IsTrue(std::isfinite(control.rightMotorPwm));
         }
 
+        TEST_METHOD(SharedRuntime_DriveTurnUsesHeadingTargetCommandPath)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            PrimeSharedRuntimeDriveWheelSpeed(runtime, 0.06f, 0.06f);
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            drive.SetLimits(limits);
+
+            const Internal::LoopController::ControlVector expected =
+                runtime.Drive().PointControlVectorWithHeadingTarget(
+                    0.0f,
+                    limits.maxAngularSpeedRadps,
+                    HALF_PI_F,
+                    drive.GetCommandPDSettings().yawRate,
+                    drive.GetCommandPDSettings().heading);
+
+            drive.StartTurn(HALF_PI_F);
+            Assert::IsTrue(drive.Active());
+
+            bool done = false;
+            const Internal::LoopController::ControlVector actual = drive.GetNextControls(done);
+            Assert::IsFalse(done);
+            Assert::AreEqual(expected.leftMotorPwm, actual.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(expected.rightMotorPwm, actual.rightMotorPwm, 1.0e-6f);
+        }
+
         TEST_METHOD(SharedRuntime_DriveHoldRejectsFanOffWheelSpeedAboveBaseSettleThreshold)
         {
             Internal::SharedRobotRuntime runtime;

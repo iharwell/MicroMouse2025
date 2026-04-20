@@ -210,7 +210,6 @@ namespace
 
     constexpr const char* kOpenFloorMeasurementSelectorRemovedReason =
         "Open-floor measurement selector jumper removed";
-    constexpr std::uint16_t kOpenFloorMeasurementInterPhaseHoldMs = 500U;
     constexpr float kOpenFloorMeasurementMaxSmoothSpeedMps = MazeMap::kOpenFloorSmoothSpeedBinsMps[2];
     constexpr MazeMap::ManeuverCode kOpenFloorMeasurementSpeedChangeStraightCode = MazeMap::S1;
 
@@ -486,7 +485,9 @@ namespace MazeMap::App::Internal
         enum class HoldContinuation : std::uint8_t
         {
             None,
+            LaunchRepeat,
             Launch,
+            StraightRepeat,
             Straight,
             Yaw,
             Smooth,
@@ -511,6 +512,7 @@ namespace MazeMap::App::Internal
         {
             bool initialized{};
             std::uint32_t deadlineMs{};
+            std::uint16_t durationMs{};
             HoldContinuation continuation{ HoldContinuation::None };
         };
 
@@ -680,7 +682,7 @@ namespace MazeMap::App::Internal
         void SwitchPhase(
             LoopController::TickServices& services,
             ModeWorkCallback callback) noexcept;
-        void StartInterPhaseHold(HoldContinuation continuation) noexcept;
+        void StartInterPhaseHold(HoldContinuation continuation, std::uint16_t durationMs) noexcept;
         bool SwitchToHoldContinuation(LoopController::TickServices& services);
         bool CheckTimingFault(
             const LoopController::ModeState& state,
@@ -690,7 +692,9 @@ namespace MazeMap::App::Internal
             LoopController::TickServices& services,
             const LoopController::ModeState& state,
             const char* estimatorReason);
+        bool HasRemainingLaunchSamples() const noexcept;
         bool StartNextLaunchSample();
+        bool HasRemainingStraightSamples() const noexcept;
         bool StartNextStraightSample();
         bool StartNextYawSample();
         bool StartNextSmoothEntry();
@@ -1401,11 +1405,13 @@ namespace MazeMap::App::Internal
     }
 
     void OpenFloorMeasurementController::State::StartInterPhaseHold(
-        const HoldContinuation continuation) noexcept
+        const HoldContinuation continuation,
+        const std::uint16_t durationMs) noexcept
     {
         _driveService.Cancel();
         _holdState = {};
         _holdState.continuation = continuation;
+        _holdState.durationMs = durationMs;
     }
 
     Drive::OperationMode OpenFloorMeasurementController::State::OpenFloorOperationMode() const noexcept
@@ -1482,11 +1488,30 @@ namespace MazeMap::App::Internal
         return true;
     }
 
+    bool OpenFloorMeasurementController::State::HasRemainingLaunchSamples() const noexcept
+    {
+        std::size_t magnitudeIndex = _launchState.magnitudeIndex;
+        std::uint8_t repeatIteration = _launchState.repeatIteration;
+        while (magnitudeIndex < MazeMap::kOpenFloorLaunchDriveMagnitudes.size())
+        {
+            if (repeatIteration >= MazeMap::kOpenFloorLaunchRepeatsPerMagnitude)
+            {
+                repeatIteration = 0U;
+                ++magnitudeIndex;
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     bool OpenFloorMeasurementController::State::StartNextLaunchSample()
     {
         while (_launchState.magnitudeIndex < MazeMap::kOpenFloorLaunchDriveMagnitudes.size())
         {
-            if (_launchState.repeatIteration >= DiagnosticConfig::kLaunchRepeatsPerMagnitude)
+            if (_launchState.repeatIteration >= MazeMap::kOpenFloorLaunchRepeatsPerMagnitude)
             {
                 _launchState.repeatIteration = 0U;
                 _launchState.negativeNext = false;
@@ -1532,12 +1557,31 @@ namespace MazeMap::App::Internal
         return false;
     }
 
+    bool OpenFloorMeasurementController::State::HasRemainingStraightSamples() const noexcept
+    {
+        std::size_t speedIndex = _straightState.speedIndex;
+        std::uint8_t repeatIteration = _straightState.repeatIteration;
+        while (speedIndex < MazeMap::kOpenFloorStraightSpeedBinsMps.size())
+        {
+            if (repeatIteration >= MazeMap::kOpenFloorStraightRepeatsPerSpeed)
+            {
+                repeatIteration = 0U;
+                ++speedIndex;
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     bool OpenFloorMeasurementController::State::StartNextStraightSample()
     {
         const float straightDistanceM = MazeMap::OpenFloorStrEquivalentDistanceMeters(4U);
         while (_straightState.speedIndex < MazeMap::kOpenFloorStraightSpeedBinsMps.size())
         {
-            if (_straightState.repeatIteration >= DiagnosticConfig::kStraightRepeatsPerSpeed)
+            if (_straightState.repeatIteration >= MazeMap::kOpenFloorStraightRepeatsPerSpeed)
             {
                 _straightState.repeatIteration = 0U;
                 _straightState.negativeNext = false;
@@ -1940,9 +1984,25 @@ namespace MazeMap::App::Internal
     {
         switch (_holdState.continuation)
         {
+        case HoldContinuation::LaunchRepeat:
+            if (!StartNextLaunchSample())
+            {
+                services.Fault("Open-floor launch sample could not start after the inter-motion hold");
+                return false;
+            }
+            SwitchPhase(services, &OpenFloorMeasurementController::State::LaunchTickThunk);
+            return true;
         case HoldContinuation::Launch:
             _launchState = {};
             SwitchPhase(services, &OpenFloorMeasurementController::State::LaunchTickThunk);
+            return true;
+        case HoldContinuation::StraightRepeat:
+            if (!StartNextStraightSample())
+            {
+                services.Fault("Open-floor straight sample could not start after the inter-motion hold");
+                return false;
+            }
+            SwitchPhase(services, &OpenFloorMeasurementController::State::StraightTickThunk);
             return true;
         case HoldContinuation::Straight:
             _straightState = {};
@@ -2037,7 +2097,7 @@ namespace MazeMap::App::Internal
         if (!_holdState.initialized)
         {
             _holdState.initialized = true;
-            _holdState.deadlineMs = millis() + kOpenFloorMeasurementInterPhaseHoldMs;
+            _holdState.deadlineMs = millis() + _holdState.durationMs;
         }
         if (static_cast<long>(_holdState.deadlineMs - millis()) <= 0)
         {
@@ -2101,7 +2161,7 @@ namespace MazeMap::App::Internal
 
         if (static_cast<long>(_staticState.deadlineMs - millis()) <= 0)
         {
-            StartInterPhaseHold(HoldContinuation::Launch);
+            StartInterPhaseHold(HoldContinuation::Launch, MazeMap::kOpenFloorInterPhaseHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
         }
 
@@ -2123,7 +2183,7 @@ namespace MazeMap::App::Internal
         }
         if (!_launchState.active && !StartNextLaunchSample())
         {
-            StartInterPhaseHold(HoldContinuation::Straight);
+            StartInterPhaseHold(HoldContinuation::Straight, MazeMap::kOpenFloorInterPhaseHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
             return stopControl;
         }
@@ -2207,6 +2267,14 @@ namespace MazeMap::App::Internal
                 else
                 {
                     _launchState.active = false;
+                    StartInterPhaseHold(
+                        HasRemainingLaunchSamples() ?
+                            HoldContinuation::LaunchRepeat :
+                            HoldContinuation::Straight,
+                        HasRemainingLaunchSamples() ?
+                            MazeMap::kOpenFloorInterMotionHoldMs :
+                            MazeMap::kOpenFloorInterPhaseHoldMs);
+                    SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
                 }
             }
 
@@ -2218,6 +2286,14 @@ namespace MazeMap::App::Internal
             ((nowMs - _launchState.settleStartMs) >= MazeMap::kOpenFloorLaunchSettleMs))
         {
             _launchState.active = false;
+            StartInterPhaseHold(
+                HasRemainingLaunchSamples() ?
+                    HoldContinuation::LaunchRepeat :
+                    HoldContinuation::Straight,
+                HasRemainingLaunchSamples() ?
+                    MazeMap::kOpenFloorInterMotionHoldMs :
+                    MazeMap::kOpenFloorInterPhaseHoldMs);
+            SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
         }
 
         return stopControl;
@@ -2238,7 +2314,7 @@ namespace MazeMap::App::Internal
         }
         if (!_straightState.active && !StartNextStraightSample())
         {
-            StartInterPhaseHold(HoldContinuation::Yaw);
+            StartInterPhaseHold(HoldContinuation::Yaw, MazeMap::kOpenFloorInterPhaseHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
             return stopControl;
         }
@@ -2273,6 +2349,14 @@ namespace MazeMap::App::Internal
         if (done)
         {
             _straightState.active = false;
+            StartInterPhaseHold(
+                HasRemainingStraightSamples() ?
+                    HoldContinuation::StraightRepeat :
+                    HoldContinuation::Yaw,
+                HasRemainingStraightSamples() ?
+                    MazeMap::kOpenFloorInterMotionHoldMs :
+                    MazeMap::kOpenFloorInterPhaseHoldMs);
+            SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
             return stopControl;
         }
         return control;
@@ -2293,7 +2377,7 @@ namespace MazeMap::App::Internal
         }
         if (!_yawState.active && !StartNextYawSample())
         {
-            StartInterPhaseHold(HoldContinuation::Smooth);
+            StartInterPhaseHold(HoldContinuation::Smooth, MazeMap::kOpenFloorInterPhaseHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
             return stopControl;
         }
@@ -2347,7 +2431,7 @@ namespace MazeMap::App::Internal
         }
         if (!_smoothState.active && !StartNextSmoothEntry())
         {
-            StartInterPhaseHold(HoldContinuation::LoopCw);
+            StartInterPhaseHold(HoldContinuation::LoopCw, MazeMap::kOpenFloorInterPhaseHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
             return stopControl;
         }
@@ -2405,7 +2489,7 @@ namespace MazeMap::App::Internal
         }
         if (!_loopState.active && !StartNextLoopEntry())
         {
-            StartInterPhaseHold(HoldContinuation::LoopCcw);
+            StartInterPhaseHold(HoldContinuation::LoopCcw, MazeMap::kOpenFloorInterPhaseHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
             return stopControl;
         }
@@ -2520,7 +2604,7 @@ namespace MazeMap::App::Internal
             "OpenFloorMeasurementController.cpp",
             "timing capture; static hold; launch PWM pulses; straight drive tests; yaw drive tests; smooth maneuver sweep; clockwise closed maneuver loop; counter-clockwise closed maneuver loop",
             "DiagnosticConfig linear limits; OpenFloorMeasurementSpec speed bins; shared startup calibration; shared drive service",
-            "Inter-phase 500 ms brake holds; smooth phase uses the current hand-picked closed maneuver sequence; loop sections are maneuver-driven",
+            "Inter-phase 500 ms brake holds; launch and straight samples insert 100 ms brake holds between motions; smooth phase uses the current hand-picked closed maneuver sequence; loop sections are maneuver-driven",
             "open_floor_timing.mmlog, open_floor_main.mmlog",
         };
         return descriptor;

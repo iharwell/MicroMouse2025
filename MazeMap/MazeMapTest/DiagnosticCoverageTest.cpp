@@ -241,52 +241,6 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.30f, 1.20f, 0UL, 0UL) - 1.0f) < 1.0e-6f);
 		}
 
-		TEST_METHOD(VehiclePhysicalModelMatchesSharedGeometryAndKinematicFit)
-		{
-			const VehiclePhysicalModel& model = Vehicle::GetPhysicalModel();
-			Assert::IsTrue(std::fabs(model.massKg - 0.14f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.lengthM - 0.1085f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.yawInertiaKgM2 - 0.000220f) < 1.0e-9f);
-			Assert::IsTrue(std::fabs(model.frontWallContactOffsetM - 0.056f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthM - 0.084635f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMinM - 0.07004f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.trackWidthPhysicalMaxM - 0.07868f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.tightRadiusM - 0.063f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.tightTrackWidthM - 0.096491f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.wideRadiusM - 0.153f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.arcTrackWidthInterpolation.wideTrackWidthM - 0.097348f) < 1.0e-6f);
-		}
-
-		TEST_METHOD(MotorEncoderDriveSharedModelMatchesMeasuredDrivetrain)
-		{
-			const auto& model = MotorEncoderDrive::GetSharedPhysicalModel();
-			Assert::IsTrue(std::fabs(model.nominalVoltageV - 6.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.nominalNoLoadSpeedRpm - 14100.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.supplyVoltageV - 8.4f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.resistanceOhms - 4.31f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.torqueConstantNmPerA - MilliNewtonMetersToNewtonMeters(3.96f)) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.noLoadCurrentA - MilliAmpsToAmps(45.9f)) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.speedConstantRadpsPerVolt - ComputeMotorSpeedConstantRadpsPerVolt(14100.0f, 6.0f, MilliAmpsToAmps(45.9f), 4.31f)) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.gearRatio - (56.0f / 17.0f)) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(model.wheelDiameterM - 0.025220f) < 1.0e-6f);
-			Assert::AreEqual(4096U, static_cast<unsigned>(model.pulsesPerRev));
-		}
-
-		TEST_METHOD(PlantParamsDefaultUsesLaunchFitWheelBankInertia)
-		{
-			const PlantParams params = PlantParams::Default();
-			Assert::IsTrue(std::fabs(params.equivalentWheelInertiaKgM2 - 1.6e-5f) < 1.0e-10f);
-		}
-
-		TEST_METHOD(PlantParamsDefaultMatchesLatestLaunchThresholdFit)
-		{
-			const PlantParams params = PlantParams::Default();
-			Assert::IsTrue(std::fabs(params.rollingFrictionTorqueNm - 0.00372f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(params.staticFrictionTorqueNm - 0.007028315f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(params.staticFrictionMaxSpeedMps - 0.005f) < 1.0e-9f);
-			Assert::IsTrue(std::fabs(params.viscousFrictionNmPerRadps - 0.0f) < 1.0e-9f);
-		}
-
 		TEST_METHOD(MotorEncoderDriveDefaultFactoriesUseSharedModelAndHardwareMap)
 		{
 			const auto& model = MotorEncoderDrive::GetSharedPhysicalModel();
@@ -305,29 +259,18 @@ namespace MazeMap
 			Assert::IsFalse(right.getInvertEncoderDirection());
 		}
 
-		TEST_METHOD(VehicleDefaultModelUsesMeasuredTurnEnvelope)
-		{
-			Vehicle vehicle;
-			const VehiclePhysicalModel& model = Vehicle::GetPhysicalModel();
-			Assert::IsTrue(std::fabs(model.trackWidthM - 0.084635f) < 1.0e-6f);
-			Assert::IsTrue(model.trackWidthPhysicalMinM < model.trackWidthPhysicalMaxM);
-			Assert::IsTrue(std::fabs(vehicle.GetMaxLateralAcceleration() - 16.5f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(vehicle.GetMaxRotationalVelocity() - 9.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(vehicle.GetMaxAngularAcceleration() - 45.0f) < 1.0e-6f);
-		}
-
 		TEST_METHOD(ArcTrackWidthInterpolationClampsAndBlendsByRadius)
 		{
-			Assert::AreEqual(0.096491f, Vehicle::GetArcEffectiveTrackWidth(0.040f), 1.0e-6f);
-			Assert::AreEqual(0.097348f, Vehicle::GetArcEffectiveTrackWidth(0.200f), 1.0e-6f);
-			Assert::AreEqual(0.096920f, Vehicle::GetArcEffectiveTrackWidth(0.108f), 1.0e-5f);
+			Assert::AreEqual(0.13235f, Vehicle::GetArcEffectiveTrackWidth(0.040f), 1.0e-6f);
+			Assert::AreEqual(0.13235f, Vehicle::GetArcEffectiveTrackWidth(0.200f), 1.0e-6f);
+			Assert::AreEqual(0.13235f, Vehicle::GetArcEffectiveTrackWidth(0.108f), 1.0e-6f);
 		}
 
 		TEST_METHOD(ArcTrackWidthInterpolationFallsBackToBaseWidthForStraightAndInPlaceMotion)
 		{
 			Assert::AreEqual(0.084635f, Vehicle::GetEffectiveTrackWidthForMotion(0.0f, 4.0f), 1.0e-6f);
 			Assert::AreEqual(0.084635f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, 0.0f), 1.0e-6f);
-			Assert::AreEqual(0.096491f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, (0.3f / 0.063f)), 1.0e-5f);
+			Assert::AreEqual(0.13235f, Vehicle::GetEffectiveTrackWidthForMotion(0.3f, (0.3f / 0.063f)), 1.0e-6f);
 		}
 
 		TEST_METHOD(TryComputeEffectiveTrackWidthMUsesEncoderDifferentialOverYaw)

@@ -22,6 +22,8 @@ from open_floor_plant_fit import TirePlantFitSummary
 from open_floor_plant_fit import FeedforwardAlignmentSummary
 from open_floor_plant_fit import summarize_feedforward_alignment
 from open_floor_plant_fit import summarize_tire_plant_fit
+from open_floor_yaw_fft import YawFftSummary
+from open_floor_yaw_fft import summarize_yaw_fft
 from open_floor_launch_floor import LaunchFloorSummary
 from open_floor_launch_floor import summarize_launch_floor
 from open_floor_recovery import DEFAULT_CONTROL_LOG_NAME
@@ -51,18 +53,41 @@ PRIMITIVE_NAMES = {
     1: "TIMING_NO_MOTION",
     2: "STATIC_HOLD",
     3: "OPEN_LOOP_LAUNCH",
-    4: "STR2",
-    5: "STR4",
-    6: "IP90",
-    7: "IP90_M",
-    8: "IP180",
-    9: "S45SS",
-    10: "S45SS_M",
-    11: "S90SS",
-    12: "S90SS_M",
-    13: "S135SS",
-    14: "S135SS_M",
-    15: "RECOVERY",
+    4: "STR1",
+    5: "STR2",
+    6: "STR4",
+    7: "IP90",
+    8: "IP90_M",
+    9: "IP180",
+    10: "S45SD",
+    11: "S45SD_M",
+    12: "S45SS",
+    13: "S45SS_M",
+    14: "S45LS",
+    15: "S45LS_M",
+    16: "S45LD",
+    17: "S45LD_M",
+    18: "S90SD",
+    19: "S90SD_M",
+    20: "S90SS",
+    21: "S90SS_M",
+    22: "S90LS",
+    23: "S90LS_M",
+    24: "S90LD",
+    25: "S90LD_M",
+    26: "S135SD",
+    27: "S135SD_M",
+    28: "S135SS",
+    29: "S135SS_M",
+    30: "S135LS",
+    31: "S135LS_M",
+    32: "S135LD",
+    33: "S135LD_M",
+    34: "S180SS",
+    35: "S180SS_M",
+    36: "S180LS",
+    37: "S180LS_M",
+    38: "RECOVERY",
 }
 
 DIRECTION_NAMES = {
@@ -167,6 +192,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Optional path to logging.txt so recovery-turn fits use the run's motor constants.",
     )
+    parser.add_argument(
+        "--fft-fallback-control-log",
+        type=Path,
+        help="Optional fallback logging.txt when the latest card is missing drive electrical dumps but still has the latest mass geometry.",
+    )
     return parser.parse_args()
 
 
@@ -192,6 +222,7 @@ def percentile(sorted_values: list[float], fraction: float) -> float:
 def analyze_main_csv(
     path: Path,
     control_log_path: Path | None,
+    yaw_fft_fallback_control_log_path: Path | None,
 ) -> tuple[
     StationarySummary,
     list[LaunchMagnitudeSummary],
@@ -199,6 +230,7 @@ def analyze_main_csv(
     RepeatabilitySummary,
     dict[str, float],
     TirePlantFitSummary | None,
+    YawFftSummary | None,
     FeedforwardAlignmentSummary | None,
     list[RecoveryTurnSummary],
     RecoveryAggregateSummary | None,
@@ -230,6 +262,7 @@ def analyze_main_csv(
     recovery_segments: list[list[dict[str, str]]] = []
     current_recovery_segment: list[dict[str, str]] = []
     current_recovery_key: tuple[int, int, int] | None = None
+    yaw_rows_by_key: DefaultDict[tuple[int, int], list[dict[str, str]]] = defaultdict(list)
     available_section_ids: set[int] = set()
 
     with path.open(newline="") as csv_file:
@@ -254,6 +287,9 @@ def analyze_main_csv(
                 recovery_segments.append(current_recovery_segment)
                 current_recovery_segment = []
                 current_recovery_key = None
+
+            if section_id == 4:
+                yaw_rows_by_key[(primitive_id, int(row["repeat_index"]))].append(dict(row))
 
             if section_id == STATIC_SECTION_ID and primitive_id == STATIC_PRIMITIVE_ID:
                 static_dt_seconds += 1.0e-6 * int(row["dt_us"])
@@ -406,6 +442,11 @@ def analyze_main_csv(
         control_log_path,
         available_section_ids,
     )
+    yaw_fft_summary = summarize_yaw_fft(
+        dict(yaw_rows_by_key),
+        control_log_path,
+        yaw_fft_fallback_control_log_path,
+    )
     feedforward_alignment = summarize_feedforward_alignment(
         dict(launch_rows_by_repeat),
         control_log_path,
@@ -426,6 +467,7 @@ def analyze_main_csv(
         repeatability_summary,
         suggestions,
         tire_plant_fit,
+        yaw_fft_summary,
         feedforward_alignment,
         recovery_summaries,
         recovery_aggregate,
@@ -514,6 +556,15 @@ def main() -> int:
     if control_log_path is not None and not control_log_path.is_file():
         print(f"error: control log not found: {control_log_path}", file=sys.stderr)
         return 1
+    if (
+        args.fft_fallback_control_log is not None and
+        not args.fft_fallback_control_log.is_file()
+    ):
+        print(
+            f"error: FFT fallback control log not found: {args.fft_fallback_control_log}",
+            file=sys.stderr,
+        )
+        return 1
 
     (
         stationary,
@@ -522,10 +573,11 @@ def main() -> int:
         repeatability,
         suggestions,
         tire_plant_fit,
+        yaw_fft_summary,
         feedforward_alignment,
         recovery_summaries,
         recovery_aggregate,
-    ) = analyze_main_csv(args.main, control_log_path)
+    ) = analyze_main_csv(args.main, control_log_path, args.fft_fallback_control_log)
 
     print(f"Open-floor main CSV: {args.main}")
     print()
@@ -674,6 +726,54 @@ def main() -> int:
         )
         if tire_plant_fit.lateral_identifiability_reason is not None:
             print(f"lateral_identifiability_reason={tire_plant_fit.lateral_identifiability_reason}")
+
+    if yaw_fft_summary is not None:
+        print()
+        print("Yaw oscillation FFT summary")
+        print(
+            "method=SEC_40_YAW phase-9 rows only; high-pass the planned turn envelope with a centered moving average, "
+            "FFT the differential wheel speed, gyro yaw rate, and differential motor torque, then keep the rigid-body "
+            "yaw contribution separate from the wheel-side inertia estimate"
+        )
+        print(
+            f"run_id={'unknown' if yaw_fft_summary.run_id is None else yaw_fft_summary.run_id}, "
+            f"configured_equivalent_wheel_inertia_kg_m2={yaw_fft_summary.configured_equivalent_wheel_inertia_kg_m2:.9f}, "
+            f"rigid_body_equivalent_inertia_kg_m2={yaw_fft_summary.rigid_body_equivalent_inertia_kg_m2:.9f}, "
+            f"track_width_m={yaw_fft_summary.track_width_m:.9f}, "
+            f"wheel_radius_m={yaw_fft_summary.wheel_radius_m:.9f}, "
+            f"yaw_inertia_kg_m2={yaw_fft_summary.yaw_inertia_kg_m2:.9f}, "
+            f"drive_parameter_source={'none' if yaw_fft_summary.drive_parameter_source_path is None else yaw_fft_summary.drive_parameter_source_path}, "
+            f"used_fallback_drive_parameters={int(yaw_fft_summary.used_fallback_drive_parameters)}"
+        )
+        if yaw_fft_summary.aggregate is not None:
+            aggregate = yaw_fft_summary.aggregate
+            print(
+                f"repeats={aggregate.repeat_count}, "
+                f"strong_repeats={aggregate.strong_repeat_count}, "
+                f"recommended_candidates={aggregate.recommended_candidate_count}, "
+                f"dominant_frequency_hz_median={format_optional_float(aggregate.dominant_frequency_hz_median, 6)}, "
+                f"wheel_speed_vs_torque_phase_deg_median={format_optional_float(aggregate.wheel_speed_vs_torque_phase_deg_median, 3)}, "
+                f"yaw_vs_rigid_wheel_phase_deg_median={format_optional_float(aggregate.yaw_vs_rigid_wheel_phase_deg_median, 3)}, "
+                f"yaw_coupling_magnitude_median={format_optional_float(aggregate.yaw_coupling_magnitude_median, 6)}, "
+                f"raw_total_inertia_kg_m2_median={format_optional_float(aggregate.raw_total_inertia_kg_m2_median, 9)}, "
+                f"phase_corrected_wheel_inertia_kg_m2_median={format_optional_float(aggregate.phase_corrected_wheel_inertia_kg_m2_median, 9)}, "
+                f"recommended_wheel_inertia_kg_m2={format_optional_float(aggregate.recommended_wheel_inertia_kg_m2, 9)}"
+            )
+        for summary in yaw_fft_summary.repeat_summaries:
+            print(
+                f"primitive={PRIMITIVE_NAMES.get(summary.primitive_id, str(summary.primitive_id))}, "
+                f"repeat={summary.repeat_index}, rows={summary.sample_count}, strong_peak={int(summary.strong_peak)}, "
+                f"dominant_frequency_hz={summary.dominant_frequency_hz:.6f}, "
+                f"oscillation_prominence={summary.oscillation_prominence:.3f}, "
+                f"wheel_speed_vs_torque_phase_deg={summary.wheel_speed_vs_torque_phase_deg:+.3f}, "
+                f"yaw_vs_rigid_wheel_phase_deg={summary.yaw_vs_rigid_wheel_phase_deg:+.3f}, "
+                f"yaw_coupling_magnitude={summary.yaw_coupling_magnitude:.6f}, "
+                f"raw_total_inertia_kg_m2={summary.raw_total_inertia_kg_m2:.9f}, "
+                f"rigid_body_subtracted_wheel_inertia_kg_m2={summary.rigid_body_subtracted_wheel_inertia_kg_m2:.9f}, "
+                f"phase_corrected_wheel_inertia_kg_m2={summary.phase_corrected_wheel_inertia_kg_m2:.9f}, "
+                f"raw_damping_nm_per_radps={summary.raw_damping_nm_per_radps:.9f}, "
+                f"phase_corrected_damping_nm_per_radps={summary.phase_corrected_damping_nm_per_radps:.9f}"
+            )
 
     if feedforward_alignment is not None:
         print()

@@ -60,25 +60,25 @@ namespace MazeMap
 
         struct RuntimeTuning
         {
-            float generalEncoderLinearSpeedSigmaMps = 0.004f;
-            float generalEncoderYawRateSigmaRadps = 0.1617f;
-            float stationaryEncoderVelocitySigmaMps = 1.76e-6f;
+            float generalEncoderLinearSpeedSigmaMps = 0.021187f;
+            float generalEncoderYawRateSigmaRadps = 0.111268f;
+            float stationaryEncoderVelocitySigmaMps = 0.002936f;
             float encoderPairNisThreshold = 13.81551f;
-            float imuYawRateSigmaRadps = 0.0131f;
-            float imuAccelSigmaMps2 = 0.1305f;
+            float imuYawRateSigmaRadps = 0.062323f;
+            float imuAccelSigmaMps2 = 0.600153f;
             float pivotScrubMaxCommandLinearMps = 0.03f;
             float pivotScrubMinCommandAngularRadps = 1.0f;
             float pivotScrubYawConsistencyThresholdRadps = 0.03f;
             float pivotScrubYawWindowMismatchThresholdRad = 0.003f;
             float pivotScrubZeroUSigmaMps = 0.06f;
             float stationaryGyroBiasTimeConstantS = 30.0f;
-            float stationaryCertificationDwellS = 0.080f;
+            float stationaryCertificationDwellS = 0.150f;
             float stationaryCandidateMaxLinearCommandMps = 0.03f;
             float stationaryCandidateMaxAngularCommandRadps = 0.15f;
             float stationaryCandidateMaxDriveCommand = 0.08f;
             float stationaryCandidateMaxEncoderOmegaRadps = 1.0f;
-            float stationaryCandidateMaxCorrectedGyroRadps = 0.06f;
-            float stationaryCandidateMaxAccelMps2 = 0.6f;
+            float stationaryCandidateMaxCorrectedGyroRadps = 0.12f;
+            float stationaryCandidateMaxAccelMps2 = 1.0f;
             float commandSignFlipWindowS = 0.025f;
             float stationaryExitLaunchWindowS = 0.060f;
             float launchHoldS = 0.030f;
@@ -108,16 +108,19 @@ namespace MazeMap
             ModeProcessNoiseTuning inconsistentOrSaturatedProcessNoise{};
         };
 
-        // April 10, 2026 D:\open_floor_main.csv tuning from tooling/analyze_open_floor.py:
-        // - SEC_10_STATIC / STATIC_HOLD set the IMU yaw noise floor,
-        // - SEC_20_LAUNCH / OPEN_LOOP_LAUNCH repeatability set the moving encoder noise floor,
-        // - the single accel sigma stays conservative at the noisier body-X axis while planar accel updates remain disabled.
-        static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.004f;
-        static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.1617f;
-        static constexpr float kStationaryEncoderVelocitySigmaMps = 1.76e-6f;
+        // April 20, 2026 post-fan-swap open-floor tuning from tooling/analyze_open_floor.py:
+        // - later same-day cards `10:22:09` and `12:10:58` are the authoritative current-hardware baseline after
+        //   the fan replacement and worse-balance parts swap,
+        // - stationary gating and IMU sigma values use the later-card envelope because that is the hardware now on
+        //   the robot,
+        // - `SEC_20_LAUNCH / OPEN_LOOP_LAUNCH` repeatability from the later hardware sets the moving encoder noise floor,
+        // - planar accel updates remain disabled, but the accel sigma still tracks the noisier post-swap stationary data.
+        static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
+        static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.111268f;
+        static constexpr float kStationaryEncoderVelocitySigmaMps = 0.002936f;
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
-        static constexpr float kImuYawRateSigmaRadps = 0.0131f;
-        static constexpr float kImuAccelSigmaMps2 = 0.1305f;
+        static constexpr float kImuYawRateSigmaRadps = 0.062323f;
+        static constexpr float kImuAccelSigmaMps2 = 0.600153f;
         static constexpr float kPivotScrubMaxCommandLinearMps = 0.03f;
         static constexpr float kPivotScrubMinCommandAngularRadps = 1.0f;
         static constexpr float kPivotScrubYawConsistencyThresholdRadps = 0.03f;
