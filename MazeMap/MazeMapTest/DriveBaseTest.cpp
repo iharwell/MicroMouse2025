@@ -201,6 +201,25 @@ namespace MazeMap
     TEST_CLASS(DriveBaseTest)
     {
     public:
+        TEST_METHOD(MotionLimitsProvideDefaultTurnEnvelopeAndBoundaryReachability)
+        {
+            MotionLimits limits{};
+            limits.maxSpeedMps = 1.0f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 3.0f;
+            limits.maxAngularSpeedRadps = 9.0f;
+            limits.angularAccelRadps2 = 45.0f;
+
+            Assert::AreEqual(0.75f * DEG_TO_RAD_F, limits.angleToleranceRad, 1.0e-6f);
+            Assert::AreEqual(0.10f, limits.angularSpeedToleranceRadps, 1.0e-6f);
+
+            const float brakingRateRadps = ReachableSpeedWithBoundary(0.0f, 0.01f, limits.angularAccelRadps2);
+            Assert::AreEqual(
+                sqrtf(2.0f * limits.angularAccelRadps2 * 0.01f),
+                brakingRateRadps,
+                1.0e-6f);
+        }
+
         TEST_METHOD(DriveBaseDeltaCommandStaysSymmetricAcrossWheelSpeedMismatch)
         {
             PlantModel plant;

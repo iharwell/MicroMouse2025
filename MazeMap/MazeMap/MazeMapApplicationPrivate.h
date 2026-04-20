@@ -25,7 +25,6 @@
 #include "GyroBiasUpdatePolicy.h"
 #include "ImuCalibrationPolicy.h"
 #include "ImuSamplingProfile.h"
-#include "InPlaceTurnProfile.h"
 #include "LaunchAssistProfile.h"
 #include "CruiseSpeedFloor.h"
 #include "MotionTargetProjection.h"

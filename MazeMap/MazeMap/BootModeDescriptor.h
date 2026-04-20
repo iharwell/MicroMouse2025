@@ -18,7 +18,7 @@ namespace MazeMap::App
         PositionAccuracyAudit,
         ManeuverFileTest,
         TopSpeedMeasurement,
-        PrimaryDiagnostic,
+        OpenFloorMeasurement,
         Mission,
     };
 

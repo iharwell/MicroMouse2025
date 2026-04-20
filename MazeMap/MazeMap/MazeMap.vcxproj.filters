@@ -183,9 +183,6 @@
     <ClInclude Include="ImuSamplingProfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="InPlaceTurnProfile.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Kinematics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -312,10 +309,7 @@
     <ClInclude Include="MouseUkfFacade.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="OpenFloorMeasurementCycle.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="OpenFloorMeasurementLabels.h">
+    <ClInclude Include="OpenFloorMeasurementController.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Path.h">

@@ -68,8 +68,8 @@ namespace MazeMap::App
             return "maneuver_file_test";
         case BootModeId::TopSpeedMeasurement:
             return "top_speed_measurement";
-        case BootModeId::PrimaryDiagnostic:
-            return "primary_diagnostic";
+        case BootModeId::OpenFloorMeasurement:
+            return "open_floor_measurement";
         case BootModeId::Mission:
         default:
             return "mission";
@@ -110,7 +110,7 @@ namespace MazeMap::App
                 &Internal::GetTopSpeedMeasurementBootModeDescriptor(),
             },
             BootModeRegistryEntry{
-                BootModeId::PrimaryDiagnostic,
+                BootModeId::OpenFloorMeasurement,
                 BootModeSelectorCondition::PinPair(27U, 28U),
                 true,
                 &Internal::GetOpenFloorMeasurementBootModeDescriptor(),

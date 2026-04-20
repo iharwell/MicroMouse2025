@@ -211,7 +211,6 @@
     <ClInclude Include="HalfStepPath.h" />
     <ClInclude Include="ImuCalibrationPolicy.h" />
     <ClInclude Include="ImuSamplingProfile.h" />
-    <ClInclude Include="InPlaceTurnProfile.h" />
     <ClInclude Include="Kinematics.h" />
     <ClInclude Include="LaunchAssistProfile.h" />
     <ClInclude Include="LedCalibrationConfig.h" />
@@ -254,8 +253,7 @@
     <ClInclude Include="MotorEncoderDrive.h" />
     <ClInclude Include="MotorModelUnits.h" />
     <ClInclude Include="MouseUkfFacade.h" />
-    <ClInclude Include="OpenFloorMeasurementCycle.h" />
-    <ClInclude Include="OpenFloorMeasurementLabels.h" />
+    <ClInclude Include="OpenFloorMeasurementController.h" />
     <ClInclude Include="Path.h" />
     <ClInclude Include="PathFinder.h" />
     <ClInclude Include="PathPoint.h" />

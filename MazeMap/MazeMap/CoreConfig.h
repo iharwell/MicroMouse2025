@@ -54,7 +54,7 @@ namespace MazeMap::Config
     // [Medium] Stop-to-stop mission and calibration moves should not hand off to the next segment until the chassis is
     // genuinely settled. These thresholds are tighter than the old profile exit tolerances so short moves do not carry
     // residual wheel motion into the next turn or pose snap.
-    constexpr float kMotionSettleSpeedThresholdMps = 0.010f;
+    constexpr float kMotionSettleSpeedThresholdMps = 0.020f;
     constexpr float kMotionSettleAngularSpeedThresholdRadps = 0.05f;
     constexpr uint16_t kMotionSettleHoldMs = 20U;
     constexpr uint16_t kMotionSettleTimeoutMs = 500U;

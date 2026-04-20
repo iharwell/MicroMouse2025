@@ -90,6 +90,8 @@ namespace MazeMap::App::Internal
         // Parameters:
         // `limits`:
         // Owner-level speed, acceleration, deceleration, and angular bounds consulted until changed.
+        // Drive stores exactly what the caller sets here; it does not sanitize or reinterpret the
+        // requested envelope before execution.
         void SetLimits(const MotionLimits& limits) noexcept;
 
         // Returns the current owner-level motion envelope.
@@ -219,9 +221,10 @@ namespace MazeMap::App::Internal
             const MazeMap::ManeuverInstance& maneuver);
 
         // Generic per-tick query used by the active mode callback. The caller may return the
-        // proposed controls to LoopController, override them, or ignore them. `done` reports normal
-        // primitive completion; internal faults are routed through the shared runtime fault path
-        // rather than through a separate public Drive fault protocol.
+        // proposed controls to LoopController, override them, or ignore them. `done` reports
+        // completion of the currently armed primitive. Drive uses configured limits only when they
+        // are actually available; it does not invent substitute limits or route command-path
+        // decisions through a separate fault protocol.
         //
         // Parameters:
         // `done`:
@@ -229,7 +232,8 @@ namespace MazeMap::App::Internal
         //
         // Return value:
         // Proposed control vector for the present tick. The mode may return it directly to
-        // LoopController, replace it, or ignore it.
+        // LoopController, replace it, or ignore it. Drive does not inject an independent fault or
+        // "safe fallback" policy into this command path.
         LoopController::ControlVector GetNextControls(bool& done);
 
     private:
@@ -251,21 +255,12 @@ namespace MazeMap::App::Internal
 
         bool CanStart() const noexcept;
         void ResetActivePrimitive() noexcept;
-        void SetFault(const char* reason) noexcept;
-        bool IsDriveMotionSettled(
-            const DriveTelemetry& stationaryReferenceTelemetry,
-            unsigned long stationaryReferenceMs,
-            const DriveTelemetry& telemetry,
-            const SensorSnapshot& snapshot,
-            unsigned long nowMs) const;
         const LoopController::ModeState* TryGetLoopState() const noexcept;
-        static float ManeuverSpeedLimit(
-            MazeMap::ManeuverCode code,
-            const MotionLimits& limits,
-            const MazeMap::Vehicle& vehicle);
 
         // Primitive-specific stepping helpers behind the generic public GetNextControls(...).
-        LoopController::ControlVector HoldControls(bool& done);
+        LoopController::ControlVector HoldControls(
+            const LoopController::ModeState& state,
+            bool& done);
         LoopController::ControlVector LinearMotionControls(
             const LoopController::ModeState& state,
             bool& done);
@@ -282,7 +277,6 @@ namespace MazeMap::App::Internal
             const LoopController::ModeState& state,
             bool& done);
 
-        SharedRobotRuntime* _runtime{};     // Shared runtime owner used for fault routing and shared services.
         LoopController* _loopController{};  // LoopController queried internally for current tick state.
         DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
         MazeMap::Vehicle* _speedVehicle{};  // Vehicle facts used for speed-limit derivation.
@@ -291,14 +285,10 @@ namespace MazeMap::App::Internal
         CommandPDSettings _commandPdSettings{};              // Owner-level CommandPD selections.
         OperationMode _operationMode{ OperationMode::Maze }; // Owner-level wall-correction policy.
         ActivePrimitive _activePrimitive{ ActivePrimitive::None }; // Currently armed primitive kind.
-        // Private fault bookkeeping only. Drive does not export a public fault protocol; failures
-        // are expected to route through the shared runtime fault path.
-        const char* _faultReason{};               // Most recent internal fault description routed to runtime.
-        bool _faulted{};                          // Sticky internal-fault indicator for the active run.
 
         // Opaque active-primitive storage. Drive.cpp privately overlays this with the active union
         // state and is responsible for asserting that the chosen union fits in this buffer.
-        static constexpr std::size_t PrimitiveStorageWordCount = 10;
+        static constexpr std::size_t PrimitiveStorageWordCount = 16;
         alignas(16) std::uint32_t _primitiveStorageWords[PrimitiveStorageWordCount]{};
     };
 }

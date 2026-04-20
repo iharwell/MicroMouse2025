@@ -6,8 +6,6 @@
 #include "LoopController.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
-#include "OpenFloorMeasurementCycle.h"
-#include "OpenFloorMeasurementLabels.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "PinPairStrap.h"
 

@@ -54,16 +54,20 @@ namespace MazeMap
             bool freezeMutation = false) noexcept;
 
     private:
-        using DirectionRow = std::array<EdgeEvidence, kDirectionCount>;
-        using MazeRow = std::array<DirectionRow, kMazeSize>;
-        using MazePlane = std::array<MazeRow, kMazeSize>;
+        static constexpr size_t kBoundaryCount = static_cast<size_t>(kMazeSize) + 1U;
 
-        MazePlane _edges{};
+        using HorizontalBoundaryRow = std::array<EdgeEvidence, kBoundaryCount>;
+        using HorizontalPlane = std::array<HorizontalBoundaryRow, kMazeSize>;
+        using VerticalCellRow = std::array<EdgeEvidence, kMazeSize>;
+        using VerticalPlane = std::array<VerticalCellRow, kBoundaryCount>;
+
+        HorizontalPlane _horizontalEdges{};
+        VerticalPlane _verticalEdges{};
 
         static bool isOrdinal(Direction direction) noexcept;
-        static size_t directionIndex(Direction direction) noexcept;
         static int8_t saturatingAdd(int8_t current, int8_t delta, int8_t limit) noexcept;
         static WallState stateFromScore(int8_t score, const Config& config) noexcept;
-        void setMirrored(const CellCoordinates& cell, Direction direction, const EdgeEvidence& evidence) noexcept;
+        EdgeEvidence& edgeFor(const CellCoordinates& cell, Direction direction) noexcept;
+        const EdgeEvidence& edgeFor(const CellCoordinates& cell, Direction direction) const noexcept;
     };
 }

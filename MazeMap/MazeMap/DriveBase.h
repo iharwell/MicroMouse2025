@@ -4,7 +4,6 @@
 // "Drive" translation layer; it is the low-level destination for concrete motion commands.
 #include "BootUtilityModeFramework.h"
 #include "CommandPD.h"
-#include "InPlaceTurnProfile.h"
 #include "LaunchAssistProfile.h"
 #include "LoopController.h"
 #include "Maneuver.h"
@@ -34,41 +33,6 @@ inline MazeMap::WheelControlProfile BuildMappingWheelControlProfile()
 {
     MazeMap::WheelControlProfile profile = BuildNominalWheelControlProfile();
     profile.accelerationResponseScale = Config::kMappingWheelAccelerationResponseScale;
-    return profile;
-}
-
-inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(float maxAngularSpeedRadps, float angularAccelRadps2)
-{
-    MazeMap::InPlaceTurnProfile profile{};
-    profile.maxAngularSpeedRadps = maxAngularSpeedRadps;
-    profile.angularAccelRadps2 = angularAccelRadps2;
-    profile.headingKp = Config::kTurnHeadingKp;
-    profile.yawD = Config::kTurnYawD;
-    profile.angleToleranceRad = Config::kAngleToleranceRad;
-    profile.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-    return profile;
-}
-
-inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MazeMap::Vehicle& vehicle)
-{
-    return BuildSharedInPlaceTurnProfile(
-        vehicle.GetMaxRotationalVelocity(),
-        vehicle.GetMaxAngularAcceleration());
-}
-
-inline MazeMap::InPlaceTurnProfile BuildSharedInPlaceTurnProfile(const MotionLimits& limits)
-{
-    MazeMap::InPlaceTurnProfile profile = BuildSharedInPlaceTurnProfile(
-        limits.maxAngularSpeedRadps,
-        limits.angularAccelRadps2);
-    profile.angleToleranceRad =
-        (std::isfinite(limits.angleToleranceRad) && (limits.angleToleranceRad > 0.0f)) ?
-        limits.angleToleranceRad :
-        Config::kAngleToleranceRad;
-    profile.angularSpeedToleranceRadps =
-        (std::isfinite(limits.angularSpeedToleranceRadps) && (limits.angularSpeedToleranceRadps > 0.0f)) ?
-        limits.angularSpeedToleranceRadps :
-        Config::kAngularSpeedToleranceRadps;
     return profile;
 }
 
@@ -346,6 +310,25 @@ public:
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
+    // PointCommandWithHeadingTarget resolves the same coupled velocity/yaw-rate target as
+    // `PointCommand`, but it also lets the caller add DriveBase-owned heading correction in the
+    // same composed command so feedforward/feedback decomposition remains authoritative here.
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommandWithHeadingTarget(
+        float desiredLinearSpeedMps,
+        float desiredYawRateRadps,
+        float targetYawRad,
+        MazeMap::CommandPD pointPd,
+        MazeMap::CommandPD headingPd) const;
+
+    // PointControlVectorWithHeadingTarget is the stable control-vector-space wrapper for
+    // `PointCommandWithHeadingTarget`.
+    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVectorWithHeadingTarget(
+        float desiredLinearSpeedMps,
+        float desiredYawRateRadps,
+        float targetYawRad,
+        MazeMap::CommandPD pointPd,
+        MazeMap::CommandPD headingPd) const;
+
     // PointCommand consumes the drive-relevant target fields from a maneuver point. Higher-level
     // maneuver execution should target this overload instead of rebuilding scalar command bridges.
     // It exposes the same `pd` selections as the scalar `(desiredLinearSpeedMps, desiredYawRateRadps)`
@@ -477,6 +460,25 @@ public:
     float GetLastFeedbackCommandDelta() const noexcept
     {
         return _lastFeedbackCommandDelta;
+    }
+
+    DriveTelemetry GetGeneratedTelemetry(
+        const MazeMap::App::Internal::LoopController::ControlVector& command) const noexcept
+    {
+        DriveTelemetry telemetry{};
+        telemetry.leftDriveCommand = command.leftMotorPwm;
+        telemetry.rightDriveCommand = command.rightMotorPwm;
+        telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
+        telemetry.rightFeedforwardCommand = _lastRightFeedforwardCommand;
+        telemetry.leftFeedbackCommand = _lastLeftFeedbackCommand;
+        telemetry.rightFeedbackCommand = _lastRightFeedbackCommand;
+        telemetry.leftTargetVelocityMps = _lastLeftTargetVelocityMps;
+        telemetry.rightTargetVelocityMps = _lastRightTargetVelocityMps;
+        telemetry.leftLaunchAssistFloor = _lastLeftLaunchAssistFloor;
+        telemetry.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
+        telemetry.modeFlags = _lastModeFlags;
+        telemetry.saturationFlags = _lastSaturationFlags;
+        return telemetry;
     }
 
     DriveTelemetry GetTelemetry() const
@@ -923,20 +925,20 @@ private:
     PoseEstimate _poseCache;
     float _leftIntegral;
     float _rightIntegral;
-    float _lastLinearCommandMps;
-    float _lastAngularCommandRadps;
+    mutable float _lastLinearCommandMps;
+    mutable float _lastAngularCommandRadps;
     mutable float _lastFeedforwardCommandAverage = 0.0f;
     mutable float _lastFeedforwardCommandDelta = 0.0f;
     mutable float _lastFeedbackCommandAverage = 0.0f;
     mutable float _lastFeedbackCommandDelta = 0.0f;
-    float _lastLeftFeedforwardCommand = 0.0f;
-    float _lastRightFeedforwardCommand = 0.0f;
-    float _lastLeftFeedbackCommand = 0.0f;
-    float _lastRightFeedbackCommand = 0.0f;
-    float _lastLeftTargetVelocityMps = 0.0f;
-    float _lastRightTargetVelocityMps = 0.0f;
-    float _lastLeftLaunchAssistFloor = 0.0f;
-    float _lastRightLaunchAssistFloor = 0.0f;
+    mutable float _lastLeftFeedforwardCommand = 0.0f;
+    mutable float _lastRightFeedforwardCommand = 0.0f;
+    mutable float _lastLeftFeedbackCommand = 0.0f;
+    mutable float _lastRightFeedbackCommand = 0.0f;
+    mutable float _lastLeftTargetVelocityMps = 0.0f;
+    mutable float _lastRightTargetVelocityMps = 0.0f;
+    mutable float _lastLeftLaunchAssistFloor = 0.0f;
+    mutable float _lastRightLaunchAssistFloor = 0.0f;
     int32_t _leftEncoderCountTotal = 0;
     int32_t _rightEncoderCountTotal = 0;
     float _leftEncoderDistanceMeters = 0.0f;
@@ -948,8 +950,8 @@ private:
     float _lastImuAccelBodyXMps2 = 0.0f;
     float _lastImuAccelBodyYMps2 = 0.0f;
     MazeMap::EncoderObs _lastEncoderObservation{};
-    uint16_t _lastModeFlags = kModeBraking;
-    uint16_t _lastSaturationFlags = 0u;
+    mutable uint16_t _lastModeFlags = kModeBraking;
+    mutable uint16_t _lastSaturationFlags = 0u;
     bool _encoderObservationValid = false;
     bool _lastImuYawRateValid = false;
     bool _lastImuAccelValid = false;

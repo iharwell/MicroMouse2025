@@ -48,6 +48,7 @@ public:
         , _vehicle(runtime.SpeedVehicle())
         , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
+        , _driveService(runtime.DriveService())
         , _startX(0.0f)
         , _startY(0.0f)
         , _faulted(false)
@@ -126,6 +127,7 @@ public:
         }
 
         _drive.Brake();
+        _driveService.Cancel();
         _drive.UseNominalWheelControlProfile();
 
         if (ok)
@@ -242,6 +244,7 @@ private:
     MazeMap::Vehicle& _vehicle;
     RuntimeSensorSuite& _sensors;
     DriveBase& _drive;
+    MazeMap::App::Internal::Drive& _driveService;
     char _logFileName[64];
     float _startX;
     float _startY;
@@ -313,7 +316,6 @@ private:
         const char* phaseName{};
         float angleRad{};
         float targetYawRad{};
-        MazeMap::InPlaceTurnProfile turnProfile{};
         unsigned long timeoutMs{};
         ScenarioStep nextStep{ ScenarioStep::None };
         bool writeSquareClosure{};
@@ -704,10 +706,17 @@ private:
         _turnPhaseState.phaseName = phaseName;
         _turnPhaseState.angleRad = angleRad;
         _turnPhaseState.targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
-        _turnPhaseState.turnProfile = BuildSharedInPlaceTurnProfile(_vehicle);
         _turnPhaseState.timeoutMs = millis() + 3000UL;
         _turnPhaseState.nextStep = nextStep;
         _turnPhaseState.writeSquareClosure = writeSquareClosure;
+        _driveService.Cancel();
+        _driveService.SetLimits(DiagnosticLimits(0.0f));
+        _driveService.SetOperationMode(MazeMap::App::Internal::Drive::OperationMode::OpenFloor);
+        _driveService.StartTurn(angleRad);
+        if (!_driveService.Active())
+        {
+            return Fail("Diagnostic turn phase could not start");
+        }
         _phaseFn = &DiagnosticController::TurnPhaseTick;
         return true;
     }
@@ -1739,7 +1748,9 @@ private:
         _turnPhaseState.peakOmegaRadps = (std::max)(
             _turnPhaseState.peakOmegaRadps,
             std::fabs(state.estimate.angularSpeedRadps));
-        if (MazeMap::IsInPlaceTurnComplete(errorRad, state.estimate.angularSpeedRadps, _turnPhaseState.turnProfile))
+        bool done = false;
+        const LoopController::ControlVector control = _driveService.GetNextControls(done);
+        if (done)
         {
             if (!WriteTurnResult(
                     _turnPhaseState.phaseName,
@@ -1774,25 +1785,12 @@ private:
         }
         if (static_cast<long>(_turnPhaseState.timeoutMs - millis()) <= 0)
         {
+            _driveService.Cancel();
             services.Fault("Turn diagnostic phase timed out");
             return LoopController::ControlVector::Brake;
         }
 
-        float angularCommandRadps = 0.0f;
-        if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
-                errorRad,
-                state.estimate.angularSpeedRadps,
-                _turnPhaseState.turnProfile,
-                angularCommandRadps))
-        {
-            services.Fault("Turn diagnostic phase profile became invalid");
-            return LoopController::ControlVector::Brake;
-        }
-
-        return _drive.PointControlVector(
-            0.0f,
-            angularCommandRadps,
-            MazeMap::CommandPD::StateWheelOmegaPD);
+        return control;
     }
 
     LoopController::ControlVector ArcPhaseTick(

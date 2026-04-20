@@ -252,6 +252,11 @@ namespace MazeMap
 				Assert::IsTrue(updater.Apply(CellCoordinates(3U, 3U), Direction::Up, wallObservation, wallFit, config, false));
 			}
 			Assert::AreEqual(static_cast<int>(WallState::Wall), static_cast<int>(updater.Get(CellCoordinates(3U, 3U), Direction::Up).state));
+			Assert::AreEqual(3, static_cast<int>(updater.Get(CellCoordinates(3U, 3U), Direction::Up).score));
+			Assert::AreEqual(
+				static_cast<int>(WallState::Wall),
+				static_cast<int>(updater.Get(CellCoordinates(3U, 3U) >> Direction::Up, Direction::Down).state));
+			Assert::AreEqual(3, static_cast<int>(updater.Get(CellCoordinates(3U, 3U) >> Direction::Up, Direction::Down).score));
 
 			MapEvidenceUpdater openUpdater;
 			WallObs openObservation{};
@@ -268,6 +273,11 @@ namespace MazeMap
 				Assert::IsTrue(openUpdater.Apply(CellCoordinates(5U, 5U), Direction::Right, openObservation, openFit, config, false));
 			}
 			Assert::AreEqual(static_cast<int>(WallState::NoWall), static_cast<int>(openUpdater.Get(CellCoordinates(5U, 5U), Direction::Right).state));
+			Assert::AreEqual(-3, static_cast<int>(openUpdater.Get(CellCoordinates(5U, 5U), Direction::Right).score));
+			Assert::AreEqual(
+				static_cast<int>(WallState::NoWall),
+				static_cast<int>(openUpdater.Get(CellCoordinates(5U, 5U) >> Direction::Right, Direction::Left).state));
+			Assert::AreEqual(-3, static_cast<int>(openUpdater.Get(CellCoordinates(5U, 5U) >> Direction::Right, Direction::Left).score));
 		}
 
 	};

@@ -4,6 +4,7 @@
 #include "..\MazeMap\MazeMapSharedRuntime.h"
 #include "..\MazeMap\Vehicle.h"
 
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -166,6 +167,84 @@ namespace MazeMap::App
             Internal::Drive& second = runtime.DriveService();
 
             Assert::IsTrue(&first == &second);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveServicePreservesConfiguredLimitsVerbatim)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Internal::Drive& drive = runtime.DriveService();
+
+            MotionLimits limits{};
+            limits.maxSpeedMps = -0.50f;
+            limits.accelMps2 = -1.25f;
+            limits.decelMps2 = -2.50f;
+            limits.maxAngularSpeedRadps = -3.50f;
+            limits.angularAccelRadps2 = -4.50f;
+            limits.angleToleranceRad = -0.05f;
+            limits.angularSpeedToleranceRadps = -0.15f;
+            drive.SetLimits(limits);
+
+            const MotionLimits& configured = drive.GetLimits();
+            Assert::AreEqual(limits.maxSpeedMps, configured.maxSpeedMps, 1.0e-6f);
+            Assert::AreEqual(limits.accelMps2, configured.accelMps2, 1.0e-6f);
+            Assert::AreEqual(limits.decelMps2, configured.decelMps2, 1.0e-6f);
+            Assert::AreEqual(limits.maxAngularSpeedRadps, configured.maxAngularSpeedRadps, 1.0e-6f);
+            Assert::AreEqual(limits.angularAccelRadps2, configured.angularAccelRadps2, 1.0e-6f);
+            Assert::AreEqual(limits.angleToleranceRad, configured.angleToleranceRad, 1.0e-6f);
+            Assert::AreEqual(limits.angularSpeedToleranceRadps, configured.angularSpeedToleranceRadps, 1.0e-6f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveServiceProducesCommandsWithoutLoopModeState)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Internal::Drive& drive = runtime.DriveService();
+
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            drive.SetLimits(limits);
+
+            drive.StartStraight(0.25f, 0.20f, 0.0f);
+            Assert::IsTrue(drive.Active());
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsFalse(done);
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+        }
+
+        TEST_METHOD(SharedRuntime_DriveServiceOmitsUnavailableLimitsInCommandPath)
+        {
+            Internal::SharedRobotRuntime runtime;
+            runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+            Internal::Drive& drive = runtime.DriveService();
+
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = -2.0f;
+            limits.decelMps2 = -2.0f;
+            limits.maxAngularSpeedRadps = -6.0f;
+            limits.angularAccelRadps2 = -30.0f;
+            limits.angleToleranceRad = -Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = -Config::kAngularSpeedToleranceRadps;
+            drive.SetLimits(limits);
+
+            const Eigen::Vector2f targetHeadingUnit(1.0f, 0.0f);
+            drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
+            Assert::IsTrue(drive.Active());
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsFalse(done);
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::fabs(control.leftMotorPwm - control.rightMotorPwm) > 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_SingletonIsStable)

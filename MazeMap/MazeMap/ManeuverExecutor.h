@@ -1,6 +1,5 @@
 #pragma once
 
-#include "InPlaceTurnProfile.h"
 #include "LoopController.h"
 #include "ManeuverQueue.h"
 #include "MazeMapRuntimeCore.h"
@@ -16,6 +15,7 @@ namespace MazeMap
 
 namespace MazeMap::App::Internal
 {
+    class Drive;
     class SharedRobotRuntime;
 
     class EXPORT ManeuverExecutor final
@@ -98,9 +98,6 @@ namespace MazeMap::App::Internal
 
         struct TurnRoutineState final
         {
-            float targetYawRad{};
-            MazeMap::InPlaceTurnProfile turnProfile{};
-            MazeMap::TurnWallEdgeTracker* wallEdgeTracker{};
             SettleRoutineState completionSettle{};
             void* nextState{};
             ActivePhaseTickFn nextPhaseTick{};
@@ -228,6 +225,7 @@ namespace MazeMap::App::Internal
 
         SharedRobotRuntime* _runtime{};
         DriveBase* _drive{};
+        Drive* _driveService{};
         MazeMap::Vehicle* _speedVehicle{};
         MazeMap::Maze* _maze{};
         void* _activeState{};

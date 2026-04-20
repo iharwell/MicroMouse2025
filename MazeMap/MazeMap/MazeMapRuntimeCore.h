@@ -490,10 +490,10 @@ namespace MazeMap::Config
     constexpr float kWheelIntegralLimit = 0.25f;
     // [High] Straight-line heading proportional gain. Increase if the robot drifts off heading in open corridors;
     // decrease if it snakes left-right while trying to stay on course.
-    constexpr float kStraightHeadingKp = 19.5f;
+    constexpr float kStraightHeadingKp = 6.5f;
     // [High] Straight-line yaw damping. Increase if heading correction oscillates; decrease if heading correction feels
     // lazy and the robot lets errors build before responding.
-    constexpr float kStraightYawD = 0.30f;
+    constexpr float kStraightYawD = 0.10f;
     // [High] Wall-centering gain used when side walls are available. Increase if the robot does not recenter in a
     // corridor; decrease if wall following hunts or bounces between walls.
     constexpr float kWallCenterGain = 135.0f;
@@ -523,7 +523,7 @@ namespace MazeMap::Config
     constexpr float kArcYawD = 0.08f;
     // [High] Smooth-turn yaw-rate proportional gain. Smooth maneuvers treat the prescribed yaw-rate trace as the
     // authority, so this closes the measured turn rate onto that trace without changing maneuver geometry.
-    constexpr float kSmoothTurnYawRateKp = 1.10f;
+    constexpr float kSmoothTurnYawRateKp = 0.80f;
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
     constexpr float kSmoothTurnYawRateKd = 0.001f;
@@ -540,8 +540,8 @@ namespace MazeMap::Config
         /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         /* headingGyroPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kArcYawD),
-        /* velocityStatePD */ MazeMap::ProportionalDerivative(20.0f, 0.0f),
-        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(15.0f, 0.0f),
+        /* velocityStatePD */ MazeMap::ProportionalDerivative(2.0f, 0.01f),
+        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(2.0f, 0.01f),
         /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.0f),

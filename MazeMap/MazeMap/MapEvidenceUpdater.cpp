@@ -5,23 +5,15 @@ namespace MazeMap
 {
     void MapEvidenceUpdater::Reset() noexcept
     {
-        for (auto& plane : _edges)
-        {
-            for (auto& row : plane)
-            {
-                for (auto& edge : row)
-                {
-                    edge = EdgeEvidence{};
-                }
-            }
-        }
+        _horizontalEdges = {};
+        _verticalEdges = {};
     }
 
     const MapEvidenceUpdater::EdgeEvidence& MapEvidenceUpdater::Get(
         const CellCoordinates& cell,
         Direction direction) const noexcept
     {
-        return _edges[cell.GetX()][cell.GetY()][directionIndex(direction)];
+        return edgeFor(cell, direction);
     }
 
     bool MapEvidenceUpdater::isOrdinal(Direction direction) noexcept
@@ -31,22 +23,6 @@ namespace MazeMap
             direction == Direction::Down ||
             direction == Direction::Left ||
             direction == Direction::Right;
-    }
-
-    size_t MapEvidenceUpdater::directionIndex(Direction direction) noexcept
-    {
-        switch (direction)
-        {
-        case Direction::Up:
-            return 0U;
-        case Direction::Down:
-            return 1U;
-        case Direction::Left:
-            return 2U;
-        case Direction::Right:
-        default:
-            return 3U;
-        }
     }
 
     int8_t MapEvidenceUpdater::saturatingAdd(int8_t current, int8_t delta, int8_t limit) noexcept
@@ -76,16 +52,31 @@ namespace MazeMap
         return WallState::Unknown;
     }
 
-    void MapEvidenceUpdater::setMirrored(
+    MapEvidenceUpdater::EdgeEvidence& MapEvidenceUpdater::edgeFor(
         const CellCoordinates& cell,
-        Direction direction,
-        const EdgeEvidence& evidence) noexcept
+        Direction direction) noexcept
     {
-        _edges[cell.GetX()][cell.GetY()][directionIndex(direction)] = evidence;
-        if (cell.IsValidMove(direction))
+        return const_cast<EdgeEvidence&>(
+            const_cast<const MapEvidenceUpdater*>(this)->edgeFor(cell, direction));
+    }
+
+    const MapEvidenceUpdater::EdgeEvidence& MapEvidenceUpdater::edgeFor(
+        const CellCoordinates& cell,
+        Direction direction) const noexcept
+    {
+        const size_t x = static_cast<size_t>(cell.GetX());
+        const size_t y = static_cast<size_t>(cell.GetY());
+        switch (direction)
         {
-            const CellCoordinates neighbor = cell >> direction;
-            _edges[neighbor.GetX()][neighbor.GetY()][directionIndex(-direction)] = evidence;
+        case Direction::Up:
+            return _horizontalEdges[x][y + 1U];
+        case Direction::Down:
+            return _horizontalEdges[x][y];
+        case Direction::Left:
+            return _verticalEdges[x][y];
+        case Direction::Right:
+        default:
+            return _verticalEdges[x + 1U][y];
         }
     }
 
@@ -128,7 +119,7 @@ namespace MazeMap
             targetDirection = bestFit.edge;
         }
 
-        EdgeEvidence updated = Get(targetCell, targetDirection);
+        EdgeEvidence& updated = edgeFor(targetCell, targetDirection);
         if (observation.cls == ObsClass::WallLike)
         {
             updated.score = saturatingAdd(updated.score, config.wallHitWeight, config.maxScore);
@@ -143,7 +134,6 @@ namespace MazeMap
         }
 
         updated.state = stateFromScore(updated.score, config);
-        setMirrored(targetCell, targetDirection, updated);
         return true;
     }
 }

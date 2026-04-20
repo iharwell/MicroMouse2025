@@ -9,7 +9,6 @@
 #include "..\MazeMap\GyroBiasUpdatePolicy.h"
 #include "..\MazeMap\ImuCalibrationPolicy.h"
 #include "..\MazeMap\ImuSamplingProfile.h"
-#include "..\MazeMap\InPlaceTurnProfile.h"
 #include "..\MazeMap\LaunchAssistProfile.h"
 #include "..\MazeMap\Maze.h"
 #include "..\MazeMap\MissionMazeExport.h"
@@ -1473,39 +1472,6 @@ namespace MazeMap
 
 			Assert::IsTrue(TryComputeSignedTurnAngleRad(179.0f * DEG_TO_RAD_F, -179.0f * DEG_TO_RAD_F, angleRad));
 			Assert::AreEqual(2.0f * DEG_TO_RAD_F, angleRad, 1.0e-6f);
-		}
-
-		TEST_METHOD(InPlaceTurnProfileUsesSharedCompletionAndCommandLaw)
-		{
-			InPlaceTurnProfile profile{};
-			profile.maxAngularSpeedRadps = 9.0f;
-			profile.angularAccelRadps2 = 45.0f;
-			profile.headingKp = 7.5f;
-			profile.yawD = 0.12f;
-			profile.angleToleranceRad = 0.75f * DEG_TO_RAD_F;
-			profile.angularSpeedToleranceRadps = 0.10f;
-
-			Assert::IsTrue(IsInPlaceTurnComplete(0.50f * DEG_TO_RAD_F, 0.08f, profile));
-			Assert::IsFalse(IsInPlaceTurnComplete(1.00f * DEG_TO_RAD_F, 0.08f, profile));
-			Assert::IsFalse(IsInPlaceTurnComplete(0.50f * DEG_TO_RAD_F, 0.12f, profile));
-
-			float angularCommandRadps = 0.0f;
-			Assert::IsTrue(TryComputeInPlaceTurnCommandRadps(
-				0.50f * PI_F,
-				0.0f,
-				profile,
-				angularCommandRadps));
-			Assert::IsTrue(angularCommandRadps > 0.0f);
-
-			Assert::IsTrue(TryComputeInPlaceTurnCommandRadps(
-				0.01f,
-				0.0f,
-				profile,
-				angularCommandRadps));
-			const float expectedSmallAngleCommandRadps =
-				sqrtf(2.0f * profile.angularAccelRadps2 * 0.01f) +
-				(profile.headingKp * 0.01f);
-			Assert::AreEqual(expectedSmallAngleCommandRadps, angularCommandRadps, 1.0e-6f);
 		}
 
 		TEST_METHOD(ApplyMinimumCruiseSpeedFloorRaisesOnlyNonzeroRequests)

@@ -44,6 +44,7 @@ namespace MazeMap::App::Internal
     {
         _runtime = &runtime;
         _drive = &runtime.Drive();
+        _driveService = &runtime.DriveService();
         _speedVehicle = &runtime.SpeedVehicle();
         _maze = &runtime.Maze();
     }
@@ -63,6 +64,7 @@ namespace MazeMap::App::Internal
         return
             (_runtime != nullptr) &&
             (_drive != nullptr) &&
+            (_driveService != nullptr) &&
             (_speedVehicle != nullptr) &&
             (_maze != nullptr) &&
             !Active();
@@ -129,6 +131,10 @@ namespace MazeMap::App::Internal
         _activeState = nullptr;
         _activePhaseTick = nullptr;
         _returnCallbacks = LoopController::ModeCallbacks{};
+        if ((_driveService != nullptr) && _driveService->Active())
+        {
+            _driveService->Cancel();
+        }
         _holdState = HoldRoutineState{};
         _settleState = SettleRoutineState{};
         _straightState = StraightRoutineState{};
@@ -480,14 +486,13 @@ namespace MazeMap::App::Internal
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
+        (void)state;
         auto& turn = *static_cast<TurnRoutineState*>(rawState);
-        if (turn.wallEdgeTracker != nullptr)
+        if (_driveService == nullptr)
         {
-            MazeMap::ObserveTurnWallStates(*turn.wallEdgeTracker, state.sensors.leftWall, state.sensors.rightWall);
+            return FaultPhase(services, "Turn Drive service was unavailable");
         }
-
-        const float errorRad = AngleErrorRad(turn.targetYawRad, state.estimate.yawRad);
-        if (MazeMap::IsInPlaceTurnComplete(errorRad, state.estimate.angularSpeedRadps, turn.turnProfile))
+        if (!_driveService->Active())
         {
             turn.completionSettle = SettleRoutineState{};
             turn.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
@@ -501,20 +506,23 @@ namespace MazeMap::App::Internal
                 services);
         }
 
-        float angularCommandRadps = 0.0f;
-        if (!MazeMap::TryComputeInPlaceTurnCommandRadps(
-                errorRad,
-                state.estimate.angularSpeedRadps,
-                turn.turnProfile,
-                angularCommandRadps))
+        bool done = false;
+        const LoopController::ControlVector control = _driveService->GetNextControls(done);
+        if (!done)
         {
-            return FaultPhase(services, "Turn profile became invalid");
+            return control;
         }
 
-        return _drive->PointControlVector(
-            0.0f,
-            angularCommandRadps,
-            MazeMap::CommandPD::StateWheelOmegaPD);
+        turn.completionSettle = SettleRoutineState{};
+        turn.completionSettle.stationaryHoldMs = Config::kMotionSettleHoldMs;
+        turn.completionSettle.timeoutMs = 0U;
+        turn.completionSettle.brakeCommand = false;
+        turn.completionSettle.nextState = turn.nextState;
+        turn.completionSettle.nextPhaseTick = turn.nextPhaseTick;
+        return CompleteCurrentPhase(
+            &turn.completionSettle,
+            &ManeuverExecutor::SettleRoutineTick,
+            services);
     }
 
     LoopController::ControlVector ManeuverExecutor::ArcRoutineTick(
@@ -675,8 +683,13 @@ namespace MazeMap::App::Internal
         if (distanceM <= 0.0f)
         {
             _turnState = TurnRoutineState{};
-            _turnState.targetYawRad = WrapAngleRad(_drive->GetPose().yawRad + angleRad);
-            _turnState.turnProfile = BuildSharedInPlaceTurnProfile(queueState.limits);
+            _driveService->Cancel();
+            _driveService->SetLimits(queueState.limits);
+            _driveService->StartTurn(angleRad);
+            if (!_driveService->Active())
+            {
+                return FaultPhase(services, "Queued turn Drive primitive could not start");
+            }
             _turnState.nextState = &queueState;
             _turnState.nextPhaseTick = &ManeuverExecutor::QueueAdvanceRoutineTick;
             return CompleteCurrentPhase(&_turnState, &ManeuverExecutor::TurnRoutineTick, services);
