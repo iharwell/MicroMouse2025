@@ -331,23 +331,102 @@ namespace MazeMap
             state(VehicleState::kR) = yawRateRadps;
             state(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
             state(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
-
             const PlantDerivatives achieved = plant.forwardStep(state, solution.control, params);
             const float expectedLeftWheelAccelRadps2 =
                 (solution.commandedLongitudinalAccelMps2 + (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
             const float expectedRightWheelAccelRadps2 =
                 (solution.commandedLongitudinalAccelMps2 - (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
 
-            Assert::IsTrue(std::isfinite(solution.control.leftMotorCommand));
-            Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
-            Assert::IsTrue(std::isfinite(achieved.longitudinalAccelMps2));
-            Assert::IsTrue(std::isfinite(achieved.yawAccelRadps2));
-            Assert::AreEqual(desiredLongitudinalAccelMps2, solution.commandedLongitudinalAccelMps2, 0.05f);
-            Assert::AreEqual(desiredYawAccelRadps2, solution.commandedYawAccelRadps2, 0.20f);
-            Assert::AreEqual(expectedLeftWheelAccelRadps2, solution.leftWheelAccelRadps2, 1.0e-5f);
-            Assert::AreEqual(expectedRightWheelAccelRadps2, solution.rightWheelAccelRadps2, 1.0e-5f);
-            Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaL)));
-            Assert::IsTrue(std::isfinite(achieved.stateDot(VehicleState::kOmegaR)));
+            std::wstring failure;
+            if (!std::isfinite(solution.control.leftMotorCommand) ||
+                !std::isfinite(solution.control.rightMotorCommand))
+            {
+                failure =
+                    std::wstring(L"non-finite motor command left/right=") +
+                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                    std::to_wstring(solution.control.rightMotorCommand);
+            }
+            else if (!std::isfinite(achieved.longitudinalAccelMps2) || !std::isfinite(achieved.yawAccelRadps2))
+            {
+                failure =
+                    std::wstring(L"non-finite operating-point accel Udd/Rdd=") +
+                    std::to_wstring(achieved.longitudinalAccelMps2) + L"," +
+                    std::to_wstring(achieved.yawAccelRadps2);
+            }
+            else if (std::fabs(solution.commandedLongitudinalAccelMps2 - desiredLongitudinalAccelMps2) > 0.05f)
+            {
+                failure =
+                    std::wstring(L"reported longitudinal accel mismatch desired/reported=") +
+                    std::to_wstring(desiredLongitudinalAccelMps2) + L"," +
+                    std::to_wstring(solution.commandedLongitudinalAccelMps2);
+            }
+            else if (std::fabs(solution.commandedYawAccelRadps2 - desiredYawAccelRadps2) > 0.20f)
+            {
+                failure =
+                    std::wstring(L"reported yaw accel mismatch desired/reported=") +
+                    std::to_wstring(desiredYawAccelRadps2) + L"," +
+                    std::to_wstring(solution.commandedYawAccelRadps2);
+            }
+            else if (std::fabs(achieved.longitudinalAccelMps2 - solution.commandedLongitudinalAccelMps2) >
+                RelativeTolerance(solution.commandedLongitudinalAccelMps2, 0.10f))
+            {
+                failure =
+                    std::wstring(L"forwardStep longitudinal accel mismatch reported/achieved=") +
+                    std::to_wstring(solution.commandedLongitudinalAccelMps2) + L"," +
+                    std::to_wstring(achieved.longitudinalAccelMps2);
+            }
+            else if (std::fabs(achieved.yawAccelRadps2 - solution.commandedYawAccelRadps2) >
+                RelativeTolerance(solution.commandedYawAccelRadps2, 0.20f))
+            {
+                failure =
+                    std::wstring(L"forwardStep yaw accel mismatch reported/achieved=") +
+                    std::to_wstring(solution.commandedYawAccelRadps2) + L"," +
+                    std::to_wstring(achieved.yawAccelRadps2) +
+                    std::wstring(L" wheelSpeedL/R=") +
+                    std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
+                    std::to_wstring(solution.rightWheelSpeedRadps) +
+                    std::wstring(L" contactForceL/R=") +
+                    std::to_wstring(solution.leftContactForceN) + L"," +
+                    std::to_wstring(solution.rightContactForceN) +
+                    std::wstring(L" achievedBankForceL/R=") +
+                    std::to_wstring(achieved.contactForces.LeftBankForwardForceN()) + L"," +
+                    std::to_wstring(achieved.contactForces.RightBankForwardForceN()) +
+                    std::wstring(L" achievedFrontRearRight=") +
+                    std::to_wstring(
+                        achieved.contactForces.contacts[0].rightForceN +
+                        achieved.contactForces.contacts[1].rightForceN) +
+                    L"," +
+                    std::to_wstring(
+                        achieved.contactForces.contacts[2].rightForceN +
+                        achieved.contactForces.contacts[3].rightForceN);
+            }
+            else if (std::fabs(solution.leftWheelAccelRadps2 - expectedLeftWheelAccelRadps2) > 1.0e-5f)
+            {
+                failure =
+                    std::wstring(L"left wheel accel mismatch expected/reported=") +
+                    std::to_wstring(expectedLeftWheelAccelRadps2) + L"," +
+                    std::to_wstring(solution.leftWheelAccelRadps2);
+            }
+            else if (std::fabs(solution.rightWheelAccelRadps2 - expectedRightWheelAccelRadps2) > 1.0e-5f)
+            {
+                failure =
+                    std::wstring(L"right wheel accel mismatch expected/reported=") +
+                    std::to_wstring(expectedRightWheelAccelRadps2) + L"," +
+                    std::to_wstring(solution.rightWheelAccelRadps2);
+            }
+            else if (!std::isfinite(achieved.stateDot(VehicleState::kOmegaL)) ||
+                !std::isfinite(achieved.stateDot(VehicleState::kOmegaR)))
+            {
+                failure =
+                    std::wstring(L"non-finite wheel acceleration stateDot omegaL/omegaR=") +
+                    std::to_wstring(achieved.stateDot(VehicleState::kOmegaL)) + L"," +
+                    std::to_wstring(achieved.stateDot(VehicleState::kOmegaR));
+            }
+
+            if (!failure.empty())
+            {
+                Assert::Fail(failure.c_str());
+            }
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsReducedFeedforwardHoldsOperatingPointInPredict)
@@ -373,15 +452,42 @@ namespace MazeMap
                     BuildRollingUkfState(targetForwardVelocityMps, 0.0f, params),
                     solution.control,
                     kFeedforwardPredictSteps);
+            VehicleState::StateVector validationState =
+                BuildRollingUkfState(targetForwardVelocityMps, 0.0f, params);
+            validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
+            validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
+            const PlantDerivatives immediate = plant.forwardStep(validationState, solution.control, params);
 
-            Assert::IsFalse(solution.tractionLimited);
-            AssertPredictStateNearTarget(
-                predictedState,
-                targetForwardVelocityMps,
-                0.0f,
-                RelativeTolerance(targetForwardVelocityMps, 0.01f),
-                0.02f,
-                0.02f);
+            std::wstring failure;
+            if (solution.tractionLimited)
+            {
+                failure = L"steady-state hold unexpectedly reported tractionLimited=true";
+            }
+            else if (std::fabs(predictedState(VehicleState::kU) - targetForwardVelocityMps) >
+                RelativeTolerance(targetForwardVelocityMps, 0.01f))
+            {
+                failure =
+                    std::wstring(L"predict steady-state hold failed predicted_u/r=") +
+                    std::to_wstring(predictedState(VehicleState::kU)) + L"," +
+                    std::to_wstring(predictedState(VehicleState::kR)) +
+                    std::wstring(L" immediate_u_dd/r_dd=") +
+                    std::to_wstring(immediate.longitudinalAccelMps2) + L"," +
+                    std::to_wstring(immediate.yawAccelRadps2) +
+                    std::wstring(L" cmd_l/r=") +
+                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                    std::to_wstring(solution.control.rightMotorCommand) +
+                    std::wstring(L" torque_l/r=") +
+                    std::to_wstring(solution.leftWheelTorqueNm) + L"," +
+                    std::to_wstring(solution.rightWheelTorqueNm) +
+                    std::wstring(L" wheelSpeed_l/r=") +
+                    std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
+                    std::to_wstring(solution.rightWheelSpeedRadps);
+            }
+
+            if (!failure.empty())
+            {
+                Assert::Fail(failure.c_str());
+            }
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsStateFeedforwardHoldsOperatingPointInPredict)
@@ -726,6 +832,61 @@ namespace MazeMap
             Assert::AreEqual(explicitDefaultSolution.control.rightMotorCommand, solution.control.rightMotorCommand, 1.0e-6f);
             Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) <= 1.0f);
             Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReportsReturnedControlPredictionAtOperatingPoint)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const VehicleState::StateVector operatingState =
+                BuildRollingUkfState(0.12f, 0.25f, params);
+            const DriveCommandSolution solution =
+                plant.solveDriveCommandsForVelocityTarget(
+                    operatingState,
+                    0.20f,
+                    0.60f,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
+            VehicleState::StateVector validationState = operatingState;
+            validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
+            validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
+            const PlantDerivatives achieved = plant.forwardStep(validationState, solution.control, params);
+
+            std::wstring failure;
+            if (solution.tractionLimited)
+            {
+                failure = L"velocity-target operating-point prediction unexpectedly reported tractionLimited=true";
+            }
+            else if (!std::isfinite(achieved.longitudinalAccelMps2) || !std::isfinite(achieved.yawAccelRadps2))
+            {
+                failure =
+                    std::wstring(L"non-finite operating-point accel Udd/Rdd=") +
+                    std::to_wstring(achieved.longitudinalAccelMps2) + L"," +
+                    std::to_wstring(achieved.yawAccelRadps2);
+            }
+            else if (std::fabs(achieved.longitudinalAccelMps2 - solution.commandedLongitudinalAccelMps2) >
+                RelativeTolerance(solution.commandedLongitudinalAccelMps2, 0.05f))
+            {
+                failure =
+                    std::wstring(L"velocity-target longitudinal prediction mismatch reported/forwardStep=") +
+                    std::to_wstring(solution.commandedLongitudinalAccelMps2) + L"," +
+                    std::to_wstring(achieved.longitudinalAccelMps2);
+            }
+            else if (std::fabs(achieved.yawAccelRadps2 - solution.commandedYawAccelRadps2) >
+                RelativeTolerance(solution.commandedYawAccelRadps2, 0.10f))
+            {
+                failure =
+                    std::wstring(L"velocity-target yaw prediction mismatch reported/forwardStep=") +
+                    std::to_wstring(solution.commandedYawAccelRadps2) + L"," +
+                    std::to_wstring(achieved.yawAccelRadps2);
+            }
+
+            if (!failure.empty())
+            {
+                Assert::Fail(failure.c_str());
+            }
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
@@ -1146,7 +1307,6 @@ namespace MazeMap
                     params,
                     0.80f,
                     params.supplyVoltageV);
-
             PlantModel::StateVector validationState = currentState;
             validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
             validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
@@ -1157,10 +1317,33 @@ namespace MazeMap
             const PlantDerivatives achievedZeroLateral =
                 plant.forwardStep(zeroLateralValidationState, solution.control, params);
 
-            Assert::IsTrue(std::isfinite(solution.commandedYawAccelRadps2));
-            Assert::IsTrue(std::isfinite(achievedFull.yawAccelRadps2));
-            Assert::IsTrue(std::isfinite(achievedZeroLateral.yawAccelRadps2));
-            Assert::IsTrue(std::fabs(achievedFull.yawAccelRadps2 - achievedZeroLateral.yawAccelRadps2) > 0.01f);
+            std::wstring failure;
+            if (!std::isfinite(solution.commandedYawAccelRadps2))
+            {
+                failure =
+                    std::wstring(L"reported yaw accel was not finite: ") +
+                    std::to_wstring(solution.commandedYawAccelRadps2);
+            }
+            else if (!std::isfinite(achievedFull.yawAccelRadps2) ||
+                !std::isfinite(achievedZeroLateral.yawAccelRadps2))
+            {
+                failure =
+                    std::wstring(L"validation yaw accel was not finite full/zero-lateral=") +
+                    std::to_wstring(achievedFull.yawAccelRadps2) + L"," +
+                    std::to_wstring(achievedZeroLateral.yawAccelRadps2);
+            }
+            else if (std::fabs(achievedFull.yawAccelRadps2 - achievedZeroLateral.yawAccelRadps2) <= 0.01f)
+            {
+                failure =
+                    std::wstring(L"validation state lost lateral-velocity effect full/zero-lateral yaw accel=") +
+                    std::to_wstring(achievedFull.yawAccelRadps2) + L"," +
+                    std::to_wstring(achievedZeroLateral.yawAccelRadps2);
+            }
+
+            if (!failure.empty())
+            {
+                Assert::Fail(failure.c_str());
+            }
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsCompensatesYawRateDampingWhenNotTractionLimited)
@@ -1195,11 +1378,68 @@ namespace MazeMap
             const float expectedRightWheelAccelRadps2 =
                 (solution.commandedLongitudinalAccelMps2 - (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
 
-            Assert::IsFalse(solution.tractionLimited);
-            Assert::AreEqual(desiredYawAccelRadps2, solution.commandedYawAccelRadps2, 0.05f);
-            Assert::AreEqual(expectedLeftWheelAccelRadps2, solution.leftWheelAccelRadps2, 1.0e-5f);
-            Assert::AreEqual(expectedRightWheelAccelRadps2, solution.rightWheelAccelRadps2, 1.0e-5f);
-            Assert::IsTrue(std::isfinite(achieved.yawAccelRadps2));
+            std::wstring failure;
+            if (solution.tractionLimited)
+            {
+                failure = L"yaw damping compensation unexpectedly reported tractionLimited=true";
+            }
+            else if (std::fabs(solution.commandedYawAccelRadps2 - desiredYawAccelRadps2) > 0.05f)
+            {
+                failure =
+                    std::wstring(L"reported yaw accel mismatch desired/reported=") +
+                    std::to_wstring(desiredYawAccelRadps2) + L"," +
+                    std::to_wstring(solution.commandedYawAccelRadps2);
+            }
+            else if (std::fabs(solution.leftWheelAccelRadps2 - expectedLeftWheelAccelRadps2) > 1.0e-5f)
+            {
+                failure =
+                    std::wstring(L"left wheel accel mismatch expected/reported=") +
+                    std::to_wstring(expectedLeftWheelAccelRadps2) + L"," +
+                    std::to_wstring(solution.leftWheelAccelRadps2);
+            }
+            else if (std::fabs(solution.rightWheelAccelRadps2 - expectedRightWheelAccelRadps2) > 1.0e-5f)
+            {
+                failure =
+                    std::wstring(L"right wheel accel mismatch expected/reported=") +
+                    std::to_wstring(expectedRightWheelAccelRadps2) + L"," +
+                    std::to_wstring(solution.rightWheelAccelRadps2);
+            }
+            else if (!std::isfinite(achieved.yawAccelRadps2))
+            {
+                failure =
+                    std::wstring(L"forwardStep yaw accel was not finite: ") +
+                    std::to_wstring(achieved.yawAccelRadps2);
+            }
+            else if (std::fabs(achieved.yawAccelRadps2 - solution.commandedYawAccelRadps2) >
+                RelativeTolerance(solution.commandedYawAccelRadps2, 0.20f))
+            {
+                failure =
+                    std::wstring(L"forwardStep yaw accel mismatch reported/achieved=") +
+                    std::to_wstring(solution.commandedYawAccelRadps2) + L"," +
+                    std::to_wstring(achieved.yawAccelRadps2) +
+                    std::wstring(L" wheelSpeedL/R=") +
+                    std::to_wstring(solution.leftWheelSpeedRadps) + L"," +
+                    std::to_wstring(solution.rightWheelSpeedRadps) +
+                    std::wstring(L" contactForceL/R=") +
+                    std::to_wstring(solution.leftContactForceN) + L"," +
+                    std::to_wstring(solution.rightContactForceN) +
+                    std::wstring(L" achievedBankForceL/R=") +
+                    std::to_wstring(achieved.contactForces.LeftBankForwardForceN()) + L"," +
+                    std::to_wstring(achieved.contactForces.RightBankForwardForceN()) +
+                    std::wstring(L" achievedFrontRearRight=") +
+                    std::to_wstring(
+                        achieved.contactForces.contacts[0].rightForceN +
+                        achieved.contactForces.contacts[1].rightForceN) +
+                    L"," +
+                    std::to_wstring(
+                        achieved.contactForces.contacts[2].rightForceN +
+                        achieved.contactForces.contacts[3].rightForceN);
+            }
+
+            if (!failure.empty())
+            {
+                Assert::Fail(failure.c_str());
+            }
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsTractionLimitedYawClampMatchesFixedSplitCapacity)
@@ -1460,11 +1700,37 @@ namespace MazeMap
             state(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
             const PlantDerivatives achieved = plant.forwardStep(state, solution.control, params);
 
-            Assert::IsTrue(solution.tractionLimited);
-            Assert::IsTrue(std::isfinite(solution.control.leftMotorCommand));
-            Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
-            Assert::IsTrue(std::isfinite(achieved.longitudinalAccelMps2));
-            Assert::IsTrue(std::fabs(achieved.longitudinalAccelMps2) <= (params.combinedAccelPeakMps2 + 1.0f));
+            std::wstring failure;
+            if (!solution.tractionLimited)
+            {
+                failure = L"beyond-nominal request should be traction-limited but reported tractionLimited=false";
+            }
+            else if (!std::isfinite(solution.control.leftMotorCommand) ||
+                !std::isfinite(solution.control.rightMotorCommand))
+            {
+                failure =
+                    std::wstring(L"non-finite motor command left/right=") +
+                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                    std::to_wstring(solution.control.rightMotorCommand);
+            }
+            else if (!std::isfinite(achieved.longitudinalAccelMps2))
+            {
+                failure =
+                    std::wstring(L"forwardStep longitudinal accel was not finite: ") +
+                    std::to_wstring(achieved.longitudinalAccelMps2);
+            }
+            else if (std::fabs(achieved.longitudinalAccelMps2) > (params.combinedAccelPeakMps2 + 1.0f))
+            {
+                failure =
+                    std::wstring(L"forwardStep longitudinal accel exceeded clipped bound actual/bound=") +
+                    std::to_wstring(std::fabs(achieved.longitudinalAccelMps2)) + L"," +
+                    std::to_wstring(params.combinedAccelPeakMps2 + 1.0f);
+            }
+
+            if (!failure.empty())
+            {
+                Assert::Fail(failure.c_str());
+            }
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReportsTractionLimitAtCanonicalResponseTime)
@@ -1499,11 +1765,31 @@ namespace MazeMap
             state(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
             const PlantDerivatives achieved = plant.forwardStep(state, solution.control, params);
 
-            Assert::IsTrue(solution.tractionLimited);
-            Assert::IsTrue(std::isfinite(achieved.longitudinalAccelMps2));
-            Assert::IsTrue(std::isfinite(achieved.yawAccelRadps2));
-            Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) <= 1.0f);
-            Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
+            std::wstring failure;
+            if (!solution.tractionLimited)
+            {
+                failure = L"beyond-peak request should be traction-limited but reported tractionLimited=false";
+            }
+            else if (!std::isfinite(achieved.longitudinalAccelMps2) || !std::isfinite(achieved.yawAccelRadps2))
+            {
+                failure =
+                    std::wstring(L"forwardStep accel was not finite Udd/Rdd=") +
+                    std::to_wstring(achieved.longitudinalAccelMps2) + L"," +
+                    std::to_wstring(achieved.yawAccelRadps2);
+            }
+            else if (std::fabs(solution.control.leftMotorCommand) > 1.0f ||
+                std::fabs(solution.control.rightMotorCommand) > 1.0f)
+            {
+                failure =
+                    std::wstring(L"motor command exceeded unit bounds left/right=") +
+                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
+                    std::to_wstring(solution.control.rightMotorCommand);
+            }
+
+            if (!failure.empty())
+            {
+                Assert::Fail(failure.c_str());
+            }
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsNearZeroSpeedTurnRemainsFinite)

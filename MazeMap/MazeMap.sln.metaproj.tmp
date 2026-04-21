@@ -1,0 +1,130 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" InitialTargets="ValidateSolutionConfiguration;ValidateToolsVersions;ValidateProjects">
+  <Target Name="GetSolutionConfigurationContents" />
+  <Target Name="Publish" />
+  <Target Name="ValidateProjects" />
+  <Target Name="Clean" />
+  <Target Name="Build" />
+  <Target Name="Rebuild" />
+  <Target Name="ValidateSolutionConfiguration" />
+  <Target Name="ValidateToolsVersions" />
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\SolutionFile\ImportBefore\*" Condition="'$(ImportByWildcardBeforeSolution)' != 'false' and exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\SolutionFile\ImportBefore')" />
+  <PropertyGroup Condition="'$(ImportDirectorySolutionProps)' != 'false' and '$(DirectorySolutionPropsPath)' == ''">
+    <_DirectorySolutionPropsFile Condition="'$(_DirectorySolutionPropsFile)' == ''">Directory.Solution.props</_DirectorySolutionPropsFile>
+    <_DirectorySolutionPropsBasePath Condition="'$(_DirectorySolutionPropsBasePath)' == ''">$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildProjectDirectory), '$(_DirectorySolutionPropsFile)'))</_DirectorySolutionPropsBasePath>
+    <DirectorySolutionPropsPath Condition="'$(_DirectorySolutionPropsBasePath)' != '' and '$(_DirectorySolutionPropsFile)' != ''">$([System.IO.Path]::Combine('$(_DirectorySolutionPropsBasePath)', '$(_DirectorySolutionPropsFile)'))</DirectorySolutionPropsPath>
+  </PropertyGroup>
+  <Import Project="$(DirectorySolutionPropsPath)" Condition="'$(ImportDirectorySolutionProps)' != 'false' and exists('$(DirectorySolutionPropsPath)')" />
+  <Import Project="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\before.MazeMap.sln.targets" Condition="exists('C:\Users\thene\source\repos\MicroMouse2025\MazeMap\before.MazeMap.sln.targets')" />
+  <PropertyGroup Condition=" '$(Configuration)' == '' ">
+    <Configuration>Debug</Configuration>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == '' ">
+    <Platform>x64</Platform>
+  </PropertyGroup>
+  <PropertyGroup Condition=" ('$(AspNetConfiguration)' == '') ">
+    <AspNetConfiguration>$(Configuration)</AspNetConfiguration>
+  </PropertyGroup>
+  <PropertyGroup>
+    <SolutionDir>C:\Users\thene\source\repos\MicroMouse2025\MazeMap\</SolutionDir>
+    <SolutionExt>.sln</SolutionExt>
+    <SolutionFileName>MazeMap.sln</SolutionFileName>
+    <SolutionName>MazeMap</SolutionName>
+    <SolutionPath>C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap.sln</SolutionPath>
+  </PropertyGroup>
+  <PropertyGroup>
+    <TargetFrameworkVersion Condition="'$(TargetFrameworkVersion)' == '' and '$(MSBuildToolsVersion)' == '2.0'">v2.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion Condition="'$(TargetFrameworkVersion)' == '' and ('$(MSBuildToolsVersion)' == '3.5' or '$(MSBuildToolsVersion)' == '3.0')">v3.5</TargetFrameworkVersion>
+    <TargetFrameworkVersion Condition="'$(TargetFrameworkVersion)' == '' and !('$(MSBuildToolsVersion)' == '3.5' or '$(MSBuildToolsVersion)' == '3.0' or '$(MSBuildToolsVersion)' == '2.0')">v4.0</TargetFrameworkVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" ('$(Configuration)' == 'Debug') and ('$(Platform)' == 'x64') ">
+    <CurrentSolutionConfigurationContents>
+      <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Debug|x64</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Debug|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Debug|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+    </CurrentSolutionConfigurationContents>
+  </PropertyGroup>
+  <ItemGroup>
+    <SolutionConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+      <Content>
+        <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Debug|x64</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Debug|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Debug|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+      </Content>
+    </SolutionConfiguration>
+    <SolutionConfiguration Include="Debug|x86">
+      <Configuration>Debug</Configuration>
+      <Platform>x86</Platform>
+      <Content>
+        <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Debug|Win32</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Debug|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Debug|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+      </Content>
+    </SolutionConfiguration>
+    <SolutionConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+      <Content>
+        <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Release|x64</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Release|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Release|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+      </Content>
+    </SolutionConfiguration>
+    <SolutionConfiguration Include="Release|x86">
+      <Configuration>Release</Configuration>
+      <Platform>x86</Platform>
+      <Content>
+        <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Release|Win32</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Release|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Release|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+      </Content>
+    </SolutionConfiguration>
+  </ItemGroup>
+  <PropertyGroup Condition=" ('$(Configuration)' == 'Debug') and ('$(Platform)' == 'x86') ">
+    <CurrentSolutionConfigurationContents>
+      <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Debug|Win32</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Debug|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Debug|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+    </CurrentSolutionConfigurationContents>
+  </PropertyGroup>
+  <PropertyGroup Condition=" ('$(Configuration)' == 'Release') and ('$(Platform)' == 'x64') ">
+    <CurrentSolutionConfigurationContents>
+      <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Release|x64</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Release|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Release|x64<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+    </CurrentSolutionConfigurationContents>
+  </PropertyGroup>
+  <PropertyGroup Condition=" ('$(Configuration)' == 'Release') and ('$(Platform)' == 'x86') ">
+    <CurrentSolutionConfigurationContents>
+      <SolutionConfiguration xmlns="">
+  <ProjectConfiguration Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMap\MazeMap.vcxproj" BuildProjectInSolution="True">Release|Win32</ProjectConfiguration>
+  <ProjectConfiguration Project="{70ECA12F-6E41-48C0-BC07-ED19A592739F}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeMapTest\MazeMapTest.vcxproj" BuildProjectInSolution="True">Release|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+  <ProjectConfiguration Project="{B9D3E228-E0C1-4892-AAB6-9D4A5C087F0C}" AbsolutePath="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\MazeSimulation\MazeSimulation.vcxproj" BuildProjectInSolution="True">Release|Win32<ProjectDependency Project="{E658C210-2A87-4780-98F3-5ED4CB48A88D}" /></ProjectConfiguration>
+</SolutionConfiguration>
+    </CurrentSolutionConfigurationContents>
+  </PropertyGroup>
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\SolutionFile\ImportAfter\*" Condition="'$(ImportByWildcardBeforeSolution)' != 'false' and exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\SolutionFile\ImportAfter')" />
+  <PropertyGroup Condition="'$(ImportDirectorySolutionTargets)' != 'false' and '$(DirectorySolutionTargetsPath)' == ''">
+    <_DirectorySolutionTargetsFile Condition="'$(_DirectorySolutionTargetsFile)' == ''">Directory.Solution.targets</_DirectorySolutionTargetsFile>
+    <_DirectorySolutionTargetsBasePath Condition="'$(_DirectorySolutionTargetsBasePath)' == ''">$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildProjectDirectory), '$(_DirectorySolutionTargetsFile)'))</_DirectorySolutionTargetsBasePath>
+    <DirectorySolutionTargetsPath Condition="'$(_DirectorySolutionTargetsBasePath)' != '' and '$(_DirectorySolutionTargetsFile)' != ''">$([System.IO.Path]::Combine('$(_DirectorySolutionTargetsBasePath)', '$(_DirectorySolutionTargetsFile)'))</DirectorySolutionTargetsPath>
+  </PropertyGroup>
+  <Import Project="$(DirectorySolutionTargetsPath)" Condition="'$(ImportDirectorySolutionTargets)' != 'false' and exists('$(DirectorySolutionTargetsPath)')" />
+  <Import Project="C:\Users\thene\source\repos\MicroMouse2025\MazeMap\after.MazeMap.sln.targets" Condition="exists('C:\Users\thene\source\repos\MicroMouse2025\MazeMap\after.MazeMap.sln.targets')" />
+</Project>

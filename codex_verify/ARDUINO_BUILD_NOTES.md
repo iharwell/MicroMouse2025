@@ -58,7 +58,8 @@ For test-only use:
 
 - `codex_verify/test_latest_binaries.cmd --no-pause`
 
-The test-only path checks that the canonical firmware and Release host artifacts are newer than their tracked repo-local inputs before it runs the Release unit tests.
+The test-only path requires the Release host test artifacts to be newer than their tracked repo-local inputs before it runs the Release unit tests.
+It still reports firmware and full-host artifact freshness, but those are advisory in the test-only path.
 The firmware build forces the Teensy 4.1 `Optimize` board option to `Faster with LTO` (`opt=o2lto`), which maps to `-O2` plus link-time optimization.
 The firmware build now compiles directly into the canonical repo-local output directory under `codex_verify/arduino_build/firmware` instead of staging the compile in a separate work directory first.
 

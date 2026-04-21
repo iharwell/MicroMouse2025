@@ -63,6 +63,42 @@ Typical use:
 5. Use the launch-floor section when you need a backlash-safe breakaway estimate; if the tool flags nonmonotonic clear motion, treat the reported floor as provisional and prefer another clean card before retuning launch thresholds.
 6. Use the tire-plant section only to update parameters that the current card actually excites; treat any output marked unstable or not identifiable as diagnostic-only.
 
+## `analyze_open_floor_turn_bias.py`
+
+Purpose: evaluate `SEC_40_YAW` turn-center bias from raw sensors only, with explicit separation between simple one-side bias and a true wheel-bank pivot.
+
+What it does:
+
+- Auto-discovers the latest decoded `open_floor_main.csv` under `TestResults` unless you pass `--main`.
+- Reads the authoritative vehicle/tire geometry from `MazeMap/MazeMap/Vehicle.h` and the back-left IMU position from `MazeMap/MazeMap/Vehicle.cpp`.
+- Estimates independent stationary gyro and accel biases from `SEC_10_STATIC` / `STATIC_HOLD`.
+- Computes center-of-rotation `x` several ways on each yaw turn:
+  encoder-average over raw gyro, encoder-average over encoder-derived yaw rate, and accelerometer moment-arm inversion over raw gyro.
+- Splits each turn into a startup/steady core window and a stop/trail window so translational runoff is visible instead of being folded into the steady-turn estimate.
+- Uses the tire-bank span from `trackWidthPhysicalMinM .. trackWidthPhysicalMaxM` to distinguish:
+  `center`, `left/right_bias`, `left/right_pivot`, and `left/right_outboard`.
+- Reports both a looser encoder bank-zone detection and a stricter consensus pivot detection that requires encoder geometry and accel-inverted geometry to agree on the same wheel bank.
+
+Example usage:
+
+```powershell
+python tooling\analyze_open_floor_turn_bias.py
+```
+
+Explicit input example:
+
+```powershell
+python tooling\analyze_open_floor_turn_bias.py --main TestResults\mmlog_decode_2026-04-21_02-46-49\open_floor_main.csv
+```
+
+Method notes:
+
+- This tool is intentionally sensor-only. It does not use UKF state.
+- The stop window keeps only rows that are still turning in the commanded direction and above a configurable minimum `|gyro|`.
+- The accelerometer inversion is part of the pivot-side test specifically so late low-yaw encoder tails do not get mistaken for a physical wheel-bank pivot.
+- A true pivot classification is stricter than a one-bank bias classification:
+  the tool requires a consecutive stop-window run where encoder-derived CoR and accel-inverted CoR both land inside the tire-bank span on the same side.
+
 ## `run_open_floor_ukf_replay.ps1`
 
 Purpose: build and run the standalone open-floor UKF replay tool that replays decoded `open_floor_main.csv` captures through the current C++ UKF implementation and writes a batch report, without rebuilding `MazeMap.dll`.

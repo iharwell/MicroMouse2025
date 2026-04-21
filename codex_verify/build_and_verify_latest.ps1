@@ -4,7 +4,7 @@ param(
     [ValidateSet('Build', 'Rebuild')]
     [string]$HostBuildTarget = 'Build',
     [ValidateSet('Incremental', 'ProjectDefault')]
-    [string]$HostLtcgMode = 'Incremental',
+    [string]$HostLtcgMode = 'ProjectDefault',
     [string]$LogFilePath
 )
 
@@ -634,6 +634,55 @@ function New-MsBuildArgumentString {
     }) -join ' '
 }
 
+function Invoke-HostMsBuild {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VsDevCmd,
+        [Parameter(Mandatory = $true)]
+        [string]$SolutionPath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ProjectTargetNames,
+        [Parameter(Mandatory = $true)]
+        [string]$HostBuildTarget,
+        [Parameter(Mandatory = $true)]
+        [string]$HostLtcgMode
+    )
+
+    $vsDevCmdArguments = @(
+        '-no_logo',
+        '-host_arch=x64',
+        '-arch=x64'
+    )
+    $hostTargetSpecification = ($ProjectTargetNames | ForEach-Object {
+        if ($HostBuildTarget -eq 'Build') {
+            $_
+        }
+        else {
+            '{0}:{1}' -f $_, $HostBuildTarget
+        }
+    }) -join ';'
+    $hostMsBuildArguments = @(
+        $SolutionPath,
+        '/m',
+        ('/t:' + $hostTargetSpecification),
+        '/p:Configuration=Release',
+        '/p:Platform=x64',
+        '/p:PreferredToolArchitecture=x64',
+        '/v:m'
+    )
+
+    if ($HostLtcgMode -eq 'Incremental') {
+        $hostMsBuildArguments += '/p:LinkTimeCodeGeneration=UseFastLinkTimeCodeGeneration'
+    }
+
+    Invoke-CmdChain -CommandLine (
+        'call "{0}" {1} && msbuild {2}' -f
+        $VsDevCmd,
+        ($vsDevCmdArguments -join ' '),
+        (New-MsBuildArgumentString -Arguments $hostMsBuildArguments)
+    )
+}
+
 function Remove-FileIfPresent {
     param(
         [Parameter(Mandatory = $true)]
@@ -1148,7 +1197,11 @@ function Get-AndLogReleaseArtifactStatus {
         [Parameter(Mandatory = $true)]
         [string]$TestDllPath,
         [Parameter(Mandatory = $true)]
-        [string]$SimulationExePath
+        [string]$SimulationExePath,
+        [Parameter(Mandatory = $true)]
+        [bool]$RequireFirmwareImage,
+        [Parameter(Mandatory = $true)]
+        [bool]$RequireSimulationBinary
     )
 
     try {
@@ -1238,10 +1291,37 @@ function Get-AndLogReleaseArtifactStatus {
     Write-LogLine ("Host test verification status: {0}" -f $(if ($hostTestReady) { 'ready' } else { 'issues detected' })) $(if ($hostTestReady) { 'DarkCyan' } else { 'Yellow' })
     Write-LogLine ("Host verification status: {0}" -f $(if ($hostReady) { 'ready' } else { 'issues detected' })) $(if ($hostReady) { 'DarkCyan' } else { 'Yellow' })
 
-    $failureMessages = [System.Collections.Generic.List[string]]::new()
-    foreach ($result in $allResults) {
+    $blockingFailureMessages = [System.Collections.Generic.List[string]]::new()
+    $advisoryFailureMessages = [System.Collections.Generic.List[string]]::new()
+    $resultPolicies = @(
+        [pscustomobject]@{
+            Result = $firmwareResult
+            Required = $RequireFirmwareImage
+        },
+        [pscustomobject]@{
+            Result = $mazeMapResult
+            Required = $true
+        },
+        [pscustomobject]@{
+            Result = $testDllResult
+            Required = $true
+        },
+        [pscustomobject]@{
+            Result = $simulationResult
+            Required = $RequireSimulationBinary
+        }
+    )
+
+    foreach ($resultPolicy in $resultPolicies) {
+        $result = $resultPolicy.Result
         if (-not $result.IsCurrent) {
-            $failureMessages.Add(("{0} verification issue: {1}" -f $result.Category, $result.Message))
+            $message = ("{0} verification issue: {1}" -f $result.Category, $result.Message)
+            if ($resultPolicy.Required) {
+                $blockingFailureMessages.Add($message)
+            }
+            else {
+                $advisoryFailureMessages.Add($message)
+            }
         }
     }
 
@@ -1254,7 +1334,9 @@ function Get-AndLogReleaseArtifactStatus {
         HostTestReady = $hostTestReady
         HostReady = $hostReady
         AllReady = $teensyReady -and $hostReady
-        FailureMessages = $failureMessages.ToArray()
+        RequiredReady = $blockingFailureMessages.Count -eq 0
+        BlockingFailureMessages = $blockingFailureMessages.ToArray()
+        AdvisoryFailureMessages = $advisoryFailureMessages.ToArray()
     }
 }
 
@@ -1269,8 +1351,8 @@ $arduinoLibrariesDir = Join-Path $scriptRoot 'arduino_libraries'
 $arduinoEigenLibraryDir = Join-Path $arduinoLibrariesDir 'Eigen'
 $solutionPath = Join-Path $repoRoot 'MazeMap\MazeMap.sln'
 $canonicalBuildPath = Join-Path $scriptRoot 'arduino_build'
+$buildPath = Join-Path $canonicalBuildPath 'build'
 $firmwareOutputDir = Join-Path $canonicalBuildPath 'firmware'
-$buildPath = $firmwareOutputDir
 $hexPath = Join-Path $firmwareOutputDir 'MazeMap.ino.hex'
 $arduinoStubHeaderPath = Join-Path $scriptRoot 'Arduino.h'
 $mazeMapDllPath = Join-Path $repoRoot 'MazeMap\x64\Release\MazeMap.dll'
@@ -1320,6 +1402,8 @@ $mazeSimulationHostProject = [pscustomobject]@{
     TLogDir = Join-Path $repoRoot 'MazeMap\MazeSimulation\x64\Release\MazeSimulation.tlog'
     ProjectFile = Join-Path $repoRoot 'MazeMap\MazeSimulation\MazeSimulation.vcxproj'
 }
+$requireFirmwareImage = $Mode -ne 'VerifyOnly'
+$requireSimulationBinary = $Mode -ne 'VerifyOnly'
 Push-Location $repoRoot
 try {
     Write-Step $launcherStepLabel
@@ -1348,29 +1432,31 @@ try {
             '--fqbn', $fqbn,
             '--board-options', ($teensyBoardOptions -join ','),
             '--libraries', $arduinoLibrariesDir,
-            '--library', $arduinoEigenLibraryDir,
             '--build-path', $buildPath,
+            '--output-dir', $firmwareOutputDir,
             $sketchDir
         ) -SuccessTailLineCount 4 -SuccessTailHeader 'Teensy compile output tail:'
         $teensyBuildStopwatch.Stop()
         Write-LogLine ("Teensy compile completed in {0:n1}s" -f $teensyBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
-        Write-Step 'Building the Release solution'
+        Write-Step 'Building the Release host targets'
         Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
         Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
-        $hostMsBuildArguments = @(
-            $solutionPath,
-            '/m',
-            ('/t:' + $HostBuildTarget),
-            '/p:Configuration=Release',
-            '/p:Platform=x64',
-            '/v:m'
-        )
-        if ($HostLtcgMode -eq 'Incremental') {
-            $hostMsBuildArguments += '/p:LinkTimeCodeGeneration=UseFastLinkTimeCodeGeneration'
+        Write-LogLine 'Host toolchain entry: VsDevCmd -host_arch=x64 -arch=x64' 'DarkCyan'
+        $hostProjectTargetNames = [System.Collections.Generic.List[string]]::new()
+        $hostProjectTargetNames.Add($mazeMapTestHostProject.Name)
+        if ($requireSimulationBinary) {
+            $hostProjectTargetNames.Add($mazeSimulationHostProject.Name)
         }
+
+        Write-LogLine ("Host project targets: {0}" -f ($hostProjectTargetNames -join ', ')) 'DarkCyan'
         $hostBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        Invoke-CmdChain -CommandLine ('call "{0}" -no_logo && msbuild {1}' -f $vsDevCmd, (New-MsBuildArgumentString -Arguments $hostMsBuildArguments))
+        Invoke-HostMsBuild `
+            -VsDevCmd $vsDevCmd `
+            -SolutionPath $solutionPath `
+            -ProjectTargetNames $hostProjectTargetNames.ToArray() `
+            -HostBuildTarget $HostBuildTarget `
+            -HostLtcgMode $HostLtcgMode
         $hostBuildStopwatch.Stop()
         Write-LogLine ("Host build completed in {0:n1}s" -f $hostBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
     }
@@ -1391,7 +1477,9 @@ try {
         -MazeSimulationProject $mazeSimulationHostProject `
         -MazeMapDllPath $mazeMapDllPath `
         -TestDllPath $testDllPath `
-        -SimulationExePath $simulationExePath
+        -SimulationExePath $simulationExePath `
+        -RequireFirmwareImage $requireFirmwareImage `
+        -RequireSimulationBinary $requireSimulationBinary
 
     if ($requiresTests) {
         if ($releaseArtifacts.HostTestReady) {
@@ -1401,8 +1489,11 @@ try {
             $testStopwatch.Stop()
             Write-LogLine ("Release tests completed in {0:n1}s" -f $testStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
 
-            if (-not $releaseArtifacts.AllReady) {
-                Write-LogLine 'Host Release tests completed even though other verification issues remain above.' 'Yellow'
+            if (-not $releaseArtifacts.RequiredReady) {
+                Write-LogLine 'Host Release tests completed even though blocking verification issues remain above.' 'Yellow'
+            }
+            elseif ($releaseArtifacts.AdvisoryFailureMessages.Count -gt 0) {
+                Write-LogLine 'Host Release tests completed even though non-blocking verification issues remain above.' 'Yellow'
             }
         }
         else {
@@ -1411,13 +1502,18 @@ try {
         }
     }
 
-    if (-not $releaseArtifacts.AllReady) {
-        throw ($releaseArtifacts.FailureMessages -join ' ')
+    if (-not $releaseArtifacts.RequiredReady) {
+        throw ($releaseArtifacts.BlockingFailureMessages -join ' ')
     }
 
     Write-Step $finalStepLabel
-    Write-LogLine ("Latest firmware image: {0}" -f $releaseArtifacts.FirmwareImage.FullName) 'Green'
+    if ($releaseArtifacts.TeensyReady -and $null -ne $releaseArtifacts.FirmwareImage) {
+        Write-LogLine ("Latest firmware image: {0}" -f $releaseArtifacts.FirmwareImage.FullName) 'Green'
+    }
     Write-LogLine ("Release test binary: {0}" -f $releaseArtifacts.TestDll.FullName) 'Green'
+    if ($releaseArtifacts.AdvisoryFailureMessages.Count -gt 0) {
+        Write-LogLine 'Advisory verification issues remain above but do not block this mode.' 'Yellow'
+    }
     Write-LogLine ("{0}: {1}" -f $logPathLabel, $LogFilePath) 'Green'
 }
 catch {
