@@ -196,6 +196,7 @@
   <ItemGroup>
     <ClCompile Include="CellTest.cpp" />
     <ClCompile Include="DriveBaseTest.cpp" />
+    <ClCompile Include="DriveManeuverTests.cpp" />
     <ClCompile Include="DirectionTest.cpp" />
     <ClCompile Include="DiagnosticCoverageTest.cpp" />
     <ClCompile Include="FresnelTest.cpp" />

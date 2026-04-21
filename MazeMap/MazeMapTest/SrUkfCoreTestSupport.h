@@ -187,6 +187,124 @@ namespace MazeMap
         return ExtractNamedFloat(FindProcessNoiseRowMessage(dumpLines, rowName), rowName);
     }
 
+    struct SyntheticEncoderRemainderState final
+    {
+        float leftRemainderCounts = 0.0f;
+        float rightRemainderCounts = 0.0f;
+    };
+
+    inline int32_t ConsumeWholeEncoderCounts(float deltaCounts, float& remainderCounts) noexcept
+    {
+        remainderCounts += deltaCounts;
+        const int32_t wholeCounts =
+            (remainderCounts >= 0.0f) ?
+            static_cast<int32_t>(std::floor(remainderCounts)) :
+            static_cast<int32_t>(std::ceil(remainderCounts));
+        remainderCounts -= static_cast<float>(wholeCounts);
+        return wholeCounts;
+    }
+
+    inline EncoderObs BuildPredictionMatchingEncoderObservation(
+        const VehicleState::StateVector& previousState,
+        const VehicleState::StateVector& predictedState,
+        const PlantParams& params,
+        float dtSeconds,
+        SyntheticEncoderRemainderState& remainderState) noexcept
+    {
+        EncoderObs encoder{};
+        encoder.omegaLeftRadps = predictedState(VehicleState::kOmegaL);
+        encoder.omegaRightRadps = predictedState(VehicleState::kOmegaR);
+
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        {
+            return encoder;
+        }
+
+        const float distancePerCountM = DistancePerEncoderCountMeters(params);
+        if (!(std::isfinite(distancePerCountM) && (distancePerCountM > 0.0f)))
+        {
+            return encoder;
+        }
+
+        const float leftDistanceDeltaM =
+            0.5f *
+            (previousState(VehicleState::kOmegaL) + predictedState(VehicleState::kOmegaL)) *
+            params.wheelRadiusM *
+            dtSeconds;
+        const float rightDistanceDeltaM =
+            0.5f *
+            (previousState(VehicleState::kOmegaR) + predictedState(VehicleState::kOmegaR)) *
+            params.wheelRadiusM *
+            dtSeconds;
+
+        encoder.totalLeftCounts =
+            ConsumeWholeEncoderCounts(
+                leftDistanceDeltaM / distancePerCountM,
+                remainderState.leftRemainderCounts);
+        encoder.totalRightCounts =
+            ConsumeWholeEncoderCounts(
+                rightDistanceDeltaM / distancePerCountM,
+                remainderState.rightRemainderCounts);
+        return encoder;
+    }
+
+    inline void ApplyPredictionMatchingEncoderAndYawUpdates(
+        SrUkfCore& core,
+        const VehicleState::StateVector& previousState,
+        const VehicleState::StateVector& predictedState,
+        const PlantParams& params,
+        float dtSeconds,
+        SyntheticEncoderRemainderState& remainderState)
+    {
+        const EncoderObs encoder =
+            BuildPredictionMatchingEncoderObservation(
+                previousState,
+                predictedState,
+                params,
+                dtSeconds,
+                remainderState);
+        const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dtSeconds);
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.attempted);
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.accepted);
+
+        const MeasurementUpdateResult yawResult =
+            core.updateYawRate(predictedState(VehicleState::kR));
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.attempted);
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.accepted);
+    }
+
+    inline void RunPredictionMatchingCycle(
+        SrUkfCore& core,
+        const ControlInput& control,
+        const PlantParams& params,
+        float dtSeconds,
+        SyntheticEncoderRemainderState& remainderState,
+        float commandedLinearMps,
+        float commandedAngularRadps,
+        std::uint16_t saturationFlags = 0U,
+        float leftLaunchAssistFloor = 0.0f,
+        float rightLaunchAssistFloor = 0.0f)
+    {
+        core.setRuntimeContext(
+            commandedLinearMps,
+            commandedAngularRadps,
+            saturationFlags,
+            leftLaunchAssistFloor,
+            rightLaunchAssistFloor,
+            true,
+            0.0f,
+            0.0f);
+        const VehicleState::StateVector stateBeforePredict = core.state();
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(core.predict(dtSeconds, control));
+        ApplyPredictionMatchingEncoderAndYawUpdates(
+            core,
+            stateBeforePredict,
+            core.state(),
+            params,
+            dtSeconds,
+            remainderState);
+    }
+
     inline std::size_t FindFirstDumpLineIndexContaining(
         const std::vector<std::pair<std::string, std::string>>& dumpLines,
         const char* token)

@@ -4,7 +4,6 @@
 #include "AuxMeasurementConfig.h"
 #include "AuxMeasurementModeSupport.h"
 #include "BootUtilityModeFramework.h"
-#include "CommandPD.h"
 #include "Drive.h"
 #include "DriveBase.h"
 #include "LoopController.h"
@@ -234,9 +233,6 @@ namespace MazeMap::App::Internal
         {
             _wallTouch.Cancel();
             _wallTouch.SetLimits(BuildPositionWallTouchLimits(_vehicle));
-            _wallTouch.SetTrackingCommandPD(
-                MazeMap::CommandPD::StateWheelOmegaPD |
-                MazeMap::CommandPD::IMUYaw);
             _wallTouch.SetAllowPassThroughNoWall(false);
             _wallTouch.Start(
                 MazeMap::CellCoordinates(

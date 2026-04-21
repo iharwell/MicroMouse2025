@@ -206,7 +206,7 @@ namespace MazeMap
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (int i = 0; i < 110000; i++)
+			for (int i = 0; i < 1100; i++)
 			{
 				for (int j = 0; j < 250; j += 5)
 				{
@@ -273,7 +273,7 @@ namespace MazeMap
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (int i = 0; i < 137500; i++)
+			for (int i = 0; i < 1375; i++)
 			{
 				for (int j = 250; j < 450; j += 5)
 				{
@@ -342,7 +342,7 @@ namespace MazeMap
 
 			auto start = std::chrono::high_resolution_clock::now();
 
-			for (int i = 0; i < 50000; i++)
+			for (int i = 0; i < 500; i++)
 			{
 				for (int j = 450; j < 1000; j += 5)
 				{

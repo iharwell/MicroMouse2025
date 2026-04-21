@@ -553,6 +553,16 @@ namespace MazeMap::Config
         /* yawAccelerationStatePD */ MazeMap::ProportionalDerivative(0.065f, 0.0f),
         /* yawAccelerationGyroPD */ MazeMap::ProportionalDerivative(0.015f, 0.0f),
         /* yawAccelerationEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.001f, 0.0f));
+    // Shared Drive/DriveBase signal hookup. Keep these selections here so maneuver-tracking users all
+    // resolve through one authoritative state-vs-sensor configuration instead of repeating ad hoc flags.
+    inline constexpr MazeMap::CommandPD kDriveHeadingCommandPd = MazeMap::CommandPD::StateHeadingPD;
+    inline constexpr MazeMap::CommandPD kDriveYawRateCommandPd =
+        MazeMap::CommandPD::StateWheelOmegaPD |
+        MazeMap::CommandPD::StateYawPD;
+    inline constexpr MazeMap::CommandPD kDriveVelocityCommandPd = MazeMap::CommandPD::StateWheelOmegaPD;
+    inline constexpr MazeMap::CommandPD kDriveDistanceCommandPd = MazeMap::CommandPD::RawCommand;
+    inline constexpr MazeMap::CommandPD kManeuverTrackingCommandPd = kDriveYawRateCommandPd;
+    inline constexpr MazeMap::CommandPD kWallTouchTrackingCommandPd = kDriveYawRateCommandPd;
 
     // [Medium] Position tolerance used to declare straight and arc profiles complete. Tighten it if stop error is too
     // large and the robot can settle cleanly; loosen it if profiles dither near the endpoint.

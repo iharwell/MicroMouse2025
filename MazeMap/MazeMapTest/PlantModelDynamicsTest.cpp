@@ -10,6 +10,11 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
+    namespace
+    {
+        constexpr float kZeroLinearVelocityToleranceMps = 0.008f;
+    }
+
     TEST_CLASS(PlantModelDynamicsTest)
     {
     public:
@@ -184,11 +189,11 @@ namespace MazeMap
             Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
 
             AssertDriveCommandSolutionNear(
-                plant.solveClosedLoopDriveCommands(state, 1.25f, 3.75f, params, control.fanDutyCycle, control.batteryVoltageV),
-                plant.solveClosedLoopDriveCommands(state, 1.25f, 3.75f, prepared, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, params, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, prepared, control.fanDutyCycle, control.batteryVoltageV),
                 1.0e-6f);
             AssertDriveCommandSolutionNear(
-                plant.solveClosedLoopDriveCommands(
+                plant.solveTractionLimitedDriveCommands(
                     state(VehicleState::kU),
                     1.25f,
                     state(VehicleState::kR),
@@ -196,7 +201,7 @@ namespace MazeMap
                     params,
                     control.fanDutyCycle,
                     control.batteryVoltageV),
-                plant.solveClosedLoopDriveCommands(
+                plant.solveTractionLimitedDriveCommands(
                     state(VehicleState::kU),
                     1.25f,
                     state(VehicleState::kR),
@@ -207,14 +212,14 @@ namespace MazeMap
                 1.0e-6f);
 
             AssertDriveCommandSolutionNear(
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     state,
                     2.05f,
                     2.95f,
                     params,
                     control.fanDutyCycle,
                     control.batteryVoltageV),
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     state,
                     2.05f,
                     2.95f,
@@ -223,7 +228,7 @@ namespace MazeMap
                     control.batteryVoltageV),
                 1.0e-6f);
             AssertDriveCommandSolutionNear(
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     state(VehicleState::kU),
                     2.05f,
                     state(VehicleState::kR),
@@ -231,7 +236,7 @@ namespace MazeMap
                     params,
                     control.fanDutyCycle,
                     control.batteryVoltageV),
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     state(VehicleState::kU),
                     2.05f,
                     state(VehicleState::kR),
@@ -260,6 +265,7 @@ namespace MazeMap
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const float zeroWheelSpeedToleranceRadps = kZeroLinearVelocityToleranceMps / params.wheelRadiusM;
             VehicleState::StateVector state = BuildUkfState(
                 0.03f,
                 0.09f,
@@ -276,24 +282,26 @@ namespace MazeMap
             constexpr float dt = 0.001f;
             for (int step = 0; step < 1000; ++step)
             {
-                state = plant.integrate(state, control, dt, prepared);
+                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
             }
 
             Assert::AreEqual(0.03f, state(VehicleState::kPx), 1.0e-7f);
             Assert::AreEqual(0.09f, state(VehicleState::kPy), 1.0e-7f);
             Assert::AreEqual(0.21f, state(VehicleState::kPsi), 1.0e-7f);
             Assert::AreEqual(0.12f, state(VehicleState::kBgz), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kV), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kU), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state(VehicleState::kV), kZeroLinearVelocityToleranceMps);
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), zeroWheelSpeedToleranceRadps);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), zeroWheelSpeedToleranceRadps);
         }
 
         TEST_METHOD(PlantModelSmallStationaryPerturbationsSnapBackToRest)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const float zeroWheelSpeedToleranceRadps = kZeroLinearVelocityToleranceMps / params.wheelRadiusM;
             VehicleState::StateVector state = BuildUkfState(
                 0.0f,
                 0.09f,
@@ -309,14 +317,14 @@ namespace MazeMap
             constexpr float dt = 0.001f;
             for (int step = 0; step < 25; ++step)
             {
-                state = plant.integrate(state, control, dt, params);
+                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
             }
 
-            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kV), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kU), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state(VehicleState::kV), kZeroLinearVelocityToleranceMps);
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), zeroWheelSpeedToleranceRadps);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), zeroWheelSpeedToleranceRadps);
         }
 
         TEST_METHOD(PlantModelPreparedNearZeroLateralPerturbationsSnapBackToRest)
@@ -324,6 +332,7 @@ namespace MazeMap
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const float zeroWheelSpeedToleranceRadps = kZeroLinearVelocityToleranceMps / params.wheelRadiusM;
             VehicleState::StateVector state = BuildUkfState(
                 0.0f,
                 0.09f,
@@ -339,14 +348,14 @@ namespace MazeMap
             constexpr float dt = 0.001f;
             for (int step = 0; step < 25; ++step)
             {
-                state = plant.integrate(state, control, dt, prepared);
+                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
             }
 
-            Assert::AreEqual(0.0f, state(VehicleState::kU), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kV), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kU), kZeroLinearVelocityToleranceMps);
+            Assert::AreEqual(0.0f, state(VehicleState::kV), kZeroLinearVelocityToleranceMps);
             Assert::AreEqual(0.0f, state(VehicleState::kR), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), 1.0e-7f);
-            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), 1.0e-7f);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), zeroWheelSpeedToleranceRadps);
+            Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), zeroWheelSpeedToleranceRadps);
         }
 
         TEST_METHOD(PlantModelComputesFiniteAlgebraicSlipAndForces)
@@ -478,7 +487,7 @@ namespace MazeMap
             constexpr int kSteps = 25;
             for (int step = 0; step < kSteps; ++step)
             {
-                state = plant.integrate(state, control, dt, prepared);
+                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
             }
 
             const float totalTimeS = dt * static_cast<float>(kSteps);

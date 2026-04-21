@@ -34,17 +34,34 @@ namespace MazeMap
             }
         }
 
-        TEST_METHOD(LaunchSettlingTimeIsConfigurableWithoutDisablingByDefault)
+        TEST_METHOD(PostSegmentHoldUsesPositiveCumulativeStationaryBudget)
         {
-            Assert::IsTrue(MazeMap::kOpenFloorLaunchSettleMs > 0UL);
+            Assert::IsTrue(MazeMap::kOpenFloorPostSegmentHoldMs > 0UL);
         }
 
         TEST_METHOD(LaunchAndStraightSampleScheduleMatchesCurrentOpenFloorPlan)
         {
             Assert::AreEqual(static_cast<std::uint8_t>(3U), MazeMap::kOpenFloorLaunchRepeatsPerMagnitude);
             Assert::AreEqual(static_cast<std::uint8_t>(3U), MazeMap::kOpenFloorStraightRepeatsPerSpeed);
-            Assert::AreEqual(100UL, MazeMap::kOpenFloorInterMotionHoldMs);
+            Assert::AreEqual(250UL, MazeMap::kOpenFloorPostSegmentHoldMs);
             Assert::AreEqual(500UL, MazeMap::kOpenFloorInterPhaseHoldMs);
+        }
+
+        TEST_METHOD(YawRepeatNominalAnglesCancelToZeroHeading)
+        {
+            Assert::AreEqual(static_cast<size_t>(4U), MazeMap::kOpenFloorYawPrimitiveIds.size());
+            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip90), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[0U]));
+            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip90M), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[1U]));
+            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip180), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[2U]));
+            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip180M), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[3U]));
+
+            float netAngleRad = 0.0f;
+            for (const float angleRad : MazeMap::kOpenFloorYawNominalAnglesRad)
+            {
+                netAngleRad += angleRad;
+            }
+
+            Assert::AreEqual(0.0f, netAngleRad, 1.0e-6f);
         }
 
         TEST_METHOD(SelectorRemovalFaultRequiresHalfSecondOfContinuousLoss)

@@ -13,18 +13,13 @@
 namespace MazeMap::App::Internal
 {
     WallTouch::WallTouch()
-        : _trackingCommandPd(MazeMap::CommandPD::StateWheelOmegaPD | MazeMap::CommandPD::IMUYaw)
+        : _trackingCommandPd(Config::kWallTouchTrackingCommandPd)
     {
     }
 
     void WallTouch::SetLimits(const MotionLimits& limits) noexcept
     {
         _limits = limits;
-    }
-
-    void WallTouch::SetTrackingCommandPD(const MazeMap::CommandPD trackingCommandPd) noexcept
-    {
-        _trackingCommandPd = trackingCommandPd;
     }
 
     void WallTouch::SetAllowPassThroughNoWall(const bool allowPassThroughNoWall) noexcept

@@ -9,7 +9,7 @@ namespace MazeMap
 {
     inline constexpr const char* kOpenFloorSelectedRoutineName = "open_floor";
     inline constexpr const char* kOpenFloorFormatVersion = "ofm:f";
-    inline constexpr const char* kOpenFloorRevisionBundle = "log:h;sched:g;bins:d;marks:d";
+    inline constexpr const char* kOpenFloorRevisionBundle = "log:h;sched:h;bins:d;marks:d";
     inline constexpr const char* kOpenFloorImuSetup = "imu:bl;extr:v1";
     inline constexpr const char* kOpenFloorTimingStreamType = "timing";
     inline constexpr const char* kOpenFloorMainStreamType = "main";
@@ -91,6 +91,7 @@ namespace MazeMap
         S180ls,
         S180lsM,
         Recovery,
+        Ip180M,
     };
 
     enum class OpenFloorDirectionId : uint8_t
@@ -201,7 +202,7 @@ namespace MazeMap
         OpenFloorSectionDefinition{ OpenFloorSectionId::Sec70LoopCcw, "SEC_70_LOOP_CCW", OpenFloorMarkerId::CCW },
     };
 
-    inline constexpr std::array<OpenFloorPrimitiveDefinition, 37U> kOpenFloorPrimitives = {
+    inline constexpr std::array<OpenFloorPrimitiveDefinition, 38U> kOpenFloorPrimitives = {
         OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::None, "NONE", OpenFloorPrimitiveFamily::None, false },
         OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::TimingNoMotion, "TIMING_NO_MOTION", OpenFloorPrimitiveFamily::Timing, false },
         OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::StaticHold, "STATIC_HOLD", OpenFloorPrimitiveFamily::StaticHold, false },
@@ -239,9 +240,10 @@ namespace MazeMap
         OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S180ls, "S180LS", OpenFloorPrimitiveFamily::SmoothTurn, false },
         OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S180lsM, "S180LS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
         OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Recovery, "RECOVERY", OpenFloorPrimitiveFamily::Recovery, false },
+        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Ip180M, "IP180_M", OpenFloorPrimitiveFamily::InPlaceTurn, true },
     };
 
-    inline constexpr std::array<const char*, 59U> kOpenFloorDeferredPrimitiveIds = {
+    inline constexpr std::array<const char*, 58U> kOpenFloorDeferredPrimitiveIds = {
         "S3",
         "S5",
         "S6",
@@ -274,7 +276,6 @@ namespace MazeMap
         "IP45_M",
         "IP135",
         "IP135_M",
-        "IP180_M",
         "S45SD",
         "S45SD_M",
         "S45LS",
@@ -305,17 +306,32 @@ namespace MazeMap
 
     inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { 0.1f, 0.30f, 0.55f };
     inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 9.0f, 18.0f, 27.0f };
+    // Keep each yaw repeat nominally balanced so the section returns to its starting heading every cycle.
+    inline constexpr std::array<OpenFloorPrimitiveId, 4U> kOpenFloorYawPrimitiveIds = {
+        OpenFloorPrimitiveId::Ip90,
+        OpenFloorPrimitiveId::Ip90M,
+        OpenFloorPrimitiveId::Ip180,
+        OpenFloorPrimitiveId::Ip180M,
+    };
+    inline constexpr std::array<OpenFloorDirectionId, 4U> kOpenFloorYawDirectionIds = {
+        OpenFloorDirectionId::Clockwise,
+        OpenFloorDirectionId::CounterClockwise,
+        OpenFloorDirectionId::Clockwise,
+        OpenFloorDirectionId::CounterClockwise,
+    };
+    inline constexpr std::array<float, 4U> kOpenFloorYawNominalAnglesRad = {
+        HALF_PI_F,
+        -HALF_PI_F,
+        PI_F,
+        -PI_F,
+    };
     inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.4f, 0.45f, 0.45f };
     inline constexpr std::uint8_t kOpenFloorLaunchRepeatsPerMagnitude = 3U;
     inline constexpr std::uint8_t kOpenFloorStraightRepeatsPerSpeed = 3U;
     inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
-    // After a launch pulse leaves the estimator's stationary regime, or after the straight battery
-    // before entering the yaw battery, hold brake while stationary for this long so the next section
-    // begins from a settled UKF state instead of motion transients.
-    inline constexpr unsigned long kOpenFloorLaunchSettleMs = 200UL;
-    // Short brake hold between launch or straight samples so the next motion starts from a clean stop
-    // without reusing whatever residual wheel motion the previous sample left behind.
-    inline constexpr unsigned long kOpenFloorInterMotionHoldMs = 100UL;
+    // After each launch, straight, or yaw test segment, use Drive's hold primitive to accumulate
+    // this much stationary time before starting the next segment or phase.
+    inline constexpr unsigned long kOpenFloorPostSegmentHoldMs = 250UL;
     // Longer brake hold between major sections so the next battery starts from a fully settled state.
     inline constexpr unsigned long kOpenFloorInterPhaseHoldMs = 500UL;
     inline constexpr float kOpenFloorLaunchDriveMagnitudeStart = 0.25f;

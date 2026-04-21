@@ -604,17 +604,13 @@ void DriveBase::ResolveVelocityPointAcceleration(
     float desiredLinearSpeedMps,
     float& desiredLongitudinalAccelMps2) const noexcept
 {
-    float unusedDesiredYawAccelRadps2 = 0.0f;
-    _plantModel.resolveVelocityTargetAccelerations(
+    _plantModel.ComputeBodyAction(
         context.presentLinearSpeedMps,
         desiredLinearSpeedMps,
         context.presentYawRateRadps,
-        context.presentYawRateRadps,
         context.maxLongitudinalAccelMps2,
-        (std::numeric_limits<float>::max)(),
         ResolveCommandResponseTimeS(),
-        desiredLongitudinalAccelMps2,
-        unusedDesiredYawAccelRadps2);
+        desiredLongitudinalAccelMps2);
 }
 
 void DriveBase::ResolveYawPointAcceleration(
@@ -622,16 +618,12 @@ void DriveBase::ResolveYawPointAcceleration(
     float desiredYawRateRadps,
     float& desiredYawAccelRadps2) const noexcept
 {
-    float unusedDesiredLongitudinalAccelMps2 = 0.0f;
-    _plantModel.resolveVelocityTargetAccelerations(
-        context.presentLinearSpeedMps,
+    _plantModel.ComputeBodyActionFromYawRate(
         context.presentLinearSpeedMps,
         context.presentYawRateRadps,
         desiredYawRateRadps,
-        (std::numeric_limits<float>::max)(),
         context.maxYawAccelRadps2,
         ResolveCommandResponseTimeS(),
-        unusedDesiredLongitudinalAccelMps2,
         desiredYawAccelRadps2);
 }
 
@@ -642,7 +634,7 @@ void DriveBase::ResolveVelocityPointAccelerations(
     float& desiredLongitudinalAccelMps2,
     float& desiredYawAccelRadps2) const noexcept
 {
-    _plantModel.resolveVelocityTargetAccelerations(
+    _plantModel.ComputeBodyAction(
         context.presentLinearSpeedMps,
         desiredLinearSpeedMps,
         context.presentYawRateRadps,
@@ -784,9 +776,12 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::ComposeGenerate
                 targets.hasVelocityTarget ?
                 targets.velocityTargetMps :
                 context.presentLinearSpeedMps;
+            const MazeMap::ProportionalDerivative& velocityPD =
+                GetProportionalDerivativeCluster().GetVelocityPD(MazeMap::CommandPD::StateVelocityPD);
             const float desiredAccelCorrectionMps2 =
-                (targetVelocityMps - context.presentLinearSpeedMps) /
-                ResolveCommandResponseTimeS();
+                velocityPD.ComputeFromMeasurementRate(
+                    targetVelocityMps - context.presentLinearSpeedMps,
+                    context.stateLongitudinalAccelMps2);
             command = AddDriveCommands(
                 command,
                 ResolveLongitudinalCorrectionCommand(
@@ -800,11 +795,16 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::ComposeGenerate
                 targets.hasLongitudinalAccelTarget ?
                 targets.longitudinalAccelTargetMps2 :
                 context.stateLongitudinalAccelMps2;
+            const MazeMap::ProportionalDerivative& accelerationPD =
+                GetProportionalDerivativeCluster().GetLongitudinalAccelerationPD(
+                    MazeMap::CommandPD::StateAccelerationPD);
             command = AddDriveCommands(
                 command,
                 ResolveLongitudinalCorrectionCommand(
                     context,
-                    targetAccelMps2 - context.stateLongitudinalAccelMps2));
+                    accelerationPD.Compute(
+                        targetAccelMps2 - context.stateLongitudinalAccelMps2,
+                        0.0f)));
         }
 
         if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::IMUForwardAccel))
@@ -843,12 +843,15 @@ MazeMap::App::Internal::LoopController::ControlVector DriveBase::ComposeGenerate
                 targets.hasYawRateTarget ?
                 targets.yawRateTargetRadps :
                 context.presentYawRateRadps;
+            const MazeMap::ProportionalDerivative& yawRatePD =
+                GetProportionalDerivativeCluster().GetYawRatePD(MazeMap::CommandPD::StateYawPD);
             command = AddDriveCommands(
                 command,
                 ResolveYawCorrectionCommand(
                     context,
-                    (targetYawRateRadps - context.presentYawRateRadps) /
-                    ResolveCommandResponseTimeS()));
+                    yawRatePD.ComputeFromMeasurementRate(
+                        targetYawRateRadps - context.presentYawRateRadps,
+                        context.presentDerivatives.yawAccelRadps2)));
         }
 
         if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::IMUYaw))

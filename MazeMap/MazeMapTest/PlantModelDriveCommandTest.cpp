@@ -1,11 +1,12 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
-#include "EstimatorTestSupport.h"
 #include "PlantModelTestSupport.h"
+#include "SrUkfCoreTestSupport.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -58,13 +59,80 @@ namespace MazeMap
             const ControlInput& control,
             int steps)
         {
-            VehicleState::StateVector state = initialState;
+            SrUkfCore core(prepared.raw, plant);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
+            SyntheticEncoderRemainderState syntheticEncoderState{};
+            const float commandedLinearMps = initialState(VehicleState::kU);
+            const float commandedAngularRadps = initialState(VehicleState::kR);
             for (int step = 0; step < steps; ++step)
             {
-                state = plant.integrate(state, control, kPredictDtSeconds, prepared);
+                RunPredictionMatchingCycle(
+                    core,
+                    control,
+                    prepared.raw,
+                    kPredictDtSeconds,
+                    syntheticEncoderState,
+                    commandedLinearMps,
+                    commandedAngularRadps);
             }
 
-            return state;
+            return core.state();
+        }
+
+        DriveCommandSolution SolveStationaryYawOnlyVelocityTargetCommand(
+            PlantModel& plant,
+            const PlantParams& params,
+            const float targetYawRateRadps = 3.0f)
+        {
+            return plant.solveDriveCommandsForVelocityTarget(
+                BuildRollingUkfState(0.0f, 0.0f, params),
+                0.0f,
+                targetYawRateRadps,
+                params,
+                0.80f,
+                params.supplyVoltageV,
+                PlantModel::kDefaultVelocityTargetResponseTimeS);
+        }
+
+        float ComputeInPlaceTurnCommandSplitForYawAccelLimit(
+            PlantModel& plant,
+            const PlantParams& params,
+            float targetYawRateRadps,
+            float yawAccelLimitRadps2)
+        {
+            float desiredYawAccelRadps2 = 0.0f;
+            plant.ComputeBodyActionFromYawRate(
+                0.0f,
+                0.0f,
+                targetYawRateRadps,
+                yawAccelLimitRadps2,
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredYawAccelRadps2);
+
+            const DriveCommandSolution solution =
+                plant.solveDriveCommands(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    desiredYawAccelRadps2,
+                    params,
+                    0.80f,
+                    params.supplyVoltageV);
+
+            return std::fabs(solution.control.leftMotorCommand - solution.control.rightMotorCommand);
+        }
+
+        float ComputeTargetArrivalTimeS(
+            float currentValue,
+            float targetValue,
+            float appliedAcceleration) noexcept
+        {
+            if (std::fabs(appliedAcceleration) <= 1.0e-6f)
+            {
+                return (std::numeric_limits<float>::infinity)();
+            }
+
+            return std::fabs((targetValue - currentValue) / appliedAcceleration);
         }
 
         template <typename Solver>
@@ -72,17 +140,28 @@ namespace MazeMap
             const PlantModel& plant,
             const PlantModel::PreparedParams& prepared,
             const VehicleState::StateVector& initialState,
+            float commandedLinearMps,
+            float commandedAngularRadps,
             int steps,
             Solver&& solveFeedforward)
         {
-            VehicleState::StateVector state = initialState;
+            SrUkfCore core(prepared.raw, plant);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
+            SyntheticEncoderRemainderState syntheticEncoderState{};
             for (int step = 0; step < steps; ++step)
             {
-                const DriveCommandSolution solution = solveFeedforward(state);
-                state = plant.integrate(state, solution.control, kPredictDtSeconds, prepared);
+                const DriveCommandSolution solution = solveFeedforward(core.state());
+                RunPredictionMatchingCycle(
+                    core,
+                    solution.control,
+                    prepared.raw,
+                    kPredictDtSeconds,
+                    syntheticEncoderState,
+                    commandedLinearMps,
+                    commandedAngularRadps);
             }
 
-            return state;
+            return core.state();
         }
 
         void AssertPredictStateNearTarget(
@@ -154,6 +233,8 @@ namespace MazeMap
                         plant,
                         prepared,
                         BuildRollingUkfState(0.0f, 0.0f, params),
+                        targetForwardVelocityMps,
+                        targetYawRateRadps,
                         horizon.steps,
                         solver);
                 AssertPredictStateNearTargetWithContext(
@@ -184,6 +265,18 @@ namespace MazeMap
             Assert::AreEqual(0.0f, solution.control.rightMotorCommand, 1.0e-6f);
             Assert::AreEqual(0.0f, solution.leftWheelTorqueNm, 1.0e-6f);
             Assert::AreEqual(0.0f, solution.rightWheelTorqueNm, 1.0e-6f);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetStationaryYawOnlyRequestProducesZeroAverageCommand)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const DriveCommandSolution solution =
+                SolveStationaryYawOnlyVelocityTargetCommand(plant, params);
+            const float averageCommand =
+                0.5f * (solution.control.leftMotorCommand + solution.control.rightMotorCommand);
+
+            Assert::AreEqual(0.0f, averageCommand, 1.0e-6f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsIncludesWheelInertiaAndFriction)
@@ -326,14 +419,14 @@ namespace MazeMap
                 0.02f);
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsReducedFeedforwardHoldsOperatingPointInPredict)
+        TEST_METHOD(PlantModelSolveTractionLimitedDriveCommandsReducedFeedforwardHoldsOperatingPointInPredict)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             const DriveCommandSolution solution =
-                plant.solveClosedLoopDriveCommands(
+                plant.solveTractionLimitedDriveCommands(
                     targetForwardVelocityMps,
                     0.0f,
                     0.0f,
@@ -360,7 +453,7 @@ namespace MazeMap
                 0.02f);
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsStateFeedforwardHoldsOperatingPointInPredict)
+        TEST_METHOD(PlantModelSolveTractionLimitedDriveCommandsStateFeedforwardHoldsOperatingPointInPredict)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
@@ -369,7 +462,7 @@ namespace MazeMap
             const VehicleState::StateVector operatingState =
                 BuildRollingUkfState(targetForwardVelocityMps, 0.0f, params);
             const DriveCommandSolution solution =
-                plant.solveClosedLoopDriveCommands(
+                plant.solveTractionLimitedDriveCommands(
                     operatingState,
                     0.0f,
                     0.0f,
@@ -395,13 +488,13 @@ namespace MazeMap
                 0.02f);
         }
 
-        TEST_METHOD(PlantModelResolveVelocityTargetAccelerationsUsesLongitudinalLimitForPureSpeedChange)
+        TEST_METHOD(PlantModelComputeBodyActionUsesLongitudinalLimitForPureSpeedChange)
         {
             PlantModel plant;
             float desiredLongitudinalAccelMps2 = 0.0f;
             float desiredYawAccelRadps2 = 0.0f;
 
-            plant.resolveVelocityTargetAccelerations(
+            plant.ComputeBodyAction(
                 0.0f,
                 0.30f,
                 0.0f,
@@ -416,46 +509,74 @@ namespace MazeMap
             Assert::AreEqual(0.0f, desiredYawAccelRadps2, 1.0e-6f);
         }
 
-        TEST_METHOD(PlantModelResolveVelocityTargetAccelerationsUsesYawLimitForPureYawChange)
+        TEST_METHOD(PlantModelComputeBodyActionFromYawRateUsesYawAccelLimitWhenRelevant)
         {
             PlantModel plant;
-            float desiredLongitudinalAccelMps2 = 0.0f;
-            float desiredYawAccelRadps2 = 0.0f;
+            const PlantParams params = PlantParams::Default();
+            constexpr float tightYawAccelLimitRadps2 = 120.0f;
+            constexpr float looseYawAccelLimitRadps2 = 240.0f;
+            const float targetYawRateRadps =
+                2.0f * looseYawAccelLimitRadps2 * PlantModel::kDefaultVelocityTargetResponseTimeS;
+            const float tightCommandSplit =
+                ComputeInPlaceTurnCommandSplitForYawAccelLimit(
+                    plant,
+                    params,
+                    targetYawRateRadps,
+                    tightYawAccelLimitRadps2);
+            const float looseCommandSplit =
+                ComputeInPlaceTurnCommandSplitForYawAccelLimit(
+                    plant,
+                    params,
+                    targetYawRateRadps,
+                    looseYawAccelLimitRadps2);
+            const std::wstring message =
+                std::wstring(L"tight split=") + std::to_wstring(tightCommandSplit) +
+                L" loose split=" + std::to_wstring(looseCommandSplit) +
+                L" target_yaw_rate=" + std::to_wstring(targetYawRateRadps);
 
-            plant.resolveVelocityTargetAccelerations(
-                0.0f,
-                0.0f,
-                0.0f,
-                8.0f,
-                9.0f,
-                400.0f,
-                PlantModel::kDefaultVelocityTargetResponseTimeS,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
-
-            Assert::AreEqual(0.0f, desiredLongitudinalAccelMps2, 1.0e-6f);
-            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
+            Assert::IsTrue(looseCommandSplit > (tightCommandSplit + 1.0e-4f), message.c_str());
         }
 
-        TEST_METHOD(PlantModelResolveVelocityTargetAccelerationsBalancesCombinedRequestsToSharedArrivalScale)
+        TEST_METHOD(PlantModelComputeBodyActionCombinedTargetsShareArrivalTime)
         {
             PlantModel plant;
+            constexpr float currentForwardVelocityMps = 0.0f;
+            constexpr float currentYawRateRadps = 0.0f;
+            constexpr float longitudinalAccelLimitMps2 = 9.0f;
+            constexpr float yawAccelLimitRadps2 = 400.0f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
+            const float targetForwardVelocityMps = 1.2f * longitudinalAccelLimitMps2 * responseTimeS;
+            const float targetYawRateRadps = 0.8f * yawAccelLimitRadps2 * responseTimeS;
             float desiredLongitudinalAccelMps2 = 0.0f;
             float desiredYawAccelRadps2 = 0.0f;
 
-            plant.resolveVelocityTargetAccelerations(
-                0.0f,
-                0.06f,
-                0.0f,
-                8.0f,
-                9.0f,
-                400.0f,
-                PlantModel::kDefaultVelocityTargetResponseTimeS,
+            plant.ComputeBodyAction(
+                currentForwardVelocityMps,
+                targetForwardVelocityMps,
+                currentYawRateRadps,
+                targetYawRateRadps,
+                longitudinalAccelLimitMps2,
+                yawAccelLimitRadps2,
+                responseTimeS,
                 desiredLongitudinalAccelMps2,
                 desiredYawAccelRadps2);
+            const float forwardArrivalTimeS =
+                ComputeTargetArrivalTimeS(
+                    currentForwardVelocityMps,
+                    targetForwardVelocityMps,
+                    desiredLongitudinalAccelMps2);
+            const float yawArrivalTimeS =
+                ComputeTargetArrivalTimeS(
+                    currentYawRateRadps,
+                    targetYawRateRadps,
+                    desiredYawAccelRadps2);
+            const std::wstring message =
+                std::wstring(L"forward_arrival_s=") + std::to_wstring(forwardArrivalTimeS) +
+                L" yaw_arrival_s=" + std::to_wstring(yawArrivalTimeS) +
+                L" long_accel=" + std::to_wstring(desiredLongitudinalAccelMps2) +
+                L" yaw_accel=" + std::to_wstring(desiredYawAccelRadps2);
 
-            Assert::AreEqual(3.0f, desiredLongitudinalAccelMps2, 1.0e-4f);
-            Assert::AreEqual(400.0f, desiredYawAccelRadps2, 1.0e-4f);
+            Assert::IsTrue(std::fabs(forwardArrivalTimeS - yawArrivalTimeS) <= 1.0e-5f, message.c_str());
         }
 
         TEST_METHOD(PlantModelResolveWheelMotionTargetsUsesEffectiveTrackWidthAndWheelRadius)
@@ -614,13 +735,15 @@ namespace MazeMap
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             const VehicleState::StateVector predictedState =
                 RunPlantPredictLoopWithResolvedFeedforward(
                     plant,
                     prepared,
                     BuildRollingUkfState(0.0f, 0.0f, params),
+                    targetForwardVelocityMps,
+                    targetYawRateRadps,
                     kFeedforwardPredictSteps,
                     [&](const VehicleState::StateVector& state)
                     {
@@ -651,13 +774,15 @@ namespace MazeMap
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             const VehicleState::StateVector predictedState =
                 RunPlantPredictLoopWithResolvedFeedforward(
                     plant,
                     prepared,
                     BuildRollingUkfState(0.0f, 0.0f, params),
+                    targetForwardVelocityMps,
+                    targetYawRateRadps,
                     kFeedforwardPredictSteps,
                     [&](const VehicleState::StateVector& state)
                     {
@@ -680,24 +805,26 @@ namespace MazeMap
                 0.04f);
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
+        TEST_METHOD(PlantModelSolveTractionLimitedDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             const VehicleState::StateVector predictedState =
                 RunPlantPredictLoopWithResolvedFeedforward(
                     plant,
                     prepared,
                     BuildRollingUkfState(0.0f, 0.0f, params),
+                    targetForwardVelocityMps,
+                    targetYawRateRadps,
                     kFeedforwardPredictSteps,
                     [&](const VehicleState::StateVector& state)
                     {
-                        return plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                        return plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                             state(VehicleState::kU),
                             targetForwardVelocityMps,
                             state(VehicleState::kR),
@@ -717,24 +844,26 @@ namespace MazeMap
                 0.04f);
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
+        TEST_METHOD(PlantModelSolveTractionLimitedDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAfterOneSecond)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             const VehicleState::StateVector predictedState =
                 RunPlantPredictLoopWithResolvedFeedforward(
                     plant,
                     prepared,
                     BuildRollingUkfState(0.0f, 0.0f, params),
+                    targetForwardVelocityMps,
+                    targetYawRateRadps,
                     kFeedforwardPredictSteps,
                     [&](const VehicleState::StateVector& state)
                     {
-                        return plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                        return plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                             state,
                             targetForwardVelocityMps,
                             targetYawRateRadps,
@@ -760,7 +889,7 @@ namespace MazeMap
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             AssertVelocityTargetFeedforwardAcrossHorizons(
                 plant,
@@ -790,7 +919,7 @@ namespace MazeMap
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             AssertVelocityTargetFeedforwardAcrossHorizons(
                 plant,
@@ -812,14 +941,14 @@ namespace MazeMap
                 L"State open-loop velocity target");
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
+        TEST_METHOD(PlantModelSolveTractionLimitedDriveCommandsForVelocityTargetReducedFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             AssertVelocityTargetFeedforwardAcrossHorizons(
                 plant,
@@ -829,7 +958,7 @@ namespace MazeMap
                 targetYawRateRadps,
                 [&](const VehicleState::StateVector& state)
                 {
-                    return plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    return plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                         state(VehicleState::kU),
                         targetForwardVelocityMps,
                         state(VehicleState::kR),
@@ -839,17 +968,17 @@ namespace MazeMap
                         params.supplyVoltageV,
                         responseTimeS);
                 },
-                L"Reduced closed-loop velocity target");
+                L"Reduced traction-limited velocity target");
         }
 
-        TEST_METHOD(PlantModelSolveClosedLoopDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
+        TEST_METHOD(PlantModelSolveTractionLimitedDriveCommandsForVelocityTargetStateFeedforwardReachesTargetWithinTenPercentAcrossExtendedHorizons)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             constexpr float targetForwardVelocityMps = 0.20f;
             constexpr float targetYawRateRadps = 0.60f;
-            constexpr float responseTimeS = 0.10f;
+            constexpr float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
 
             AssertVelocityTargetFeedforwardAcrossHorizons(
                 plant,
@@ -859,7 +988,7 @@ namespace MazeMap
                 targetYawRateRadps,
                 [&](const VehicleState::StateVector& state)
                 {
-                    return plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                    return plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                         state,
                         targetForwardVelocityMps,
                         targetYawRateRadps,
@@ -868,14 +997,14 @@ namespace MazeMap
                         params.supplyVoltageV,
                         responseTimeS);
                 },
-                L"State closed-loop velocity target");
+                L"State traction-limited velocity target");
         }
 
-        TEST_METHOD(PlantModelClosedLoopVelocityTargetKeepsTenPercentTractionReserveWhenLimited)
+        TEST_METHOD(PlantModelTractionLimitedVelocityTargetKeepsTenPercentTractionReserveWhenLimited)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
-            constexpr float aggressiveResponseTimeS = 0.005f;
+            constexpr float canonicalResponseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
             const DriveCommandSolution tractionLimited =
                 plant.solveDriveCommandsForVelocityTarget(
                     0.0f,
@@ -885,9 +1014,9 @@ namespace MazeMap
                     params,
                     0.80f,
                     0.0f,
-                    aggressiveResponseTimeS);
+                    canonicalResponseTimeS);
             const DriveCommandSolution reserved =
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     0.0f,
                     0.20f,
                     0.0f,
@@ -895,23 +1024,29 @@ namespace MazeMap
                     params,
                     0.80f,
                     0.0f,
-                    aggressiveResponseTimeS);
+                    canonicalResponseTimeS);
 
-            Assert::IsTrue(tractionLimited.tractionLimited);
-            Assert::IsFalse(reserved.tractionLimited);
-            Assert::IsTrue(reserved.commandedLongitudinalAccelMps2 < tractionLimited.commandedLongitudinalAccelMps2);
-            Assert::AreEqual(
-                0.90f * tractionLimited.commandedLongitudinalAccelMps2,
-                reserved.commandedLongitudinalAccelMps2,
-                0.25f);
+            const float expectedReservedLongitudinalAccelMps2 =
+                0.90f * tractionLimited.commandedLongitudinalAccelMps2;
+            const std::wstring message =
+                std::wstring(L"limited=") + (tractionLimited.tractionLimited ? L"true" : L"false") +
+                L" reserve_accel=" + std::to_wstring(reserved.commandedLongitudinalAccelMps2) +
+                L" limited_accel=" + std::to_wstring(tractionLimited.commandedLongitudinalAccelMps2) +
+                L" expected_reserved=" + std::to_wstring(expectedReservedLongitudinalAccelMps2);
+
+            Assert::IsTrue(
+                tractionLimited.tractionLimited &&
+                (reserved.commandedLongitudinalAccelMps2 < tractionLimited.commandedLongitudinalAccelMps2) &&
+                (std::fabs(reserved.commandedLongitudinalAccelMps2 - expectedReservedLongitudinalAccelMps2) <= 0.25f),
+                message.c_str());
         }
 
-        TEST_METHOD(PlantModelClosedLoopVelocityTargetKeepsPositiveYawFeedforwardDirectionAtNonzeroYawRate)
+        TEST_METHOD(PlantModelTractionLimitedVelocityTargetKeepsPositiveYawFeedforwardDirectionAtNonzeroYawRate)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const DriveCommandSolution solution =
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     0.0f,
                     0.0f,
                     0.35f,
@@ -946,12 +1081,12 @@ namespace MazeMap
             }
         }
 
-        TEST_METHOD(PlantModelClosedLoopVelocityTargetKeepsNegativeYawFeedforwardDirectionAtNonzeroYawRate)
+        TEST_METHOD(PlantModelTractionLimitedVelocityTargetKeepsNegativeYawFeedforwardDirectionAtNonzeroYawRate)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const DriveCommandSolution solution =
-                plant.solveClosedLoopDriveCommandsForVelocityTarget(
+                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     0.0f,
                     0.0f,
                     -0.35f,
@@ -1332,13 +1467,11 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(achieved.longitudinalAccelMps2) <= (params.combinedAccelPeakMps2 + 1.0f));
         }
 
-        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetTractionLimitsExplicitAggressiveStep)
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReportsTractionLimitAtCanonicalResponseTime)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
-            constexpr float aggressiveResponseTimeS = 0.005f;
-            const float requestedLongitudinalAccelMps2 =
-                (0.20f - 0.0f) / aggressiveResponseTimeS;
+            constexpr float canonicalResponseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS;
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(
                     0.0f,
@@ -1348,13 +1481,9 @@ namespace MazeMap
                     params,
                     0.80f,
                     0.0f,
-                    aggressiveResponseTimeS);
+                    canonicalResponseTimeS);
 
             Assert::IsTrue(solution.tractionLimited);
-            Assert::IsTrue(solution.commandedLongitudinalAccelMps2 < requestedLongitudinalAccelMps2);
-            Assert::IsTrue(std::fabs(solution.commandedLongitudinalAccelMps2) <= (params.combinedAccelPeakMps2 + 1.0f));
-            Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) <= 1.0f);
-            Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsBeyondPeakRemainsStable)

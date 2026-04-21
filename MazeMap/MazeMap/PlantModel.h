@@ -332,7 +332,7 @@ namespace MazeMap
         using PreparedParams = PlantPreparedParams;
 
         static constexpr float kDefaultVelocityTargetResponseTimeS = 0.025f;
-        static constexpr float kClosedLoopTractionReserveScale = 0.90f;
+        static constexpr float kTractionLimitedReserveScale = 0.90f;
 
         static PreparedParams Prepare(const PlantParams& params) noexcept;
 
@@ -460,7 +460,7 @@ namespace MazeMap
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
 
-        void resolveVelocityTargetAccelerations(
+        void ComputeBodyAction(
             float currentForwardVelocityMps,
             float targetForwardVelocityMps,
             float currentYawRateRadps,
@@ -469,6 +469,20 @@ namespace MazeMap
             float yawAccelLimitRadps2,
             float responseTimeS,
             float& desiredLongitudinalAccelMps2,
+            float& desiredYawAccelRadps2) const noexcept;
+        void ComputeBodyAction(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float longitudinalAccelLimitMps2,
+            float responseTimeS,
+            float& desiredLongitudinalAccelMps2) const noexcept;
+        void ComputeBodyActionFromYawRate(
+            float currentForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            float yawAccelLimitRadps2,
+            float responseTimeS,
             float& desiredYawAccelRadps2) const noexcept;
 
         void resolveWheelMotionTargets(
@@ -518,10 +532,10 @@ namespace MazeMap
             float& maxYawAccelRadps2,
             float fanDutyCycle = 0.80f) const noexcept;
 
-        // Returns the issued closed-loop feedforward command. If the raw request reaches the traction limit,
+        // Returns the issued traction-limited feedforward command. If the raw request reaches the traction limit,
         // this backs the validated body accelerations off by the requested reserve scale so the outer PI loop
         // retains command headroom.
-        DriveCommandSolution solveClosedLoopDriveCommands(
+        DriveCommandSolution solveTractionLimitedDriveCommands(
             const StateVector& currentState,
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
@@ -529,7 +543,7 @@ namespace MazeMap
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommands(
+        DriveCommandSolution solveTractionLimitedDriveCommands(
             const StateVector& currentState,
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
@@ -537,7 +551,7 @@ namespace MazeMap
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommands(
+        DriveCommandSolution solveTractionLimitedDriveCommands(
             float forwardVelocityMps,
             float desiredLongitudinalAccelMps2,
             float yawRateRadps,
@@ -546,7 +560,7 @@ namespace MazeMap
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommands(
+        DriveCommandSolution solveTractionLimitedDriveCommands(
             float forwardVelocityMps,
             float desiredLongitudinalAccelMps2,
             float yawRateRadps,
@@ -555,7 +569,7 @@ namespace MazeMap
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
             const StateVector& currentState,
             float targetForwardVelocityMps,
             float targetYawRateRadps,
@@ -564,7 +578,7 @@ namespace MazeMap
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS,
             float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
             const StateVector& currentState,
             float targetForwardVelocityMps,
             float targetYawRateRadps,
@@ -573,7 +587,7 @@ namespace MazeMap
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS,
             float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
             float currentForwardVelocityMps,
             float targetForwardVelocityMps,
             float currentYawRateRadps,
@@ -583,7 +597,7 @@ namespace MazeMap
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS,
             float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
             float currentForwardVelocityMps,
             float targetForwardVelocityMps,
             float currentYawRateRadps,

@@ -4,6 +4,7 @@
 
 #include "..\MazeMap\PlantModel.h"
 
+#include <cmath>
 #include <cstddef>
 
 namespace MazeMap
@@ -203,5 +204,60 @@ namespace MazeMap
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
             static_cast<int>(expected.converged),
             static_cast<int>(actual.converged));
+    }
+
+    inline VehicleState::StateVector AdvancePlantPredictionState(
+        const PlantModel& plant,
+        const PlantModel::PreparedParams& prepared,
+        const VehicleState::StateVector& state,
+        const ControlInput& control,
+        float dtSeconds) noexcept
+    {
+        const VehicleState::StateVector integratedState =
+            plant.integrate(state, control, dtSeconds, prepared);
+        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
+        {
+            return integratedState;
+        }
+
+        VehicleState::StateVector predictedState = integratedState;
+        if (!(std::isfinite(prepared.wheelRadiusM) && (prepared.wheelRadiusM > 0.0f)))
+        {
+            return predictedState;
+        }
+
+        const float leftDistanceM =
+            0.5f *
+            (state(VehicleState::kOmegaL) + integratedState(VehicleState::kOmegaL)) *
+            prepared.wheelRadiusM *
+            dtSeconds;
+        const float rightDistanceM =
+            0.5f *
+            (state(VehicleState::kOmegaR) + integratedState(VehicleState::kOmegaR)) *
+            prepared.wheelRadiusM *
+            dtSeconds;
+        const float forwardDistanceM = 0.5f * (leftDistanceM + rightDistanceM);
+        const float lateralDistanceM =
+            0.5f * (state(VehicleState::kV) + integratedState(VehicleState::kV)) * dtSeconds;
+        const float deltaYawRad =
+            0.5f * (state(VehicleState::kR) + integratedState(VehicleState::kR)) * dtSeconds;
+        const float translationYawRad =
+            VehicleState::NormalizeAngle(state(VehicleState::kPsi) + (0.5f * deltaYawRad));
+        float s = 0.0f;
+        float c = 0.0f;
+        sin_cosf(translationYawRad, s, c);
+        predictedState(VehicleState::kPx) =
+            state(VehicleState::kPx) +
+            (lateralDistanceM * c) +
+            (forwardDistanceM * s);
+        predictedState(VehicleState::kPy) =
+            state(VehicleState::kPy) -
+            (lateralDistanceM * s) +
+            (forwardDistanceM * c);
+        predictedState(VehicleState::kPsi) =
+            VehicleState::NormalizeAngle(state(VehicleState::kPsi) + deltaYawRad);
+        predictedState(VehicleState::kU) = forwardDistanceM / dtSeconds;
+        VehicleState::NormalizeStateVector(predictedState);
+        return predictedState;
     }
 }

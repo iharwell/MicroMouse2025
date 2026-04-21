@@ -122,14 +122,14 @@ namespace
         return ResolvePhysicalTrackWidthM(params);
     }
 
-    inline float ResolveClosedLoopTractionReserveScale(float tractionReserveScale) noexcept
+    inline float ResolveTractionLimitedReserveScale(float tractionReserveScale) noexcept
     {
         return
             (std::isfinite(tractionReserveScale) &&
              (tractionReserveScale > 0.0f) &&
              (tractionReserveScale <= 1.0f)) ?
             tractionReserveScale :
-            PlantModel::kClosedLoopTractionReserveScale;
+            PlantModel::kTractionLimitedReserveScale;
     }
 
     inline float SafePositive(float value, float fallbackValue) noexcept
@@ -1513,7 +1513,7 @@ namespace
 
         float desiredLongitudinalAccelMps2 = 0.0f;
         float desiredYawAccelRadps2 = 0.0f;
-        plant.resolveVelocityTargetAccelerations(
+        plant.ComputeBodyAction(
             currentForwardVelocityMps,
             resolvedTargetForwardVelocityMps,
             currentYawRateRadps,
@@ -2663,7 +2663,7 @@ namespace MazeMap
             });
     }
 
-    void PlantModel::resolveVelocityTargetAccelerations(
+    void PlantModel::ComputeBodyAction(
         float currentForwardVelocityMps,
         float targetForwardVelocityMps,
         float currentYawRateRadps,
@@ -2741,6 +2741,48 @@ namespace MazeMap
                     -resolvedYawAccelLimitRadps2,
                     resolvedYawAccelLimitRadps2);
         }
+    }
+
+    void PlantModel::ComputeBodyAction(
+        float currentForwardVelocityMps,
+        float targetForwardVelocityMps,
+        float currentYawRateRadps,
+        float longitudinalAccelLimitMps2,
+        float responseTimeS,
+        float& desiredLongitudinalAccelMps2) const noexcept
+    {
+        float unusedDesiredYawAccelRadps2 = 0.0f;
+        ComputeBodyAction(
+            currentForwardVelocityMps,
+            targetForwardVelocityMps,
+            currentYawRateRadps,
+            currentYawRateRadps,
+            longitudinalAccelLimitMps2,
+            0.0f,
+            responseTimeS,
+            desiredLongitudinalAccelMps2,
+            unusedDesiredYawAccelRadps2);
+    }
+
+    void PlantModel::ComputeBodyActionFromYawRate(
+        float currentForwardVelocityMps,
+        float currentYawRateRadps,
+        float targetYawRateRadps,
+        float yawAccelLimitRadps2,
+        float responseTimeS,
+        float& desiredYawAccelRadps2) const noexcept
+    {
+        float unusedDesiredLongitudinalAccelMps2 = 0.0f;
+        ComputeBodyAction(
+            currentForwardVelocityMps,
+            currentForwardVelocityMps,
+            currentYawRateRadps,
+            targetYawRateRadps,
+            0.0f,
+            yawAccelLimitRadps2,
+            responseTimeS,
+            unusedDesiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
     }
 
     void PlantModel::resolveWheelMotionTargets(
@@ -2926,7 +2968,7 @@ namespace MazeMap
             fanDutyCycle);
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommands(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommands(
         const StateVector& currentState,
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2,
@@ -2936,7 +2978,7 @@ namespace MazeMap
         float tractionReserveScale) const noexcept
     {
         const PreparedParams prepared = Prepare(params);
-        return solveClosedLoopDriveCommands(
+        return solveTractionLimitedDriveCommands(
             currentState,
             desiredLongitudinalAccelMps2,
             desiredYawAccelRadps2,
@@ -2946,7 +2988,7 @@ namespace MazeMap
             tractionReserveScale);
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommands(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommands(
         const StateVector& currentState,
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2,
@@ -2956,7 +2998,7 @@ namespace MazeMap
         float tractionReserveScale) const noexcept
     {
         const StateVector operatingState = BuildDriveCommandOperatingState(currentState, params);
-        const float resolvedReserveScale = ResolveClosedLoopTractionReserveScale(tractionReserveScale);
+        const float resolvedReserveScale = ResolveTractionLimitedReserveScale(tractionReserveScale);
         const DriveCommandSolution tractionLimitedSolution =
             solveDriveCommands(
                 operatingState,
@@ -2990,7 +3032,7 @@ namespace MazeMap
             batteryVoltageV);
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommands(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommands(
         float forwardVelocityMps,
         float desiredLongitudinalAccelMps2,
         float yawRateRadps,
@@ -3001,7 +3043,7 @@ namespace MazeMap
         float tractionReserveScale) const noexcept
     {
         const PreparedParams prepared = Prepare(params);
-        return solveClosedLoopDriveCommands(
+        return solveTractionLimitedDriveCommands(
             forwardVelocityMps,
             desiredLongitudinalAccelMps2,
             yawRateRadps,
@@ -3012,7 +3054,7 @@ namespace MazeMap
             tractionReserveScale);
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommands(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommands(
         float forwardVelocityMps,
         float desiredLongitudinalAccelMps2,
         float yawRateRadps,
@@ -3022,7 +3064,7 @@ namespace MazeMap
         float batteryVoltageV,
         float tractionReserveScale) const noexcept
     {
-        return solveClosedLoopDriveCommands(
+        return solveTractionLimitedDriveCommands(
             BuildReducedDriveCommandOperatingState(forwardVelocityMps, yawRateRadps, params),
             desiredLongitudinalAccelMps2,
             desiredYawAccelRadps2,
@@ -3032,7 +3074,7 @@ namespace MazeMap
             tractionReserveScale);
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommandsForVelocityTarget(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommandsForVelocityTarget(
         const StateVector& currentState,
         float targetForwardVelocityMps,
         float targetYawRateRadps,
@@ -3043,7 +3085,7 @@ namespace MazeMap
         float tractionReserveScale) const noexcept
     {
         const PreparedParams prepared = Prepare(params);
-        return solveClosedLoopDriveCommandsForVelocityTarget(
+        return solveTractionLimitedDriveCommandsForVelocityTarget(
             currentState,
             targetForwardVelocityMps,
             targetYawRateRadps,
@@ -3054,7 +3096,7 @@ namespace MazeMap
             tractionReserveScale);
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommandsForVelocityTarget(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommandsForVelocityTarget(
         const StateVector& currentState,
         float targetForwardVelocityMps,
         float targetYawRateRadps,
@@ -3064,7 +3106,7 @@ namespace MazeMap
         float responseTimeS,
         float tractionReserveScale) const noexcept
     {
-        const float resolvedReserveScale = ResolveClosedLoopTractionReserveScale(tractionReserveScale);
+        const float resolvedReserveScale = ResolveTractionLimitedReserveScale(tractionReserveScale);
         const DriveCommandSolution openLoop =
             solveDriveCommandsForVelocityTarget(
                 currentState,
@@ -3097,7 +3139,7 @@ namespace MazeMap
             false,
             [&](const StateVector& state, float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
             {
-                return solveClosedLoopDriveCommands(
+                return solveTractionLimitedDriveCommands(
                     state,
                     desiredLongitudinalAccelMps2,
                     desiredYawAccelRadps2,
@@ -3108,7 +3150,7 @@ namespace MazeMap
             });
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommandsForVelocityTarget(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommandsForVelocityTarget(
         float currentForwardVelocityMps,
         float targetForwardVelocityMps,
         float currentYawRateRadps,
@@ -3120,7 +3162,7 @@ namespace MazeMap
         float tractionReserveScale) const noexcept
     {
         const PreparedParams prepared = Prepare(params);
-        return solveClosedLoopDriveCommandsForVelocityTarget(
+        return solveTractionLimitedDriveCommandsForVelocityTarget(
             currentForwardVelocityMps,
             targetForwardVelocityMps,
             currentYawRateRadps,
@@ -3132,7 +3174,7 @@ namespace MazeMap
             tractionReserveScale);
     }
 
-    DriveCommandSolution PlantModel::solveClosedLoopDriveCommandsForVelocityTarget(
+    DriveCommandSolution PlantModel::solveTractionLimitedDriveCommandsForVelocityTarget(
         float currentForwardVelocityMps,
         float targetForwardVelocityMps,
         float currentYawRateRadps,
@@ -3143,7 +3185,7 @@ namespace MazeMap
         float responseTimeS,
         float tractionReserveScale) const noexcept
     {
-        const float resolvedReserveScale = ResolveClosedLoopTractionReserveScale(tractionReserveScale);
+        const float resolvedReserveScale = ResolveTractionLimitedReserveScale(tractionReserveScale);
         const DriveCommandSolution openLoop =
             solveDriveCommandsForVelocityTarget(
                 currentForwardVelocityMps,
@@ -3171,7 +3213,7 @@ namespace MazeMap
             false,
             [&](const StateVector& state, float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
             {
-                return solveClosedLoopDriveCommands(
+                return solveTractionLimitedDriveCommands(
                     state,
                     desiredLongitudinalAccelMps2,
                     desiredYawAccelRadps2,

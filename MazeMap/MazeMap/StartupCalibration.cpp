@@ -13,10 +13,6 @@ namespace MazeMap::App::Internal
 {
     namespace
     {
-        constexpr MazeMap::CommandPD kStartupWallTouchTrackingCommandPd =
-            MazeMap::CommandPD::StateWheelOmegaPD |
-            MazeMap::CommandPD::IMUYaw;
-
         float StartupCellCenterCoordinateM() noexcept
         {
             return 0.5f * Config::kCellSizeM;
@@ -385,7 +381,6 @@ namespace MazeMap::App::Internal
 
         _wallTouch->Cancel();
         _wallTouch->SetLimits(_travelLimits);
-        _wallTouch->SetTrackingCommandPD(kStartupWallTouchTrackingCommandPd);
         _wallTouch->SetAllowPassThroughNoWall(false);
         _wallTouch->Start(MazeMap::CellCoordinates(0U, 0U), wallDirection);
         if (!_wallTouch->Active())

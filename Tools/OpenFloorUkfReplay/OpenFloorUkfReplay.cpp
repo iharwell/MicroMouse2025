@@ -552,7 +552,7 @@ namespace
         state(MazeMap::VehicleState::kPx) = MazeMap::OpenFloorMarkerXMeters(MazeMap::OpenFloorMarkerId::C);
         state(MazeMap::VehicleState::kPy) = MazeMap::OpenFloorMarkerYMeters(MazeMap::OpenFloorMarkerId::C);
         state(MazeMap::VehicleState::kPsi) =
-            MazeMap::DirectionToYawRad(MazeMap::GetOpenFloorMarker(MazeMap::OpenFloorMarkerId::C).heading);
+            DirectionToYawRad(MazeMap::GetOpenFloorMarker(MazeMap::OpenFloorMarkerId::C).heading);
         MazeMap::VehicleState::NormalizeStateVector(state);
         return state;
     }
@@ -655,10 +655,20 @@ namespace
         info.streamType = (streamIt != info.metadata.end()) ? streamIt->second : std::string();
         info.controlLogFile = (controlLogIt != info.metadata.end()) ? controlLogIt->second : std::string();
 
+        if (info.streamType == "main")
+        {
+            info.streamType = "open_floor_main";
+        }
+
         if (info.streamType != "open_floor_main")
         {
             error = "Unexpected stream_type in sidecar: " + path.string();
             return false;
+        }
+
+        if (info.runId.empty())
+        {
+            info.runId = path.parent_path().filename().string();
         }
 
         if (info.runId.empty())

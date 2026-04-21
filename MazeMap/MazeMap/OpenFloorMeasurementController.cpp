@@ -489,6 +489,7 @@ namespace MazeMap::App::Internal
             Launch,
             StraightRepeat,
             Straight,
+            YawRepeat,
             Yaw,
             Smooth,
             LoopCw,
@@ -510,33 +511,19 @@ namespace MazeMap::App::Internal
 
         struct HoldState final
         {
-            bool initialized{};
-            std::uint32_t deadlineMs{};
-            std::uint16_t durationMs{};
             HoldContinuation continuation{ HoldContinuation::None };
         };
 
         struct LaunchState final
         {
-            enum class Stage : std::uint8_t
-            {
-                Pulse,
-                Settle,
-            };
-
             std::size_t magnitudeIndex{};
             std::uint8_t repeatIteration{};
             bool negativeNext{};
             std::uint16_t nextRepeatIndex{};
             bool active{};
-            Stage stage{ Stage::Pulse };
             OpenFloorMeasurementLabels labels{};
             float signedDriveCommand{};
             std::uint32_t pulseDeadlineMs{};
-            MazeMap::VehicleState stationaryCheckState{};
-            bool previousStationary{};
-            bool launchFlippedStationary{};
-            std::uint32_t settleStartMs{};
         };
 
         struct StraightState final
@@ -696,6 +683,7 @@ namespace MazeMap::App::Internal
         bool StartNextLaunchSample();
         bool HasRemainingStraightSamples() const noexcept;
         bool StartNextStraightSample();
+        bool HasRemainingYawSamples() const noexcept;
         bool StartNextYawSample();
         bool StartNextSmoothEntry();
         void ResetLoopPhase(bool clockwise) noexcept;
@@ -1253,6 +1241,10 @@ namespace MazeMap::App::Internal
             return OpenFloorPrimitiveId::Ip90;
         case MazeMap::IP90_M:
             return OpenFloorPrimitiveId::Ip90M;
+        case MazeMap::IP180:
+            return OpenFloorPrimitiveId::Ip180;
+        case MazeMap::IP180_M:
+            return OpenFloorPrimitiveId::Ip180M;
         case MazeMap::S45SD:
             return OpenFloorPrimitiveId::S45sd;
         case MazeMap::S45SD_M:
@@ -1321,6 +1313,10 @@ namespace MazeMap::App::Internal
         case MazeMap::IP90:
             return OpenFloorDirectionId::Clockwise;
         case MazeMap::IP90_M:
+            return OpenFloorDirectionId::CounterClockwise;
+        case MazeMap::IP180:
+            return OpenFloorDirectionId::Clockwise;
+        case MazeMap::IP180_M:
             return OpenFloorDirectionId::CounterClockwise;
         default:
             break;
@@ -1411,7 +1407,9 @@ namespace MazeMap::App::Internal
         _driveService.Cancel();
         _holdState = {};
         _holdState.continuation = continuation;
-        _holdState.durationMs = durationMs;
+        _driveService.SetLimits(StraightLimits(0.0f));
+        _driveService.SetOperationMode(OpenFloorOperationMode());
+        _driveService.StartHold(durationMs, false);
     }
 
     Drive::OperationMode OpenFloorMeasurementController::State::OpenFloorOperationMode() const noexcept
@@ -1535,7 +1533,6 @@ namespace MazeMap::App::Internal
             }
 
             _launchState.active = true;
-            _launchState.stage = LaunchState::Stage::Pulse;
             _launchState.labels = {};
             _launchState.labels.sectionId = OpenFloorSectionId::Sec20Launch;
             _launchState.labels.startMarkerId = OpenFloorMarkerId::C;
@@ -1547,10 +1544,6 @@ namespace MazeMap::App::Internal
             _launchState.labels.repeatIndex = repeatIndex;
             _launchState.signedDriveCommand = negative ? -magnitude : magnitude;
             _launchState.pulseDeadlineMs = millis() + MazeMap::kOpenFloorLaunchPulseMs;
-            _launchState.stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
-            _launchState.previousStationary = _launchState.stationaryCheckState.IsStationary();
-            _launchState.launchFlippedStationary = false;
-            _launchState.settleStartMs = 0U;
             return true;
         }
 
@@ -1649,34 +1642,15 @@ namespace MazeMap::App::Internal
                 static_cast<std::uint16_t>(_yawState.nextRepeatIndex + 1U);
             _yawState.nextRepeatIndex = repeatIndex;
             ++_yawState.primitiveIndex;
-            if (_yawState.primitiveIndex >= 3U)
+            if (_yawState.primitiveIndex >= MazeMap::kOpenFloorYawPrimitiveIds.size())
             {
                 _yawState.primitiveIndex = 0U;
                 ++_yawState.repeatIteration;
             }
 
-            OpenFloorPrimitiveId primitiveId = OpenFloorPrimitiveId::None;
-            OpenFloorDirectionId directionId = OpenFloorDirectionId::None;
-            float angleRad = 0.0f;
-            switch (primitiveIndex)
-            {
-            case 0U:
-                primitiveId = OpenFloorPrimitiveId::Ip90;
-                directionId = OpenFloorDirectionId::Clockwise;
-                angleRad = HALF_PI_F;
-                break;
-            case 1U:
-                primitiveId = OpenFloorPrimitiveId::Ip90M;
-                directionId = OpenFloorDirectionId::CounterClockwise;
-                angleRad = -HALF_PI_F;
-                break;
-            case 2U:
-            default:
-                primitiveId = OpenFloorPrimitiveId::Ip180;
-                directionId = OpenFloorDirectionId::Flip;
-                angleRad = PI_F;
-                break;
-            }
+            const OpenFloorPrimitiveId primitiveId = MazeMap::kOpenFloorYawPrimitiveIds[primitiveIndex];
+            const OpenFloorDirectionId directionId = MazeMap::kOpenFloorYawDirectionIds[primitiveIndex];
+            const float angleRad = MazeMap::kOpenFloorYawNominalAnglesRad[primitiveIndex];
 
             const float maxOmegaRadps = MazeMap::kOpenFloorYawOmegaBinsRadps[_yawState.speedIndex];
             _driveService.Cancel();
@@ -1699,6 +1673,33 @@ namespace MazeMap::App::Internal
             _yawState.targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
             _yawState.targetMagnitudeRad = std::fabs(angleRad);
             return true;
+        }
+
+        return false;
+    }
+
+    bool OpenFloorMeasurementController::State::HasRemainingYawSamples() const noexcept
+    {
+        std::size_t speedIndex = _yawState.speedIndex;
+        std::uint8_t repeatIteration = _yawState.repeatIteration;
+        std::uint8_t primitiveIndex = _yawState.primitiveIndex;
+        while (speedIndex < MazeMap::kOpenFloorYawOmegaBinsRadps.size())
+        {
+            if (repeatIteration >= DiagnosticConfig::kYawRepeatsPerPrimitiveSpeed)
+            {
+                repeatIteration = 0U;
+                primitiveIndex = 0U;
+                ++speedIndex;
+                continue;
+            }
+
+            if (primitiveIndex < MazeMap::kOpenFloorYawPrimitiveIds.size())
+            {
+                return true;
+            }
+
+            primitiveIndex = 0U;
+            ++repeatIteration;
         }
 
         return false;
@@ -2008,6 +2009,14 @@ namespace MazeMap::App::Internal
             _straightState = {};
             SwitchPhase(services, &OpenFloorMeasurementController::State::StraightTickThunk);
             return true;
+        case HoldContinuation::YawRepeat:
+            if (!StartNextYawSample())
+            {
+                services.Fault("Open-floor yaw sample could not start after the inter-motion hold");
+                return false;
+            }
+            SwitchPhase(services, &OpenFloorMeasurementController::State::YawTickThunk);
+            return true;
         case HoldContinuation::Yaw:
             _yawState = {};
             SwitchPhase(services, &OpenFloorMeasurementController::State::YawTickThunk);
@@ -2094,20 +2103,24 @@ namespace MazeMap::App::Internal
             return stopControl;
         }
 
-        if (!_holdState.initialized)
+        if (!_driveService.Active())
         {
-            _holdState.initialized = true;
-            _holdState.deadlineMs = millis() + _holdState.durationMs;
+            services.Fault("Open-floor cumulative hold primitive was not active");
+            return stopControl;
         }
-        if (static_cast<long>(_holdState.deadlineMs - millis()) <= 0)
+
+        bool done = false;
+        const LoopController::ControlVector control = _driveService.GetNextControls(done);
+        if (done)
         {
             if (!SwitchToHoldContinuation(services))
             {
                 services.Fault("Open-floor measurement hold continuation was not configured");
             }
+            return stopControl;
         }
 
-        return stopControl;
+        return control;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::State::StaticTick(
@@ -2188,57 +2201,18 @@ namespace MazeMap::App::Internal
             return stopControl;
         }
 
-        _launchState.stationaryCheckState.SetStateVector(_drive.GetEstimatorStateVector());
-        const bool estimatorStationary = _launchState.stationaryCheckState.IsStationary();
         const unsigned long nowMs = millis();
-
-        if (_launchState.stage == LaunchState::Stage::Pulse)
-        {
-            if (_launchState.previousStationary && !estimatorStationary)
-            {
-                _launchState.launchFlippedStationary = true;
-            }
-            _launchState.previousStationary = estimatorStationary;
-            _launchState.labels.phaseId = OpenFloorPhaseId::LaunchPulse;
-            _launchState.labels.progressNorm = (MazeMap::kOpenFloorLaunchPulseMs > 0UL) ?
-                (std::clamp)(
-                    static_cast<float>(MazeMap::kOpenFloorLaunchPulseMs - (std::max)(0L, static_cast<long>(_launchState.pulseDeadlineMs - nowMs))) /
-                        static_cast<float>(MazeMap::kOpenFloorLaunchPulseMs),
-                    0.0f,
-                    1.0f) :
-                1.0f;
-        }
-        else
-        {
-            if (!estimatorStationary)
-            {
-                _launchState.settleStartMs = 0U;
-                _launchState.labels.phaseId = OpenFloorPhaseId::Brake;
-                _launchState.labels.progressNorm = 0.0f;
-            }
-            else
-            {
-                if (_launchState.settleStartMs == 0U)
-                {
-                    _launchState.settleStartMs = nowMs;
-                }
-                _launchState.labels.phaseId = OpenFloorPhaseId::Hold;
-                _launchState.labels.progressNorm = (MazeMap::kOpenFloorLaunchSettleMs > 0UL) ?
-                    (std::clamp)(
-                        static_cast<float>(nowMs - _launchState.settleStartMs) /
-                            static_cast<float>(MazeMap::kOpenFloorLaunchSettleMs),
-                        0.0f,
-                        1.0f) :
-                1.0f;
-            }
-        }
-
-        const LoopController::ControlVector control =
-            (_launchState.stage == LaunchState::Stage::Pulse) ?
-                LoopController::ControlVector::RawMotorPwm(
-                    _launchState.signedDriveCommand,
-                    _launchState.signedDriveCommand) :
-                stopControl;
+        _launchState.labels.phaseId = OpenFloorPhaseId::LaunchPulse;
+        _launchState.labels.progressNorm = (MazeMap::kOpenFloorLaunchPulseMs > 0UL) ?
+            (std::clamp)(
+                static_cast<float>(MazeMap::kOpenFloorLaunchPulseMs - (std::max)(0L, static_cast<long>(_launchState.pulseDeadlineMs - nowMs))) /
+                    static_cast<float>(MazeMap::kOpenFloorLaunchPulseMs),
+                0.0f,
+                1.0f) :
+            1.0f;
+        const LoopController::ControlVector control = LoopController::ControlVector::RawMotorPwm(
+            _launchState.signedDriveCommand,
+            _launchState.signedDriveCommand);
         const CommandTelemetrySnapshot nextCommandTelemetry = BuildRawCommandTelemetrySnapshot(control);
 
         const bool mainFault = CheckMainFault(
@@ -2255,48 +2229,21 @@ namespace MazeMap::App::Internal
             return stopControl;
         }
 
-        if (_launchState.stage == LaunchState::Stage::Pulse)
-        {
-            if (static_cast<long>(_launchState.pulseDeadlineMs - nowMs) <= 0)
-            {
-                if (_launchState.launchFlippedStationary)
-                {
-                    _launchState.stage = LaunchState::Stage::Settle;
-                    _launchState.settleStartMs = 0U;
-                }
-                else
-                {
-                    _launchState.active = false;
-                    StartInterPhaseHold(
-                        HasRemainingLaunchSamples() ?
-                            HoldContinuation::LaunchRepeat :
-                            HoldContinuation::Straight,
-                        HasRemainingLaunchSamples() ?
-                            MazeMap::kOpenFloorInterMotionHoldMs :
-                            MazeMap::kOpenFloorInterPhaseHoldMs);
-                    SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
-                }
-            }
-
-            return control;
-        }
-
-        if (estimatorStationary &&
-            (_launchState.settleStartMs != 0U) &&
-            ((nowMs - _launchState.settleStartMs) >= MazeMap::kOpenFloorLaunchSettleMs))
+        _savedCommandTelemetry = nextCommandTelemetry;
+        if (static_cast<long>(_launchState.pulseDeadlineMs - nowMs) <= 0)
         {
             _launchState.active = false;
             StartInterPhaseHold(
                 HasRemainingLaunchSamples() ?
                     HoldContinuation::LaunchRepeat :
                     HoldContinuation::Straight,
-                HasRemainingLaunchSamples() ?
-                    MazeMap::kOpenFloorInterMotionHoldMs :
-                    MazeMap::kOpenFloorInterPhaseHoldMs);
+                MazeMap::kOpenFloorPostSegmentHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
+            _savedCommandTelemetry = stopTelemetry;
+            return stopControl;
         }
 
-        return stopControl;
+        return control;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::State::StraightTick(
@@ -2353,9 +2300,7 @@ namespace MazeMap::App::Internal
                 HasRemainingStraightSamples() ?
                     HoldContinuation::StraightRepeat :
                     HoldContinuation::Yaw,
-                HasRemainingStraightSamples() ?
-                    MazeMap::kOpenFloorInterMotionHoldMs :
-                    MazeMap::kOpenFloorInterPhaseHoldMs);
+                MazeMap::kOpenFloorPostSegmentHoldMs);
             SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
             return stopControl;
         }
@@ -2411,6 +2356,13 @@ namespace MazeMap::App::Internal
         if (done)
         {
             _yawState.active = false;
+            StartInterPhaseHold(
+                HasRemainingYawSamples() ?
+                    HoldContinuation::YawRepeat :
+                    HoldContinuation::Smooth,
+                MazeMap::kOpenFloorPostSegmentHoldMs);
+            SwitchPhase(services, &OpenFloorMeasurementController::State::InterPhaseHoldTickThunk);
+            _savedCommandTelemetry = stopTelemetry;
             return stopControl;
         }
         return control;

@@ -278,10 +278,10 @@ namespace MazeMap::App::Internal
 
     Drive::Drive()
     {
-        _commandPdSettings.heading = MazeMap::CommandPD::StateHeadingPD;
-        _commandPdSettings.yawRate = MazeMap::CommandPD::StateWheelOmegaPD | MazeMap::CommandPD::IMUYaw;
-        _commandPdSettings.velocity = MazeMap::CommandPD::StateWheelOmegaPD;
-        _commandPdSettings.distance = MazeMap::CommandPD::RawCommand;
+        _commandPdSettings.heading = Config::kDriveHeadingCommandPd;
+        _commandPdSettings.yawRate = Config::kDriveYawRateCommandPd;
+        _commandPdSettings.velocity = Config::kDriveVelocityCommandPd;
+        _commandPdSettings.distance = Config::kDriveDistanceCommandPd;
     }
 
     void Drive::SetOperationMode(const OperationMode mode) noexcept

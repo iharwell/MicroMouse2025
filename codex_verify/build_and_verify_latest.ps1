@@ -19,6 +19,200 @@ $requiresBuild = $Mode -ne 'VerifyOnly'
 $requiresTests = $Mode -ne 'BuildOnly'
 $artifactVerb = if ($requiresBuild) { 'Built' } else { 'Verified' }
 
+function Get-NormalizedSingleLineText {
+    param(
+        [AllowNull()]
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+
+    return (($Value -replace '\s+', ' ').Trim())
+}
+
+function Test-IsElevatedProcess {
+    try {
+        $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        if ($null -eq $currentIdentity) {
+            return $false
+        }
+
+        $principal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Get-ProcessSnapshot {
+    param(
+        [int]$ProcessId
+    )
+
+    if ($ProcessId -le 0) {
+        return $null
+    }
+
+    try {
+        $process = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = {0}" -f $ProcessId) -ErrorAction Stop
+        return [pscustomobject]@{
+            ProcessId = [int]$process.ProcessId
+            ParentProcessId = [int]$process.ParentProcessId
+            Name = Get-NormalizedSingleLineText -Value $process.Name
+            ExecutablePath = Get-NormalizedSingleLineText -Value $process.ExecutablePath
+            CommandLine = Get-NormalizedSingleLineText -Value $process.CommandLine
+        }
+    }
+    catch {
+        try {
+            $process = Get-Process -Id $ProcessId -ErrorAction Stop
+            return [pscustomobject]@{
+                ProcessId = [int]$process.Id
+                ParentProcessId = 0
+                Name = Get-NormalizedSingleLineText -Value $process.ProcessName
+                ExecutablePath = Get-NormalizedSingleLineText -Value $process.Path
+                CommandLine = $null
+            }
+        }
+        catch {
+            return $null
+        }
+    }
+}
+
+function Format-ProcessSnapshot {
+    param(
+        [AllowNull()]
+        [psobject]$Process
+    )
+
+    if ($null -eq $Process) {
+        return $null
+    }
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($Process.Name)) {
+        $parts.Add([string]$Process.Name)
+    }
+
+    $parts.Add(("PID {0}" -f $Process.ProcessId))
+
+    if (-not [string]::IsNullOrWhiteSpace($Process.CommandLine)) {
+        $parts.Add([string]$Process.CommandLine)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Process.ExecutablePath)) {
+        $parts.Add([string]$Process.ExecutablePath)
+    }
+
+    return ($parts -join ' | ')
+}
+
+function Test-IsBuildWrapperProcess {
+    param(
+        [AllowNull()]
+        [psobject]$Process
+    )
+
+    if ($null -eq $Process) {
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Process.Name) -or
+        $Process.Name -notmatch '^(cmd\.exe|powershell\.exe|pwsh\.exe)$') {
+        return $false
+    }
+
+    return (-not [string]::IsNullOrWhiteSpace($Process.CommandLine)) -and
+        ($Process.CommandLine -match 'build_and_verify_latest|build_latest|test_latest_binaries')
+}
+
+function Get-ProcessLaunchChain {
+    $chain = [System.Collections.Generic.List[string]]::new()
+    $visitedProcessIds = [System.Collections.Generic.HashSet[int]]::new()
+    $currentProcessId = $PID
+
+    for ($depth = 0; $depth -lt 5 -and $currentProcessId -gt 0; $depth++) {
+        if (-not $visitedProcessIds.Add($currentProcessId)) {
+            break
+        }
+
+        $snapshot = Get-ProcessSnapshot -ProcessId $currentProcessId
+        if ($null -eq $snapshot) {
+            break
+        }
+
+        $formattedSnapshot = Format-ProcessSnapshot -Process $snapshot
+        if (-not [string]::IsNullOrWhiteSpace($formattedSnapshot)) {
+            $chain.Add($formattedSnapshot)
+        }
+
+        $currentProcessId = [int]$snapshot.ParentProcessId
+    }
+
+    if ($chain.Count -eq 0) {
+        return $null
+    }
+
+    return ($chain -join ' <- ')
+}
+
+function Get-InvocationContext {
+    $self = Get-ProcessSnapshot -ProcessId $PID
+    $parent = $null
+    if ($null -ne $self -and $self.ParentProcessId -gt 0) {
+        $parent = Get-ProcessSnapshot -ProcessId $self.ParentProcessId
+    }
+
+    $selectedCallerProcess = $parent
+    if (Test-IsBuildWrapperProcess -Process $parent) {
+        $grandParent = Get-ProcessSnapshot -ProcessId $parent.ParentProcessId
+        if ($null -ne $grandParent) {
+            $selectedCallerProcess = $grandParent
+        }
+    }
+
+    $currentIdentity = $null
+    try {
+        $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    }
+    catch {
+    }
+
+    $caller = Get-NormalizedSingleLineText -Value $env:MM_BUILD_SCRIPT_CALLER
+    if ([string]::IsNullOrWhiteSpace($caller)) {
+        $caller = Get-NormalizedSingleLineText -Value $env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE
+    }
+
+    if ([string]::IsNullOrWhiteSpace($caller) -and $null -ne $selectedCallerProcess) {
+        $caller = Format-ProcessSnapshot -Process $selectedCallerProcess
+    }
+
+    $callerCommand = Get-NormalizedSingleLineText -Value $env:MM_BUILD_SCRIPT_CALLER_COMMAND
+    if ([string]::IsNullOrWhiteSpace($callerCommand) -and
+        $null -ne $selectedCallerProcess -and
+        -not [string]::IsNullOrWhiteSpace($selectedCallerProcess.CommandLine)) {
+        $callerCommand = [string]$selectedCallerProcess.CommandLine
+    }
+
+    return [pscustomobject]@{
+        User = if ($null -ne $currentIdentity) {
+            Get-NormalizedSingleLineText -Value $currentIdentity.Name
+        }
+        else {
+            Get-NormalizedSingleLineText -Value $env:USERNAME
+        }
+        Elevated = Test-IsElevatedProcess
+        Caller = if ([string]::IsNullOrWhiteSpace($caller)) { 'Unknown' } else { $caller }
+        CallerCommand = $callerCommand
+        LaunchChain = Get-ProcessLaunchChain
+        LauncherPath = Get-NormalizedSingleLineText -Value $env:MM_BUILD_SCRIPT_LAUNCHER_PATH
+        LauncherArguments = Get-NormalizedSingleLineText -Value $env:MM_BUILD_SCRIPT_LAUNCHER_ARGS
+    }
+}
+
 switch ($Mode) {
     'BuildOnly' {
         $logFilePrefix = 'build_latest_'
@@ -138,6 +332,31 @@ function Append-FileToLog {
 }
 
 Write-LogLine ("{0}: {1}" -f $logPathLabel, $LogFilePath) 'DarkCyan'
+$invocationContext = Get-InvocationContext
+if (-not [string]::IsNullOrWhiteSpace($invocationContext.User)) {
+    Write-LogLine ("User: {0}" -f $invocationContext.User) 'DarkCyan'
+}
+
+Write-LogLine ("Elevation: {0}" -f $(if ($invocationContext.Elevated) { 'Elevated' } else { 'Not elevated' })) 'DarkCyan'
+Write-LogLine ("Caller: {0}" -f $invocationContext.Caller) 'DarkCyan'
+if (-not [string]::IsNullOrWhiteSpace($invocationContext.CallerCommand)) {
+    Write-LogLine ("Caller command: {0}" -f $invocationContext.CallerCommand) 'DarkGray'
+}
+
+if (-not [string]::IsNullOrWhiteSpace($invocationContext.LauncherPath)) {
+    $launcherLine = $invocationContext.LauncherPath
+    if (-not [string]::IsNullOrWhiteSpace($invocationContext.LauncherArguments)) {
+        $launcherLine = "{0} {1}" -f $launcherLine, $invocationContext.LauncherArguments
+    }
+
+    Write-LogLine ("Launcher: {0}" -f $launcherLine) 'DarkGray'
+}
+
+if (($invocationContext.Elevated -or $invocationContext.Caller -eq 'Unknown') -and
+    -not [string]::IsNullOrWhiteSpace($invocationContext.LaunchChain)) {
+    Write-LogLine ("Launch chain: {0}" -f $invocationContext.LaunchChain) 'DarkGray'
+}
+
 $script:SuppressTerminalErrorSummary = $false
 $scriptExitCode = 0
 
@@ -817,8 +1036,33 @@ function Get-LatestRepoInputWriteTimeFromProjectTLogs {
     return $latestWriteTime
 }
 
-function Assert-ArtifactNotOlderThan {
+function New-ArtifactVerificationResult {
     param(
+        [Parameter(Mandatory = $true)]
+        [string]$Category,
+        [Parameter(Mandatory = $true)]
+        [string]$Description,
+        [Parameter(Mandatory = $true)]
+        [bool]$IsCurrent,
+        [AllowNull()]
+        [System.IO.FileInfo]$Item,
+        [AllowNull()]
+        [string]$Message
+    )
+
+    return [pscustomobject]@{
+        Category = $Category
+        Description = $Description
+        IsCurrent = $IsCurrent
+        Item = $Item
+        Message = $Message
+    }
+}
+
+function Get-ArtifactVerificationResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Category,
         [Parameter(Mandatory = $true)]
         [string]$Path,
         [Parameter(Mandatory = $true)]
@@ -827,17 +1071,53 @@ function Assert-ArtifactNotOlderThan {
         [datetime]$NotOlderThan
     )
 
-    Assert-PathExists -Path $Path -Description $Description
+    try {
+        Assert-PathExists -Path $Path -Description $Description
 
-    $item = Get-Item -LiteralPath $Path
-    if ($item.LastWriteTime -lt $NotOlderThan) {
-        throw ("{0} is stale. LastWriteTime={1}; expected at or after {2}." -f $Description, $item.LastWriteTime, $NotOlderThan)
+        $item = Get-Item -LiteralPath $Path
+        if ($item.LastWriteTime -lt $NotOlderThan) {
+            return New-ArtifactVerificationResult `
+                -Category $Category `
+                -Description $Description `
+                -IsCurrent $false `
+                -Item $item `
+                -Message ("{0} is stale. LastWriteTime={1}; expected at or after {2}." -f $Description, $item.LastWriteTime, $NotOlderThan)
+        }
+
+        return New-ArtifactVerificationResult `
+            -Category $Category `
+            -Description $Description `
+            -IsCurrent $true `
+            -Item $item `
+            -Message $null
     }
-
-    return $item
+    catch {
+        return New-ArtifactVerificationResult `
+            -Category $Category `
+            -Description $Description `
+            -IsCurrent $false `
+            -Item $null `
+            -Message $_.Exception.Message
+    }
 }
 
-function Assert-AndLogCurrentReleaseArtifacts {
+function Write-ArtifactVerificationResult {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArtifactVerb,
+        [Parameter(Mandatory = $true)]
+        [psobject]$Result
+    )
+
+    if ($Result.IsCurrent) {
+        Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $Result.Item.FullName, $Result.Item.LastWriteTime, $Result.Item.Length) 'Green'
+        return
+    }
+
+    Write-LogLine ("{0} verification issue: {1}" -f $Result.Category, $Result.Message) 'Yellow'
+}
+
+function Get-AndLogReleaseArtifactStatus {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ArtifactVerb,
@@ -871,33 +1151,110 @@ function Assert-AndLogCurrentReleaseArtifacts {
         [string]$SimulationExePath
     )
 
-    $firmwareSourceCutoff = Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles `
-        -FirmwareOutputDir $FirmwareOutputDir `
-        -RepoRoot $RepoRoot `
-        -CanonicalBuildPath $CanonicalBuildPath `
-        -SketchDir $SketchDir `
-        -ArduinoEigenLibraryDir $ArduinoEigenLibraryDir `
-        -EigenSourceRoot $EigenSourceRoot `
-        -ArduinoStubHeaderPath $ArduinoStubHeaderPath
-    $mazeMapSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeMapProject -RepoRoot $RepoRoot
-    $mazeMapTestSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeMapTestProject -RepoRoot $RepoRoot
-    $mazeSimulationSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeSimulationProject -RepoRoot $RepoRoot
+    try {
+        $firmwareSourceCutoff = Get-LatestRepoInputWriteTimeFromArduinoDependencyFiles `
+            -FirmwareOutputDir $FirmwareOutputDir `
+            -RepoRoot $RepoRoot `
+            -CanonicalBuildPath $CanonicalBuildPath `
+            -SketchDir $SketchDir `
+            -ArduinoEigenLibraryDir $ArduinoEigenLibraryDir `
+            -EigenSourceRoot $EigenSourceRoot `
+            -ArduinoStubHeaderPath $ArduinoStubHeaderPath
+        $firmwareResult = Get-ArtifactVerificationResult `
+            -Category 'Teensy' `
+            -Path $HexPath `
+            -Description 'Compiled firmware image' `
+            -NotOlderThan $firmwareSourceCutoff
+    }
+    catch {
+        $firmwareResult = New-ArtifactVerificationResult `
+            -Category 'Teensy' `
+            -Description 'Compiled firmware image' `
+            -IsCurrent $false `
+            -Item $null `
+            -Message ("Compiled firmware image could not be validated: {0}" -f $_.Exception.Message)
+    }
 
-    $firmwareImage = Assert-ArtifactNotOlderThan -Path $HexPath -Description 'Compiled firmware image' -NotOlderThan $firmwareSourceCutoff
-    $mazeMapDll = Assert-ArtifactNotOlderThan -Path $MazeMapDllPath -Description 'Release MazeMap host binary' -NotOlderThan $mazeMapSourceCutoff
-    $simulationExe = Assert-ArtifactNotOlderThan -Path $SimulationExePath -Description 'Release MazeSimulation host binary' -NotOlderThan $mazeSimulationSourceCutoff
-    $testDll = Assert-ArtifactNotOlderThan -Path $TestDllPath -Description 'Release test binary' -NotOlderThan $mazeMapTestSourceCutoff
+    try {
+        $mazeMapSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeMapProject -RepoRoot $RepoRoot
+        $mazeMapResult = Get-ArtifactVerificationResult `
+            -Category 'Host' `
+            -Path $MazeMapDllPath `
+            -Description 'Release MazeMap host binary' `
+            -NotOlderThan $mazeMapSourceCutoff
+    }
+    catch {
+        $mazeMapResult = New-ArtifactVerificationResult `
+            -Category 'Host' `
+            -Description 'Release MazeMap host binary' `
+            -IsCurrent $false `
+            -Item $null `
+            -Message ("Release MazeMap host binary could not be validated: {0}" -f $_.Exception.Message)
+    }
 
-    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $firmwareImage.FullName, $firmwareImage.LastWriteTime, $firmwareImage.Length) 'Green'
-    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $mazeMapDll.FullName, $mazeMapDll.LastWriteTime, $mazeMapDll.Length) 'Green'
-    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $testDll.FullName, $testDll.LastWriteTime, $testDll.Length) 'Green'
-    Write-LogLine ("{0} {1} ({2}, {3} bytes)" -f $ArtifactVerb, $simulationExe.FullName, $simulationExe.LastWriteTime, $simulationExe.Length) 'Green'
+    try {
+        $mazeMapTestSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeMapTestProject -RepoRoot $RepoRoot
+        $testDllResult = Get-ArtifactVerificationResult `
+            -Category 'Host' `
+            -Path $TestDllPath `
+            -Description 'Release test binary' `
+            -NotOlderThan $mazeMapTestSourceCutoff
+    }
+    catch {
+        $testDllResult = New-ArtifactVerificationResult `
+            -Category 'Host' `
+            -Description 'Release test binary' `
+            -IsCurrent $false `
+            -Item $null `
+            -Message ("Release test binary could not be validated: {0}" -f $_.Exception.Message)
+    }
+
+    try {
+        $mazeSimulationSourceCutoff = Get-LatestRepoInputWriteTimeFromProjectTLogs -Project $MazeSimulationProject -RepoRoot $RepoRoot
+        $simulationResult = Get-ArtifactVerificationResult `
+            -Category 'Host' `
+            -Path $SimulationExePath `
+            -Description 'Release MazeSimulation host binary' `
+            -NotOlderThan $mazeSimulationSourceCutoff
+    }
+    catch {
+        $simulationResult = New-ArtifactVerificationResult `
+            -Category 'Host' `
+            -Description 'Release MazeSimulation host binary' `
+            -IsCurrent $false `
+            -Item $null `
+            -Message ("Release MazeSimulation host binary could not be validated: {0}" -f $_.Exception.Message)
+    }
+
+    $allResults = @($firmwareResult, $mazeMapResult, $testDllResult, $simulationResult)
+    foreach ($result in $allResults) {
+        Write-ArtifactVerificationResult -ArtifactVerb $ArtifactVerb -Result $result
+    }
+
+    $teensyReady = $firmwareResult.IsCurrent
+    $hostTestReady = $mazeMapResult.IsCurrent -and $testDllResult.IsCurrent
+    $hostReady = $hostTestReady -and $simulationResult.IsCurrent
+    Write-LogLine ("Teensy verification status: {0}" -f $(if ($teensyReady) { 'ready' } else { 'issues detected' })) $(if ($teensyReady) { 'DarkCyan' } else { 'Yellow' })
+    Write-LogLine ("Host test verification status: {0}" -f $(if ($hostTestReady) { 'ready' } else { 'issues detected' })) $(if ($hostTestReady) { 'DarkCyan' } else { 'Yellow' })
+    Write-LogLine ("Host verification status: {0}" -f $(if ($hostReady) { 'ready' } else { 'issues detected' })) $(if ($hostReady) { 'DarkCyan' } else { 'Yellow' })
+
+    $failureMessages = [System.Collections.Generic.List[string]]::new()
+    foreach ($result in $allResults) {
+        if (-not $result.IsCurrent) {
+            $failureMessages.Add(("{0} verification issue: {1}" -f $result.Category, $result.Message))
+        }
+    }
 
     return [pscustomobject]@{
-        FirmwareImage = $firmwareImage
-        MazeMapDll = $mazeMapDll
-        TestDll = $testDll
-        SimulationExe = $simulationExe
+        FirmwareImage = $firmwareResult.Item
+        MazeMapDll = $mazeMapResult.Item
+        TestDll = $testDllResult.Item
+        SimulationExe = $simulationResult.Item
+        TeensyReady = $teensyReady
+        HostTestReady = $hostTestReady
+        HostReady = $hostReady
+        AllReady = $teensyReady -and $hostReady
+        FailureMessages = $failureMessages.ToArray()
     }
 }
 
@@ -1019,7 +1376,7 @@ try {
     }
 
     Write-Step 'Checking latest release artifacts'
-    $releaseArtifacts = Assert-AndLogCurrentReleaseArtifacts `
+    $releaseArtifacts = Get-AndLogReleaseArtifactStatus `
         -ArtifactVerb $artifactVerb `
         -FirmwareOutputDir $firmwareOutputDir `
         -HexPath $hexPath `
@@ -1037,11 +1394,25 @@ try {
         -SimulationExePath $simulationExePath
 
     if ($requiresTests) {
-        Write-Step 'Running the Release unit tests'
-        $testStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        Invoke-External -FilePath $vstest -Arguments @($releaseArtifacts.TestDll.FullName) -FailureConsoleOutputMode 'VSTestFailuresOnly'
-        $testStopwatch.Stop()
-        Write-LogLine ("Release tests completed in {0:n1}s" -f $testStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
+        if ($releaseArtifacts.HostTestReady) {
+            Write-Step 'Running the Release unit tests'
+            $testStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            Invoke-External -FilePath $vstest -Arguments @($releaseArtifacts.TestDll.FullName) -FailureConsoleOutputMode 'VSTestFailuresOnly'
+            $testStopwatch.Stop()
+            Write-LogLine ("Release tests completed in {0:n1}s" -f $testStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
+
+            if (-not $releaseArtifacts.AllReady) {
+                Write-LogLine 'Host Release tests completed even though other verification issues remain above.' 'Yellow'
+            }
+        }
+        else {
+            Write-Step 'Skipping the Release unit tests'
+            Write-LogLine 'Host test artifacts are not current, so the host tests cannot run.' 'Yellow'
+        }
+    }
+
+    if (-not $releaseArtifacts.AllReady) {
+        throw ($releaseArtifacts.FailureMessages -join ' ')
     }
 
     Write-Step $finalStepLabel

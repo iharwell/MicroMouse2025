@@ -51,85 +51,10 @@ namespace MazeMap::App::Internal
             const LoopController::ModeState& state,
             LoopController::TickServices& services);
 
-        struct HoldRoutineState final
+        struct DelegatedDriveRoutineState final
         {
-            std::uint16_t durationMs{};
-            unsigned long startMs{};
-            bool stationary{ true };
-            bool started{};
-        };
-
-        struct SettleRoutineState final
-        {
-            const char* timeoutMessage{};
-            std::uint16_t stationaryHoldMs{ Config::kMotionSettleHoldMs };
-            std::uint16_t timeoutMs{ Config::kMotionSettleTimeoutMs };
-            unsigned long startMs{};
-            unsigned long stationaryStartMs{};
-            bool stationaryWindowActive{};
-            bool started{};
-            bool brakeCommand{ true };
-            DriveTelemetry stationaryStartTelemetry{};
             void* nextState{};
             ActivePhaseTickFn nextPhaseTick{};
-        };
-
-        struct StraightRoutineState final
-        {
-            MotionLimits limits{};
-            Eigen::Vector2f targetHeading = Eigen::Vector2f(0.0f, 1.0f);
-            const Eigen::Vector2f* targetPositionOverride{};
-            MazeMap::DirectionalLocation* currentLocation{};
-            float distanceM{};
-            float entrySpeed{};
-            float exitSpeed{};
-            float cruiseSpeed{};
-            float startDistanceM{};
-            float commandedSpeedMps{};
-            bool useWallCentering{};
-            bool diagonalHeading{};
-            float previousCorridorErrorM{};
-            float filteredCorridorErrorRateMps{};
-            bool previousCorridorErrorValid{};
-            SettleRoutineState completionSettle{};
-            void* nextState{};
-            ActivePhaseTickFn nextPhaseTick{};
-        };
-
-        struct TurnRoutineState final
-        {
-            SettleRoutineState completionSettle{};
-            void* nextState{};
-            ActivePhaseTickFn nextPhaseTick{};
-        };
-
-        struct ArcRoutineState final
-        {
-            MotionLimits limits{};
-            float distanceM{};
-            float angleRad{};
-            float exitSpeed{};
-            float cruiseSpeed{};
-            float startDistanceM{};
-            float startYawRad{};
-            float curvature{};
-            float commandedSpeedMps{};
-            EncoderProgressWatchdog translationWatchdog{};
-            SettleRoutineState completionSettle{};
-            void* nextState{};
-            ActivePhaseTickFn nextPhaseTick{};
-        };
-
-        struct SmoothTurnRoutineState final
-        {
-            MazeMap::ManeuverInstance maneuver{};
-            MotionLimits limits{};
-            float maneuverSpeedMps{};
-            float totalDistanceM{};
-            float startDistanceM{};
-            void* nextState{};
-            ActivePhaseTickFn nextPhaseTick{};
-            EncoderProgressWatchdog translationWatchdog{};
         };
 
         struct QueueRoutineState final
@@ -171,43 +96,7 @@ namespace MazeMap::App::Internal
             LoopController::TickServices& services,
             const char* reason) noexcept;
 
-        bool IsDriveMotionSettled(
-            const DriveTelemetry& stationaryReferenceTelemetry,
-            unsigned long stationaryReferenceMs,
-            const DriveTelemetry& telemetry,
-            const SensorSnapshot& snapshot,
-            unsigned long nowMs) const;
-        static float ManeuverSpeedLimit(
-            MazeMap::ManeuverCode code,
-            const MotionLimits& limits,
-            const MazeMap::Vehicle& vehicle);
-
-        LoopController::ControlVector HoldRoutineTick(
-            void* rawState,
-            std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services);
-        LoopController::ControlVector SettleRoutineTick(
-            void* rawState,
-            std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services);
-        LoopController::ControlVector StraightRoutineTick(
-            void* rawState,
-            std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services);
-        LoopController::ControlVector TurnRoutineTick(
-            void* rawState,
-            std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services);
-        LoopController::ControlVector ArcRoutineTick(
-            void* rawState,
-            std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
-            LoopController::TickServices& services);
-        LoopController::ControlVector SmoothTurnRoutineTick(
+        LoopController::ControlVector DelegatedDriveRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const LoopController::ModeState& state,
@@ -226,17 +115,10 @@ namespace MazeMap::App::Internal
         SharedRobotRuntime* _runtime{};
         DriveBase* _drive{};
         Drive* _driveService{};
-        MazeMap::Vehicle* _speedVehicle{};
-        MazeMap::Maze* _maze{};
         void* _activeState{};
         ActivePhaseTickFn _activePhaseTick{};
         LoopController::ModeCallbacks _returnCallbacks{};
-        HoldRoutineState _holdState{};
-        SettleRoutineState _settleState{};
-        StraightRoutineState _straightState{};
-        TurnRoutineState _turnState{};
-        ArcRoutineState _arcState{};
-        SmoothTurnRoutineState _smoothTurnState{};
+        DelegatedDriveRoutineState _delegatedDriveState{};
         QueueRoutineState _queueState{};
     };
 }

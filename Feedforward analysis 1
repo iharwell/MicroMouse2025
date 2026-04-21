@@ -1,0 +1,46 @@
+
+I traced the open-floor yaw and smooth paths through Drive, DriveBase, and PlantModel. The short version is that the yaw sections are not running a plain PD loop. They are running a stack of feedforward and feedback layers, and there is an intentional common-mode term in the velocity-target feedforward path.
+
+Command Path
+
+The launch section does not use Drive at all. OpenFloorMeasurementController.cpp (line 2184) sends raw equal PWM on both sides and logs that as feedforward.
+The yaw section starts an in-place turn with Drive::StartTurn(), then Drive::TurnControls() computes a yaw-rate feedforward from remaining angle and passes it into PointControlVectorWithHeadingTarget(0.0f, ffYaw, targetYaw, ...). See OpenFloorMeasurementController.cpp (line 1628), Drive.cpp (line 684), and DriveBase.cpp (line 148).
+That means the active yaw-section controller is:
+plant velocity-target feedforward,
+StateYawPD,
+StateHeadingPD,
+StateWheelOmegaPD.
+The default gain hookup for Drive is in MazeMapRuntimeCore.h (line 539). Notably:
+yaw-rate PD defaults to StateWheelOmegaPD | StateYawPD at MazeMapRuntimeCore.h (line 559),
+heading defaults to StateHeadingPD at MazeMapRuntimeCore.h (line 558),
+the actual gains used there are the straight-heading gains and smooth-turn yaw-rate gains, not the dedicated turn gains.
+The dedicated kTurnHeadingKp / kTurnYawD constants exist at MazeMapRuntimeCore.h (line 532), but this Drive path does not select them. So the open-floor yaw section is not actually using the turn-specific PD tuning.
+Why There Is Common-Mode Command In Yaw
+
+First source: the plant feedforward adds it on purpose. In SolveVelocityTargetFeedforward(), after solving the base left/right command, the code computes:
+a differential yaw bias at PlantModel.cpp (line 1603),
+then a direction-independent common trim commonCommandTrim = -0.10f * abs(yawCommandBias) at PlantModel.cpp (line 1613),
+then applies it with ApplyVelocityTargetCommonCommandBias() at PlantModel.cpp (line 1649).
+So if you are seeing same-sign command during yaw sections, part of that is simply coded in by design. It is not coming from the yaw target itself.
+Second source: wheel-speed feedback adds common-mode when the robot has residual translation. The wheel targets for a pure yaw command are zero-mean by construction:
+leftTarget = u + 0.5*w*r
+rightTarget = u - 0.5*w*r
+at PlantModel.cpp (line 2815).
+For the yaw section u = 0, so the target pair is equal-and-opposite.
+But StateWheelOmegaPD in DriveBase.cpp (line 895) applies per-wheel proportional correction. If both real wheels are shifted together because the robot is drifting forward or backward while turning, both wheel errors have the same sign, so the wheel loop generates a same-sign correction. That is a translation cleanup term.
+The latest yaw log matches that exactly. In mmlog_decode_2026-04-21_00-16-10/open_floor_main.csv:
+steady-rotation ff_avg median is about -0.03 for both CW and CCW, which matches the explicit negative common trim,
+startup and stop fb_avg track opposite the measured linear velocity, which is the wheel loop braking out translation.
+On that run, corr(u, fb_avg) is about -0.72 in startup and -0.65 in stop, so the feedback common-mode is strongly acting like translation damping, not yaw damping.
+What Looks Wrong
+
+The yaw section is not a clean “PD damping” experiment. It is contaminated by:
+plant yaw assist scaling,
+explicit yaw differential bias,
+explicit negative common trim,
+heading PD,
+wheel-speed P.
+That lines up with the result you asked about earlier: this does not look like “too much damping in the PD loop.” The math is still fairly aggressive, and some of that aggression is outside the PD term entirely.
+There is also a tuning disconnect: the code declares dedicated turn gains, but the Drive yaw path uses the shared cluster defaults instead. So if someone tunes kTurnHeadingKp / kTurnYawD, it won’t affect this path.
+For smooth turns, the feedforward path is even more heuristic-heavy. Drive::ManeuverControls() routes through PointControlVector() at Drive.cpp (line 750), and the plant feedforward then uses effective-track-width logic from Vehicle.cpp (line 348) plus yaw assist scaling in PlantModel.cpp (line 1577). With the current track-width interpolation in Vehicle.h (line 50), that can amplify turn differential materially before feedback even starts helping.
+The most direct conclusion is: the yaw common-mode is real, and it is coming from two places in code, one intentional feedforward bias and one translation-canceling wheel feedback term. If you want, I can turn this into a concrete cleanup plan for the yaw path, or isolate which terms should be disabled first for a cleaner diagnostic controller.

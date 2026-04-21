@@ -3,10 +3,64 @@
 
 #include "SrUkfCoreTestSupport.h"
 
+#include <cmath>
+#include <limits>
+
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
+    namespace
+    {
+        constexpr float kZeroVelocityToleranceMps = 0.008f;
+
+        VehicleState::StateVector PredictStationarySplitCommandStateAfterFifteenPredicts()
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f);
+            if (!core.reset(initialState, BuildUkfCovariance()))
+            {
+                return VehicleState::StateVector::Constant(std::numeric_limits<float>::quiet_NaN());
+            }
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.60f;
+            control.rightMotorCommand = -0.60f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            constexpr float dtSeconds = 0.01f;
+            constexpr int kPredictSteps = 15;
+            const float pivotScrubCommandAngularRadps =
+                SrUkfCore::GetRuntimeTuning().pivotScrubMinCommandAngularRadps;
+            SyntheticEncoderRemainderState syntheticEncoderState{};
+            for (int step = 0; step < kPredictSteps; ++step)
+            {
+                RunPredictionMatchingCycle(
+                    core,
+                    control,
+                    params,
+                    dtSeconds,
+                    syntheticEncoderState,
+                    0.0f,
+                    pivotScrubCommandAngularRadps);
+            }
+
+            return core.state();
+        }
+    }
+
     TEST_CLASS(SrUkfCoreMotionUpdateTest)
     {
     public:
@@ -105,6 +159,7 @@ namespace MazeMap
             Assert::IsTrue(control.control.leftMotorCommand > 0.1f, L"Left motor command should overcome friction."); // Should overcome friction.
             Assert::IsTrue(control.control.rightMotorCommand > 0.1f, L"Right motor command should overcome friction."); // Should overcome friction.
 
+            SyntheticEncoderRemainderState syntheticEncoderState{};
             for (size_t i = 0; i < 1000; i++)
             {
                 control = plant.solveDriveCommandsForVelocityTarget(
@@ -115,7 +170,14 @@ namespace MazeMap
                     params,
                     0.8f,
                     8.4f);
-                core.predict(0.001f, control.control);
+                RunPredictionMatchingCycle(
+                    core,
+                    control.control,
+                    params,
+                    0.001f,
+                    syntheticEncoderState,
+                    targetForwardVelocityMps,
+                    0.0f);
             }
             Assert::IsTrue(core.state()(VehicleState::kU) > targetForwardVelocityMps * 0.9f, L"Vehicle speed shouldn't fall too low.");
             Assert::IsTrue(core.state()(VehicleState::kU) < targetForwardVelocityMps * 1.1f, L"Vehicle speed shouldn't be too high.");
@@ -292,6 +354,42 @@ namespace MazeMap
             const VehicleState::StateVector& state = core.state();
             Assert::IsTrue(std::fabs(state(VehicleState::kPy)) > 1.0e-2f);
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) > 1.0e-2f);
+        }
+
+        TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandKeepsZeroForwardVelocity)
+        {
+            const VehicleState::StateVector predictedState =
+                PredictStationarySplitCommandStateAfterFifteenPredicts();
+
+            Assert::AreEqual(0.0f, predictedState(VehicleState::kU), kZeroVelocityToleranceMps);
+        }
+
+        TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandProducesPositiveLeftWheelSpeed)
+        {
+            const VehicleState::StateVector predictedState =
+                PredictStationarySplitCommandStateAfterFifteenPredicts();
+
+            Assert::IsTrue(predictedState(VehicleState::kOmegaL) > 0.0f);
+        }
+
+        TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandProducesNegativeRightWheelSpeed)
+        {
+            const VehicleState::StateVector predictedState =
+                PredictStationarySplitCommandStateAfterFifteenPredicts();
+
+            Assert::IsTrue(predictedState(VehicleState::kOmegaR) < 0.0f);
+        }
+
+        TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandKeepsZeroAverageWheelSpeed)
+        {
+            const VehicleState::StateVector predictedState =
+                PredictStationarySplitCommandStateAfterFifteenPredicts();
+            const float averageWheelLinearSpeedMps =
+                0.5f *
+                (predictedState(VehicleState::kOmegaL) + predictedState(VehicleState::kOmegaR)) *
+                PlantParams::Default().wheelRadiusM;
+
+            Assert::AreEqual(0.0f, averageWheelLinearSpeedMps, kZeroVelocityToleranceMps);
         }
 
         TEST_METHOD(SrUkfCoreAcceptsLaunchEncoderDeltasWhenOpenLoopPredictionDisagrees)
@@ -945,8 +1043,8 @@ namespace MazeMap
 
             SrUkfCore core;
             core.reset(initialState, initialCovariance);
-            EncoderObs encoder{};
             constexpr float dt = 0.001f;
+            SyntheticEncoderRemainderState syntheticEncoderState{};
 
             for (int step = 0; step < 3000; ++step)
             {
@@ -958,11 +1056,14 @@ namespace MazeMap
                         0.0f,
                         params);
 
-                Assert::IsTrue(core.predict(dt, control.control));
-
-                const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
-                Assert::IsTrue(yawResult.attempted);
-                Assert::IsTrue(yawResult.accepted);
+                RunPredictionMatchingCycle(
+                    core,
+                    control.control,
+                    params,
+                    dt,
+                    syntheticEncoderState,
+                    forwardVelocityTargetMps,
+                    0.0f);
             }
 
 			auto state = core.state();
@@ -983,9 +1084,9 @@ namespace MazeMap
             PlantModel model = PlantModel();
             const PlantParams& params = PlantParams::Default();
             constexpr float forwardVelocityTargetMps = 1.0f;
-            EncoderObs encoder{};
             constexpr float dt = 0.001f;
             auto core = RunUKFCycles(2000, ControlInput{});
+            SyntheticEncoderRemainderState syntheticEncoderState{};
 
             for (int step = 0; step < 3000; ++step)
             {
@@ -997,11 +1098,14 @@ namespace MazeMap
                         0.0f,
                         params);
 
-                Assert::IsTrue(core.predict(dt, control.control));
-
-                const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
-                Assert::IsTrue(yawResult.attempted);
-                Assert::IsTrue(yawResult.accepted);
+                RunPredictionMatchingCycle(
+                    core,
+                    control.control,
+                    params,
+                    dt,
+                    syntheticEncoderState,
+                    forwardVelocityTargetMps,
+                    0.0f);
             }
 
             auto state = core.state();

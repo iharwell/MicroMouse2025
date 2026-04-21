@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -133,6 +134,33 @@ namespace
             state->runtime->FlushTextLog();
             ++state->linesWritten;
         }
+    }
+
+    float BuildSharedRuntimeTurnStationaryAverageCommand()
+    {
+        MazeMap::App::Internal::SharedRobotRuntime runtime;
+        if (!runtime.Drive().Begin())
+        {
+            return std::numeric_limits<float>::quiet_NaN();
+        }
+
+        runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+        PrimeSharedRuntimeDriveWheelSpeed(runtime, 0.0f, 0.0f);
+        MazeMap::App::Internal::Drive& drive = runtime.DriveService();
+        MotionLimits limits{};
+        limits.maxSpeedMps = 0.40f;
+        limits.accelMps2 = 2.0f;
+        limits.decelMps2 = 2.0f;
+        limits.maxAngularSpeedRadps = 6.0f;
+        limits.angularAccelRadps2 = 30.0f;
+        limits.angleToleranceRad = Config::kAngleToleranceRad;
+        limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+        drive.SetLimits(limits);
+        drive.StartTurn(HALF_PI_F);
+
+        bool done = false;
+        const MazeMap::App::Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+        return 0.5f * (control.leftMotorPwm + control.rightMotorPwm);
     }
 }
 
@@ -295,6 +323,11 @@ namespace MazeMap::App
             Assert::IsFalse(done);
             Assert::AreEqual(expected.leftMotorPwm, actual.leftMotorPwm, 1.0e-6f);
             Assert::AreEqual(expected.rightMotorPwm, actual.rightMotorPwm, 1.0e-6f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveTurnFromStationaryStartKeepsZeroAverageCommand)
+        {
+            Assert::AreEqual(0.0f, BuildSharedRuntimeTurnStationaryAverageCommand(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveHoldRejectsFanOffWheelSpeedAboveBaseSettleThreshold)

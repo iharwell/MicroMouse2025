@@ -21,7 +21,6 @@ namespace MazeMap::App::Internal
         WallTouch();
 
         void SetLimits(const MotionLimits& limits) noexcept;
-        void SetTrackingCommandPD(MazeMap::CommandPD trackingCommandPd) noexcept;
         void SetAllowPassThroughNoWall(bool allowPassThroughNoWall) noexcept;
 
         bool Active() const noexcept;

@@ -47,6 +47,9 @@
     <ClCompile Include="DriveBaseTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DriveManeuverTests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="DirectionTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
