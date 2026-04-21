@@ -490,7 +490,7 @@ namespace MazeMap::Config
     constexpr float kWheelIntegralLimit = 0.25f;
     // [High] Straight-line heading proportional gain. Increase if the robot drifts off heading in open corridors;
     // decrease if it snakes left-right while trying to stay on course.
-    constexpr float kStraightHeadingKp = 6.5f;
+    constexpr float kStraightHeadingKp = 18.0f;
     // [High] Straight-line yaw damping. Increase if heading correction oscillates; decrease if heading correction feels
     // lazy and the robot lets errors build before responding.
     constexpr float kStraightYawD = 0.10f;
@@ -523,7 +523,7 @@ namespace MazeMap::Config
     constexpr float kArcYawD = 0.10f;
     // [High] Smooth-turn yaw-rate proportional gain. Smooth maneuvers treat the prescribed yaw-rate trace as the
     // authority, so this closes the measured turn rate onto that trace without changing maneuver geometry.
-    constexpr float kSmoothTurnYawRateKp = 0.55f;
+    constexpr float kSmoothTurnYawRateKp = 1.3f;
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
     constexpr float kSmoothTurnYawRateKd = 0.05f;

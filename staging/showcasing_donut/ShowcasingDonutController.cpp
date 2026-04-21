@@ -69,6 +69,7 @@ namespace
 
     std::uint16_t BuildOpenFloorMeasurementFlags(
         const bool abortMarker,
+        const bool estimatorFault,
         const MazeMap::App::Internal::Runtime::ShowcasingDonutMainRow& row,
         const bool encoderValid,
         const bool imuValid,
@@ -81,6 +82,10 @@ namespace
         if (abortMarker)
         {
             flags |= kOpenFloorMeasurementFlagAbortMarker;
+        }
+        if (estimatorFault)
+        {
+            flags |= kOpenFloorMeasurementFlagEstimatorFault;
         }
         if (row.fan_duty_cycle > 0.0f)
         {
@@ -120,23 +125,6 @@ namespace
 
 namespace MazeMap::App::Internal
 {
-    namespace
-    {
-        const char* EndReasonName(const ShowcasingDonutController::EndReason reason) noexcept
-        {
-            switch (reason)
-            {
-            case ShowcasingDonutController::EndReason::TractionLoss:
-                return "traction_loss";
-            case ShowcasingDonutController::EndReason::SpeedCap:
-                return "speed_cap";
-            case ShowcasingDonutController::EndReason::None:
-            default:
-                return "none";
-            }
-        }
-    }
-
     ShowcasingDonutController::ShowcasingDonutController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
@@ -221,7 +209,7 @@ namespace MazeMap::App::Internal
         {
             (void)_runtime.AppendTextLogFormatted(
                 "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",
-                EndReasonName(_endReason),
+                EndReasonText(_endReason),
                 _logFileName,
                 _peakCommandedSpeedMps,
                 _peakEncoderSpeedMps,
@@ -315,8 +303,8 @@ namespace MazeMap::App::Internal
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", MazeMap::kOpenFloorLogFormatSpec)) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("selector_drive_pin", kShowcasingDonutSelectorDrivePin)) return false;
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("selector_sense_pin", kShowcasingDonutSelectorSensePin)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("selector_drive_pin", _selectorDrivePin)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("selector_sense_pin", _selectorSensePin)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("turn_radius_m", kShowcasingDonutRadiusM, 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("turn_start_speed_mps", kShowcasingDonutInitialSpeedMps, 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("turn_ramp_mps2", kShowcasingDonutSpeedRampMps2, 3)) return false;
@@ -526,9 +514,23 @@ namespace MazeMap::App::Internal
         _endReason = reason;
         (void)_runtime.AppendTextLogFormatted(
             "Showcasing donut ending: reason=%s yaw_coherence=%.3f planar_coherence=%.3f",
-            EndReasonName(reason),
+            EndReasonText(reason),
             _tractionLoss.lastYawCoherence,
             _tractionLoss.lastPlanarCoherence);
+    }
+
+    const char* ShowcasingDonutController::EndReasonText(const EndReason reason) const noexcept
+    {
+        switch (reason)
+        {
+        case EndReason::TractionLoss:
+            return "traction_loss";
+        case EndReason::SpeedCap:
+            return "speed_cap";
+        case EndReason::None:
+        default:
+            return "none";
+        }
     }
 
     bool ShowcasingDonutController::LogCurrentSample(
@@ -613,7 +615,7 @@ namespace MazeMap::App::Internal
         row.right_target_velocity_mps = _appliedCommandTelemetry.driveTelemetry.rightTargetVelocityMps;
         row.left_launch_assist_floor = _appliedCommandTelemetry.driveTelemetry.leftLaunchAssistFloor;
         row.right_launch_assist_floor = _appliedCommandTelemetry.driveTelemetry.rightLaunchAssistFloor;
-        row.encoder_timestamp_us = state.sensors.imuTiming.readDoneUs;
+        row.encoder_timestamp_us = 0U;
         row.left_encoder_count = state.driveTelemetry.leftEncoderCount;
         row.right_encoder_count = state.driveTelemetry.rightEncoderCount;
         row.left_encoder_omega_radps = state.driveTelemetry.leftEncoderOmegaRadps;
@@ -657,6 +659,7 @@ namespace MazeMap::App::Internal
         row.fan_duty_cycle = GetMissionFanDutyCycle();
         row.measurement_flags = BuildOpenFloorMeasurementFlags(
             abortMarker,
+            !state.estimatorHealthy,
             row,
             encoderValid,
             imuValid,
@@ -670,7 +673,6 @@ namespace MazeMap::App::Internal
     {
         LogLabels labels{};
         labels.repeatIndex = 0U;
-        labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
 
         switch (_phase)
         {
@@ -681,6 +683,7 @@ namespace MazeMap::App::Internal
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
             labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Startup);
             labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm = _startupCalibration.Active() ? 0.0f : 1.0f;
             break;
 
@@ -691,6 +694,7 @@ namespace MazeMap::App::Internal
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
             labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Hold);
             labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm = 0.0f;
             break;
 
@@ -701,6 +705,7 @@ namespace MazeMap::App::Internal
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::Clockwise);
             labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Accel);
             labels.speedBin = SpeedBinForSpeed(_commandedSpeedMps);
+            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::CW);
             labels.progressNorm =
                 (kShowcasingDonutSpeedCapMps > kShowcasingDonutInitialSpeedMps) ?
                     (std::clamp)(
@@ -718,6 +723,7 @@ namespace MazeMap::App::Internal
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::Clockwise);
             labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::SteadyRotation);
             labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm =
                 (_flashTurnMagnitudeRad > 1.0e-5f) ?
                     (std::clamp)(
@@ -735,6 +741,7 @@ namespace MazeMap::App::Internal
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
             labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Stop);
             labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm = (_phase == Phase::Complete) ? 1.0f : 0.0f;
             break;
 
@@ -745,6 +752,7 @@ namespace MazeMap::App::Internal
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
             labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Idle);
             labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm = 0.0f;
             break;
         }

@@ -4,7 +4,7 @@
 #include "LoopController.h"
 #include "MazeMapApplicationMode.h"
 #include "MazeMapRuntimeCore.h"
-#include "MmLog.h"
+#include "MazeMapRuntimeMmLog.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +17,6 @@ namespace MazeMap
 namespace MazeMap::App::Internal
 {
     class Drive;
-    class DriveBase;
     class SharedRobotRuntime;
     class StartupCalibration;
 }
@@ -228,6 +227,7 @@ namespace MazeMap::App::Internal
         bool TractionLossDetected(const LoopController::ModeState& state) noexcept;
         bool EndConditionReached(const LoopController::ModeState& state);
         void RecordRequestedEnd(EndReason reason);
+        const char* EndReasonText(EndReason reason) const noexcept;
         LogLabels CurrentLabels() const noexcept;
         std::uint8_t SpeedBinForSpeed(float speedMps) const noexcept;
         float EncoderAverageSpeedMps(const LoopController::ModeState& state) const noexcept;
@@ -236,7 +236,7 @@ namespace MazeMap::App::Internal
         SharedRobotRuntime& _runtime;
         LoopController& _loopController;
         MazeMap::Vehicle& _vehicle;
-        DriveBase& _drive;
+        ::DriveBase& _drive;
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
         Phase _phase{ Phase::Idle };

@@ -2,11 +2,12 @@
 
 ## Status
 
-- Added as standalone source files only:
-  - `MazeMap/MazeMap/ShowcasingDonutController.h`
-  - `MazeMap/MazeMap/ShowcasingDonutController.cpp`
+- Added as standalone staged source files only:
+  - `staging/showcasing_donut/ShowcasingDonutController.h`
+  - `staging/showcasing_donut/ShowcasingDonutController.cpp`
+- Intentionally kept outside compiled source directories.
 - Intentionally not added to the project file yet.
-- Intentionally not wired into `BootModeDescriptor.h` or `BootModeRegistry.cpp` yet, because this task explicitly forbids editing other files.
+- Intentionally not wired into `BootModeDescriptor.h` or `BootModeRegistry.cpp` yet.
 
 ## Intended Mode Identity
 
@@ -77,11 +78,11 @@
 
 When edits to other files are allowed, the remaining steps are:
 
-1. Add a new `BootModeId` entry in `MazeMap/MazeMap/BootModeDescriptor.h`.
-2. Add a real descriptor function for `ShowcasingDonutController`.
-3. Add the `BootModeRegistry` selector entry for pins `9/10`.
-4. Add the new source files to the project build.
-5. Verify Release host tests and the current Teensy build path after project integration.
+1. Move the staged files into `MazeMap/MazeMap` only when integration is explicitly requested.
+2. Add a new `BootModeId` entry in `MazeMap/MazeMap/BootModeDescriptor.h`.
+3. Add a real descriptor function for `ShowcasingDonutController`.
+4. Add the `BootModeRegistry` selector entry for pins `9/10`.
+5. Add the new source files to the project build and then verify Release host tests and the current Teensy build path.
 
 ## Build Note
 
