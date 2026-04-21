@@ -445,6 +445,11 @@ namespace MazeMap
             Assert::AreEqual(0.0f, BuildDriveBaseStationaryYawOnlyCommandAverage(), 1.0e-6f);
         }
 
+        TEST_METHOD(DriveConfigYawRateTrackingUsesImuYawByDefault)
+        {
+            Assert::IsTrue(Config::kDriveYawRateCommandPd == MazeMap::CommandPD::IMUYaw);
+        }
+
         TEST_METHOD(DriveBasePointCommandManeuverPointMatchesScalarTargets)
         {
             PlantModel plant;

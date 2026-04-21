@@ -152,6 +152,24 @@ namespace
         return t * t * (3.0f - (2.0f * t));
     }
 
+    inline float ComputeLateralScrubWeight(
+        float rightVelocityMps,
+        float yawRateRadps,
+        const PreparedParams& params) noexcept
+    {
+        const float frontLateralSpeedMps = rightVelocityMps + (params.longitudinalOffsetM * yawRateRadps);
+        const float rearLateralSpeedMps = rightVelocityMps - (params.longitudinalOffsetM * yawRateRadps);
+        const float lateralScrubSpeedMps =
+            (std::max)(std::fabs(frontLateralSpeedMps), std::fabs(rearLateralSpeedMps));
+        return
+            std::isfinite(lateralScrubSpeedMps) ?
+            SmoothStep(
+                params.stopEnterSpeedMps,
+                params.stopExitSpeedMps,
+                lateralScrubSpeedMps) :
+            0.0f;
+    }
+
     inline float ComputeSpeedNormMps(
         float forwardVelocityMps,
         float rightVelocityMps,
@@ -192,7 +210,7 @@ namespace
             (std::fabs(omegaLeftRadps) < params.stopEnterWheelSpeedRadps) &&
             (std::fabs(omegaRightRadps) < params.stopEnterWheelSpeedRadps) &&
             (commandNorm < params.stopEnterCommand) &&
-            !((std::isfinite(rightVelocityMps)) && (rightVelocityMps != 0.0f));
+            (ComputeLateralScrubWeight(rightVelocityMps, yawRateRadps, params) <= 0.0f);
     }
 
     inline bool ShouldSnapToZeroFast(
@@ -237,6 +255,34 @@ namespace
             (std::fabs(yawRateRadps) < params.stopEnterYawRateRadps) &&
             (std::fabs(omegaLeftRadps) < params.stopEnterWheelSpeedRadps) &&
             (std::fabs(omegaRightRadps) < params.stopEnterWheelSpeedRadps);
+    }
+
+    inline float ResolveRollingMotionWeight(
+        float forwardVelocityMps,
+        float rightVelocityMps,
+        float yawRateRadps,
+        float omegaLeftRadps,
+        float omegaRightRadps,
+        float commandNorm,
+        const PreparedParams& params) noexcept
+    {
+        const float speedNormMps =
+            ComputeSpeedNormMps(
+                forwardVelocityMps,
+                rightVelocityMps,
+                yawRateRadps,
+                omegaLeftRadps,
+                omegaRightRadps,
+                params);
+        const float speedWeight =
+            SmoothStep(params.stopEnterSpeedMps, params.stopExitSpeedMps, speedNormMps);
+        const float yawRateWeight =
+            SmoothStep(params.stopEnterYawRateRadps, params.stopExitYawRateRadps, std::fabs(yawRateRadps));
+        const float commandWeight =
+            SmoothStep(params.stopEnterCommand, params.stopExitCommand, commandNorm);
+        const float rollWeight = (std::max)((std::max)(speedWeight, yawRateWeight), commandWeight);
+        const float lateralScrubWeight = ComputeLateralScrubWeight(rightVelocityMps, yawRateRadps, params);
+        return (std::max)(rollWeight, lateralScrubWeight);
     }
 
     inline float ReserveScaledDemandWithRequestedSign(
@@ -1658,6 +1704,9 @@ namespace
         const float currentForwardVelocityMps = operatingState(VehicleState::kU);
         const float currentYawRateRadps = operatingState(VehicleState::kR);
         const float resolvedTargetForwardVelocityMps = targetForwardVelocityMps;
+        const bool applyInPlaceTurnCommandShaping =
+            (std::fabs(resolvedTargetForwardVelocityMps) <= params.stopExitSpeedMps) &&
+            (std::fabs(targetYawRateRadps) > params.stopEnterYawRateRadps);
 
         float desiredLongitudinalAccelMps2 = 0.0f;
         float desiredYawAccelRadps2 = 0.0f;
@@ -1669,20 +1718,43 @@ namespace
             (std::numeric_limits<float>::max)(),
             (std::numeric_limits<float>::max)(),
             responseTimeS,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
 
+        float shapedLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+        float shapedYawAccelRadps2 = desiredYawAccelRadps2;
+        const float targetForwardReferenceMps =
+            ResolveVelocityTargetReferenceSpeedMps(
+                currentForwardVelocityMps,
+                resolvedTargetForwardVelocityMps,
+                params.rollingRegularizationMps);
+        const float currentYawReferenceMps =
+            ResolveVelocityTargetReferenceSpeedMps(
+                currentForwardVelocityMps,
+                currentForwardVelocityMps,
+                params.rollingRegularizationMps);
+        float yawAssistScale = 1.0f;
+        if (currentYawReferenceMps > 0.0f)
+        {
+            yawAssistScale =
+                (std::clamp)(targetForwardReferenceMps / currentYawReferenceMps, 1.0f, 4.0f);
+        }
+
+        if (applyInPlaceTurnCommandShaping)
+        {
+            shapedYawAccelRadps2 *= yawAssistScale;
+        }
         DriveCommandSolution solution =
             solveBase(
                 operatingState,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
+                shapedLongitudinalAccelMps2,
+                shapedYawAccelRadps2);
         const bool solutionPredictionValid =
             UpdateVelocityTargetSolutionPrediction(
                 plant,
                 validationState,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2,
+                shapedLongitudinalAccelMps2,
+                shapedYawAccelRadps2,
                 params,
                 solution);
         const float solutionErrorMetric =
@@ -1705,10 +1777,11 @@ namespace
                 targetYawRateRadps,
                 solution,
                 params);
+        DriveCommandSolution selectedSolution = solution;
         switch (operatingMode)
         {
         case VelocityTargetOperatingMode::TractionLoss:
-            return solution;
+            break;
 
         case VelocityTargetOperatingMode::Static:
         case VelocityTargetOperatingMode::HighSlipTurn:
@@ -1723,8 +1796,8 @@ namespace
                         validationState,
                         resolvedTargetForwardVelocityMps,
                         targetYawRateRadps,
-                        desiredLongitudinalAccelMps2,
-                        desiredYawAccelRadps2,
+                        shapedLongitudinalAccelMps2,
+                        shapedYawAccelRadps2,
                         responseTimeS,
                         operatingMode,
                         params,
@@ -1746,15 +1819,17 @@ namespace
                         (exactErrorMetric <= 1.0f);
                     if (ShouldPreferExactVelocityTargetCandidate(solutionErrorMetric, exactErrorMetric))
                     {
-                        return exactCandidate;
+                        selectedSolution = exactCandidate;
                     }
                 }
             }
-            return solution;
+            break;
 
         default:
-            return solution;
+            break;
         }
+
+        return selectedSolution;
     }
 
 } // namespace
@@ -2003,24 +2078,15 @@ namespace MazeMap
             return derivatives;
         }
 
-        const float speedNormMps =
-            ComputeSpeedNormMps(
+        const float motionWeight =
+            ResolveRollingMotionWeight(
                 forwardVelocityMps,
                 rightVelocityMps,
                 yawRateRadps,
                 omegaLeftRadps,
                 omegaRightRadps,
+                commandNorm,
                 params);
-        const float speedWeight =
-            SmoothStep(params.stopEnterSpeedMps, params.stopExitSpeedMps, speedNormMps);
-        const float yawRateWeight =
-            SmoothStep(params.stopEnterYawRateRadps, params.stopExitYawRateRadps, std::fabs(yawRateRadps));
-        const float commandWeight =
-            SmoothStep(params.stopEnterCommand, params.stopExitCommand, commandNorm);
-        const float rollWeight = (std::max)((std::max)(speedWeight, yawRateWeight), commandWeight);
-        const float lateralScrubWeight =
-            (std::isfinite(rightVelocityMps) && (rightVelocityMps != 0.0f)) ? 1.0f : 0.0f;
-        const float motionWeight = (std::max)(rollWeight, lateralScrubWeight);
 
         RollingContactEvaluation rollingForces{};
         if (motionWeight > 0.0f)
@@ -2250,22 +2316,16 @@ namespace MazeMap
         const float commandNorm =
             (std::max)(std::fabs(control.leftMotorCommand), std::fabs(control.rightMotorCommand));
 
-        const float speedNormMps =
-            ComputeSpeedNormMps(
+        const float motionWeight =
+            ResolveRollingMotionWeight(
                 forwardVelocityMps,
                 rightVelocityMps,
                 yawRateRadps,
                 omegaLeftRadps,
                 omegaRightRadps,
+                commandNorm,
                 params);
-        const float speedWeight =
-            SmoothStep(params.stopEnterSpeedMps, params.stopExitSpeedMps, speedNormMps);
-        const float yawRateWeight =
-            SmoothStep(params.stopEnterYawRateRadps, params.stopExitYawRateRadps, std::fabs(yawRateRadps));
-        const float commandWeight =
-            SmoothStep(params.stopEnterCommand, params.stopExitCommand, commandNorm);
-        const float rollWeight = (std::max)((std::max)(speedWeight, yawRateWeight), commandWeight);
-        if (rollWeight <= 0.0f)
+        if (motionWeight <= 0.0f)
         {
             return EvaluateSplitContactForces(0.0f, 0.0f, 0.0f, 0.0f, control.fanDutyCycle, params).forces;
         }
@@ -2280,7 +2340,7 @@ namespace MazeMap
                 kinematics,
                 control.fanDutyCycle,
                 params);
-        return BlendContactForces(rolling.forces, rollWeight);
+        return BlendContactForces(rolling.forces, motionWeight);
     }
 
     Eigen::Vector2f PlantModel::imuPlanarAcceleration(
@@ -2321,12 +2381,12 @@ namespace MazeMap
             return state;
         }
 
+        const float commandNorm =
+            (std::max)(std::fabs(control.leftMotorCommand), std::fabs(control.rightMotorCommand));
         const PlantDerivatives derivatives = forwardStep(state, control, params);
         StateVector implicitState = state + (dt * derivatives.stateDot);
         implicitState(VehicleState::kPsi) = VehicleState::NormalizeAngle(implicitState(VehicleState::kPsi));
 
-        const float commandNorm =
-            (std::max)(std::fabs(control.leftMotorCommand), std::fabs(control.rightMotorCommand));
         if (ShouldSnapToZeroFast(
             implicitState(VehicleState::kU),
             implicitState(VehicleState::kV),

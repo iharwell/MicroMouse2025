@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ShowcasingDonutController.h"
 
+#include "BootModeRegistry.h"
 #include "BootUtilityModeFramework.h"
 #include "DiagnosticConfig.h"
 #include "Drive.h"
@@ -25,9 +26,6 @@ namespace
     constexpr const char* kShowcasingDonutSelectorRemovedReason =
         "Showcasing donut selector jumper removed";
     constexpr const char* kShowcasingDonutMainLogHostFallback = "showcasing_donut_main.mmlog";
-
-    constexpr std::uint8_t kShowcasingDonutSelectorDrivePin = 9U;
-    constexpr std::uint8_t kShowcasingDonutSelectorSensePin = 10U;
 
     constexpr float kShowcasingDonutRadiusM = 0.090f;
     constexpr float kShowcasingDonutInitialSpeedMps = 0.30f;
@@ -165,6 +163,10 @@ namespace MazeMap::App::Internal
         }
 
         ConfigureSelectorMonitor();
+        if (!_selectorMonitorArmed)
+        {
+            return _runtime.FailActiveMode("Showcasing donut selector pins unavailable");
+        }
         if (SelectorRemoved())
         {
             return _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
@@ -378,8 +380,15 @@ namespace MazeMap::App::Internal
     void ShowcasingDonutController::ConfigureSelectorMonitor() noexcept
     {
         ReleaseSelectorMonitor();
-        _selectorDrivePin = kShowcasingDonutSelectorDrivePin;
-        _selectorSensePin = kShowcasingDonutSelectorSensePin;
+        const BootModeRegistryEntry* const entry =
+            FindBootModeRegistryEntry(BootModeId::ShowcasingDonut);
+        if ((entry == nullptr) || (entry->selector.kind != BootModeSelectorKind::PinPair))
+        {
+            return;
+        }
+
+        _selectorDrivePin = entry->selector.pinA;
+        _selectorSensePin = entry->selector.pinB;
         BeginPinPairStrapMonitor(_selectorDrivePin, _selectorSensePin);
         _selectorMonitorArmed = true;
     }
@@ -1016,5 +1025,24 @@ namespace MazeMap::App::Internal
     {
         static ShowcasingDonutController mode(GetSharedRobotRuntime());
         return mode;
+    }
+
+    const BootModeDescriptor& GetShowcasingDonutBootModeDescriptor()
+    {
+        static constexpr BootModeDescriptor descriptor{
+            BootModeId::ShowcasingDonut,
+            BootModeCategory::Utility,
+            "showcasing_donut",
+            "Run shared startup calibration, execute a fixed-radius clockwise donut sweep, ramp speed until traction loss or the 4 m/s cap, then finish with bounded flashy turns.",
+            "logging.txt, donutNNN.mmlog",
+            &GetShowcasingDonutMode,
+            "GetShowcasingDonutMode",
+            "ShowcasingDonutController.cpp",
+            "shared startup calibration; fan spinup hold; fixed-radius donut sweep; bounded flashy turns; completion hold",
+            "DiagnosticConfig control period; OpenFloorMeasurementSpec log vocabulary; shared startup calibration; shared drive and drive-base services",
+            "Fixed 0.090 m clockwise turn radius; 0.30 m/s initial speed; 0.05 m/s^2 speed ramp; 4.0 m/s end cap; selector removal faults the run; finish stays within 0.27 m of donut center",
+            "donutNNN.mmlog",
+        };
+        return descriptor;
     }
 }

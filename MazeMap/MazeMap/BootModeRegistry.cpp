@@ -7,7 +7,7 @@
 
 namespace
 {
-    constexpr std::size_t kBootModeRegistryEntryCount = 7U;
+    constexpr std::size_t kBootModeRegistryEntryCount = 8U;
 
     constexpr MazeMap::App::BootModeId GetAuxiliarySelectorBootModeId() noexcept
     {
@@ -70,6 +70,8 @@ namespace MazeMap::App
             return "top_speed_measurement";
         case BootModeId::OpenFloorMeasurement:
             return "open_floor_measurement";
+        case BootModeId::ShowcasingDonut:
+            return "showcasing_donut";
         case BootModeId::Mission:
         default:
             return "mission";
@@ -114,6 +116,12 @@ namespace MazeMap::App
                 BootModeSelectorCondition::PinPair(27U, 28U),
                 true,
                 &Internal::GetOpenFloorMeasurementBootModeDescriptor(),
+            },
+            BootModeRegistryEntry{
+                BootModeId::ShowcasingDonut,
+                BootModeSelectorCondition::PinPair(9U, 10U),
+                true,
+                &Internal::GetShowcasingDonutBootModeDescriptor(),
             },
             BootModeRegistryEntry{
                 BootModeId::Mission,

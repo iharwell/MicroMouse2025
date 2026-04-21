@@ -1,9 +1,10 @@
 #include "pch.h"
+#include "WallSensorLedCalibrationController.h"
+
 #include "MazeMapApplicationPrivate.h"
 #include "BootUtilityModeFramework.h"
 #include "BootModeDescriptor.h"
 #include "BootModeRegistry.h"
-#include "LoopController.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapSharedRuntime.h"
 #include "PinPairStrap.h"
@@ -14,41 +15,17 @@ using MazeMap::App::Internal::SharedRobotRuntime;
 namespace
 {
     constexpr const char* kWallSensorLedCalibrationStableId = "wall_sensor_led_calibration";
-
-    enum class LedCalibrationPhase : std::uint8_t
-    {
-        Front,
-        Side,
-        Complete
-    };
-
-    LedCalibrationPhase AdvanceLedCalibrationPhase(
-        const LedCalibrationPhase currentPhase,
-        const bool jumperInstalled) noexcept
-    {
-        switch (currentPhase)
-        {
-        case LedCalibrationPhase::Front:
-            return jumperInstalled ? LedCalibrationPhase::Front : LedCalibrationPhase::Side;
-        case LedCalibrationPhase::Side:
-            return jumperInstalled ? LedCalibrationPhase::Complete : LedCalibrationPhase::Side;
-        case LedCalibrationPhase::Complete:
-        default:
-            return LedCalibrationPhase::Complete;
-        }
-    }
 }
 
-class WallSensorLedCalibrationController : public IApplicationMode
+namespace MazeMap::App::Internal
 {
-public:
-    explicit WallSensorLedCalibrationController(SharedRobotRuntime& runtime)
+    WallSensorLedCalibrationController::WallSensorLedCalibrationController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
     {
     }
 
-    bool Begin() override
+    bool WallSensorLedCalibrationController::Begin()
     {
         ResetState();
         if (!_runtime.RegisterModeFaultHandler(
@@ -75,7 +52,9 @@ public:
         _monitorSensePin = entry->selector.pinB;
         _phase = LedCalibrationPhase::Front;
         _ledEnabled = false;
-        _lastToggleUs = micros();
+        _lastToggleUs = static_cast<std::uint32_t>(micros());
+        _pauseRequested = false;
+        _runtimeFaultReason = nullptr;
 
         pinMode(Pins::LED_Ctrl_Forward_Left, OUTPUT);
         pinMode(Pins::LED_Ctrl_Forward_Right, OUTPUT);
@@ -93,16 +72,19 @@ public:
         return true;
     }
 
-    void Run() override
+    void WallSensorLedCalibrationController::Run()
     {
-        bool ok = false;
+        bool completed = false;
         LoopController::ModeCallbacks callbacks{};
         callbacks.onModeWork = &WallSensorLedCalibrationController::ModeWorkThunk;
         callbacks.context = this;
         if (_loopController.BeginSession(BuildLoopOptions(), callbacks))
         {
             const LoopController::SessionResult result = _loopController.Run();
-            ok = (result.status == LoopController::SessionResult::Status::Completed);
+            completed =
+                (result.status == LoopController::SessionResult::Status::Completed) &&
+                !_runtimeFaulted &&
+                (_phase == LedCalibrationPhase::Complete);
             _loopController.EndSession();
         }
         else
@@ -111,21 +93,21 @@ public:
         }
 
         CleanupHardware();
-        if (ok)
+        if (completed)
         {
             (void)_runtime.AppendTextLogLine("Wall sensor LED calibration complete");
         }
     }
 
-private:
-    using LoopController = MazeMap::App::Internal::LoopController;
-
-    static LoopController::ControlVector ModeWorkThunk(
+    LoopController::ControlVector WallSensorLedCalibrationController::ModeWorkThunk(
         void* context,
-        std::uint32_t loopEndTimeUs,
+        const std::uint32_t loopEndTimeUs,
         const LoopController::ModeState& state,
         LoopController::TickServices& services)
     {
+        (void)loopEndTimeUs;
+        (void)state;
+
         auto* const self = static_cast<WallSensorLedCalibrationController*>(context);
         if (self == nullptr)
         {
@@ -133,10 +115,21 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
-        return self->RunTick(loopEndTimeUs, state, services);
+        return self->OnModeWork(services);
     }
 
-    static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+    LoopController::PauseDisposition WallSensorLedCalibrationController::PauseThunk(
+        void* context,
+        const LoopController::PauseContext& pause)
+    {
+        auto* const self = static_cast<WallSensorLedCalibrationController*>(context);
+        return (self != nullptr) ?
+            self->OnPauseGranted(pause) :
+            LoopController::PauseDisposition::StopByRuntime(
+                "Wall sensor LED calibration pause callback context was null");
+    }
+
+    void WallSensorLedCalibrationController::TeardownOnRuntimeFault(void* context, const char* reason) noexcept
     {
         if (context != nullptr)
         {
@@ -144,7 +137,7 @@ private:
         }
     }
 
-    LoopController::SessionOptions BuildLoopOptions() const noexcept
+    LoopController::SessionOptions WallSensorLedCalibrationController::BuildLoopOptions() const noexcept
     {
         LoopController::SessionOptions options{};
         options.controlPeriodUs = Config::kControlPeriodUs;
@@ -158,25 +151,60 @@ private:
         return options;
     }
 
-    static void SetFrontLeds(const bool enabled)
+    LoopController::ControlVector WallSensorLedCalibrationController::OnModeWork(
+        LoopController::TickServices& services)
+    {
+        if (_pauseRequested)
+        {
+            services.Fault("Wall sensor LED calibration unexpectedly resumed after pause request");
+            return LoopController::ControlVector::Brake;
+        }
+
+        _pauseRequested = true;
+        LoopController::PauseRequest request{};
+        request.onPauseGranted = &WallSensorLedCalibrationController::PauseThunk;
+        request.reason = "wall_sensor_led_calibration";
+        request.flushLogsBeforeGrant = true;
+        request.resetClockOnResume = false;
+        services.RequestPause(request);
+        return LoopController::ControlVector::Brake;
+    }
+
+    LoopController::PauseDisposition WallSensorLedCalibrationController::OnPauseGranted(
+        const LoopController::PauseContext& pause)
+    {
+        (void)pause;
+        RunCalibrationLoop();
+        if (_runtimeFaulted)
+        {
+            return LoopController::PauseDisposition::StopByRuntime(
+                (_runtimeFaultReason != nullptr) ?
+                    _runtimeFaultReason :
+                    "Wall sensor LED calibration paused execution faulted");
+        }
+
+        return LoopController::PauseDisposition::Complete();
+    }
+
+    void WallSensorLedCalibrationController::SetFrontLeds(const bool enabled)
     {
         digitalWriteFast(Pins::LED_Ctrl_Forward_Left, enabled ? HIGH : LOW);
         digitalWriteFast(Pins::LED_Ctrl_Forward_Right, enabled ? HIGH : LOW);
     }
 
-    static void SetSideLeds(const bool enabled)
+    void WallSensorLedCalibrationController::SetSideLeds(const bool enabled)
     {
         digitalWriteFast(Pins::LED_Ctrl_Side_Left, enabled ? HIGH : LOW);
         digitalWriteFast(Pins::LED_Ctrl_Side_Right, enabled ? HIGH : LOW);
     }
 
-    static void SetAllLeds(const bool enabled)
+    void WallSensorLedCalibrationController::SetAllLeds(const bool enabled)
     {
         SetFrontLeds(enabled);
         SetSideLeds(enabled);
     }
 
-    void ToggleActiveLeds()
+    void WallSensorLedCalibrationController::ToggleActiveLeds()
     {
         _ledEnabled = !_ledEnabled;
         if (_phase == LedCalibrationPhase::Front)
@@ -188,7 +216,7 @@ private:
         SetSideLeds(_ledEnabled);
     }
 
-    void PrintFrequency(const char* label, const uint32_t halfPeriodUs)
+    void WallSensorLedCalibrationController::PrintFrequency(const char* label, const uint32_t halfPeriodUs)
     {
         if (halfPeriodUs == 0U)
         {
@@ -202,23 +230,73 @@ private:
             1000000.0f / (2.0f * static_cast<float>(halfPeriodUs)));
     }
 
-    LoopController::ControlVector RunTick(
-        const std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
-        LoopController::TickServices& services)
+    std::uint32_t WallSensorLedCalibrationController::ActiveHalfPeriodUs() const noexcept
     {
-        (void)loopEndTimeUs;
-        (void)state;
+        switch (_phase)
+        {
+        case LedCalibrationPhase::Front:
+            return WallSensorLedCalibrationHalfPeriodUs(WallSensorId::FrontLeft);
+        case LedCalibrationPhase::Side:
+            return WallSensorLedCalibrationHalfPeriodUs(WallSensorId::SideLeft);
+        case LedCalibrationPhase::Complete:
+        default:
+            return 0U;
+        }
+    }
 
+    void WallSensorLedCalibrationController::RunCalibrationLoop()
+    {
+        while (!_runtimeFaulted && _phase != LedCalibrationPhase::Complete)
+        {
+            AdvancePhase();
+            if (_runtimeFaulted || _phase == LedCalibrationPhase::Complete)
+            {
+                break;
+            }
+
+            const std::uint32_t halfPeriodUs = ActiveHalfPeriodUs();
+            if (halfPeriodUs == 0U)
+            {
+                continue;
+            }
+
+            const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
+            if (static_cast<std::uint32_t>(nowUs - _lastToggleUs) >= halfPeriodUs)
+            {
+                ToggleActiveLeds();
+                _lastToggleUs = nowUs;
+                continue;
+            }
+
+            const std::uint32_t remainingUs = halfPeriodUs - static_cast<std::uint32_t>(nowUs - _lastToggleUs);
+            delayMicroseconds(static_cast<unsigned int>(remainingUs));
+        }
+    }
+
+    void WallSensorLedCalibrationController::AdvancePhase()
+    {
         const bool jumperInstalled = IsPinPairStrapMonitorClosed(_monitorSensePin);
-        const LedCalibrationPhase nextPhase = AdvanceLedCalibrationPhase(_phase, jumperInstalled);
+        LedCalibrationPhase nextPhase = _phase;
+        switch (_phase)
+        {
+        case LedCalibrationPhase::Front:
+            nextPhase = jumperInstalled ? LedCalibrationPhase::Front : LedCalibrationPhase::Side;
+            break;
+        case LedCalibrationPhase::Side:
+            nextPhase = jumperInstalled ? LedCalibrationPhase::Complete : LedCalibrationPhase::Side;
+            break;
+        case LedCalibrationPhase::Complete:
+        default:
+            nextPhase = LedCalibrationPhase::Complete;
+            break;
+        }
         if (nextPhase != _phase)
         {
             if (_phase == LedCalibrationPhase::Front)
             {
                 SetFrontLeds(false);
                 _ledEnabled = false;
-                _lastToggleUs = micros();
+                _lastToggleUs = static_cast<std::uint32_t>(micros());
                 (void)_runtime.AppendTextLogLine("Side calibration active; front LEDs held off");
                 PrintFrequency("Side LED square wave (Hz): ", WallSensorLedCalibrationHalfPeriodUs(WallSensorId::SideLeft));
             }
@@ -229,38 +307,23 @@ private:
             }
 
             _phase = nextPhase;
-            if (_phase == LedCalibrationPhase::Complete)
-            {
-                services.RequestEndLoop();
-                return LoopController::ControlVector::Brake;
-            }
         }
-
-        const uint32_t halfPeriodUs =
-            (_phase == LedCalibrationPhase::Front) ?
-                WallSensorLedCalibrationHalfPeriodUs(WallSensorId::FrontLeft) :
-                WallSensorLedCalibrationHalfPeriodUs(WallSensorId::SideLeft);
-        const unsigned long nowUs = micros();
-        if (static_cast<std::uint32_t>(nowUs - _lastToggleUs) >= halfPeriodUs)
-        {
-            ToggleActiveLeds();
-            _lastToggleUs = nowUs;
-        }
-
-        return LoopController::ControlVector::Brake;
     }
 
-    void ResetState() noexcept
+    void WallSensorLedCalibrationController::ResetState() noexcept
     {
         _phase = LedCalibrationPhase::Front;
         _ledEnabled = false;
-        _lastToggleUs = 0UL;
+        _lastToggleUs = 0U;
         _monitorDrivePin = 0U;
         _monitorSensePin = 0U;
         _monitorArmed = false;
+        _runtimeFaulted = false;
+        _pauseRequested = false;
+        _runtimeFaultReason = nullptr;
     }
 
-    void CleanupHardware() noexcept
+    void WallSensorLedCalibrationController::CleanupHardware() noexcept
     {
         if (_monitorArmed)
         {
@@ -272,25 +335,13 @@ private:
         _ledEnabled = false;
     }
 
-    void CleanupOnRuntimeFault(const char* reason) noexcept
+    void WallSensorLedCalibrationController::CleanupOnRuntimeFault(const char* reason) noexcept
     {
-        (void)reason;
+        _runtimeFaulted = true;
+        _runtimeFaultReason = reason;
+        _phase = LedCalibrationPhase::Complete;
         CleanupHardware();
     }
-
-    SharedRobotRuntime& _runtime;
-    LoopController& _loopController;
-    std::uint8_t _monitorDrivePin{};
-    std::uint8_t _monitorSensePin{};
-    LedCalibrationPhase _phase{ LedCalibrationPhase::Front };
-    bool _ledEnabled{};
-    unsigned long _lastToggleUs{};
-    bool _monitorArmed{};
-};
-
-namespace MazeMap::App::Internal
-{
-    IApplicationMode& GetWallSensorLedCalibrationMode();
 
     const BootModeDescriptor& GetWallSensorLedCalibrationBootModeDescriptor()
     {

@@ -2,12 +2,16 @@
 
 ## Status
 
-- Added as standalone staged source files only:
-  - `staging/showcasing_donut/ShowcasingDonutController.h`
-  - `staging/showcasing_donut/ShowcasingDonutController.cpp`
-- Intentionally kept outside compiled source directories.
-- Intentionally not added to the project file yet.
-- Intentionally not wired into `BootModeDescriptor.h` or `BootModeRegistry.cpp` yet.
+- Integrated into the compiled boot-mode graph:
+  - `MazeMap/MazeMap/ShowcasingDonutController.h`
+  - `MazeMap/MazeMap/ShowcasingDonutController.cpp`
+- Wired into:
+  - `MazeMap/MazeMap/BootModeDescriptor.h`
+  - `MazeMap/MazeMap/MazeMapControllerRegistry.h`
+  - `MazeMap/MazeMap/BootModeRegistry.cpp`
+  - `MazeMap/MazeMap/MazeMap.vcxproj`
+  - `MazeMap/MazeMap/MazeMap.vcxproj.filters`
+  - `MazeMap/MazeMapTest/MazeMapApplicationTest.cpp`
 
 ## Intended Mode Identity
 
@@ -76,15 +80,27 @@
 
 ## Deferred Integration Work
 
-When edits to other files are allowed, the remaining steps are:
+Integration is complete. Ongoing validation should cover:
 
-1. Move the staged files into `MazeMap/MazeMap` only when integration is explicitly requested.
-2. Add a new `BootModeId` entry in `MazeMap/MazeMap/BootModeDescriptor.h`.
-3. Add a real descriptor function for `ShowcasingDonutController`.
-4. Add the `BootModeRegistry` selector entry for pins `9/10`.
-5. Add the new source files to the project build and then verify Release host tests and the current Teensy build path.
+1. Release host tests after the next clean current-artifact build.
+2. The current Teensy build path after the next clean current-artifact build.
+3. On-hardware confirmation that the `9/10` selector monitor faults immediately when the jumper is removed.
 
 ## Build Note
 
-- Per request, no build or test has been run yet.
-- The next step is to pause here before any build is started.
+- Direct Release rebuild of `MazeMap.sln` succeeded on `2026-04-21`.
+- Targeted Release boot-registry tests passed for the integrated mode:
+  - `BootModeRegistry_ExposesCurrentInventory`
+  - `BootModeRegistry_DescriptorsAreAuthoritative`
+  - `ResolveActiveApplicationMode_UsesDescriptorEntryMode`
+  - `BootModeRegistry_DefaultsToMission`
+  - `BootModeRegistry_PrefersFrontWallCharacterization`
+  - `BootModeRegistry_PrefersLedCalibrationOverLaterModes`
+  - `BootModeRegistry_PrefersAuxiliarySelectorOverMissionModes`
+  - `BootModeRegistry_PrefersManeuverFileTestOverLaterModes`
+  - `BootModeRegistry_PrefersTopSpeedMeasurementOverLaterModes`
+  - `BootModeRegistry_PrefersOpenFloorMeasurementOverShowcasingDonut`
+  - `BootModeRegistry_SelectsShowcasingDonutWhenPins9And10AreStrapped`
+- Direct Teensy compile succeeded and produced a fresh `MazeMap.ino.hex`.
+- The repository wrapper `build_and_verify_latest.cmd --no-pause` still stops at its artifact-freshness gate even after successful builds.
+- The full Release `MazeMapTest.dll` suite currently has unrelated existing failures in `DriveManeuver`, `PlantModelDriveCommand`, and `SrUkfCoreMotionUpdate`; those failures are outside this mode integration.

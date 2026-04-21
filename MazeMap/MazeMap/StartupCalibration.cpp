@@ -507,11 +507,21 @@ namespace MazeMap::App::Internal
 
         float actualDistanceM = 0.0f;
         if ((_drive == nullptr) ||
-            !TryDistanceToSouthWall(_drive->GetPose(), _speedVehicle->SideLeft, actualDistanceM) ||
-            !StoreSideReference(WallSensorId::SideLeft, leftCapture, actualDistanceM) ||
+            !TryDistanceToSouthWall(_drive->GetPose(), _speedVehicle->SideLeft, actualDistanceM))
+        {
+            Fail("StartupCalibration could not store the west-facing side-wall calibration1");
+            return false;
+        }
+        if ((_drive == nullptr) ||
+            !StoreSideReference(WallSensorId::SideLeft, leftCapture, actualDistanceM))
+        {
+            Fail("StartupCalibration could not store the west-facing side-wall calibration2");
+            return false;
+        }
+        if ((_drive == nullptr) ||
             !StoreSideBaseline(WallSensorId::SideRight, rightCapture))
         {
-            Fail("StartupCalibration could not store the west-facing side-wall calibration");
+            Fail("StartupCalibration could not store the west-facing side-wall calibration3");
             return false;
         }
 

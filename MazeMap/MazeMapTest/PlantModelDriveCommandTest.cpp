@@ -279,6 +279,62 @@ namespace MazeMap
             Assert::AreEqual(0.0f, averageCommand, 1.0e-6f);
         }
 
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetYawOnlyRepresentativeStatesMeetBreakawayFloor)
+        {
+            PlantModel plant;
+            const PlantParams params = PlantParams::Default();
+            const float breakawayDriveCommand =
+                std::fabs(
+                    plant.driveCommandFromTorque(
+                        params.staticFrictionTorqueNm,
+                        0.0f,
+                        params.supplyVoltageV,
+                        params));
+
+            struct RepresentativeYawSample final
+            {
+                float forwardVelocityMps;
+                float yawRateRadps;
+                float leftWheelSpeedRadps;
+                float rightWheelSpeedRadps;
+                float targetYawRateRadps;
+            };
+
+            const RepresentativeYawSample samples[] = {
+                // 2026-04-21 05:59:46, master_time_us=94152347
+                { -0.037369605f, 1.82710910f, 11.6418180f, -34.9254532f, 5.22920513f },
+                // 2026-04-21 05:59:46, master_time_us=94169347
+                { -0.115910612f, 2.00860476f, 11.1761456f, -35.8567963f, 4.93123722f },
+            };
+
+            for (const RepresentativeYawSample& sample : samples)
+            {
+                PlantModel::StateVector currentState = PlantModel::StateVector::Zero();
+                currentState(VehicleState::kU) = sample.forwardVelocityMps;
+                currentState(VehicleState::kR) = sample.yawRateRadps;
+                currentState(VehicleState::kOmegaL) = sample.leftWheelSpeedRadps;
+                currentState(VehicleState::kOmegaR) = sample.rightWheelSpeedRadps;
+
+                const DriveCommandSolution solution =
+                    plant.solveDriveCommandsForVelocityTarget(
+                        currentState,
+                        0.0f,
+                        sample.targetYawRateRadps,
+                        params,
+                        0.80f,
+                        params.supplyVoltageV,
+                        PlantModel::kDefaultVelocityTargetResponseTimeS);
+                const float weakerBankCommand =
+                    (std::min)(
+                        std::fabs(solution.control.leftMotorCommand),
+                        std::fabs(solution.control.rightMotorCommand));
+
+                Assert::IsFalse(solution.tractionLimited);
+                Assert::IsTrue(solution.control.leftMotorCommand * solution.control.rightMotorCommand < 0.0f);
+                Assert::IsTrue(weakerBankCommand >= (breakawayDriveCommand - 1.0e-3f));
+            }
+        }
+
         TEST_METHOD(PlantModelSolveDriveCommandsIncludesWheelInertiaAndFriction)
         {
             PlantModel plant;

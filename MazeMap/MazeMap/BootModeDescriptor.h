@@ -19,6 +19,7 @@ namespace MazeMap::App
         ManeuverFileTest,
         TopSpeedMeasurement,
         OpenFloorMeasurement,
+        ShowcasingDonut,
         Mission,
     };
 

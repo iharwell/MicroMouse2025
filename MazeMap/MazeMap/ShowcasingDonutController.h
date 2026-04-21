@@ -9,6 +9,11 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace MazeMap::App
+{
+    struct BootModeDescriptor;
+}
+
 namespace MazeMap
 {
     class Vehicle;
@@ -260,4 +265,5 @@ namespace MazeMap::App::Internal
     };
 
     IApplicationMode& GetShowcasingDonutMode();
+    const MazeMap::App::BootModeDescriptor& GetShowcasingDonutBootModeDescriptor();
 }

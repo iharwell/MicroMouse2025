@@ -540,8 +540,8 @@ namespace MazeMap::Config
         /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         /* headingGyroPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kArcYawD),
-        /* velocityStatePD */ MazeMap::ProportionalDerivative(2.0f, 0.01f),
-        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(2.0f, 0.01f),
+        /* velocityStatePD */ MazeMap::ProportionalDerivative(3.5f, 0.01f),
+        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(3.5f, 0.01f),
         /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.01f),
@@ -556,9 +556,7 @@ namespace MazeMap::Config
     // Shared Drive/DriveBase signal hookup. Keep these selections here so maneuver-tracking users all
     // resolve through one authoritative state-vs-sensor configuration instead of repeating ad hoc flags.
     inline constexpr MazeMap::CommandPD kDriveHeadingCommandPd = MazeMap::CommandPD::StateHeadingPD;
-    inline constexpr MazeMap::CommandPD kDriveYawRateCommandPd =
-        MazeMap::CommandPD::StateWheelOmegaPD |
-        MazeMap::CommandPD::StateYawPD;
+    inline constexpr MazeMap::CommandPD kDriveYawRateCommandPd = MazeMap::CommandPD::IMUYaw;
     inline constexpr MazeMap::CommandPD kDriveVelocityCommandPd = MazeMap::CommandPD::StateWheelOmegaPD;
     inline constexpr MazeMap::CommandPD kDriveDistanceCommandPd = MazeMap::CommandPD::RawCommand;
     inline constexpr MazeMap::CommandPD kManeuverTrackingCommandPd = kDriveYawRateCommandPd;

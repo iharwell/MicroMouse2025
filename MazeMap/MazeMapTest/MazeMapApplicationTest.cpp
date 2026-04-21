@@ -3,8 +3,15 @@
 #include "..\MazeMap\BootModeRegistry.h"
 #include "..\MazeMap\MazeMapApplication.h"
 #include "..\MazeMap\MazeMapApplicationRuntime.h"
+#include "..\MazeMap\MazeMapSharedRuntime.h"
+#include "..\MazeMap\Pins.h"
+#include "..\MazeMap\WallSensorLedCalibrationController.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\PinPairStrap.h"
+
+#include <chrono>
+#include <future>
+#include <thread>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -65,7 +72,7 @@ namespace MazeMap::App
 
         TEST_METHOD(BootModeRegistry_ExposesCurrentInventory)
         {
-            Assert::IsTrue(GetBootModeRegistryEntryCount() == 7U);
+            Assert::IsTrue(GetBootModeRegistryEntryCount() == 8U);
             Assert::IsTrue(GetBootModeRegistryEntryCount() <= kTestBootSelectorCapacity);
             Assert::IsTrue(GetBootModeRegistryEntry(0U).selector.pinA == 39U);
             Assert::IsTrue(GetBootModeRegistryEntry(0U).selector.pinB == 40U);
@@ -79,7 +86,9 @@ namespace MazeMap::App
             Assert::IsTrue(GetBootModeRegistryEntry(4U).selector.pinB == 27U);
             Assert::IsTrue(GetBootModeRegistryEntry(5U).selector.pinA == 27U);
             Assert::IsTrue(GetBootModeRegistryEntry(5U).selector.pinB == 28U);
-            Assert::IsTrue(GetBootModeRegistryEntry(6U).selector.kind == BootModeSelectorKind::Fallback);
+            Assert::IsTrue(GetBootModeRegistryEntry(6U).selector.pinA == 9U);
+            Assert::IsTrue(GetBootModeRegistryEntry(6U).selector.pinB == 10U);
+            Assert::IsTrue(GetBootModeRegistryEntry(7U).selector.kind == BootModeSelectorKind::Fallback);
         }
 
         TEST_METHOD(BootModeRegistry_DescriptorsAreAuthoritative)
@@ -123,6 +132,7 @@ namespace MazeMap::App
             ActivateBootSelector(29U, 30U);
             ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
+            ActivateBootSelector(9U, 10U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::FrontWallCharacterization);
         }
@@ -134,6 +144,7 @@ namespace MazeMap::App
             ActivateBootSelector(29U, 30U);
             ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
+            ActivateBootSelector(9U, 10U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::WallSensorLedCalibration);
         }
@@ -144,25 +155,43 @@ namespace MazeMap::App
             ActivateBootSelector(29U, 30U);
             ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
+            ActivateBootSelector(9U, 10U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == GetBootModeRegistryEntry(2U).descriptor->id);
         }
 
-        TEST_METHOD(BootModeRegistry_PrefersManeuverFileTestOverTopSpeedAndDiagnostic)
+        TEST_METHOD(BootModeRegistry_PrefersManeuverFileTestOverLaterModes)
         {
             ActivateBootSelector(29U, 30U);
             ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
+            ActivateBootSelector(9U, 10U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::ManeuverFileTest);
         }
 
-        TEST_METHOD(BootModeRegistry_PrefersTopSpeedMeasurementOverDiagnostic)
+        TEST_METHOD(BootModeRegistry_PrefersTopSpeedMeasurementOverLaterModes)
         {
             ActivateBootSelector(26U, 27U);
             ActivateBootSelector(27U, 28U);
+            ActivateBootSelector(9U, 10U);
 
             Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::TopSpeedMeasurement);
+        }
+
+        TEST_METHOD(BootModeRegistry_PrefersOpenFloorMeasurementOverShowcasingDonut)
+        {
+            ActivateBootSelector(27U, 28U);
+            ActivateBootSelector(9U, 10U);
+
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::OpenFloorMeasurement);
+        }
+
+        TEST_METHOD(BootModeRegistry_SelectsShowcasingDonutWhenPins9And10AreStrapped)
+        {
+            ActivateBootSelector(9U, 10U);
+
+            Assert::IsTrue(ResolveSelectedBootMode(&ReadActiveBootSelector).descriptor->id == BootModeId::ShowcasingDonut);
         }
 
         TEST_METHOD(HostPinShortsDrivePullupInputsLowForTesting)
@@ -192,6 +221,56 @@ namespace MazeMap::App
             Assert::IsFalse(IsPinPairStrapMonitorClosed(28U));
 
             EndPinPairStrapMonitor(27U, 28U);
+        }
+
+        TEST_METHOD(WallSensorLedCalibrationMode_UsesPauseInsteadOfAdvancingLoopTicks)
+        {
+            HostSetPinShort(38U, 39U);
+
+            MazeMap::App::Internal::SharedRobotRuntime runtime;
+            MazeMap::App::Internal::WallSensorLedCalibrationController mode(runtime);
+            Assert::IsTrue(mode.Begin());
+
+            std::packaged_task<void()> runTask([&mode]() { mode.Run(); });
+            std::future<void> runFuture = runTask.get_future();
+            std::thread runThread(std::move(runTask));
+
+            const bool stillRunningFront =
+                runFuture.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+            const bool loopActiveFront = runtime.ControlLoop().SessionActive();
+            const std::uint32_t frontSequence = runtime.ControlLoop().LastDiagnostics().sequence;
+
+            HostSetPinShort(38U, 39U, false);
+            const bool stillRunningSide =
+                runFuture.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+            const bool loopActiveSide = runtime.ControlLoop().SessionActive();
+            const std::uint32_t sideSequence = runtime.ControlLoop().LastDiagnostics().sequence;
+
+            HostSetPinShort(38U, 39U, true);
+            std::future_status finalStatus = runFuture.wait_for(std::chrono::milliseconds(250));
+            if (finalStatus != std::future_status::ready)
+            {
+                (void)runtime.FailActiveMode("test cleanup");
+                runFuture.wait();
+                finalStatus = std::future_status::ready;
+            }
+
+            Assert::IsTrue(finalStatus == std::future_status::ready);
+            runFuture.get();
+            runThread.join();
+
+            runtime.FinalizeSuccessfulModeExit();
+            Assert::IsTrue(stillRunningFront);
+            Assert::IsTrue(loopActiveFront);
+            Assert::IsTrue(frontSequence > 0U);
+            Assert::IsTrue(stillRunningSide);
+            Assert::IsTrue(loopActiveSide);
+            Assert::AreEqual(frontSequence, sideSequence);
+            Assert::IsFalse(runtime.ControlLoop().SessionActive());
+            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Forward_Left));
+            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Forward_Right));
+            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Side_Left));
+            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Side_Right));
         }
 
     };
