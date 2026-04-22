@@ -219,6 +219,16 @@ namespace MazeMap
         float staticFrictionTorqueNm = 0.0f;
         float staticFrictionMaxSpeedMps = 0.005f;
         float viscousFrictionNmPerRadps = 0.0f;
+        // Archival competition pivot logs showed that the controller-side velocity-target inverse
+        // needs a persistent in-place scrub yaw moment through the pivot regime, with only an
+        // optional small near-zero surplus. Keep these defaults aligned with
+        // tooling/fit_competition_pivot_scrub.py.
+        float pivotScrubBreakawayYawMomentNm = 0.11f;
+        float pivotScrubRollingYawMomentNm = 0.11f;
+        float pivotScrubMaxForwardSpeedMps = 0.12f;
+        float pivotScrubMinCommandYawRateRadps = 0.75f;
+        float pivotScrubBreakawayYawRateRadps = 1.5f;
+        float pivotScrubBreakawayYawRateBandRadps = 1.0f;
 
         float longitudinalTireStiffnessN = 6.0f;
         float corneringStiffnessFrontNPerRad = 18.0f;
@@ -358,6 +368,12 @@ namespace MazeMap
         float wheelTorquePerAmpNm = 0.0f;
         float rollingFrictionTorqueNm = 0.0f;
         float viscousFrictionNmPerRadps = 0.0f;
+        float pivotScrubBreakawayYawMomentNm = 0.0f;
+        float pivotScrubRollingYawMomentNm = 0.0f;
+        float pivotScrubMaxForwardSpeedMps = 0.0f;
+        float pivotScrubMinCommandYawRateRadps = 0.0f;
+        float pivotScrubBreakawayYawRateRadps = 0.0f;
+        float pivotScrubBreakawayYawRateBandRadps = 0.0f;
 
         float stopEnterSpeedMps = 0.0f;
         float stopExitSpeedMps = 0.0f;
@@ -874,6 +890,9 @@ namespace MazeMap
             float batteryVoltageV = 8.4f;
             float reserveUsage = 1.0f;
             bool closedLoopReserveMode = false;
+            bool hasVelocityTargets = false;
+            float targetForwardVelocityMps = 0.0f;
+            float targetYawRateRadps = 0.0f;
             bool alignedCycleContextAvailable = false;
             const ModelCycleContext* cycleContext = nullptr;
         };
@@ -916,6 +935,11 @@ namespace MazeMap
 
         FeedforwardSolveContext buildFeedforwardSolveContext(
             const FeedforwardRequest& request,
+            const PreparedParams& prepared) const noexcept;
+        float computeControllerPivotScrubYawMomentNm(
+            const FeedforwardRequest& request,
+            const StateVector& operatingState,
+            float effectiveTrackWidthM,
             const PreparedParams& prepared) const noexcept;
         FeedforwardForceRequest buildForceRequest(
             const FeedforwardRequest& request,

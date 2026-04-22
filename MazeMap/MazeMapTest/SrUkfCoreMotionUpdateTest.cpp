@@ -839,6 +839,40 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(after(VehicleState::kBgz)));
         }
 
+        TEST_METHOD(SrUkfCoreMovingPredictDoesNotInjectGyroBiasProcessVariance)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.02f,
+                    0.11f,
+                    0.01f,
+                    0.35f,
+                    0.0f,
+                    0.02f,
+                    4.6f,
+                    4.5f,
+                    0.01f);
+            Assert::IsTrue(core.reset(initialState, SrUkfCore::BuildDefaultInitialCovariance()));
+
+            const float beforeVarianceRadps2 = core.covariance()(VehicleState::kBgz, VehicleState::kBgz);
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.16f;
+            control.rightMotorCommand = 0.16f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+
+            Assert::IsTrue(core.predict(0.002f, control));
+
+            const float afterVarianceRadps2 = core.covariance()(VehicleState::kBgz, VehicleState::kBgz);
+            Assert::AreEqual(
+                static_cast<int>(SrUkfCore::OperatingMode::GripLinear),
+                static_cast<int>(core.operatingMode()));
+            Assert::AreEqual(beforeVarianceRadps2, afterVarianceRadps2, 1.0e-9f);
+        }
+
         TEST_METHOD(SrUkfCoreExposesFrozenCycleContextForRuntimeFeedforward)
         {
             const PlantParams params = PlantParams::Default();

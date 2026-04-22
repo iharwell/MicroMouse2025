@@ -94,6 +94,18 @@ namespace MazeMap
                 PlantModel::kDefaultVelocityTargetResponseTimeS);
         }
 
+        PlantParams BuildPivotScrubTestParams() noexcept
+        {
+            PlantParams params = PlantParams::Default();
+            params.pivotScrubBreakawayYawMomentNm = 0.12f;
+            params.pivotScrubRollingYawMomentNm = 0.03f;
+            params.pivotScrubMaxForwardSpeedMps = 0.03f;
+            params.pivotScrubMinCommandYawRateRadps = 1.0f;
+            params.pivotScrubBreakawayYawRateRadps = 2.0f;
+            params.pivotScrubBreakawayYawRateBandRadps = 1.0f;
+            return params;
+        }
+
         float ComputeInPlaceTurnCommandSplitForYawAccelLimit(
             PlantModel& plant,
             const PlantParams& params,
@@ -881,7 +893,7 @@ namespace MazeMap
             AssertDriveCommandSolutionNear(canonical, legacyWrapper, 1.0e-6f);
         }
 
-        TEST_METHOD(PlantModelVelocityTargetWrappersStayThin)
+        TEST_METHOD(PlantModelVelocityTargetWrappersStayThinOutsidePivotScrubRegime)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
@@ -944,6 +956,152 @@ namespace MazeMap
                     responseTimeS,
                     reserveUsage);
             AssertDriveCommandSolutionNear(expectedClosedLoop, actualClosedLoop, 1.0e-6f);
+        }
+
+        TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReducesPivotScrubAfterYawBreakaway)
+        {
+            PlantModel plant;
+            const PlantParams params = BuildPivotScrubTestParams();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const float targetYawRateRadps = 8.0f;
+
+            const auto measureAddedDifferentialForceN =
+                [&](const VehicleState::StateVector& state)
+                {
+                    float desiredLongitudinalAccelMps2 = 0.0f;
+                    float desiredYawAccelRadps2 = 0.0f;
+                    plant.ComputeBodyAction(
+                        state(VehicleState::kU),
+                        0.0f,
+                        state(VehicleState::kR),
+                        targetYawRateRadps,
+                        (std::numeric_limits<float>::max)(),
+                        (std::numeric_limits<float>::max)(),
+                        PlantModel::kDefaultVelocityTargetResponseTimeS,
+                        desiredLongitudinalAccelMps2,
+                        desiredYawAccelRadps2);
+
+                    const DriveCommandSolution baseline =
+                        plant.solveDriveCommands(
+                            state,
+                            desiredLongitudinalAccelMps2,
+                            desiredYawAccelRadps2,
+                            prepared,
+                            0.80f,
+                            params.supplyVoltageV);
+                    const DriveCommandSolution actual =
+                        plant.solveDriveCommandsForVelocityTarget(
+                            state,
+                            0.0f,
+                            targetYawRateRadps,
+                            prepared,
+                            0.80f,
+                            params.supplyVoltageV,
+                            PlantModel::kDefaultVelocityTargetResponseTimeS);
+                    return std::fabs(actual.requestedDifferentialForceN - baseline.requestedDifferentialForceN);
+                };
+
+            const VehicleState::StateVector stuckState = BuildRollingUkfState(0.0f, 0.0f, params);
+            const VehicleState::StateVector rollingState =
+                BuildRollingUkfState(
+                    0.0f,
+                    params.pivotScrubBreakawayYawRateRadps + params.pivotScrubBreakawayYawRateBandRadps + 1.0f,
+                    params);
+
+            const float stuckAddedDifferentialForceN = measureAddedDifferentialForceN(stuckState);
+            const float rollingAddedDifferentialForceN = measureAddedDifferentialForceN(rollingState);
+
+            Assert::IsTrue(stuckAddedDifferentialForceN > (rollingAddedDifferentialForceN + 0.5f));
+        }
+
+        TEST_METHOD(PlantModelVelocityTargetPivotScrubStaysOffForForwardDominantCommand)
+        {
+            PlantModel plant;
+            const PlantParams params = BuildPivotScrubTestParams();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const VehicleState::StateVector state = BuildRollingUkfState(0.0f, 0.0f, params);
+            constexpr float targetForwardVelocityMps = 0.20f;
+            constexpr float targetYawRateRadps = 2.0f;
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            plant.ComputeBodyAction(
+                state(VehicleState::kU),
+                targetForwardVelocityMps,
+                state(VehicleState::kR),
+                targetYawRateRadps,
+                (std::numeric_limits<float>::max)(),
+                (std::numeric_limits<float>::max)(),
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            const DriveCommandSolution expected =
+                plant.solveDriveCommands(
+                    state,
+                    desiredLongitudinalAccelMps2,
+                    desiredYawAccelRadps2,
+                    prepared,
+                    0.80f,
+                    params.supplyVoltageV);
+            const DriveCommandSolution actual =
+                plant.solveDriveCommandsForVelocityTarget(
+                    state,
+                    targetForwardVelocityMps,
+                    targetYawRateRadps,
+                    prepared,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
+
+            AssertDriveCommandSolutionNear(expected, actual, 1.0e-6f);
+        }
+
+        TEST_METHOD(PlantModelVelocityTargetPivotScrubAppliesForNonZeroForwardVelocity)
+        {
+            PlantModel plant;
+            PlantParams params = BuildPivotScrubTestParams();
+            params.pivotScrubBreakawayYawMomentNm = 0.11f;
+            params.pivotScrubRollingYawMomentNm = 0.11f;
+            params.pivotScrubMaxForwardSpeedMps = 0.12f;
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const VehicleState::StateVector state = BuildRollingUkfState(0.10f, 0.0f, params);
+            constexpr float targetForwardVelocityMps = 0.10f;
+            constexpr float targetYawRateRadps = 6.0f;
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+
+            plant.ComputeBodyAction(
+                state(VehicleState::kU),
+                targetForwardVelocityMps,
+                state(VehicleState::kR),
+                targetYawRateRadps,
+                (std::numeric_limits<float>::max)(),
+                (std::numeric_limits<float>::max)(),
+                PlantModel::kDefaultVelocityTargetResponseTimeS,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+
+            const DriveCommandSolution baseline =
+                plant.solveDriveCommands(
+                    state,
+                    desiredLongitudinalAccelMps2,
+                    desiredYawAccelRadps2,
+                    prepared,
+                    0.80f,
+                    params.supplyVoltageV);
+            const DriveCommandSolution actual =
+                plant.solveDriveCommandsForVelocityTarget(
+                    state,
+                    targetForwardVelocityMps,
+                    targetYawRateRadps,
+                    prepared,
+                    0.80f,
+                    params.supplyVoltageV,
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
+
+            Assert::IsTrue(
+                std::fabs(actual.requestedDifferentialForceN - baseline.requestedDifferentialForceN) > 0.5f);
         }
 
         TEST_METHOD(PlantModelEvaluateFeedforwardOfflineReportsAlignedContext)

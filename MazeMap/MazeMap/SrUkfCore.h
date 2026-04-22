@@ -65,7 +65,7 @@ namespace MazeMap
             float stationaryEncoderVelocitySigmaMps = 0.002936f;
             float encoderPairNisThreshold = 13.81551f;
             float imuYawRateSigmaRadps = 0.0010954451f;
-            float imuAccelSigmaMps2 = 0.600153f;
+            float imuAccelSigmaMps2 = 0.569900f;
             float pivotScrubMaxCommandLinearMps = 0.03f;
             float pivotScrubMinCommandAngularRadps = 1.0f;
             float pivotScrubYawConsistencyThresholdRadps = 0.03f;
@@ -106,13 +106,15 @@ namespace MazeMap
             ModeProcessNoiseTuning inconsistentOrSaturatedProcessNoise{};
         };
 
-        // April 20, 2026 post-fan-swap open-floor tuning from tooling/analyze_open_floor.py:
-        // - later same-day cards `10:22:09` and `12:10:58` are the authoritative current-hardware baseline after
-        //   the fan replacement and worse-balance parts swap,
-        // - stationary gating and IMU sigma values use the later-card envelope because that is the hardware now on
-        //   the robot,
-        // - `SEC_20_LAUNCH / OPEN_LOOP_LAUNCH` repeatability from the later hardware sets the moving encoder noise floor,
-        // - planar accel updates remain disabled, but the accel sigma still tracks the noisier post-swap stationary data.
+        // April 22, 2026 Allan-backed open-floor retune from the unique April 21, 2026 current-hardware cards:
+        // - stationary IMU measurement sigmas use the observed current-hardware envelope across the April 21 cards,
+        // - gyro-z measurement noise uses the April 22, 2026 author 6.2 override `R_g = 1.2e-6 (rad/s)^2`,
+        // - accel sigma envelope: 0.569900 m/s^2,
+        // - gyro Allan envelope: 0.002002105 rad/sqrt(s) angle random walk and 8.5965e-5 rad/s bias-instability
+        //   lower bound,
+        // - moving and stationary gyro-bias process terms remain unchanged because these 15 s holds do not support a
+        //   stronger RRW-based retune,
+        // - `SEC_20_LAUNCH / OPEN_LOOP_LAUNCH` repeatability still owns the moving encoder noise floor.
         static constexpr float kGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
         static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.111268f;
         static constexpr float kStationaryEncoderVelocitySigmaMps = 0.002936f;
@@ -122,7 +124,7 @@ namespace MazeMap
         static constexpr float kGyroBiasProcessVarianceMovingRadps2PerSample = 0.0f;
         static constexpr float kGyroBiasProcessVarianceStationaryRadps2PerSample = 3.0e-16f;
         static constexpr float kGyroBiasInitialVarianceUnseededRadps2 = 3.05e-4f;
-        static constexpr float kImuAccelSigmaMps2 = 0.600153f;
+        static constexpr float kImuAccelSigmaMps2 = 0.569900f;
         static constexpr float kPivotScrubMaxCommandLinearMps = 0.03f;
         static constexpr float kPivotScrubMinCommandAngularRadps = 1.0f;
         static constexpr float kPivotScrubYawConsistencyThresholdRadps = 0.03f;

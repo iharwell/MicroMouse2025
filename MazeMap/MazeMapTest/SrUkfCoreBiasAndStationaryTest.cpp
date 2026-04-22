@@ -203,6 +203,8 @@ namespace MazeMap
                 SrUkfCore::kImuYawRateSigmaRadps * SrUkfCore::kImuYawRateSigmaRadps,
                 1.0e-12f);
             Assert::AreEqual(SrUkfCore::kImuYawRateSigmaRadps, defaults.imuYawRateSigmaRadps, 1.0e-10f);
+            Assert::AreEqual(0.569900f, SrUkfCore::kImuAccelSigmaMps2, 1.0e-6f);
+            Assert::AreEqual(SrUkfCore::kImuAccelSigmaMps2, defaults.imuAccelSigmaMps2, 1.0e-10f);
             Assert::AreEqual(0.0f, SrUkfCore::kGyroBiasProcessVarianceMovingRadps2PerSample, 0.0f);
             Assert::AreEqual(3.0e-16f, SrUkfCore::kGyroBiasProcessVarianceStationaryRadps2PerSample, 1.0e-20f);
             Assert::AreEqual(3.05e-4f, SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2, 1.0e-12f);

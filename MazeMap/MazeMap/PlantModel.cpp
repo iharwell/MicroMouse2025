@@ -1840,7 +1840,11 @@ namespace
             responseTimeS,
             desiredLongitudinalAccelMps2,
             desiredYawAccelRadps2);
-        return solveAcceleration(desiredLongitudinalAccelMps2, desiredYawAccelRadps2);
+        return solveAcceleration(
+            targetForwardVelocityMps,
+            targetYawRateRadps,
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
     }
 
 } // namespace
@@ -2032,6 +2036,13 @@ namespace MazeMap
             params.torqueConstantNmPerA * prepared.driveGain;
         prepared.rollingFrictionTorqueNm = params.rollingFrictionTorqueNm;
         prepared.viscousFrictionNmPerRadps = params.viscousFrictionNmPerRadps;
+        prepared.pivotScrubBreakawayYawMomentNm = SafePositive(params.pivotScrubBreakawayYawMomentNm, 0.0f);
+        prepared.pivotScrubRollingYawMomentNm = SafePositive(params.pivotScrubRollingYawMomentNm, 0.0f);
+        prepared.pivotScrubMaxForwardSpeedMps = SafePositive(params.pivotScrubMaxForwardSpeedMps, 0.0f);
+        prepared.pivotScrubMinCommandYawRateRadps = SafePositive(params.pivotScrubMinCommandYawRateRadps, 0.0f);
+        prepared.pivotScrubBreakawayYawRateRadps = SafePositive(params.pivotScrubBreakawayYawRateRadps, 0.0f);
+        prepared.pivotScrubBreakawayYawRateBandRadps =
+            SafePositive(params.pivotScrubBreakawayYawRateBandRadps, 0.0f);
 
         prepared.stopEnterSpeedMps = params.stopEnterSpeedMps;
         prepared.stopExitSpeedMps = params.stopExitSpeedMps;
@@ -2960,16 +2971,31 @@ namespace MazeMap
             operatingState(VehicleState::kR),
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveDriveCommands(
-                    currentState,
-                    desiredLongitudinalAccelMps2,
-                    desiredYawAccelRadps2,
-                    params,
-                    cycleContext,
-                    fanDutyCycle,
-                    batteryVoltageV);
+                FeedforwardRequest request{};
+                request.currentState = currentState;
+                request.hasCurrentState = true;
+                request.currentForwardSpeedMps = currentState(VehicleState::kU);
+                request.currentLateralSpeedMps = currentState(VehicleState::kV);
+                request.currentYawRateRadps = currentState(VehicleState::kR);
+                request.currentLeftWheelSpeedRadps = currentState(VehicleState::kOmegaL);
+                request.currentRightWheelSpeedRadps = currentState(VehicleState::kOmegaR);
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = 1.0f;
+                request.closedLoopReserveMode = false;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = true;
+                request.cycleContext = &cycleContext;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -2990,15 +3016,31 @@ namespace MazeMap
             operatingState(VehicleState::kR),
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveDriveCommands(
-                    currentState,
-                    desiredLongitudinalAccelMps2,
-                    desiredYawAccelRadps2,
-                    params,
-                    fanDutyCycle,
-                    batteryVoltageV);
+                FeedforwardRequest request{};
+                request.currentState = currentState;
+                request.hasCurrentState = true;
+                request.currentForwardSpeedMps = currentState(VehicleState::kU);
+                request.currentLateralSpeedMps = currentState(VehicleState::kV);
+                request.currentYawRateRadps = currentState(VehicleState::kR);
+                request.currentLeftWheelSpeedRadps = currentState(VehicleState::kOmegaL);
+                request.currentRightWheelSpeedRadps = currentState(VehicleState::kOmegaR);
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = 1.0f;
+                request.closedLoopReserveMode = false;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = false;
+                request.cycleContext = nullptr;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -3042,17 +3084,31 @@ namespace MazeMap
             currentYawRateRadps,
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveDriveCommands(
-                    currentForwardVelocityMps,
-                    desiredLongitudinalAccelMps2,
-                    currentYawRateRadps,
-                    desiredYawAccelRadps2,
-                    params,
-                    cycleContext,
-                    fanDutyCycle,
-                    batteryVoltageV);
+                FeedforwardRequest request{};
+                request.currentForwardSpeedMps = currentForwardVelocityMps;
+                request.currentLateralSpeedMps = 0.0f;
+                request.currentYawRateRadps = currentYawRateRadps;
+                request.currentLeftWheelSpeedRadps =
+                    (currentForwardVelocityMps + (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.currentRightWheelSpeedRadps =
+                    (currentForwardVelocityMps - (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = 1.0f;
+                request.closedLoopReserveMode = false;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = true;
+                request.cycleContext = &cycleContext;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -3073,16 +3129,31 @@ namespace MazeMap
             currentYawRateRadps,
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveDriveCommands(
-                    currentForwardVelocityMps,
-                    desiredLongitudinalAccelMps2,
-                    currentYawRateRadps,
-                    desiredYawAccelRadps2,
-                    params,
-                    fanDutyCycle,
-                    batteryVoltageV);
+                FeedforwardRequest request{};
+                request.currentForwardSpeedMps = currentForwardVelocityMps;
+                request.currentLateralSpeedMps = 0.0f;
+                request.currentYawRateRadps = currentYawRateRadps;
+                request.currentLeftWheelSpeedRadps =
+                    (currentForwardVelocityMps + (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.currentRightWheelSpeedRadps =
+                    (currentForwardVelocityMps - (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = 1.0f;
+                request.closedLoopReserveMode = false;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = false;
+                request.cycleContext = nullptr;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -3105,17 +3176,31 @@ namespace MazeMap
             operatingState(VehicleState::kR),
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveClosedLoopDriveCommands(
-                    currentState,
-                    desiredLongitudinalAccelMps2,
-                    desiredYawAccelRadps2,
-                    params,
-                    cycleContext,
-                    fanDutyCycle,
-                    batteryVoltageV,
-                    reserveUsage);
+                FeedforwardRequest request{};
+                request.currentState = currentState;
+                request.hasCurrentState = true;
+                request.currentForwardSpeedMps = currentState(VehicleState::kU);
+                request.currentLateralSpeedMps = currentState(VehicleState::kV);
+                request.currentYawRateRadps = currentState(VehicleState::kR);
+                request.currentLeftWheelSpeedRadps = currentState(VehicleState::kOmegaL);
+                request.currentRightWheelSpeedRadps = currentState(VehicleState::kOmegaR);
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = ResolveTractionLimitedReserveScale(reserveUsage);
+                request.closedLoopReserveMode = true;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = true;
+                request.cycleContext = &cycleContext;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -3137,16 +3222,31 @@ namespace MazeMap
             operatingState(VehicleState::kR),
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveClosedLoopDriveCommands(
-                    currentState,
-                    desiredLongitudinalAccelMps2,
-                    desiredYawAccelRadps2,
-                    params,
-                    fanDutyCycle,
-                    batteryVoltageV,
-                    reserveUsage);
+                FeedforwardRequest request{};
+                request.currentState = currentState;
+                request.hasCurrentState = true;
+                request.currentForwardSpeedMps = currentState(VehicleState::kU);
+                request.currentLateralSpeedMps = currentState(VehicleState::kV);
+                request.currentYawRateRadps = currentState(VehicleState::kR);
+                request.currentLeftWheelSpeedRadps = currentState(VehicleState::kOmegaL);
+                request.currentRightWheelSpeedRadps = currentState(VehicleState::kOmegaR);
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = ResolveTractionLimitedReserveScale(reserveUsage);
+                request.closedLoopReserveMode = true;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = false;
+                request.cycleContext = nullptr;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -3169,18 +3269,31 @@ namespace MazeMap
             currentYawRateRadps,
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveClosedLoopDriveCommands(
-                    currentForwardVelocityMps,
-                    desiredLongitudinalAccelMps2,
-                    currentYawRateRadps,
-                    desiredYawAccelRadps2,
-                    params,
-                    cycleContext,
-                    fanDutyCycle,
-                    batteryVoltageV,
-                    reserveUsage);
+                FeedforwardRequest request{};
+                request.currentForwardSpeedMps = currentForwardVelocityMps;
+                request.currentLateralSpeedMps = 0.0f;
+                request.currentYawRateRadps = currentYawRateRadps;
+                request.currentLeftWheelSpeedRadps =
+                    (currentForwardVelocityMps + (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.currentRightWheelSpeedRadps =
+                    (currentForwardVelocityMps - (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = ResolveTractionLimitedReserveScale(reserveUsage);
+                request.closedLoopReserveMode = true;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = true;
+                request.cycleContext = &cycleContext;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -3202,17 +3315,31 @@ namespace MazeMap
             currentYawRateRadps,
             targetYawRateRadps,
             responseTimeS,
-            [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2)
+            [&](float targetForwardVelocityMps,
+                float targetYawRateRadps,
+                float desiredLongitudinalAccelMps2,
+                float desiredYawAccelRadps2)
             {
-                return solveClosedLoopDriveCommands(
-                    currentForwardVelocityMps,
-                    desiredLongitudinalAccelMps2,
-                    currentYawRateRadps,
-                    desiredYawAccelRadps2,
-                    params,
-                    fanDutyCycle,
-                    batteryVoltageV,
-                    reserveUsage);
+                FeedforwardRequest request{};
+                request.currentForwardSpeedMps = currentForwardVelocityMps;
+                request.currentLateralSpeedMps = 0.0f;
+                request.currentYawRateRadps = currentYawRateRadps;
+                request.currentLeftWheelSpeedRadps =
+                    (currentForwardVelocityMps + (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.currentRightWheelSpeedRadps =
+                    (currentForwardVelocityMps - (params.halfTrackWidthM * currentYawRateRadps)) * params.invWheelRadiusM;
+                request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
+                request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
+                request.fanDutyCycle = fanDutyCycle;
+                request.batteryVoltageV = batteryVoltageV;
+                request.reserveUsage = ResolveTractionLimitedReserveScale(reserveUsage);
+                request.closedLoopReserveMode = true;
+                request.hasVelocityTargets = true;
+                request.targetForwardVelocityMps = targetForwardVelocityMps;
+                request.targetYawRateRadps = targetYawRateRadps;
+                request.alignedCycleContextAvailable = false;
+                request.cycleContext = nullptr;
+                return solveFeedforwardCanonical(request, params);
             });
     }
 
@@ -3928,6 +4055,73 @@ namespace MazeMap
         return solveContext;
     }
 
+    float PlantModel::computeControllerPivotScrubYawMomentNm(
+        const FeedforwardRequest& request,
+        const StateVector& operatingState,
+        float effectiveTrackWidthM,
+        const PreparedParams& prepared) const noexcept
+    {
+        if (!request.hasVelocityTargets)
+        {
+            return 0.0f;
+        }
+        if (effectiveTrackWidthM <= prepared.forceEpsilonN)
+        {
+            return 0.0f;
+        }
+        if ((prepared.pivotScrubBreakawayYawMomentNm <= prepared.forceEpsilonN) &&
+            (prepared.pivotScrubRollingYawMomentNm <= prepared.forceEpsilonN))
+        {
+            return 0.0f;
+        }
+
+        const float commandYawRateAbsRadps = std::fabs(request.targetYawRateRadps);
+        const float commandYawGate =
+            SmoothStep(
+                prepared.pivotScrubMinCommandYawRateRadps,
+                prepared.pivotScrubMinCommandYawRateRadps + prepared.pivotScrubMinCommandYawRateRadps,
+                commandYawRateAbsRadps);
+        if (commandYawGate <= 0.0f)
+        {
+            return 0.0f;
+        }
+
+        const float pivotSpeedMarginMps =
+            (0.5f * effectiveTrackWidthM * commandYawRateAbsRadps) -
+            std::fabs(request.targetForwardVelocityMps);
+        const float pivotRegimeBlendBandMps =
+            (std::max)(prepared.pivotScrubMaxForwardSpeedMps, prepared.rollingRegularizationMps);
+        const float pivotRegimeGate =
+            SmoothStep(
+                0.0f,
+                pivotRegimeBlendBandMps,
+                pivotSpeedMarginMps);
+        if (pivotRegimeGate <= 0.0f)
+        {
+            return 0.0f;
+        }
+
+        const float persistentScrubYawMomentNm = prepared.pivotScrubRollingYawMomentNm;
+        const float breakawaySurplusYawMomentNm =
+            (std::max)(0.0f, prepared.pivotScrubBreakawayYawMomentNm - persistentScrubYawMomentNm);
+        const float breakawaySurplusBlend =
+            1.0f -
+            SmoothStep(
+                prepared.pivotScrubBreakawayYawRateRadps,
+                prepared.pivotScrubBreakawayYawRateRadps + prepared.pivotScrubBreakawayYawRateBandRadps,
+                std::fabs(operatingState(VehicleState::kR)));
+        const float scrubYawMomentNm =
+            persistentScrubYawMomentNm +
+            (breakawaySurplusBlend * breakawaySurplusYawMomentNm);
+        const float commandDirection =
+            SignedDirectionFast(request.targetYawRateRadps, request.desiredYawAccelRadps2);
+        return
+            commandDirection *
+            commandYawGate *
+            pivotRegimeGate *
+            scrubYawMomentNm;
+    }
+
     PlantModel::FeedforwardForceRequest PlantModel::buildForceRequest(
         const FeedforwardRequest& request,
         const FeedforwardSolveContext& solveContext,
@@ -3973,10 +4167,17 @@ namespace MazeMap
             prepared.trackWidthM;
         const float inverseTrackWidthPerM =
             (effectiveTrackWidthM > prepared.forceEpsilonN) ? (1.0f / effectiveTrackWidthM) : 0.0f;
+        const float controllerPivotScrubYawMomentNm =
+            computeControllerPivotScrubYawMomentNm(
+                request,
+                operatingState,
+                effectiveTrackWidthM,
+                prepared);
         const float requestedYawMomentNm =
             (prepared.yawInertiaKgM2 * desiredYawAccelRadps2) +
             (prepared.yawDampingNmPerRadps * operatingState(VehicleState::kR)) -
-            forceRequest.baselineLateralYawMomentNm;
+            forceRequest.baselineLateralYawMomentNm +
+            controllerPivotScrubYawMomentNm;
         forceRequest.differentialForceRequestN = -requestedYawMomentNm * inverseTrackWidthPerM;
         return forceRequest;
     }
