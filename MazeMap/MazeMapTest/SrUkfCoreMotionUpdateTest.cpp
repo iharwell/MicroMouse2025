@@ -242,7 +242,7 @@ namespace MazeMap
                 std::fabs(first.omegaRightRadps - second.omegaRightRadps));
         }
 
-        TEST_METHOD(SrUkfCoreEncoderPairDirectUpdateDoesNotMoveBodyStatesOutsideExactRest)
+        TEST_METHOD(SrUkfCoreEncoderPairDirectUpdateKeepsPoseInvariantWhileReconcilingForwardAndYawKinematics)
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core(params);
@@ -283,16 +283,24 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.accepted);
 
             const VehicleState::StateVector& stateAfterEncoder = core.state();
+            const float measuredForwardSpeedMps =
+                0.5f * params.wheelRadiusM * (encoder.omegaLeftRadps + encoder.omegaRightRadps);
+            const float measuredYawRateRadps =
+                params.wheelRadiusM * (encoder.omegaLeftRadps - encoder.omegaRightRadps) / params.trackWidthM;
             Assert::IsTrue(core.directWheelUpdateBodyStateInvariant());
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
-            Assert::AreEqual(stateBeforeEncoder(VehicleState::kU), stateAfterEncoder(VehicleState::kU), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kV), stateAfterEncoder(VehicleState::kV), 1.0e-6f);
-            Assert::AreEqual(stateBeforeEncoder(VehicleState::kR), stateAfterEncoder(VehicleState::kR), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kBgz), stateAfterEncoder(VehicleState::kBgz), 1.0e-6f);
             Assert::AreEqual(encoder.omegaLeftRadps, stateAfterEncoder(VehicleState::kOmegaL), 1.0e-6f);
             Assert::AreEqual(encoder.omegaRightRadps, stateAfterEncoder(VehicleState::kOmegaR), 1.0e-6f);
+            Assert::IsTrue(
+                std::fabs(stateAfterEncoder(VehicleState::kU) - measuredForwardSpeedMps) <
+                std::fabs(stateBeforeEncoder(VehicleState::kU) - measuredForwardSpeedMps));
+            Assert::IsTrue(
+                std::fabs(stateAfterEncoder(VehicleState::kR) - measuredYawRateRadps) <
+                std::fabs(stateBeforeEncoder(VehicleState::kR) - measuredYawRateRadps));
         }
 
         TEST_METHOD(SrUkfCoreDoesNotLetControlInputCreateUnboundedForwardMotionWithEncoderOpposition)
