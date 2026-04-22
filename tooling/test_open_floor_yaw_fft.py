@@ -58,7 +58,6 @@ class OpenFloorYawFftTest(unittest.TestCase):
                     "dt_us": str(dt_us),
                     "clipping_flags": "0",
                     "saturation_flags": "0",
-                    "watchdog_flags": "0",
                     "left_drive_command": f"{left_command}",
                     "right_drive_command": f"{right_command}",
                     "left_encoder_omega_radps": f"{wheel_speed_radps}",

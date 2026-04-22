@@ -16,27 +16,6 @@ namespace
         return 3.0f * MazeMap::SrUkfCore::GetRuntimeTuning().imuYawRateSigmaRadps;
     }
 
-    Eigen::Vector2f HeadingUnitFromYaw(float yawRad) noexcept
-    {
-        float s = 0.0f;
-        float c = 0.0f;
-        sin_cosf(yawRad, s, c);
-        return Eigen::Vector2f(s, c);
-    }
-
-    bool CanAnchorPoseFromEncoderReference(
-        bool hasPoseReference,
-        float distancePerEncoderCountM,
-        float trackWidthM) noexcept
-    {
-        return
-            hasPoseReference &&
-            std::isfinite(distancePerEncoderCountM) &&
-            (distancePerEncoderCountM > 0.0f) &&
-            std::isfinite(trackWidthM) &&
-            (trackWidthM > 0.0f);
-    }
-
     float UkfStationaryWheelSpeedThresholdRadps() noexcept
     {
         const MazeMap::PlantParams params = MazeMap::PlantParams::Default();
@@ -128,29 +107,17 @@ namespace MazeMap
     }
 
     void VehicleState::ApplyStationaryZeroMotionConstraint(
-        const EncoderObs& encoderObservation,
         bool resetLateralVelocity,
         bool hasPoseReference,
         const StateVector& poseReferenceState,
-        const StateMatrix& poseReferenceCovariance,
-        float distancePerEncoderCountM,
-        float trackWidthM) noexcept
+        const StateMatrix& poseReferenceCovariance) noexcept
     {
         StateVector constrainedState = _state;
-        if (CanAnchorPoseFromEncoderReference(hasPoseReference, distancePerEncoderCountM, trackWidthM))
+        if (hasPoseReference)
         {
-            const float leftDistanceM =
-                static_cast<float>(encoderObservation.totalLeftCounts) * distancePerEncoderCountM;
-            const float rightDistanceM =
-                static_cast<float>(encoderObservation.totalRightCounts) * distancePerEncoderCountM;
-            const float forwardDistanceM = 0.5f * (leftDistanceM + rightDistanceM);
-            const float deltaYawRad = (leftDistanceM - rightDistanceM) / trackWidthM;
-            const float referenceYawRad = poseReferenceState(kPsi);
-            const float translationYawRad = NormalizeAngle(referenceYawRad + (0.5f * deltaYawRad));
-            const Eigen::Vector2f heading = HeadingUnitFromYaw(translationYawRad);
-            constrainedState(kPx) = poseReferenceState(kPx) + (forwardDistanceM * heading.x());
-            constrainedState(kPy) = poseReferenceState(kPy) + (forwardDistanceM * heading.y());
-            constrainedState(kPsi) = NormalizeAngle(referenceYawRad + deltaYawRad);
+            constrainedState(kPx) = poseReferenceState(kPx);
+            constrainedState(kPy) = poseReferenceState(kPy);
+            constrainedState(kPsi) = poseReferenceState(kPsi);
         }
 
         constrainedState(kU) = 0.0f;

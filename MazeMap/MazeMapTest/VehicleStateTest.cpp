@@ -95,11 +95,8 @@ namespace MazeMap
             Assert::IsFalse(state.IsStationary());
         }
 
-        TEST_METHOD(VehicleStateStationaryConstraintAnchorsPoseAndCollapsesStationaryStates)
+        TEST_METHOD(VehicleStateStationaryConstraintKeepsPoseReferenceAndCollapsesStationaryStates)
         {
-            const PlantParams params = PlantParams::Default();
-            const float distancePerEncoderCountM = DistancePerEncoderCountMeters(params);
-
             VehicleState state;
             state.SetStateVector(BuildUkfState(
                 0.40f,
@@ -132,40 +129,18 @@ namespace MazeMap
             poseReferenceCovariance(VehicleState::kPy, VehicleState::kPsi) = 1.2e-5f;
             poseReferenceCovariance(VehicleState::kPsi, VehicleState::kPy) = 1.2e-5f;
 
-            EncoderObs encoder{};
-            encoder.totalLeftCounts = 12;
-            encoder.totalRightCounts = 8;
-
             state.ApplyStationaryZeroMotionConstraint(
-                encoder,
                 true,
                 true,
                 poseReferenceState,
-                poseReferenceCovariance,
-                distancePerEncoderCountM,
-                params.trackWidthM);
-
-            const float leftDistanceM =
-                static_cast<float>(encoder.totalLeftCounts) * distancePerEncoderCountM;
-            const float rightDistanceM =
-                static_cast<float>(encoder.totalRightCounts) * distancePerEncoderCountM;
-            const float forwardDistanceM = 0.5f * (leftDistanceM + rightDistanceM);
-            const float deltaYawRad = (leftDistanceM - rightDistanceM) / params.trackWidthM;
-            const float expectedYawRad =
-                VehicleState::NormalizeAngle(poseReferenceState(VehicleState::kPsi) + deltaYawRad);
-            const float translationYawRad =
-                VehicleState::NormalizeAngle(poseReferenceState(VehicleState::kPsi) + (0.5f * deltaYawRad));
-            const float expectedPxM =
-                poseReferenceState(VehicleState::kPx) + (forwardDistanceM * std::sin(translationYawRad));
-            const float expectedPyM =
-                poseReferenceState(VehicleState::kPy) + (forwardDistanceM * std::cos(translationYawRad));
+                poseReferenceCovariance);
 
             const VehicleState::StateVector& constrainedState = state.GetStateVector();
             const VehicleState::StateMatrix constrainedCovariance = state.GetCovariance();
 
-            Assert::AreEqual(expectedPxM, constrainedState(VehicleState::kPx), 1.0e-6f);
-            Assert::AreEqual(expectedPyM, constrainedState(VehicleState::kPy), 1.0e-6f);
-            Assert::AreEqual(expectedYawRad, constrainedState(VehicleState::kPsi), 1.0e-6f);
+            Assert::AreEqual(poseReferenceState(VehicleState::kPx), constrainedState(VehicleState::kPx), 1.0e-6f);
+            Assert::AreEqual(poseReferenceState(VehicleState::kPy), constrainedState(VehicleState::kPy), 1.0e-6f);
+            Assert::AreEqual(poseReferenceState(VehicleState::kPsi), constrainedState(VehicleState::kPsi), 1.0e-6f);
             Assert::AreEqual(0.0f, constrainedState(VehicleState::kU), 1.0e-7f);
             Assert::AreEqual(0.0f, constrainedState(VehicleState::kV), 1.0e-7f);
             Assert::AreEqual(0.0f, constrainedState(VehicleState::kR), 1.0e-7f);

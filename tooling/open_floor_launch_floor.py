@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from open_floor_recovery import DistributionSummary
 from open_floor_recovery import parse_float
+from open_floor_recovery import row_watchdog_flags
 from open_floor_recovery import row_dt_seconds
 from open_floor_recovery import summarize_distribution
 
@@ -72,7 +73,7 @@ def build_active_launch_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]
             abs(left_command - right_command) > 1.0e-6 or
             int(row["saturation_flags"]) != 0 or
             int(row["clipping_flags"]) != 0 or
-            int(row["watchdog_flags"]) != 0
+            row_watchdog_flags(row) != 0
         ):
             continue
         active_rows.append(row)

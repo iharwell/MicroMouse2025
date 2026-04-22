@@ -298,6 +298,55 @@ namespace MazeMap::App
             Assert::AreEqual(expected.rightMotorPwm, actual.rightMotorPwm, 1.0e-6f);
         }
 
+        TEST_METHOD(SharedRuntime_DriveStraightUsesDriveBaseHeadingCluster)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 2000.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            drive.SetLimits(limits);
+
+            const Eigen::Vector2f targetHeadingUnit(0.0f, 1.0f);
+            const auto runStraightOnce =
+                [&runtime, &drive, &targetHeadingUnit]() -> Internal::LoopController::ControlVector
+            {
+                runtime.Drive().Brake();
+                runtime.Drive().ResetControllers();
+                runtime.Drive().SetPose(0.0f, 0.0f, 0.20f);
+                drive.Cancel();
+                drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
+                Assert::IsTrue(drive.Active());
+
+                bool done = false;
+                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                Assert::IsFalse(done);
+                return control;
+            };
+
+            const MazeMap::ProportionalDerivativeCluster baselineCluster =
+                runtime.Drive().GetProportionalDerivativeCluster();
+            MazeMap::ProportionalDerivativeCluster zeroHeadingCluster = baselineCluster;
+            zeroHeadingCluster.HeadingStatePD = MazeMap::ProportionalDerivative(0.0f, 0.0f);
+
+            runtime.Drive().SetProportionalDerivativeCluster(baselineCluster);
+            const Internal::LoopController::ControlVector baselineControl = runStraightOnce();
+
+            runtime.Drive().SetProportionalDerivativeCluster(zeroHeadingCluster);
+            const Internal::LoopController::ControlVector zeroHeadingControl = runStraightOnce();
+
+            Assert::IsTrue(
+                (std::fabs(baselineControl.leftMotorPwm - zeroHeadingControl.leftMotorPwm) > 1.0e-6f) ||
+                (std::fabs(baselineControl.rightMotorPwm - zeroHeadingControl.rightMotorPwm) > 1.0e-6f));
+        }
+
         TEST_METHOD(SharedRuntime_DriveHoldRejectsFanOffWheelSpeedAboveBaseSettleThreshold)
         {
             Internal::SharedRobotRuntime runtime;

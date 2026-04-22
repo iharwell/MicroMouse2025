@@ -27,8 +27,9 @@ namespace MazeMap::App::Internal
     // its callback and decides whether to return Drive's proposed controls or do something else.
     //
     // This is intentionally a simpler, cadence-safe owner than ManeuverExecutor. Drive keeps the
-    // primitive-specific state and control law private so most mode logic does not need to care
-    // which primitive is currently active.
+    // primitive-specific progression state private and requests any closed-loop tracking through
+    // DriveBase's canonical command entry points, so most mode logic does not need to care which
+    // primitive is currently active.
     class EXPORT Drive final
     {
     public:
@@ -43,9 +44,9 @@ namespace MazeMap::App::Internal
             OpenFloor
         };
 
-        // Owner-level feedback-selection defaults reused across subsequent primitive starts.
-        // This intentionally borrows DriveBase's CommandPD flag vocabulary instead of introducing
-        // another control-settings dialect.
+        // Owner-level DriveBase feedback-selection defaults reused across subsequent primitive
+        // starts. This intentionally borrows DriveBase's CommandPD flag vocabulary instead of
+        // introducing another control-settings dialect or local feedback owner in Drive.
         //
         // `heading`:
         // Flags used when a primitive is correcting a heading target.
@@ -98,7 +99,7 @@ namespace MazeMap::App::Internal
         const MotionLimits& GetLimits() const noexcept;
 
         // `SetCommandPDSettings(settings)`:
-        // Installs the owner-level feedback-selection flags.
+        // Installs the owner-level DriveBase feedback-selection flags.
         //
         // Parameters:
         // `settings`:
@@ -136,8 +137,9 @@ namespace MazeMap::App::Internal
             bool requireContinuous);
 
         // Arms linear motion. Signed velocity determines forward versus reverse travel.
-        // Drive captures the current initiation point and then owns progress tracking, heading
-        // hold, and completion behavior privately.
+        // Drive captures the current initiation point and target references, then owns progress
+        // tracking and completion behavior while delegating closed-loop heading/speed tracking to
+        // DriveBase's canonical command helpers.
         //
         // Parameters:
         // `distanceM`:

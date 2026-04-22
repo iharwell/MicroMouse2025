@@ -659,12 +659,7 @@ namespace MazeMap::App::Internal
                 (std::fabs(state.estimate.linearSpeedMps - desiredSpeedMps) <= Config::kSpeedToleranceMps);
         }
 
-        float desiredYawRateRadps =
-            (Config::kStraightHeadingKp *
-                HeadingErrorRad(
-                    HeadingUnitFromYawRad(linear.targetYawRad),
-                    state.estimate.headingUnit)) -
-            (Config::kStraightYawD * state.estimate.angularSpeedRadps);
+        float desiredYawRateRadps = 0.0f;
         if ((_operationMode == OperationMode::Maze) &&
             IsApproximatelyDiagonalHeadingUnit(HeadingUnitFromYawRad(linear.targetYawRad)))
         {
@@ -675,10 +670,12 @@ namespace MazeMap::App::Internal
         }
         desiredYawRateRadps = LimitByConfiguredMagnitude(desiredYawRateRadps, _limits.maxAngularSpeedRadps);
 
-        return _drive->PointControlVector(
+        return _drive->PointControlVectorWithHeadingTarget(
             desiredSpeedMps,
             desiredYawRateRadps,
-            _commandPdSettings.velocity | _commandPdSettings.yawRate);
+            linear.targetYawRad,
+            _commandPdSettings.velocity | _commandPdSettings.yawRate,
+            _commandPdSettings.heading);
     }
 
     LoopController::ControlVector Drive::TurnControls(

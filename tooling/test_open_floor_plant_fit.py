@@ -27,7 +27,6 @@ class OpenFloorPlantFitTest(unittest.TestCase):
             "accel_body_y_mps2": f"{accel_body_y_mps2}",
             "saturation_flags": "0",
             "clipping_flags": "0",
-            "watchdog_flags": "0",
         }
 
     def test_load_run_id_accepts_prefixed_fields(self) -> None:

@@ -25,7 +25,6 @@ class OpenFloorLaunchFloorTest(unittest.TestCase):
             "ukf_state_py_m": f"{ukf_state_py_m}",
             "saturation_flags": "0",
             "clipping_flags": "0",
-            "watchdog_flags": "0",
         }
 
     def make_backlash_repeat(

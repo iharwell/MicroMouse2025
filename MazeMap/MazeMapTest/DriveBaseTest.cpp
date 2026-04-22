@@ -1104,21 +1104,21 @@ namespace MazeMap
                 L" steady_start=" + std::to_wstring(scenario.steadyWindowStartStep);
         }
 
-        void AssertOscillationPairingAuditProducesFiniteMetrics(
-            const OscillationPairingAuditResult& audit,
-            const wchar_t* const message)
+        bool OscillationPairingAuditHasFiniteMetrics(
+            const OscillationPairingAuditResult& audit) noexcept
         {
-            Assert::IsTrue(std::isfinite(audit.steadySourceErrorHighPassRms), message);
-            Assert::IsTrue(std::isfinite(audit.steadyEstimatorErrorHighPassRms), message);
-            Assert::IsTrue(std::isfinite(audit.steadyTruthErrorHighPassRms), message);
-            Assert::IsTrue(std::isfinite(audit.steadySourceAbsError), message);
-            Assert::IsTrue(std::isfinite(audit.steadyEstimatorAbsError), message);
-            Assert::IsTrue(std::isfinite(audit.steadyTruthAbsError), message);
-            Assert::IsTrue(std::isfinite(audit.steadyFeedbackComponentRms), message);
-            Assert::IsTrue(std::isfinite(audit.steadySignFlipRate), message);
-            Assert::IsTrue(std::isfinite(audit.fullSaturationDuty), message);
-            Assert::IsTrue(std::isfinite(audit.steadySaturationDuty), message);
-            Assert::IsTrue(std::isfinite(audit.transientPeakGrowthRatio), message);
+            return
+                std::isfinite(audit.steadySourceErrorHighPassRms) &&
+                std::isfinite(audit.steadyEstimatorErrorHighPassRms) &&
+                std::isfinite(audit.steadyTruthErrorHighPassRms) &&
+                std::isfinite(audit.steadySourceAbsError) &&
+                std::isfinite(audit.steadyEstimatorAbsError) &&
+                std::isfinite(audit.steadyTruthAbsError) &&
+                std::isfinite(audit.steadyFeedbackComponentRms) &&
+                std::isfinite(audit.steadySignFlipRate) &&
+                std::isfinite(audit.fullSaturationDuty) &&
+                std::isfinite(audit.steadySaturationDuty) &&
+                std::isfinite(audit.transientPeakGrowthRatio);
         }
 
         void AssertOscillationPairingHasNoJitterOnStepInput(
@@ -1135,8 +1135,10 @@ namespace MazeMap
             const std::wstring message =
                 BuildOscillationPairingStepMessage(scenario, audit);
 
-            AssertOscillationPairingAuditProducesFiniteMetrics(audit, message.c_str());
-            Assert::IsFalse(audit.smallJitterDetected, message.c_str());
+            Assert::IsTrue(
+                OscillationPairingAuditHasFiniteMetrics(audit) &&
+                !audit.smallJitterDetected,
+                message.c_str());
         }
 
         void AssertOscillationPairingHasNoBlowoutOnStepInput(
@@ -1153,8 +1155,10 @@ namespace MazeMap
             const std::wstring message =
                 BuildOscillationPairingStepMessage(scenario, audit);
 
-            AssertOscillationPairingAuditProducesFiniteMetrics(audit, message.c_str());
-            Assert::IsFalse(audit.blowoutDetected, message.c_str());
+            Assert::IsTrue(
+                OscillationPairingAuditHasFiniteMetrics(audit) &&
+                !audit.blowoutDetected,
+                message.c_str());
         }
 
     }

@@ -134,7 +134,7 @@ namespace MazeMap
             Assert::AreEqual(1.0e-3f, covariance(VehicleState::kR, VehicleState::kR), 1.0e-9f);
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaL, VehicleState::kOmegaL), 1.0e-9f);
             Assert::AreEqual(0.25f, covariance(VehicleState::kOmegaR, VehicleState::kOmegaR), 1.0e-9f);
-            Assert::AreEqual(0.01f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-9f);
+            Assert::AreEqual(3.05e-4f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-12f);
         }
 
         TEST_METHOD(SrUkfCoreRuntimeTuningOverridesRoundTripAndDriveStationaryThresholds)

@@ -434,6 +434,66 @@ namespace MazeMap
         {
             return (_sqrtCovariance * _sqrtCovariance.transpose());
         }
+        float variance(int stateIndex) const noexcept
+        {
+            if ((stateIndex < 0) || (stateIndex >= NState))
+            {
+                return 0.0f;
+            }
+
+            float value = 0.0f;
+            for (int column = 0; column <= stateIndex; ++column)
+            {
+                const float term = _sqrtCovariance(stateIndex, column);
+                value += term * term;
+            }
+            return value;
+        }
+        bool floorVariance(int stateIndex, float minimumVariance) noexcept
+        {
+            if ((stateIndex < 0) ||
+                (stateIndex >= NState) ||
+                !std::isfinite(minimumVariance) ||
+                !(minimumVariance > 0.0f))
+            {
+                return false;
+            }
+
+            const float currentVariance = variance(stateIndex);
+            if (!std::isfinite(currentVariance))
+            {
+                return false;
+            }
+
+            if (currentVariance >= minimumVariance)
+            {
+                return false;
+            }
+
+            const float deltaVariance = minimumVariance - currentVariance;
+            if (!std::isfinite(deltaVariance) || !(deltaVariance > 0.0f))
+            {
+                return false;
+            }
+
+            StateVec updateVector = StateVec::Zero();
+            updateVector(stateIndex) = MazeMap::Math::Sqrtf(deltaVariance);
+            if (!SrUkfMath<NState>::CholUpdate(_sqrtCovariance, updateVector, 1.0f))
+            {
+                StateMat repairedCovariance = covariance();
+                repairedCovariance(stateIndex, stateIndex) =
+                    (std::max)(repairedCovariance(stateIndex, stateIndex), minimumVariance);
+                StateMat repairedSqrtCovariance = _sqrtCovariance;
+                if (!SrUkfMath<NState>::FactorCovariance(repairedCovariance, repairedSqrtCovariance))
+                {
+                    return false;
+                }
+                _sqrtCovariance = repairedSqrtCovariance;
+            }
+
+            _predictionCacheValid = false;
+            return true;
+        }
         float lastNis() const noexcept { return _lastNis; }
         int activeSigmaCount() const noexcept { return _activeSigmaCount; }
         SigmaPointStrategy sigmaPointStrategy() const noexcept { return _sigmaPointStrategy; }

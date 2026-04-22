@@ -54,7 +54,6 @@ namespace MazeMap
             float sigmaVSqrtQ = 0.0f;
             float sigmaRSqrtQ = 0.0f;
             float sigmaOmegaSqrtQ = 0.0f;
-            float sigmaBgzSqrtQ = 0.0f;
             float stdRMin = 0.0f;
             float stdVMin = 0.0f;
         };
@@ -65,14 +64,13 @@ namespace MazeMap
             float generalEncoderYawRateSigmaRadps = 0.111268f;
             float stationaryEncoderVelocitySigmaMps = 0.002936f;
             float encoderPairNisThreshold = 13.81551f;
-            float imuYawRateSigmaRadps = 0.062323f;
+            float imuYawRateSigmaRadps = 0.0010954451f;
             float imuAccelSigmaMps2 = 0.600153f;
             float pivotScrubMaxCommandLinearMps = 0.03f;
             float pivotScrubMinCommandAngularRadps = 1.0f;
             float pivotScrubYawConsistencyThresholdRadps = 0.03f;
             float pivotScrubYawWindowMismatchThresholdRad = 0.003f;
             float pivotScrubZeroUSigmaMps = 0.06f;
-            float stationaryGyroBiasTimeConstantS = 30.0f;
             float stationaryCertificationDwellS = 0.150f;
             float stationaryCandidateMaxLinearCommandMps = 0.03f;
             float stationaryCandidateMaxAngularCommandRadps = 0.15f;
@@ -100,7 +98,6 @@ namespace MazeMap
             float nhcSpeedSlopePerMps = 0.05f;
             float nhcMinimumSigmaMps = 0.005f;
             float nhcMaximumSigmaMps = 0.040f;
-            float movingGyroBiasStdCapRadps = 0.020f;
             float recoveryYawRateStdFloorRadps = 0.030f;
             float yawValidityBiasDeltaMaxRadps = 0.02f;
             ModeProcessNoiseTuning stationaryCertifiedProcessNoise{};
@@ -120,14 +117,17 @@ namespace MazeMap
         static constexpr float kGeneralEncoderYawRateSigmaRadps = 0.111268f;
         static constexpr float kStationaryEncoderVelocitySigmaMps = 0.002936f;
         static constexpr float kEncoderPairNisThreshold = 13.81551f;
-        static constexpr float kImuYawRateSigmaRadps = 0.062323f;
+        static constexpr float kImuYawRateVarianceRadps2 = 1.2e-6f;
+        static constexpr float kImuYawRateSigmaRadps = 0.0010954451f;
+        static constexpr float kGyroBiasProcessVarianceMovingRadps2PerSample = 0.0f;
+        static constexpr float kGyroBiasProcessVarianceStationaryRadps2PerSample = 3.0e-16f;
+        static constexpr float kGyroBiasInitialVarianceUnseededRadps2 = 3.05e-4f;
         static constexpr float kImuAccelSigmaMps2 = 0.600153f;
         static constexpr float kPivotScrubMaxCommandLinearMps = 0.03f;
         static constexpr float kPivotScrubMinCommandAngularRadps = 1.0f;
         static constexpr float kPivotScrubYawConsistencyThresholdRadps = 0.03f;
         static constexpr float kPivotScrubYawWindowMismatchThresholdRad = 0.003f;
         static constexpr float kPivotScrubZeroUSigmaMps = 0.06f;
-        static constexpr float kStationaryGyroBiasTimeConstantS = 30.0f;
         static constexpr std::uint16_t kInitialStationaryGyroBiasSeedStartSample = 50U;
         static constexpr std::uint16_t kInitialStationaryGyroBiasSeedEndSample = 150U;
         static constexpr std::uint16_t kInitialStationaryGyroBiasSeedSampleCount =
@@ -271,12 +271,6 @@ namespace MazeMap
             bool nhcEnabled,
             float lateralVelocityMps,
             float nhcSigmaMps) noexcept;
-        static float ComputeStationaryGyroBiasWalkProcessVarianceRadps2(
-            float dtSeconds,
-            float measurementVarianceRadps2) noexcept;
-        static float ComputeStationaryGyroBiasWalkPosteriorVarianceRadps2(
-            float dtSeconds,
-            float measurementVarianceRadps2) noexcept;
 
         bool WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept;
 
@@ -393,7 +387,6 @@ namespace MazeMap
         static void InvokeLoopHook(void* context, LoopHookInvoker loopHook) noexcept;
         static bool HasExactZeroWheelObservation(const EncoderObs& observation) noexcept;
         static StateMatrix BuildProcessNoiseSquareRootForMode(OperatingMode mode) noexcept;
-        static float ComputeDistancePerEncoderCountM(const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedMps(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredLinearSpeedVarianceMps2(const EncoderObs& observation) noexcept;
         static float ComputeMeasuredYawRateRadps(const EncoderObs& observation, const PlantParams& params) noexcept;
@@ -408,17 +401,15 @@ namespace MazeMap
             float yawWindowMismatchRad,
             const PlantParams& params) noexcept;
         static float wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept;
-        static void ZeroGyroBiasDynamicCrossCovariances(StateMatrix& covariance) noexcept;
-        static float ComputeStationaryGyroBiasBlendFactor(float dtSeconds) noexcept;
-        static void ProjectMaskedStateAndCovariance(
+        static void ProjectMaskedStateAndSquareRootCovariance(
             const StateVector& priorState,
-            const StateMatrix& priorCovariance,
+            const StateMatrix& priorSqrtCovariance,
             const StateVector& updatedState,
-            const StateMatrix& updatedCovariance,
+            const StateMatrix& updatedSqrtCovariance,
             const int* allowedIndices,
             std::size_t allowedCount,
             StateVector& projectedState,
-            StateMatrix& projectedCovariance) noexcept;
+            StateMatrix& projectedSqrtCovariance) noexcept;
         void updateInitialStationaryGyroBias(float yawRateRadps, bool stationaryZeroMotionCandidate) noexcept;
 
         bool predictImpl(float dt, const ControlInput& control, void* loopHookContext, LoopHookInvoker loopHook) noexcept;
@@ -446,26 +437,7 @@ namespace MazeMap
             StateVector& anchoredState,
             const EncoderObs& measured,
             bool updateYaw) const noexcept;
-        void applyWheelRateConstraint(
-            const StateVector& priorState,
-            const StateMatrix& priorCovariance,
-            const EncoderObs& measured,
-            float wheelVarianceRadps2,
-            bool updateYaw) noexcept;
         void applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept;
-        void applyPivotScrubEncoderWheelConstraint(
-            const StateVector& priorState,
-            const StateMatrix& priorCovariance,
-            const EncoderObs& measured,
-            float wheelVarianceRadps2) noexcept;
-        void applyPivotScrubZeroUConstraint(
-            const StateVector& priorState,
-            const StateMatrix& priorCovariance,
-            float sigmaMps) noexcept;
-        void applyPivotScrubGyroConstraint(
-            const StateVector& priorState,
-            const StateMatrix& priorCovariance,
-            float yawRateRadps) noexcept;
         void applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept;
         void updateCommandSignFlipWindow(float dtSeconds) noexcept;
         void updateStationaryCertification(float yawRateRadps) noexcept;
@@ -476,13 +448,6 @@ namespace MazeMap
         void resetPivotScrubTelemetry() noexcept;
         bool shouldEnableNonholonomicConstraint() const noexcept;
         float correctedYawRateRadps(float yawRateRawRadps) const noexcept;
-        void synchronizeGyroBiasStateToAnchor(
-            bool zeroDynamicCrossCovariances,
-            float maxGyroBiasStdRadps,
-            float minimumYawRateStdRadps) noexcept;
-        void enforceVarianceFloors(OperatingMode mode) noexcept;
-        void sanitizeLaunchRecoveryIfNeeded(OperatingMode previousMode, OperatingMode newMode) noexcept;
-        void applyReleaseInflationIfNeeded(bool wasExactStationaryLock) noexcept;
         void buildFrozenCycleContext(float dtSeconds, const ControlInput& control) noexcept;
         bool applyClosurePseudoMeasurements(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         bool applyAdaptiveLateralPseudoMeasurement(void* loopHookContext, LoopHookInvoker loopHook) noexcept;

@@ -29,6 +29,8 @@ constexpr int PROCESSING_CYCLES = 10000;
 namespace
 {
     constexpr const char* kOpenFloorUkfBenchmarkArg = "--benchmark-open-floor-ukf-stationary";
+    constexpr const char* kOpenFloorUkfBenchmarkMeasurementSet =
+        "runtime_context + predict + encoder_pair + yaw_rate + planar_accel";
     constexpr uint32_t kDefaultOpenFloorUkfBenchmarkIterations = 200000U;
     constexpr uint32_t kOpenFloorUkfBenchmarkWarmupIterations = 2048U;
     constexpr float kOpenFloorUkfBenchmarkDtSeconds = 0.001f;
@@ -45,6 +47,21 @@ namespace
         (void)ukf.reset(state, BuildOpenFloorBenchmarkCovariance());
     }
 
+    void ApplyOpenFloorBenchmarkRuntimeContext(
+        MazeMap::MouseUkfFacade& ukf,
+        const MazeMap::ImuAccelObs& accelObservation) noexcept
+    {
+        ukf.ukf().setRuntimeContext(
+            0.0f,
+            0.0f,
+            0U,
+            0.0f,
+            0.0f,
+            accelObservation.valid,
+            accelObservation.accelBodyXMps2,
+            accelObservation.accelBodyYMps2);
+    }
+
     bool ExecuteOpenFloorStationaryMeasurementCycle(
         MazeMap::MouseUkfFacade& ukf,
         float dtSeconds,
@@ -53,6 +70,8 @@ namespace
         const MazeMap::ImuAccelObs& accelObservation,
         float rawGyroRadps)
     {
+        ApplyOpenFloorBenchmarkRuntimeContext(ukf, accelObservation);
+
         if (!ukf.predict(dtSeconds, control))
         {
             return false;
@@ -171,7 +190,7 @@ namespace
 
         std::cout << std::fixed << std::setprecision(6);
         std::cout << "Open-floor UKF stationary benchmark\n";
-        std::cout << "  measurement_set: predict + encoder_pair + yaw_rate + planar_accel\n";
+        std::cout << "  measurement_set: " << kOpenFloorUkfBenchmarkMeasurementSet << "\n";
         std::cout << "  iterations: " << iterations << "\n";
         std::cout << "  dt_seconds: " << kOpenFloorUkfBenchmarkDtSeconds << "\n";
         std::cout << "  fan_duty: " << control.fanDutyCycle << "\n";

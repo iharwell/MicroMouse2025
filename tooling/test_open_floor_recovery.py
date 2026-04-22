@@ -38,7 +38,6 @@ class OpenFloorRecoveryTest(unittest.TestCase):
             "left_encoder_omega_radps": f"{left_velocity_mps / 0.01261}",
             "right_encoder_omega_radps": f"{right_velocity_mps / 0.01261}",
             "saturation_flags": "0",
-            "watchdog_flags": "0",
         }
 
     def test_sensor_only_turn_summary_uses_gyro_and_encoder(self) -> None:
@@ -95,6 +94,7 @@ class OpenFloorRecoveryTest(unittest.TestCase):
         self.assertAlmostEqual(summary.sample_effective_track_width_stats.l50, track_width_m, delta=1.0e-6)
         self.assertAlmostEqual(summary.sample_effective_track_width_stats.mean, track_width_m, delta=1.0e-6)
         self.assertAlmostEqual(summary.sample_effective_track_width_stats.sigma, 0.0, delta=1.0e-9)
+        self.assertEqual(summary.watchdog_flags, 0)
         assert aggregate is not None
         self.assertAlmostEqual(aggregate.median_effective_track_width_m, track_width_m, delta=0.0011)
         self.assertIsNotNone(aggregate.sample_effective_track_width_stats)

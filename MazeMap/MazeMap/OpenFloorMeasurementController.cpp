@@ -14,7 +14,9 @@
 #include "MazeMapSharedRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "PinPairStrap.h"
+#include "PlantModel.h"
 #include "RuntimeSensorSuite.h"
+#include "SigmaPointSetSimplex.h"
 #include "StartupCalibration.h"
 #include "VehicleState.h"
 
@@ -85,8 +87,6 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint16_t, mode_flags)                   \
     X(std::uint32_t, clipping_flags)               \
     X(std::uint16_t, saturation_flags)             \
-    X(std::uint16_t, watchdog_flags)               \
-    X(std::uint16_t, measurement_flags)            \
     X(std::uint8_t,  ukf_mode_id)                  \
     X(std::uint8_t,  ukf_yaw_valid_for_feedforward)\
     X(std::uint8_t,  bias_update_enabled)          \
@@ -130,7 +130,6 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         right_encoder_velocity_mps)   \
     X(std::uint32_t, imu_timestamp_us)             \
     X(std::uint8_t,  imu_status)                   \
-    X(std::uint8_t,  imu_interrupt_high)           \
     X(std::uint8_t,  accel_bias_valid)             \
     X(std::int16_t,  imu_gyro_x)                   \
     X(std::int16_t,  imu_gyro_y)                   \
@@ -148,32 +147,9 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, front_timestamp_us)           \
     X(std::uint32_t, left_timestamp_us)            \
     X(std::uint32_t, right_timestamp_us)           \
-    X(std::uint8_t,  front_left_obs_class)         \
-    X(std::uint8_t,  front_right_obs_class)        \
-    X(std::uint8_t,  left_obs_class)               \
-    X(std::uint8_t,  right_obs_class)              \
-    X(float,         front_left_obs_rho_m)         \
-    X(float,         front_right_obs_rho_m)        \
-    X(float,         left_obs_rho_m)               \
-    X(float,         right_obs_rho_m)              \
-    X(float,         front_left_obs_confidence)    \
-    X(float,         front_right_obs_confidence)   \
-    X(float,         left_obs_confidence)          \
-    X(float,         right_obs_confidence)         \
     X(float,         fan_duty_cycle)
 
     MMLOG_DEFINE_ROW(OpenFloorMainRow, OPEN_FLOOR_MAIN_FIELDS);
-
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagAbortMarker = 1u << 0;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagEstimatorFault = 1u << 2;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagFanEnabled = 1u << 3;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagEncoderValid = 1u << 4;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagImuValid = 1u << 5;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagAccelBiasValid = 1u << 6;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagFrontLeftObsValid = 1u << 7;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagFrontRightObsValid = 1u << 8;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagLeftObsValid = 1u << 9;
-    inline constexpr std::uint16_t kOpenFloorMeasurementFlagRightObsValid = 1u << 10;
 }
 
 namespace MazeMap::App::Internal
@@ -357,6 +333,28 @@ namespace
         return !queue.empty();
     }
 
+    bool WriteOpenFloorV62Metadata(MazeMap::App::Internal::SharedRobotRuntime& runtime)
+    {
+        const MazeMap::PlantModel::PreparedParams prepared =
+            MazeMap::PlantModel::Prepare(MazeMap::PlantParams::Default());
+        return
+            runtime.WriteUtilityDataLogMetadata("ukfver", "v6.2") &&
+            runtime.WriteUtilityDataLogMetadata("ukfset", "splx") &&
+            runtime.WriteUtilityDataLogMetadataUnsigned(
+                "nx",
+                static_cast<unsigned long>(MazeMap::VehicleState::kDimension)) &&
+            runtime.WriteUtilityDataLogMetadataUnsigned(
+                "nsig",
+                static_cast<unsigned long>(
+                    MazeMap::SigmaPointSetSimplex::ActiveSigmaCountForDimension(
+                        MazeMap::VehicleState::kDimension))) &&
+            runtime.WriteUtilityDataLogMetadataFloat("re_m", prepared.wheelRadiusM, 6) &&
+            runtime.WriteUtilityDataLogMetadataFloat("we_m", prepared.trackWidthM, 6) &&
+            runtime.WriteUtilityDataLogMetadataFloat("imu_x", prepared.imuPositionBodyM.x(), 6) &&
+            runtime.WriteUtilityDataLogMetadataFloat("imu_y", prepared.imuPositionBodyM.y(), 6) &&
+            runtime.WriteUtilityDataLogMetadataFloat("jw_kgm2", prepared.wheelInertiaKgM2, 9);
+    }
+
     CommandTelemetrySnapshot BuildRawCommandTelemetrySnapshot(
         const LoopController::ControlVector& control) noexcept
     {
@@ -378,62 +376,6 @@ namespace
         }
 
         return snapshot;
-    }
-
-    std::uint16_t BuildOpenFloorMeasurementFlags(
-        const OpenFloorMeasurementLabels& labels,
-        const bool estimatorFault,
-        const OpenFloorMainRow& row,
-        const bool encoderValid,
-        const bool imuValid,
-        const MazeMap::WallObs& frontLeftObs,
-        const MazeMap::WallObs& frontRightObs,
-        const MazeMap::WallObs& leftObs,
-        const MazeMap::WallObs& rightObs) noexcept
-    {
-        std::uint16_t flags = 0U;
-        if (labels.abortMarker)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagAbortMarker;
-        }
-        if (estimatorFault)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagEstimatorFault;
-        }
-        if (row.fan_duty_cycle > 0.0f)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagFanEnabled;
-        }
-        if (encoderValid)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagEncoderValid;
-        }
-        if (imuValid)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagImuValid;
-        }
-        if (row.accel_bias_valid != 0U)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagAccelBiasValid;
-        }
-        if (frontLeftObs.valid)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagFrontLeftObsValid;
-        }
-        if (frontRightObs.valid)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagFrontRightObsValid;
-        }
-        if (leftObs.valid)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagLeftObsValid;
-        }
-        if (rightObs.valid)
-        {
-            flags |= MazeMap::App::Internal::Runtime::kOpenFloorMeasurementFlagRightObsValid;
-        }
-
-        return flags;
     }
 
     void ApplyControlTimingToTimingRow(
@@ -931,6 +873,7 @@ namespace MazeMap::App::Internal
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", MazeMap::kOpenFloorLogFormatSpec)) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
+        if (!WriteOpenFloorV62Metadata(_runtime)) return false;
 
         OpenFloorTimingRow row{};
         if (!_runtime.BeginUtilityDataLogSchema(row))
@@ -985,6 +928,7 @@ namespace MazeMap::App::Internal
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", MazeMap::kOpenFloorLogFormatSpec)) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
+        if (!WriteOpenFloorV62Metadata(_runtime)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _sensors.GetGyroBiasRadps(), 6)) return false;
@@ -1100,20 +1044,6 @@ namespace MazeMap::App::Internal
         const CommandTelemetrySnapshot& commandTelemetry,
         OpenFloorMainRow& row) const
     {
-        const bool encoderValid = state.driveTelemetry.encoderObservationValid;
-        const bool imuValid = std::isfinite(state.sensors.gyroRawRadps);
-        const float maxRangeM = MazeMap::PlantParams::Default().noHitRangeM;
-        MazeMap::WallObs frontLeftObs{};
-        MazeMap::WallObs frontRightObs{};
-        DriveBase::BuildLoggedFrontPairObservations(
-            state.sensors,
-            maxRangeM,
-            frontLeftObs,
-            frontRightObs);
-        const MazeMap::WallObs leftObs =
-            DriveBase::BuildLoggedLeftSideObservation(state.sensors, maxRangeM);
-        const MazeMap::WallObs rightObs =
-            DriveBase::BuildLoggedRightSideObservation(state.sensors, maxRangeM);
         const MazeMap::VehicleState::StateVector estimatorState = _drive.GetEstimatorStateVector();
 
         row.master_time_us = state.tickStartUs;
@@ -1131,7 +1061,6 @@ namespace MazeMap::App::Internal
         row.mode_flags = commandTelemetry.driveTelemetry.modeFlags;
         row.clipping_flags = 0U;
         row.saturation_flags = commandTelemetry.driveTelemetry.saturationFlags;
-        row.watchdog_flags = 0U;
         row.ukf_mode_id = state.driveTelemetry.ukfModeId;
         row.ukf_yaw_valid_for_feedforward = state.driveTelemetry.ukfYawValidForFeedforward;
         row.bias_update_enabled = state.driveTelemetry.ukfBiasUpdateEnabled;
@@ -1175,7 +1104,6 @@ namespace MazeMap::App::Internal
         row.right_encoder_velocity_mps = state.driveTelemetry.rightVelocityMps;
         row.imu_timestamp_us = state.sensors.imuTiming.readDoneUs;
         row.imu_status = state.sensors.imuBackLeft.status;
-        row.imu_interrupt_high = state.sensors.imuBackLeft.interruptHigh ? 1U : 0U;
         row.accel_bias_valid = state.sensors.accelBiasValid ? 1U : 0U;
         row.imu_gyro_x = state.sensors.imuBackLeft.gyroX;
         row.imu_gyro_y = state.sensors.imuBackLeft.gyroY;
@@ -1193,29 +1121,7 @@ namespace MazeMap::App::Internal
         row.front_timestamp_us = state.sensors.frontTiming.observationReadyUs;
         row.left_timestamp_us = state.sensors.leftTiming.observationReadyUs;
         row.right_timestamp_us = state.sensors.rightTiming.observationReadyUs;
-        row.front_left_obs_class = static_cast<std::uint8_t>(frontLeftObs.cls);
-        row.front_right_obs_class = static_cast<std::uint8_t>(frontRightObs.cls);
-        row.left_obs_class = static_cast<std::uint8_t>(leftObs.cls);
-        row.right_obs_class = static_cast<std::uint8_t>(rightObs.cls);
-        row.front_left_obs_rho_m = frontLeftObs.rho;
-        row.front_right_obs_rho_m = frontRightObs.rho;
-        row.left_obs_rho_m = leftObs.rho;
-        row.right_obs_rho_m = rightObs.rho;
-        row.front_left_obs_confidence = frontLeftObs.confidence;
-        row.front_right_obs_confidence = frontRightObs.confidence;
-        row.left_obs_confidence = leftObs.confidence;
-        row.right_obs_confidence = rightObs.confidence;
         row.fan_duty_cycle = GetMissionFanDutyCycle();
-        row.measurement_flags = BuildOpenFloorMeasurementFlags(
-            labels,
-            !state.estimatorHealthy,
-            row,
-            encoderValid,
-            imuValid,
-            frontLeftObs,
-            frontRightObs,
-            leftObs,
-            rightObs);
     }
 
     CommandTelemetrySnapshot OpenFloorMeasurementController::State::CaptureDriveCommandTelemetry(

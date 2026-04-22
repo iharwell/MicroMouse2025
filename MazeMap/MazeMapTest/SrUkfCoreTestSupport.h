@@ -17,24 +17,9 @@
 
 namespace MazeMap
 {
-    inline float StationaryGyroBiasBlendFactor(float dtSeconds) noexcept
-    {
-        if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)) ||
-            !(std::isfinite(SrUkfCore::kStationaryGyroBiasTimeConstantS) &&
-                (SrUkfCore::kStationaryGyroBiasTimeConstantS > 0.0f)))
-        {
-            return 0.0f;
-        }
-
-        return (std::clamp)(
-            1.0f - std::exp(-dtSeconds / SrUkfCore::kStationaryGyroBiasTimeConstantS),
-            0.0f,
-            1.0f);
-    }
-
     inline float StationaryGyroBiasMeasurementVarianceRadps2() noexcept
     {
-        return SrUkfCore::kImuYawRateSigmaRadps * SrUkfCore::kImuYawRateSigmaRadps;
+        return SrUkfCore::kImuYawRateVarianceRadps2;
     }
 
     struct InitialStationaryGyroBiasExpectation final
@@ -54,6 +39,7 @@ namespace MazeMap
         const float dtSeconds,
         const bool startupStationaryTick = true) noexcept
     {
+        (void)dtSeconds;
         if (expectation.phaseExited)
         {
             return;
@@ -94,13 +80,10 @@ namespace MazeMap
                 expectation.biasRadps = static_cast<float>(
                     expectation.seedAccumRadps /
                     static_cast<double>(expectation.collectedSeedSamples));
-                expectation.varianceRadps2 =
-                    SrUkfCore::ComputeStationaryGyroBiasWalkPosteriorVarianceRadps2(
-                        dtSeconds,
-                        measurementVarianceRadps2);
+                expectation.varianceRadps2 = SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
                 if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
                 {
-                    expectation.varianceRadps2 = 1.0e-8f;
+                    expectation.varianceRadps2 = SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
                 }
                 expectation.seedApplied = true;
             }
@@ -110,12 +93,10 @@ namespace MazeMap
         const float priorVarianceRadps2 =
             (std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)) ?
             expectation.varianceRadps2 :
-            1.0e-8f;
+            SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
         const float predictedVarianceRadps2 =
             priorVarianceRadps2 +
-            SrUkfCore::ComputeStationaryGyroBiasWalkProcessVarianceRadps2(
-                dtSeconds,
-                measurementVarianceRadps2);
+            SrUkfCore::kGyroBiasProcessVarianceStationaryRadps2PerSample;
         const float innovationVarianceRadps2 = predictedVarianceRadps2 + measurementVarianceRadps2;
         if (!(std::isfinite(predictedVarianceRadps2) && std::isfinite(innovationVarianceRadps2)) ||
             !(innovationVarianceRadps2 > 0.0f))
@@ -129,7 +110,7 @@ namespace MazeMap
         expectation.varianceRadps2 = (1.0f - kalmanGain) * predictedVarianceRadps2;
         if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
         {
-            expectation.varianceRadps2 = 1.0e-8f;
+            expectation.varianceRadps2 = SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
         }
     }
 

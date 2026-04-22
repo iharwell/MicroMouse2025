@@ -11,6 +11,7 @@ from open_floor_recovery import RunPlantParameters
 from open_floor_recovery import drive_torque_from_command
 from open_floor_recovery import load_control_log_parameters
 from open_floor_recovery import parse_key_value_fields
+from open_floor_recovery import row_watchdog_flags
 
 
 FFT_MIN_FREQUENCY_HZ = 3.0
@@ -240,7 +241,7 @@ def summarize_yaw_fft(
             if int(row["phase_id"]) == 9 and
             int(row["clipping_flags"]) == 0 and
             int(row["saturation_flags"]) == 0 and
-            int(row["watchdog_flags"]) == 0
+            row_watchdog_flags(row) == 0
         ]
         if len(phase_rows) < FFT_MIN_PHASE_ROWS:
             continue

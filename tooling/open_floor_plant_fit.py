@@ -13,6 +13,7 @@ from open_floor_recovery import independent_gyro_radps
 from open_floor_recovery import load_control_log_parameters
 from open_floor_recovery import parse_float
 from open_floor_recovery import parse_key_value_fields
+from open_floor_recovery import row_watchdog_flags
 from open_floor_recovery import row_dt_seconds
 
 
@@ -247,7 +248,7 @@ def build_launch_mean_traces(
                 abs(left_command - right_command) > 1.0e-6 or
                 int(row["saturation_flags"]) != 0 or
                 int(row["clipping_flags"]) != 0 or
-                int(row["watchdog_flags"]) != 0
+                row_watchdog_flags(row) != 0
             ):
                 continue
             sign = 1.0 if left_command >= 0.0 else -1.0

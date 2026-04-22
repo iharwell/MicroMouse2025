@@ -242,7 +242,7 @@ namespace MazeMap
                 std::fabs(first.omegaRightRadps - second.omegaRightRadps));
         }
 
-        TEST_METHOD(SrUkfCoreEncoderPairDirectUpdateKeepsPoseInvariantWhileReconcilingForwardAndYawKinematics)
+        TEST_METHOD(SrUkfCoreEncoderPairDirectUpdateKeepsBodyStateInvariantWhileUpdatingWheelStates)
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core(params);
@@ -283,24 +283,62 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.accepted);
 
             const VehicleState::StateVector& stateAfterEncoder = core.state();
-            const float measuredForwardSpeedMps =
-                0.5f * params.wheelRadiusM * (encoder.omegaLeftRadps + encoder.omegaRightRadps);
-            const float measuredYawRateRadps =
-                params.wheelRadiusM * (encoder.omegaLeftRadps - encoder.omegaRightRadps) / params.trackWidthM;
             Assert::IsTrue(core.directWheelUpdateBodyStateInvariant());
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kU), stateAfterEncoder(VehicleState::kU), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kV), stateAfterEncoder(VehicleState::kV), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kR), stateAfterEncoder(VehicleState::kR), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kBgz), stateAfterEncoder(VehicleState::kBgz), 1.0e-6f);
             Assert::AreEqual(encoder.omegaLeftRadps, stateAfterEncoder(VehicleState::kOmegaL), 1.0e-6f);
             Assert::AreEqual(encoder.omegaRightRadps, stateAfterEncoder(VehicleState::kOmegaR), 1.0e-6f);
-            Assert::IsTrue(
-                std::fabs(stateAfterEncoder(VehicleState::kU) - measuredForwardSpeedMps) <
-                std::fabs(stateBeforeEncoder(VehicleState::kU) - measuredForwardSpeedMps));
-            Assert::IsTrue(
-                std::fabs(stateAfterEncoder(VehicleState::kR) - measuredYawRateRadps) <
-                std::fabs(stateBeforeEncoder(VehicleState::kR) - measuredYawRateRadps));
+        }
+
+        TEST_METHOD(SrUkfCoreRejectedEncoderPairUpdateStillKeepsBodyStateInvariant)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    -0.04f,
+                    0.16f,
+                    -0.07f,
+                    0.31f,
+                    -0.02f,
+                    0.09f,
+                    1.6f,
+                    1.4f,
+                    -0.01f);
+            const VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.02f, 0.04f, 0.10f, 0.08f, 0.10f, 0.08f, 0.03f);
+            Assert::IsTrue(core.reset(initialState, initialCovariance));
+
+            const VehicleState::StateVector stateBeforeEncoder = core.state();
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 40;
+            encoder.totalRightCounts = -36;
+            encoder.omegaLeftRadps = 120.0f;
+            encoder.omegaRightRadps = -115.0f;
+
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.010f);
+            Assert::IsTrue(encoderResult.attempted);
+            Assert::IsTrue(encoderResult.accepted);
+            Assert::IsTrue(encoderResult.nis > SrUkfCore::GetRuntimeTuning().encoderPairNisThreshold);
+
+            const VehicleState::StateVector& stateAfterEncoder = core.state();
+            Assert::IsTrue(core.directWheelUpdateBodyStateInvariant());
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kU), stateAfterEncoder(VehicleState::kU), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kV), stateAfterEncoder(VehicleState::kV), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kR), stateAfterEncoder(VehicleState::kR), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kBgz), stateAfterEncoder(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaLeftRadps, stateAfterEncoder(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaRightRadps, stateAfterEncoder(VehicleState::kOmegaR), 1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCoreDoesNotLetControlInputCreateUnboundedForwardMotionWithEncoderOpposition)

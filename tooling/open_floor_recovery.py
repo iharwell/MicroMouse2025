@@ -122,6 +122,10 @@ def row_dt_seconds(row: dict[str, str]) -> float:
     return 1.0e-6 * parse_int(row["dt_us"])
 
 
+def row_watchdog_flags(row: dict[str, str]) -> int:
+    return parse_int(row.get("watchdog_flags", "0"))
+
+
 def encoder_diff_speed_mps(row: dict[str, str]) -> float:
     return parse_float(row["right_encoder_velocity_mps"]) - parse_float(row["left_encoder_velocity_mps"])
 
@@ -450,7 +454,7 @@ def summarize_recovery_segments(
         watchdog_flags = 0
         for row in segment:
             saturation_flags |= parse_int(row["saturation_flags"])
-            watchdog_flags |= parse_int(row["watchdog_flags"])
+            watchdog_flags |= row_watchdog_flags(row)
         if params is not None and params.nominal_track_width_m > 0.0:
             encoder_angle_at_logged_track_rad = differential_distance_m / params.nominal_track_width_m
             encoder_angle_at_logged_track_deg = math.degrees(encoder_angle_at_logged_track_rad)
