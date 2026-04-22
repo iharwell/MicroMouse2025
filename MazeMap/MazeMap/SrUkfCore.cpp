@@ -1,7 +1,15 @@
 #include "pch.h"
 #include "SrUkfCore.h"
 
+#include "GripUtilizationMetrics.h"
+#include "PlanarAccelLateralUpdate.h"
+#include "RegripRecoveryMonitor.h"
+#include "SoftOdometryAid.h"
+#include "TorqueEstimateAdapter.h"
+#include "TransientContactMemory.h"
+#include "UkfRobustUpdatePolicy.h"
 #include "Vehicle.h"
+#include "WheelAuthorityPolicy.h"
 
 #include <algorithm>
 #include <array>
@@ -338,10 +346,14 @@ namespace MazeMap
         const PlantParams& params,
         const PlantModel& plantModel) noexcept
         : _plantModel(plantModel)
+        , _predictModel()
         , _geometryModel()
         , _params(params)
         , _preparedParams(PlantModel::Prepare(_params))
         , _filter()
+        , _frozenCycleContext()
+        , _transientContactMemory()
+        , _regripRecovery()
         , _lastControl()
         , _lastEncoderObs()
         , _lastEncoderDtSeconds(0.0f)
@@ -369,6 +381,9 @@ namespace MazeMap
         , _accelBodyXMps2(0.0f)
         , _accelBodyYMps2(0.0f)
         , _stationaryCandidateDwellS(0.0f)
+        , _stationaryCandidatePoseReferenceState(StateVector::Zero())
+        , _stationaryCandidatePoseReferenceCovariance(StateMatrix::Zero())
+        , _stationaryCandidatePoseReferenceValid(false)
         , _stationaryCertified(false)
         , _timeSinceStationaryExitS(std::numeric_limits<float>::infinity())
         , _timeSinceCommandSignFlipS(std::numeric_limits<float>::infinity())
@@ -401,6 +416,23 @@ namespace MazeMap
         , _pivotScrubGyroDeltaOmegaLRadps(0.0f)
         , _pivotScrubGyroDeltaOmegaRRadps(0.0f)
         , _pivotScrubGyroMaskedDeltaNorm(0.0f)
+        , _directWheelUpdateBodyStateInvariant(false)
+        , _releaseInflationApplied(false)
+        , _lastClosureResidualLeftMps(0.0f)
+        , _lastClosureResidualRightMps(0.0f)
+        , _lastGyroMeasurementRadps(0.0f)
+        , _lastGyroInnovationRadps(0.0f)
+        , _lastGyroNis(0.0f)
+        , _lastForwardAccelInnovationMps2(0.0f)
+        , _lastForwardAccelNis(0.0f)
+        , _lastLateralAccelInnovationMps2(0.0f)
+        , _lastLateralAccelNis(0.0f)
+        , _lastClosureLeftInnovationMps(0.0f)
+        , _lastClosureLeftNis(0.0f)
+        , _lastClosureRightInnovationMps(0.0f)
+        , _lastClosureRightNis(0.0f)
+        , _lastLateralPseudoInnovationMps(0.0f)
+        , _lastLateralPseudoNis(0.0f)
         , _yawWindowDtSeconds{}
         , _yawWindowUkfIntegralRad{}
         , _yawWindowGyroIntegralRad{}
@@ -409,6 +441,7 @@ namespace MazeMap
         , _yawWindowSpanS(0.0f)
     {
         _filter.setStateNormalizer(&VehicleState::NormalizeStateVector);
+        _filter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
 
         StateVector initialState = StateVector::Zero();
         const StateMatrix initialCovariance = BuildDefaultInitialCovariance();
@@ -427,11 +460,8 @@ namespace MazeMap
         _sqrtFrontNoise(0, 0) = 0.010f;
         _sqrtFrontNoise(1, 1) = 0.010f;
         _sqrtSideNoise(0, 0) = 0.012f;
-        synchronizeGyroBiasStateToAnchor(
-            true,
-            Tuning().movingGyroBiasStdCapRadps,
-            GetModeProcessNoiseConfig(_operatingMode).stdRMin);
         enforceVarianceFloors(_operatingMode);
+        buildFrozenCycleContext(0.0f, ControlInput{});
     }
 
     void SrUkfCore::setRuntimeContext(
@@ -1060,17 +1090,108 @@ namespace MazeMap
             return false;
         }
 
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_consistency",
+                "gyro_bias_anchor_radps=%.9g;yaw_consistency_lp_radps=%.9g;yaw_window_mismatch_rad=%.9g;nhc_sigma_mps=%.9g;nhc_residual_mps=%.9g;nhc_residual_sigma=%.9g",
+                static_cast<double>(_gyroBiasAnchorRadps),
+                static_cast<double>(_yawConsistencyLowPassRadps),
+                static_cast<double>(_yawWindowMismatchRad),
+                static_cast<double>(_nhcSigmaMps),
+                static_cast<double>(_nhcResidualMps),
+                static_cast<double>(_nhcResidualSigma)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_frozen_cycle_context",
+                "dt_s=%.9g;exact_stationary_lock=%s;closure_residual_left_mps=%.9g;closure_residual_right_mps=%.9g;longitudinal_closure_severity=%.9g;differential_closure_severity=%.9g;lateral_accel_severity=%.9g;yaw_consistency_severity=%.9g;left_pre_projection_utilization=%.9g;right_pre_projection_utilization=%.9g;left_memory=%.9g;right_memory=%.9g;left_recovery_score=%.9g;right_recovery_score=%.9g;left_recovery_time_remaining_s=%.9g;right_recovery_time_remaining_s=%.9g;left_holdoff_active=%s;right_holdoff_active=%s;left_applied_bank_torque_nm=%.9g;right_applied_bank_torque_nm=%.9g",
+                static_cast<double>(_frozenCycleContext.dtS),
+                _frozenCycleContext.schedule.exactStationaryLock ? "true" : "false",
+                static_cast<double>(_lastClosureResidualLeftMps),
+                static_cast<double>(_lastClosureResidualRightMps),
+                static_cast<double>(_frozenCycleContext.utilization.longitudinalClosureSeverity),
+                static_cast<double>(_frozenCycleContext.utilization.differentialClosureSeverity),
+                static_cast<double>(_frozenCycleContext.utilization.lateralAccelerationSeverity),
+                static_cast<double>(_frozenCycleContext.utilization.yawConsistencySeverity),
+                static_cast<double>(_frozenCycleContext.utilization.leftBankPreProjectionUtilization),
+                static_cast<double>(_frozenCycleContext.utilization.rightBankPreProjectionUtilization),
+                static_cast<double>(_frozenCycleContext.memory.leftBankMemory),
+                static_cast<double>(_frozenCycleContext.memory.rightBankMemory),
+                static_cast<double>(_frozenCycleContext.regrip.leftBankRecoveryScore),
+                static_cast<double>(_frozenCycleContext.regrip.rightBankRecoveryScore),
+                static_cast<double>(_frozenCycleContext.regrip.leftBankRecoveryTimeRemainingS),
+                static_cast<double>(_frozenCycleContext.regrip.rightBankRecoveryTimeRemainingS),
+                _frozenCycleContext.schedule.leftBankHoldoffActive ? "true" : "false",
+                _frozenCycleContext.schedule.rightBankHoldoffActive ? "true" : "false",
+                static_cast<double>(_frozenCycleContext.appliedTorque.leftAppliedBankTorqueNm),
+                static_cast<double>(_frozenCycleContext.appliedTorque.rightAppliedBankTorqueNm)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_schedule_scales",
+                "forward_process_noise_scale=%.9g;lateral_process_noise_scale=%.9g;yaw_rate_process_noise_scale=%.9g;left_wheel_process_noise_scale=%.9g;right_wheel_process_noise_scale=%.9g;left_closure_covariance_scale=%.9g;right_closure_covariance_scale=%.9g;lateral_pseudo_covariance_scale=%.9g;launch_hold_remaining_s=%.9g;inconsistent_hold_remaining_s=%.9g;stationary_candidate_dwell_s=%.9g;time_since_stationary_exit_s=%.9g;nhc_reenable_delay_remaining_s=%.9g",
+                static_cast<double>(_frozenCycleContext.schedule.forwardSpeedProcessNoiseScale),
+                static_cast<double>(_frozenCycleContext.schedule.lateralSpeedProcessNoiseScale),
+                static_cast<double>(_frozenCycleContext.schedule.yawRateProcessNoiseScale),
+                static_cast<double>(_frozenCycleContext.schedule.leftWheelSpeedProcessNoiseScale),
+                static_cast<double>(_frozenCycleContext.schedule.rightWheelSpeedProcessNoiseScale),
+                static_cast<double>(_frozenCycleContext.schedule.closureCovarianceScaleLeft),
+                static_cast<double>(_frozenCycleContext.schedule.closureCovarianceScaleRight),
+                static_cast<double>(_frozenCycleContext.schedule.lateralPseudoMeasurementCovarianceScale),
+                static_cast<double>(_launchHoldRemainingS),
+                static_cast<double>(_inconsistentHoldRemainingS),
+                static_cast<double>(_stationaryCandidateDwellS),
+                static_cast<double>(_timeSinceStationaryExitS),
+                static_cast<double>(_nhcReenableDelayRemainingS)))
+        {
+            return false;
+        }
+
+        if (!EmitDebugTextLine(
+                context,
+                sink,
+                "ukf_dump_update_metrics",
+                "direct_wheel_body_invariant=%s;release_inflation_applied=%s;gyro_innovation_radps=%.9g;gyro_nis=%.9g;forward_accel_innovation_mps2=%.9g;forward_accel_nis=%.9g;lateral_accel_innovation_mps2=%.9g;lateral_accel_nis=%.9g;closure_left_innovation_mps=%.9g;closure_left_nis=%.9g;closure_right_innovation_mps=%.9g;closure_right_nis=%.9g;lateral_pseudo_innovation_mps=%.9g;lateral_pseudo_nis=%.9g;soft_odometry_enabled=%s",
+                _directWheelUpdateBodyStateInvariant ? "true" : "false",
+                _releaseInflationApplied ? "true" : "false",
+                static_cast<double>(_lastGyroInnovationRadps),
+                static_cast<double>(_lastGyroNis),
+                static_cast<double>(_lastForwardAccelInnovationMps2),
+                static_cast<double>(_lastForwardAccelNis),
+                static_cast<double>(_lastLateralAccelInnovationMps2),
+                static_cast<double>(_lastLateralAccelNis),
+                static_cast<double>(_lastClosureLeftInnovationMps),
+                static_cast<double>(_lastClosureLeftNis),
+                static_cast<double>(_lastClosureRightInnovationMps),
+                static_cast<double>(_lastClosureRightNis),
+                static_cast<double>(_lastLateralPseudoInnovationMps),
+                static_cast<double>(_lastLateralPseudoNis),
+                SoftOdometryAid::kFeatureEnabled ? "true" : "false"))
+        {
+            return false;
+        }
+
+        const StateMatrix covarianceDiagonal = _filter.covariance();
         return EmitDebugTextLine(
             context,
             sink,
-            "ukf_dump_consistency",
-            "gyro_bias_anchor_radps=%.9g;yaw_consistency_lp_radps=%.9g;yaw_window_mismatch_rad=%.9g;nhc_sigma_mps=%.9g;nhc_residual_mps=%.9g;nhc_residual_sigma=%.9g",
-            static_cast<double>(_gyroBiasAnchorRadps),
-            static_cast<double>(_yawConsistencyLowPassRadps),
-            static_cast<double>(_yawWindowMismatchRad),
-            static_cast<double>(_nhcSigmaMps),
-            static_cast<double>(_nhcResidualMps),
-            static_cast<double>(_nhcResidualSigma));
+            "ukf_dump_covariance_diagonals",
+            "forward_speed_var=%.9g;lateral_speed_var=%.9g;yaw_rate_var=%.9g;left_wheel_speed_var=%.9g;right_wheel_speed_var=%.9g;gyro_bias_var=%.9g",
+            static_cast<double>(covarianceDiagonal(VehicleState::kU, VehicleState::kU)),
+            static_cast<double>(covarianceDiagonal(VehicleState::kV, VehicleState::kV)),
+            static_cast<double>(covarianceDiagonal(VehicleState::kR, VehicleState::kR)),
+            static_cast<double>(covarianceDiagonal(VehicleState::kOmegaL, VehicleState::kOmegaL)),
+            static_cast<double>(covarianceDiagonal(VehicleState::kOmegaR, VehicleState::kOmegaR)),
+            static_cast<double>(covarianceDiagonal(VehicleState::kBgz, VehicleState::kBgz)));
     }
 
     SrUkfCore::StateMatrix SrUkfCore::BuildDefaultInitialCovariance() noexcept
@@ -1104,6 +1225,7 @@ namespace MazeMap
     bool SrUkfCore::reset(const StateVector& state, const StateMatrix& covariance) noexcept
     {
         _filter.setState(state, covariance);
+        _filter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
         _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
         _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
         _initialStationaryGyroBiasPhaseExited = false;
@@ -1119,6 +1241,9 @@ namespace MazeMap
         _accelBodyXMps2 = 0.0f;
         _accelBodyYMps2 = 0.0f;
         _stationaryCandidateDwellS = 0.0f;
+        _stationaryCandidatePoseReferenceState = _filter.state();
+        _stationaryCandidatePoseReferenceCovariance = _filter.covariance();
+        _stationaryCandidatePoseReferenceValid = false;
         _stationaryCertified = false;
         _timeSinceStationaryExitS = std::numeric_limits<float>::infinity();
         _timeSinceCommandSignFlipS = std::numeric_limits<float>::infinity();
@@ -1143,6 +1268,23 @@ namespace MazeMap
         _yawWindowSize = 0U;
         _yawWindowSpanS = 0.0f;
         resetPivotScrubTelemetry();
+        _directWheelUpdateBodyStateInvariant = false;
+        _releaseInflationApplied = false;
+        _lastClosureResidualLeftMps = 0.0f;
+        _lastClosureResidualRightMps = 0.0f;
+        _lastGyroMeasurementRadps = 0.0f;
+        _lastGyroInnovationRadps = 0.0f;
+        _lastGyroNis = 0.0f;
+        _lastForwardAccelInnovationMps2 = 0.0f;
+        _lastForwardAccelNis = 0.0f;
+        _lastLateralAccelInnovationMps2 = 0.0f;
+        _lastLateralAccelNis = 0.0f;
+        _lastClosureLeftInnovationMps = 0.0f;
+        _lastClosureLeftNis = 0.0f;
+        _lastClosureRightInnovationMps = 0.0f;
+        _lastClosureRightNis = 0.0f;
+        _lastLateralPseudoInnovationMps = 0.0f;
+        _lastLateralPseudoNis = 0.0f;
         _sqrtImuNoise(0, 0) = Tuning().imuYawRateSigmaRadps;
         _sqrtImuNoise(1, 1) = Tuning().imuAccelSigmaMps2;
         _sqrtImuNoise(2, 2) = Tuning().imuAccelSigmaMps2;
@@ -1155,17 +1297,17 @@ namespace MazeMap
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
         _acceptedEncoderUpdateSincePredict = false;
-        synchronizeGyroBiasStateToAnchor(
-            true,
-            Tuning().movingGyroBiasStdCapRadps,
-            GetModeProcessNoiseConfig(_operatingMode).stdRMin);
         enforceVarianceFloors(_operatingMode);
+        _transientContactMemory = {};
+        _regripRecovery = {};
+        buildFrozenCycleContext(0.0f, ControlInput{});
         return true;
     }
 
     bool SrUkfCore::setState(const StateVector& state, const StateMatrix& covariance) noexcept
     {
         _filter.setState(state, covariance);
+        _filter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
         _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
         _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
         _initialStationaryGyroBiasPhaseExited = false;
@@ -1181,6 +1323,9 @@ namespace MazeMap
         _accelBodyXMps2 = 0.0f;
         _accelBodyYMps2 = 0.0f;
         _stationaryCandidateDwellS = 0.0f;
+        _stationaryCandidatePoseReferenceState = _filter.state();
+        _stationaryCandidatePoseReferenceCovariance = _filter.covariance();
+        _stationaryCandidatePoseReferenceValid = false;
         _stationaryCertified = false;
         _timeSinceStationaryExitS = std::numeric_limits<float>::infinity();
         _timeSinceCommandSignFlipS = std::numeric_limits<float>::infinity();
@@ -1205,9 +1350,28 @@ namespace MazeMap
         _yawWindowSize = 0U;
         _yawWindowSpanS = 0.0f;
         resetPivotScrubTelemetry();
+        _directWheelUpdateBodyStateInvariant = false;
+        _releaseInflationApplied = false;
+        _lastClosureResidualLeftMps = 0.0f;
+        _lastClosureResidualRightMps = 0.0f;
+        _lastGyroMeasurementRadps = 0.0f;
+        _lastGyroInnovationRadps = 0.0f;
+        _lastGyroNis = 0.0f;
+        _lastForwardAccelInnovationMps2 = 0.0f;
+        _lastForwardAccelNis = 0.0f;
+        _lastLateralAccelInnovationMps2 = 0.0f;
+        _lastLateralAccelNis = 0.0f;
+        _lastClosureLeftInnovationMps = 0.0f;
+        _lastClosureLeftNis = 0.0f;
+        _lastClosureRightInnovationMps = 0.0f;
+        _lastClosureRightNis = 0.0f;
+        _lastLateralPseudoInnovationMps = 0.0f;
+        _lastLateralPseudoNis = 0.0f;
         _sqrtImuNoise(0, 0) = Tuning().imuYawRateSigmaRadps;
         _sqrtImuNoise(1, 1) = Tuning().imuAccelSigmaMps2;
         _sqrtImuNoise(2, 2) = Tuning().imuAccelSigmaMps2;
+        _lastControl = ControlInput{};
+        _lastEncoderObs = EncoderObs{};
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastEncoderDtSeconds = 0.0f;
@@ -1215,11 +1379,10 @@ namespace MazeMap
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = false;
         _acceptedEncoderUpdateSincePredict = false;
-        synchronizeGyroBiasStateToAnchor(
-            true,
-            Tuning().movingGyroBiasStdCapRadps,
-            GetModeProcessNoiseConfig(_operatingMode).stdRMin);
         enforceVarianceFloors(_operatingMode);
+        _transientContactMemory = {};
+        _regripRecovery = {};
+        buildFrozenCycleContext(0.0f, ControlInput{});
         return true;
     }
 
@@ -1315,6 +1478,268 @@ namespace MazeMap
         return Tuning().encoderPairNisThreshold;
     }
 
+    void SrUkfCore::buildFrozenCycleContext(float dtSeconds, const ControlInput& control) noexcept
+    {
+        const StateVector& currentState = _filter.state();
+        const StateVector& torqueEstimateState =
+            _havePredictionReference ?
+            _prePredictState :
+            currentState;
+        const EstimatorGeometry geometry = BuildEstimatorGeometry(_preparedParams);
+        const float batteryVoltageV =
+            (std::isfinite(control.batteryVoltageV) && (control.batteryVoltageV > 0.0f)) ?
+            control.batteryVoltageV :
+            _preparedParams.supplyVoltageV;
+        const AppliedTorqueEstimate appliedTorque =
+            TorqueEstimateAdapter::Estimate(
+                _plantModel,
+                torqueEstimateState,
+                control,
+                _preparedParams,
+                batteryVoltageV);
+
+        const WheelOnlyMeasurementPrediction wheelReference =
+            WheelAuthorityPolicy::PredictWheelOnlyMeasurement(currentState, geometry);
+        const float effectiveWheelRadiusM =
+            (std::isfinite(geometry.effectiveWheelRadiusM) && (geometry.effectiveWheelRadiusM > 0.0f)) ?
+            geometry.effectiveWheelRadiusM :
+            _preparedParams.wheelRadiusM;
+        const float leftClosureResidualMps =
+            effectiveWheelRadiusM * (_lastEncoderObs.omegaLeftRadps - wheelReference.leftWheelSpeedRadps);
+        const float rightClosureResidualMps =
+            effectiveWheelRadiusM * (_lastEncoderObs.omegaRightRadps - wheelReference.rightWheelSpeedRadps);
+        _lastClosureResidualLeftMps = leftClosureResidualMps;
+        _lastClosureResidualRightMps = rightClosureResidualMps;
+        const float closureSigmaMps =
+            (std::max)(Tuning().generalEncoderLinearSpeedSigmaMps, 1.0e-3f);
+        const float yawSeverity =
+            (Tuning().yawConsistencyLowPassThresholdRadps > 0.0f) ?
+            (std::fabs(_yawConsistencyLowPassRadps) / Tuning().yawConsistencyLowPassThresholdRadps) :
+            0.0f;
+        const float lateralAccelSeverity =
+            (std::isfinite(_accelBodyXMps2) && (_preparedParams.raw.combinedAccelPeakMps2 > 0.0f)) ?
+            (std::fabs(_accelBodyXMps2) / _preparedParams.raw.combinedAccelPeakMps2) :
+            0.0f;
+
+        GripUtilizationInputs utilizationInputs{};
+        utilizationInputs.fanDutyCycle = control.fanDutyCycle;
+        utilizationInputs.longitudinalClosureSeverity =
+            (std::fabs(leftClosureResidualMps + rightClosureResidualMps) * 0.5f) / closureSigmaMps;
+        utilizationInputs.differentialClosureSeverity =
+            std::fabs(leftClosureResidualMps - rightClosureResidualMps) / closureSigmaMps;
+        utilizationInputs.lateralAccelerationSeverity = lateralAccelSeverity;
+        utilizationInputs.yawConsistencySeverity = yawSeverity;
+        utilizationInputs.leftBankAnomalySeverity = std::fabs(leftClosureResidualMps) / closureSigmaMps;
+        utilizationInputs.rightBankAnomalySeverity = std::fabs(rightClosureResidualMps) / closureSigmaMps;
+
+        const GripUtilizationSnapshot utilization =
+            GripUtilizationMetrics::Compute(
+                currentState,
+                appliedTorque,
+                _preparedParams,
+                utilizationInputs);
+        TransientContactMemoryState memory =
+            TransientContactMemory::Advance(
+                _transientContactMemory,
+                utilization,
+                dtSeconds);
+        RegripRecoveryState regrip =
+            RegripRecoveryMonitor::Advance(
+                _regripRecovery,
+                utilization,
+                memory,
+                dtSeconds);
+
+        const float correctedYawRateForStationaryLockRadps =
+            std::isfinite(_lastGyroMeasurementRadps) ?
+            this->correctedYawRateRadps(_lastGyroMeasurementRadps) :
+            (std::isfinite(currentState(VehicleState::kR)) ? currentState(VehicleState::kR) : 0.0f);
+        const bool stationaryEvidenceReady =
+            _stationaryCertified &&
+            controlCommandsAreEffectivelyZero() &&
+            HasExactZeroWheelObservation(_lastEncoderObs) &&
+            (std::fabs(correctedYawRateForStationaryLockRadps) <= Tuning().stationaryCandidateMaxCorrectedGyroRadps) &&
+            (std::fabs(currentState(VehicleState::kU)) <= Tuning().stationaryCandidateMaxLinearCommandMps) &&
+            (std::fabs(currentState(VehicleState::kV)) <= Tuning().stationaryCandidateMaxLinearCommandMps) &&
+            (std::fabs(_accelBodyXMps2) <= Tuning().stationaryCandidateMaxAccelMps2) &&
+            (std::fabs(_accelBodyYMps2) <= Tuning().stationaryCandidateMaxAccelMps2) &&
+            (_inconsistentHoldRemainingS <= 0.0f);
+        if (stationaryEvidenceReady &&
+            (utilization.leftBankPreProjectionUtilization <= 0.25f) &&
+            (utilization.rightBankPreProjectionUtilization <= 0.25f))
+        {
+            memory = {};
+            regrip = {};
+        }
+        const bool exactStationaryLock =
+            stationaryEvidenceReady &&
+            !RegripRecoveryMonitor::IsHoldoffActive(regrip);
+
+        const FrozenCycleSchedule schedule =
+            UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
+                utilization,
+                memory,
+                regrip,
+                exactStationaryLock,
+                true,
+                PlanarAccelLateralUpdate::kFeatureEnabled,
+                SoftOdometryAid::kFeatureEnabled,
+                ((_launchHoldRemainingS > 0.0f) || (_timeSinceStationaryExitS <= Tuning().stationaryExitLaunchWindowS)) &&
+                    (std::fabs(currentState(VehicleState::kU)) <= Tuning().launchLowSpeedThresholdMps),
+                _inconsistentHoldRemainingS > 0.0f);
+
+        _transientContactMemory = memory;
+        _regripRecovery = regrip;
+        _frozenCycleContext.geometry = geometry;
+        _frozenCycleContext.appliedTorque = appliedTorque;
+        _frozenCycleContext.utilization = utilization;
+        _frozenCycleContext.schedule = schedule;
+        _frozenCycleContext.memory = memory;
+        _frozenCycleContext.regrip = regrip;
+        _frozenCycleContext.dtS = (std::isfinite(dtSeconds) && (dtSeconds > 0.0f)) ? dtSeconds : 0.0f;
+    }
+
+    bool SrUkfCore::applyClosurePseudoMeasurements(
+        void* loopHookContext,
+        LoopHookInvoker loopHook) noexcept
+    {
+        if (!_acceptedEncoderUpdateSincePredict)
+        {
+            return false;
+        }
+
+        const EstimatorGeometry& geometry = _frozenCycleContext.geometry;
+        if (!(std::isfinite(geometry.effectiveWheelRadiusM) && (geometry.effectiveWheelRadiusM > 0.0f)) ||
+            !(std::isfinite(geometry.halfEffectiveTrackWidthM)))
+        {
+            return false;
+        }
+
+        bool anyAccepted = false;
+        const auto invokeLoop = [loopHookContext, loopHook]() noexcept
+        {
+            InvokeLoopHook(loopHookContext, loopHook);
+        };
+        const float baseSigmaMps =
+            (std::max)(Tuning().generalEncoderLinearSpeedSigmaMps, 1.0e-3f);
+        const float leftScale =
+            _frozenCycleContext.schedule.closureCovarianceScaleLeft *
+            WheelAuthorityPolicy::ClosurePseudoMeasurementScale(
+                Side::Left,
+                _frozenCycleContext.utilization,
+                _frozenCycleContext.regrip,
+                _frozenCycleContext.schedule);
+        const float rightScale =
+            _frozenCycleContext.schedule.closureCovarianceScaleRight *
+            WheelAuthorityPolicy::ClosurePseudoMeasurementScale(
+                Side::Right,
+                _frozenCycleContext.utilization,
+                _frozenCycleContext.regrip,
+                _frozenCycleContext.schedule);
+
+        const auto applySideUpdate =
+            [this, &geometry, &invokeLoop, baseSigmaMps](
+                float measuredLinearSpeedMps,
+                float covarianceScale,
+                float yawSign,
+                float& innovationStorageMps,
+                float& nisStorage) noexcept
+        {
+            Eigen::Matrix<float, 1, 1> measurement;
+            measurement << measuredLinearSpeedMps;
+            innovationStorageMps =
+                measuredLinearSpeedMps -
+                (_filter.state()(VehicleState::kU) +
+                    (yawSign * geometry.halfEffectiveTrackWidthM * _filter.state()(VehicleState::kR)));
+            Eigen::Matrix<float, 1, 1> sqrtNoise;
+            sqrtNoise(0, 0) =
+                baseSigmaMps *
+                MazeMap::Math::Sqrtf((std::max)(covarianceScale, 0.25f));
+            const bool accepted = _filter.Update<1>(
+                measurement,
+                sqrtNoise,
+                25.0f,
+                [&geometry, yawSign](const StateVector& sigmaPoint) noexcept
+                {
+                    Eigen::Matrix<float, 1, 1> prediction;
+                    prediction <<
+                        sigmaPoint(VehicleState::kU) +
+                        (yawSign * geometry.halfEffectiveTrackWidthM * sigmaPoint(VehicleState::kR));
+                    return prediction;
+                },
+                invokeLoop);
+            nisStorage = _filter.lastNis();
+            return accepted;
+        };
+
+        anyAccepted =
+            applySideUpdate(
+                geometry.effectiveWheelRadiusM * _lastEncoderObs.omegaLeftRadps,
+                leftScale,
+                1.0f,
+                _lastClosureLeftInnovationMps,
+                _lastClosureLeftNis) ||
+            anyAccepted;
+        anyAccepted =
+            applySideUpdate(
+                geometry.effectiveWheelRadiusM * _lastEncoderObs.omegaRightRadps,
+                rightScale,
+                -1.0f,
+                _lastClosureRightInnovationMps,
+                _lastClosureRightNis) ||
+            anyAccepted;
+        return anyAccepted;
+    }
+
+    bool SrUkfCore::applyAdaptiveLateralPseudoMeasurement(
+        void* loopHookContext,
+        LoopHookInvoker loopHook) noexcept
+    {
+        if (_frozenCycleContext.schedule.exactStationaryLock)
+        {
+            updateNonholonomicDiagnostics(false);
+            return false;
+        }
+
+        const float covarianceScale =
+            _frozenCycleContext.schedule.lateralPseudoMeasurementCovarianceScale *
+            WheelAuthorityPolicy::LateralPseudoMeasurementScale(
+                _frozenCycleContext.utilization,
+                _frozenCycleContext.regrip,
+                _frozenCycleContext.schedule);
+        if (!(std::isfinite(covarianceScale) && (covarianceScale > 0.0f)) || (covarianceScale >= 64.0f))
+        {
+            updateNonholonomicDiagnostics(false);
+            return false;
+        }
+
+        Eigen::Matrix<float, 1, 1> measurement;
+        measurement << 0.0f;
+        _lastLateralPseudoInnovationMps = -_filter.state()(VehicleState::kV);
+        Eigen::Matrix<float, 1, 1> sqrtNoise;
+        sqrtNoise(0, 0) =
+            ComputeNonholonomicSigmaMps(std::fabs(_filter.state()(VehicleState::kU))) *
+            MazeMap::Math::Sqrtf((std::max)(covarianceScale, 0.25f));
+        const auto invokeLoop = [loopHookContext, loopHook]() noexcept
+        {
+            InvokeLoopHook(loopHookContext, loopHook);
+        };
+        const bool accepted = _filter.Update<1>(
+            measurement,
+            sqrtNoise,
+            25.0f,
+            [](const StateVector& sigmaPoint) noexcept
+            {
+                Eigen::Matrix<float, 1, 1> prediction;
+                prediction << sigmaPoint(VehicleState::kV);
+                return prediction;
+            },
+            invokeLoop);
+        _lastLateralPseudoNis = _filter.lastNis();
+        updateNonholonomicDiagnostics(accepted);
+        return accepted;
+    }
+
     bool SrUkfCore::predict(float dt, const ControlInput& control) noexcept
     {
         return predictImpl(dt, control, nullptr, nullptr);
@@ -1336,11 +1761,39 @@ namespace MazeMap
         _prePredictCovariance = _filter.covariance();
         _havePredictionReference = true;
         _acceptedEncoderUpdateSincePredict = false;
-        _lastEncoderDtSeconds = 0.0f;
+        _lastEncoderDtSeconds = dt;
         resetPivotScrubTelemetry();
+        _directWheelUpdateBodyStateInvariant = false;
+        _releaseInflationApplied = false;
+        _lastGyroMeasurementRadps = 0.0f;
+        _lastGyroInnovationRadps = 0.0f;
+        _lastGyroNis = 0.0f;
+        _lastForwardAccelInnovationMps2 = 0.0f;
+        _lastForwardAccelNis = 0.0f;
+        _lastLateralAccelInnovationMps2 = 0.0f;
+        _lastLateralAccelNis = 0.0f;
+        _lastClosureLeftInnovationMps = 0.0f;
+        _lastClosureLeftNis = 0.0f;
+        _lastClosureRightInnovationMps = 0.0f;
+        _lastClosureRightNis = 0.0f;
+        _lastLateralPseudoInnovationMps = 0.0f;
+        _lastLateralPseudoNis = 0.0f;
         updateCommandSignFlipWindow(dt);
         updateOperatingMode(dt);
+        const bool wasExactStationaryLock = _frozenCycleContext.schedule.exactStationaryLock;
+        buildFrozenCycleContext(dt, control);
+        applyReleaseInflationIfNeeded(wasExactStationaryLock);
         updateProcessNoiseForMode();
+        _sqrtProcessNoiseDensity(VehicleState::kU, VehicleState::kU) *=
+            MazeMap::Math::Sqrtf((std::max)(_frozenCycleContext.schedule.forwardSpeedProcessNoiseScale, 1.0f));
+        _sqrtProcessNoiseDensity(VehicleState::kV, VehicleState::kV) *=
+            MazeMap::Math::Sqrtf((std::max)(_frozenCycleContext.schedule.lateralSpeedProcessNoiseScale, 1.0f));
+        _sqrtProcessNoiseDensity(VehicleState::kR, VehicleState::kR) *=
+            MazeMap::Math::Sqrtf((std::max)(_frozenCycleContext.schedule.yawRateProcessNoiseScale, 1.0f));
+        _sqrtProcessNoiseDensity(VehicleState::kOmegaL, VehicleState::kOmegaL) *=
+            MazeMap::Math::Sqrtf((std::max)(_frozenCycleContext.schedule.leftWheelSpeedProcessNoiseScale, 1.0f));
+        _sqrtProcessNoiseDensity(VehicleState::kOmegaR, VehicleState::kOmegaR) *=
+            MazeMap::Math::Sqrtf((std::max)(_frozenCycleContext.schedule.rightWheelSpeedProcessNoiseScale, 1.0f));
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity * MazeMap::Math::Sqrtf(dt));
         Eigen::Matrix<float, 3, 1> controlVector;
         controlVector << control.leftMotorCommand, control.rightMotorCommand, control.fanDutyCycle;
@@ -1351,17 +1804,22 @@ namespace MazeMap
         const bool predicted = _filter.Predict(
             dt,
             controlVector,
-            [this, &control](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
+            [this](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
             {
-                return _plantModel.integrate(sigmaPoint, control, sigmaDt, _preparedParams);
+                EstimatorPredictModel::PredictInput predictInput{};
+                predictInput.currentState = sigmaPoint;
+                predictInput.leftAppliedBankTorqueNm = _frozenCycleContext.appliedTorque.leftAppliedBankTorqueNm;
+                predictInput.rightAppliedBankTorqueNm = _frozenCycleContext.appliedTorque.rightAppliedBankTorqueNm;
+                predictInput.fanDutyCycle = _lastControl.fanDutyCycle;
+                predictInput.dtS = sigmaDt;
+                predictInput.cycleContext = &_frozenCycleContext;
+                return _predictModel.Integrate(predictInput, _preparedParams).nextState;
             },
             invokeLoop);
         if (predicted)
         {
-            synchronizeGyroBiasStateToAnchor(
-                true,
-                Tuning().movingGyroBiasStdCapRadps,
-                GetModeProcessNoiseConfig(_operatingMode).stdRMin);
+            _gyroBiasAnchorRadps = _filter.state()(VehicleState::kBgz);
+            _gyroBiasAnchorVarianceRadps2 = _filter.covariance()(VehicleState::kBgz, VehicleState::kBgz);
             enforceVarianceFloors(_operatingMode);
         }
         return predicted;
@@ -1388,6 +1846,8 @@ namespace MazeMap
         const EncoderObs measured = observation;
         const StateVector priorState = _filter.state();
         const StateMatrix priorCovariance = _filter.covariance();
+        const float measuredWheelVarianceRadps2 =
+            ComputeMeasuredWheelVarianceRadps2(measured, _params);
         _acceptedEncoderUpdateSincePredict = false;
         _lastEncoderDtSeconds =
             (std::isfinite(dt) && (dt > 0.0f)) ?
@@ -1401,6 +1861,10 @@ namespace MazeMap
             _yawWindowMismatchRad,
             _params);
         _pivotScrubEncoderBodyUpdateSkipped = _pivotScrubMode;
+        _lastEncoderObs = measured;
+        const bool wasExactStationaryLock = _frozenCycleContext.schedule.exactStationaryLock;
+        buildFrozenCycleContext(_lastEncoderDtSeconds, _lastControl);
+        applyReleaseInflationIfNeeded(wasExactStationaryLock);
 
         Eigen::Matrix<float, 2, 1> z;
         z << measured.omegaLeftRadps, measured.omegaRightRadps;
@@ -1423,81 +1887,89 @@ namespace MazeMap
         const float encoderMeasurementNis = _filter.lastNis();
         if (result.accepted)
         {
-            _lastEncoderObs = measured;
             _acceptedEncoderUpdateSincePredict = true;
-            if (_pivotScrubMode)
+            if (!_frozenCycleContext.schedule.exactStationaryLock)
             {
-                applyPivotScrubEncoderWheelConstraint(
+                constexpr std::array<int, 2> kWheelOnlyIndices = {
+                    VehicleState::kOmegaL,
+                    VehicleState::kOmegaR
+                };
+                const StateVector updatedState = _filter.state();
+                const StateMatrix updatedCovariance = _filter.covariance();
+                StateVector projectedState = priorState;
+                StateMatrix projectedCovariance = priorCovariance;
+                ProjectMaskedStateAndCovariance(
                     priorState,
                     priorCovariance,
-                    measured,
-                    ComputeMeasuredWheelVarianceRadps2(measured, _params));
-                const StateVector& postEncoderState = _filter.state();
-                _pivotScrubEncoderWheelDeltaPsiRad =
-                    postEncoderState(VehicleState::kPsi) - priorState(VehicleState::kPsi);
-                _pivotScrubEncoderWheelDeltaRRadps =
-                    postEncoderState(VehicleState::kR) - priorState(VehicleState::kR);
-                _pivotScrubEncoderWheelDeltaOmegaLRadps =
-                    postEncoderState(VehicleState::kOmegaL) - priorState(VehicleState::kOmegaL);
-                _pivotScrubEncoderWheelDeltaOmegaRRadps =
-                    postEncoderState(VehicleState::kOmegaR) - priorState(VehicleState::kOmegaR);
-                const float encoderMaskedDeltaNorm =
-                    MazeMap::Math::Sqrtf(
-                        (_pivotScrubEncoderWheelDeltaOmegaLRadps * _pivotScrubEncoderWheelDeltaOmegaLRadps) +
-                        (_pivotScrubEncoderWheelDeltaOmegaRRadps * _pivotScrubEncoderWheelDeltaOmegaRRadps));
-                _pivotScrubEncoderWheelMaskedDeltaNorm =
-                    std::isfinite(encoderMaskedDeltaNorm) ? encoderMaskedDeltaNorm : 0.0f;
+                    updatedState,
+                    updatedCovariance,
+                    kWheelOnlyIndices.data(),
+                    kWheelOnlyIndices.size(),
+                    projectedState,
+                    projectedCovariance);
+                _filter.setState(projectedState, projectedCovariance);
+                applyWheelSpeedConstraint(measured, measuredWheelVarianceRadps2);
+                if (!_pivotScrubMode)
+                {
+                    applyWheelRateConstraint(
+                        _filter.state(),
+                        _filter.covariance(),
+                        measured,
+                        measuredWheelVarianceRadps2,
+                        updateYaw);
+                }
             }
-            else
-            {
-                applyWheelRateConstraint(
-                    priorState,
-                    priorCovariance,
-                    measured,
-                    ComputeMeasuredWheelVarianceRadps2(measured, _params),
-                    updateYaw);
-            }
+            const StateVector& postEncoderState = _filter.state();
+            _pivotScrubEncoderWheelDeltaPsiRad =
+                postEncoderState(VehicleState::kPsi) - priorState(VehicleState::kPsi);
+            _pivotScrubEncoderWheelDeltaRRadps =
+                postEncoderState(VehicleState::kR) - priorState(VehicleState::kR);
+            _pivotScrubEncoderWheelDeltaOmegaLRadps =
+                postEncoderState(VehicleState::kOmegaL) - priorState(VehicleState::kOmegaL);
+            _pivotScrubEncoderWheelDeltaOmegaRRadps =
+                postEncoderState(VehicleState::kOmegaR) - priorState(VehicleState::kOmegaR);
+            const float encoderMaskedDeltaNorm =
+                MazeMap::Math::Sqrtf(
+                    (_pivotScrubEncoderWheelDeltaOmegaLRadps * _pivotScrubEncoderWheelDeltaOmegaLRadps) +
+                    (_pivotScrubEncoderWheelDeltaOmegaRRadps * _pivotScrubEncoderWheelDeltaOmegaRRadps));
+            _pivotScrubEncoderWheelMaskedDeltaNorm =
+                std::isfinite(encoderMaskedDeltaNorm) ? encoderMaskedDeltaNorm : 0.0f;
         }
         else
         {
-            _lastEncoderObs = measured;
             _acceptedEncoderUpdateSincePredict = true;
-            applyWheelSpeedConstraint(measured, ComputeMeasuredWheelVarianceRadps2(measured, _params));
+            applyWheelSpeedConstraint(measured, measuredWheelVarianceRadps2);
+            if (!_frozenCycleContext.schedule.exactStationaryLock && !_pivotScrubMode)
+            {
+                applyWheelRateConstraint(
+                    _filter.state(),
+                    _filter.covariance(),
+                    measured,
+                    measuredWheelVarianceRadps2,
+                    updateYaw);
+            }
             result.accepted = true;
         }
-        if (_pivotScrubMode)
+        if (_frozenCycleContext.schedule.exactStationaryLock)
         {
-            const StateVector zeroUPriorState = _filter.state();
-            const StateMatrix zeroUPriorCovariance = _filter.covariance();
-            Eigen::Matrix<float, 1, 1> zeroUObservation;
-            zeroUObservation << 0.0f;
-            Eigen::Matrix<float, 1, 1> zeroUSqrtNoise;
-            zeroUSqrtNoise(0, 0) = Tuning().pivotScrubZeroUSigmaMps;
-            const bool zeroUAccepted = _filter.Update<1>(
-                zeroUObservation,
-                zeroUSqrtNoise,
-                std::numeric_limits<float>::infinity(),
-                [](const StateVector& sigmaPoint) noexcept
-                {
-                    Eigen::Matrix<float, 1, 1> prediction;
-                    prediction << sigmaPoint(VehicleState::kU);
-                    return prediction;
-                },
-                invokeLoop);
-            if (zeroUAccepted)
-            {
-                applyPivotScrubZeroUConstraint(
-                    zeroUPriorState,
-                    zeroUPriorCovariance,
-                    Tuning().pivotScrubZeroUSigmaMps);
-            }
-            _pivotScrubZeroUSoftApplied = zeroUAccepted;
-            const StateVector& zeroUPostState = _filter.state();
-            _pivotScrubZeroUInnovationMps = std::isfinite(zeroUPriorState(VehicleState::kU)) ?
-                -zeroUPriorState(VehicleState::kU) :
-                0.0f;
-            _pivotScrubZeroUDeltaMps = zeroUPostState(VehicleState::kU) - zeroUPriorState(VehicleState::kU);
+            applyStationaryZeroMotionConstraint(_lastGyroMeasurementRadps);
         }
+        const StateVector& constrainedState = _filter.state();
+        _directWheelUpdateBodyStateInvariant =
+            _frozenCycleContext.schedule.exactStationaryLock ||
+            ((std::fabs(constrainedState(VehicleState::kPx) - priorState(VehicleState::kPx)) <= 1.0e-6f) &&
+             (std::fabs(constrainedState(VehicleState::kPy) - priorState(VehicleState::kPy)) <= 1.0e-6f) &&
+             (std::fabs(constrainedState(VehicleState::kPsi) - priorState(VehicleState::kPsi)) <= 1.0e-6f) &&
+             (std::fabs(constrainedState(VehicleState::kV) - priorState(VehicleState::kV)) <= 1.0e-6f) &&
+             (std::fabs(constrainedState(VehicleState::kBgz) - priorState(VehicleState::kBgz)) <= 1.0e-6f));
+        _pivotScrubZeroUSoftApplied = false;
+        _pivotScrubZeroUInnovationMps = 0.0f;
+        _pivotScrubZeroUDeltaMps = 0.0f;
+        updateStationaryCertification(_lastGyroMeasurementRadps);
+        const OperatingMode previousMode = _operatingMode;
+        updateOperatingMode(_lastEncoderDtSeconds);
+        sanitizeLaunchRecoveryIfNeeded(previousMode, _operatingMode);
+        enforceVarianceFloors(_operatingMode);
         result.nis = encoderMeasurementNis;
         return result;
     }
@@ -1512,7 +1984,19 @@ namespace MazeMap
         }
 
         const MeasurementUpdateResult yawResult = updateYawRate(observation.gyroZRadps);
-        result.accepted = yawResult.accepted;
+        if (!yawResult.accepted)
+        {
+            result.accepted = false;
+            result.nis = yawResult.nis;
+            return result;
+        }
+
+        ImuAccelObs accelObservation{};
+        accelObservation.valid = observation.valid;
+        accelObservation.accelBodyXMps2 = observation.accelBodyXMps2;
+        accelObservation.accelBodyYMps2 = observation.accelBodyYMps2;
+        const MeasurementUpdateResult accelResult = updatePlanarAccel(accelObservation);
+        result.accepted = yawResult.accepted && (!accelObservation.valid || accelResult.accepted);
         result.nis = yawResult.nis;
         return result;
     }
@@ -1536,6 +2020,9 @@ namespace MazeMap
 
         const StateVector priorState = _filter.state();
         const StateMatrix priorCovariance = _filter.covariance();
+        _lastGyroMeasurementRadps = yawRateRadps;
+        _lastGyroInnovationRadps =
+            yawRateRadps - (priorState(VehicleState::kR) + priorState(VehicleState::kBgz));
         Eigen::Matrix<float, 1, 1> z;
         z << yawRateRadps;
         Eigen::Matrix<float, 1, 1> sqrtNoise;
@@ -1551,94 +2038,60 @@ namespace MazeMap
             z,
             sqrtNoise,
             std::numeric_limits<float>::infinity(),
-            [this](const StateVector& sigmaPoint) noexcept
+            [](const StateVector& sigmaPoint) noexcept
             {
                 Eigen::Matrix<float, 1, 1> prediction;
-                prediction << sigmaPoint(VehicleState::kR) + _gyroBiasAnchorRadps;
+                prediction << sigmaPoint(VehicleState::kR) + sigmaPoint(VehicleState::kBgz);
                 return prediction;
             },
             invokeLoop);
         const float yawMeasurementNis = _filter.lastNis();
+        _lastGyroNis = yawMeasurementNis;
         if (result.accepted)
         {
-            if (!_pivotScrubMode)
-            {
-                const StateVector updatedState = _filter.state();
-                const StateMatrix updatedCovariance = _filter.covariance();
-                StateVector projectedState = priorState;
-                StateMatrix projectedCovariance = priorCovariance;
-                constexpr std::array<int, 6> kAllowedIndices = {
-                    VehicleState::kPx,
-                    VehicleState::kPy,
-                    VehicleState::kPsi,
-                    VehicleState::kU,
-                    VehicleState::kV,
-                    VehicleState::kR
-                };
+            const StateVector updatedState = _filter.state();
+            const StateMatrix updatedCovariance = _filter.covariance();
+            StateVector projectedState = priorState;
+            StateMatrix projectedCovariance = priorCovariance;
+            constexpr std::array<int, 7> kAllowedIndices = {
+                VehicleState::kPx,
+                VehicleState::kPy,
+                VehicleState::kPsi,
+                VehicleState::kU,
+                VehicleState::kV,
+                VehicleState::kR,
+                VehicleState::kBgz
+            };
 
-                // Preserve the encoder-owned wheel-rate states across the gyro update.
-                ProjectMaskedStateAndCovariance(
-                    priorState,
-                    priorCovariance,
-                    updatedState,
-                    updatedCovariance,
-                    kAllowedIndices.data(),
-                    kAllowedIndices.size(),
-                    projectedState,
-                    projectedCovariance);
-                _filter.setState(projectedState, projectedCovariance);
-            }
+            ProjectMaskedStateAndCovariance(
+                priorState,
+                priorCovariance,
+                updatedState,
+                updatedCovariance,
+                kAllowedIndices.data(),
+                kAllowedIndices.size(),
+                projectedState,
+                projectedCovariance);
+            _filter.setState(projectedState, projectedCovariance);
+
             updateInitialStationaryGyroBias(yawRateRadps, shouldApplyStationaryConstraint);
-            if (_pivotScrubMode)
-            {
-                applyPivotScrubGyroConstraint(priorState, priorCovariance, yawRateRadps);
-                const StateVector& postState = _filter.state();
-                _pivotScrubGyroDeltaPsiRad = postState(VehicleState::kPsi) - priorState(VehicleState::kPsi);
-                _pivotScrubGyroDeltaRRadps = postState(VehicleState::kR) - priorState(VehicleState::kR);
-                _pivotScrubGyroDeltaBgzRadps = postState(VehicleState::kBgz) - priorState(VehicleState::kBgz);
-                _pivotScrubGyroDeltaOmegaLRadps = postState(VehicleState::kOmegaL) - priorState(VehicleState::kOmegaL);
-                _pivotScrubGyroDeltaOmegaRRadps = postState(VehicleState::kOmegaR) - priorState(VehicleState::kOmegaR);
-                _pivotScrubGyroMaskedDeltaNorm = MazeMap::Math::Sqrtf(
-                    (_pivotScrubGyroDeltaPsiRad * _pivotScrubGyroDeltaPsiRad) +
-                    (_pivotScrubGyroDeltaRRadps * _pivotScrubGyroDeltaRRadps) +
-                    (_pivotScrubGyroDeltaBgzRadps * _pivotScrubGyroDeltaBgzRadps));
-            }
             updateStationaryCertification(yawRateRadps);
             updateYawConsistencyMetrics(yawRateRadps, priorState(VehicleState::kR));
-            const OperatingMode previousMode = _operatingMode;
-            updateOperatingMode(_lastEncoderDtSeconds);
-            if (shouldApplyStationaryConstraint &&
-                _stationaryCertified)
+            if (_biasUpdateEnabled || shouldApplyStationaryConstraint || _stationaryCertified)
+            {
+                synchronizeGyroBiasStateToAnchor(
+                    true,
+                    Tuning().movingGyroBiasStdCapRadps,
+                    GetModeProcessNoiseConfig(OperatingMode::StationaryCertified).stdRMin);
+            }
+            if (_frozenCycleContext.schedule.exactStationaryLock)
             {
                 applyStationaryZeroMotionConstraint(yawRateRadps);
             }
-            else if (_pivotScrubMode)
-            {
-                updateNonholonomicDiagnostics(false);
-            }
-            else if (_acceptedEncoderUpdateSincePredict && !HasExactZeroWheelObservation(_lastEncoderObs))
-            {
-                (void)applyGripLateralVelocityConstraint(loopHookContext, loopHook);
-            }
-            else
-            {
-                updateNonholonomicDiagnostics(false);
-            }
-            updateOperatingMode(0.0f);
+            const OperatingMode previousMode = _operatingMode;
+            updateOperatingMode(_lastEncoderDtSeconds);
             sanitizeLaunchRecoveryIfNeeded(previousMode, _operatingMode);
-            synchronizeGyroBiasStateToAnchor(
-                _operatingMode != OperatingMode::StationaryCertified,
-                Tuning().movingGyroBiasStdCapRadps,
-                GetModeProcessNoiseConfig(_operatingMode).stdRMin);
             enforceVarianceFloors(_operatingMode);
-            _yawValidForFeedforward = IsYawValidForFeedforward(
-                _operatingMode,
-                _filter.state()(VehicleState::kBgz),
-                _gyroBiasAnchorRadps,
-                _yawConsistencyLowPassRadps,
-                _nonholonomicConstraintEnabled,
-                _filter.state()(VehicleState::kV),
-                _nhcSigmaMps);
         }
         result.nis = yawMeasurementNis;
         return result;
@@ -1654,16 +2107,94 @@ namespace MazeMap
         void* loopHookContext,
         LoopHookInvoker loopHook) noexcept
     {
-        (void)observation;
-        (void)loopHookContext;
-        (void)loopHook;
-
-        // Intentionally disabled while the second IMU is offline. With only one IMU online,
-        // this planar-accel update feeds yaw-related state through the lever-arm model and has
-        // produced edge-case estimator failures. Do not reintroduce this path unless the
-        // multi-IMU measurement model is restored and revalidated end-to-end.
         MeasurementUpdateResult result{};
-        result.accepted = true;
+        result.attempted = observation.valid || _acceptedEncoderUpdateSincePredict;
+        const auto invokeLoop = [loopHookContext, loopHook]() noexcept
+        {
+            InvokeLoopHook(loopHookContext, loopHook);
+        };
+
+        bool accelAccepted = false;
+        if (observation.valid && _frozenCycleContext.schedule.planarAccelForwardUpdateEnabled)
+        {
+            Eigen::Matrix<float, 1, 1> measurement;
+            measurement << observation.accelBodyYMps2;
+            _lastForwardAccelInnovationMps2 =
+                observation.accelBodyYMps2 -
+                _plantModel.imuPlanarAcceleration(_filter.state(), _lastControl, _preparedParams)(1);
+            Eigen::Matrix<float, 1, 1> sqrtNoise;
+            sqrtNoise(0, 0) = _sqrtImuNoise(2, 2);
+            const bool forwardAccelAccepted = _filter.Update<1>(
+                measurement,
+                sqrtNoise,
+                25.0f,
+                [this](const StateVector& sigmaPoint) noexcept
+                {
+                    Eigen::Matrix<float, 1, 1> prediction;
+                    prediction << _plantModel.imuPlanarAcceleration(
+                        sigmaPoint,
+                        _lastControl,
+                        _preparedParams)(1);
+                    return prediction;
+                },
+                invokeLoop);
+            _lastForwardAccelNis = _filter.lastNis();
+            accelAccepted = forwardAccelAccepted || accelAccepted;
+        }
+
+        if (observation.valid &&
+            _frozenCycleContext.schedule.planarAccelLateralUpdateEnabled &&
+            PlanarAccelLateralUpdate::kFeatureEnabled)
+        {
+            Eigen::Matrix<float, 1, 1> measurement;
+            measurement << observation.accelBodyXMps2;
+            _lastLateralAccelInnovationMps2 =
+                observation.accelBodyXMps2 -
+                _plantModel.imuPlanarAcceleration(_filter.state(), _lastControl, _preparedParams)(0);
+            Eigen::Matrix<float, 1, 1> sqrtNoise;
+            sqrtNoise(0, 0) = _sqrtImuNoise(1, 1);
+            const bool lateralAccelAccepted = _filter.Update<1>(
+                measurement,
+                sqrtNoise,
+                25.0f,
+                [this](const StateVector& sigmaPoint) noexcept
+                {
+                    Eigen::Matrix<float, 1, 1> prediction;
+                    prediction << _plantModel.imuPlanarAcceleration(
+                        sigmaPoint,
+                        _lastControl,
+                        _preparedParams)(0);
+                    return prediction;
+                },
+                invokeLoop);
+            _lastLateralAccelNis = _filter.lastNis();
+            accelAccepted = lateralAccelAccepted || accelAccepted;
+        }
+
+        const bool closureAccepted = applyClosurePseudoMeasurements(loopHookContext, loopHook);
+        const bool lateralAccepted = applyAdaptiveLateralPseudoMeasurement(loopHookContext, loopHook);
+        bool stationaryApplied = false;
+        if (_frozenCycleContext.schedule.exactStationaryLock)
+        {
+            applyStationaryZeroMotionConstraint(0.0f);
+            stationaryApplied = true;
+        }
+
+        const OperatingMode previousMode = _operatingMode;
+        updateOperatingMode(_lastEncoderDtSeconds);
+        sanitizeLaunchRecoveryIfNeeded(previousMode, _operatingMode);
+        _gyroBiasAnchorRadps = _filter.state()(VehicleState::kBgz);
+        _gyroBiasAnchorVarianceRadps2 = _filter.covariance()(VehicleState::kBgz, VehicleState::kBgz);
+        enforceVarianceFloors(_operatingMode);
+        _yawValidForFeedforward = IsYawValidForFeedforward(
+            _operatingMode,
+            _filter.state()(VehicleState::kBgz),
+            _gyroBiasAnchorRadps,
+            _yawConsistencyLowPassRadps,
+            _nonholonomicConstraintEnabled,
+            _filter.state()(VehicleState::kV),
+            _nhcSigmaMps);
+        result.accepted = accelAccepted || closureAccepted || lateralAccepted || stationaryApplied;
         return result;
     }
 
@@ -1817,109 +2348,6 @@ namespace MazeMap
             0.0f;
     }
 
-    void SrUkfCore::anchorPoseToEncoderDelta(
-        StateVector& anchoredState,
-        const EncoderObs& measured,
-        bool updateYaw) const noexcept
-    {
-        if (!_havePredictionReference)
-        {
-            return;
-        }
-
-        const float distancePerCountM = ComputeDistancePerEncoderCountM(_params);
-        const float trackWidthM = _params.trackWidthM;
-        if (!(distancePerCountM > 0.0f) ||
-            !std::isfinite(distancePerCountM) ||
-            !(trackWidthM > 0.0f) ||
-            !std::isfinite(trackWidthM))
-        {
-            return;
-        }
-
-        const float leftDistanceM = static_cast<float>(measured.totalLeftCounts) * distancePerCountM;
-        const float rightDistanceM = static_cast<float>(measured.totalRightCounts) * distancePerCountM;
-        const float forwardDistanceM = 0.5f * (leftDistanceM + rightDistanceM);
-        const float deltaYawRad = (leftDistanceM - rightDistanceM) / trackWidthM;
-        const float referenceYawRad = _prePredictState(VehicleState::kPsi);
-        const float translationYawRad = VehicleState::NormalizeAngle(referenceYawRad + (0.5f * deltaYawRad));
-        const Eigen::Vector2f heading = HeadingUnitFromYaw(translationYawRad);
-
-        anchoredState(VehicleState::kPx) = _prePredictState(VehicleState::kPx) + (forwardDistanceM * heading.x());
-        anchoredState(VehicleState::kPy) = _prePredictState(VehicleState::kPy) + (forwardDistanceM * heading.y());
-        if (updateYaw)
-        {
-            anchoredState(VehicleState::kPsi) = VehicleState::NormalizeAngle(referenceYawRad + deltaYawRad);
-        }
-    }
-
-    void SrUkfCore::applyWheelRateConstraint(
-        const StateVector& priorState,
-        const StateMatrix& priorCovariance,
-        const EncoderObs& measured,
-        float wheelVarianceRadps2,
-        bool updateYaw) noexcept
-    {
-        StateVector anchoredState = _filter.state();
-        anchorPoseToEncoderDelta(anchoredState, measured, updateYaw);
-        anchoredState(VehicleState::kU) = ComputeMeasuredLinearSpeedMps(measured, _params);
-        anchoredState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
-        anchoredState(VehicleState::kOmegaR) = measured.omegaRightRadps;
-        VehicleState::NormalizeStateVector(anchoredState);
-
-        StateMatrix anchoredCovariance = _filter.covariance();
-        anchoredCovariance.row(VehicleState::kU).setZero();
-        anchoredCovariance.col(VehicleState::kU).setZero();
-        anchoredCovariance.row(VehicleState::kOmegaL).setZero();
-        anchoredCovariance.col(VehicleState::kOmegaL).setZero();
-        anchoredCovariance.row(VehicleState::kOmegaR).setZero();
-        anchoredCovariance.col(VehicleState::kOmegaR).setZero();
-        if (updateYaw)
-        {
-            anchoredCovariance.row(VehicleState::kR).setZero();
-            anchoredCovariance.col(VehicleState::kR).setZero();
-            anchoredState(VehicleState::kR) = ComputeMeasuredYawRateRadps(measured, _params);
-        }
-        anchoredCovariance(VehicleState::kU, VehicleState::kU) =
-            (std::max)(ComputeMeasuredLinearSpeedVarianceMps2(measured), 1.0e-12f);
-        if (updateYaw)
-        {
-            anchoredCovariance(VehicleState::kR, VehicleState::kR) =
-                (std::max)(ComputeMeasuredYawRateVarianceRadps2(measured, _params), 1.0e-12f);
-        }
-        const float constrainedVariance = (std::max)(wheelVarianceRadps2, 1.0e-12f);
-        anchoredCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
-        anchoredCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;
-
-        if (!updateYaw)
-        {
-            StateVector projectedState = priorState;
-            StateMatrix projectedCovariance = priorCovariance;
-            constexpr std::array<int, 7> kAllowedIndices = {
-                VehicleState::kPx,
-                VehicleState::kPy,
-                VehicleState::kU,
-                VehicleState::kV,
-                VehicleState::kOmegaL,
-                VehicleState::kOmegaR,
-                VehicleState::kBgz
-            };
-            ProjectMaskedStateAndCovariance(
-                priorState,
-                priorCovariance,
-                anchoredState,
-                anchoredCovariance,
-                kAllowedIndices.data(),
-                kAllowedIndices.size(),
-                projectedState,
-                projectedCovariance);
-            anchoredState = projectedState;
-            anchoredCovariance = projectedCovariance;
-        }
-
-        _filter.setState(anchoredState, anchoredCovariance);
-    }
-
     void SrUkfCore::applyPivotScrubEncoderWheelConstraint(
         const StateVector& priorState,
         const StateMatrix& priorCovariance,
@@ -1946,6 +2374,14 @@ namespace MazeMap
             projectedState,
             projectedCovariance);
         _filter.setState(projectedState, projectedCovariance);
+        _directWheelUpdateBodyStateInvariant =
+            (std::fabs(projectedState(VehicleState::kPx) - priorState(VehicleState::kPx)) <= 1.0e-6f) &&
+            (std::fabs(projectedState(VehicleState::kPy) - priorState(VehicleState::kPy)) <= 1.0e-6f) &&
+            (std::fabs(projectedState(VehicleState::kPsi) - priorState(VehicleState::kPsi)) <= 1.0e-6f) &&
+            (std::fabs(projectedState(VehicleState::kU) - priorState(VehicleState::kU)) <= 1.0e-6f) &&
+            (std::fabs(projectedState(VehicleState::kV) - priorState(VehicleState::kV)) <= 1.0e-6f) &&
+            (std::fabs(projectedState(VehicleState::kR) - priorState(VehicleState::kR)) <= 1.0e-6f) &&
+            (std::fabs(projectedState(VehicleState::kBgz) - priorState(VehicleState::kBgz)) <= 1.0e-6f);
     }
 
     void SrUkfCore::applyPivotScrubZeroUConstraint(
@@ -2002,6 +2438,11 @@ namespace MazeMap
 
     void SrUkfCore::applyWheelSpeedConstraint(const EncoderObs& measured, float wheelVarianceRadps2) noexcept
     {
+        if (_frozenCycleContext.schedule.exactStationaryLock)
+        {
+            return;
+        }
+
         StateVector constrainedState = _filter.state();
         constrainedState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
         constrainedState(VehicleState::kOmegaR) = measured.omegaRightRadps;
@@ -2018,18 +2459,125 @@ namespace MazeMap
         _filter.setState(constrainedState, constrainedCovariance);
     }
 
+    void SrUkfCore::applyWheelRateConstraint(
+        const StateVector& priorState,
+        const StateMatrix& priorCovariance,
+        const EncoderObs& measured,
+        float wheelVarianceRadps2,
+        bool updateYaw) noexcept
+    {
+        (void)wheelVarianceRadps2;
+        if (_frozenCycleContext.schedule.exactStationaryLock || _pivotScrubMode)
+        {
+            return;
+        }
+
+        const float measuredForwardSpeedMps = ComputeMeasuredLinearSpeedMps(measured, _params);
+        const float measuredForwardVarianceMps2 = ComputeMeasuredLinearSpeedVarianceMps2(measured);
+        if (!(std::isfinite(measuredForwardSpeedMps) &&
+            std::isfinite(measuredForwardVarianceMps2) &&
+            (measuredForwardVarianceMps2 > 0.0f)))
+        {
+            return;
+        }
+
+        StateVector projectedState = priorState;
+        StateMatrix projectedCovariance = priorCovariance;
+        if (updateYaw)
+        {
+            const float measuredYawRateRadps = ComputeMeasuredYawRateRadps(measured, _params);
+            const float measuredYawVarianceRadps2 = ComputeMeasuredYawRateVarianceRadps2(measured, _params);
+            if (!(std::isfinite(measuredYawRateRadps) &&
+                std::isfinite(measuredYawVarianceRadps2) &&
+                (measuredYawVarianceRadps2 > 0.0f)))
+            {
+                return;
+            }
+
+            Eigen::Matrix<float, 2, 1> measurement;
+            measurement << measuredForwardSpeedMps, measuredYawRateRadps;
+            Eigen::Matrix<float, 2, 2> sqrtNoise = Eigen::Matrix<float, 2, 2>::Zero();
+            sqrtNoise(0, 0) = MazeMap::Math::Sqrtf((std::max)(measuredForwardVarianceMps2, 1.0e-12f));
+            sqrtNoise(1, 1) = MazeMap::Math::Sqrtf((std::max)(measuredYawVarianceRadps2, 1.0e-12f));
+            (void)_filter.Update<2>(
+                measurement,
+                sqrtNoise,
+                std::numeric_limits<float>::infinity(),
+                [](const StateVector& sigmaPoint) noexcept
+                {
+                    Eigen::Matrix<float, 2, 1> prediction;
+                    prediction << sigmaPoint(VehicleState::kU), sigmaPoint(VehicleState::kR);
+                    return prediction;
+                });
+
+            constexpr std::array<int, 2> kAllowedIndices = {
+                VehicleState::kU,
+                VehicleState::kR
+            };
+            ProjectMaskedStateAndCovariance(
+                priorState,
+                priorCovariance,
+                _filter.state(),
+                _filter.covariance(),
+                kAllowedIndices.data(),
+                kAllowedIndices.size(),
+                projectedState,
+                projectedCovariance);
+        }
+        else
+        {
+            Eigen::Matrix<float, 1, 1> measurement;
+            measurement << measuredForwardSpeedMps;
+            Eigen::Matrix<float, 1, 1> sqrtNoise;
+            sqrtNoise(0, 0) = MazeMap::Math::Sqrtf((std::max)(measuredForwardVarianceMps2, 1.0e-12f));
+            (void)_filter.Update<1>(
+                measurement,
+                sqrtNoise,
+                std::numeric_limits<float>::infinity(),
+                [](const StateVector& sigmaPoint) noexcept
+                {
+                    Eigen::Matrix<float, 1, 1> prediction;
+                    prediction << sigmaPoint(VehicleState::kU);
+                    return prediction;
+                });
+
+            constexpr std::array<int, 1> kAllowedIndices = {
+                VehicleState::kU
+            };
+            ProjectMaskedStateAndCovariance(
+                priorState,
+                priorCovariance,
+                _filter.state(),
+                _filter.covariance(),
+                kAllowedIndices.data(),
+                kAllowedIndices.size(),
+                projectedState,
+                projectedCovariance);
+        }
+
+        _filter.setState(projectedState, projectedCovariance);
+    }
+
     void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
     {
         (void)yawRateRadps;
+        const bool hasPoseReference =
+            _stationaryCandidatePoseReferenceValid ||
+            _havePredictionReference;
+        const StateVector& poseReferenceState =
+            _stationaryCandidatePoseReferenceValid ?
+            _stationaryCandidatePoseReferenceState :
+            _prePredictState;
+        const StateMatrix& poseReferenceCovariance = _prePredictCovariance;
         VehicleState constrainedState;
         constrainedState.SetStateVector(_filter.state());
         constrainedState.SetCovariance(_filter.covariance());
         constrainedState.ApplyStationaryZeroMotionConstraint(
             _lastEncoderObs,
             true,
-            _havePredictionReference,
-            _prePredictState,
-            _prePredictCovariance,
+            hasPoseReference,
+            poseReferenceState,
+            poseReferenceCovariance,
             ComputeDistancePerEncoderCountM(_params),
             _params.trackWidthM);
         constrainedState.SetGyroBiasZ(_gyroBiasAnchorRadps);
@@ -2078,11 +2626,18 @@ namespace MazeMap
             _saturationFlags);
         if (stationaryCandidate)
         {
+            if (_stationaryCandidateDwellS <= 0.0f)
+            {
+                _stationaryCandidatePoseReferenceState = _prePredictState;
+                _stationaryCandidatePoseReferenceCovariance = _prePredictCovariance;
+                _stationaryCandidatePoseReferenceValid = _havePredictionReference;
+            }
             _stationaryCandidateDwellS += _lastEncoderDtSeconds;
         }
         else
         {
             _stationaryCandidateDwellS = 0.0f;
+            _stationaryCandidatePoseReferenceValid = false;
         }
         _stationaryCertified = _stationaryCandidateDwellS >= Tuning().stationaryCertificationDwellS;
     }
@@ -2243,7 +2798,16 @@ namespace MazeMap
 
     float SrUkfCore::correctedYawRateRadps(float yawRateRawRadps) const noexcept
     {
-        return std::isfinite(yawRateRawRadps) ? (yawRateRawRadps - _gyroBiasAnchorRadps) : 0.0f;
+        if (!std::isfinite(yawRateRawRadps))
+        {
+            return 0.0f;
+        }
+
+        const float gyroBiasZRadps =
+            std::isfinite(_filter.state()(VehicleState::kBgz)) ?
+            _filter.state()(VehicleState::kBgz) :
+            _gyroBiasAnchorRadps;
+        return yawRateRawRadps - gyroBiasZRadps;
     }
 
     void SrUkfCore::ZeroGyroBiasDynamicCrossCovariances(StateMatrix& covariance) noexcept
@@ -2462,6 +3026,40 @@ namespace MazeMap
                 Tuning().recoveryYawRateStdFloorRadps * Tuning().recoveryYawRateStdFloorRadps);
         _filter.setState(state, covariance);
         _nhcReenableDelayRemainingS = Tuning().recoveryNhcReenableDelayS;
+    }
+
+    void SrUkfCore::applyReleaseInflationIfNeeded(bool wasExactStationaryLock) noexcept
+    {
+        if (!wasExactStationaryLock || _frozenCycleContext.schedule.exactStationaryLock)
+        {
+            return;
+        }
+
+        StateMatrix covariance = _filter.covariance();
+        const Eigen::Matrix<float, 2, 2> encoderCovariance =
+            ComputeGeneralEncoderPairCovarianceRadps(_params);
+        const float wheelVarianceFloorRadps2 =
+            (std::max)(encoderCovariance(0, 0), encoderCovariance(1, 1));
+        const float forwardVarianceFloorMps2 =
+            Tuning().generalEncoderLinearSpeedSigmaMps * Tuning().generalEncoderLinearSpeedSigmaMps;
+        const float lateralSigmaFloorMps = ComputeNonholonomicSigmaMps(std::fabs(_filter.state()(VehicleState::kU)));
+        const float lateralVarianceFloorMps2 = lateralSigmaFloorMps * lateralSigmaFloorMps;
+        const float yawSigmaFloorRadps =
+            (std::max)(Tuning().generalEncoderYawRateSigmaRadps, Tuning().recoveryYawRateStdFloorRadps);
+        const float yawVarianceFloorRadps2 = yawSigmaFloorRadps * yawSigmaFloorRadps;
+
+        covariance(VehicleState::kU, VehicleState::kU) =
+            (std::max)(covariance(VehicleState::kU, VehicleState::kU), forwardVarianceFloorMps2);
+        covariance(VehicleState::kV, VehicleState::kV) =
+            (std::max)(covariance(VehicleState::kV, VehicleState::kV), lateralVarianceFloorMps2);
+        covariance(VehicleState::kR, VehicleState::kR) =
+            (std::max)(covariance(VehicleState::kR, VehicleState::kR), yawVarianceFloorRadps2);
+        covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) =
+            (std::max)(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL), wheelVarianceFloorRadps2);
+        covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) =
+            (std::max)(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR), wheelVarianceFloorRadps2);
+        _filter.setState(_filter.state(), covariance);
+        _releaseInflationApplied = true;
     }
 
     float SrUkfCore::wallNoiseFromConfidence(float confidence, float minimumNoise) noexcept

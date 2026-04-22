@@ -12,7 +12,6 @@
 #include "PinPairStrap.h"
 #include "PlantModel.h"
 #include "RuntimeSensorSuite.h"
-#include "StartupCalibration.h"
 #include "VehicleState.h"
 
 #include <algorithm>
@@ -31,8 +30,6 @@ namespace
     constexpr float kShowcasingDonutInitialSpeedMps = 0.30f;
     constexpr float kShowcasingDonutSpeedRampMps2 = 0.05f;
     constexpr float kShowcasingDonutSpeedCapMps = 4.0f;
-    constexpr std::uint16_t kShowcasingDonutFanSpinupHoldMs = 1000U;
-    constexpr std::uint16_t kShowcasingDonutCompletionHoldMs = 250U;
     constexpr float kShowcasingDonutFlashTurnAngleRad = PI_F;
     constexpr std::uint8_t kShowcasingDonutFlashTurnCount = 2U;
     constexpr float kShowcasingDonutCenterRadiusLimitM = 0.27f;
@@ -129,7 +126,6 @@ namespace MazeMap::App::Internal
         , _vehicle(runtime.SpeedVehicle())
         , _drive(runtime.Drive())
         , _driveService(runtime.DriveService())
-        , _startupCalibration(runtime.StartupCalibrationService())
     {
     }
 
@@ -147,20 +143,13 @@ namespace MazeMap::App::Internal
 
         (void)BootUtilityModeFramework::ResetStartupTrace("mode:showcasing_donut");
         (void)_runtime.AppendTextLogLine("Showcasing donut mode");
-        (void)_runtime.AppendTextLogLine("Shared startup calibration, fixed-radius donut sweep, open-floor main-schema logging");
+        (void)_runtime.AppendTextLogLine("Fixed-radius donut sweep followed by flashy in-place turns, open-floor main-schema logging");
 
         if (!_drive.Begin())
         {
             return _runtime.FailActiveMode("Showcasing donut drive base init failed");
         }
         _drive.UseNominalWheelControlProfile();
-
-        _startupCalibration.Cancel();
-        _startupCalibration.SetIsInMaze(true);
-        if (!_startupCalibration.BringUp())
-        {
-            return _runtime.FailActiveMode("Showcasing donut startup bring-up failed");
-        }
 
         ConfigureSelectorMonitor();
         if (!_selectorMonitorArmed)
@@ -182,7 +171,26 @@ namespace MazeMap::App::Internal
 
     void ShowcasingDonutController::Run()
     {
-        _phase = Phase::LaunchStartupCalibration;
+        if (!BeginDonutSweep())
+        {
+            (void)_runtime.FailActiveMode("Showcasing donut sweep could not start");
+            ReleaseSelectorMonitor();
+            _driveService.Cancel();
+            _drive.Brake();
+            _drive.UseNominalWheelControlProfile();
+            SetMissionLevelFanEnabled(false);
+            return;
+        }
+
+        _phase = Phase::DonutSweep;
+        SetMissionLevelFanEnabled(true);
+        (void)_runtime.AppendTextLogFormatted(
+            "Showcasing donut sweep: radius=%.3f start_speed=%.3f ramp=%.3f speed_cap=%.3f center_limit=%.3f",
+            kShowcasingDonutRadiusM,
+            kShowcasingDonutInitialSpeedMps,
+            kShowcasingDonutSpeedRampMps2,
+            kShowcasingDonutSpeedCapMps,
+            kShowcasingDonutCenterRadiusLimitM);
 
         LoopController::ModeCallbacks callbacks{};
         callbacks.onModeWork = &ShowcasingDonutController::ModeWorkThunk;
@@ -201,7 +209,6 @@ namespace MazeMap::App::Internal
         }
 
         ReleaseSelectorMonitor();
-        _startupCalibration.Cancel();
         _driveService.Cancel();
         _drive.Brake();
         _drive.UseNominalWheelControlProfile();
@@ -231,7 +238,6 @@ namespace MazeMap::App::Internal
 
         self->ReleaseSelectorMonitor();
         self->_phase = Phase::Idle;
-        self->_startupCalibration.Cancel();
         self->_driveService.Cancel();
         self->_drive.Brake();
         self->_drive.UseNominalWheelControlProfile();
@@ -265,21 +271,17 @@ namespace MazeMap::App::Internal
     void ShowcasingDonutController::ResetState() noexcept
     {
         ReleaseSelectorMonitor();
-        _startupCalibration.Cancel();
         _driveService.Cancel();
         _phase = Phase::Idle;
         _endReason = EndReason::None;
         _logFileName[0] = '\0';
         _mainLogOpen = false;
         _commandedSpeedMps = 0.0f;
-        _sweepElapsedS = 0.0f;
         _peakCommandedSpeedMps = 0.0f;
         _peakEncoderSpeedMps = 0.0f;
         _peakYawRateRadps = 0.0f;
         _peakPlanarAccelMps2 = 0.0f;
-        _flashTurnsRemaining = 0U;
-        _flashTurnTargetYawRad = 0.0f;
-        _flashTurnMagnitudeRad = 0.0f;
+        _flashTurnsStarted = 0U;
         _appliedCommandTelemetry = BuildBrakeTelemetry();
         _tractionLoss = {};
     }
@@ -409,27 +411,12 @@ namespace MazeMap::App::Internal
         return _selectorMonitorArmed && !IsPinPairStrapMonitorClosed(_selectorSensePin);
     }
 
-    bool ShowcasingDonutController::StartSharedStartupCalibration()
-    {
-        _startupCalibration.Start();
-        return _startupCalibration.Active();
-    }
-
-    bool ShowcasingDonutController::StartHold(const std::uint16_t durationMs) noexcept
-    {
-        _driveService.Cancel();
-        _driveService.SetLimits(BuildShowcasingDonutLimits(_vehicle));
-        _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-        _driveService.StartHold(durationMs, true);
-        return _driveService.Active();
-    }
-
     bool ShowcasingDonutController::BeginDonutSweep() noexcept
     {
         _driveService.Cancel();
         _commandedSpeedMps = kShowcasingDonutInitialSpeedMps;
-        _sweepElapsedS = 0.0f;
         _endReason = EndReason::None;
+        _flashTurnsStarted = 0U;
         _tractionLoss = {};
         return true;
     }
@@ -439,8 +426,6 @@ namespace MazeMap::App::Internal
         _driveService.Cancel();
         _driveService.SetLimits(BuildShowcasingDonutLimits(_vehicle));
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-        _flashTurnTargetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
-        _flashTurnMagnitudeRad = std::fabs(angleRad);
         _driveService.StartTurn(angleRad);
         return _driveService.Active();
     }
@@ -685,30 +670,7 @@ namespace MazeMap::App::Internal
 
         switch (_phase)
         {
-        case Phase::LaunchStartupCalibration:
-        case Phase::RunStartupCalibration:
-            labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec10Static);
-            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::StaticHold);
-            labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
-            labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Startup);
-            labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
-            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
-            labels.progressNorm = _startupCalibration.Active() ? 0.0f : 1.0f;
-            break;
-
-        case Phase::LaunchFanSpinupHold:
-        case Phase::RunFanSpinupHold:
-            labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec10Static);
-            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::StaticHold);
-            labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
-            labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Hold);
-            labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
-            labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
-            labels.progressNorm = 0.0f;
-            break;
-
-        case Phase::LaunchDonutSweep:
-        case Phase::RunDonutSweep:
+        case Phase::DonutSweep:
             labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec60LoopCw);
             labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::None);
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::Clockwise);
@@ -725,8 +687,7 @@ namespace MazeMap::App::Internal
                     0.0f;
             break;
 
-        case Phase::LaunchFlashTurn:
-        case Phase::RunFlashTurn:
+        case Phase::FlashyMoves:
             labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec40Yaw);
             labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::Ip180);
             labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::Clockwise);
@@ -734,16 +695,14 @@ namespace MazeMap::App::Internal
             labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
             labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm =
-                (_flashTurnMagnitudeRad > 1.0e-5f) ?
+                (kShowcasingDonutFlashTurnCount > 0U) ?
                     (std::clamp)(
-                        1.0f - (std::fabs(AngleErrorRad(_flashTurnTargetYawRad, _drive.GetPose().yawRad)) / _flashTurnMagnitudeRad),
+                        static_cast<float>(_flashTurnsStarted) / static_cast<float>(kShowcasingDonutFlashTurnCount),
                         0.0f,
                         1.0f) :
-                    0.0f;
+                    1.0f;
             break;
 
-        case Phase::LaunchCompletionHold:
-        case Phase::RunCompletionHold:
         case Phase::Complete:
             labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec10Static);
             labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::StaticHold);
@@ -829,103 +788,19 @@ namespace MazeMap::App::Internal
 
         switch (_phase)
         {
-        case Phase::LaunchStartupCalibration:
-            if (!StartSharedStartupCalibration())
-            {
-                services.Fault("Showcasing donut startup calibration could not start");
-            }
-            else
-            {
-                (void)_runtime.AppendTextLogLine("Showcasing donut startup calibration");
-                _phase = Phase::RunStartupCalibration;
-            }
-            _appliedCommandTelemetry = BuildBrakeTelemetry();
-            return LoopController::ControlVector::Brake;
-
-        case Phase::RunStartupCalibration:
+        case Phase::DonutSweep:
         {
-            bool done = false;
-            const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
-            if (done)
-            {
-                _phase = Phase::LaunchFanSpinupHold;
-                _appliedCommandTelemetry = BuildBrakeTelemetry();
-                return LoopController::ControlVector::Brake;
-            }
-
-            _appliedCommandTelemetry = BuildCommandTelemetry(control);
-            return control;
-        }
-
-        case Phase::LaunchFanSpinupHold:
-            SetMissionLevelFanEnabled(true);
-            if (!StartHold(kShowcasingDonutFanSpinupHoldMs))
-            {
-                services.Fault("Showcasing donut fan-spinup hold could not start");
-            }
-            else
-            {
-                (void)_runtime.AppendTextLogLine("Showcasing donut fan spinup");
-                _phase = Phase::RunFanSpinupHold;
-            }
-            _appliedCommandTelemetry = BuildBrakeTelemetry();
-            return LoopController::ControlVector::Brake;
-
-        case Phase::RunFanSpinupHold:
-            if (!_driveService.Active())
-            {
-                services.Fault("Showcasing donut fan-spinup hold was not active");
-                _appliedCommandTelemetry = BuildBrakeTelemetry();
-                return LoopController::ControlVector::Brake;
-            }
-            else
-            {
-                bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
-                if (done)
-                {
-                    _phase = Phase::LaunchDonutSweep;
-                    _appliedCommandTelemetry = BuildBrakeTelemetry();
-                    return LoopController::ControlVector::Brake;
-                }
-
-                _appliedCommandTelemetry = BuildCommandTelemetry(control);
-                return control;
-            }
-
-        case Phase::LaunchDonutSweep:
-            if (!BeginDonutSweep())
-            {
-                services.Fault("Showcasing donut sweep could not start");
-            }
-            else
-            {
-                (void)_runtime.AppendTextLogFormatted(
-                    "Showcasing donut sweep: radius=%.3f start_speed=%.3f ramp=%.3f speed_cap=%.3f center_limit=%.3f",
-                    kShowcasingDonutRadiusM,
-                    kShowcasingDonutInitialSpeedMps,
-                    kShowcasingDonutSpeedRampMps2,
-                    kShowcasingDonutSpeedCapMps,
-                    kShowcasingDonutCenterRadiusLimitM);
-                _phase = Phase::RunDonutSweep;
-            }
-            _appliedCommandTelemetry = BuildBrakeTelemetry();
-            return LoopController::ControlVector::Brake;
-
-        case Phase::RunDonutSweep:
-        {
-            _sweepElapsedS += (state.dtSeconds > 0.0f) ? state.dtSeconds : 0.0f;
-            if (EndConditionReached(state))
-            {
-                _phase = Phase::LaunchFlashTurn;
-                _flashTurnsRemaining = kShowcasingDonutFlashTurnCount;
-                _appliedCommandTelemetry = BuildBrakeTelemetry();
-                return LoopController::ControlVector::Brake;
-            }
-
             const float dtSeconds = (state.dtSeconds > 0.0f) ? state.dtSeconds : 0.0f;
             _commandedSpeedMps =
                 (std::min)(kShowcasingDonutSpeedCapMps, _commandedSpeedMps + (kShowcasingDonutSpeedRampMps2 * dtSeconds));
+            if (EndConditionReached(state))
+            {
+                (void)_runtime.AppendTextLogLine("Showcasing donut flashy turns");
+                _phase = Phase::FlashyMoves;
+                _appliedCommandTelemetry = BuildBrakeTelemetry();
+                return LoopController::ControlVector::Brake;
+            }
+
             const LoopController::ControlVector control = _drive.PointControlVector(
                 _commandedSpeedMps,
                 CommandedYawRateRadps(),
@@ -934,79 +809,42 @@ namespace MazeMap::App::Internal
             return control;
         }
 
-        case Phase::LaunchFlashTurn:
-            if (_flashTurnsRemaining == 0U)
+        case Phase::FlashyMoves:
+            if (_driveService.Active())
             {
-                _phase = Phase::LaunchCompletionHold;
+                bool done = false;
+                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                if (done)
+                {
+                    if (_flashTurnsStarted >= kShowcasingDonutFlashTurnCount)
+                    {
+                        _phase = Phase::Complete;
+                    }
+                    _appliedCommandTelemetry = BuildBrakeTelemetry();
+                    return LoopController::ControlVector::Brake;
+                }
+
+                _appliedCommandTelemetry = BuildCommandTelemetry(control);
+                return control;
+            }
+
+            if (_flashTurnsStarted >= kShowcasingDonutFlashTurnCount)
+            {
+                _phase = Phase::Complete;
                 _appliedCommandTelemetry = BuildBrakeTelemetry();
                 return LoopController::ControlVector::Brake;
             }
+
             if (!BeginFlashTurn(kShowcasingDonutFlashTurnAngleRad))
             {
-                _phase = Phase::LaunchCompletionHold;
+                services.Fault("Showcasing donut flashy turn could not start");
                 _appliedCommandTelemetry = BuildBrakeTelemetry();
                 return LoopController::ControlVector::Brake;
             }
-            --_flashTurnsRemaining;
-            _phase = Phase::RunFlashTurn;
+
+            ++_flashTurnsStarted;
             _appliedCommandTelemetry = BuildBrakeTelemetry();
             return LoopController::ControlVector::Brake;
-
-        case Phase::RunFlashTurn:
-            if (!_driveService.Active())
-            {
-                services.Fault("Showcasing donut flash turn was not active");
-                _appliedCommandTelemetry = BuildBrakeTelemetry();
-                return LoopController::ControlVector::Brake;
-            }
-            else
-            {
-                bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
-                if (done)
-                {
-                    _phase = (_flashTurnsRemaining > 0U) ? Phase::LaunchFlashTurn : Phase::LaunchCompletionHold;
-                    _appliedCommandTelemetry = BuildBrakeTelemetry();
-                    return LoopController::ControlVector::Brake;
-                }
-
-                _appliedCommandTelemetry = BuildCommandTelemetry(control);
-                return control;
-            }
-
-        case Phase::LaunchCompletionHold:
-            if (!StartHold(kShowcasingDonutCompletionHoldMs))
-            {
-                services.Fault("Showcasing donut completion hold could not start");
-            }
-            else
-            {
-                _phase = Phase::RunCompletionHold;
-            }
-            _appliedCommandTelemetry = BuildBrakeTelemetry();
-            return LoopController::ControlVector::Brake;
-
-        case Phase::RunCompletionHold:
-            if (!_driveService.Active())
-            {
-                services.Fault("Showcasing donut completion hold was not active");
-                _appliedCommandTelemetry = BuildBrakeTelemetry();
-                return LoopController::ControlVector::Brake;
-            }
-            else
-            {
-                bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
-                if (done)
-                {
-                    _phase = Phase::Complete;
-                    _appliedCommandTelemetry = BuildBrakeTelemetry();
-                    return LoopController::ControlVector::Brake;
-                }
-
-                _appliedCommandTelemetry = BuildCommandTelemetry(control);
-                return control;
-            }
 
         case Phase::Complete:
             services.RequestEndLoop();
@@ -1033,13 +871,13 @@ namespace MazeMap::App::Internal
             BootModeId::ShowcasingDonut,
             BootModeCategory::Utility,
             "showcasing_donut",
-            "Run shared startup calibration, execute a fixed-radius clockwise donut sweep, ramp speed until traction loss or the 4 m/s cap, then finish with bounded flashy turns.",
+            "Execute a fixed-radius clockwise donut sweep, ramp speed until traction loss or the 4 m/s cap, then finish with bounded flashy turns.",
             "logging.txt, donutNNN.mmlog",
             &GetShowcasingDonutMode,
             "GetShowcasingDonutMode",
             "ShowcasingDonutController.cpp",
-            "shared startup calibration; fan spinup hold; fixed-radius donut sweep; bounded flashy turns; completion hold",
-            "DiagnosticConfig control period; OpenFloorMeasurementSpec log vocabulary; shared startup calibration; shared drive and drive-base services",
+            "fixed-radius donut sweep; bounded flashy turns",
+            "DiagnosticConfig control period; OpenFloorMeasurementSpec log vocabulary; shared drive and drive-base services",
             "Fixed 0.090 m clockwise turn radius; 0.30 m/s initial speed; 0.05 m/s^2 speed ramp; 4.0 m/s end cap; selector removal faults the run; finish stays within 0.27 m of donut center",
             "donutNNN.mmlog",
         };

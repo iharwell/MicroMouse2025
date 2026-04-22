@@ -8,6 +8,8 @@
 #include "..\MazeMap\MazeMapRuntimeMmLog.h"
 #include "..\MazeMap\MazeMapRuntimeSignalHelpers.h"
 #include "..\MazeMap\RuntimeBinaryLogSupport.h"
+#include "..\MazeMap\SigmaPointSetSimplex.h"
+#include "..\MazeMap\UKF.h"
 
 #include <cstdio>
 #include <array>
@@ -232,6 +234,56 @@ namespace MazeMap::App
                 AngleErrorRad(DirectionToYawRad(MazeMap::UpRight), DirectionToYawRad(MazeMap::UpLeft)),
                 diagonalError,
                 1.0e-6f);
+        }
+
+        TEST_METHOD(SigmaPointSetSimplex_UsesRecursiveWeightsAndUnitCovariance)
+        {
+            using MazeMap::SigmaPointSetSimplex;
+            using SimplexFilter = MazeMap::UKF<3, 1>;
+
+            Assert::AreEqual(5, SigmaPointSetSimplex::ActiveSigmaCountForDimension(3));
+
+            Eigen::Matrix<float, 5, 1> meanWeights;
+            Eigen::Matrix<float, 5, 1> covarianceWeights;
+            SigmaPointSetSimplex::ComputeWeights<3>(meanWeights, covarianceWeights);
+
+            Assert::AreEqual(0.0f, meanWeights(0), 1.0e-6f);
+            Assert::AreEqual(2.0f, covarianceWeights(0), 1.0e-6f);
+            for (int index = 1; index < 5; ++index)
+            {
+                Assert::AreEqual(0.25f, meanWeights(index), 1.0e-6f);
+                Assert::AreEqual(0.25f, covarianceWeights(index), 1.0e-6f);
+            }
+
+            Eigen::Matrix<float, 3, 1> mean = Eigen::Matrix<float, 3, 1>::Zero();
+            Eigen::Matrix<float, 3, 3> sqrtCovariance = Eigen::Matrix<float, 3, 3>::Identity();
+            Eigen::Matrix<float, 3, 5> sigmaPoints;
+            Assert::IsTrue(SigmaPointSetSimplex::GenerateSigmaPoints<3>(mean, sqrtCovariance, sigmaPoints));
+
+            Eigen::Matrix<float, 3, 1> weightedMean = Eigen::Matrix<float, 3, 1>::Zero();
+            for (int column = 0; column < 5; ++column)
+            {
+                weightedMean += meanWeights(column) * sigmaPoints.col(column);
+            }
+            Assert::AreEqual(0.0f, weightedMean(0), 1.0e-6f);
+            Assert::AreEqual(0.0f, weightedMean(1), 1.0e-6f);
+            Assert::AreEqual(0.0f, weightedMean(2), 1.0e-6f);
+
+            Eigen::Matrix<float, 3, 3> weightedCovariance = Eigen::Matrix<float, 3, 3>::Zero();
+            for (int column = 0; column < 5; ++column)
+            {
+                const Eigen::Matrix<float, 3, 1> residual = sigmaPoints.col(column) - weightedMean;
+                weightedCovariance += covarianceWeights(column) * (residual * residual.transpose());
+            }
+            Assert::AreEqual(1.0f, weightedCovariance(0, 0), 1.0e-6f);
+            Assert::AreEqual(1.0f, weightedCovariance(1, 1), 1.0e-6f);
+            Assert::AreEqual(1.0f, weightedCovariance(2, 2), 1.0e-6f);
+            Assert::AreEqual(0.0f, weightedCovariance(0, 1), 1.0e-6f);
+            Assert::AreEqual(0.0f, weightedCovariance(0, 2), 1.0e-6f);
+            Assert::AreEqual(0.0f, weightedCovariance(1, 2), 1.0e-6f);
+
+            SimplexFilter filter;
+            Assert::IsTrue(filter.sigmaPointStrategy() == SimplexFilter::SigmaPointStrategy::Simplex);
         }
 
         TEST_METHOD(Lsm6Dsv16xGyroProjectYawConversionFlipsSensorCounterclockwiseSign)

@@ -493,7 +493,7 @@ namespace MazeMap::Config
     constexpr float kStraightHeadingKp = 18.0f;
     // [High] Straight-line yaw damping. Increase if heading correction oscillates; decrease if heading correction feels
     // lazy and the robot lets errors build before responding.
-    constexpr float kStraightYawD = 0.10f;
+    constexpr float kStraightYawD = 2.0f;
     // [High] Wall-centering gain used when side walls are available. Increase if the robot does not recenter in a
     // corridor; decrease if wall following hunts or bounces between walls.
     constexpr float kWallCenterGain = 135.0f;
@@ -520,7 +520,7 @@ namespace MazeMap::Config
     constexpr float kArcHeadingKp = 14.0f;
     // [High] Arc yaw damping. Increase if arc tracking oscillates in yaw; decrease if the robot lags behind the
     // desired curvature and feels overdamped through smooth turns.
-    constexpr float kArcYawD = 0.10f;
+    constexpr float kArcYawD = 2.0f;
     // [High] Smooth-turn yaw-rate proportional gain. Smooth maneuvers treat the prescribed yaw-rate trace as the
     // authority, so this closes the measured turn rate onto that trace without changing maneuver geometry.
     constexpr float kSmoothTurnYawRateKp = 1.3f;
@@ -532,7 +532,7 @@ namespace MazeMap::Config
     constexpr float kTurnHeadingKp = 7.5f;
     // [High] In-place turn damping. Increase if turn-stop oscillation remains; decrease if in-place turns feel too
     // sluggish to settle on target heading.
-    constexpr float kTurnYawD = 0.12f;
+    constexpr float kTurnYawD = 2.4f;
     // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
     // current DriveBase PD setup family, with concrete starting values for every supported
     // control/signal pairing already represented by the new naming scheme.
@@ -747,6 +747,60 @@ struct DriveTelemetry
     float ukfNhcResidualMps = 0.0f;
     float ukfNhcResidualSigma = 0.0f;
     float ukfFeedforwardYawRateRadps = 0.0f;
+    float ukfClosureResidualLeftMps = 0.0f;
+    float ukfClosureResidualRightMps = 0.0f;
+    float ukfLongitudinalClosureSeverity = 0.0f;
+    float ukfDifferentialClosureSeverity = 0.0f;
+    float ukfLateralAccelerationSeverity = 0.0f;
+    float ukfYawConsistencySeverity = 0.0f;
+    float ukfLeftBankAnomalySeverity = 0.0f;
+    float ukfRightBankAnomalySeverity = 0.0f;
+    float ukfLeftPreProjectionUtilization = 0.0f;
+    float ukfRightPreProjectionUtilization = 0.0f;
+    float ukfLeftBankMemory = 0.0f;
+    float ukfRightBankMemory = 0.0f;
+    float ukfLeftBankRecoveryScore = 0.0f;
+    float ukfRightBankRecoveryScore = 0.0f;
+    float ukfLeftBankRecoveryTimeRemainingS = 0.0f;
+    float ukfRightBankRecoveryTimeRemainingS = 0.0f;
+    float ukfStationaryCandidateDwellS = 0.0f;
+    float ukfLaunchHoldRemainingS = 0.0f;
+    float ukfInconsistentHoldRemainingS = 0.0f;
+    float ukfNhcReenableDelayRemainingS = 0.0f;
+    float ukfForwardProcessNoiseScale = 1.0f;
+    float ukfLateralProcessNoiseScale = 1.0f;
+    float ukfYawRateProcessNoiseScale = 1.0f;
+    float ukfLeftWheelProcessNoiseScale = 1.0f;
+    float ukfRightWheelProcessNoiseScale = 1.0f;
+    float ukfClosureCovarianceScaleLeft = 1.0f;
+    float ukfClosureCovarianceScaleRight = 1.0f;
+    float ukfLateralPseudoCovarianceScale = 1.0f;
+    float ukfAppliedLeftBankTorqueNm = 0.0f;
+    float ukfAppliedRightBankTorqueNm = 0.0f;
+    float ukfGyroInnovationRadps = 0.0f;
+    float ukfForwardAccelInnovationMps2 = 0.0f;
+    float ukfLateralAccelInnovationMps2 = 0.0f;
+    float ukfGyroInnovationNis = 0.0f;
+    float ukfForwardAccelInnovationNis = 0.0f;
+    float ukfLateralAccelInnovationNis = 0.0f;
+    float ukfClosureLeftNis = 0.0f;
+    float ukfClosureRightNis = 0.0f;
+    float ukfLateralPseudoNis = 0.0f;
+    float ukfForwardSpeedVariance = 0.0f;
+    float ukfLateralSpeedVariance = 0.0f;
+    float ukfYawRateVariance = 0.0f;
+    float ukfLeftWheelSpeedVariance = 0.0f;
+    float ukfRightWheelSpeedVariance = 0.0f;
+    float ukfGyroBiasVariance = 0.0f;
+    std::uint8_t ukfExactStationaryLock = 0U;
+    std::uint8_t ukfLeftBankHoldoffActive = 0U;
+    std::uint8_t ukfRightBankHoldoffActive = 0U;
+    std::uint8_t ukfLeftBankInRecovery = 0U;
+    std::uint8_t ukfRightBankInRecovery = 0U;
+    std::uint8_t ukfDirectWheelUpdateBodyInvariant = 0U;
+    std::uint8_t ukfReleaseInflationApplied = 0U;
+    std::uint8_t feedforwardUsedAlignedCycleContext = 0U;
+    std::uint8_t feedforwardUsedGripOnlyFallback = 0U;
     bool encoderObservationValid = false;
 };
 
@@ -763,6 +817,7 @@ struct ControlCycleTiming
     uint32_t ukfUpdateStartUs = 0UL;
     uint32_t ukfUpdateEndUs = 0UL;
     uint32_t ukfUpdateDurationUs = 0UL;
+    uint32_t ukfTotalDurationUs = 0UL;
     uint32_t cycleCounterStart = 0UL;
     uint32_t cycleCounterEnd = 0UL;
 };
@@ -1896,8 +1951,8 @@ public:
         float& offDistanceThresholdM) const
     {
         const float forwardSensorOffsetM = (std::min)(
-            vehicle.FrontLeft.GetPosition().x(),
-            vehicle.FrontRight.GetPosition().x());
+            vehicle.FrontLeft.GetPosition().y(),
+            vehicle.FrontRight.GetPosition().y());
         if (!MazeMap::TryComputeFrontWallHalfwayIntoAdjacentDistanceM(
                 MazeMap::Config::kCellSizeM,
                 MazeMap::Config::kMazeWallThicknessM,
@@ -2493,17 +2548,17 @@ inline float ReachableSpeedWithBoundary(float boundarySpeed, float distance, flo
     return MazeMap::LinearKinematics::V1IgnoringT((std::max)(distance, 0.0f), boundarySpeed, accel);
 }
 
-inline Eigen::Vector2f LeftUnitFromHeading(const Eigen::Vector2f& headingUnit)
+inline Eigen::Vector2f RightUnitFromHeading(const Eigen::Vector2f& headingUnit)
 {
-    return Eigen::Vector2f(-headingUnit.y(), headingUnit.x());
+    return Eigen::Vector2f(headingUnit.y(), -headingUnit.x());
 }
 
 inline Eigen::Vector2f RotateBodyVectorToWorld(const PoseEstimate& pose, const Eigen::Vector2f& bodyVector)
 {
-    const Eigen::Vector2f leftUnit = LeftUnitFromHeading(pose.headingUnit);
+    const Eigen::Vector2f rightUnit = RightUnitFromHeading(pose.headingUnit);
     return Eigen::Vector2f(
-        (pose.headingUnit.x() * bodyVector.x()) + (leftUnit.x() * bodyVector.y()),
-        (pose.headingUnit.y() * bodyVector.x()) + (leftUnit.y() * bodyVector.y()));
+        (rightUnit.x() * bodyVector.x()) + (pose.headingUnit.x() * bodyVector.y()),
+        (rightUnit.y() * bodyVector.x()) + (pose.headingUnit.y() * bodyVector.y()));
 }
 
 inline Eigen::Vector2f SensorWorldPosition(const PoseEstimate& pose, const MazeMap::WallSensor& sensor)
@@ -2810,7 +2865,7 @@ inline bool TryComputeFrontWallObservationSampleDistanceM(
     float poseXM = 0.0f;
     float poseYM = 0.0f;
     const float sideSensorForwardOffsetM =
-        (std::max)(vehicle.SideLeft.GetPosition().x(), vehicle.SideRight.GetPosition().x());
+        (std::max)(vehicle.SideLeft.GetPosition().y(), vehicle.SideRight.GetPosition().y());
     const MazeMap::CellCoordinates observedCell(0, 0);
     if (!MazeMap::TryComputeSideWallObservationSamplePoseM(
             observedCell,
@@ -3771,24 +3826,12 @@ inline bool TryComputeSideWallAimCoordinateM(
         return false;
     }
 
-    const float yawCos = std::cos(pose.yawRad);
-    const float yawSin = std::sin(pose.yawRad);
-    const Eigen::Vector2f& sensorPosition = sensor.GetPosition();
-    const Eigen::Vector2f& sensorFacing = sensor.GetFacingDirection();
-    const float sensorXM =
-        pose.xMeters +
-        (yawCos * sensorPosition.x()) -
-        (yawSin * sensorPosition.y());
-    const float sensorYM =
-        pose.yMeters +
-        (yawSin * sensorPosition.x()) +
-        (yawCos * sensorPosition.y());
-    const float facingXM =
-        (yawCos * sensorFacing.x()) -
-        (yawSin * sensorFacing.y());
-    const float facingYM =
-        (yawSin * sensorFacing.x()) +
-        (yawCos * sensorFacing.y());
+    const Eigen::Vector2f sensorPosition = SensorWorldPosition(pose, sensor);
+    const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
+    const float sensorXM = sensorPosition.x();
+    const float sensorYM = sensorPosition.y();
+    const float facingXM = sensorFacing.x();
+    const float facingYM = sensorFacing.y();
     const float innerMinCoordinateM =
         MazeMap::ComputeCellInnerMinCoordinateM(MazeMap::Config::kMazeWallThicknessM);
     const float innerMaxCoordinateM =

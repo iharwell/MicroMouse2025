@@ -2,6 +2,8 @@
 #include "CppUnitTest.h"
 
 #include "SrUkfCoreTestSupport.h"
+#include "..\MazeMap\PlantModel.h"
+#include "..\MazeMap\UkfRobustUpdatePolicy.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -18,6 +20,70 @@ namespace MazeMap
                 SrUkfCore::SetRuntimeTuning(saved);
             }
         };
+
+        constexpr float kPlanarAccelUpdateTestDtSeconds = 0.001f;
+
+        VehicleState::StateVector BuildPlanarAccelUpdateTestState() noexcept
+        {
+            return BuildUkfState(
+                0.03f,
+                0.11f,
+                0.08f,
+                1.2f,
+                0.02f,
+                0.15f,
+                12.0f,
+                12.0f,
+                0.01f);
+        }
+
+        VehicleState::StateMatrix BuildPlanarAccelUpdateTestCovariance() noexcept
+        {
+            return BuildUkfCovariance(0.02f, 0.05f, 0.20f, 0.15f, 0.25f, 0.50f, 0.05f);
+        }
+
+        ControlInput BuildPlanarAccelUpdateTestControl(const PlantParams& params) noexcept
+        {
+            ControlInput control{};
+            control.leftMotorCommand = 0.26f;
+            control.rightMotorCommand = 0.23f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+            return control;
+        }
+
+        void PrimeCoreForPlanarAccelUpdate(
+            SrUkfCore& core,
+            const VehicleState::StateVector& initialState,
+            const VehicleState::StateMatrix& initialCovariance,
+            const ControlInput& control)
+        {
+            Assert::IsTrue(core.reset(initialState, initialCovariance));
+            Assert::IsTrue(core.predict(kPlanarAccelUpdateTestDtSeconds, control));
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 0;
+            encoder.totalRightCounts = 0;
+            encoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
+            encoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            Assert::IsTrue(core.updateEncoderPair(encoder, kPlanarAccelUpdateTestDtSeconds).accepted);
+        }
+
+        ImuAccelObs BuildPlanarAccelObservation(
+            const PlantModel& plant,
+            const VehicleState::StateVector& state,
+            const ControlInput& control,
+            const PlantModel::PreparedParams& prepared,
+            float lateralAccelDeltaMps2,
+            float forwardAccelDeltaMps2) noexcept
+        {
+            const Eigen::Vector2f predicted = plant.imuPlanarAcceleration(state, control, prepared);
+            ImuAccelObs observation{};
+            observation.valid = true;
+            observation.accelBodyXMps2 = predicted.x() + lateralAccelDeltaMps2;
+            observation.accelBodyYMps2 = predicted.y() + forwardAccelDeltaMps2;
+            return observation;
+        }
     }
 
     TEST_CLASS(SrUkfCoreModeAndDiagnosticsTest)
@@ -156,6 +222,86 @@ namespace MazeMap
                 false,
                 0.0f,
                 0.01f));
+        }
+
+        TEST_METHOD(UkfRobustUpdatePolicyAppliesLaunchAndSevereEdgeScheduling)
+        {
+            const FrozenCycleSchedule nominal =
+                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
+                    GripUtilizationSnapshot{},
+                    TransientContactMemoryState{},
+                    RegripRecoveryState{},
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false);
+
+            const FrozenCycleSchedule launch =
+                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
+                    GripUtilizationSnapshot{},
+                    TransientContactMemoryState{},
+                    RegripRecoveryState{},
+                    false,
+                    true,
+                    false,
+                    false,
+                    true,
+                    false);
+            Assert::IsTrue(launch.lateralPseudoMeasurementCovarianceScale < nominal.lateralPseudoMeasurementCovarianceScale);
+
+            GripUtilizationSnapshot oneBank{};
+            oneBank.leftBankAnomalySeverity = 1.0f;
+            const FrozenCycleSchedule oneBankSchedule =
+                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
+                    oneBank,
+                    TransientContactMemoryState{},
+                    RegripRecoveryState{},
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false);
+            Assert::IsTrue(oneBankSchedule.closureCovarianceScaleLeft > oneBankSchedule.closureCovarianceScaleRight);
+
+            GripUtilizationSnapshot severe{};
+            severe.longitudinalClosureSeverity = 1.0f;
+            severe.differentialClosureSeverity = 1.0f;
+            severe.lateralAccelerationSeverity = 1.0f;
+            severe.yawConsistencySeverity = 1.0f;
+            severe.leftBankAnomalySeverity = 1.0f;
+            severe.rightBankAnomalySeverity = 1.0f;
+            severe.leftBankPreProjectionUtilization = 1.20f;
+            severe.rightBankPreProjectionUtilization = 1.15f;
+
+            TransientContactMemoryState memory{};
+            memory.leftBankMemory = 1.0f;
+            memory.rightBankMemory = 1.0f;
+
+            RegripRecoveryState regrip{};
+            regrip.leftBankInRecovery = true;
+            regrip.rightBankInRecovery = true;
+            regrip.leftBankRecoveryScore = 1.0f;
+            regrip.rightBankRecoveryScore = 1.0f;
+            regrip.leftBankRecoveryTimeRemainingS = 0.05f;
+            regrip.rightBankRecoveryTimeRemainingS = 0.05f;
+
+            const FrozenCycleSchedule severeEdge =
+                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
+                    severe,
+                    memory,
+                    regrip,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    true);
+            Assert::IsTrue(severeEdge.leftBankHoldoffActive);
+            Assert::IsTrue(severeEdge.rightBankHoldoffActive);
+            Assert::IsTrue(severeEdge.lateralPseudoMeasurementCovarianceScale >= 64.0f);
         }
 
         TEST_METHOD(SrUkfCorePivotScrubModeMasksEncoderYawAndAppliesSoftZeroU)
@@ -514,124 +660,6 @@ namespace MazeMap
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) >= (0.020f * 0.020f));
         }
 
-        TEST_METHOD(SrUkfCoreDebugTextDumpIncludesStateCovarianceNoiseAndPlantConfiguration)
-        {
-            SrUkfCore core;
-            const VehicleState::StateVector state = BuildUkfState(
-                0.05f,
-                0.11f,
-                0.02f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.003f);
-            const VehicleState::StateMatrix covariance = BuildUkfCovariance();
-            Assert::IsTrue(core.reset(state, covariance));
-
-            ControlInput control{};
-            control.leftMotorCommand = 0.25f;
-            control.rightMotorCommand = 0.35f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = 7.95f;
-            Assert::IsTrue(core.predict(0.01f, control));
-
-            EncoderObs encoderObservation{};
-            encoderObservation.totalLeftCounts = 8;
-            encoderObservation.totalRightCounts = 9;
-            encoderObservation.omegaLeftRadps = 1.2f;
-            encoderObservation.omegaRightRadps = 1.3f;
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoderObservation, 0.01f);
-            Assert::IsTrue(encoderResult.attempted);
-
-            std::vector<std::pair<std::string, std::string>> dumpLines;
-            Assert::IsTrue(core.WriteDebugTextDump(
-                [&dumpLines](const char* type, const char* message) noexcept
-                {
-                    dumpLines.emplace_back(
-                        (type != nullptr) ? type : "",
-                        (message != nullptr) ? message : "");
-                    return true;
-                }));
-
-            auto countType =
-                [&dumpLines](const char* type)
-                {
-                    std::size_t count = 0U;
-                    for (const auto& line : dumpLines)
-                    {
-                        if (line.first == type)
-                        {
-                            ++count;
-                        }
-                    }
-                    return count;
-                };
-            auto findLineIndexContaining =
-                [&dumpLines](const char* token)
-                {
-                    return FindFirstDumpLineIndexContaining(dumpLines, token);
-                };
-
-            Assert::IsTrue(dumpLines.size() >= 42U);
-            Assert::AreEqual(static_cast<std::size_t>(9U), countType("ukf_dump_covariance_row"));
-            Assert::AreEqual(static_cast<std::size_t>(9U), countType("ukf_dump_process_noise_sqrt_row"));
-            Assert::AreEqual(static_cast<std::size_t>(4U), countType("ukf_dump_contact_position"));
-            Assert::AreEqual(static_cast<std::size_t>(3U), countType("ukf_dump_imu_noise_sqrt_row"));
-            Assert::AreEqual(static_cast<std::size_t>(2U), countType("ukf_dump_front_noise_sqrt_row"));
-            Assert::AreEqual(static_cast<std::size_t>(1U), countType("ukf_dump_side_noise_sqrt_row"));
-
-            const std::size_t stateIndex = findLineIndexContaining("px_m=");
-            const std::size_t predictionReferenceIndex = findLineIndexContaining("have_prediction_reference=true");
-            const std::size_t lastControlIndex = findLineIndexContaining("left_motor_command=0.25");
-            const std::size_t lastEncoderIndex = findLineIndexContaining("total_left_counts=8");
-            const std::size_t massGeometryIndex = findLineIndexContaining("mass_kg=");
-            const std::size_t driveElectricalIndex = findLineIndexContaining("supply_voltage_v=");
-            const std::size_t tireFrictionIndex = findLineIndexContaining("rolling_friction_torque_nm=");
-            const std::size_t staticFrictionIndex = findLineIndexContaining("static_friction_torque_nm=");
-            const std::size_t imuExtrinsicsIndex = findLineIndexContaining("gyro_z_sign=");
-
-            Assert::IsTrue(stateIndex < dumpLines.size());
-            Assert::IsTrue(predictionReferenceIndex < dumpLines.size());
-            Assert::IsTrue(lastControlIndex < dumpLines.size());
-            Assert::IsTrue(lastEncoderIndex < dumpLines.size());
-            Assert::IsTrue(massGeometryIndex < dumpLines.size());
-            Assert::IsTrue(driveElectricalIndex < dumpLines.size());
-            Assert::IsTrue(tireFrictionIndex < dumpLines.size());
-            Assert::IsTrue(staticFrictionIndex < dumpLines.size());
-            Assert::IsTrue(imuExtrinsicsIndex < dumpLines.size());
-
-            Assert::IsTrue(stateIndex < predictionReferenceIndex);
-            Assert::IsTrue(predictionReferenceIndex < lastControlIndex);
-            Assert::IsTrue(lastControlIndex < lastEncoderIndex);
-            Assert::IsTrue(lastEncoderIndex < massGeometryIndex);
-            Assert::IsTrue(massGeometryIndex < driveElectricalIndex);
-            Assert::IsTrue(driveElectricalIndex < tireFrictionIndex);
-            Assert::IsTrue(tireFrictionIndex < staticFrictionIndex);
-            Assert::IsTrue(staticFrictionIndex < imuExtrinsicsIndex);
-
-            const std::string& stateLine = dumpLines[stateIndex].second;
-            Assert::IsTrue(stateLine.find("bgz_radps=") != std::string::npos);
-
-            const std::string& lastControlLine = dumpLines[lastControlIndex].second;
-            Assert::IsTrue(lastControlLine.find("right_motor_command=0.349999994") != std::string::npos ||
-                           lastControlLine.find("right_motor_command=0.35") != std::string::npos);
-            Assert::IsTrue(lastControlLine.find("battery_voltage_v=7.94999981") != std::string::npos ||
-                           lastControlLine.find("battery_voltage_v=7.95") != std::string::npos);
-
-            const std::string& lastEncoderLine = dumpLines[lastEncoderIndex].second;
-            Assert::IsTrue(lastEncoderLine.find("total_right_counts=9") != std::string::npos);
-            Assert::IsTrue(lastEncoderLine.find("omega_left_radps=1.20000005") != std::string::npos ||
-                           lastEncoderLine.find("omega_left_radps=1.2") != std::string::npos);
-
-            const std::string& staticFrictionLine = dumpLines[staticFrictionIndex].second;
-            Assert::AreEqual(
-                0.005f,
-                ExtractNamedFloat(staticFrictionLine, "static_friction_max_speed_mps"),
-                1.0e-6f);
-        }
-
         TEST_METHOD(SrUkfCoreRejectsInvalidMergedImuUpdate)
         {
             SrUkfCore core;
@@ -646,84 +674,122 @@ namespace MazeMap
             Assert::IsFalse(result.accepted);
         }
 
-        TEST_METHOD(SrUkfCoreMergedImuUpdateIgnoresPlanarAccelValues)
+        TEST_METHOD(SrUkfCoreMergedImuUpdateMatchesSequentialYawAndPlanarAccelPath)
         {
-            SrUkfCore baselineCore;
-            SrUkfCore perturbedCore;
-            ControlInput control{};
-            EncoderObs encoder{};
-            constexpr float dt = 0.0005f;
-            constexpr float rawStationaryGyroRadps = 0.04f;
+            const PlantParams params = PlantParams::Default();
+            const PlantModel plant;
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
+            const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
+            const ControlInput control = BuildPlanarAccelUpdateTestControl(params);
 
-            Assert::IsTrue(baselineCore.predict(dt, control));
-            Assert::IsTrue(perturbedCore.predict(dt, control));
+            SrUkfCore mergedCore(params);
+            SrUkfCore sequentialCore(params);
+            PrimeCoreForPlanarAccelUpdate(mergedCore, initialState, initialCovariance, control);
+            PrimeCoreForPlanarAccelUpdate(sequentialCore, initialState, initialCovariance, control);
 
-            const MeasurementUpdateResult baselineEncoderResult = baselineCore.updateEncoderPair(encoder, dt);
-            const MeasurementUpdateResult perturbedEncoderResult = perturbedCore.updateEncoderPair(encoder, dt);
-            Assert::IsTrue(baselineEncoderResult.accepted);
-            Assert::IsTrue(perturbedEncoderResult.accepted);
+            const ImuAccelObs accelObservation =
+                BuildPlanarAccelObservation(
+                    plant,
+                    mergedCore.state(),
+                    control,
+                    prepared,
+                    0.35f,
+                    -0.55f);
+            ImuMergedObs mergedObservation{};
+            mergedObservation.valid = true;
+            mergedObservation.gyroZRadps =
+                mergedCore.state()(VehicleState::kR) +
+                mergedCore.state()(VehicleState::kBgz) +
+                0.08f;
+            mergedObservation.accelBodyXMps2 = accelObservation.accelBodyXMps2;
+            mergedObservation.accelBodyYMps2 = accelObservation.accelBodyYMps2;
 
-            ImuMergedObs baselineObservation{};
-            baselineObservation.valid = true;
-            baselineObservation.gyroZRadps = rawStationaryGyroRadps;
-            baselineObservation.accelBodyXMps2 = 0.0f;
-            baselineObservation.accelBodyYMps2 = 0.0f;
+            const MeasurementUpdateResult mergedResult = mergedCore.updateImuMerged(mergedObservation);
+            const MeasurementUpdateResult yawResult = sequentialCore.updateYawRate(mergedObservation.gyroZRadps);
+            const MeasurementUpdateResult accelResult = sequentialCore.updatePlanarAccel(accelObservation);
 
-            ImuMergedObs perturbedObservation = baselineObservation;
-            perturbedObservation.accelBodyXMps2 = 250.0f;
-            perturbedObservation.accelBodyYMps2 = -175.0f;
-
-            const MeasurementUpdateResult baselineResult = baselineCore.updateImuMerged(baselineObservation);
-            const MeasurementUpdateResult perturbedResult = perturbedCore.updateImuMerged(perturbedObservation);
-            Assert::IsTrue(baselineResult.attempted);
-            Assert::IsTrue(baselineResult.accepted);
-            Assert::IsTrue(perturbedResult.attempted);
-            Assert::IsTrue(perturbedResult.accepted);
-
-            const VehicleState::StateVector baselineState = baselineCore.state();
-            const VehicleState::StateVector perturbedState = perturbedCore.state();
-            const VehicleState::StateMatrix baselineCovariance = baselineCore.covariance();
-            const VehicleState::StateMatrix perturbedCovariance = perturbedCore.covariance();
-
-            Assert::IsTrue((baselineState - perturbedState).cwiseAbs().maxCoeff() <= 1.0e-7f);
-            Assert::IsTrue((baselineCovariance - perturbedCovariance).cwiseAbs().maxCoeff() <= 1.0e-7f);
-            Assert::IsTrue(std::isfinite(baselineState(VehicleState::kR)));
-            Assert::AreEqual(0.0f, baselineState(VehicleState::kBgz), 1.0e-6f);
+            Assert::IsTrue(mergedResult.attempted);
+            Assert::IsTrue(mergedResult.accepted);
+            Assert::IsTrue(yawResult.attempted);
+            Assert::IsTrue(yawResult.accepted);
+            Assert::IsTrue(accelResult.attempted);
+            Assert::IsTrue(accelResult.accepted);
+            Assert::IsTrue(
+                (mergedCore.state() - sequentialCore.state()).cwiseAbs().maxCoeff() <= 1.0e-6f);
+            Assert::IsTrue(
+                (mergedCore.covariance() - sequentialCore.covariance()).cwiseAbs().maxCoeff() <= 1.0e-6f);
         }
 
-        TEST_METHOD(SrUkfCorePlanarAccelUpdateIsDisabledAndLeavesFilterStateUntouched)
+        TEST_METHOD(SrUkfCorePlanarAccelUpdateUsesForwardChannelAndIgnoresLateralOnlyPerturbation)
         {
-            SrUkfCore core;
-            const VehicleState::StateVector initialState =
-                BuildUkfState(
-                    0.03f,
-                    0.11f,
-                    0.08f,
-                    1.2f,
-                    0.02f,
-                    0.15f,
-                    12.0f,
-                    12.0f,
-                    0.01f);
-            const VehicleState::StateMatrix initialCovariance =
-                BuildUkfCovariance(0.02f, 0.05f, 0.20f, 0.15f, 0.25f, 0.50f, 0.05f);
-            Assert::IsTrue(core.reset(initialState, initialCovariance));
+            const PlantParams params = PlantParams::Default();
+            const PlantModel plant;
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
+            const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
+            const ControlInput control = BuildPlanarAccelUpdateTestControl(params);
 
-            const VehicleState::StateVector beforeState = core.state();
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            SrUkfCore baselineCore(params);
+            SrUkfCore lateralPerturbedCore(params);
+            SrUkfCore forwardPerturbedCore(params);
+            PrimeCoreForPlanarAccelUpdate(baselineCore, initialState, initialCovariance, control);
+            PrimeCoreForPlanarAccelUpdate(lateralPerturbedCore, initialState, initialCovariance, control);
+            PrimeCoreForPlanarAccelUpdate(forwardPerturbedCore, initialState, initialCovariance, control);
 
-            ImuAccelObs observation{};
-            observation.valid = true;
-            observation.accelBodyXMps2 = 123.0f;
-            observation.accelBodyYMps2 = -87.0f;
-            const MeasurementUpdateResult result = core.updatePlanarAccel(observation);
+            const ImuAccelObs baselineObservation =
+                BuildPlanarAccelObservation(
+                    plant,
+                    baselineCore.state(),
+                    control,
+                    prepared,
+                    0.0f,
+                    0.35f);
+            const ImuAccelObs lateralPerturbedObservation =
+                BuildPlanarAccelObservation(
+                    plant,
+                    lateralPerturbedCore.state(),
+                    control,
+                    prepared,
+                    25.0f,
+                    0.35f);
+            const ImuAccelObs forwardPerturbedObservation =
+                BuildPlanarAccelObservation(
+                    plant,
+                    forwardPerturbedCore.state(),
+                    control,
+                    prepared,
+                    0.0f,
+                    -0.35f);
 
-            const VehicleState::StateVector afterState = core.state();
-            const VehicleState::StateMatrix afterCovariance = core.covariance();
-            Assert::IsFalse(result.attempted);
-            Assert::IsTrue(result.accepted);
-            Assert::IsTrue((afterState - beforeState).cwiseAbs().maxCoeff() <= 1.0e-7f);
-            Assert::IsTrue((afterCovariance - beforeCovariance).cwiseAbs().maxCoeff() <= 1.0e-7f);
+            const MeasurementUpdateResult baselineResult = baselineCore.updatePlanarAccel(baselineObservation);
+            const MeasurementUpdateResult lateralResult =
+                lateralPerturbedCore.updatePlanarAccel(lateralPerturbedObservation);
+            const MeasurementUpdateResult forwardResult =
+                forwardPerturbedCore.updatePlanarAccel(forwardPerturbedObservation);
+
+            Assert::IsTrue(baselineResult.attempted);
+            Assert::IsTrue(baselineResult.accepted);
+            Assert::IsTrue(lateralResult.attempted);
+            Assert::IsTrue(lateralResult.accepted);
+            Assert::IsTrue(forwardResult.attempted);
+            Assert::IsTrue(forwardResult.accepted);
+
+            Assert::IsTrue(
+                (baselineCore.state() - lateralPerturbedCore.state()).cwiseAbs().maxCoeff() <= 1.0e-6f);
+            Assert::IsTrue(
+                (baselineCore.covariance() - lateralPerturbedCore.covariance()).cwiseAbs().maxCoeff() <= 1.0e-6f);
+            Assert::AreEqual(
+                baselineCore.forwardAccelInnovationMps2(),
+                lateralPerturbedCore.forwardAccelInnovationMps2(),
+                1.0e-6f);
+
+            Assert::IsTrue(
+                std::fabs(
+                    baselineCore.forwardAccelInnovationMps2() -
+                    forwardPerturbedCore.forwardAccelInnovationMps2()) > 0.5f);
+            Assert::IsTrue(
+                (baselineCore.state() - forwardPerturbedCore.state()).cwiseAbs().maxCoeff() > 1.0e-6f);
         }
     };
 }

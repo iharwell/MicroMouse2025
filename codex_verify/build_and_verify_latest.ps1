@@ -709,17 +709,19 @@ function Ensure-ArduinoEigenLibrary {
     $eigenIncludeRoot = Join-Path $srcRoot 'Eigen'
     $entryHeaderPath = Join-Path $srcRoot 'Eigen.h'
     $libraryPropertiesPath = Join-Path $eigenLibraryRoot 'library.properties'
+    $eigenHeaderPath = Join-Path $EigenSourceRoot 'Eigen\Core'
+    $unsupportedIncludeRoot = Join-Path $srcRoot 'unsupported'
 
     New-Item -ItemType Directory -Path $srcRoot -Force | Out-Null
+    Assert-PathExists -Path $eigenHeaderPath -Description 'Eigen core header'
 
-    if (-not (Test-Path -LiteralPath $eigenIncludeRoot)) {
-        New-Item -ItemType Junction -Path $eigenIncludeRoot -Target (Join-Path $EigenSourceRoot 'Eigen') | Out-Null
+    foreach ($generatedIncludeRoot in @($eigenIncludeRoot, $unsupportedIncludeRoot)) {
+        if (Test-Path -LiteralPath $generatedIncludeRoot) {
+            Remove-Item -LiteralPath $generatedIncludeRoot -Force -Recurse
+        }
     }
 
-    $unsupportedIncludeRoot = Join-Path $srcRoot 'unsupported'
-    if (Test-Path -LiteralPath $unsupportedIncludeRoot) {
-        Remove-Item -LiteralPath $unsupportedIncludeRoot -Force -Recurse
-    }
+    New-Item -ItemType Junction -Path $eigenIncludeRoot -Target (Join-Path $EigenSourceRoot 'Eigen') | Out-Null
 
     @(
         '#pragma once'

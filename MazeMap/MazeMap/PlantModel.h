@@ -4,6 +4,7 @@
 
 #include "Defines.h"
 #include "EigenCompat.h"
+#include "EstimatorGeometry.h"
 #include "Maze.h"
 #include "VehicleState.h"
 
@@ -13,6 +14,8 @@
 
 namespace MazeMap
 {
+    class EstimatorPredictModel;
+
     // Contact-point velocity resolved in the project body frame (+X right, +Y forward).
     struct ContactKinematics
     {
@@ -43,6 +46,7 @@ namespace MazeMap
         float forwardForceN = 0.0f;
         float normalForceN = 0.0f;
         float saturation = 0.0f;
+        float preProjectionUtilization = 0.0f;
     };
 
     // Aggregate contact-force bundle for the four tire contact patches.
@@ -79,6 +83,16 @@ namespace MazeMap
         {
             return contacts[1].forwardForceN + contacts[3].forwardForceN;
         }
+
+        float LeftBankMaxPreProjectionUtilization() const noexcept
+        {
+            return (std::max)(contacts[0].preProjectionUtilization, contacts[2].preProjectionUtilization);
+        }
+
+        float RightBankMaxPreProjectionUtilization() const noexcept
+        {
+            return (std::max)(contacts[1].preProjectionUtilization, contacts[3].preProjectionUtilization);
+        }
     };
 
     enum class MotionRegime : uint8_t
@@ -108,6 +122,21 @@ namespace MazeMap
     struct DriveCommandSolution
     {
         ControlInput control{};
+        float requestedCommonForceN = 0.0f;
+        float requestedDifferentialForceN = 0.0f;
+        float commandedCommonForceN = 0.0f;
+        float commandedDifferentialForceN = 0.0f;
+        float leftForceLimitN = 0.0f;
+        float rightForceLimitN = 0.0f;
+        float leftTangentialCapacityN = 0.0f;
+        float rightTangentialCapacityN = 0.0f;
+        bool commonForceClamped = false;
+        bool differentialForceClamped = false;
+        bool usedAlignedCycleContext = false;
+        bool usedGripOnlyFallback = false;
+        bool closedLoopReserveMode = false;
+        float reserveUsage = 1.0f;
+        float slipSpeedFloorMps = 0.0f;
         float leftSlipRatio = 0.0f;
         float rightSlipRatio = 0.0f;
         // Slip-bearing wheel speeds implied by the solved contact-force balance at the current body rates.
@@ -136,6 +165,24 @@ namespace MazeMap
         float longitudinalAccelErrorMps2 = 0.0f;
         float yawAccelErrorRadps2 = 0.0f;
         bool converged = false;
+        bool valid = false;
+    };
+
+    struct FeedforwardAuditResult
+    {
+        DriveCommandSolution issued{};
+        PlantDerivatives predictedAppliedStep{};
+        VehicleState::StateVector predictedNextState = VehicleState::StateVector::Zero();
+
+        float predictedForwardAccelMps2 = 0.0f;
+        float predictedYawAccelRadps2 = 0.0f;
+        float predictedLateralAccelMps2 = 0.0f;
+
+        float forwardAccelResidualMps2 = 0.0f;
+        float yawAccelResidualRadps2 = 0.0f;
+
+        bool usedAlignedCycleContext = false;
+        bool usedGripOnlyFallback = false;
     };
 
     // Tunable physical parameters and sensor extrinsics for the UKF plant model.
@@ -324,7 +371,7 @@ namespace MazeMap
         Eigen::Vector2f imuPositionBodyM = Eigen::Vector2f::Zero();
     };
 
-    // Evaluates the UKF process model from controls and vehicle state.
+    // Shared vehicle plant owner for runtime dynamics, inverse solves, and plant-side diagnostics.
     class EXPORT PlantModel
     {
     public:
@@ -404,6 +451,14 @@ namespace MazeMap
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
             const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 8.4f) const noexcept;
+        DriveCommandSolution solveDriveCommands(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            const PreparedParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 8.4f) const noexcept;
         DriveCommandSolution solveDriveCommands(
@@ -420,8 +475,54 @@ namespace MazeMap
             float yawRateRadps,
             float desiredYawAccelRadps2,
             const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) const noexcept;
+        DriveCommandSolution solveDriveCommands(
+            float forwardVelocityMps,
+            float desiredLongitudinalAccelMps2,
+            float yawRateRadps,
+            float desiredYawAccelRadps2,
+            const PreparedParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f) const noexcept;
+
+        DriveCommandSolution solveClosedLoopDriveCommands(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 8.4f,
+            float reserveUsage = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommands(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            const PreparedParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 8.4f,
+            float reserveUsage = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommands(
+            float forwardVelocityMps,
+            float desiredLongitudinalAccelMps2,
+            float yawRateRadps,
+            float desiredYawAccelRadps2,
+            const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float reserveUsage = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommands(
+            float forwardVelocityMps,
+            float desiredLongitudinalAccelMps2,
+            float yawRateRadps,
+            float desiredYawAccelRadps2,
+            const PreparedParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float reserveUsage = 0.90f) const noexcept;
 
         // Returns the traction-limited control command that drives the current body rates toward the target
         // body rates over the requested response horizon using the canonical default when none is supplied.
@@ -438,6 +539,15 @@ namespace MazeMap
             float targetForwardVelocityMps,
             float targetYawRateRadps,
             const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
+        DriveCommandSolution solveDriveCommandsForVelocityTarget(
+            const StateVector& currentState,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            const PreparedParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
@@ -456,9 +566,60 @@ namespace MazeMap
             float currentYawRateRadps,
             float targetYawRateRadps,
             const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
+        DriveCommandSolution solveDriveCommandsForVelocityTarget(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            const PreparedParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
+
+        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+            const StateVector& currentState,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
+            float reserveUsage = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+            const StateVector& currentState,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            const PreparedParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
+            float reserveUsage = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
+            float reserveUsage = 0.90f) const noexcept;
+        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            const PreparedParams& params,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
+            float reserveUsage = 0.90f) const noexcept;
 
         void ComputeBodyAction(
             float currentForwardVelocityMps,
@@ -514,6 +675,14 @@ namespace MazeMap
         void velocityTargetTechnicalLimits(
             const StateVector& currentState,
             const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float& maxLongitudinalAccelMps2,
+            float& maxYawAccelRadps2,
+            float fanDutyCycle = 0.80f,
+            float reserveUsage = 1.0f) const noexcept;
+        void velocityTargetTechnicalLimits(
+            const StateVector& currentState,
+            const PreparedParams& params,
             float& maxLongitudinalAccelMps2,
             float& maxYawAccelRadps2,
             float fanDutyCycle = 0.80f) const noexcept;
@@ -528,13 +697,21 @@ namespace MazeMap
             float forwardVelocityMps,
             float yawRateRadps,
             const PreparedParams& params,
+            const ModelCycleContext& cycleContext,
+            float& maxLongitudinalAccelMps2,
+            float& maxYawAccelRadps2,
+            float fanDutyCycle = 0.80f,
+            float reserveUsage = 1.0f) const noexcept;
+        void velocityTargetTechnicalLimits(
+            float forwardVelocityMps,
+            float yawRateRadps,
+            const PreparedParams& params,
             float& maxLongitudinalAccelMps2,
             float& maxYawAccelRadps2,
             float fanDutyCycle = 0.80f) const noexcept;
 
-        // Returns the issued traction-limited feedforward command. If the raw request reaches the traction limit,
-        // this backs the validated body accelerations off by the requested reserve scale so the outer PI loop
-        // retains command headroom.
+        // Legacy compatibility entry points. These now forward to the canonical closed-loop-reserve solver, which
+        // applies reserve only by reducing per-side usable force limits before the explicit allocator runs.
         DriveCommandSolution solveTractionLimitedDriveCommands(
             const StateVector& currentState,
             float desiredLongitudinalAccelMps2,
@@ -639,5 +816,118 @@ namespace MazeMap
             float wheelTorqueRequestNm,
             const PreparedParams& params) const noexcept;
 
+        FeedforwardAuditResult evaluateFeedforwardOffline(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            const PreparedParams& prepared,
+            const ModelCycleContext& cycleContext,
+            float fanDutyCycle,
+            float batteryVoltageV,
+            float reserveUsage,
+            float dtS) const noexcept;
+
+    private:
+        friend class EstimatorPredictModel;
+
+        PlantDerivatives forwardStepFromAppliedBankTorques(
+            const StateVector& state,
+            float leftAppliedBankTorqueNm,
+            float rightAppliedBankTorqueNm,
+            const PlantParams& params,
+            float fanDutyCycle = 0.80f,
+            const ModelCycleContext* cycleContext = nullptr) const noexcept;
+        PlantDerivatives forwardStepFromAppliedBankTorques(
+            const StateVector& state,
+            float leftAppliedBankTorqueNm,
+            float rightAppliedBankTorqueNm,
+            const PreparedParams& params,
+            float fanDutyCycle = 0.80f,
+            const ModelCycleContext* cycleContext = nullptr) const noexcept;
+        PlantDerivatives evaluateAppliedBankTorqueStep(
+            const StateVector& state,
+            float leftAppliedBankTorqueNm,
+            float rightAppliedBankTorqueNm,
+            float activityNorm,
+            const PreparedParams& params,
+            float fanDutyCycle) const noexcept;
+        PlantDerivatives evaluateEstimatorAppliedBankTorqueStep(
+            const StateVector& state,
+            float leftAppliedBankTorqueNm,
+            float rightAppliedBankTorqueNm,
+            const PreparedParams& params,
+            float fanDutyCycle,
+            const ModelCycleContext* cycleContext) const noexcept;
+
+        struct FeedforwardRequest
+        {
+            StateVector currentState = StateVector::Zero();
+            bool hasCurrentState = false;
+            float currentForwardSpeedMps = 0.0f;
+            float currentLateralSpeedMps = 0.0f;
+            float currentYawRateRadps = 0.0f;
+            float currentLeftWheelSpeedRadps = 0.0f;
+            float currentRightWheelSpeedRadps = 0.0f;
+            float desiredLongitudinalAccelMps2 = 0.0f;
+            float desiredYawAccelRadps2 = 0.0f;
+            float fanDutyCycle = 0.80f;
+            float batteryVoltageV = 8.4f;
+            float reserveUsage = 1.0f;
+            bool closedLoopReserveMode = false;
+            bool alignedCycleContextAvailable = false;
+            const ModelCycleContext* cycleContext = nullptr;
+        };
+
+        struct FeedforwardSolveContext
+        {
+            EstimatorGeometry geometry{};
+            FrozenCycleSchedule schedule{};
+            GripUtilizationSnapshot utilization{};
+            TransientContactMemoryState memory{};
+            RegripRecoveryState regrip{};
+
+            float batteryVoltageV = 8.4f;
+            float fanDutyCycle = 0.80f;
+            float reserveUsage = 1.0f;
+            float slipSpeedFloorMps = 0.0f;
+
+            bool alignedCycleContext = false;
+            bool gripOnlyFallback = false;
+        };
+
+        struct FeedforwardForceRequest
+        {
+            float commonForceRequestN = 0.0f;
+            float differentialForceRequestN = 0.0f;
+            float baselineLateralYawMomentNm = 0.0f;
+        };
+
+        struct FeedforwardForceAllocation
+        {
+            float commonForceCommandN = 0.0f;
+            float differentialForceCommandN = 0.0f;
+            float leftForceCommandN = 0.0f;
+            float rightForceCommandN = 0.0f;
+            float leftForceLimitN = 0.0f;
+            float rightForceLimitN = 0.0f;
+            bool commonForceClamped = false;
+            bool differentialForceClamped = false;
+        };
+
+        FeedforwardSolveContext buildFeedforwardSolveContext(
+            const FeedforwardRequest& request,
+            const PreparedParams& prepared) const noexcept;
+        FeedforwardForceRequest buildForceRequest(
+            const FeedforwardRequest& request,
+            const FeedforwardSolveContext& solveContext,
+            const PreparedParams& prepared) const noexcept;
+        FeedforwardForceAllocation allocateCommonAndDifferentialForces(
+            const FeedforwardForceRequest& request,
+            float leftTangentialCapacityN,
+            float rightTangentialCapacityN,
+            float reserveUsage) const noexcept;
+        DriveCommandSolution solveFeedforwardCanonical(
+            const FeedforwardRequest& request,
+            const PreparedParams& prepared) const noexcept;
     };
 }

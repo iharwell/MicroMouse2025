@@ -147,6 +147,15 @@
     <ClInclude Include="EigenCompat.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="EstimatorGeometry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EstimatorPredictModel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EdgeForceShapeModifier.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="EncoderStallPolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -166,6 +175,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="FloodFillPathFinder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GripUtilizationMetrics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="GyroBiasUpdatePolicy.h">
@@ -339,6 +351,15 @@
     <ClInclude Include="PlantModel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="PlanarAccelLateralUpdate.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PredictorSubstepPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="RegripRecoveryMonitor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="RollingAverageWindow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -352,6 +373,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Sensor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SigmaPointSetSimplex.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SoftOdometryAid.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SmoothTurnYawRateController.h">
@@ -369,7 +396,13 @@
     <ClInclude Include="TrackWidthEstimate.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TorqueEstimateAdapter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="TractionLimitSweep.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="TransientContactMemory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TurnCommandGeometry.h">
@@ -379,6 +412,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="UKF.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UkfRobustUpdatePolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Vehicle.h">
@@ -411,6 +447,9 @@
     <ClInclude Include="WallSensorPreprocessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="WheelAuthorityPolicy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="WheelControlProfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -440,10 +479,19 @@
     <ClCompile Include="DriveBase.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="EdgeForceShapeModifier.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EstimatorPredictModel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Fresnel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GripUtilizationMetrics.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Kinematics.cpp">
@@ -572,13 +620,40 @@
     <ClCompile Include="PlantModel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PlanarAccelLateralUpdate.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PredictorSubstepPolicy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="RegripRecoveryMonitor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SigmaPointSetSimplex.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SoftOdometryAid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="SrUkfCore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TorqueEstimateAdapter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="TransientContactMemory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="UkfRobustUpdatePolicy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="WallGeometryModel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="WallSensorPreprocessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WheelAuthorityPolicy.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Vehicle.cpp">

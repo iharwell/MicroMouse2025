@@ -20,7 +20,7 @@
 - Planned selector pins: `9/10`
 - Planned category: utility mode
 - Planned purpose summary:
-  - Run a fixed-radius donut sweep after shared startup calibration, ramp speed until traction loss or the 4 m/s cap, then finish with a bounded flashy turn sequence.
+  - Run a fixed-radius donut sweep, ramp speed until traction loss or the 4 m/s cap, then finish with a bounded flashy turn sequence.
 
 ## Runtime Shape
 
@@ -29,16 +29,16 @@
   - `LoopController`
   - `DriveBase`
   - `Drive`
-  - `StartupCalibration`
 - Uses the runtime-owned fault path.
 - Does not explicitly close `logging.txt` or the utility data log.
 - Uses a single `LoopController` session.
 - Faults immediately on jumper removal.
+- Uses two execution phases inside that one session:
+  - one continuous donut-sweep phase
+  - one flashy-turn phase
 
 ## Motion Plan
 
-- Run shared startup calibration before motion.
-- Hold with fan enabled to settle before the sweep.
 - Execute a clockwise fixed-radius turn:
   - radius: `0.090 m`
   - initial commanded speed: `0.30 m/s`
@@ -50,7 +50,6 @@
   - reaching the `4.0 m/s` speed cap
 - Finish sequence:
   - two `180 deg` in-place `Drive` turns for a full flashy spin
-  - short completion hold
 
 ## Traction-Loss Detection
 

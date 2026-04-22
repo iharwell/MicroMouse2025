@@ -2,6 +2,7 @@
 // Declares the square-root UKF core that owns the process model and measurement updates.
 
 #include "Maze.h"
+#include "EstimatorPredictModel.h"
 #include "PlantModel.h"
 #include "WallGeometryModel.h"
 #include "UKF.h"
@@ -166,6 +167,11 @@ namespace MazeMap
             return _preparedParams;
         }
 
+        const ModelCycleContext& modelCycleContext() const noexcept
+        {
+            return _frozenCycleContext;
+        }
+
         OperatingMode operatingMode() const noexcept { return _operatingMode; }
         std::uint8_t operatingModeId() const noexcept { return static_cast<std::uint8_t>(_operatingMode); }
         float gyroBiasAnchorRadps() const noexcept { return _gyroBiasAnchorRadps; }
@@ -177,6 +183,11 @@ namespace MazeMap
         bool nonholonomicConstraintEnabled() const noexcept { return _nonholonomicConstraintEnabled; }
         bool yawValidForFeedforward() const noexcept { return _yawValidForFeedforward; }
         bool biasUpdateEnabled() const noexcept { return _biasUpdateEnabled; }
+        bool stationaryCertified() const noexcept { return _stationaryCertified; }
+        float stationaryCandidateDwellS() const noexcept { return _stationaryCandidateDwellS; }
+        float launchHoldRemainingS() const noexcept { return _launchHoldRemainingS; }
+        float inconsistentHoldRemainingS() const noexcept { return _inconsistentHoldRemainingS; }
+        float nhcReenableDelayRemainingS() const noexcept { return _nhcReenableDelayRemainingS; }
         bool pivotScrubMode() const noexcept { return _pivotScrubMode; }
         bool pivotScrubEncoderBodyUpdateSkipped() const noexcept { return _pivotScrubEncoderBodyUpdateSkipped; }
         bool pivotScrubZeroUSoftApplied() const noexcept { return _pivotScrubZeroUSoftApplied; }
@@ -193,6 +204,24 @@ namespace MazeMap
         float pivotScrubGyroDeltaOmegaLRadps() const noexcept { return _pivotScrubGyroDeltaOmegaLRadps; }
         float pivotScrubGyroDeltaOmegaRRadps() const noexcept { return _pivotScrubGyroDeltaOmegaRRadps; }
         float pivotScrubGyroMaskedDeltaNorm() const noexcept { return _pivotScrubGyroMaskedDeltaNorm; }
+        float closureResidualLeftMps() const noexcept { return _lastClosureResidualLeftMps; }
+        float closureResidualRightMps() const noexcept { return _lastClosureResidualRightMps; }
+        float gyroInnovationRadps() const noexcept { return _lastGyroInnovationRadps; }
+        float gyroInnovationNis() const noexcept { return _lastGyroNis; }
+        float forwardAccelInnovationMps2() const noexcept { return _lastForwardAccelInnovationMps2; }
+        float forwardAccelInnovationNis() const noexcept { return _lastForwardAccelNis; }
+        float lateralAccelInnovationMps2() const noexcept { return _lastLateralAccelInnovationMps2; }
+        float lateralAccelInnovationNis() const noexcept { return _lastLateralAccelNis; }
+        float closureLeftInnovationMps() const noexcept { return _lastClosureLeftInnovationMps; }
+        float closureLeftNis() const noexcept { return _lastClosureLeftNis; }
+        float closureRightInnovationMps() const noexcept { return _lastClosureRightInnovationMps; }
+        float closureRightNis() const noexcept { return _lastClosureRightNis; }
+        float lateralPseudoInnovationMps() const noexcept { return _lastLateralPseudoInnovationMps; }
+        float lateralPseudoNis() const noexcept { return _lastLateralPseudoNis; }
+        float softOdometryInnovation() const noexcept { return 0.0f; }
+        float softOdometryInnovationNis() const noexcept { return 0.0f; }
+        bool directWheelUpdateBodyStateInvariant() const noexcept { return _directWheelUpdateBodyStateInvariant; }
+        bool releaseInflationApplied() const noexcept { return _releaseInflationApplied; }
 
         void setRuntimeContext(
             float commandedLinearMps,
@@ -453,6 +482,10 @@ namespace MazeMap
             float minimumYawRateStdRadps) noexcept;
         void enforceVarianceFloors(OperatingMode mode) noexcept;
         void sanitizeLaunchRecoveryIfNeeded(OperatingMode previousMode, OperatingMode newMode) noexcept;
+        void applyReleaseInflationIfNeeded(bool wasExactStationaryLock) noexcept;
+        void buildFrozenCycleContext(float dtSeconds, const ControlInput& control) noexcept;
+        bool applyClosurePseudoMeasurements(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
+        bool applyAdaptiveLateralPseudoMeasurement(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
             const StateVector& sigmaPoint,
             const Maze& maze) const noexcept;
@@ -462,10 +495,14 @@ namespace MazeMap
             const Maze& maze) const noexcept;
 
         PlantModel _plantModel;
+        EstimatorPredictModel _predictModel;
         WallGeometryModel _geometryModel;
         PlantParams _params;
         PlantModel::PreparedParams _preparedParams;
         UKF<VehicleState::kDimension, 3> _filter;
+        ModelCycleContext _frozenCycleContext;
+        TransientContactMemoryState _transientContactMemory;
+        RegripRecoveryState _regripRecovery;
         ControlInput _lastControl;
         EncoderObs _lastEncoderObs;
         float _lastEncoderDtSeconds;
@@ -493,6 +530,9 @@ namespace MazeMap
         float _accelBodyXMps2;
         float _accelBodyYMps2;
         float _stationaryCandidateDwellS;
+        StateVector _stationaryCandidatePoseReferenceState;
+        StateMatrix _stationaryCandidatePoseReferenceCovariance;
+        bool _stationaryCandidatePoseReferenceValid;
         bool _stationaryCertified;
         float _timeSinceStationaryExitS;
         float _timeSinceCommandSignFlipS;
@@ -525,6 +565,23 @@ namespace MazeMap
         float _pivotScrubGyroDeltaOmegaLRadps;
         float _pivotScrubGyroDeltaOmegaRRadps;
         float _pivotScrubGyroMaskedDeltaNorm;
+        bool _directWheelUpdateBodyStateInvariant;
+        bool _releaseInflationApplied;
+        float _lastClosureResidualLeftMps;
+        float _lastClosureResidualRightMps;
+        float _lastGyroMeasurementRadps;
+        float _lastGyroInnovationRadps;
+        float _lastGyroNis;
+        float _lastForwardAccelInnovationMps2;
+        float _lastForwardAccelNis;
+        float _lastLateralAccelInnovationMps2;
+        float _lastLateralAccelNis;
+        float _lastClosureLeftInnovationMps;
+        float _lastClosureLeftNis;
+        float _lastClosureRightInnovationMps;
+        float _lastClosureRightNis;
+        float _lastLateralPseudoInnovationMps;
+        float _lastLateralPseudoNis;
         std::array<float, 128> _yawWindowDtSeconds;
         std::array<float, 128> _yawWindowUkfIntegralRad;
         std::array<float, 128> _yawWindowGyroIntegralRad;

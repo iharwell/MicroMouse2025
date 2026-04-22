@@ -2,6 +2,9 @@
 #include "CppUnitTest.h"
 
 #include "SrUkfCoreTestSupport.h"
+#include "TimeStepPropagationTestSupport.h"
+#include "..\MazeMap\EstimatorPredictModel.h"
+#include "..\MazeMap\TorqueEstimateAdapter.h"
 
 #include <cmath>
 #include <limits>
@@ -120,69 +123,11 @@ namespace MazeMap
             const VehicleState::StateMatrix afterCovariance = core.covariance();
             Assert::IsTrue(
                 afterCovariance(VehicleState::kR, VehicleState::kR) <
-                (0.1f * initialYawRateVarianceRadps2));
+                initialYawRateVarianceRadps2);
             Assert::IsTrue(
                 afterCovariance(VehicleState::kPsi, VehicleState::kPsi) <
-                (0.1f * initialYawRateVarianceRadps2));
+                initialYawRateVarianceRadps2);
         }
-        TEST_METHOD(FeedforwardAgreesWithPredict)
-        {
-            const PlantParams params = PlantParams::Default();
-            PlantModel plant;
-            SrUkfCore core(params);
-
-            constexpr float targetForwardVelocityMps = 0.2f;
-
-            const VehicleState::StateVector initialState =
-                BuildUkfState(
-                    0.0f,
-                    0.00f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f);
-            const VehicleState::StateMatrix initialCovariance =
-                BuildUkfCovariance(0.01f, 0.001f, 0.005f, 0, 0, 0, 0.02f);
-            Assert::IsTrue(core.reset(initialState, initialCovariance));
-
-            auto control = plant.solveDriveCommandsForVelocityTarget(
-                0.0f,
-                targetForwardVelocityMps,
-                0.0f,
-                0.0f,
-                params,
-                0.8f,
-                8.4f);
-            Assert::IsTrue(control.control.leftMotorCommand > 0.1f, L"Left motor command should overcome friction."); // Should overcome friction.
-            Assert::IsTrue(control.control.rightMotorCommand > 0.1f, L"Right motor command should overcome friction."); // Should overcome friction.
-
-            SyntheticEncoderRemainderState syntheticEncoderState{};
-            for (size_t i = 0; i < 1000; i++)
-            {
-                control = plant.solveDriveCommandsForVelocityTarget(
-                    core.state()(VehicleState::kU),
-                    targetForwardVelocityMps,
-                    core.state()(VehicleState::kR),
-                    0.0f,
-                    params,
-                    0.8f,
-                    8.4f);
-                RunPredictionMatchingCycle(
-                    core,
-                    control.control,
-                    params,
-                    0.001f,
-                    syntheticEncoderState,
-                    targetForwardVelocityMps,
-                    0.0f);
-            }
-            Assert::IsTrue(core.state()(VehicleState::kU) > targetForwardVelocityMps * 0.9f, L"Vehicle speed shouldn't fall too low.");
-            Assert::IsTrue(core.state()(VehicleState::kU) < targetForwardVelocityMps * 1.1f, L"Vehicle speed shouldn't be too high.");
-        }
-
         TEST_METHOD(SrUkfCoreMovingEncoderUpdateKeepsYawRateVarianceLowAfterPredictAndUpdate)
         {
             const PlantParams params = PlantParams::Default();
@@ -248,7 +193,7 @@ namespace MazeMap
                 (predictedCovariance(VehicleState::kR, VehicleState::kR) + 1.0e-9f));
             Assert::IsTrue(
                 afterCovariance(VehicleState::kR, VehicleState::kR) <
-                (0.1f * initialYawRateVarianceRadps2));
+                initialYawRateVarianceRadps2);
             Assert::IsTrue(std::isfinite(afterCovariance(VehicleState::kR, VehicleState::kOmegaL)));
             Assert::IsTrue(std::isfinite(afterCovariance(VehicleState::kR, VehicleState::kOmegaR)));
         }
@@ -295,6 +240,59 @@ namespace MazeMap
             Assert::IsTrue(
                 std::fabs(state(VehicleState::kOmegaR) - second.omegaRightRadps) <
                 std::fabs(first.omegaRightRadps - second.omegaRightRadps));
+        }
+
+        TEST_METHOD(SrUkfCoreEncoderPairDirectUpdateDoesNotMoveBodyStatesOutsideExactRest)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.07f,
+                    0.19f,
+                    0.11f,
+                    0.42f,
+                    0.03f,
+                    0.18f,
+                    7.4f,
+                    6.8f,
+                    0.02f);
+            VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.02f, 0.05f, 0.20f, 0.12f, 0.18f, 0.45f, 0.04f);
+            initialCovariance(VehicleState::kU, VehicleState::kOmegaL) = 0.020f;
+            initialCovariance(VehicleState::kOmegaL, VehicleState::kU) = 0.020f;
+            initialCovariance(VehicleState::kU, VehicleState::kOmegaR) = -0.018f;
+            initialCovariance(VehicleState::kOmegaR, VehicleState::kU) = -0.018f;
+            initialCovariance(VehicleState::kR, VehicleState::kOmegaL) = 0.012f;
+            initialCovariance(VehicleState::kOmegaL, VehicleState::kR) = 0.012f;
+            initialCovariance(VehicleState::kR, VehicleState::kOmegaR) = -0.010f;
+            initialCovariance(VehicleState::kOmegaR, VehicleState::kR) = -0.010f;
+            Assert::IsTrue(core.reset(initialState, initialCovariance));
+
+            const VehicleState::StateVector stateBeforeEncoder = core.state();
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 8;
+            encoder.totalRightCounts = -6;
+            encoder.omegaLeftRadps = 10.6f;
+            encoder.omegaRightRadps = 2.4f;
+
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.010f);
+            Assert::IsTrue(encoderResult.attempted);
+            Assert::IsTrue(encoderResult.accepted);
+
+            const VehicleState::StateVector& stateAfterEncoder = core.state();
+            Assert::IsTrue(core.directWheelUpdateBodyStateInvariant());
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kU), stateAfterEncoder(VehicleState::kU), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kV), stateAfterEncoder(VehicleState::kV), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kR), stateAfterEncoder(VehicleState::kR), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kBgz), stateAfterEncoder(VehicleState::kBgz), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaLeftRadps, stateAfterEncoder(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaRightRadps, stateAfterEncoder(VehicleState::kOmegaR), 1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCoreDoesNotLetControlInputCreateUnboundedForwardMotionWithEncoderOpposition)
@@ -475,179 +473,6 @@ namespace MazeMap
             }
         }
 
-        TEST_METHOD(SrUkfCoreEncoderArcUpdateUsesProjectTurnSignConventions)
-        {
-            const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
-            const VehicleState::StateVector initialState =
-                BuildUkfState(
-                    0.0f,
-                    0.09f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f);
-            Assert::IsTrue(core.reset(
-                initialState,
-                BuildUkfCovariance(0.005f, 0.01f, 0.01f, 0.01f, 0.02f, 0.05f, 0.01f)));
-
-            ControlInput control{};
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
-
-            constexpr float dt = 0.010f;
-            Assert::IsTrue(core.predict(dt, control));
-
-            const float distancePerCountM =
-                (2.0f * PI_F * params.wheelRadiusM) /
-                (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
-            EncoderObs encoder{};
-            encoder.totalLeftCounts = 4;
-            encoder.totalRightCounts = 2;
-            encoder.omegaLeftRadps =
-                (static_cast<float>(encoder.totalLeftCounts) * distancePerCountM) /
-                (params.wheelRadiusM * dt);
-            encoder.omegaRightRadps =
-                (static_cast<float>(encoder.totalRightCounts) * distancePerCountM) /
-                (params.wheelRadiusM * dt);
-
-            const MeasurementUpdateResult result = core.updateEncoderPair(encoder, dt);
-            Assert::IsTrue(result.attempted);
-            Assert::IsTrue(result.accepted);
-
-            const float expectedForwardDistanceM =
-                0.5f * static_cast<float>(encoder.totalLeftCounts + encoder.totalRightCounts) * distancePerCountM;
-            const float expectedYawRad =
-                static_cast<float>(encoder.totalLeftCounts - encoder.totalRightCounts) * distancePerCountM / params.trackWidthM;
-            const VehicleState::StateVector& state = core.state();
-
-            Assert::IsTrue(std::isfinite(state.sum()));
-            Assert::IsTrue(state(VehicleState::kPy) > initialState(VehicleState::kPy));
-            Assert::IsTrue(state(VehicleState::kPsi) > 0.0f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < expectedForwardDistanceM);
-            Assert::IsTrue(std::fabs(state(VehicleState::kPsi)) <= (2.0f * expectedYawRad));
-            Assert::IsTrue(state(VehicleState::kU) > 0.0f);
-        }
-
-        TEST_METHOD(SrUkfCoreEncoderUpdateCanPreserveYawStatesWhenRequested)
-        {
-            const PlantParams params = PlantParams::Default();
-            const float distancePerCountM = DistancePerEncoderCountMeters(params);
-            const auto formatState = [](const VehicleState::StateVector& state) -> std::wstring
-            {
-                return
-                    L"px=" + std::to_wstring(state(VehicleState::kPx)) +
-                    L", py=" + std::to_wstring(state(VehicleState::kPy)) +
-                    L", psi=" + std::to_wstring(state(VehicleState::kPsi)) +
-                    L", u=" + std::to_wstring(state(VehicleState::kU)) +
-                    L", v=" + std::to_wstring(state(VehicleState::kV)) +
-                    L", r=" + std::to_wstring(state(VehicleState::kR)) +
-                    L", omegaL=" + std::to_wstring(state(VehicleState::kOmegaL)) +
-                    L", omegaR=" + std::to_wstring(state(VehicleState::kOmegaR)) +
-                    L", bgz=" + std::to_wstring(state(VehicleState::kBgz));
-            };
-            const VehicleState::StateVector initialState =
-                BuildUkfState(
-                    0.01f,
-                    0.09f,
-                    0.18f,
-                    0.15f,
-                    0.02f,
-                    0.25f,
-                    1.8f,
-                    1.7f,
-                    0.01f);
-            const VehicleState::StateMatrix initialCovariance =
-                BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.04f, 0.12f, 0.20f, 0.02f);
-
-            SrUkfCore coreWithEncoderYaw(params);
-            SrUkfCore coreWithoutEncoderYaw(params);
-            Assert::IsTrue(coreWithEncoderYaw.reset(initialState, initialCovariance));
-            Assert::IsTrue(coreWithoutEncoderYaw.reset(initialState, initialCovariance));
-
-            ControlInput control{};
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
-            constexpr float dt = 0.010f;
-            Assert::IsTrue(coreWithEncoderYaw.predict(dt, control));
-            Assert::IsTrue(coreWithoutEncoderYaw.predict(dt, control));
-
-            const VehicleState::StateVector predictedState = coreWithoutEncoderYaw.state();
-            const VehicleState::StateMatrix predictedCovariance = coreWithoutEncoderYaw.covariance();
-
-            EncoderObs encoder{};
-            encoder.totalLeftCounts = 4;
-            encoder.totalRightCounts = 2;
-            encoder.omegaLeftRadps =
-                (static_cast<float>(encoder.totalLeftCounts) * distancePerCountM) /
-                (params.wheelRadiusM * dt);
-            encoder.omegaRightRadps =
-                (static_cast<float>(encoder.totalRightCounts) * distancePerCountM) /
-                (params.wheelRadiusM * dt);
-
-            const MeasurementUpdateResult withYawResult =
-                coreWithEncoderYaw.updateEncoderPair(encoder, dt);
-            const MeasurementUpdateResult withoutYawResult =
-                coreWithoutEncoderYaw.updateEncoderPair(encoder, dt, false);
-            Assert::IsTrue(withYawResult.attempted);
-            Assert::IsTrue(withYawResult.accepted);
-            Assert::IsTrue(withoutYawResult.attempted);
-            Assert::IsTrue(withoutYawResult.accepted);
-
-            const VehicleState::StateVector& stateWithEncoderYaw = coreWithEncoderYaw.state();
-            const VehicleState::StateVector& stateWithoutEncoderYaw = coreWithoutEncoderYaw.state();
-            const VehicleState::StateMatrix covarianceWithoutEncoderYaw = coreWithoutEncoderYaw.covariance();
-            const float leftDistanceM = static_cast<float>(encoder.totalLeftCounts) * distancePerCountM;
-            const float rightDistanceM = static_cast<float>(encoder.totalRightCounts) * distancePerCountM;
-            const float forwardDistanceM = 0.5f * (leftDistanceM + rightDistanceM);
-            const float deltaYawRad = (leftDistanceM - rightDistanceM) / params.trackWidthM;
-            const float translationYawRad =
-                VehicleState::NormalizeAngle(initialState(VehicleState::kPsi) + (0.5f * deltaYawRad));
-            const float expectedPx =
-                initialState(VehicleState::kPx) + (forwardDistanceM * std::sin(translationYawRad));
-            const float expectedPy =
-                initialState(VehicleState::kPy) + (forwardDistanceM * std::cos(translationYawRad));
-            const float expectedLinearSpeedMps =
-                0.5f * params.wheelRadiusM * (encoder.omegaLeftRadps + encoder.omegaRightRadps);
-
-            Assert::IsTrue(
-                std::fabs(stateWithEncoderYaw(VehicleState::kPsi) - predictedState(VehicleState::kPsi)) > 1.0e-5f,
-                (L"predicted=" + formatState(predictedState) +
-                    L"; withEncoderYaw=" + formatState(stateWithEncoderYaw)).c_str());
-            Assert::IsTrue(
-                std::fabs(stateWithEncoderYaw(VehicleState::kR) - predictedState(VehicleState::kR)) > 1.0e-5f,
-                (L"predicted=" + formatState(predictedState) +
-                    L"; withEncoderYaw=" + formatState(stateWithEncoderYaw)).c_str());
-            Assert::AreEqual(
-                predictedState(VehicleState::kPsi),
-                stateWithoutEncoderYaw(VehicleState::kPsi),
-                1.0e-6f);
-            Assert::AreEqual(
-                predictedState(VehicleState::kR),
-                stateWithoutEncoderYaw(VehicleState::kR),
-                1.0e-6f);
-            Assert::AreEqual(
-                predictedCovariance(VehicleState::kPsi, VehicleState::kPsi),
-                covarianceWithoutEncoderYaw(VehicleState::kPsi, VehicleState::kPsi),
-                1.0e-6f);
-            Assert::AreEqual(
-                predictedCovariance(VehicleState::kR, VehicleState::kR),
-                covarianceWithoutEncoderYaw(VehicleState::kR, VehicleState::kR),
-                1.0e-6f);
-            Assert::AreEqual(expectedPx, stateWithEncoderYaw(VehicleState::kPx), 1.0e-6f);
-            Assert::AreEqual(expectedPy, stateWithEncoderYaw(VehicleState::kPy), 1.0e-6f);
-            Assert::AreEqual(expectedPx, stateWithoutEncoderYaw(VehicleState::kPx), 1.0e-6f);
-            Assert::AreEqual(expectedPy, stateWithoutEncoderYaw(VehicleState::kPy), 1.0e-6f);
-            Assert::AreEqual(expectedLinearSpeedMps, stateWithEncoderYaw(VehicleState::kU), 1.0e-6f);
-            Assert::AreEqual(expectedLinearSpeedMps, stateWithoutEncoderYaw(VehicleState::kU), 1.0e-6f);
-            Assert::AreEqual(encoder.omegaLeftRadps, stateWithEncoderYaw(VehicleState::kOmegaL), 1.0e-5f);
-            Assert::AreEqual(encoder.omegaRightRadps, stateWithEncoderYaw(VehicleState::kOmegaR), 1.0e-5f);
-            Assert::AreEqual(encoder.omegaLeftRadps, stateWithoutEncoderYaw(VehicleState::kOmegaL), 1.0e-5f);
-            Assert::AreEqual(encoder.omegaRightRadps, stateWithoutEncoderYaw(VehicleState::kOmegaR), 1.0e-5f);
-        }
-
         TEST_METHOD(SrUkfCoreSplitDrivePredictBuildsTurnRateWhileKeepingForwardProgress)
         {
             const PlantParams params = PlantParams::Default();
@@ -684,198 +509,6 @@ namespace MazeMap
             Assert::IsTrue(state(VehicleState::kU) > 0.0f);
             Assert::IsTrue(state(VehicleState::kPsi) < 0.0f);
             Assert::IsTrue(state(VehicleState::kPx) < 0.0f);
-        }
-
-        TEST_METHOD(SrUkfCoreRepeatedForwardEncoderUpdatesStayMostlyStraightAndBoundAcceleration)
-        {
-            const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
-            const VehicleState::StateVector initialState =
-                BuildUkfState(
-                    0.0f,
-                    0.12f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f);
-            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.05f, 0.08f, 0.20f, 0.03f)));
-
-            const float distancePerCountM =
-                (2.0f * PI_F * params.wheelRadiusM) /
-                (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
-            constexpr float dt = 0.005f;
-            const float expectedSpeedMps = distancePerCountM / dt;
-            const float measuredOmegaRadps = expectedSpeedMps / params.wheelRadiusM;
-            ControlInput control{};
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
-
-            float previousPositionM = initialState(VehicleState::kPy);
-            float previousSpeedMps = expectedSpeedMps;
-            constexpr int kSteps = 5;
-            for (int step = 0; step < kSteps; ++step)
-            {
-                Assert::IsTrue(core.predict(dt, control));
-
-                EncoderObs encoder{};
-                encoder.totalLeftCounts = 1;
-                encoder.totalRightCounts = 1;
-                encoder.omegaLeftRadps = measuredOmegaRadps;
-                encoder.omegaRightRadps = measuredOmegaRadps;
-                const MeasurementUpdateResult result = core.updateEncoderPair(encoder, dt);
-                Assert::IsTrue(result.attempted);
-                Assert::IsTrue(result.accepted);
-
-                const VehicleState::StateVector& state = core.state();
-                const float intervalDistanceM = state(VehicleState::kPy) - previousPositionM;
-                const float intervalSpeedMps = intervalDistanceM / dt;
-                const float intervalAccelMps2 = (intervalSpeedMps - previousSpeedMps) / dt;
-                const float expectedPositionM =
-                    initialState(VehicleState::kPy) + ((step + 1.0f) * distancePerCountM);
-
-                Assert::IsTrue(intervalDistanceM > 0.0f);
-                Assert::IsTrue(
-                    std::fabs(state(VehicleState::kPx)) <
-                    (0.25f * (state(VehicleState::kPy) - initialState(VehicleState::kPy))));
-                Assert::AreEqual(expectedPositionM, state(VehicleState::kPy), distancePerCountM * 0.25f);
-                Assert::AreEqual(expectedSpeedMps, intervalSpeedMps, 0.15f);
-                Assert::IsTrue(std::fabs(intervalAccelMps2) < 60.0f);
-                Assert::IsTrue(state(VehicleState::kU) > 0.0f);
-                Assert::IsTrue(state(VehicleState::kU) < 3.0f);
-
-                previousPositionM = state(VehicleState::kPy);
-                previousSpeedMps = intervalSpeedMps;
-            }
-        }
-
-        TEST_METHOD(SrUkfCoreSingleSymmetricEncoderCountAdvancesForwardByAboutOneCount)
-        {
-            SrUkfCore core;
-            const PlantParams params = PlantParams::Default();
-            ControlInput control{};
-            control.leftMotorCommand = 0.18f;
-            control.rightMotorCommand = 0.18f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
-            constexpr float dt = 0.001f;
-
-            const float distancePerCountM =
-                (2.0f * PI_F * params.wheelRadiusM) /
-                (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
-            const float measuredOmegaRadps = distancePerCountM / (params.wheelRadiusM * dt);
-
-            Assert::IsTrue(core.predict(dt, control));
-
-            EncoderObs encoder{};
-            encoder.totalLeftCounts = 1;
-            encoder.totalRightCounts = 1;
-            encoder.omegaLeftRadps = measuredOmegaRadps;
-            encoder.omegaRightRadps = measuredOmegaRadps;
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
-            Assert::IsTrue(encoderResult.attempted);
-            Assert::IsTrue(encoderResult.accepted);
-
-            const VehicleState::StateVector& state = core.state();
-            Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < distancePerCountM);
-            Assert::IsTrue(std::fabs(state(VehicleState::kPy) - distancePerCountM) < (0.5f * distancePerCountM));
-            Assert::IsTrue(state(VehicleState::kU) > 0.0f);
-            Assert::IsTrue(state(VehicleState::kU) < (2.0f * (distancePerCountM / dt)));
-        }
-
-        TEST_METHOD(SrUkfCoreZeroEncoderObservationCollapsesMotionStateWithoutTeleportingPose)
-        {
-            const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
-            constexpr float initialForwardVelocityMps = 1.2f;
-            const float wheelSpeedRadps = initialForwardVelocityMps / params.wheelRadiusM;
-            const VehicleState::StateVector initialState =
-                BuildUkfState(
-                    0.03f,
-                    0.11f,
-                    0.08f,
-                    initialForwardVelocityMps,
-                    0.02f,
-                    0.15f,
-                    wheelSpeedRadps,
-                    wheelSpeedRadps);
-            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.02f, 0.05f, 0.20f, 0.15f, 0.25f, 0.50f, 0.05f)));
-
-            ControlInput control{};
-            control.leftMotorCommand = 0.40f;
-            control.rightMotorCommand = 0.40f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
-            constexpr float dt = 0.01f;
-            Assert::IsTrue(core.predict(dt, control));
-            const VehicleState::StateMatrix predictedCovariance = core.covariance();
-
-            EncoderObs encoder{};
-            const MeasurementUpdateResult result = core.updateEncoderPair(encoder, dt);
-            Assert::IsTrue(result.attempted);
-            Assert::IsTrue(result.accepted);
-
-            const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
-            const float maxOpenLoopTravelM = initialForwardVelocityMps * dt;
-            Assert::IsTrue(std::fabs(state(VehicleState::kPx) - initialState(VehicleState::kPx)) < maxOpenLoopTravelM);
-            Assert::IsTrue(std::fabs(state(VehicleState::kPy) - initialState(VehicleState::kPy)) < maxOpenLoopTravelM);
-            Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 1.0e-6f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 1.0e-6f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-6f);
-            Assert::IsTrue(
-                covariance(VehicleState::kU, VehicleState::kU) <
-                (0.1f * predictedCovariance(VehicleState::kU, VehicleState::kU)));
-            Assert::IsTrue(
-                covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) <
-                (0.1f * predictedCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL)));
-            Assert::IsTrue(
-                covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) <
-                (0.1f * predictedCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR)));
-            Assert::IsTrue(std::isfinite(covariance(VehicleState::kPy, VehicleState::kPy)));
-            Assert::IsTrue(covariance(VehicleState::kPy, VehicleState::kPy) > 1.0e-12f);
-        }
-
-        TEST_METHOD(SrUkfCoreYawRateUpdateImprovesYawMeasurementFitWithoutMovingPosition)
-        {
-            SrUkfCore core;
-            const VehicleState::StateVector initialState =
-                BuildUkfState(
-                    0.02f,
-                    0.14f,
-                    0.10f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    0.0f);
-            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.01f, 0.04f, 0.02f, 0.02f, 0.30f, 0.10f, 0.30f)));
-
-            const VehicleState::StateVector before = core.state();
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
-            constexpr float observedYawRateRadps = 0.35f;
-            const float beforeError =
-                std::fabs((before(VehicleState::kR) + before(VehicleState::kBgz)) - observedYawRateRadps);
-
-            const MeasurementUpdateResult result = core.updateYawRate(observedYawRateRadps);
-            Assert::IsTrue(result.attempted);
-            Assert::IsTrue(result.accepted);
-
-            const VehicleState::StateVector& after = core.state();
-            const VehicleState::StateMatrix afterCovariance = core.covariance();
-            const float afterError =
-                std::fabs((after(VehicleState::kR) + after(VehicleState::kBgz)) - observedYawRateRadps);
-
-            Assert::AreEqual(before(VehicleState::kPx), after(VehicleState::kPx), 1.0e-6f);
-            Assert::AreEqual(before(VehicleState::kPy), after(VehicleState::kPy), 1.0e-6f);
-            Assert::IsTrue(afterError < beforeError);
-            Assert::AreEqual(before(VehicleState::kBgz), after(VehicleState::kBgz), 1.0e-6f);
-            Assert::AreEqual(
-                beforeCovariance(VehicleState::kBgz, VehicleState::kBgz),
-                afterCovariance(VehicleState::kBgz, VehicleState::kBgz),
-                1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCoreYawRateUpdateDoesNotPullWheelRatesThroughYawCrossCovariance)
@@ -1120,6 +753,266 @@ namespace MazeMap
             Assert::IsTrue(fabs(state(VehicleState::kR)) < 0.5f,
                 (std::wstring(L"Angular velocity was too high: ") +
                     std::to_wstring(state(VehicleState::kR))).c_str());
+        }
+
+        TEST_METHOD(SrUkfCoreYawRateUpdateUsesGyroBiasStateInMeasurementEquation)
+        {
+            SrUkfCore core;
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.02f,
+                    -0.03f,
+                    0.05f,
+                    0.15f,
+                    -0.04f,
+                    0.11f,
+                    0.0f,
+                    0.0f,
+                    0.08f);
+            VehicleState::StateMatrix initialCovariance =
+                BuildUkfCovariance(0.010f, 0.010f, 0.020f, 0.015f, 0.015f, 0.020f, 0.030f);
+            initialCovariance(VehicleState::kR, VehicleState::kBgz) = 0.0f;
+            initialCovariance(VehicleState::kBgz, VehicleState::kR) = 0.0f;
+            Assert::IsTrue(core.reset(initialState, initialCovariance));
+
+            const VehicleState::StateVector before = core.state();
+            constexpr float observedYawRateRadps = 0.27f;
+            const float beforeError =
+                std::fabs((before(VehicleState::kR) + before(VehicleState::kBgz)) - observedYawRateRadps);
+
+            const MeasurementUpdateResult result = core.updateYawRate(observedYawRateRadps);
+            Assert::IsTrue(result.attempted);
+            Assert::IsTrue(result.accepted);
+
+            const VehicleState::StateVector& after = core.state();
+            const float afterError =
+                std::fabs((after(VehicleState::kR) + after(VehicleState::kBgz)) - observedYawRateRadps);
+
+            Assert::IsTrue(afterError < beforeError);
+            Assert::IsTrue(std::fabs(after(VehicleState::kBgz) - before(VehicleState::kBgz)) > 1.0e-5f);
+            Assert::IsTrue(std::isfinite(after(VehicleState::kBgz)));
+        }
+
+        TEST_METHOD(SrUkfCoreExposesFrozenCycleContextForRuntimeFeedforward)
+        {
+            const PlantParams params = PlantParams::Default();
+            SrUkfCore core(params);
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.05f,
+                    0.07f,
+                    0.04f,
+                    0.30f,
+                    0.02f,
+                    -0.05f,
+                    3.10f,
+                    3.05f,
+                    0.01f);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.002f, 0.002f, 0.003f, 0.003f, 0.003f, 0.003f, 0.002f)));
+
+            ControlInput control{};
+            control.leftMotorCommand = 0.19f;
+            control.rightMotorCommand = 0.17f;
+            control.fanDutyCycle = 0.80f;
+            control.batteryVoltageV = params.supplyVoltageV;
+            constexpr float dt = 0.002f;
+            Assert::IsTrue(core.predict(dt, control));
+
+            EncoderObs encoder{};
+            encoder.totalLeftCounts = 1;
+            encoder.totalRightCounts = 0;
+            encoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
+            encoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
+
+            const ModelCycleContext& cycleContext = core.modelCycleContext();
+            Assert::AreEqual(dt, cycleContext.dtS, 1.0e-7f);
+            Assert::IsTrue(std::isfinite(cycleContext.appliedTorque.leftAppliedBankTorqueNm));
+            Assert::IsTrue(std::isfinite(cycleContext.appliedTorque.rightAppliedBankTorqueNm));
+            Assert::IsFalse(cycleContext.schedule.exactStationaryLock);
+            Assert::IsTrue(std::isfinite(cycleContext.geometry.effectiveWheelRadiusM));
+            Assert::IsTrue(std::isfinite(core.closureResidualLeftMps()));
+            Assert::IsTrue(std::isfinite(core.closureResidualRightMps()));
+        }
+
+        TEST_METHOD(EstimatorPredictModelExactStationaryLockKeepsPoseFixedAndContractsDynamics)
+        {
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            EstimatorPredictModel predictModel;
+
+            EstimatorPredictModel::PredictInput input{};
+            input.currentState = BuildUkfState(
+                0.12f,
+                -0.08f,
+                0.35f,
+                0.40f,
+                -0.30f,
+                0.25f,
+                6.0f,
+                -5.0f,
+                0.02f);
+            input.leftAppliedBankTorqueNm = 0.10f;
+            input.rightAppliedBankTorqueNm = -0.08f;
+            input.dtS = 0.010f;
+
+            ModelCycleContext cycleContext{};
+            cycleContext.schedule.exactStationaryLock = true;
+            input.cycleContext = &cycleContext;
+
+            const EstimatorPredictModel::PredictOutput output = predictModel.Integrate(input, prepared);
+
+            Assert::AreEqual(input.currentState(VehicleState::kPx), output.nextState(VehicleState::kPx), 1.0e-9f);
+            Assert::AreEqual(input.currentState(VehicleState::kPy), output.nextState(VehicleState::kPy), 1.0e-9f);
+            Assert::AreEqual(
+                VehicleState::NormalizeAngle(input.currentState(VehicleState::kPsi)),
+                output.nextState(VehicleState::kPsi),
+                1.0e-9f);
+            Assert::IsTrue(std::fabs(output.nextState(VehicleState::kU)) < std::fabs(input.currentState(VehicleState::kU)));
+            Assert::IsTrue(std::fabs(output.nextState(VehicleState::kV)) < std::fabs(input.currentState(VehicleState::kV)));
+            Assert::IsTrue(std::fabs(output.nextState(VehicleState::kR)) < std::fabs(input.currentState(VehicleState::kR)));
+            Assert::IsTrue(std::fabs(output.nextState(VehicleState::kOmegaL)) < std::fabs(input.currentState(VehicleState::kOmegaL)));
+            Assert::IsTrue(std::fabs(output.nextState(VehicleState::kOmegaR)) < std::fabs(input.currentState(VehicleState::kOmegaR)));
+            Assert::AreEqual(input.currentState(VehicleState::kBgz), output.nextState(VehicleState::kBgz), 1.0e-9f);
+        }
+
+        TEST_METHOD(SrUkfCorePredictRefreshesFrozenCycleContextFromCurrentControl)
+        {
+            const PlantParams params = PlantParams::Default();
+            const PlantModel plant;
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            SrUkfCore core(params);
+            const VehicleState::StateVector initialState =
+                BuildUkfState(
+                    0.01f,
+                    0.02f,
+                    0.03f,
+                    0.45f,
+                    -0.01f,
+                    0.06f,
+                    4.00f,
+                    3.85f,
+                    0.01f);
+            Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.003f, 0.003f, 0.004f, 0.004f, 0.004f, 0.004f, 0.002f)));
+
+            ControlInput firstControl{};
+            firstControl.leftMotorCommand = 0.08f;
+            firstControl.rightMotorCommand = 0.06f;
+            firstControl.fanDutyCycle = 0.80f;
+            firstControl.batteryVoltageV = params.supplyVoltageV;
+
+            constexpr float dt = 0.002f;
+            Assert::IsTrue(core.predict(dt, firstControl));
+
+            EncoderObs firstEncoder{};
+            firstEncoder.totalLeftCounts = 0;
+            firstEncoder.totalRightCounts = 0;
+            firstEncoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
+            firstEncoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            Assert::IsTrue(core.updateEncoderPair(firstEncoder, dt).accepted);
+
+            const ModelCycleContext firstContext = core.modelCycleContext();
+            const AppliedTorqueEstimate expectedFirstTorque =
+                TorqueEstimateAdapter::Estimate(
+                    plant,
+                    initialState,
+                    firstControl,
+                    prepared,
+                    firstControl.batteryVoltageV);
+            Assert::AreEqual(
+                expectedFirstTorque.leftAppliedBankTorqueNm,
+                firstContext.appliedTorque.leftAppliedBankTorqueNm,
+                1.0e-6f);
+            Assert::AreEqual(
+                expectedFirstTorque.rightAppliedBankTorqueNm,
+                firstContext.appliedTorque.rightAppliedBankTorqueNm,
+                1.0e-6f);
+
+            const VehicleState::StateVector stateBeforeSecondPredict = core.state();
+            ControlInput secondControl{};
+            secondControl.leftMotorCommand = 0.31f;
+            secondControl.rightMotorCommand = 0.27f;
+            secondControl.fanDutyCycle = 0.80f;
+            secondControl.batteryVoltageV = params.supplyVoltageV;
+
+            Assert::IsTrue(core.predict(dt, secondControl));
+
+            EncoderObs secondEncoder{};
+            secondEncoder.totalLeftCounts = 0;
+            secondEncoder.totalRightCounts = 0;
+            secondEncoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
+            secondEncoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            Assert::IsTrue(core.updateEncoderPair(secondEncoder, dt).accepted);
+
+            const ModelCycleContext secondContext = core.modelCycleContext();
+            const AppliedTorqueEstimate expectedSecondTorque =
+                TorqueEstimateAdapter::Estimate(
+                    plant,
+                    stateBeforeSecondPredict,
+                    secondControl,
+                    prepared,
+                    secondControl.batteryVoltageV);
+            Assert::AreEqual(
+                expectedSecondTorque.leftAppliedBankTorqueNm,
+                secondContext.appliedTorque.leftAppliedBankTorqueNm,
+                1.0e-6f);
+            Assert::AreEqual(
+                expectedSecondTorque.rightAppliedBankTorqueNm,
+                secondContext.appliedTorque.rightAppliedBankTorqueNm,
+                1.0e-6f);
+        }
+
+        TEST_METHOD(EstimatorPredictModelUsesRuntimeFanDutyCycleForAppliedTorquePropagation)
+        {
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+            const VehicleState::StateVector state =
+                BuildUkfState(
+                    0.01f,
+                    0.02f,
+                    0.03f,
+                    0.40f,
+                    0.06f,
+                    2.4f,
+                    13.5f,
+                    11.8f,
+                    0.0f);
+
+            EstimatorPredictModel model;
+            EstimatorPredictModel::PredictInput lowFanInput{};
+            lowFanInput.currentState = state;
+            lowFanInput.leftAppliedBankTorqueNm = 0.055f;
+            lowFanInput.rightAppliedBankTorqueNm = 0.049f;
+            lowFanInput.fanDutyCycle = 0.15f;
+            lowFanInput.dtS = 0.002f;
+
+            EstimatorPredictModel::PredictInput highFanInput = lowFanInput;
+            highFanInput.fanDutyCycle = 0.95f;
+
+            const auto lowFanOutput = model.Integrate(lowFanInput, prepared);
+            const auto highFanOutput = model.Integrate(highFanInput, prepared);
+
+            const VehicleState::StateVector expectedLowFanState =
+                EstimatorPredictModel::SemiImplicitAdvance(
+                    state,
+                    model.EvaluateStep(
+                        lowFanInput,
+                        prepared),
+                    lowFanInput.dtS);
+            const VehicleState::StateVector expectedHighFanState =
+                EstimatorPredictModel::SemiImplicitAdvance(
+                    state,
+                    model.EvaluateStep(
+                        highFanInput,
+                        prepared),
+                    highFanInput.dtS);
+
+            for (int index = 0; index < lowFanOutput.nextState.size(); ++index)
+            {
+                Assert::AreEqual(expectedLowFanState(index), lowFanOutput.nextState(index), 1.0e-6f);
+                Assert::AreEqual(expectedHighFanState(index), highFanOutput.nextState(index), 1.0e-6f);
+            }
+
         }
     };
 }

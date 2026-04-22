@@ -359,6 +359,14 @@ namespace MazeMap
             const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.attempted);
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.accepted);
+
+            ImuAccelObs accel{};
+            accel.valid = true;
+            accel.accelBodyXMps2 = 0.0f;
+            accel.accelBodyYMps2 = 0.0f;
+            const MeasurementUpdateResult accelResult = core.updatePlanarAccel(accel);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(accelResult.attempted);
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(accelResult.accepted);
         }
 
         return core;

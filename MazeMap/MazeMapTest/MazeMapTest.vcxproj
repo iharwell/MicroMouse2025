@@ -246,6 +246,7 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="SrUkfCoreTestSupport.h" />
     <ClInclude Include="Templates.h" />
+    <ClInclude Include="TimeStepPropagationTestSupport.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MazeMap\MazeMap.vcxproj">

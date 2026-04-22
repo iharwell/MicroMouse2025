@@ -15,6 +15,7 @@ namespace MazeMap
 
         SrUkfCore& ukf() noexcept { return _core; }
         const SrUkfCore& ukf() const noexcept { return _core; }
+        const ModelCycleContext& modelCycleContext() const noexcept { return _core.modelCycleContext(); }
         MapEvidenceUpdater& mapEvidence() noexcept { return _mapEvidence; }
         const MapEvidenceUpdater& mapEvidence() const noexcept { return _mapEvidence; }
 

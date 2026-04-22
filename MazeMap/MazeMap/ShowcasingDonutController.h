@@ -23,7 +23,6 @@ namespace MazeMap::App::Internal
 {
     class Drive;
     class SharedRobotRuntime;
-    class StartupCalibration;
 }
 
 namespace MazeMap::App::Internal::Runtime
@@ -146,16 +145,8 @@ namespace MazeMap::App::Internal
         enum class Phase : std::uint8_t
         {
             Idle,
-            LaunchStartupCalibration,
-            RunStartupCalibration,
-            LaunchFanSpinupHold,
-            RunFanSpinupHold,
-            LaunchDonutSweep,
-            RunDonutSweep,
-            LaunchFlashTurn,
-            RunFlashTurn,
-            LaunchCompletionHold,
-            RunCompletionHold,
+            DonutSweep,
+            FlashyMoves,
             Complete,
         };
 
@@ -225,8 +216,6 @@ namespace MazeMap::App::Internal
         void ConfigureSelectorMonitor() noexcept;
         void ReleaseSelectorMonitor() noexcept;
         bool SelectorRemoved() const noexcept;
-        bool StartSharedStartupCalibration();
-        bool StartHold(std::uint16_t durationMs) noexcept;
         bool BeginDonutSweep() noexcept;
         bool BeginFlashTurn(float angleRad) noexcept;
         bool TractionLossDetected(const LoopController::ModeState& state) noexcept;
@@ -243,7 +232,6 @@ namespace MazeMap::App::Internal
         MazeMap::Vehicle& _vehicle;
         ::DriveBase& _drive;
         Drive& _driveService;
-        StartupCalibration& _startupCalibration;
         Phase _phase{ Phase::Idle };
         EndReason _endReason{ EndReason::None };
         char _logFileName[kLogFileNameCapacity]{};
@@ -252,14 +240,11 @@ namespace MazeMap::App::Internal
         std::uint8_t _selectorSensePin{};
         bool _selectorMonitorArmed{};
         float _commandedSpeedMps{};
-        float _sweepElapsedS{};
         float _peakCommandedSpeedMps{};
         float _peakEncoderSpeedMps{};
         float _peakYawRateRadps{};
         float _peakPlanarAccelMps2{};
-        std::uint8_t _flashTurnsRemaining{};
-        float _flashTurnTargetYawRad{};
-        float _flashTurnMagnitudeRad{};
+        std::uint8_t _flashTurnsStarted{};
         CommandTelemetrySample _appliedCommandTelemetry{};
         TractionLossState _tractionLoss{};
     };

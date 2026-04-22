@@ -390,6 +390,8 @@ public:
         _lastRightTargetVelocityMps = 0.0f;
         _lastLeftLaunchAssistFloor = 0.0f;
         _lastRightLaunchAssistFloor = 0.0f;
+        _lastFeedforwardUsedAlignedCycleContext = false;
+        _lastFeedforwardUsedGripOnlyFallback = false;
         _lastModeFlags = kModeBraking;
         _lastSaturationFlags = 0u;
         _leftMotor.brake();
@@ -466,6 +468,8 @@ public:
         const MazeMap::App::Internal::LoopController::ControlVector& command) const noexcept
     {
         DriveTelemetry telemetry{};
+        const MazeMap::ModelCycleContext& cycleContext = _ukf.ukf().modelCycleContext();
+        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
         telemetry.leftDriveCommand = command.leftMotorPwm;
         telemetry.rightDriveCommand = command.rightMotorPwm;
         telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
@@ -478,6 +482,71 @@ public:
         telemetry.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
         telemetry.modeFlags = _lastModeFlags;
         telemetry.saturationFlags = _lastSaturationFlags;
+        telemetry.ukfModeId = _ukf.ukf().operatingModeId();
+        telemetry.ukfYawValidForFeedforward = _ukf.ukf().yawValidForFeedforward() ? 1U : 0U;
+        telemetry.ukfBiasUpdateEnabled = _ukf.ukf().biasUpdateEnabled() ? 1U : 0U;
+        telemetry.ukfNhcEnabled = _ukf.ukf().nonholonomicConstraintEnabled() ? 1U : 0U;
+        telemetry.ukfGyroBiasAnchorRadps = _ukf.ukf().gyroBiasAnchorRadps();
+        telemetry.ukfYawConsistencyLowPassRadps = _ukf.ukf().yawConsistencyLowPassRadps();
+        telemetry.ukfYawWindowMismatchRad = _ukf.ukf().yawWindowMismatchRad();
+        telemetry.ukfNhcSigmaMps = _ukf.ukf().nhcSigmaMps();
+        telemetry.ukfNhcResidualMps = _ukf.ukf().nhcResidualMps();
+        telemetry.ukfNhcResidualSigma = _ukf.ukf().nhcResidualSigma();
+        telemetry.ukfFeedforwardYawRateRadps = _ukf.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
+        telemetry.ukfClosureResidualLeftMps = _ukf.ukf().closureResidualLeftMps();
+        telemetry.ukfClosureResidualRightMps = _ukf.ukf().closureResidualRightMps();
+        telemetry.ukfLongitudinalClosureSeverity = cycleContext.utilization.longitudinalClosureSeverity;
+        telemetry.ukfDifferentialClosureSeverity = cycleContext.utilization.differentialClosureSeverity;
+        telemetry.ukfLateralAccelerationSeverity = cycleContext.utilization.lateralAccelerationSeverity;
+        telemetry.ukfYawConsistencySeverity = cycleContext.utilization.yawConsistencySeverity;
+        telemetry.ukfLeftBankAnomalySeverity = cycleContext.utilization.leftBankAnomalySeverity;
+        telemetry.ukfRightBankAnomalySeverity = cycleContext.utilization.rightBankAnomalySeverity;
+        telemetry.ukfLeftPreProjectionUtilization = cycleContext.utilization.leftBankPreProjectionUtilization;
+        telemetry.ukfRightPreProjectionUtilization = cycleContext.utilization.rightBankPreProjectionUtilization;
+        telemetry.ukfLeftBankMemory = cycleContext.memory.leftBankMemory;
+        telemetry.ukfRightBankMemory = cycleContext.memory.rightBankMemory;
+        telemetry.ukfLeftBankRecoveryScore = cycleContext.regrip.leftBankRecoveryScore;
+        telemetry.ukfRightBankRecoveryScore = cycleContext.regrip.rightBankRecoveryScore;
+        telemetry.ukfLeftBankRecoveryTimeRemainingS = cycleContext.regrip.leftBankRecoveryTimeRemainingS;
+        telemetry.ukfRightBankRecoveryTimeRemainingS = cycleContext.regrip.rightBankRecoveryTimeRemainingS;
+        telemetry.ukfStationaryCandidateDwellS = _ukf.ukf().stationaryCandidateDwellS();
+        telemetry.ukfLaunchHoldRemainingS = _ukf.ukf().launchHoldRemainingS();
+        telemetry.ukfInconsistentHoldRemainingS = _ukf.ukf().inconsistentHoldRemainingS();
+        telemetry.ukfNhcReenableDelayRemainingS = _ukf.ukf().nhcReenableDelayRemainingS();
+        telemetry.ukfForwardProcessNoiseScale = cycleContext.schedule.forwardSpeedProcessNoiseScale;
+        telemetry.ukfLateralProcessNoiseScale = cycleContext.schedule.lateralSpeedProcessNoiseScale;
+        telemetry.ukfYawRateProcessNoiseScale = cycleContext.schedule.yawRateProcessNoiseScale;
+        telemetry.ukfLeftWheelProcessNoiseScale = cycleContext.schedule.leftWheelSpeedProcessNoiseScale;
+        telemetry.ukfRightWheelProcessNoiseScale = cycleContext.schedule.rightWheelSpeedProcessNoiseScale;
+        telemetry.ukfClosureCovarianceScaleLeft = cycleContext.schedule.closureCovarianceScaleLeft;
+        telemetry.ukfClosureCovarianceScaleRight = cycleContext.schedule.closureCovarianceScaleRight;
+        telemetry.ukfLateralPseudoCovarianceScale = cycleContext.schedule.lateralPseudoMeasurementCovarianceScale;
+        telemetry.ukfAppliedLeftBankTorqueNm = cycleContext.appliedTorque.leftAppliedBankTorqueNm;
+        telemetry.ukfAppliedRightBankTorqueNm = cycleContext.appliedTorque.rightAppliedBankTorqueNm;
+        telemetry.ukfGyroInnovationRadps = _ukf.ukf().gyroInnovationRadps();
+        telemetry.ukfForwardAccelInnovationMps2 = _ukf.ukf().forwardAccelInnovationMps2();
+        telemetry.ukfLateralAccelInnovationMps2 = _ukf.ukf().lateralAccelInnovationMps2();
+        telemetry.ukfGyroInnovationNis = _ukf.ukf().gyroInnovationNis();
+        telemetry.ukfForwardAccelInnovationNis = _ukf.ukf().forwardAccelInnovationNis();
+        telemetry.ukfLateralAccelInnovationNis = _ukf.ukf().lateralAccelInnovationNis();
+        telemetry.ukfClosureLeftNis = _ukf.ukf().closureLeftNis();
+        telemetry.ukfClosureRightNis = _ukf.ukf().closureRightNis();
+        telemetry.ukfLateralPseudoNis = _ukf.ukf().lateralPseudoNis();
+        telemetry.ukfForwardSpeedVariance = covariance(MazeMap::VehicleState::kU, MazeMap::VehicleState::kU);
+        telemetry.ukfLateralSpeedVariance = covariance(MazeMap::VehicleState::kV, MazeMap::VehicleState::kV);
+        telemetry.ukfYawRateVariance = covariance(MazeMap::VehicleState::kR, MazeMap::VehicleState::kR);
+        telemetry.ukfLeftWheelSpeedVariance = covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL);
+        telemetry.ukfRightWheelSpeedVariance = covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR);
+        telemetry.ukfGyroBiasVariance = covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz);
+        telemetry.ukfExactStationaryLock = cycleContext.schedule.exactStationaryLock ? 1U : 0U;
+        telemetry.ukfLeftBankHoldoffActive = cycleContext.schedule.leftBankHoldoffActive ? 1U : 0U;
+        telemetry.ukfRightBankHoldoffActive = cycleContext.schedule.rightBankHoldoffActive ? 1U : 0U;
+        telemetry.ukfLeftBankInRecovery = cycleContext.regrip.leftBankInRecovery ? 1U : 0U;
+        telemetry.ukfRightBankInRecovery = cycleContext.regrip.rightBankInRecovery ? 1U : 0U;
+        telemetry.ukfDirectWheelUpdateBodyInvariant = _ukf.ukf().directWheelUpdateBodyStateInvariant() ? 1U : 0U;
+        telemetry.ukfReleaseInflationApplied = _ukf.ukf().releaseInflationApplied() ? 1U : 0U;
+        telemetry.feedforwardUsedAlignedCycleContext = _lastFeedforwardUsedAlignedCycleContext ? 1U : 0U;
+        telemetry.feedforwardUsedGripOnlyFallback = _lastFeedforwardUsedGripOnlyFallback ? 1U : 0U;
         return telemetry;
     }
 
@@ -486,6 +555,7 @@ public:
         DriveTelemetry telemetry{};
         const int32_t pendingLeftCounts = _leftMotor.getEncoderCount();
         const int32_t pendingRightCounts = _rightMotor.getEncoderCount();
+        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
         telemetry.leftDriveCommand = _leftMotor.getDriveCommand();
         telemetry.rightDriveCommand = _rightMotor.getDriveCommand();
         telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
@@ -517,6 +587,61 @@ public:
         telemetry.ukfNhcResidualMps = _ukf.ukf().nhcResidualMps();
         telemetry.ukfNhcResidualSigma = _ukf.ukf().nhcResidualSigma();
         telemetry.ukfFeedforwardYawRateRadps = _ukf.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
+        const MazeMap::ModelCycleContext& cycleContext = _ukf.ukf().modelCycleContext();
+        telemetry.ukfClosureResidualLeftMps = _ukf.ukf().closureResidualLeftMps();
+        telemetry.ukfClosureResidualRightMps = _ukf.ukf().closureResidualRightMps();
+        telemetry.ukfLongitudinalClosureSeverity = cycleContext.utilization.longitudinalClosureSeverity;
+        telemetry.ukfDifferentialClosureSeverity = cycleContext.utilization.differentialClosureSeverity;
+        telemetry.ukfLateralAccelerationSeverity = cycleContext.utilization.lateralAccelerationSeverity;
+        telemetry.ukfYawConsistencySeverity = cycleContext.utilization.yawConsistencySeverity;
+        telemetry.ukfLeftBankAnomalySeverity = cycleContext.utilization.leftBankAnomalySeverity;
+        telemetry.ukfRightBankAnomalySeverity = cycleContext.utilization.rightBankAnomalySeverity;
+        telemetry.ukfLeftPreProjectionUtilization = cycleContext.utilization.leftBankPreProjectionUtilization;
+        telemetry.ukfRightPreProjectionUtilization = cycleContext.utilization.rightBankPreProjectionUtilization;
+        telemetry.ukfLeftBankMemory = cycleContext.memory.leftBankMemory;
+        telemetry.ukfRightBankMemory = cycleContext.memory.rightBankMemory;
+        telemetry.ukfLeftBankRecoveryScore = cycleContext.regrip.leftBankRecoveryScore;
+        telemetry.ukfRightBankRecoveryScore = cycleContext.regrip.rightBankRecoveryScore;
+        telemetry.ukfLeftBankRecoveryTimeRemainingS = cycleContext.regrip.leftBankRecoveryTimeRemainingS;
+        telemetry.ukfRightBankRecoveryTimeRemainingS = cycleContext.regrip.rightBankRecoveryTimeRemainingS;
+        telemetry.ukfStationaryCandidateDwellS = _ukf.ukf().stationaryCandidateDwellS();
+        telemetry.ukfLaunchHoldRemainingS = _ukf.ukf().launchHoldRemainingS();
+        telemetry.ukfInconsistentHoldRemainingS = _ukf.ukf().inconsistentHoldRemainingS();
+        telemetry.ukfNhcReenableDelayRemainingS = _ukf.ukf().nhcReenableDelayRemainingS();
+        telemetry.ukfForwardProcessNoiseScale = cycleContext.schedule.forwardSpeedProcessNoiseScale;
+        telemetry.ukfLateralProcessNoiseScale = cycleContext.schedule.lateralSpeedProcessNoiseScale;
+        telemetry.ukfYawRateProcessNoiseScale = cycleContext.schedule.yawRateProcessNoiseScale;
+        telemetry.ukfLeftWheelProcessNoiseScale = cycleContext.schedule.leftWheelSpeedProcessNoiseScale;
+        telemetry.ukfRightWheelProcessNoiseScale = cycleContext.schedule.rightWheelSpeedProcessNoiseScale;
+        telemetry.ukfClosureCovarianceScaleLeft = cycleContext.schedule.closureCovarianceScaleLeft;
+        telemetry.ukfClosureCovarianceScaleRight = cycleContext.schedule.closureCovarianceScaleRight;
+        telemetry.ukfLateralPseudoCovarianceScale = cycleContext.schedule.lateralPseudoMeasurementCovarianceScale;
+        telemetry.ukfAppliedLeftBankTorqueNm = cycleContext.appliedTorque.leftAppliedBankTorqueNm;
+        telemetry.ukfAppliedRightBankTorqueNm = cycleContext.appliedTorque.rightAppliedBankTorqueNm;
+        telemetry.ukfGyroInnovationRadps = _ukf.ukf().gyroInnovationRadps();
+        telemetry.ukfForwardAccelInnovationMps2 = _ukf.ukf().forwardAccelInnovationMps2();
+        telemetry.ukfLateralAccelInnovationMps2 = _ukf.ukf().lateralAccelInnovationMps2();
+        telemetry.ukfGyroInnovationNis = _ukf.ukf().gyroInnovationNis();
+        telemetry.ukfForwardAccelInnovationNis = _ukf.ukf().forwardAccelInnovationNis();
+        telemetry.ukfLateralAccelInnovationNis = _ukf.ukf().lateralAccelInnovationNis();
+        telemetry.ukfClosureLeftNis = _ukf.ukf().closureLeftNis();
+        telemetry.ukfClosureRightNis = _ukf.ukf().closureRightNis();
+        telemetry.ukfLateralPseudoNis = _ukf.ukf().lateralPseudoNis();
+        telemetry.ukfForwardSpeedVariance = covariance(MazeMap::VehicleState::kU, MazeMap::VehicleState::kU);
+        telemetry.ukfLateralSpeedVariance = covariance(MazeMap::VehicleState::kV, MazeMap::VehicleState::kV);
+        telemetry.ukfYawRateVariance = covariance(MazeMap::VehicleState::kR, MazeMap::VehicleState::kR);
+        telemetry.ukfLeftWheelSpeedVariance = covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL);
+        telemetry.ukfRightWheelSpeedVariance = covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR);
+        telemetry.ukfGyroBiasVariance = covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz);
+        telemetry.ukfExactStationaryLock = cycleContext.schedule.exactStationaryLock ? 1U : 0U;
+        telemetry.ukfLeftBankHoldoffActive = cycleContext.schedule.leftBankHoldoffActive ? 1U : 0U;
+        telemetry.ukfRightBankHoldoffActive = cycleContext.schedule.rightBankHoldoffActive ? 1U : 0U;
+        telemetry.ukfLeftBankInRecovery = cycleContext.regrip.leftBankInRecovery ? 1U : 0U;
+        telemetry.ukfRightBankInRecovery = cycleContext.regrip.rightBankInRecovery ? 1U : 0U;
+        telemetry.ukfDirectWheelUpdateBodyInvariant = _ukf.ukf().directWheelUpdateBodyStateInvariant() ? 1U : 0U;
+        telemetry.ukfReleaseInflationApplied = _ukf.ukf().releaseInflationApplied() ? 1U : 0U;
+        telemetry.feedforwardUsedAlignedCycleContext = _lastFeedforwardUsedAlignedCycleContext ? 1U : 0U;
+        telemetry.feedforwardUsedGripOnlyFallback = _lastFeedforwardUsedGripOnlyFallback ? 1U : 0U;
         telemetry.encoderObservationValid = _encoderObservationValid;
         return telemetry;
     }
@@ -832,6 +957,7 @@ private:
                     timing->ukfUpdateStartUs = timing->ukfPredictEndUs;
                     timing->ukfUpdateEndUs = timing->ukfPredictEndUs;
                     timing->ukfUpdateDurationUs = 0U;
+                    timing->ukfTotalDurationUs = timing->ukfPredictDurationUs;
                 }
                 return;
             }
@@ -865,21 +991,20 @@ private:
                 {
                     timing->ukfUpdateEndUs = micros();
                     timing->ukfUpdateDurationUs = timing->ukfUpdateEndUs - timing->ukfUpdateStartUs;
+                    timing->ukfTotalDurationUs = timing->ukfPredictDurationUs + timing->ukfUpdateDurationUs;
                 }
                 return;
             }
         }
 
-        if (snapshot.accelBiasValid)
-        {
-            MazeMap::ImuAccelObs accelObservation{};
-            accelObservation.valid =
-                std::isfinite(snapshot.accelBodyXMps2) &&
-                std::isfinite(snapshot.accelBodyYMps2);
-            accelObservation.accelBodyXMps2 = snapshot.accelBodyXMps2;
-            accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
-            (void)_ukf.updatePlanarAccel(accelObservation, loopHook);
-        }
+        MazeMap::ImuAccelObs accelObservation{};
+        accelObservation.valid =
+            snapshot.accelBiasValid &&
+            std::isfinite(snapshot.accelBodyXMps2) &&
+            std::isfinite(snapshot.accelBodyYMps2);
+        accelObservation.accelBodyXMps2 = snapshot.accelBodyXMps2;
+        accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
+        (void)_ukf.updatePlanarAccel(accelObservation, loopHook);
 
         if (map != nullptr)
         {
@@ -907,6 +1032,7 @@ private:
         {
             timing->ukfUpdateEndUs = micros();
             timing->ukfUpdateDurationUs = timing->ukfUpdateEndUs - timing->ukfUpdateStartUs;
+            timing->ukfTotalDurationUs = timing->ukfPredictDurationUs + timing->ukfUpdateDurationUs;
         }
 
         SyncPoseEstimate();
@@ -939,6 +1065,8 @@ private:
     mutable float _lastRightTargetVelocityMps = 0.0f;
     mutable float _lastLeftLaunchAssistFloor = 0.0f;
     mutable float _lastRightLaunchAssistFloor = 0.0f;
+    mutable bool _lastFeedforwardUsedAlignedCycleContext = false;
+    mutable bool _lastFeedforwardUsedGripOnlyFallback = false;
     int32_t _leftEncoderCountTotal = 0;
     int32_t _rightEncoderCountTotal = 0;
     float _leftEncoderDistanceMeters = 0.0f;
@@ -1144,6 +1272,7 @@ private:
         _plantModel.velocityTargetTechnicalLimits(
             presentState,
             _ukf.ukf().preparedParams(),
+            _ukf.ukf().modelCycleContext(),
             technicalLongitudinalAccelMps2,
             technicalYawAccelRadps2,
             GetMissionFanDutyCycle());
