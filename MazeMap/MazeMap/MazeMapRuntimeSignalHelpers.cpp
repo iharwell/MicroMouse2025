@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "MazeMapRuntimeSignalHelpers.h"
 
+#include "SensorSnapshot.h"
+
 #include <algorithm>
 #include <cmath>
 

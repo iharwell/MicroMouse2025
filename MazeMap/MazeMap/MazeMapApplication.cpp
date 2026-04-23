@@ -1,8 +1,7 @@
 #include "pch.h"
-#include "MazeMapApplication.h"
+#include "MazeMapApplicationRuntime.h"
 
 #include "BootModeRegistry.h"
-#include "MazeMapApplicationRuntime.h"
 
 #include <cassert>
 #include <stdexcept>

@@ -2,7 +2,7 @@
 
 #include "Defines.h"
 #include "LoopController.h"
-#include "MazeMapApplicationMode.h"
+#include "IApplicationMode.h"
 
 #include <cstdint>
 

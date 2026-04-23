@@ -71,13 +71,13 @@
     <ClCompile Include="ManeuverPathFinderTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapApplicationTest.cpp">
+    <ClCompile Include="ApplicationTest.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapRuntimeHelperTest.cpp">
+    <ClCompile Include="RuntimeHelperTest.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapSharedRuntimeTest.cpp">
+    <ClCompile Include="SharedRuntimeTest.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
     <ClCompile Include="..\MazeMap\MmLog.cpp">
@@ -86,7 +86,7 @@
     <ClCompile Include="ManeuverTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapTest.cpp">
+    <ClCompile Include="WallMappingTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeMaskTest.cpp">

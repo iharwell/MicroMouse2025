@@ -2,7 +2,7 @@
 #include "CppUnitTest.h"
 #include "EstimatorTestSupport.h"
 #include "..\MazeMap\Drive.h"
-#include "..\MazeMap\MazeMapSharedRuntime.h"
+#include "..\MazeMap\SharedRobotRuntime.h"
 #include "..\MazeMap\Vehicle.h"
 
 #include <cmath>
@@ -139,7 +139,7 @@ namespace
 
 namespace MazeMap::App
 {
-    TEST_CLASS(MazeMapSharedRuntimeTest)
+    TEST_CLASS(SharedRuntimeTest)
     {
     public:
         static std::string ReadAllBytes(const std::string& path)

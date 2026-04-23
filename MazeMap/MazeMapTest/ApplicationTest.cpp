@@ -1,9 +1,9 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 #include "..\MazeMap\BootModeRegistry.h"
-#include "..\MazeMap\MazeMapApplication.h"
+#include "..\MazeMap\Application.h"
 #include "..\MazeMap\MazeMapApplicationRuntime.h"
-#include "..\MazeMap\MazeMapSharedRuntime.h"
+#include "..\MazeMap\SharedRobotRuntime.h"
 #include "..\MazeMap\Pins.h"
 #include "..\MazeMap\WallSensorLedCalibrationController.h"
 #include "..\MazeMap\Defines.h"
@@ -61,7 +61,7 @@ namespace MazeMap::App
         }
     }
 
-    TEST_CLASS(MazeMapApplicationTest)
+    TEST_CLASS(ApplicationTest)
     {
     public:
         TEST_METHOD_INITIALIZE(ResetHostPins)

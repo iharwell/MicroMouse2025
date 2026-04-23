@@ -1,7 +1,7 @@
 #include "pch.h"
-#include "MazeMapApplication.h"
+#include "Application.h"
 #include "MazeMapApplicationRuntime.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "Defines.h"
 
 namespace MazeMap::App

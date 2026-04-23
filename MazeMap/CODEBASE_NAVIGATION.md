@@ -22,7 +22,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `DiagnosticCoverage.h`: diagnostic coverage instructions and result-shaping helpers.
 - `DiagnosticLogBudget.h`: limits and budgeting rules for diagnostic logging volume.
 - `DiagnosticMotionPlan.h`: helpers that describe the intended diagnostic motion sequence.
-- `DiagnosticSensorSuite.h`: class-named entry header for the diagnostic sensor pipeline defined in the runtime sensor layer.
 - `DiagonalWallCentering.h`: logic for centering the robot on diagonal wall references.
 - `Direction.h` / `Direction.cpp`: directional enums and relative-direction helpers used across mapping and motion code.
 - `DirectionalLocation.h` / `DirectionalLocation.cpp`: combine a maze location with a facing direction.
@@ -56,24 +55,23 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `MapEvidenceUpdater.h` / `MapEvidenceUpdater.cpp`: accumulate accepted UKF wall observations into per-edge maze evidence.
 - `Maze.h` / `Maze.cpp`: full maze representation, indexing, wall knowledge, and goal-cell handling.
 - `MazeLocation.h` / `MazeLocation.cpp`: physical or logical location within a maze cell, including conversions between them.
-- `MazeMapApplication.h` / `MazeMapApplication.cpp`: top-level application object and startup mode selection.
-- `MazeMapApplicationEntry.cpp`: entrypoint glue that boots the application in the correct host or embedded mode.
-- `MazeMapApplicationMode.h`: interface for a runnable application mode with `Begin` and `Run` phases.
+- `Application.h` / `Application.cpp`: top-level application object and setup/loop entry.
+- `MazeMap.ino`: Arduino sketch entrypoint that delegates setup/loop to `Application`.
+- `MazeMapApplication.cpp`: application runtime resolver that asks `BootModeRegistry` for the selected descriptor and enters that descriptor's mode.
+- `IApplicationMode.h`: interface for a runnable application mode with `Begin` and `Run` phases.
 - `MazeMapApplicationPrivate.h`: private application include set that assembles runtime, mission, and hardware dependencies for the app entrypoints.
 - `MazeMapApplicationRuntime.h`: declarations for the application runtime boundary between startup and active control loops.
-- `MazeMapControllerRegistry.h`: registry helpers for application controllers and standalone mode selection.
+- `MazeMapControllerRegistry.h`: declarations for boot-mode entry objects and descriptors consumed by `BootModeRegistry`.
 - `MazeMapCore.cpp`: excluded legacy/experimental core file; retained in the project but not built.
 - `MissionRunMode.cpp`, `CorridorRepeatabilityMode.cpp`, and `PositionAccuracyAuditMode.cpp`: the public boot-mode entrypoints for the maze-running family. They currently each carry a large private implementation while convergence continues on session ownership and shared execution mechanics moving into canonical owners like `ManeuverExecutor` and `BootUtilityModeFramework`.
-- `MazeMapMissionModeHost.h`: host interface that mission modes call to enter specific mission workflows.
-- `MazeMapMissionModes.h` / `MazeMapMissionModes.cpp`: concrete mission mode types used by the standalone app.
 - `MazeMapRuntimeCore.h`: shared runtime state, calibration, asynchronous sensor-read helpers, and wall-distance calibration logic.
 - `WallDistanceCalibration.h`: class-named entry header for the wall-distance calibration subsystem defined in `MazeMapRuntimeCore.h`.
 - `MazeMapRuntimeInfrastructure.h`: runtime logging, telemetry, and open-floor measurement infrastructure.
 - `MazeMapRuntimeMmLog.h`: runtime log-writer helpers layered on top of the shared `MmLog.h` MMLOG file-format definitions.
-- `MazeMapRuntimeSensors.h`: mission and diagnostic sensor-capture pipelines.
+- `RuntimeSensorSuite.h` / `RuntimeSensorSuite.cpp`: mission and diagnostic sensor-capture pipelines.
 - `MazeMapRuntimeSignalHelpers.h` / `MazeMapRuntimeSignalHelpers.cpp`: signal filtering and threshold helpers shared by runtime sensing.
-- `MazeMapSharedRuntime.h` / `MazeMapSharedRuntime.cpp`: shared runtime composition root that owns the maze, vehicles, planners, drive, and sensor subsystems.
-- `MazeMapStandaloneModes.cpp`: standalone controllers for diagnostics, auxiliary measurements, LED calibration, and open-floor measurements.
+- `SharedRobotRuntime.h` / `SharedRobotRuntime.cpp`: shared runtime composition root that owns the maze, vehicles, planners, drive, and sensor subsystems.
+- `AuxMeasurementController.cpp`, `DiagnosticController.cpp`, `FrontWallCharacterizationController.cpp`, `OpenFloorMeasurementController.h` / `OpenFloorMeasurementController.cpp`, and `WallSensorLedCalibrationController.h` / `WallSensorLedCalibrationController.cpp`: utility boot-mode controllers and measurement workflows.
 - `MazeMask.h` / `MazeMask.cpp`: bitmask-based occupancy or visitation helpers for maze algorithms.
 - `MissionMazeExport.h`: maze export helpers for mission data capture.
 - `MissionStartPolicy.h`: mission-start policy, including front-calibration heading classification.
@@ -96,7 +94,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `RollingAverageWindow.h`: small fixed-size rolling average helper.
 - `SearchRunPlanner.h`: search-run straight planning and replanning response helpers.
 - `Sensor.h`: generic sensor abstraction template.
-- `SensorSuite.h`: class-named entry header for the mission sensor pipeline defined in the runtime sensor layer.
 - `SmoothTurnYawRateController.h`: state bundle for smooth-turn yaw-rate control.
 - `StartupWaitProfile.h`: startup wait timing and policy constants.
 - `SrUkfCore.h` / `SrUkfCore.cpp`: estimator-specific square-root UKF core with encoder, IMU, and wall-update logic.
@@ -138,10 +135,10 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `DriveBaseTest.cpp`: runtime drive delta-command tests that prime encoder state through the production odometry path.
 - `EstimatorTestSupport.h`: shared estimator-test builders for `VehicleState`, covariance, local-map views, and encoder-distance conversion.
 - `LoopControllerTest.cpp`: focused checks for `LoopController` startup callback timing constants.
-- `MazeMapApplicationTest.cpp`: tests around application startup and mode selection.
-- `MazeMapRuntimeHelperTest.cpp`: tests for runtime helper functions and utility routines.
-- `MazeMapSharedRuntimeTest.cpp`: tests for shared runtime composition and default wiring.
-- `MazeMapTest.cpp`: broad integration-style tests for the MazeMap library.
+- `ApplicationTest.cpp`: tests around application startup and mode selection.
+- `RuntimeHelperTest.cpp`: tests for runtime helper functions and utility routines.
+- `SharedRuntimeTest.cpp`: tests for shared runtime composition and default wiring.
+- `WallMappingTest.cpp`: broad wall-mapping tests for the MazeMap library.
 - `MazeMaskTest.cpp`: tests for mask and bit-grid helpers.
 - `MazeRef.h`: test helper that supplies reference mazes for assertions.
 - `MazeTest.cpp`: tests for maze mutation, lookup, and path interaction behavior.
@@ -161,3 +158,20 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `VehicleStateTest.cpp`: tests for stationary classification and zero-motion constraint behavior on `VehicleState`.
 - `Vector2fTest.cpp`: tests for vector math assumptions used by estimator code.
 - `pch.h` / `pch.cpp`: precompiled-header setup for the test project.
+
+## MazeMap-Prefixed Follow-Up Files
+
+These tracked source files still start with `MazeMap` because they do not contain one primary class/type to rename around. Split them only when a later cleanup identifies authoritative owners for their contents.
+
+- `MazeMap/MazeMap/MazeMap.ino`
+- `MazeMap/MazeMap/MazeMapApplication.cpp`
+- `MazeMap/MazeMap/MazeMapApplicationPrivate.h`
+- `MazeMap/MazeMap/MazeMapApplicationRuntime.h`
+- `MazeMap/MazeMap/MazeMapControllerRegistry.h`
+- `MazeMap/MazeMap/MazeMapCore.cpp`
+- `MazeMap/MazeMap/MazeMapRuntimeCore.h`
+- `MazeMap/MazeMap/MazeMapRuntimeInfrastructure.cpp`
+- `MazeMap/MazeMap/MazeMapRuntimeInfrastructure.h`
+- `MazeMap/MazeMap/MazeMapRuntimeMmLog.h`
+- `MazeMap/MazeMap/MazeMapRuntimeSignalHelpers.cpp`
+- `MazeMap/MazeMap/MazeMapRuntimeSignalHelpers.h`

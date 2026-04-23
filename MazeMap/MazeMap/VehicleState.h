@@ -2,6 +2,7 @@
 
 #include "Defines.h"
 #include "EigenCompat.h"
+#include "SensorSnapshot.h"
 
 #include <algorithm>
 #include <array>
@@ -157,6 +158,10 @@ namespace MazeMap
             const StateMatrix& poseReferenceCovariance) noexcept;
 
         void SetPosition(const Eigen::Vector2f& position) noexcept { _state(kPx) = position.x(); _state(kPy) = position.y(); }
+        float GetPositionX() const noexcept { return _state(kPx); }
+        float GetPositionX() noexcept { return const_cast<const VehicleState*>(this)->GetPositionX(); }
+        float GetPositionY() const noexcept { return _state(kPy); }
+        float GetPositionY() noexcept { return const_cast<const VehicleState*>(this)->GetPositionY(); }
         Eigen::Vector2f GetPosition() const noexcept { return Eigen::Vector2f(_state(kPx), _state(kPy)); }
         Eigen::Vector2f GetPosition() noexcept { return const_cast<const VehicleState*>(this)->GetPosition(); }
 
@@ -171,6 +176,11 @@ namespace MazeMap
         void SetOrientation(float orientation) noexcept { _state(kPsi) = NormalizeAngle(orientation); }
         float GetOrientation() const noexcept { return _state(kPsi); }
         float GetOrientation() noexcept { return const_cast<const VehicleState*>(this)->GetOrientation(); }
+        Eigen::Vector2f GetHeadingUnit() const noexcept
+        {
+            return Eigen::Vector2f(std::sin(_state(kPsi)), std::cos(_state(kPsi)));
+        }
+        Eigen::Vector2f GetHeadingUnit() noexcept { return const_cast<const VehicleState*>(this)->GetHeadingUnit(); }
 
         void SetRotationalVelocity(float rotationalVelocity) noexcept { _state(kR) = rotationalVelocity; }
         float GetRotationalVelocity() const noexcept { return _state(kR); }
@@ -207,6 +217,30 @@ namespace MazeMap
         void SetControlInput(const ControlInput& control) noexcept { _control = control; }
         const ControlInput& GetControlInput() const noexcept { return _control; }
         const ControlInput& GetControlInput() noexcept { return const_cast<const VehicleState*>(this)->GetControlInput(); }
+
+        void SetSensorSnapshot(const ::SensorSnapshot& sensorSnapshot) noexcept { _sensorSnapshot = sensorSnapshot; }
+        const ::SensorSnapshot& GetSensorSnapshot() const noexcept { return _sensorSnapshot; }
+        ::SensorSnapshot& GetSensorSnapshot() noexcept { return _sensorSnapshot; }
+
+        VehicleState ProjectConstantVelocity(float dtSeconds) const noexcept
+        {
+            VehicleState projected = *this;
+            if (!std::isfinite(dtSeconds) || (dtSeconds <= 0.0f))
+            {
+                return projected;
+            }
+
+            const float linearSpeedMps = std::isfinite(GetVelocity()) ? GetVelocity() : 0.0f;
+            const float yawRateRadps = std::isfinite(GetRotationalVelocity()) ? GetRotationalVelocity() : 0.0f;
+            const float midYawRad = NormalizeAngle(GetOrientation() + (0.5f * yawRateRadps * dtSeconds));
+            const Eigen::Vector2f midHeading(std::sin(midYawRad), std::cos(midYawRad));
+            projected.SetPosition(Eigen::Vector2f(
+                GetPositionX() + (linearSpeedMps * midHeading.x() * dtSeconds),
+                GetPositionY() + (linearSpeedMps * midHeading.y() * dtSeconds)));
+            projected.SetOrientation(GetOrientation() + (yawRateRadps * dtSeconds));
+            projected.SetTime(GetTime() + dtSeconds);
+            return projected;
+        }
 
         void SetVarianceValues(float xVar, float yVar, float velocityVar, float orientationVar, float rotVelocityVar)
         {
@@ -327,5 +361,6 @@ namespace MazeMap
         StateMatrix _sqrtCovariance;
         float _time;
         ControlInput _control;
+        ::SensorSnapshot _sensorSnapshot;
     };
 }

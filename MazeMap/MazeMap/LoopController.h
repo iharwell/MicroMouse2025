@@ -1,6 +1,8 @@
 #pragma once
 
+#include "DriveTelemetry.h"
 #include "MazeMapRuntimeCore.h"
+#include "SensorSnapshot.h"
 
 #include <cstdint>
 
@@ -273,8 +275,8 @@ namespace MazeMap::App::Internal
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
         void ResetLatchedRequests() noexcept;
         bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
-        bool ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing);
-        bool CaptureTickState(ObservedTickState& observed, TimingDiagnostics& timing);
+        bool ExecuteSensingUpdate(ObservedTickState& observed);
+        bool CaptureTickState(ObservedTickState& observed);
         const ModeState* CurrentModeState() const noexcept;
         ModeState BuildModeState(
             const ObservedTickState& observed,
@@ -288,9 +290,9 @@ namespace MazeMap::App::Internal
         TimingDiagnostics& WorkingTiming() noexcept;
         const TimingDiagnostics& PublishedTiming() const noexcept;
         void PublishWorkingTiming() noexcept;
-        void RecordModeReturnTiming(std::uint32_t tickStartUs) noexcept;
-        void RecordPostServiceTiming(std::uint32_t tickStartUs) noexcept;
-        void FinalizeTiming(std::uint32_t tickStartUs) noexcept;
+        void RecordModeReturnTiming() noexcept;
+        void RecordPostServiceTiming() noexcept;
+        void FinalizeTiming() noexcept;
         bool ServiceRuntimeLogsNormal() noexcept;
         void ServiceRuntimeLogsForFaultPath() noexcept;
         std::uint32_t ComputeRemainingSlackUs(std::uint32_t absoluteDeadlineUs) const noexcept;

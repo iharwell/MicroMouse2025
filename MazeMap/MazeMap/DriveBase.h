@@ -4,6 +4,7 @@
 // "Drive" translation layer; it is the low-level destination for concrete motion commands.
 #include "BootUtilityModeFramework.h"
 #include "CommandPD.h"
+#include "DriveTelemetry.h"
 #include "LaunchAssistProfile.h"
 #include "LoopController.h"
 #include "Maneuver.h"
@@ -12,6 +13,7 @@
 #include "MouseUkfFacade.h"
 #include "PlantModel.h"
 #include "ProportionalDerivativeCluster.h"
+#include "SensorSnapshot.h"
 #include "WheelControlProfile.h"
 
 #include <algorithm>
@@ -408,6 +410,14 @@ public:
     const PoseEstimate& GetPose() const
     {
         return _poseCache;
+    }
+
+    MazeMap::VehicleState GetVehicleState() const noexcept
+    {
+        MazeMap::VehicleState vehicleState{};
+        vehicleState.SetStateVector(_ukf.ukf().state());
+        vehicleState.SetCovariance(_ukf.ukf().covariance());
+        return vehicleState;
     }
 
     const MazeMap::VehicleState::StateVector& GetEstimatorStateVector() const noexcept

@@ -6,7 +6,7 @@
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "RuntimeBinaryLogSupport.h"
 #include "StartupCalibration.h"
 

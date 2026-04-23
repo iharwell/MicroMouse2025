@@ -2,7 +2,7 @@
 #include "BootUtilityModeFramework.h"
 
 #include "Defines.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 
 namespace MazeMap::App::Internal::BootUtilityModeFramework
 {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "DriveTelemetry.h"
 #include "ManeuverPath.h"
 #include "MazeMapRuntimeCore.h"
 

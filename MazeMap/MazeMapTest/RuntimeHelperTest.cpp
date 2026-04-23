@@ -30,7 +30,7 @@ MMLOG_DEFINE_ROW(RuntimeHelperTestRow, RUNTIME_HELPER_TEST_FIELDS);
 
 namespace MazeMap::App
 {
-    TEST_CLASS(MazeMapRuntimeHelperTest)
+    TEST_CLASS(RuntimeHelperTest)
     {
     public:
         static MazeMap::WallSensor MakeTestWallSensor(

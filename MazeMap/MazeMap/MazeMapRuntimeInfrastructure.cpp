@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "MazeMapRuntimeInfrastructure.h"
 
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "RuntimeSensorSuite.h"
 
 #include <algorithm>

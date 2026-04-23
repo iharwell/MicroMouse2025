@@ -1,9 +1,10 @@
 #include "pch.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "TeensyLayout.h"
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "RuntimeBinaryLogSupport.h"
+#include "WallDistanceCalibration.h"
 
 #include <cmath>
 #include <cstdarg>

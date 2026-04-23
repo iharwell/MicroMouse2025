@@ -1,7 +1,7 @@
 #pragma once
 
-#include "MazeMapApplication.h"
-#include "MazeMapApplicationMode.h"
+#include "Application.h"
+#include "IApplicationMode.h"
 #include "MazeMapApplicationRuntime.h"
 #include "BootUtilityModeFramework.h"
 #include "Defines.h"

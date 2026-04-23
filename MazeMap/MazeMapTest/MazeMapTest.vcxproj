@@ -203,16 +203,16 @@
     <ClCompile Include="HistoricalMazePathFinderTest.cpp" />
     <ClCompile Include="LoopControllerTest.cpp" />
     <ClCompile Include="ManeuverPathFinderTest.cpp" />
-    <ClCompile Include="MazeMapApplicationTest.cpp" />
-    <ClCompile Include="MazeMapRuntimeHelperTest.cpp">
-      <ObjectFileName>$(IntDir)MazeMapRuntimeHelperTest.obj</ObjectFileName>
+    <ClCompile Include="ApplicationTest.cpp" />
+    <ClCompile Include="RuntimeHelperTest.cpp">
+      <ObjectFileName>$(IntDir)RuntimeHelperTest.obj</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="MazeMapSharedRuntimeTest.cpp" />
+    <ClCompile Include="SharedRuntimeTest.cpp" />
     <ClCompile Include="..\MazeMap\MmLog.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="ManeuverTest.cpp" />
-    <ClCompile Include="MazeMapTest.cpp" />
+    <ClCompile Include="WallMappingTest.cpp" />
     <ClCompile Include="MazeMaskTest.cpp" />
     <ClCompile Include="MazeTest.cpp" />
     <ClCompile Include="OpenFloorMeasurementSpecTest.cpp">

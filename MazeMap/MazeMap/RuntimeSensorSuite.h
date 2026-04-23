@@ -3,6 +3,9 @@
 
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeSignalHelpers.h"
+#include "SensorSnapshot.h"
+#include "WallDistanceCalibration.h"
+#include "WallSensorRuntimeTypes.h"
 
 class RuntimeSensorSuite final
 {

@@ -1,0 +1,29 @@
+Temporary non-compiled reference for delete-first migration.
+
+Removed from compiled source:
+
+struct PoseEstimate
+{
+    float xMeters = 0.0f;
+    float yMeters = 0.0f;
+    Eigen::Vector2f headingUnit = Eigen::Vector2f(1.0f, 0.0f);
+    float yawRad = 0.0f;
+    float linearSpeedMps = 0.0f;
+    float angularSpeedRadps = 0.0f;
+};
+
+struct LoopController::ModeState final
+{
+    std::uint32_t sequence{};
+    std::uint32_t tickStartUs{};
+    std::uint32_t commandApplyTimeUs{};
+    std::uint32_t dtUs{};
+    float dtSeconds{};
+    PoseEstimate estimate{};
+    MeasuredMotion measured{};
+    DriveTelemetry driveTelemetry{};
+    SensorSnapshot sensors{};
+    bool estimatorHealthy{ true };
+    bool overrun{};
+    const char* faultReason{};
+};

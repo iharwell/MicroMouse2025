@@ -9,7 +9,7 @@
 #include "LoopController.h"
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeCore.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "PinPairStrap.h"
 #include "StartupCalibration.h"
 

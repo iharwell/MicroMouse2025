@@ -1,8 +1,9 @@
 #pragma once
 
 #include "Defines.h"
+#include "DriveTelemetry.h"
 #include "LoopController.h"
-#include "MazeMapApplicationMode.h"
+#include "IApplicationMode.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
 

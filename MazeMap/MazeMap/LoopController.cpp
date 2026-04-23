@@ -4,7 +4,7 @@
 #include "Defines.h"
 #include "DriveBase.h"
 #include "HardwareConfig.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "RuntimeSensorSuite.h"
 #include "Vehicle.h"
 
@@ -264,8 +264,8 @@ namespace MazeMap::App::Internal
                 _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
                 _deferredTerminalReason = "LoopController motor PWM hook failed";
                 ServiceRuntimeLogsForFaultPath();
-                RecordPostServiceTiming(tickStartUs);
-                FinalizeTiming(tickStartUs);
+                RecordPostServiceTiming();
+                FinalizeTiming();
                 PublishWorkingTiming();
                 WaitUntilUs(loopEndTimeUs);
                 _nextSyncTargetUs += _options.controlPeriodUs;
@@ -287,7 +287,7 @@ namespace MazeMap::App::Internal
 
             ResetLatchedRequests();
 
-            if (!ExecuteSensingUpdate(_observedScratch, timing))
+            if (!ExecuteSensingUpdate(_observedScratch))
             {
                 _queuedControl = ControlVector::Brake;
                 timing.flags |= kTimingFlagRuntimeStopPending;
@@ -298,8 +298,8 @@ namespace MazeMap::App::Internal
                     "LoopController sensing update failed";
 
                 ServiceRuntimeLogsForFaultPath();
-                RecordPostServiceTiming(tickStartUs);
-                FinalizeTiming(tickStartUs);
+                RecordPostServiceTiming();
+                FinalizeTiming();
                 PublishWorkingTiming();
                 WaitUntilUs(loopEndTimeUs);
                 _nextSyncTargetUs += _options.controlPeriodUs;
@@ -320,7 +320,7 @@ namespace MazeMap::App::Internal
             ControlVector candidateControl =
                 _activeModeWorkCallback(_activeModeWorkContext, loopEndTimeUs, modeState, services);
             _callbackModeStateValid = false;
-            RecordModeReturnTiming(tickStartUs);
+            RecordModeReturnTiming();
 
             if (_requests.nextModeWorkRequested && (_requests.nextModeWork.onModeWork != nullptr))
             {
@@ -373,8 +373,8 @@ namespace MazeMap::App::Internal
                 }
             }
 
-            RecordPostServiceTiming(tickStartUs);
-            FinalizeTiming(tickStartUs);
+            RecordPostServiceTiming();
+            FinalizeTiming();
             PublishWorkingTiming();
 
             // There is exactly one normal wait block per tick and it stays here at end-of-tick.
@@ -597,9 +597,9 @@ namespace MazeMap::App::Internal
         return _motorPwmSink.Apply(control);
     }
 
-    bool LoopController::ExecuteSensingUpdate(ObservedTickState& observed, TimingDiagnostics& timing)
+    bool LoopController::ExecuteSensingUpdate(ObservedTickState& observed)
     {
-        if (!CaptureTickState(observed, timing))
+        if (!CaptureTickState(observed))
         {
             return false;
         }
@@ -621,7 +621,7 @@ namespace MazeMap::App::Internal
         return true;
     }
 
-    bool LoopController::CaptureTickState(ObservedTickState& observed, TimingDiagnostics& timing)
+    bool LoopController::CaptureTickState(ObservedTickState& observed)
     {
         if (_runtime == nullptr)
         {
@@ -629,6 +629,7 @@ namespace MazeMap::App::Internal
             return false;
         }
 
+        TimingDiagnostics& timing = WorkingTiming();
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
         MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
         timing.controlTiming.encoderLatchUs = static_cast<std::uint32_t>(micros());
@@ -766,19 +767,21 @@ namespace MazeMap::App::Internal
         _publishedTimingValid = true;
     }
 
-    void LoopController::RecordModeReturnTiming(const std::uint32_t tickStartUs) noexcept
+    void LoopController::RecordModeReturnTiming() noexcept
     {
+        const std::uint32_t tickStartUs = WorkingTiming().tickStartUs;
         WorkingTiming().tModeReturnUs =
             RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
     }
 
-    void LoopController::RecordPostServiceTiming(const std::uint32_t tickStartUs) noexcept
+    void LoopController::RecordPostServiceTiming() noexcept
     {
+        const std::uint32_t tickStartUs = WorkingTiming().tickStartUs;
         WorkingTiming().tPostServiceDoneUs =
             RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
     }
 
-    void LoopController::FinalizeTiming(const std::uint32_t tickStartUs) noexcept
+    void LoopController::FinalizeTiming() noexcept
     {
         TimingDiagnostics& timing = WorkingTiming();
         const std::uint32_t finalizeUs = static_cast<std::uint32_t>(micros());
@@ -795,7 +798,6 @@ namespace MazeMap::App::Internal
                 finalizeUs - _nextSyncTargetUs,
                 static_cast<std::uint32_t>(kTickTimingSaturatedUs)));
         }
-        (void)tickStartUs;
     }
 
     bool LoopController::ServiceRuntimeLogsNormal() noexcept
@@ -940,7 +942,7 @@ namespace MazeMap::App::Internal
             _observedScratch.dtUs = dtUs;
             _observedScratch.dtSeconds = dtSeconds;
 
-            if (!ExecuteSensingUpdate(_observedScratch, timing))
+            if (!ExecuteSensingUpdate(_observedScratch))
             {
                 _deferredTerminalReason =
                     (_observedScratch.faultReason != nullptr) ?
@@ -967,8 +969,8 @@ namespace MazeMap::App::Internal
                 settledState.estimatorHealthy;
             settledCount = settled ? static_cast<std::uint8_t>(settledCount + 1U) : 0U;
 
-            RecordPostServiceTiming(tickStartUs);
-            FinalizeTiming(tickStartUs);
+            RecordPostServiceTiming();
+            FinalizeTiming();
             PublishWorkingTiming();
             WaitUntilUs(deadlineUs);
         }

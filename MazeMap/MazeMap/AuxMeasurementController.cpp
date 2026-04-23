@@ -6,7 +6,7 @@
 #include "DriveBase.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "StartupCalibration.h"
 
 using MazeMap::App::Internal::Drive;

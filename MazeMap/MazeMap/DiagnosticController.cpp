@@ -1,12 +1,14 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
+#include "EncoderProgressWatchdog.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
 #include "MazeMapRuntimeMmLog.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "RuntimeBinaryLogSupport.h"
+#include "WallDistanceCalibration.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
 using MazeMap::App::Internal::SharedRobotRuntime;

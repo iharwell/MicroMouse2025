@@ -72,7 +72,7 @@ This means the block between `encoderLatchUs` and `encoderReadDoneUs` is not "en
 
 - `CaptureDiagnosticTickState(...)`
 
-That means the loop always uses `DiagnosticSensorSuite::Capture(...)` in the current path, not the mission sensor pipeline.
+That means the loop uses `RuntimeSensorSuite::Capture(...)` in the current path.
 
 ### 4. The actual encoder sample point is later than the current log suggests
 
@@ -88,7 +88,7 @@ So the real encoder sample point is much closer to `ukfPredictStartUs` than to t
 
 ### 5. The current wall-sensor sweep is only partially asynchronous
 
-`DiagnosticSensorSuite::Capture(...)` currently does this:
+`RuntimeSensorSuite::Capture(...)` currently does this:
 
 1. start the async sweep,
 2. prime the dark samples immediately,
@@ -104,7 +104,7 @@ The last two steps are the architectural problem. They reintroduce blocking wait
 The timing block between the current `encoderLatchUs` and `encoderReadDoneUs` is mostly this work:
 
 1. compute the stationary hint,
-2. call `DiagnosticSensorSuite::Capture(...)`,
+2. call `RuntimeSensorSuite::Capture(...)`,
 3. allocate and initialize the sweep state,
 4. prime dark samples for all four wall sensors,
 5. turn on the front LED pair,
@@ -389,7 +389,7 @@ The authoritative owner for this behavior should remain with the runtime sensor 
 
 Concretely:
 
-- keep wall-sensor sweep state and logic inside `SensorSuite` / `DiagnosticSensorSuite` or a private helper owned by `MazeMapRuntimeSensors`,
+- keep wall-sensor sweep state and logic inside `RuntimeSensorSuite` or a private helper owned by `RuntimeSensorSuite`,
 - do not introduce a new public timing helper family,
 - let `LoopController` only orchestrate the existing callback boundaries.
 
@@ -400,8 +400,8 @@ That matches the repository ownership rules better than moving sensor sequencing
 Recommended high-level sequence:
 
 1. `LoopController` applies control at tick start.
-2. `DiagnosticSensorSuite::Capture(...)` immediately takes dark samples for all four sensors with a fast direct `ADC1` read path.
-3. `DiagnosticSensorSuite::Capture(...)` turns on the front LED pair immediately and records the front deadline.
+2. `RuntimeSensorSuite::Capture(...)` immediately takes dark samples for all four sensors with a fast direct `ADC1` read path.
+3. `RuntimeSensorSuite::Capture(...)` turns on the front LED pair immediately and records the front deadline.
 4. `LoopController` enters `Drive().UpdateOdometry(...)`.
 5. `Drive().UpdateOdometry(...)` passes a nonblocking wall-sweep progress callback into UKF predict and update.
 6. Each hook invocation:
@@ -728,7 +728,7 @@ It is available on the platform and can be combined with DMA, but it is probably
 The intended end state should look like this:
 
 - `LoopController` still owns loop sequencing and mode callbacks.
-- `SensorSuite` / `DiagnosticSensorSuite` own wall-sensor capture state.
+- `RuntimeSensorSuite` owns wall-sensor capture state.
 - `DriveBase` still owns the single UKF execution path.
 - the wall sweep uses the existing UKF hook rather than introducing a second scheduler.
 - the wall-sensor control path has zero explicit settle waits.
@@ -752,7 +752,8 @@ Local code references used for the current-behavior observations:
 - `MazeMap/MazeMap/LoopController.cpp`
 - `MazeMap/MazeMap/LoopController.h`
 - `MazeMap/MazeMap/DriveBase.h`
-- `MazeMap/MazeMap/MazeMapRuntimeSensors.h`
+- `MazeMap/MazeMap/RuntimeSensorSuite.h`
+- `MazeMap/MazeMap/RuntimeSensorSuite.cpp`
 - `MazeMap/MazeMap/MazeMapRuntimeCore.h`
 - `MazeMap/MazeMap/WallSensor.h`
 - `MazeMap/MazeMap/MotorEncoderDrive.h`

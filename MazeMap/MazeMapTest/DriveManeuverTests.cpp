@@ -6,7 +6,7 @@
 #include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\ManeuverInstance.h"
 #include "..\MazeMap\ManeuverSet.h"
-#include "..\MazeMap\MazeMapSharedRuntime.h"
+#include "..\MazeMap\SharedRobotRuntime.h"
 
 #include <algorithm>
 #include <cmath>

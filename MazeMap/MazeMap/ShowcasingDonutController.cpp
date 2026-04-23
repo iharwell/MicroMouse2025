@@ -7,7 +7,7 @@
 #include "Drive.h"
 #include "DriveBase.h"
 #include "MazeMapApplicationPrivate.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "PinPairStrap.h"
 #include "PlantModel.h"

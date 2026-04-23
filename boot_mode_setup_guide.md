@@ -36,9 +36,9 @@ For a new top-level mode, the normal file touch list is:
 1. Add the mode's authoritative `.h/.cpp`.
 2. Add or extend the `BootModeId` enum in `MazeMap/MazeMap/BootModeDescriptor.h` if the mode needs a new stable id.
 3. Add the mode getter/descriptor declarations to `MazeMap/MazeMap/MazeMapControllerRegistry.h`.
-4. Add the selector entry to `MazeMap/MazeMap/BootModeRegistry.cpp`.
-5. Add the application-mode mapping in `MazeMap/MazeMap/MazeMapApplication.cpp`.
-6. Add or update tests for the registry, mode selection, and any mode-local logic that is unit-testable.
+4. Define the mode descriptor with its `entryMode` callback next to the mode implementation.
+5. Add the selector entry to `MazeMap/MazeMap/BootModeRegistry.cpp`.
+6. Add or update tests for the registry, mode selection, descriptor entry point, and any mode-local logic that is unit-testable.
 
 Keep the metadata split clean:
 
@@ -347,8 +347,8 @@ For a new direct boot-selected mode, start by reading:
 - `MazeMap/MazeMap/TopSpeedMeasurementMode.cpp`
 - `MazeMap/MazeMap/LoopController.h`
 - `MazeMap/MazeMap/LoopController.cpp`
-- `MazeMap/MazeMap/MazeMapSharedRuntime.h`
-- `MazeMap/MazeMap/MazeMapSharedRuntime.cpp`
+- `MazeMap/MazeMap/SharedRobotRuntime.h`
+- `MazeMap/MazeMap/SharedRobotRuntime.cpp`
 - `MazeMap/MazeMap/BootModeRegistry.h`
 - `MazeMap/MazeMap/BootModeRegistry.cpp`
 

@@ -16,7 +16,7 @@ using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
-	TEST_CLASS(MazeMapTest)
+	TEST_CLASS(WallMappingTest)
 	{
 	public:
 

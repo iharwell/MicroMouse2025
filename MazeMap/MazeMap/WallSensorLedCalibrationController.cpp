@@ -6,7 +6,7 @@
 #include "BootModeDescriptor.h"
 #include "BootModeRegistry.h"
 #include "MazeMapRuntimeCore.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "PinPairStrap.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;

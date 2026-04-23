@@ -3,8 +3,9 @@
 
 #include "Drive.h"
 #include "DriveBase.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "RuntimeSensorSuite.h"
+#include "WallDistanceCalibration.h"
 #include "WallTouch.h"
 
 #include <cmath>

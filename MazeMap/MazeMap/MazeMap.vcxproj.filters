@@ -144,7 +144,13 @@
     <ClInclude Include="DriveBase.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DriveTelemetry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="EigenCompat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="EncoderProgressWatchdog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="EstimatorGeometry.h">
@@ -243,10 +249,10 @@
     <ClInclude Include="Maze.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapApplication.h">
+    <ClInclude Include="Application.h">
       <Filter>Header Files\App</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapApplicationMode.h">
+    <ClInclude Include="IApplicationMode.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="MazeMapApplicationPrivate.h">
@@ -273,7 +279,7 @@
     <ClInclude Include="MazeMapRuntimeSignalHelpers.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
-    <ClInclude Include="MazeMapSharedRuntime.h">
+    <ClInclude Include="SharedRobotRuntime.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
     <ClInclude Include="MazeLocation.h">
@@ -375,6 +381,12 @@
     <ClInclude Include="Sensor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SensorSnapshot.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SensorTelemetryTypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="SigmaPointSetSimplex.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -429,6 +441,9 @@
     <ClInclude Include="WallDetectionThresholds.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="WallSensorRuntimeTypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="WallBeliefMap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -479,10 +494,16 @@
     <ClCompile Include="DriveBase.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DriveTelemetry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="EdgeForceShapeModifier.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EstimatorPredictModel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="EncoderProgressWatchdog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="dllmain.cpp">
@@ -530,7 +551,7 @@
     <ClCompile Include="MapEvidenceUpdater.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapApplicationEntry.cpp">
+    <ClCompile Include="Application.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
     <ClCompile Include="BootModeRegistry.cpp">
@@ -584,7 +605,7 @@
     <ClCompile Include="TopSpeedMeasurementMode.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
-    <ClCompile Include="MazeMapSharedRuntime.cpp">
+    <ClCompile Include="SharedRobotRuntime.cpp">
       <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="MazeMapRuntimeInfrastructure.cpp">
@@ -594,6 +615,9 @@
       <Filter>Source Files\App\Internal\Runtime</Filter>
     </ClCompile>
     <ClCompile Include="RuntimeSensorSuite.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SensorSnapshot.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MazeLocation.cpp">
@@ -660,6 +684,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="VehicleState.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WallDistanceCalibration.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

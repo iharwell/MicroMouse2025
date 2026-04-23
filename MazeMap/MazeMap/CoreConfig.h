@@ -1,7 +1,9 @@
 #pragma once
 #include "Defines.h"
 #include "Maze.h"
+#include "ProportionalDerivativeCluster.h"
 #include "Vehicle.h"
+
 namespace MazeMap::Config
 {
     // Supported mission tuning parameters live here. Treat hard-coded literals elsewhere as implementation
@@ -54,7 +56,7 @@ namespace MazeMap::Config
     // [Medium] Stop-to-stop mission and calibration moves should not hand off to the next segment until the chassis is
     // genuinely settled. These thresholds are tighter than the old profile exit tolerances so short moves do not carry
     // residual wheel motion into the next turn or pose snap.
-    constexpr float kMotionSettleSpeedThresholdMps = 0.020f;
+    constexpr float kMotionSettleSpeedThresholdMps = 0.010f;
     constexpr float kMotionSettleAngularSpeedThresholdRadps = 0.05f;
     constexpr uint16_t kMotionSettleHoldMs = 20U;
     constexpr uint16_t kMotionSettleTimeoutMs = 500U;
@@ -431,10 +433,10 @@ namespace MazeMap::Config
     constexpr float kWheelIntegralLimit = 0.25f;
     // [High] Straight-line heading proportional gain. Increase if the robot drifts off heading in open corridors;
     // decrease if it snakes left-right while trying to stay on course.
-    constexpr float kStraightHeadingKp = 11.5f;
+    constexpr float kStraightHeadingKp = 18.0f;
     // [High] Straight-line yaw damping. Increase if heading correction oscillates; decrease if heading correction feels
     // lazy and the robot lets errors build before responding.
-    constexpr float kStraightYawD = 0.20f;
+    constexpr float kStraightYawD = 0.3f;
     // [High] Wall-centering gain used when side walls are available. Increase if the robot does not recenter in a
     // corridor; decrease if wall following hunts or bounces between walls.
     constexpr float kWallCenterGain = 135.0f;
@@ -461,19 +463,47 @@ namespace MazeMap::Config
     constexpr float kArcHeadingKp = 14.0f;
     // [High] Arc yaw damping. Increase if arc tracking oscillates in yaw; decrease if the robot lags behind the
     // desired curvature and feels overdamped through smooth turns.
-    constexpr float kArcYawD = 0.08f;
+    constexpr float kArcYawD = 2.0f;
     // [High] Smooth-turn yaw-rate proportional gain. Smooth maneuvers treat the prescribed yaw-rate trace as the
     // authority, so this closes the measured turn rate onto that trace without changing maneuver geometry.
-    constexpr float kSmoothTurnYawRateKp = 1.10f;
+    constexpr float kSmoothTurnYawRateKp = 1.3f;
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
-    constexpr float kSmoothTurnYawRateKd = 0.0001f;
+    constexpr float kSmoothTurnYawRateKd = 0.05f;
     // [High] In-place turn proportional gain. Increase if the robot consistently stops short of target heading;
     // decrease if it overshoots or rings at the end of turns.
     constexpr float kTurnHeadingKp = 7.5f;
     // [High] In-place turn damping. Increase if turn-stop oscillation remains; decrease if in-place turns feel too
     // sluggish to settle on target heading.
-    constexpr float kTurnYawD = 0.12f;
+    constexpr float kTurnYawD = 2.4f;
+    // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
+    // current DriveBase PD setup family, with concrete starting values for every supported
+    // control/signal pairing already represented by the new naming scheme.
+    inline constexpr MazeMap::ProportionalDerivativeCluster kDriveBasePDCluster(
+        /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
+        /* headingGyroPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
+        /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kArcYawD),
+        /* velocityStatePD */ MazeMap::ProportionalDerivative(2.5f, 0.01f),
+        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(2.5f, 0.01f),
+        /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
+        /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
+        /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.01f),
+        /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.01f),
+        /* longitudinalAccelerationStatePD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
+        /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
+        /* wheelVelocityStatePD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, 0.01f),
+        /* wheelVelocityEncoderPD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, 0.01f),
+        /* yawAccelerationStatePD */ MazeMap::ProportionalDerivative(0.065f, 0.0f),
+        /* yawAccelerationGyroPD */ MazeMap::ProportionalDerivative(0.015f, 0.0f),
+        /* yawAccelerationEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.001f, 0.0f));
+    // Shared Drive/DriveBase signal hookup. Keep these selections here so maneuver-tracking users all
+    // resolve through one authoritative state-vs-sensor configuration instead of repeating ad hoc flags.
+    inline constexpr MazeMap::CommandPD kDriveHeadingCommandPd = MazeMap::CommandPD::StateHeadingPD;
+    inline constexpr MazeMap::CommandPD kDriveYawRateCommandPd = MazeMap::CommandPD::IMUYaw;
+    inline constexpr MazeMap::CommandPD kDriveVelocityCommandPd = MazeMap::CommandPD::StateWheelOmegaPD;
+    inline constexpr MazeMap::CommandPD kDriveDistanceCommandPd = MazeMap::CommandPD::RawCommand;
+    inline constexpr MazeMap::CommandPD kManeuverTrackingCommandPd = kDriveYawRateCommandPd;
+    inline constexpr MazeMap::CommandPD kWallTouchTrackingCommandPd = kDriveYawRateCommandPd;
 
     // [Medium] Position tolerance used to declare straight and arc profiles complete. Tighten it if stop error is too
     // large and the robot can settle cleanly; loosen it if profiles dither near the endpoint.

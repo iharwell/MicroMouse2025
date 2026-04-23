@@ -9,7 +9,7 @@
 #include "ManeuverQueue.h"
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeCore.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 #include "StartupCalibration.h"
 
 #include <cstdio>

@@ -1,7 +1,7 @@
 #pragma once
 #include "Pins.h"
 #include "HardwareConfig.h"
-#include "MazeMapSharedRuntime.h"
+#include "SharedRobotRuntime.h"
 
 #include "StartupWaitProfile.h"
 

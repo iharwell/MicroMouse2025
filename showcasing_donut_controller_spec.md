@@ -11,7 +11,7 @@
   - `MazeMap/MazeMap/BootModeRegistry.cpp`
   - `MazeMap/MazeMap/MazeMap.vcxproj`
   - `MazeMap/MazeMap/MazeMap.vcxproj.filters`
-  - `MazeMap/MazeMapTest/MazeMapApplicationTest.cpp`
+  - `MazeMap/MazeMapTest/ApplicationTest.cpp`
 
 ## Intended Mode Identity
 

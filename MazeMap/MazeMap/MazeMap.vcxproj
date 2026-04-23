@@ -198,7 +198,9 @@
     <ClInclude Include="DirectionalPathFinder.h" />
     <ClInclude Include="Drive.h" />
     <ClInclude Include="DriveBase.h" />
+    <ClInclude Include="DriveTelemetry.h" />
     <ClInclude Include="EigenCompat.h" />
+    <ClInclude Include="EncoderProgressWatchdog.h" />
     <ClInclude Include="EstimatorGeometry.h" />
     <ClInclude Include="EstimatorPredictModel.h" />
     <ClInclude Include="EdgeForceShapeModifier.h" />
@@ -231,8 +233,8 @@
     <ClInclude Include="MaskQueue.h" />
     <ClInclude Include="MapEvidenceUpdater.h" />
     <ClInclude Include="Maze.h" />
-    <ClInclude Include="MazeMapApplication.h" />
-    <ClInclude Include="MazeMapApplicationMode.h" />
+    <ClInclude Include="Application.h" />
+    <ClInclude Include="IApplicationMode.h" />
     <ClInclude Include="MazeMapApplicationPrivate.h" />
     <ClInclude Include="MazeMapApplicationRuntime.h" />
     <ClInclude Include="MazeMapControllerRegistry.h" />
@@ -241,7 +243,7 @@
     <ClInclude Include="MazeMapRuntimeInfrastructure.h" />
     <ClInclude Include="MazeMapRuntimeMmLog.h" />
     <ClInclude Include="MazeMapRuntimeSignalHelpers.h" />
-    <ClInclude Include="MazeMapSharedRuntime.h" />
+    <ClInclude Include="SharedRobotRuntime.h" />
     <ClInclude Include="MazeLocation.h" />
     <ClInclude Include="MazeMask.h" />
     <ClInclude Include="MissionRunMode.h" />
@@ -277,6 +279,8 @@
     <ClInclude Include="RuntimeBinaryLogSupport.h" />
     <ClInclude Include="SearchRunPlanner.h" />
     <ClInclude Include="Sensor.h" />
+    <ClInclude Include="SensorSnapshot.h" />
+    <ClInclude Include="SensorTelemetryTypes.h" />
     <ClInclude Include="SigmaPointSetSimplex.h" />
     <ClInclude Include="SoftOdometryAid.h" />
     <ClInclude Include="SmoothTurnYawRateController.h" />
@@ -295,6 +299,7 @@
     <ClInclude Include="VehicleState.h" />
     <ClInclude Include="WallDistanceCalibration.h" />
     <ClInclude Include="WallDetectionThresholds.h" />
+    <ClInclude Include="WallSensorRuntimeTypes.h" />
     <ClInclude Include="WallBeliefMap.h" />
     <ClInclude Include="WallGeometryModel.h" />
     <ClInclude Include="WallObservationPipeline.h" />
@@ -313,7 +318,9 @@
     <ClCompile Include="DirectionalPathFinder.cpp" />
     <ClCompile Include="Drive.cpp" />
     <ClCompile Include="DriveBase.cpp" />
+    <ClCompile Include="DriveTelemetry.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="EncoderProgressWatchdog.cpp" />
     <ClCompile Include="EdgeForceShapeModifier.cpp" />
     <ClCompile Include="EstimatorPredictModel.cpp" />
     <ClCompile Include="Fresnel.cpp" />
@@ -330,7 +337,7 @@
     <ClCompile Include="MaskQueue.cpp" />
     <ClCompile Include="Maze.cpp" />
     <ClCompile Include="MapEvidenceUpdater.cpp" />
-    <ClCompile Include="MazeMapApplicationEntry.cpp" />
+    <ClCompile Include="Application.cpp" />
     <ClCompile Include="BootModeRegistry.cpp" />
     <ClCompile Include="BootUtilityModeFramework.cpp" />
     <ClCompile Include="MazeMapApplication.cpp">
@@ -368,12 +375,13 @@
     <ClCompile Include="CorridorRepeatabilityMode.cpp" />
     <ClCompile Include="PositionAccuracyAuditMode.cpp" />
     <ClCompile Include="TopSpeedMeasurementMode.cpp" />
-    <ClCompile Include="MazeMapSharedRuntime.cpp" />
+    <ClCompile Include="SharedRobotRuntime.cpp" />
     <ClCompile Include="MazeMapRuntimeInfrastructure.cpp" />
     <ClCompile Include="MazeMapRuntimeSignalHelpers.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="RuntimeSensorSuite.cpp" />
+    <ClCompile Include="SensorSnapshot.cpp" />
     <ClCompile Include="MazeLocation.cpp" />
     <ClCompile Include="MazeMapCore.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
@@ -405,6 +413,7 @@
     <ClCompile Include="WheelAuthorityPolicy.cpp" />
     <ClCompile Include="Vehicle.cpp" />
     <ClCompile Include="VehicleState.cpp" />
+    <ClCompile Include="WallDistanceCalibration.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="MazeMap.ino" />

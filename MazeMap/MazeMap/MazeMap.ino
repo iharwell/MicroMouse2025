@@ -1,5 +1,5 @@
 #include <Eigen.h>
-#include "MazeMapApplication.h"
+#include "Application.h"
 
 namespace
 {
