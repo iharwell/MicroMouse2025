@@ -101,7 +101,7 @@ Method notes:
 
 ## `run_open_floor_ukf_replay.ps1`
 
-Purpose: build and run the standalone open-floor UKF replay tool that replays decoded `open_floor_main.csv` captures through the current C++ UKF implementation and writes a batch report, without rebuilding `MazeMap.dll`.
+Purpose: build and run the standalone open-floor UKF replay tool that replays decoded `open_floor_main.csv` captures through the current C++ UKF implementation, writes a batch report, and also runs the archival competition feedforward check, without rebuilding `MazeMap.dll`.
 
 Default usage:
 
@@ -126,6 +126,24 @@ powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
   -RunId ofm_10728325
 ```
 
+Optional competition-archive controls:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
+  -SkipToolBuild `
+  -RunId ofm_10728325 `
+  -CompetitionArchiveRoot "TestResults\Competition Testing Data"
+```
+
+Skip the archival competition check when you only want the decoded open-floor replay:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tooling\run_open_floor_ukf_replay.ps1 `
+  -SkipToolBuild `
+  -RunId ofm_10728325 `
+  -SkipCompetitionArchive
+```
+
 Single-run sample export example:
 
 ```powershell
@@ -142,14 +160,18 @@ Notes:
 
 - The runner builds only `Tools/OpenFloorUkfReplay/OpenFloorUkfReplay.vcxproj` in `Release|x64`; it links against the existing `MazeMap.lib` and runs against the existing `MazeMap.dll`.
 - Before replay, the runner checks that `MazeMap.dll` and `MazeMap.lib` exist and are not older than the authoritative UKF sources.
+- If git is available, the MazeMap freshness gate ignores timestamp-only touched files and blocks only on newer files with actual staged or unstaged content changes.
 - The tool binds each decoded CSV to its sibling `open_floor_main.sidecar` and uses the bound `logging.txt` when present.
 - It ignores the highest `section_id` in each run by default so the known failed final section does not contaminate the batch report.
 - The generated report now includes section-phase error association tables and writes `section_phase_summary.csv` so agents can see which canonical `section_id` + `phase_id` buckets concentrate estimator error.
 - `-KnownStationarySeed` seeds replay from the canonical stationary open-floor marker `C` state instead of the first logged UKF state.
 - `-Tuning` loads a simple `key=value` override file and the report writes `aggregate_metrics.json` for machine scoring.
 - `-SampleCsv` exports one replay-aligned per-sample CSV for the selected `-RunId`.
+- `-FeedforwardSampleCsv` exports the per-sample feedforward-path audit matrix for the selected `-RunId`.
 - `-Metrics` accepts comma-separated metric names or aliases. Current aliases are `context`, `accel_compare`, and `speed_compare`.
 - The default sample-export metric set is the accel comparison layout shown above if you pass `-SampleCsv` without `-Metrics`.
+- Unless you pass `-SkipCompetitionArchive`, the runner also invokes `tooling\analyze_competition_feedforward.py` against `TestResults\Competition Testing Data` by default and writes `competition_feedforward_report.txt` under the replay output directory.
+- `-CompetitionArchiveRoot` overrides the default archival competition log root used by that additional check.
 
 Caveats:
 

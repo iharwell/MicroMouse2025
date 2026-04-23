@@ -26,7 +26,7 @@ namespace MazeMap::AuxMeasurementConfig
     // [Medium] Selected one-off routine. Change this when you need a different internal measurement script without
     // disturbing the main characterization battery.
     constexpr Routine kRoutine = Routine::TurningTractionSweep;
-    constexpr BootSelectedMode kBootSelectedMode = BootSelectedMode::PositionAccuracyAudit;
+    constexpr BootSelectedMode kBootSelectedMode = BootSelectedMode::CorridorRepeatability;
     // [Medium] Control/log period for auxiliary capture. Shorten it only if SD logging still keeps up and the extra
     // temporal resolution is actually useful.
     constexpr unsigned long kControlPeriodUs = 1000UL;

@@ -493,7 +493,7 @@ namespace MazeMap::Config
     constexpr float kStraightHeadingKp = 18.0f;
     // [High] Straight-line yaw damping. Increase if heading correction oscillates; decrease if heading correction feels
     // lazy and the robot lets errors build before responding.
-    constexpr float kStraightYawD = 2.0f;
+    constexpr float kStraightYawD = 0.3f;
     // [High] Wall-centering gain used when side walls are available. Increase if the robot does not recenter in a
     // corridor; decrease if wall following hunts or bounces between walls.
     constexpr float kWallCenterGain = 135.0f;
@@ -540,8 +540,8 @@ namespace MazeMap::Config
         /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         /* headingGyroPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kArcYawD),
-        /* velocityStatePD */ MazeMap::ProportionalDerivative(3.5f, 0.01f),
-        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(3.5f, 0.01f),
+        /* velocityStatePD */ MazeMap::ProportionalDerivative(2.5f, 0.01f),
+        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(2.5f, 0.01f),
         /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.01f),

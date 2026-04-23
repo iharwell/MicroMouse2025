@@ -2,6 +2,7 @@
 #include "..\..\MazeMap\MazeMap\OpenFloorMeasurementSpec.h"
 #include "..\..\MazeMap\MazeMap\PlantModel.h"
 
+#include <array>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -29,7 +30,11 @@ namespace
     constexpr const char* kRunSummaryFileName = "run_summary.csv";
     constexpr const char* kSectionPhaseSummaryFileName = "section_phase_summary.csv";
     constexpr const char* kAggregateMetricsFileName = "aggregate_metrics.json";
+    constexpr const char* kFeedforwardPathSummaryFileName = "feedforward_path_summary.csv";
     constexpr float kRadiansToDegrees = 57.295779513082320876f;
+    constexpr float kWheelVelocitySensorBoundMps = 0.06f;
+    constexpr float kYawRateSensorBoundRadps = 0.03f;
+    constexpr float kDefaultFeedforwardReserveUsage = 0.90f;
 
     struct ReplayOptions
     {
@@ -38,6 +43,7 @@ namespace
         fs::path tuningPath;
         std::string runIdFilter;
         fs::path sampleCsvPath;
+        fs::path feedforwardSampleCsvPath;
         std::vector<std::string> sampleMetrics;
         bool useKnownStationarySeed = false;
     };
@@ -86,12 +92,16 @@ namespace
         float commandedAngularRadps = 0.0f;
         float leftDriveCommand = 0.0f;
         float rightDriveCommand = 0.0f;
+        float leftFeedforwardCommand = 0.0f;
+        float rightFeedforwardCommand = 0.0f;
         float leftLaunchAssistFloor = 0.0f;
         float rightLaunchAssistFloor = 0.0f;
         std::int32_t leftEncoderCount = 0;
         std::int32_t rightEncoderCount = 0;
         float leftEncoderOmegaRadps = 0.0f;
         float rightEncoderOmegaRadps = 0.0f;
+        float leftEncoderVelocityMps = 0.0f;
+        float rightEncoderVelocityMps = 0.0f;
         bool accelBiasValid = false;
         float gyroRawRadps = std::numeric_limits<float>::quiet_NaN();
         float gyroCorrectedRadps = std::numeric_limits<float>::quiet_NaN();
@@ -126,6 +136,109 @@ namespace
         float actualYawRateRadps = std::numeric_limits<float>::quiet_NaN();
         float predictedRawGyroRadps = std::numeric_limits<float>::quiet_NaN();
         float actualRawGyroRadps = std::numeric_limits<float>::quiet_NaN();
+    };
+
+    struct FeedforwardSampleExportRow
+    {
+        std::uint32_t masterTimeUs = 0U;
+        std::uint32_t nextMasterTimeUs = 0U;
+        std::uint32_t controlTickSequence = 0U;
+        std::uint32_t nextControlTickSequence = 0U;
+        std::uint32_t dtUs = 0U;
+        std::uint8_t sectionId = 0U;
+        std::uint8_t primitiveId = 0U;
+        std::uint8_t phaseId = 0U;
+        std::uint16_t repeatIndex = 0U;
+        std::uint16_t saturationFlags = 0U;
+        std::string pathId;
+        std::string pathLabel;
+        std::string pathCategory;
+        std::string sectionName;
+        std::string primitiveName;
+        std::string phaseName;
+        float currentForwardSensorMps = std::numeric_limits<float>::quiet_NaN();
+        float currentLeftVelocityMps = std::numeric_limits<float>::quiet_NaN();
+        float currentRightVelocityMps = std::numeric_limits<float>::quiet_NaN();
+        float currentYawRateSensorRadps = std::numeric_limits<float>::quiet_NaN();
+        float targetForwardSensorMps = std::numeric_limits<float>::quiet_NaN();
+        float targetLeftVelocityMps = std::numeric_limits<float>::quiet_NaN();
+        float targetRightVelocityMps = std::numeric_limits<float>::quiet_NaN();
+        float targetYawRateSensorRadps = std::numeric_limits<float>::quiet_NaN();
+        float nominalLeftCommand = std::numeric_limits<float>::quiet_NaN();
+        float nominalRightCommand = std::numeric_limits<float>::quiet_NaN();
+        float nominalAverageCommand = std::numeric_limits<float>::quiet_NaN();
+        float nominalDeltaCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedLeftDriveCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedRightDriveCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedAverageDriveCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedDeltaDriveCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedLeftFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedRightFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedAverageFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedDeltaFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
+        float leftDriveCommandError = std::numeric_limits<float>::quiet_NaN();
+        float rightDriveCommandError = std::numeric_limits<float>::quiet_NaN();
+        float averageDriveCommandError = std::numeric_limits<float>::quiet_NaN();
+        float deltaDriveCommandError = std::numeric_limits<float>::quiet_NaN();
+        float leftFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
+        float rightFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
+        float averageFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
+        float deltaFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
+        float envelopeLeftMin = std::numeric_limits<float>::quiet_NaN();
+        float envelopeLeftMax = std::numeric_limits<float>::quiet_NaN();
+        float envelopeRightMin = std::numeric_limits<float>::quiet_NaN();
+        float envelopeRightMax = std::numeric_limits<float>::quiet_NaN();
+        bool loggedDriveWithinEnvelope = false;
+        bool loggedFeedforwardWithinEnvelope = false;
+        float predictedNextForwardMps = std::numeric_limits<float>::quiet_NaN();
+        float predictedNextYawRateRadps = std::numeric_limits<float>::quiet_NaN();
+        float predictedForwardTargetErrorMps = std::numeric_limits<float>::quiet_NaN();
+        float predictedYawTargetErrorRadps = std::numeric_limits<float>::quiet_NaN();
+        bool tractionLimited = false;
+        bool commonForceClamped = false;
+        bool differentialForceClamped = false;
+        bool usedGripOnlyFallback = false;
+    };
+
+    enum class FeedforwardPathId : std::size_t
+    {
+        StateOpenAccel = 0U,
+        StateClosedAccel,
+        StateTractionAccel,
+        StateOpenVelocity,
+        StateClosedVelocity,
+        StateTractionVelocity,
+        ScalarOpenAccel,
+        ScalarClosedAccel,
+        ScalarTractionAccel,
+        ScalarOpenVelocity,
+        ScalarClosedVelocity,
+        ScalarTractionVelocity,
+        ContextStateOpenAccel,
+        ContextStateClosedAccel,
+        ContextStateOpenVelocity,
+        ContextStateClosedVelocity,
+        ContextScalarOpenAccel,
+        ContextScalarClosedAccel,
+        ContextScalarOpenVelocity,
+        ContextScalarClosedVelocity,
+        DriveBaseDeltaForwardRaw,
+        DriveBaseDeltaCombinedRaw,
+        DriveBaseDeltaYawRaw,
+        DriveBasePointForwardRaw,
+        DriveBasePointCombinedRaw,
+        DriveBasePointYawRaw,
+        Count
+    };
+
+    struct FeedforwardPathDefinition
+    {
+        FeedforwardPathId id = FeedforwardPathId::StateOpenAccel;
+        const char* pathId = "";
+        const char* label = "";
+        const char* category = "";
+        bool sensorOnlyEvaluable = false;
+        const char* unavailableReason = "";
     };
 
     struct ErrorStats
@@ -176,6 +289,32 @@ namespace
         }
     };
 
+    struct HitRateStats
+    {
+        std::uint64_t total = 0U;
+        std::uint64_t hits = 0U;
+
+        void add(bool hit) noexcept
+        {
+            ++total;
+            if (hit)
+            {
+                ++hits;
+            }
+        }
+
+        void merge(const HitRateStats& other) noexcept
+        {
+            total += other.total;
+            hits += other.hits;
+        }
+
+        double rate() const noexcept
+        {
+            return (total > 0U) ? (static_cast<double>(hits) / static_cast<double>(total)) : 0.0;
+        }
+    };
+
     struct PredictionMetrics
     {
         ErrorStats encoderLeftOmegaRadps;
@@ -202,6 +341,84 @@ namespace
             accelBodyYMps2.merge(other.accelBodyYMps2);
             planarAccelMps2.merge(other.planarAccelMps2);
         }
+    };
+
+    struct FeedforwardMetrics
+    {
+        ErrorStats leftDriveCommand;
+        ErrorStats rightDriveCommand;
+        ErrorStats averageDriveCommand;
+        ErrorStats deltaDriveCommand;
+        ErrorStats leftFeedforwardCommand;
+        ErrorStats rightFeedforwardCommand;
+        ErrorStats averageFeedforwardCommand;
+        ErrorStats deltaFeedforwardCommand;
+        ErrorStats predictedForwardTargetErrorMps;
+        ErrorStats predictedYawTargetErrorRadps;
+        HitRateStats driveEnvelopeHit;
+        HitRateStats feedforwardEnvelopeHit;
+
+        void merge(const FeedforwardMetrics& other) noexcept
+        {
+            leftDriveCommand.merge(other.leftDriveCommand);
+            rightDriveCommand.merge(other.rightDriveCommand);
+            averageDriveCommand.merge(other.averageDriveCommand);
+            deltaDriveCommand.merge(other.deltaDriveCommand);
+            leftFeedforwardCommand.merge(other.leftFeedforwardCommand);
+            rightFeedforwardCommand.merge(other.rightFeedforwardCommand);
+            averageFeedforwardCommand.merge(other.averageFeedforwardCommand);
+            deltaFeedforwardCommand.merge(other.deltaFeedforwardCommand);
+            predictedForwardTargetErrorMps.merge(other.predictedForwardTargetErrorMps);
+            predictedYawTargetErrorRadps.merge(other.predictedYawTargetErrorRadps);
+            driveEnvelopeHit.merge(other.driveEnvelopeHit);
+            feedforwardEnvelopeHit.merge(other.feedforwardEnvelopeHit);
+        }
+    };
+
+    struct FeedforwardEnvelope
+    {
+        float leftMin = (std::numeric_limits<float>::infinity)();
+        float leftMax = -(std::numeric_limits<float>::infinity)();
+        float rightMin = (std::numeric_limits<float>::infinity)();
+        float rightMax = -(std::numeric_limits<float>::infinity)();
+        bool valid = false;
+    };
+
+    struct FeedforwardPathSummary
+    {
+        FeedforwardPathId id = FeedforwardPathId::StateOpenAccel;
+        std::string pathId;
+        std::string label;
+        std::string category;
+        bool sensorOnlyEvaluable = false;
+        std::string unavailableReason;
+        std::uint64_t comparableTransitions = 0U;
+        std::uint64_t validSolutions = 0U;
+        FeedforwardMetrics metrics{};
+
+        void merge(const FeedforwardPathSummary& other) noexcept
+        {
+            comparableTransitions += other.comparableTransitions;
+            validSolutions += other.validSolutions;
+            metrics.merge(other.metrics);
+        }
+    };
+
+    struct FeedforwardTransitionInputs
+    {
+        MazeMap::VehicleState::StateVector currentState = MazeMap::VehicleState::StateVector::Zero();
+        float currentForwardSensorMps = std::numeric_limits<float>::quiet_NaN();
+        float currentYawRateSensorRadps = std::numeric_limits<float>::quiet_NaN();
+        float targetForwardSensorMps = std::numeric_limits<float>::quiet_NaN();
+        float targetYawRateSensorRadps = std::numeric_limits<float>::quiet_NaN();
+        float desiredStateLongitudinalAccelMps2 = std::numeric_limits<float>::quiet_NaN();
+        float desiredStateYawAccelRadps2 = std::numeric_limits<float>::quiet_NaN();
+        float desiredScalarLongitudinalAccelMps2 = std::numeric_limits<float>::quiet_NaN();
+        float desiredScalarYawAccelRadps2 = std::numeric_limits<float>::quiet_NaN();
+        float responseTimeS = std::numeric_limits<float>::quiet_NaN();
+        float fanDutyCycle = 0.0f;
+        float batteryVoltageV = 0.0f;
+        float reserveUsage = kDefaultFeedforwardReserveUsage;
     };
 
     struct ConsistencyMetrics
@@ -290,13 +507,16 @@ namespace
         std::uint64_t scoredTransitions = 0U;
         std::uint64_t predictFailures = 0U;
         std::uint64_t yawRejects = 0U;
+        std::uint64_t feedforwardTransitions = 0U;
         int ignoredSectionId = -1;
         bool completed = true;
         std::string failureReason;
         PredictionMetrics prediction{};
         ConsistencyMetrics consistency{};
+        std::vector<FeedforwardPathSummary> feedforwardPaths;
         std::vector<SectionPhaseReport> sectionPhaseBuckets;
         std::vector<SampleExportRow> sampleExportRows;
+        std::vector<FeedforwardSampleExportRow> feedforwardSampleExportRows;
     };
 
     struct CorpusReport
@@ -306,8 +526,63 @@ namespace
         std::uint64_t candidateCsvCount = 0U;
         PredictionMetrics prediction{};
         ConsistencyMetrics consistency{};
+        std::vector<FeedforwardPathSummary> feedforwardPaths;
         std::vector<SectionPhaseReport> sectionPhaseBuckets;
     };
+
+    constexpr std::size_t kFeedforwardPathCount = static_cast<std::size_t>(FeedforwardPathId::Count);
+
+    const std::array<FeedforwardPathDefinition, kFeedforwardPathCount>& GetFeedforwardPathDefinitions() noexcept
+    {
+        static const std::array<FeedforwardPathDefinition, kFeedforwardPathCount> definitions =
+        {{
+            { FeedforwardPathId::StateOpenAccel, "state_open_accel", "PlantModel state-vector acceleration solve", "plant_model_state", true, "" },
+            { FeedforwardPathId::StateClosedAccel, "state_closed_accel", "PlantModel state-vector closed-loop acceleration solve", "plant_model_state", true, "" },
+            { FeedforwardPathId::StateTractionAccel, "state_traction_accel", "PlantModel state-vector traction-limited acceleration wrapper", "plant_model_state", true, "" },
+            { FeedforwardPathId::StateOpenVelocity, "state_open_velocity", "PlantModel state-vector velocity-target solve", "plant_model_state", true, "" },
+            { FeedforwardPathId::StateClosedVelocity, "state_closed_velocity", "PlantModel state-vector closed-loop velocity-target solve", "plant_model_state", true, "" },
+            { FeedforwardPathId::StateTractionVelocity, "state_traction_velocity", "PlantModel state-vector traction-limited velocity-target wrapper", "plant_model_state", true, "" },
+            { FeedforwardPathId::ScalarOpenAccel, "scalar_open_accel", "PlantModel scalar operating-point acceleration solve", "plant_model_scalar", true, "" },
+            { FeedforwardPathId::ScalarClosedAccel, "scalar_closed_accel", "PlantModel scalar closed-loop acceleration solve", "plant_model_scalar", true, "" },
+            { FeedforwardPathId::ScalarTractionAccel, "scalar_traction_accel", "PlantModel scalar traction-limited acceleration wrapper", "plant_model_scalar", true, "" },
+            { FeedforwardPathId::ScalarOpenVelocity, "scalar_open_velocity", "PlantModel scalar operating-point velocity-target solve", "plant_model_scalar", true, "" },
+            { FeedforwardPathId::ScalarClosedVelocity, "scalar_closed_velocity", "PlantModel scalar closed-loop velocity-target solve", "plant_model_scalar", true, "" },
+            { FeedforwardPathId::ScalarTractionVelocity, "scalar_traction_velocity", "PlantModel scalar traction-limited velocity-target wrapper", "plant_model_scalar", true, "" },
+            { FeedforwardPathId::ContextStateOpenAccel, "context_state_open_accel", "PlantModel state-vector acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::ContextStateClosedAccel, "context_state_closed_accel", "PlantModel state-vector closed-loop acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::ContextStateOpenVelocity, "context_state_open_velocity", "PlantModel state-vector velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::ContextStateClosedVelocity, "context_state_closed_velocity", "PlantModel state-vector closed-loop velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::ContextScalarOpenAccel, "context_scalar_open_accel", "PlantModel scalar acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::ContextScalarClosedAccel, "context_scalar_closed_accel", "PlantModel scalar closed-loop acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::ContextScalarOpenVelocity, "context_scalar_open_velocity", "PlantModel scalar velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::ContextScalarClosedVelocity, "context_scalar_closed_velocity", "PlantModel scalar closed-loop velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::DriveBaseDeltaForwardRaw, "drivebase_delta_forward_raw", "DriveBase::DeltaCommand(presentLinear, accel, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::DriveBaseDeltaCombinedRaw, "drivebase_delta_combined_raw", "DriveBase::DeltaCommand(presentLinear, accel, presentYaw, yawAccel, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::DriveBaseDeltaYawRaw, "drivebase_delta_yaw_raw", "DriveBase::DeltaYawRateCommand(presentYaw, yawAccel, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::DriveBasePointForwardRaw, "drivebase_point_forward_raw", "DriveBase::PointCommand(linear, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::DriveBasePointCombinedRaw, "drivebase_point_combined_raw", "DriveBase::PointCommand(linear, yaw, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
+            { FeedforwardPathId::DriveBasePointYawRaw, "drivebase_point_yaw_raw", "DriveBase::PointYawRateCommand(yaw, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." }
+        }};
+        return definitions;
+    }
+
+    std::vector<FeedforwardPathSummary> BuildDefaultFeedforwardPathSummaries()
+    {
+        std::vector<FeedforwardPathSummary> summaries;
+        summaries.reserve(kFeedforwardPathCount);
+        for (const FeedforwardPathDefinition& definition : GetFeedforwardPathDefinitions())
+        {
+            FeedforwardPathSummary summary{};
+            summary.id = definition.id;
+            summary.pathId = definition.pathId;
+            summary.label = definition.label;
+            summary.category = definition.category;
+            summary.sensorOnlyEvaluable = definition.sensorOnlyEvaluable;
+            summary.unavailableReason = definition.unavailableReason;
+            summaries.push_back(std::move(summary));
+        }
+        return summaries;
+    }
 
     std::string Trim(const std::string& value)
     {
@@ -418,7 +693,7 @@ namespace
         else if (key == "pivot_scrub_yaw_consistency_threshold_radps") tuning.pivotScrubYawConsistencyThresholdRadps = value;
         else if (key == "pivot_scrub_yaw_window_mismatch_threshold_rad") tuning.pivotScrubYawWindowMismatchThresholdRad = value;
         else if (key == "pivot_scrub_zero_u_sigma_mps") tuning.pivotScrubZeroUSigmaMps = value;
-        else if (key == "stationary_gyro_bias_time_constant_s") tuning.stationaryGyroBiasTimeConstantS = value;
+        else if (key == "stationary_gyro_bias_time_constant_s") { (void)value; }
         else if (key == "stationary_certification_dwell_s") tuning.stationaryCertificationDwellS = value;
         else if (key == "stationary_candidate_max_linear_command_mps") tuning.stationaryCandidateMaxLinearCommandMps = value;
         else if (key == "stationary_candidate_max_angular_command_radps") tuning.stationaryCandidateMaxAngularCommandRadps = value;
@@ -446,35 +721,35 @@ namespace
         else if (key == "nhc_speed_slope_per_mps") tuning.nhcSpeedSlopePerMps = value;
         else if (key == "nhc_minimum_sigma_mps") tuning.nhcMinimumSigmaMps = value;
         else if (key == "nhc_maximum_sigma_mps") tuning.nhcMaximumSigmaMps = value;
-        else if (key == "moving_gyro_bias_std_cap_radps") tuning.movingGyroBiasStdCapRadps = value;
+        else if (key == "moving_gyro_bias_std_cap_radps") { (void)value; }
         else if (key == "recovery_yaw_rate_std_floor_radps") tuning.recoveryYawRateStdFloorRadps = value;
         else if (key == "yaw_validity_bias_delta_max_radps") tuning.yawValidityBiasDeltaMaxRadps = value;
         else if (key == "stationary_sigma_u_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaUSqrtQ = value;
         else if (key == "stationary_sigma_v_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaVSqrtQ = value;
         else if (key == "stationary_sigma_r_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaRSqrtQ = value;
         else if (key == "stationary_sigma_omega_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "stationary_sigma_bgz_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "stationary_sigma_bgz_sqrt_q") { (void)value; }
         else if (key == "stationary_std_r_min") tuning.stationaryCertifiedProcessNoise.stdRMin = value;
         else if (key == "stationary_std_v_min") tuning.stationaryCertifiedProcessNoise.stdVMin = value;
         else if (key == "launch_sigma_u_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaUSqrtQ = value;
         else if (key == "launch_sigma_v_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaVSqrtQ = value;
         else if (key == "launch_sigma_r_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaRSqrtQ = value;
         else if (key == "launch_sigma_omega_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "launch_sigma_bgz_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "launch_sigma_bgz_sqrt_q") { (void)value; }
         else if (key == "launch_std_r_min") tuning.launchOrReversalProcessNoise.stdRMin = value;
         else if (key == "launch_std_v_min") tuning.launchOrReversalProcessNoise.stdVMin = value;
         else if (key == "grip_sigma_u_sqrt_q") tuning.gripLinearProcessNoise.sigmaUSqrtQ = value;
         else if (key == "grip_sigma_v_sqrt_q") tuning.gripLinearProcessNoise.sigmaVSqrtQ = value;
         else if (key == "grip_sigma_r_sqrt_q") tuning.gripLinearProcessNoise.sigmaRSqrtQ = value;
         else if (key == "grip_sigma_omega_sqrt_q") tuning.gripLinearProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "grip_sigma_bgz_sqrt_q") tuning.gripLinearProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "grip_sigma_bgz_sqrt_q") { (void)value; }
         else if (key == "grip_std_r_min") tuning.gripLinearProcessNoise.stdRMin = value;
         else if (key == "grip_std_v_min") tuning.gripLinearProcessNoise.stdVMin = value;
         else if (key == "inconsistent_sigma_u_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaUSqrtQ = value;
         else if (key == "inconsistent_sigma_v_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaVSqrtQ = value;
         else if (key == "inconsistent_sigma_r_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaRSqrtQ = value;
         else if (key == "inconsistent_sigma_omega_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "inconsistent_sigma_bgz_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaBgzSqrtQ = value;
+        else if (key == "inconsistent_sigma_bgz_sqrt_q") { (void)value; }
         else if (key == "inconsistent_std_r_min") tuning.inconsistentOrSaturatedProcessNoise.stdRMin = value;
         else if (key == "inconsistent_std_v_min") tuning.inconsistentOrSaturatedProcessNoise.stdVMin = value;
         else
@@ -819,6 +1094,16 @@ namespace
 
                 options.sampleCsvPath = fs::path(argv[++index]);
             }
+            else if (argument == "--feedforward-sample-csv")
+            {
+                if ((index + 1) >= argc)
+                {
+                    error = "--feedforward-sample-csv requires a path";
+                    return false;
+                }
+
+                options.feedforwardSampleCsvPath = fs::path(argv[++index]);
+            }
             else if (argument == "--metrics")
             {
                 if ((index + 1) >= argc)
@@ -853,6 +1138,7 @@ namespace
                     << "  --known-stationary-seed  Seed from the canonical open-floor start pose instead of the logged UKF state.\n"
                     << "  --run-id <id>    Optional single-run filter.\n"
                     << "  --sample-csv <path>  Optional per-sample CSV export for the selected run.\n"
+                    << "  --feedforward-sample-csv <path>  Optional per-sample feedforward-path audit CSV export for the selected run.\n"
                     << "  --metrics <list> Optional sample metric list or aliases: context, accel_compare, speed_compare.\n";
                 std::exit(0);
             }
@@ -872,6 +1158,12 @@ namespace
         if (!options.sampleCsvPath.empty() && options.runIdFilter.empty())
         {
             error = "--sample-csv requires --run-id so the export targets one run";
+            return false;
+        }
+
+        if (!options.feedforwardSampleCsvPath.empty() && options.runIdFilter.empty())
+        {
+            error = "--feedforward-sample-csv requires --run-id so the export targets one run";
             return false;
         }
 
@@ -1460,12 +1752,16 @@ namespace
                 !ParseField(tokens, indices, "cmd_angular_radps", row.commandedAngularRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_drive_command", row.leftDriveCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_drive_command", row.rightDriveCommand, ParseFloat, error) ||
+                !ParseField(tokens, indices, "left_feedforward_command", row.leftFeedforwardCommand, ParseFloat, error) ||
+                !ParseField(tokens, indices, "right_feedforward_command", row.rightFeedforwardCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_launch_assist_floor", row.leftLaunchAssistFloor, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_launch_assist_floor", row.rightLaunchAssistFloor, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_encoder_count", row.leftEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "right_encoder_count", row.rightEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "left_encoder_omega_radps", row.leftEncoderOmegaRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_encoder_omega_radps", row.rightEncoderOmegaRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "left_encoder_velocity_mps", row.leftEncoderVelocityMps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "right_encoder_velocity_mps", row.rightEncoderVelocityMps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "gyro_raw_radps", row.gyroRawRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "gyro_radps", row.gyroCorrectedRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "accel_body_x_mps2", row.accelBodyXMps2, ParseFloat, error) ||
@@ -1514,6 +1810,557 @@ namespace
         observation.omegaLeftRadps = row.leftEncoderOmegaRadps;
         observation.omegaRightRadps = row.rightEncoderOmegaRadps;
         return observation;
+    }
+
+    float SensorForwardVelocityMps(const LoggedRow& row) noexcept
+    {
+        return 0.5f * (row.leftEncoderVelocityMps + row.rightEncoderVelocityMps);
+    }
+
+    float CommandAverage(float leftCommand, float rightCommand) noexcept
+    {
+        return 0.5f * (leftCommand + rightCommand);
+    }
+
+    float CommandDelta(float leftCommand, float rightCommand) noexcept
+    {
+        return 0.5f * (rightCommand - leftCommand);
+    }
+
+    bool IsSensorComparableTransition(const LoggedRow& currentRow, const LoggedRow& nextRow) noexcept
+    {
+        return
+            (currentRow.sectionId == nextRow.sectionId) &&
+            (currentRow.primitiveId == nextRow.primitiveId) &&
+            (currentRow.repeatIndex == nextRow.repeatIndex);
+    }
+
+    const FeedforwardPathDefinition& GetFeedforwardPathDefinition(const FeedforwardPathId id) noexcept
+    {
+        return GetFeedforwardPathDefinitions()[static_cast<std::size_t>(id)];
+    }
+
+    bool BuildSensorOnlyFeedforwardState(
+        const LoggedRow& row,
+        const MazeMap::PlantModel::PreparedParams& prepared,
+        MazeMap::VehicleState::StateVector& state) noexcept
+    {
+        if (!(std::isfinite(row.leftEncoderVelocityMps) &&
+            std::isfinite(row.rightEncoderVelocityMps) &&
+            std::isfinite(row.gyroCorrectedRadps) &&
+            (prepared.raw.wheelRadiusM > 0.0f)))
+        {
+            return false;
+        }
+
+        state = MazeMap::VehicleState::StateVector::Zero();
+        state(MazeMap::VehicleState::kU) = SensorForwardVelocityMps(row);
+        state(MazeMap::VehicleState::kV) = 0.0f;
+        state(MazeMap::VehicleState::kR) = row.gyroCorrectedRadps;
+        state(MazeMap::VehicleState::kOmegaL) = row.leftEncoderVelocityMps / prepared.raw.wheelRadiusM;
+        state(MazeMap::VehicleState::kOmegaR) = row.rightEncoderVelocityMps / prepared.raw.wheelRadiusM;
+        MazeMap::VehicleState::NormalizeStateVector(state);
+        return true;
+    }
+
+    bool BuildFeedforwardTransitionInputs(
+        const MazeMap::PlantModel& plantModel,
+        const LoggedRow& currentRow,
+        const LoggedRow& nextRow,
+        const MazeMap::PlantModel::PreparedParams& prepared,
+        float batteryVoltageV,
+        FeedforwardTransitionInputs& inputs) noexcept
+    {
+        if (!IsSensorComparableTransition(currentRow, nextRow))
+        {
+            return false;
+        }
+
+        const float responseTimeS = static_cast<float>(nextRow.dtUs) * 1.0e-6f;
+        if (!(std::isfinite(responseTimeS) && (responseTimeS > 0.0f)))
+        {
+            return false;
+        }
+
+        MazeMap::VehicleState::StateVector currentState = MazeMap::VehicleState::StateVector::Zero();
+        if (!BuildSensorOnlyFeedforwardState(currentRow, prepared, currentState))
+        {
+            return false;
+        }
+
+        const float currentForwardVelocityMps = SensorForwardVelocityMps(currentRow);
+        const float currentYawRateRadps = currentRow.gyroCorrectedRadps;
+        const float targetForwardVelocityMps = SensorForwardVelocityMps(nextRow);
+        const float targetYawRateRadps = nextRow.gyroCorrectedRadps;
+        if (!(std::isfinite(currentForwardVelocityMps) &&
+            std::isfinite(currentYawRateRadps) &&
+            std::isfinite(targetForwardVelocityMps) &&
+            std::isfinite(targetYawRateRadps)))
+        {
+            return false;
+        }
+
+        float maxStateLongitudinalAccelMps2 = 0.0f;
+        float maxStateYawAccelRadps2 = 0.0f;
+        plantModel.velocityTargetTechnicalLimits(
+            currentState,
+            prepared,
+            maxStateLongitudinalAccelMps2,
+            maxStateYawAccelRadps2,
+            currentRow.fanDutyCycle);
+
+        float desiredStateLongitudinalAccelMps2 = 0.0f;
+        float desiredStateYawAccelRadps2 = 0.0f;
+        plantModel.ComputeBodyAction(
+            currentForwardVelocityMps,
+            targetForwardVelocityMps,
+            currentYawRateRadps,
+            targetYawRateRadps,
+            maxStateLongitudinalAccelMps2,
+            maxStateYawAccelRadps2,
+            responseTimeS,
+            desiredStateLongitudinalAccelMps2,
+            desiredStateYawAccelRadps2);
+
+        float maxScalarLongitudinalAccelMps2 = 0.0f;
+        float maxScalarYawAccelRadps2 = 0.0f;
+        plantModel.velocityTargetTechnicalLimits(
+            currentForwardVelocityMps,
+            currentYawRateRadps,
+            prepared,
+            maxScalarLongitudinalAccelMps2,
+            maxScalarYawAccelRadps2,
+            currentRow.fanDutyCycle);
+
+        float desiredScalarLongitudinalAccelMps2 = 0.0f;
+        float desiredScalarYawAccelRadps2 = 0.0f;
+        plantModel.ComputeBodyAction(
+            currentForwardVelocityMps,
+            targetForwardVelocityMps,
+            currentYawRateRadps,
+            targetYawRateRadps,
+            maxScalarLongitudinalAccelMps2,
+            maxScalarYawAccelRadps2,
+            responseTimeS,
+            desiredScalarLongitudinalAccelMps2,
+            desiredScalarYawAccelRadps2);
+
+        if (!(std::isfinite(desiredStateLongitudinalAccelMps2) &&
+            std::isfinite(desiredStateYawAccelRadps2) &&
+            std::isfinite(desiredScalarLongitudinalAccelMps2) &&
+            std::isfinite(desiredScalarYawAccelRadps2)))
+        {
+            return false;
+        }
+
+        inputs = {};
+        inputs.currentState = currentState;
+        inputs.currentForwardSensorMps = currentForwardVelocityMps;
+        inputs.currentYawRateSensorRadps = currentYawRateRadps;
+        inputs.targetForwardSensorMps = targetForwardVelocityMps;
+        inputs.targetYawRateSensorRadps = targetYawRateRadps;
+        inputs.desiredStateLongitudinalAccelMps2 = desiredStateLongitudinalAccelMps2;
+        inputs.desiredStateYawAccelRadps2 = desiredStateYawAccelRadps2;
+        inputs.desiredScalarLongitudinalAccelMps2 = desiredScalarLongitudinalAccelMps2;
+        inputs.desiredScalarYawAccelRadps2 = desiredScalarYawAccelRadps2;
+        inputs.responseTimeS = responseTimeS;
+        inputs.fanDutyCycle = currentRow.fanDutyCycle;
+        inputs.batteryVoltageV = batteryVoltageV;
+        inputs.reserveUsage = kDefaultFeedforwardReserveUsage;
+        return true;
+    }
+
+    bool TrySolveFeedforwardPath(
+        const MazeMap::PlantModel& plantModel,
+        const FeedforwardPathId pathId,
+        const FeedforwardTransitionInputs& inputs,
+        const MazeMap::PlantModel::PreparedParams& prepared,
+        MazeMap::DriveCommandSolution& solution) noexcept
+    {
+        switch (pathId)
+        {
+        case FeedforwardPathId::StateOpenAccel:
+            solution =
+                plantModel.solveDriveCommands(
+                    inputs.currentState,
+                    inputs.desiredStateLongitudinalAccelMps2,
+                    inputs.desiredStateYawAccelRadps2,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV);
+            return true;
+        case FeedforwardPathId::StateClosedAccel:
+            solution =
+                plantModel.solveClosedLoopDriveCommands(
+                    inputs.currentState,
+                    inputs.desiredStateLongitudinalAccelMps2,
+                    inputs.desiredStateYawAccelRadps2,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.reserveUsage);
+            return true;
+        case FeedforwardPathId::StateTractionAccel:
+            solution =
+                plantModel.solveTractionLimitedDriveCommands(
+                    inputs.currentState,
+                    inputs.desiredStateLongitudinalAccelMps2,
+                    inputs.desiredStateYawAccelRadps2,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.reserveUsage);
+            return true;
+        case FeedforwardPathId::StateOpenVelocity:
+            solution =
+                plantModel.solveDriveCommandsForVelocityTarget(
+                    inputs.currentState,
+                    inputs.targetForwardSensorMps,
+                    inputs.targetYawRateSensorRadps,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.responseTimeS);
+            return true;
+        case FeedforwardPathId::StateClosedVelocity:
+            solution =
+                plantModel.solveClosedLoopDriveCommandsForVelocityTarget(
+                    inputs.currentState,
+                    inputs.targetForwardSensorMps,
+                    inputs.targetYawRateSensorRadps,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.responseTimeS,
+                    inputs.reserveUsage);
+            return true;
+        case FeedforwardPathId::StateTractionVelocity:
+            solution =
+                plantModel.solveTractionLimitedDriveCommandsForVelocityTarget(
+                    inputs.currentState,
+                    inputs.targetForwardSensorMps,
+                    inputs.targetYawRateSensorRadps,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.responseTimeS,
+                    inputs.reserveUsage);
+            return true;
+        case FeedforwardPathId::ScalarOpenAccel:
+            solution =
+                plantModel.solveDriveCommands(
+                    inputs.currentForwardSensorMps,
+                    inputs.desiredScalarLongitudinalAccelMps2,
+                    inputs.currentYawRateSensorRadps,
+                    inputs.desiredScalarYawAccelRadps2,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV);
+            return true;
+        case FeedforwardPathId::ScalarClosedAccel:
+            solution =
+                plantModel.solveClosedLoopDriveCommands(
+                    inputs.currentForwardSensorMps,
+                    inputs.desiredScalarLongitudinalAccelMps2,
+                    inputs.currentYawRateSensorRadps,
+                    inputs.desiredScalarYawAccelRadps2,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.reserveUsage);
+            return true;
+        case FeedforwardPathId::ScalarTractionAccel:
+            solution =
+                plantModel.solveTractionLimitedDriveCommands(
+                    inputs.currentForwardSensorMps,
+                    inputs.desiredScalarLongitudinalAccelMps2,
+                    inputs.currentYawRateSensorRadps,
+                    inputs.desiredScalarYawAccelRadps2,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.reserveUsage);
+            return true;
+        case FeedforwardPathId::ScalarOpenVelocity:
+            solution =
+                plantModel.solveDriveCommandsForVelocityTarget(
+                    inputs.currentForwardSensorMps,
+                    inputs.targetForwardSensorMps,
+                    inputs.currentYawRateSensorRadps,
+                    inputs.targetYawRateSensorRadps,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.responseTimeS);
+            return true;
+        case FeedforwardPathId::ScalarClosedVelocity:
+            solution =
+                plantModel.solveClosedLoopDriveCommandsForVelocityTarget(
+                    inputs.currentForwardSensorMps,
+                    inputs.targetForwardSensorMps,
+                    inputs.currentYawRateSensorRadps,
+                    inputs.targetYawRateSensorRadps,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.responseTimeS,
+                    inputs.reserveUsage);
+            return true;
+        case FeedforwardPathId::ScalarTractionVelocity:
+            solution =
+                plantModel.solveTractionLimitedDriveCommandsForVelocityTarget(
+                    inputs.currentForwardSensorMps,
+                    inputs.targetForwardSensorMps,
+                    inputs.currentYawRateSensorRadps,
+                    inputs.targetYawRateSensorRadps,
+                    prepared,
+                    inputs.fanDutyCycle,
+                    inputs.batteryVoltageV,
+                    inputs.responseTimeS,
+                    inputs.reserveUsage);
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    FeedforwardEnvelope ComputeFeedforwardCommandEnvelope(
+        const MazeMap::PlantModel& plantModel,
+        const FeedforwardPathId pathId,
+        const LoggedRow& currentRow,
+        const LoggedRow& nextRow,
+        const MazeMap::PlantModel::PreparedParams& prepared,
+        float batteryVoltageV) noexcept
+    {
+        FeedforwardEnvelope envelope{};
+        for (int currentLeftSign = -1; currentLeftSign <= 1; currentLeftSign += 2)
+        {
+            for (int currentRightSign = -1; currentRightSign <= 1; currentRightSign += 2)
+            {
+                for (int nextLeftSign = -1; nextLeftSign <= 1; nextLeftSign += 2)
+                {
+                    for (int nextRightSign = -1; nextRightSign <= 1; nextRightSign += 2)
+                    {
+                        for (int currentYawSign = -1; currentYawSign <= 1; currentYawSign += 2)
+                        {
+                            for (int nextYawSign = -1; nextYawSign <= 1; nextYawSign += 2)
+                            {
+                                LoggedRow perturbedCurrent = currentRow;
+                                LoggedRow perturbedNext = nextRow;
+                                perturbedCurrent.leftEncoderVelocityMps +=
+                                    static_cast<float>(currentLeftSign) * kWheelVelocitySensorBoundMps;
+                                perturbedCurrent.rightEncoderVelocityMps +=
+                                    static_cast<float>(currentRightSign) * kWheelVelocitySensorBoundMps;
+                                perturbedNext.leftEncoderVelocityMps +=
+                                    static_cast<float>(nextLeftSign) * kWheelVelocitySensorBoundMps;
+                                perturbedNext.rightEncoderVelocityMps +=
+                                    static_cast<float>(nextRightSign) * kWheelVelocitySensorBoundMps;
+                                perturbedCurrent.gyroCorrectedRadps +=
+                                    static_cast<float>(currentYawSign) * kYawRateSensorBoundRadps;
+                                perturbedNext.gyroCorrectedRadps +=
+                                    static_cast<float>(nextYawSign) * kYawRateSensorBoundRadps;
+
+                                FeedforwardTransitionInputs perturbedInputs{};
+                                if (!BuildFeedforwardTransitionInputs(
+                                    plantModel,
+                                    perturbedCurrent,
+                                    perturbedNext,
+                                    prepared,
+                                    batteryVoltageV,
+                                    perturbedInputs))
+                                {
+                                    continue;
+                                }
+
+                                MazeMap::DriveCommandSolution solution{};
+                                if (!TrySolveFeedforwardPath(
+                                    plantModel,
+                                    pathId,
+                                    perturbedInputs,
+                                    prepared,
+                                    solution))
+                                {
+                                    continue;
+                                }
+                                if (!solution.valid)
+                                {
+                                    continue;
+                                }
+
+                                envelope.valid = true;
+                                envelope.leftMin = (std::min)(envelope.leftMin, solution.control.leftMotorCommand);
+                                envelope.leftMax = (std::max)(envelope.leftMax, solution.control.leftMotorCommand);
+                                envelope.rightMin = (std::min)(envelope.rightMin, solution.control.rightMotorCommand);
+                                envelope.rightMax = (std::max)(envelope.rightMax, solution.control.rightMotorCommand);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return envelope;
+    }
+
+    void ScoreFeedforward(
+        const FeedforwardSampleExportRow& row,
+        FeedforwardMetrics& metrics) noexcept
+    {
+        metrics.leftDriveCommand.add(row.leftDriveCommandError);
+        metrics.rightDriveCommand.add(row.rightDriveCommandError);
+        metrics.averageDriveCommand.add(row.averageDriveCommandError);
+        metrics.deltaDriveCommand.add(row.deltaDriveCommandError);
+        metrics.leftFeedforwardCommand.add(row.leftFeedforwardCommandError);
+        metrics.rightFeedforwardCommand.add(row.rightFeedforwardCommandError);
+        metrics.averageFeedforwardCommand.add(row.averageFeedforwardCommandError);
+        metrics.deltaFeedforwardCommand.add(row.deltaFeedforwardCommandError);
+        metrics.predictedForwardTargetErrorMps.add(row.predictedForwardTargetErrorMps);
+        metrics.predictedYawTargetErrorRadps.add(row.predictedYawTargetErrorRadps);
+        if (std::isfinite(row.envelopeLeftMin) &&
+            std::isfinite(row.envelopeLeftMax) &&
+            std::isfinite(row.envelopeRightMin) &&
+            std::isfinite(row.envelopeRightMax))
+        {
+            metrics.driveEnvelopeHit.add(row.loggedDriveWithinEnvelope);
+            metrics.feedforwardEnvelopeHit.add(row.loggedFeedforwardWithinEnvelope);
+        }
+    }
+
+    bool BuildFeedforwardSampleExportRow(
+        const MazeMap::PlantModel& plantModel,
+        const FeedforwardPathId pathId,
+        const MazeMap::PlantModel::PreparedParams& prepared,
+        const LoggedRow& currentRow,
+        const LoggedRow& nextRow,
+        float batteryVoltageV,
+        FeedforwardSampleExportRow& exportRow) noexcept
+    {
+        const FeedforwardPathDefinition& definition = GetFeedforwardPathDefinition(pathId);
+        if (!definition.sensorOnlyEvaluable)
+        {
+            return false;
+        }
+
+        FeedforwardTransitionInputs inputs{};
+        if (!BuildFeedforwardTransitionInputs(
+            plantModel,
+            currentRow,
+            nextRow,
+            prepared,
+            batteryVoltageV,
+            inputs))
+        {
+            return false;
+        }
+
+        MazeMap::DriveCommandSolution solution{};
+        if (!TrySolveFeedforwardPath(
+            plantModel,
+            pathId,
+            inputs,
+            prepared,
+            solution))
+        {
+            return false;
+        }
+        if (!solution.valid)
+        {
+            return false;
+        }
+
+        const FeedforwardEnvelope envelope =
+            ComputeFeedforwardCommandEnvelope(
+                plantModel,
+                pathId,
+                currentRow,
+                nextRow,
+                prepared,
+                batteryVoltageV);
+
+        const MazeMap::VehicleState::StateVector predictedNextState =
+            plantModel.integrate(inputs.currentState, solution.control, inputs.responseTimeS, prepared);
+
+        exportRow = {};
+        exportRow.masterTimeUs = currentRow.masterTimeUs;
+        exportRow.nextMasterTimeUs = nextRow.masterTimeUs;
+        exportRow.controlTickSequence = currentRow.controlTickSequence;
+        exportRow.nextControlTickSequence = nextRow.controlTickSequence;
+        exportRow.dtUs = nextRow.dtUs;
+        exportRow.sectionId = currentRow.sectionId;
+        exportRow.primitiveId = currentRow.primitiveId;
+        exportRow.phaseId = currentRow.phaseId;
+        exportRow.repeatIndex = currentRow.repeatIndex;
+        exportRow.saturationFlags = currentRow.saturationFlags;
+        exportRow.pathId = definition.pathId;
+        exportRow.pathLabel = definition.label;
+        exportRow.pathCategory = definition.category;
+        exportRow.sectionName = SectionName(currentRow.sectionId);
+        exportRow.primitiveName = PrimitiveName(currentRow.primitiveId);
+        exportRow.phaseName = PhaseName(currentRow.phaseId);
+        exportRow.currentForwardSensorMps = inputs.currentForwardSensorMps;
+        exportRow.currentLeftVelocityMps = currentRow.leftEncoderVelocityMps;
+        exportRow.currentRightVelocityMps = currentRow.rightEncoderVelocityMps;
+        exportRow.currentYawRateSensorRadps = inputs.currentYawRateSensorRadps;
+        exportRow.targetForwardSensorMps = inputs.targetForwardSensorMps;
+        exportRow.targetLeftVelocityMps = nextRow.leftEncoderVelocityMps;
+        exportRow.targetRightVelocityMps = nextRow.rightEncoderVelocityMps;
+        exportRow.targetYawRateSensorRadps = inputs.targetYawRateSensorRadps;
+        exportRow.nominalLeftCommand = solution.control.leftMotorCommand;
+        exportRow.nominalRightCommand = solution.control.rightMotorCommand;
+        exportRow.nominalAverageCommand =
+            CommandAverage(exportRow.nominalLeftCommand, exportRow.nominalRightCommand);
+        exportRow.nominalDeltaCommand =
+            CommandDelta(exportRow.nominalLeftCommand, exportRow.nominalRightCommand);
+        exportRow.loggedLeftDriveCommand = currentRow.leftDriveCommand;
+        exportRow.loggedRightDriveCommand = currentRow.rightDriveCommand;
+        exportRow.loggedAverageDriveCommand =
+            CommandAverage(currentRow.leftDriveCommand, currentRow.rightDriveCommand);
+        exportRow.loggedDeltaDriveCommand =
+            CommandDelta(currentRow.leftDriveCommand, currentRow.rightDriveCommand);
+        exportRow.loggedLeftFeedforwardCommand = currentRow.leftFeedforwardCommand;
+        exportRow.loggedRightFeedforwardCommand = currentRow.rightFeedforwardCommand;
+        exportRow.loggedAverageFeedforwardCommand =
+            CommandAverage(currentRow.leftFeedforwardCommand, currentRow.rightFeedforwardCommand);
+        exportRow.loggedDeltaFeedforwardCommand =
+            CommandDelta(currentRow.leftFeedforwardCommand, currentRow.rightFeedforwardCommand);
+        exportRow.leftDriveCommandError = exportRow.nominalLeftCommand - exportRow.loggedLeftDriveCommand;
+        exportRow.rightDriveCommandError = exportRow.nominalRightCommand - exportRow.loggedRightDriveCommand;
+        exportRow.averageDriveCommandError = exportRow.nominalAverageCommand - exportRow.loggedAverageDriveCommand;
+        exportRow.deltaDriveCommandError = exportRow.nominalDeltaCommand - exportRow.loggedDeltaDriveCommand;
+        exportRow.leftFeedforwardCommandError =
+            exportRow.nominalLeftCommand - exportRow.loggedLeftFeedforwardCommand;
+        exportRow.rightFeedforwardCommandError =
+            exportRow.nominalRightCommand - exportRow.loggedRightFeedforwardCommand;
+        exportRow.averageFeedforwardCommandError =
+            exportRow.nominalAverageCommand - exportRow.loggedAverageFeedforwardCommand;
+        exportRow.deltaFeedforwardCommandError =
+            exportRow.nominalDeltaCommand - exportRow.loggedDeltaFeedforwardCommand;
+        exportRow.predictedNextForwardMps = predictedNextState(MazeMap::VehicleState::kU);
+        exportRow.predictedNextYawRateRadps = predictedNextState(MazeMap::VehicleState::kR);
+        exportRow.predictedForwardTargetErrorMps = exportRow.predictedNextForwardMps - inputs.targetForwardSensorMps;
+        exportRow.predictedYawTargetErrorRadps = exportRow.predictedNextYawRateRadps - inputs.targetYawRateSensorRadps;
+        exportRow.tractionLimited = solution.tractionLimited;
+        exportRow.commonForceClamped = solution.commonForceClamped;
+        exportRow.differentialForceClamped = solution.differentialForceClamped;
+        exportRow.usedGripOnlyFallback = solution.usedGripOnlyFallback;
+        if (envelope.valid)
+        {
+            exportRow.envelopeLeftMin = envelope.leftMin;
+            exportRow.envelopeLeftMax = envelope.leftMax;
+            exportRow.envelopeRightMin = envelope.rightMin;
+            exportRow.envelopeRightMax = envelope.rightMax;
+            exportRow.loggedDriveWithinEnvelope =
+                (currentRow.leftDriveCommand >= envelope.leftMin) &&
+                (currentRow.leftDriveCommand <= envelope.leftMax) &&
+                (currentRow.rightDriveCommand >= envelope.rightMin) &&
+                (currentRow.rightDriveCommand <= envelope.rightMax);
+            exportRow.loggedFeedforwardWithinEnvelope =
+                (currentRow.leftFeedforwardCommand >= envelope.leftMin) &&
+                (currentRow.leftFeedforwardCommand <= envelope.leftMax) &&
+                (currentRow.rightFeedforwardCommand >= envelope.rightMin) &&
+                (currentRow.rightFeedforwardCommand <= envelope.rightMax);
+        }
+        return true;
     }
 
     SampleExportRow BuildSampleExportRow(
@@ -1639,6 +2486,7 @@ namespace
         report.csvPath = candidate.csvPath;
         report.batterySource = candidate.batterySource;
         report.batteryVoltageV = candidate.batteryVoltageV;
+        report.feedforwardPaths = BuildDefaultFeedforwardPathSummaries();
 
         std::string error;
         std::vector<LoggedRow> rows;
@@ -1676,6 +2524,7 @@ namespace
         }
 
         MazeMap::MouseUkfFacade ukf;
+        MazeMap::PlantModel plantModel;
         const MazeMap::SrUkfCore::StateVector initialState =
             options.useKnownStationarySeed ?
             BuildKnownStationaryOpenFloorInitialState() :
@@ -1687,16 +2536,74 @@ namespace
             return report;
         }
 
-        MazeMap::PlantModel plantModel;
         SectionPhaseReportMap sectionPhaseBuckets;
         const MazeMap::PlantParams& params = ukf.ukf().params();
+        const MazeMap::PlantModel::PreparedParams prepared = ukf.ukf().preparedParams();
         const float fallbackBatteryVoltageV = params.supplyVoltageV;
         const bool exportSampleRows =
             !options.sampleCsvPath.empty() &&
             (options.runIdFilter == candidate.sidecar.runId);
+        const bool exportFeedforwardRows =
+            !options.feedforwardSampleCsvPath.empty() &&
+            (options.runIdFilter == candidate.sidecar.runId);
         if (exportSampleRows)
         {
             report.sampleExportRows.reserve(keptRows.size() - 1U);
+        }
+        if (exportFeedforwardRows)
+        {
+            const std::size_t evaluablePathCount = static_cast<std::size_t>(std::count_if(
+                report.feedforwardPaths.begin(),
+                report.feedforwardPaths.end(),
+                [](const FeedforwardPathSummary& summary) { return summary.sensorOnlyEvaluable; }));
+            report.feedforwardSampleExportRows.reserve((keptRows.size() - 1U) * evaluablePathCount);
+        }
+
+        for (std::size_t index = 0; (index + 1U) < keptRows.size(); ++index)
+        {
+            const LoggedRow& currentRow = keptRows[index];
+            const LoggedRow& nextRow = keptRows[index + 1U];
+            FeedforwardTransitionInputs transitionInputs{};
+            if (!BuildFeedforwardTransitionInputs(
+                plantModel,
+                currentRow,
+                nextRow,
+                prepared,
+                std::isfinite(candidate.batteryVoltageV) ? candidate.batteryVoltageV : fallbackBatteryVoltageV,
+                transitionInputs))
+            {
+                continue;
+            }
+
+            ++report.feedforwardTransitions;
+            for (FeedforwardPathSummary& pathSummary : report.feedforwardPaths)
+            {
+                if (!pathSummary.sensorOnlyEvaluable)
+                {
+                    continue;
+                }
+
+                ++pathSummary.comparableTransitions;
+                FeedforwardSampleExportRow sample{};
+                if (!BuildFeedforwardSampleExportRow(
+                    plantModel,
+                    pathSummary.id,
+                    prepared,
+                    currentRow,
+                    nextRow,
+                    transitionInputs.batteryVoltageV,
+                    sample))
+                {
+                    continue;
+                }
+
+                ++pathSummary.validSolutions;
+                ScoreFeedforward(sample, pathSummary.metrics);
+                if (exportFeedforwardRows)
+                {
+                    report.feedforwardSampleExportRows.push_back(std::move(sample));
+                }
+            }
         }
 
         for (std::size_t index = 1; index < keptRows.size(); ++index)
@@ -1810,6 +2717,37 @@ namespace
             << " | " << FormatDouble(stats.bias())
             << " | " << FormatDouble(stats.maxAbs)
             << " |\n";
+    }
+
+    void WriteHitRateRow(
+        std::ostream& stream,
+        const char* label,
+        const HitRateStats& stats)
+    {
+        stream
+            << "| " << label
+            << " | " << stats.total
+            << " | " << stats.hits
+            << " | " << FormatDouble(100.0 * stats.rate(), 2)
+            << " |\n";
+    }
+
+    std::uint64_t TotalFeedforwardValidSolutions(const std::vector<FeedforwardPathSummary>& summaries) noexcept
+    {
+        std::uint64_t total = 0U;
+        for (const FeedforwardPathSummary& summary : summaries)
+        {
+            total += summary.validSolutions;
+        }
+        return total;
+    }
+
+    std::size_t FeedforwardEvaluablePathCount(const std::vector<FeedforwardPathSummary>& summaries) noexcept
+    {
+        return static_cast<std::size_t>(std::count_if(
+            summaries.begin(),
+            summaries.end(),
+            [](const FeedforwardPathSummary& summary) { return summary.sensorOnlyEvaluable; }));
     }
 
     void WritePhaseAssociationRow(
@@ -1999,6 +2937,160 @@ namespace
         return true;
     }
 
+    bool WriteFeedforwardSampleExportCsv(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
+    {
+        if (options.feedforwardSampleCsvPath.empty())
+        {
+            return true;
+        }
+
+        const auto runIt = std::find_if(
+            corpus.runs.begin(),
+            corpus.runs.end(),
+            [&options](const RunReport& run) { return run.runId == options.runIdFilter; });
+        if (runIt == corpus.runs.end())
+        {
+            error = "Requested feedforward sample export run was not replayed: " + options.runIdFilter;
+            return false;
+        }
+
+        if (runIt->feedforwardSampleExportRows.empty())
+        {
+            error =
+                "Requested feedforward sample export run did not produce any comparable transitions: " +
+                options.runIdFilter;
+            return false;
+        }
+
+        const fs::path parentPath = options.feedforwardSampleCsvPath.parent_path();
+        if (!parentPath.empty())
+        {
+            std::error_code createEc;
+            fs::create_directories(parentPath, createEc);
+            if (createEc)
+            {
+                error =
+                    "Failed to create feedforward sample CSV directory: " +
+                    parentPath.string();
+                return false;
+            }
+        }
+
+        std::ofstream csv(options.feedforwardSampleCsvPath);
+        if (!csv)
+        {
+            error =
+                "Failed to open feedforward sample CSV for write: " +
+                options.feedforwardSampleCsvPath.string();
+            return false;
+        }
+
+        csv
+            << "master_time_us,next_master_time_us,control_tick_sequence,next_control_tick_sequence,dt_us,"
+            << "section_id,section_name,primitive_id,primitive_name,phase_id,phase_name,repeat_index,"
+            << "path_id,path_label,path_category,"
+            << "saturation_flags,current_forward_sensor_mps,current_left_velocity_mps,current_right_velocity_mps,"
+            << "current_yaw_rate_sensor_radps,target_forward_sensor_mps,target_left_velocity_mps,"
+            << "target_right_velocity_mps,target_yaw_rate_sensor_radps,nominal_left_command,nominal_right_command,"
+            << "nominal_average_command,nominal_delta_command,logged_left_drive_command,logged_right_drive_command,"
+            << "logged_average_drive_command,logged_delta_drive_command,logged_left_feedforward_command,"
+            << "logged_right_feedforward_command,logged_average_feedforward_command,logged_delta_feedforward_command,"
+            << "left_drive_command_error,right_drive_command_error,average_drive_command_error,delta_drive_command_error,"
+            << "left_feedforward_command_error,right_feedforward_command_error,average_feedforward_command_error,"
+            << "delta_feedforward_command_error,envelope_left_min,envelope_left_max,envelope_right_min,"
+            << "envelope_right_max,logged_drive_within_envelope,logged_feedforward_within_envelope,"
+            << "predicted_next_forward_mps,predicted_next_yaw_rate_radps,predicted_forward_target_error_mps,"
+            << "predicted_yaw_target_error_radps,traction_limited,common_force_clamped,differential_force_clamped,"
+            << "used_grip_only_fallback\n";
+
+        for (const FeedforwardSampleExportRow& row : runIt->feedforwardSampleExportRows)
+        {
+            csv
+                << row.masterTimeUs << ','
+                << row.nextMasterTimeUs << ','
+                << row.controlTickSequence << ','
+                << row.nextControlTickSequence << ','
+                << row.dtUs << ','
+                << static_cast<unsigned>(row.sectionId) << ','
+                << row.sectionName << ','
+                << static_cast<unsigned>(row.primitiveId) << ','
+                << row.primitiveName << ','
+                << static_cast<unsigned>(row.phaseId) << ','
+                << row.phaseName << ','
+                << row.repeatIndex << ','
+                << row.pathId << ','
+                << row.pathLabel << ','
+                << row.pathCategory << ','
+                << row.saturationFlags << ','
+                << FormatDouble(row.currentForwardSensorMps) << ','
+                << FormatDouble(row.currentLeftVelocityMps) << ','
+                << FormatDouble(row.currentRightVelocityMps) << ','
+                << FormatDouble(row.currentYawRateSensorRadps) << ','
+                << FormatDouble(row.targetForwardSensorMps) << ','
+                << FormatDouble(row.targetLeftVelocityMps) << ','
+                << FormatDouble(row.targetRightVelocityMps) << ','
+                << FormatDouble(row.targetYawRateSensorRadps) << ','
+                << FormatDouble(row.nominalLeftCommand) << ','
+                << FormatDouble(row.nominalRightCommand) << ','
+                << FormatDouble(row.nominalAverageCommand) << ','
+                << FormatDouble(row.nominalDeltaCommand) << ','
+                << FormatDouble(row.loggedLeftDriveCommand) << ','
+                << FormatDouble(row.loggedRightDriveCommand) << ','
+                << FormatDouble(row.loggedAverageDriveCommand) << ','
+                << FormatDouble(row.loggedDeltaDriveCommand) << ','
+                << FormatDouble(row.loggedLeftFeedforwardCommand) << ','
+                << FormatDouble(row.loggedRightFeedforwardCommand) << ','
+                << FormatDouble(row.loggedAverageFeedforwardCommand) << ','
+                << FormatDouble(row.loggedDeltaFeedforwardCommand) << ','
+                << FormatDouble(row.leftDriveCommandError) << ','
+                << FormatDouble(row.rightDriveCommandError) << ','
+                << FormatDouble(row.averageDriveCommandError) << ','
+                << FormatDouble(row.deltaDriveCommandError) << ','
+                << FormatDouble(row.leftFeedforwardCommandError) << ','
+                << FormatDouble(row.rightFeedforwardCommandError) << ','
+                << FormatDouble(row.averageFeedforwardCommandError) << ','
+                << FormatDouble(row.deltaFeedforwardCommandError) << ','
+                << FormatDouble(row.envelopeLeftMin) << ','
+                << FormatDouble(row.envelopeLeftMax) << ','
+                << FormatDouble(row.envelopeRightMin) << ','
+                << FormatDouble(row.envelopeRightMax) << ','
+                << (row.loggedDriveWithinEnvelope ? "true" : "false") << ','
+                << (row.loggedFeedforwardWithinEnvelope ? "true" : "false") << ','
+                << FormatDouble(row.predictedNextForwardMps) << ','
+                << FormatDouble(row.predictedNextYawRateRadps) << ','
+                << FormatDouble(row.predictedForwardTargetErrorMps) << ','
+                << FormatDouble(row.predictedYawTargetErrorRadps) << ','
+                << (row.tractionLimited ? "true" : "false") << ','
+                << (row.commonForceClamped ? "true" : "false") << ','
+                << (row.differentialForceClamped ? "true" : "false") << ','
+                << (row.usedGripOnlyFallback ? "true" : "false") << '\n';
+        }
+
+        std::cout
+            << "Feedforward audit sample export written to "
+            << options.feedforwardSampleCsvPath.string()
+            << "\n";
+        std::cout << "Feedforward path summary for run " << runIt->runId << ":\n";
+        for (const FeedforwardPathSummary& summary : runIt->feedforwardPaths)
+        {
+            if (!summary.sensorOnlyEvaluable || (summary.validSolutions == 0U))
+            {
+                continue;
+            }
+
+            std::cout
+                << "  " << summary.pathId
+                << ": samples=" << summary.validSolutions
+                << ", drive_average_rmse=" << FormatDouble(summary.metrics.averageDriveCommand.rmse(), 6)
+                << ", drive_delta_rmse=" << FormatDouble(summary.metrics.deltaDriveCommand.rmse(), 6)
+                << ", feedforward_average_rmse=" << FormatDouble(summary.metrics.averageFeedforwardCommand.rmse(), 6)
+                << ", feedforward_delta_rmse=" << FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse(), 6)
+                << ", drive_envelope_hit_rate_pct=" << FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 2)
+                << "\n";
+        }
+        return true;
+    }
+
     bool WriteReportFiles(const CorpusReport& corpus, const ReplayOptions& options, std::string& error)
     {
         fs::path outputPath = options.outputPath;
@@ -2019,6 +3111,7 @@ namespace
         const fs::path csvPath = outputPath / kRunSummaryFileName;
         const fs::path sectionPhaseCsvPath = outputPath / kSectionPhaseSummaryFileName;
         const fs::path aggregateJsonPath = outputPath / kAggregateMetricsFileName;
+        const fs::path feedforwardPathCsvPath = outputPath / kFeedforwardPathSummaryFileName;
 
         std::ofstream markdown(markdownPath);
         if (!markdown)
@@ -2076,6 +3169,8 @@ namespace
             {
                 return bucket.consistency.headingDeg;
             });
+        const std::uint64_t totalFeedforwardEvaluations = TotalFeedforwardValidSolutions(corpus.feedforwardPaths);
+        const std::size_t evaluableFeedforwardPaths = FeedforwardEvaluablePathCount(corpus.feedforwardPaths);
 
         markdown
             << "# Open-Floor UKF Replay Report\n\n"
@@ -2096,6 +3191,12 @@ namespace
             << "- Battery policy: use `battery_voltage_start` from the bound `logging.txt` when available; otherwise fall back to the current plant default.\n"
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"
             << "- Post-update replay deltas compare the replayed UKF state against the logged UKF state from the capture; they are consistency checks, not external ground truth.\n"
+            << "- Feedforward validation uses the present row's wheel-side velocities plus debiased gyro as the current state, the following row's wheel-side velocities plus debiased gyro as the target state, the following row's `dt_us` as the response horizon, and never uses logged UKF state for that validation.\n"
+            << "- Feedforward path coverage: " << evaluableFeedforwardPaths << " sensor-validatable public paths evaluated, "
+            << (corpus.feedforwardPaths.size() - evaluableFeedforwardPaths)
+            << " additional public paths reported as unavailable because they require UKF-owned state or cycle context.\n"
+            << "- Feedforward audit sensor bounds: each wheel-side velocity is treated as a `+/- 0.06 m/s` sensor and debiased yaw rate as a `+/- 0.03 rad/s` sensor when computing per-path command envelopes.\n"
+            << "- Feedforward evaluations completed: " << totalFeedforwardEvaluations << "\n"
             << "- Phase analysis uses canonical `section_id` + `phase_id` buckets from the open-floor schema.\n"
             << "- `eta_squared_abs` is the fraction of absolute-error variance explained by those section-phase buckets.\n\n";
 
@@ -2124,6 +3225,34 @@ namespace
         WriteMetricRow(markdown, "left_wheel_omega", "rad/s", corpus.consistency.leftWheelOmegaRadps);
         WriteMetricRow(markdown, "right_wheel_omega", "rad/s", corpus.consistency.rightWheelOmegaRadps);
         WriteMetricRow(markdown, "gyro_bias", "rad/s", corpus.consistency.gyroBiasRadps);
+
+        if (!corpus.feedforwardPaths.empty())
+        {
+            markdown << "\n## Feedforward Path Audit\n\n";
+            markdown << "| path_id | category | status | samples | drive_avg_rmse | drive_delta_rmse | ff_avg_rmse | ff_delta_rmse | drive_envelope_hit_pct | note |\n";
+            markdown << "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
+            for (const FeedforwardPathSummary& summary : corpus.feedforwardPaths)
+            {
+                markdown
+                    << "| " << summary.pathId
+                    << " | " << summary.category
+                    << " | " << (summary.sensorOnlyEvaluable ? "evaluated" : "unavailable")
+                    << " | " << summary.validSolutions
+                    << " | "
+                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.averageDriveCommand.rmse()) : "")
+                    << " | "
+                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.deltaDriveCommand.rmse()) : "")
+                    << " | "
+                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.averageFeedforwardCommand.rmse()) : "")
+                    << " | "
+                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse()) : "")
+                    << " | "
+                    << (summary.validSolutions > 0U ? FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 2) : "")
+                    << " | "
+                    << (summary.sensorOnlyEvaluable ? summary.label : summary.unavailableReason)
+                    << " |\n";
+            }
+        }
 
         markdown << "\n## Section-Phase Error Association\n\n";
         markdown << "| Metric | Samples | Buckets | eta_squared_abs | Worst Bucket | Worst Bucket Samples | Worst Bucket MAE | Global MAE | Ratio |\n";
@@ -2156,8 +3285,8 @@ namespace
 
         markdown << "\n## Per-Run Summary\n\n";
         markdown
-            << "| run_id | format | rows | kept | ignored_section | predict_failures | yaw_rejects | encoder_linear_rmse | raw_gyro_rmse | accel_x_rmse | accel_y_rmse | post_position_rmse_mm | post_heading_rmse_deg | battery_source |\n"
-            << "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
+            << "| run_id | format | rows | kept | ignored_section | predict_failures | yaw_rejects | ff_transitions | ff_evaluations | encoder_linear_rmse | raw_gyro_rmse | accel_x_rmse | accel_y_rmse | post_position_rmse_mm | post_heading_rmse_deg | battery_source |\n"
+            << "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
         for (const RunReport& run : corpus.runs)
         {
             markdown
@@ -2168,6 +3297,8 @@ namespace
                 << " | " << run.ignoredSectionId
                 << " | " << run.predictFailures
                 << " | " << run.yawRejects
+                << " | " << run.feedforwardTransitions
+                << " | " << TotalFeedforwardValidSolutions(run.feedforwardPaths)
                 << " | " << FormatDouble(run.prediction.encoderLinearSpeedMps.rmse())
                 << " | " << FormatDouble(run.prediction.rawGyroRadps.rmse())
                 << " | " << FormatDouble(run.prediction.accelBodyXMps2.rmse())
@@ -2203,7 +3334,7 @@ namespace
         }
 
         csv
-            << "run_id,format_version,csv_path,battery_source,battery_voltage_v,total_rows,kept_rows,scored_transitions,ignored_section_id,predict_failures,yaw_rejects,completed,encoder_linear_rmse_mps,raw_gyro_rmse_radps,accel_body_x_rmse_mps2,accel_body_y_rmse_mps2,post_position_rmse_mm,post_heading_rmse_deg,failure_reason\n";
+            << "run_id,format_version,csv_path,battery_source,battery_voltage_v,total_rows,kept_rows,scored_transitions,feedforward_transitions,feedforward_evaluations,ignored_section_id,predict_failures,yaw_rejects,completed,encoder_linear_rmse_mps,raw_gyro_rmse_radps,accel_body_x_rmse_mps2,accel_body_y_rmse_mps2,post_position_rmse_mm,post_heading_rmse_deg,failure_reason\n";
         for (const RunReport& run : corpus.runs)
         {
             csv
@@ -2215,6 +3346,8 @@ namespace
                 << run.totalRows << ','
                 << run.keptRows << ','
                 << run.scoredTransitions << ','
+                << run.feedforwardTransitions << ','
+                << TotalFeedforwardValidSolutions(run.feedforwardPaths) << ','
                 << run.ignoredSectionId << ','
                 << run.predictFailures << ','
                 << run.yawRejects << ','
@@ -2226,6 +3359,35 @@ namespace
                 << FormatDouble(run.consistency.positionMm.rmse(), 3) << ','
                 << FormatDouble(run.consistency.headingDeg.rmse(), 3) << ','
                 << '"' << run.failureReason << '"' << '\n';
+        }
+
+        std::ofstream feedforwardPathCsv(feedforwardPathCsvPath);
+        if (!feedforwardPathCsv)
+        {
+            error = "Failed to open feedforward path summary CSV for write: " + feedforwardPathCsvPath.string();
+            return false;
+        }
+
+        feedforwardPathCsv
+            << "path_id,label,category,sensor_only_evaluable,unavailable_reason,comparable_transitions,valid_solutions,drive_average_rmse,drive_delta_rmse,feedforward_average_rmse,feedforward_delta_rmse,drive_envelope_hit_pct,feedforward_envelope_hit_pct,forward_target_rmse_mps,yaw_target_rmse_radps\n";
+        for (const FeedforwardPathSummary& summary : corpus.feedforwardPaths)
+        {
+            feedforwardPathCsv
+                << summary.pathId << ','
+                << '"' << summary.label << '"' << ','
+                << summary.category << ','
+                << (summary.sensorOnlyEvaluable ? "true" : "false") << ','
+                << '"' << summary.unavailableReason << '"' << ','
+                << summary.comparableTransitions << ','
+                << summary.validSolutions << ','
+                << FormatDouble(summary.metrics.averageDriveCommand.rmse()) << ','
+                << FormatDouble(summary.metrics.deltaDriveCommand.rmse()) << ','
+                << FormatDouble(summary.metrics.averageFeedforwardCommand.rmse()) << ','
+                << FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse()) << ','
+                << FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 2) << ','
+                << FormatDouble(100.0 * summary.metrics.feedforwardEnvelopeHit.rate(), 2) << ','
+                << FormatDouble(summary.metrics.predictedForwardTargetErrorMps.rmse()) << ','
+                << FormatDouble(summary.metrics.predictedYawTargetErrorRadps.rmse()) << '\n';
         }
 
         std::ofstream sectionPhaseCsv(sectionPhaseCsvPath);
@@ -2296,12 +3458,38 @@ namespace
             << "  \"consistency\": {\n"
             << "    \"post_position_rmse_mm\": " << FormatDouble(corpus.consistency.positionMm.rmse(), 12) << ",\n"
             << "    \"post_heading_rmse_deg\": " << FormatDouble(corpus.consistency.headingDeg.rmse(), 12) << "\n"
+            << "  },\n"
+            << "  \"feedforward_paths\": {\n";
+        for (std::size_t pathIndex = 0; pathIndex < corpus.feedforwardPaths.size(); ++pathIndex)
+        {
+            const FeedforwardPathSummary& summary = corpus.feedforwardPaths[pathIndex];
+            aggregateJson
+                << "    \"" << summary.pathId << "\": {\n"
+                << "      \"label\": \"" << summary.label << "\",\n"
+                << "      \"category\": \"" << summary.category << "\",\n"
+                << "      \"sensor_only_evaluable\": " << (summary.sensorOnlyEvaluable ? "true" : "false") << ",\n"
+                << "      \"unavailable_reason\": "
+                << (summary.unavailableReason.empty() ? "null" : (std::string("\"") + summary.unavailableReason + "\"")) << ",\n"
+                << "      \"comparable_transitions\": " << summary.comparableTransitions << ",\n"
+                << "      \"valid_solutions\": " << summary.validSolutions << ",\n"
+                << "      \"drive_average_rmse\": " << FormatDouble(summary.metrics.averageDriveCommand.rmse(), 12) << ",\n"
+                << "      \"drive_delta_rmse\": " << FormatDouble(summary.metrics.deltaDriveCommand.rmse(), 12) << ",\n"
+                << "      \"feedforward_average_rmse\": " << FormatDouble(summary.metrics.averageFeedforwardCommand.rmse(), 12) << ",\n"
+                << "      \"feedforward_delta_rmse\": " << FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse(), 12) << ",\n"
+                << "      \"drive_envelope_hit_pct\": " << FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 12) << ",\n"
+                << "      \"feedforward_envelope_hit_pct\": " << FormatDouble(100.0 * summary.metrics.feedforwardEnvelopeHit.rate(), 12) << ",\n"
+                << "      \"forward_target_rmse_mps\": " << FormatDouble(summary.metrics.predictedForwardTargetErrorMps.rmse(), 12) << ",\n"
+                << "      \"yaw_target_rmse_radps\": " << FormatDouble(summary.metrics.predictedYawTargetErrorRadps.rmse(), 12) << "\n"
+                << "    }" << ((pathIndex + 1U) < corpus.feedforwardPaths.size() ? "," : "") << "\n";
+        }
+        aggregateJson
             << "  }\n"
             << "}\n";
 
         std::cout
             << "Report written to " << markdownPath.string() << "\n"
             << "Run summary written to " << csvPath.string() << "\n"
+            << "Feedforward path summary written to " << feedforwardPathCsvPath.string() << "\n"
             << "Section-phase summary written to " << sectionPhaseCsvPath.string() << "\n"
             << "Aggregate metrics written to " << aggregateJsonPath.string() << "\n";
         return true;
@@ -2326,6 +3514,7 @@ int main(int argc, char* argv[])
 
     std::vector<RunCandidate> runs;
     CorpusReport corpus{};
+    corpus.feedforwardPaths = BuildDefaultFeedforwardPathSummaries();
     if (!DiscoverRuns(options, runs, corpus.duplicates, corpus.candidateCsvCount, error))
     {
         std::cerr << error << "\n";
@@ -2338,6 +3527,10 @@ int main(int argc, char* argv[])
         RunReport report = ReplayRun(run, options);
         corpus.prediction.merge(report.prediction);
         corpus.consistency.merge(report.consistency);
+        for (std::size_t pathIndex = 0; pathIndex < corpus.feedforwardPaths.size(); ++pathIndex)
+        {
+            corpus.feedforwardPaths[pathIndex].merge(report.feedforwardPaths[pathIndex]);
+        }
         for (const SectionPhaseReport& bucket : report.sectionPhaseBuckets)
         {
             GetOrCreateSectionPhaseReport(corpusSectionPhaseBuckets, bucket.sectionId, bucket.phaseId).merge(bucket);
@@ -2354,6 +3547,12 @@ int main(int argc, char* argv[])
     }
 
     if (!WriteSampleExportCsv(corpus, options, error))
+    {
+        std::cerr << error << "\n";
+        return 1;
+    }
+
+    if (!WriteFeedforwardSampleExportCsv(corpus, options, error))
     {
         std::cerr << error << "\n";
         return 1;

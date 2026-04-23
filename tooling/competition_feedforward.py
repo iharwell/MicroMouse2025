@@ -213,11 +213,11 @@ def load_current_feedforward_setup(repo_root: Path) -> CurrentFeedforwardSetup:
 
     vehicle_entries = extract_initializer_entries(
         vehicle_header,
-        "inline static constexpr VehiclePhysicalModel kPhysicalModel",
+        "kPhysicalModel = {",
     )
     drive_entries = extract_initializer_entries(
         drive_header,
-        "inline static constexpr MotorEncoderDrivePhysicalModel kSharedPhysicalModel",
+        "kSharedPhysicalModel = {",
     )
 
     mass_kg = evaluate_cpp_expr(vehicle_entries[0])
