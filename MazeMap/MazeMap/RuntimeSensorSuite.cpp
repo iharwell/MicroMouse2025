@@ -432,7 +432,7 @@ void RuntimeSensorSuite::ResetSideWallMemory() noexcept
 
 void RuntimeSensorSuite::Capture(
     const bool stationary,
-    const PoseEstimate& pose,
+    const MazeMap::VehicleState& state,
     SensorSnapshot& snapshot,
     const CaptureHandler callback,
     void* const callbackContext)
@@ -614,8 +614,8 @@ void RuntimeSensorSuite::Capture(
     snapshot.frontWallUsesFallbackDetection = _frontWallUsesFallbackDetection;
     snapshot.frontWallUsesCharacterizationDetection = false;
 
-    const bool sideLeftWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideLeft);
-    const bool sideRightWindowValid = IsSideWallDetectionWindowValid(pose, _vehicle.SideRight);
+    const bool sideLeftWindowValid = IsSideWallDetectionWindowValid(state, _vehicle.SideLeft);
+    const bool sideRightWindowValid = IsSideWallDetectionWindowValid(state, _vehicle.SideRight);
 
     float sideLeftSignalRise = 0.0f;
     float sideLeftLatchRiseThreshold = 0.0f;

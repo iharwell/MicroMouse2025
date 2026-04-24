@@ -183,7 +183,6 @@ namespace MazeMap::App::Internal
         _workingTimingIndex = 1U;
         _timingBuffers[0] = TimingDiagnostics{};
         _timingBuffers[1] = TimingDiagnostics{};
-        _observedScratch = ObservedTickState{};
         _pauseContextScratch = PauseContext{};
         _deferredTerminalOutcome = DeferredTerminalOutcome::None;
         _deferredTerminalReason = nullptr;
@@ -279,22 +278,16 @@ namespace MazeMap::App::Internal
                 RunSessionStartWallSensorAdcProbe();
             }
 
-            _observedScratch = ObservedTickState{};
-            _observedScratch.sequence = _tickCount;
-            _observedScratch.tickStartUs = tickStartUs;
-            _observedScratch.dtUs = dtUs;
-            _observedScratch.dtSeconds = dtSeconds;
-
             ResetLatchedRequests();
 
-            if (!ExecuteSensingUpdate(_observedScratch))
+            if (!CaptureTickState(dtSeconds, tickStartUs))
             {
                 _queuedControl = ControlVector::Brake;
                 timing.flags |= kTimingFlagRuntimeStopPending;
                 _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
                 _deferredTerminalReason =
-                    (_observedScratch.faultReason != nullptr) ?
-                    _observedScratch.faultReason :
+                    (_deferredTerminalReason != nullptr) ?
+                    _deferredTerminalReason :
                     "LoopController sensing update failed";
 
                 ServiceRuntimeLogsForFaultPath();
@@ -306,20 +299,9 @@ namespace MazeMap::App::Internal
                 continue;
             }
 
-            const std::uint32_t projectionAnchorUs =
-                (timing.controlTiming.ukfUpdateEndUs != 0U) ?
-                timing.controlTiming.ukfUpdateEndUs :
-                tickStartUs;
-            const bool overrunBeforeModeWork = (ComputeRemainingSlackUs(loopEndTimeUs) == 0U);
-            const ModeState modeState =
-                BuildModeState(_observedScratch, projectionAnchorUs, loopEndTimeUs, overrunBeforeModeWork);
-
             TickServices services(*this);
-            _callbackModeState = modeState;
-            _callbackModeStateValid = true;
             ControlVector candidateControl =
-                _activeModeWorkCallback(_activeModeWorkContext, loopEndTimeUs, modeState, services);
-            _callbackModeStateValid = false;
+                _activeModeWorkCallback(_activeModeWorkContext, loopEndTimeUs, _runtime->RuntimeState(), services);
             RecordModeReturnTiming();
 
             if (_requests.nextModeWorkRequested && (_requests.nextModeWork.onModeWork != nullptr))
@@ -433,6 +415,29 @@ namespace MazeMap::App::Internal
         return _appliedControl;
     }
 
+    std::uint32_t LoopController::CurrentTickSequence() const noexcept
+    {
+        const TimingDiagnostics* const timing = CurrentTimingForReaders();
+        return (timing != nullptr) ? timing->sequence : 0U;
+    }
+
+    std::uint32_t LoopController::CurrentTickStartUs() const noexcept
+    {
+        const TimingDiagnostics* const timing = CurrentTimingForReaders();
+        return (timing != nullptr) ? timing->tickStartUs : 0U;
+    }
+
+    std::uint32_t LoopController::CurrentTickDtUs() const noexcept
+    {
+        const TimingDiagnostics* const timing = CurrentTimingForReaders();
+        return (timing != nullptr) ? timing->dtUs : 0U;
+    }
+
+    float LoopController::CurrentTickDtSeconds() const noexcept
+    {
+        return static_cast<float>(CurrentTickDtUs()) * 1.0e-6f;
+    }
+
     std::uint16_t LoopController::RelativeTickUs(
         const std::uint32_t tickStartUs,
         const std::uint32_t timestampUs) noexcept
@@ -478,37 +483,6 @@ namespace MazeMap::App::Internal
 #else
         return 0UL;
 #endif
-    }
-
-    PoseEstimate LoopController::ProjectEstimate(
-        const PoseEstimate& estimate,
-        const std::uint32_t projectionAnchorUs,
-        const std::uint32_t commandApplyTimeUs) noexcept
-    {
-        PoseEstimate projected = estimate;
-        const std::int32_t deltaUsSigned = static_cast<std::int32_t>(commandApplyTimeUs - projectionAnchorUs);
-        if (deltaUsSigned <= 0)
-        {
-            projected.headingUnit = HeadingUnitFromYawRad(projected.yawRad);
-            return projected;
-        }
-
-        const float dtSeconds = static_cast<float>(deltaUsSigned) * 1.0e-6f;
-        if (!std::isfinite(dtSeconds) || (dtSeconds <= 0.0f))
-        {
-            projected.headingUnit = HeadingUnitFromYawRad(projected.yawRad);
-            return projected;
-        }
-
-        const float linearSpeedMps = std::isfinite(projected.linearSpeedMps) ? projected.linearSpeedMps : 0.0f;
-        const float angularSpeedRadps = std::isfinite(projected.angularSpeedRadps) ? projected.angularSpeedRadps : 0.0f;
-        const float midYawRad = WrapAngleRad(projected.yawRad + (0.5f * angularSpeedRadps * dtSeconds));
-        const Eigen::Vector2f midHeading = HeadingUnitFromYawRad(midYawRad);
-        projected.xMeters += linearSpeedMps * midHeading.x() * dtSeconds;
-        projected.yMeters += linearSpeedMps * midHeading.y() * dtSeconds;
-        projected.yawRad = WrapAngleRad(projected.yawRad + (angularSpeedRadps * dtSeconds));
-        projected.headingUnit = HeadingUnitFromYawRad(projected.yawRad);
-        return projected;
     }
 
     void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
@@ -582,6 +556,16 @@ namespace MazeMap::App::Internal
             workPlan.useAccelUpdate;
     }
 
+    const LoopController::TimingDiagnostics* LoopController::CurrentTimingForReaders() const noexcept
+    {
+        if (_sessionActive && (_tickCount > 0U))
+        {
+            return &_timingBuffers[_workingTimingIndex];
+        }
+
+        return _publishedTimingValid ? &_timingBuffers[_publishedTimingIndex] : nullptr;
+    }
+
     void LoopController::ResetLatchedRequests() noexcept
     {
         _requests = LatchedRequests{};
@@ -597,35 +581,11 @@ namespace MazeMap::App::Internal
         return _motorPwmSink.Apply(control);
     }
 
-    bool LoopController::ExecuteSensingUpdate(ObservedTickState& observed)
-    {
-        if (!CaptureTickState(observed))
-        {
-            return false;
-        }
-
-        observed.estimate = _runtime->Drive().GetPose();
-        observed.driveTelemetry = _runtime->Drive().GetTelemetry();
-
-        const float measuredYawRateRadps = observed.sensors.gyroRadps;
-        const DriveBase::MeasuredKinematics measured = _runtime->Drive().GetMeasuredKinematics(measuredYawRateRadps);
-        observed.measured.linearSpeedMps = measured.linearSpeedMps;
-        observed.measured.angularSpeedRadps = measured.angularSpeedRadps;
-
-        if (_runtime->Drive().HasEstimatorFault())
-        {
-            observed.estimatorHealthy = false;
-            observed.faultReason = _runtime->Drive().GetEstimatorFaultReason();
-        }
-
-        return true;
-    }
-
-    bool LoopController::CaptureTickState(ObservedTickState& observed)
+    bool LoopController::CaptureTickState(const float dtSeconds, const std::uint32_t tickStartUs)
     {
         if (_runtime == nullptr)
         {
-            observed.faultReason = "LoopController runtime unavailable";
+            _deferredTerminalReason = "LoopController runtime unavailable";
             return false;
         }
 
@@ -638,24 +598,19 @@ namespace MazeMap::App::Internal
         public:
             CaptureContext(
                 SharedRobotRuntime* runtime,
-                ObservedTickState* observed,
                 TimingDiagnostics* timing,
-                MazeMap::Maze* map) noexcept
+                MazeMap::Maze* map,
+                float dtSeconds) noexcept
                 : _runtime(runtime)
-                , _observed(observed)
                 , _timing(timing)
                 , _map(map)
+                , _dtSeconds(dtSeconds)
             {
             }
 
             SharedRobotRuntime& Runtime() const noexcept
             {
                 return *_runtime;
-            }
-
-            ObservedTickState& Observed() const noexcept
-            {
-                return *_observed;
             }
 
             TimingDiagnostics& Timing() const noexcept
@@ -668,20 +623,38 @@ namespace MazeMap::App::Internal
                 return _map;
             }
 
+            float DtSeconds() const noexcept
+            {
+                return _dtSeconds;
+            }
+
         private:
             SharedRobotRuntime* _runtime{};
-            ObservedTickState* _observed{};
             TimingDiagnostics* _timing{};
             MazeMap::Maze* _map{};
-        } captureContext{ _runtime, &observed, &timing, map };
+            float _dtSeconds{};
+        } captureContext{ _runtime, &timing, map, dtSeconds };
 
         const RuntimeSensorSuite::CaptureHandler callback =
             [](void* rawContext, SensorSnapshot& captureSnapshot, RuntimeSensorSuite::CaptureServices& services) noexcept
             {
                 auto& context = *static_cast<CaptureContext*>(rawContext);
                 context.Timing().controlTiming.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
-                context.Runtime().Drive().UpdateOdometry(
-                    context.Observed().dtSeconds,
+                DriveBase& drive = context.Runtime().Drive();
+                drive.RecordMeasurementInputs(captureSnapshot);
+                const MazeMap::ControlInput control = drive.CurrentControlInput();
+                const MazeMap::VehicleState::DriveCommandState driveCommandState =
+                    drive.BuildDriveCommandState(control);
+                const MazeMap::EncoderObs encoderObservation = drive.ConsumeEncoderObservation(context.DtSeconds());
+                (void)context.Runtime().Estimator().UpdateRuntimeState(
+                    context.DtSeconds(),
+                    control,
+                    drive.GetLastLinearCommandMps(),
+                    drive.GetLastAngularCommandRadps(),
+                    drive.GetLastSaturationFlags(),
+                    drive.GetLastLeftLaunchAssistFloor(),
+                    drive.GetLastRightLaunchAssistFloor(),
+                    encoderObservation,
                     captureSnapshot,
                     context.Map(),
                     &context.Timing().controlTiming,
@@ -691,51 +664,27 @@ namespace MazeMap::App::Internal
                         (void)services.ServiceWallRead();
                     },
                     [&context, &services]() noexcept
-                    {
-                        (void)context.Runtime().ServiceUtilityDataLog();
-                        services.CaptureImu();
-                    });
+                     {
+                         (void)context.Runtime().ServiceUtilityDataLog();
+                         services.CaptureImu();
+                     });
+                context.Runtime().RuntimeState().SetDriveCommandState(driveCommandState);
             };
 
+        SensorSnapshot snapshot{};
         _runtime->Sensors().Capture(
             stationaryHint,
-            _runtime->Drive().GetPose(),
-            observed.sensors,
+            _runtime->RuntimeState(),
+            snapshot,
             callback,
             &captureContext);
 
-        timing.frontTiming = observed.sensors.frontTiming;
-        timing.leftTiming = observed.sensors.leftTiming;
-        timing.rightTiming = observed.sensors.rightTiming;
-        timing.imuTiming = observed.sensors.imuTiming;
+        _runtime->RuntimeState().SetTimestampUs(tickStartUs);
+        timing.frontTiming = snapshot.frontTiming;
+        timing.leftTiming = snapshot.leftTiming;
+        timing.rightTiming = snapshot.rightTiming;
+        timing.imuTiming = snapshot.imuTiming;
         return true;
-    }
-
-    const LoopController::ModeState* LoopController::CurrentModeState() const noexcept
-    {
-        return _callbackModeStateValid ? &_callbackModeState : nullptr;
-    }
-
-    LoopController::ModeState LoopController::BuildModeState(
-        const ObservedTickState& observed,
-        const std::uint32_t projectionAnchorUs,
-        const std::uint32_t commandApplyTimeUs,
-        const bool overrunBeforeModeWork) const noexcept
-    {
-        ModeState state{};
-        state.sequence = observed.sequence;
-        state.tickStartUs = observed.tickStartUs;
-        state.commandApplyTimeUs = commandApplyTimeUs;
-        state.dtUs = observed.dtUs;
-        state.dtSeconds = observed.dtSeconds;
-        state.estimate = ProjectEstimate(observed.estimate, projectionAnchorUs, commandApplyTimeUs);
-        state.measured = observed.measured;
-        state.driveTelemetry = observed.driveTelemetry;
-        state.sensors = observed.sensors;
-        state.estimatorHealthy = observed.estimatorHealthy;
-        state.overrun = overrunBeforeModeWork || observed.overrun;
-        state.faultReason = observed.faultReason;
-        return state;
     }
 
     void LoopController::ResetWorkingTiming(
@@ -836,8 +785,7 @@ namespace MazeMap::App::Internal
 
     bool LoopController::ResolvePauseRequest(SessionResult& result)
     {
-        ModeState settledState{};
-        if (!WaitForPauseSettlement(_requests.pauseRequest, settledState))
+        if (!WaitForPauseSettlement(_requests.pauseRequest))
         {
             if (_runtime != nullptr)
             {
@@ -848,7 +796,6 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        _pauseContextScratch.stateEstimate = settledState;
         _pauseContextScratch.reason = _requests.pauseRequest.reason;
         const PauseDisposition disposition =
             _requests.pauseRequest.onPauseGranted(_activeModeWorkContext, _pauseContextScratch);
@@ -886,7 +833,7 @@ namespace MazeMap::App::Internal
         }
     }
 
-    bool LoopController::WaitForPauseSettlement(const PauseRequest& request, ModeState& settledState)
+    bool LoopController::WaitForPauseSettlement(const PauseRequest& request)
     {
         if (_runtime == nullptr)
         {
@@ -936,37 +883,30 @@ namespace MazeMap::App::Internal
             timing.tActuationAppliedUs =
                 RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
 
-            _observedScratch = ObservedTickState{};
-            _observedScratch.sequence = _tickCount;
-            _observedScratch.tickStartUs = tickStartUs;
-            _observedScratch.dtUs = dtUs;
-            _observedScratch.dtSeconds = dtSeconds;
-
-            if (!ExecuteSensingUpdate(_observedScratch))
+            if (!CaptureTickState(dtSeconds, tickStartUs))
             {
                 _deferredTerminalReason =
-                    (_observedScratch.faultReason != nullptr) ?
-                    _observedScratch.faultReason :
+                    (_deferredTerminalReason != nullptr) ?
+                    _deferredTerminalReason :
                     "LoopController pause settlement capture failed";
                 ServiceRuntimeLogsForFaultPath();
                 return false;
             }
-
-            const std::uint32_t projectionAnchorUs =
-                (timing.controlTiming.ukfUpdateEndUs != 0U) ?
-                timing.controlTiming.ukfUpdateEndUs :
-                tickStartUs;
-            settledState = BuildModeState(_observedScratch, projectionAnchorUs, projectionAnchorUs, false);
 
             if (request.flushLogsBeforeGrant)
             {
                 ServiceRuntimeLogsForFaultPath();
             }
 
+            const MazeMap::VehicleState& runtimeState = _runtime->RuntimeState();
+            const float linearSpeedMps = runtimeState.GetVelocity();
+            const float angularSpeedRadps = runtimeState.GetRotationalVelocity();
             const bool settled =
-                std::fabs(settledState.measured.linearSpeedMps) <= linearThreshold &&
-                std::fabs(settledState.measured.angularSpeedRadps) <= angularThreshold &&
-                settledState.estimatorHealthy;
+                std::isfinite(linearSpeedMps) &&
+                std::isfinite(angularSpeedRadps) &&
+                (std::fabs(linearSpeedMps) <= linearThreshold) &&
+                (std::fabs(angularSpeedRadps) <= angularThreshold) &&
+                !_runtime->Estimator().HasFault();
             settledCount = settled ? static_cast<std::uint8_t>(settledCount + 1U) : 0U;
 
             RecordPostServiceTiming();
@@ -997,9 +937,6 @@ namespace MazeMap::App::Internal
         _requests = LatchedRequests{};
         _deferredTerminalOutcome = DeferredTerminalOutcome::None;
         _deferredTerminalReason = nullptr;
-        _observedScratch = ObservedTickState{};
-        _callbackModeState = ModeState{};
-        _callbackModeStateValid = false;
         _pauseContextScratch = PauseContext{};
     }
 }

@@ -100,6 +100,7 @@ namespace MazeMap::App
 
         void ApplyEncoderObservation(
             DriveBase& drive,
+            Estimator& estimator,
             const float leftDistanceDeltaM,
             const float rightDistanceDeltaM,
             const float yawRateRadps,
@@ -116,11 +117,11 @@ namespace MazeMap::App
 
             MazeMap::Platform::WriteEncoderCount(kDriveManeuverLeftEncoderChannel, leftCounts);
             MazeMap::Platform::WriteEncoderCount(kDriveManeuverRightEncoderChannel, rightCounts);
-            drive.UpdateOdometry(
+            UpdateDriveEstimator(
+                drive,
+                estimator,
                 dtSeconds,
-                BuildDriveManeuverSensorSnapshot(yawRateRadps),
-                nullptr,
-                nullptr);
+                BuildDriveManeuverSensorSnapshot(yawRateRadps));
         }
 
         void ApplyControlVector(DriveBase& drive, const ControlVector& control) noexcept
@@ -160,6 +161,7 @@ namespace MazeMap::App
             truthState = BuildTruthState(kSmoothEntrySpeedMps);
             ApplyEncoderObservation(
                 runtime.Drive(),
+                runtime.Estimator(),
                 kSmoothEntrySpeedMps * kSimulationDtSeconds,
                 kSmoothEntrySpeedMps * kSimulationDtSeconds,
                 0.0f,
@@ -203,6 +205,7 @@ namespace MazeMap::App
 
             ApplyEncoderObservation(
                 runtime.Drive(),
+                runtime.Estimator(),
                 leftDistanceDeltaM,
                 rightDistanceDeltaM,
                 truthState(VehicleState::kR),
@@ -334,7 +337,7 @@ namespace MazeMap::App
 
             for (int stepIndex = 0; stepIndex < kMaxSimulationSteps; ++stepIndex)
             {
-                if (runtime.Drive().HasEstimatorFault())
+                if (runtime.Estimator().HasFault())
                 {
                     return trace;
                 }

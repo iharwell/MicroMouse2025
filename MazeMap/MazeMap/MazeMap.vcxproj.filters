@@ -327,7 +327,7 @@
     <ClInclude Include="MotorModelUnits.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MouseUkfFacade.h">
+    <ClInclude Include="Estimator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OpenFloorMeasurementController.h">
@@ -566,7 +566,7 @@
     <ClCompile Include="MmLog.cpp">
       <Filter>Source Files\mmlog</Filter>
     </ClCompile>
-    <ClCompile Include="MouseUkfFacade.cpp">
+    <ClCompile Include="Estimator.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="AuxMeasurementModeSupport.cpp">

@@ -10,7 +10,7 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector ManeuverExecutor::ActiveRoutineThunk(
         void* context,
         const std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         auto* const self = static_cast<ManeuverExecutor*>(context);
@@ -228,7 +228,7 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector ManeuverExecutor::DelegatedDriveRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -257,7 +257,7 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector ManeuverExecutor::QueueDispatchRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -305,7 +305,7 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector ManeuverExecutor::QueueAdvanceRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;

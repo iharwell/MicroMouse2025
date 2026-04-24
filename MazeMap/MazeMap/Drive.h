@@ -4,6 +4,7 @@
 #include "LoopController.h"
 #include "ManeuverInstance.h"
 #include "MazeMapRuntimeCore.h"
+#include "VehicleState.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -257,29 +258,37 @@ namespace MazeMap::App::Internal
 
         bool CanStart() const noexcept;
         void ResetActivePrimitive() noexcept;
-        const LoopController::ModeState* TryGetLoopState() const noexcept;
 
         // Primitive-specific stepping helpers behind the generic public GetNextControls(...).
         LoopController::ControlVector HoldControls(
-            const LoopController::ModeState& state,
+            const SensorSnapshot& sensors,
+            const DriveTelemetry& driveTelemetry,
             bool& done);
         LoopController::ControlVector LinearMotionControls(
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
+            const SensorSnapshot& sensors,
+            const DriveTelemetry& driveTelemetry,
+            float dtSeconds,
             bool& done);
         LoopController::ControlVector TurnControls(
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
+            const SensorSnapshot& sensors,
             bool& done);
         LoopController::ControlVector TurnTransitionControls(
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
+            const DriveTelemetry& driveTelemetry,
             bool& done);
         LoopController::ControlVector ArcControls(
-            const LoopController::ModeState& state,
+            const DriveTelemetry& driveTelemetry,
             bool& done);
         LoopController::ControlVector ManeuverControls(
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
+            const SensorSnapshot& sensors,
+            const DriveTelemetry& driveTelemetry,
             bool& done);
 
-        LoopController* _loopController{};  // LoopController queried internally for current tick state.
+        SharedRobotRuntime* _runtime{};     // Canonical runtime owner for live state and services.
+        LoopController* _loopController{};  // LoopController queried internally for current tick timing.
         DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
         MazeMap::Vehicle* _speedVehicle{};  // Vehicle facts used for speed-limit derivation.
         MazeMap::Maze* _maze{};             // Maze facts used when maze-mode wall correction is enabled.

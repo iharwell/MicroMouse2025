@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MazeMapRuntimeSignalHelpers.h"
 
+#include "MazeMapRuntimeCore.h"
 #include "SensorSnapshot.h"
 
 #include <algorithm>
@@ -19,7 +20,7 @@ namespace MazeMap::App::Internal::Runtime
 
         bool TryResolveMapQualifiedSideWallReference(
             const MazeMap::Maze& maze,
-            const PoseEstimate& pose,
+            const MazeMap::VehicleState& state,
             const MazeMap::WallSensor& sensor,
             const bool distanceValidForControl,
             MapQualifiedSideWallReference& reference)
@@ -31,15 +32,15 @@ namespace MazeMap::App::Internal::Runtime
             }
 
             float alongWallCoordinateM = 0.0f;
-            if (!TryComputeSideWallAimCoordinateM(pose, sensor, alongWallCoordinateM))
+            if (!TryComputeSideWallAimCoordinateM(state, sensor, alongWallCoordinateM))
             {
                 return false;
             }
 
-            const Eigen::Vector2f worldOffset = RotateBodyVectorToWorld(pose, sensor.GetPosition());
-            const float sensorXM = pose.xMeters + worldOffset.x();
-            const float sensorYM = pose.yMeters + worldOffset.y();
-            const Eigen::Vector2f sensorFacing = SensorWorldFacing(pose, sensor);
+            const Eigen::Vector2f worldOffset = RotateBodyVectorToWorld(state, sensor.GetPosition());
+            const float sensorXM = state.GetPositionX() + worldOffset.x();
+            const float sensorYM = state.GetPositionY() + worldOffset.y();
+            const Eigen::Vector2f sensorFacing = SensorWorldFacing(state, sensor);
 
             int cellX = -1;
             int cellY = -1;
@@ -145,7 +146,7 @@ namespace MazeMap::App::Internal::Runtime
         const MazeMap::Maze& maze,
         const MazeMap::Vehicle& vehicle,
         const MazeMap::DirectionalLocation& currentLocation,
-        const PoseEstimate& pose,
+        const MazeMap::VehicleState& state,
         const SensorSnapshot& snapshot,
         float& coordinateM,
         bool& correctsXAxis)
@@ -176,13 +177,13 @@ namespace MazeMap::App::Internal::Runtime
 
         if (TryResolveMapQualifiedSideWallReference(
                 maze,
-                pose,
+                state,
                 vehicle.SideLeft,
                 snapshot.leftDistanceValidForControl,
                 leftReference))
         {
             haveLeftCoordinate = TryComputePoseAxisFromObservedWall(
-                pose,
+                state,
                 vehicle.SideLeft,
                 snapshot.sideLeftDistanceM,
                 leftReference.cell,
@@ -192,13 +193,13 @@ namespace MazeMap::App::Internal::Runtime
 
         if (TryResolveMapQualifiedSideWallReference(
                 maze,
-                pose,
+                state,
                 vehicle.SideRight,
                 snapshot.rightDistanceValidForControl,
                 rightReference))
         {
             haveRightCoordinate = TryComputePoseAxisFromObservedWall(
-                pose,
+                state,
                 vehicle.SideRight,
                 snapshot.sideRightDistanceM,
                 rightReference.cell,
@@ -221,7 +222,7 @@ namespace MazeMap::App::Internal::Runtime
         const MazeMap::Maze& maze,
         const MazeMap::Vehicle& vehicle,
         const MazeMap::DirectionalLocation& currentLocation,
-        const PoseEstimate& pose,
+        const MazeMap::VehicleState& state,
         const SensorSnapshot& snapshot,
         float& corridorErrorM)
     {
@@ -233,7 +234,7 @@ namespace MazeMap::App::Internal::Runtime
                 maze,
                 vehicle,
                 currentLocation,
-                pose,
+                state,
                 snapshot,
                 corridorCoordinateM,
                 correctsXAxis))

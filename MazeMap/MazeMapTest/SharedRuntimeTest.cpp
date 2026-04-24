@@ -75,7 +75,7 @@ namespace
         const int32_t rightCounts = static_cast<int32_t>(std::round((rightWheelSpeedMps * dtSeconds) / distancePerCountM));
         MazeMap::Platform::WriteEncoderCount(kSharedRuntimeLeftEncoderChannel, leftCounts);
         MazeMap::Platform::WriteEncoderCount(kSharedRuntimeRightEncoderChannel, rightCounts);
-        runtime.Drive().UpdateOdometry(dtSeconds, BuildSharedRuntimeSensorSnapshot(), nullptr, nullptr);
+        UpdateDriveEstimator(runtime.Drive(), runtime.Estimator(), dtSeconds, BuildSharedRuntimeSensorSnapshot());
     }
 
     void CaptureFaultCallback(void* context, const char* reason) noexcept

@@ -508,15 +508,15 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         void* const context,
         const std::uint8_t speedIndex,
         const float cruiseSpeedMps,
-        const PoseEstimate& startPose,
+        const MazeMap::VehicleState& startPose,
         const DriveTelemetry& startTelemetry,
-        const PoseEstimate& finalPose,
+        const MazeMap::VehicleState& finalPose,
         const DriveTelemetry& finalTelemetry)
     {
-        const float deltaXM = finalPose.xMeters - startPose.xMeters;
-        const float deltaYM = finalPose.yMeters - startPose.yMeters;
+        const float deltaXM = finalPose.GetPositionX() - startPose.GetPositionX();
+        const float deltaYM = finalPose.GetPositionY() - startPose.GetPositionY();
         const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
-        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.yawRad, finalPose.yawRad);
+        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.GetOrientation(), finalPose.GetOrientation());
 
         char message[224] = {};
         const int length = std::snprintf(
@@ -555,13 +555,13 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         const float northStopErrorM,
         const float northTouchCorrectionM,
         const float encoderOutErrorM,
-        const PoseEstimate& startPose,
-        const PoseEstimate& finalPose)
+        const MazeMap::VehicleState& startPose,
+        const MazeMap::VehicleState& finalPose)
     {
-        const float deltaXM = finalPose.xMeters - startPose.xMeters;
-        const float deltaYM = finalPose.yMeters - startPose.yMeters;
+        const float deltaXM = finalPose.GetPositionX() - startPose.GetPositionX();
+        const float deltaYM = finalPose.GetPositionY() - startPose.GetPositionY();
         const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
-        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.yawRad, finalPose.yawRad);
+        const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.GetOrientation(), finalPose.GetOrientation());
 
         char message[224] = {};
         const int length = std::snprintf(

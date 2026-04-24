@@ -430,7 +430,9 @@ namespace MazeMap::App::Internal
         , speedPathFinder(maze, speedVehicle)
         , wallBeliefMap()
         , plantModel()
-        , drive(plantModel, MazeMap::Config::kDriveBasePDCluster)
+        , runtimeState()
+        , estimator(MazeMap::PlantParams::Default(), &runtimeState)
+        , drive(plantModel, estimator, MazeMap::Config::kDriveBasePDCluster)
         , driveService()
         , startupCalibrationService()
         , wallTouchService()
@@ -1085,6 +1087,16 @@ namespace MazeMap::App::Internal
     DriveBase& SharedRobotRuntime::Drive() noexcept
     {
         return drive;
+    }
+
+    MazeMap::Estimator& SharedRobotRuntime::Estimator() noexcept
+    {
+        return estimator;
+    }
+
+    MazeMap::VehicleState& SharedRobotRuntime::RuntimeState() noexcept
+    {
+        return runtimeState;
     }
 
     MazeMap::App::Internal::Drive& SharedRobotRuntime::DriveService() noexcept

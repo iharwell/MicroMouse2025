@@ -34,7 +34,7 @@ namespace MazeMap::App::Internal
         static LoopController::ControlVector ModeWorkThunk(
             void* context,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
         static LoopController::PauseDisposition PauseThunk(
             void* context,

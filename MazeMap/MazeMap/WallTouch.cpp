@@ -63,7 +63,7 @@ namespace MazeMap::App::Internal
             return;
         }
 
-        const PoseEstimate& pose = _drive->GetPose();
+        const MazeMap::VehicleState& pose = _runtime->RuntimeState();
         const float preferredXMeters = (static_cast<float>(wallCell.GetX()) + 0.5f) * Config::kCellSizeM;
         const float preferredYMeters = (static_cast<float>(wallCell.GetY()) + 0.5f) * Config::kCellSizeM;
         float contactXMeters = preferredXMeters;
@@ -73,19 +73,19 @@ namespace MazeMap::App::Internal
         {
         case MazeMap::Left:
             contactXMeters = contactCoordinateM;
-            expectedTravelM = pose.xMeters - contactCoordinateM;
+            expectedTravelM = pose.GetPositionX() - contactCoordinateM;
             break;
         case MazeMap::Right:
             contactXMeters = contactCoordinateM;
-            expectedTravelM = contactCoordinateM - pose.xMeters;
+            expectedTravelM = contactCoordinateM - pose.GetPositionX();
             break;
         case MazeMap::Down:
             contactYMeters = contactCoordinateM;
-            expectedTravelM = pose.yMeters - contactCoordinateM;
+            expectedTravelM = pose.GetPositionY() - contactCoordinateM;
             break;
         case MazeMap::Up:
             contactYMeters = contactCoordinateM;
-            expectedTravelM = contactCoordinateM - pose.yMeters;
+            expectedTravelM = contactCoordinateM - pose.GetPositionY();
             break;
         default:
             return;
@@ -159,16 +159,19 @@ namespace MazeMap::App::Internal
             return LoopController::ControlVector::Brake;
         }
 
-        const LoopController::ModeState* const state = TryGetLoopState();
-        if (state == nullptr)
+        if (_runtime == nullptr)
         {
-            SetFault("WallTouch requires an active LoopController mode state");
+            SetFault("WallTouch requires a shared runtime");
             done = true;
             return LoopController::ControlVector::Brake;
         }
-        if (!state->estimatorHealthy)
+
+        const MazeMap::VehicleState state = _runtime->RuntimeState();
+        const SensorSnapshot& sensors = state.GetSensorSnapshot();
+        const DriveTelemetry driveTelemetry = (_drive != nullptr) ? _drive->GetTelemetry() : DriveTelemetry{};
+        if (_runtime->Estimator().HasFault())
         {
-            SetFault((state->faultReason != nullptr) ? state->faultReason : "WallTouch estimator unhealthy");
+            SetFault(_runtime->Estimator().FaultReason());
             done = true;
             return LoopController::ControlVector::Brake;
         }
@@ -177,16 +180,16 @@ namespace MazeMap::App::Internal
         switch (_activePhase)
         {
         case ActivePhase::Seek:
-            control = SeekControls(*state, done);
+            control = SeekControls(state, sensors, driveTelemetry, done);
             break;
         case ActivePhase::Seat:
-            control = SeatControls(*state, done);
+            control = SeatControls(state, done);
             break;
         case ActivePhase::Square:
-            control = SquareControls(*state, done);
+            control = SquareControls(state, sensors, done);
             break;
         case ActivePhase::HoldBeforeReturn:
-            control = HoldBeforeReturnControls(*state, done);
+            control = HoldBeforeReturnControls(state, done);
             break;
         case ActivePhase::ReturnToPreferred:
             control = ReturnToPreferredControls(done);
@@ -245,11 +248,6 @@ namespace MazeMap::App::Internal
         }
     }
 
-    const LoopController::ModeState* WallTouch::TryGetLoopState() const noexcept
-    {
-        return (_loopController != nullptr) ? _loopController->CurrentModeState() : nullptr;
-    }
-
     bool WallTouch::BeginHoldBeforeReturn(const bool resetPoseDuringHold) noexcept
     {
         _state.phaseStartMs = millis();
@@ -268,12 +266,12 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        const PoseEstimate& pose = _drive->GetPose();
+        const MazeMap::VehicleState& pose = _runtime->RuntimeState();
         const Eigen::Vector2f heading = DirectionToUnitVector(_state.wallDirection);
         float projectedDistanceM = 0.0f;
         if (!MazeMap::TryComputeProjectedDistanceToTargetM(
-                pose.xMeters,
-                pose.yMeters,
+                pose.GetPositionX(),
+                pose.GetPositionY(),
                 _state.preferredXMeters,
                 _state.preferredYMeters,
                 heading.x(),
@@ -320,7 +318,7 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector WallTouch::ForwardControl(
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         float desiredSpeedMps,
         float yawRateBiasRadps) const
     {
@@ -336,8 +334,8 @@ namespace MazeMap::App::Internal
         }
 
         float angularCommandRadps =
-            (Config::kStraightHeadingKp * AngleErrorRad(_state.targetYawRad, state.estimate.yawRad)) -
-            (Config::kStraightYawD * state.estimate.angularSpeedRadps) +
+            (Config::kStraightHeadingKp * AngleErrorRad(_state.targetYawRad, state.GetOrientation())) -
+            (Config::kStraightYawD * state.GetRotationalVelocity()) +
             yawRateBiasRadps;
         if (std::isfinite(_limits.maxAngularSpeedRadps) && (_limits.maxAngularSpeedRadps > 0.0f))
         {
@@ -351,18 +349,20 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector WallTouch::SeekControls(
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
+        const SensorSnapshot& sensors,
+        const DriveTelemetry& driveTelemetry,
         bool& done)
     {
         const unsigned long nowMs = millis();
         const float currentDistanceM =
-            0.5f * (state.driveTelemetry.leftDistanceM + state.driveTelemetry.rightDistanceM);
+            0.5f * (driveTelemetry.leftDistanceM + driveTelemetry.rightDistanceM);
         const float traveledDistanceM = std::fabs(currentDistanceM - _state.startDistanceM);
         const unsigned long elapsedMs = nowMs - _state.touchStartMs;
         const bool frontSignalActive =
-            state.sensors.frontWall ||
-            state.sensors.frontLeftWall ||
-            state.sensors.frontRightWall;
+            sensors.frontWall ||
+            sensors.frontLeftWall ||
+            sensors.frontRightWall;
 
         if (traveledDistanceM >= _state.maxApproachTravelM)
         {
@@ -399,7 +399,7 @@ namespace MazeMap::App::Internal
 
         LoopController::ControlVector control = LoopController::ControlVector::Brake;
         const float encoderSpeedMps =
-            0.5f * (std::fabs(state.driveTelemetry.leftVelocityMps) + std::fabs(state.driveTelemetry.rightVelocityMps));
+            0.5f * (std::fabs(driveTelemetry.leftVelocityMps) + std::fabs(driveTelemetry.rightVelocityMps));
         if (!std::isfinite(encoderSpeedMps) || (encoderSpeedMps < Config::kWallTouchMaxApproachEncoderSpeedMps))
         {
             control = ForwardControl(state, approachSpeedMps);
@@ -410,7 +410,7 @@ namespace MazeMap::App::Internal
         {
             ++contactIndicators;
         }
-        if ((std::fabs(state.estimate.linearSpeedMps) <= Config::kMotionSettleSpeedThresholdMps) &&
+        if ((std::fabs(state.GetVelocity()) <= Config::kMotionSettleSpeedThresholdMps) &&
             ((traveledDistanceM >= Config::kWallTouchMinApproachDistanceM) ||
                 ((elapsedMs >= Config::kWallTouchMinCommandTimeMs) && (traveledDistanceM >= _state.minLatchTravelM))))
         {
@@ -444,7 +444,7 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector WallTouch::SeatControls(
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         bool& done)
     {
         (void)done;
@@ -484,15 +484,16 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector WallTouch::SquareControls(
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
+        const SensorSnapshot& sensors,
         bool& done)
     {
         const unsigned long nowMs = millis();
         const unsigned long phaseElapsedMs = nowMs - _state.phaseStartMs;
         const bool frontSignalActive =
-            state.sensors.frontWall ||
-            state.sensors.frontLeftWall ||
-            state.sensors.frontRightWall;
+            sensors.frontWall ||
+            sensors.frontLeftWall ||
+            sensors.frontRightWall;
 
         if (!frontSignalActive)
         {
@@ -519,11 +520,11 @@ namespace MazeMap::App::Internal
             seatSpeedMps = (std::min)(seatSpeedMps, _limits.maxSpeedMps);
         }
 
-        const float headingErrorRad = AngleErrorRad(_state.targetYawRad, state.estimate.yawRad);
+        const float headingErrorRad = AngleErrorRad(_state.targetYawRad, state.GetOrientation());
         const bool squareStable =
             frontSignalActive &&
-            (std::fabs(state.sensors.frontSkewM) <= Config::kWallTouchSquareFrontSkewThresholdM) &&
-            (std::fabs(state.estimate.angularSpeedRadps) <= Config::kWallTouchSquareResidualYawRateThresholdRadps) &&
+            (std::fabs(sensors.frontSkewM) <= Config::kWallTouchSquareFrontSkewThresholdM) &&
+            (std::fabs(state.GetRotationalVelocity()) <= Config::kWallTouchSquareResidualYawRateThresholdRadps) &&
             (std::fabs(headingErrorRad) <= Config::kWallTouchSquareNetYawChangeThresholdRad);
         if (squareStable)
         {
@@ -552,7 +553,7 @@ namespace MazeMap::App::Internal
             return LoopController::ControlVector::Brake;
         }
 
-        float yawBiasRadps = Config::kFrontSkewGain * state.sensors.frontSkewM;
+        float yawBiasRadps = Config::kFrontSkewGain * sensors.frontSkewM;
         yawBiasRadps = (std::clamp)(
             yawBiasRadps,
             -Config::kWallTouchReverseMaxAngularCommandRadps,
@@ -561,7 +562,7 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector WallTouch::HoldBeforeReturnControls(
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         bool& done)
     {
         const unsigned long nowMs = millis();

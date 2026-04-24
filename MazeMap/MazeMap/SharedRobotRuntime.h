@@ -4,6 +4,7 @@
 #include "Defines.h"
 #include "Drive.h"
 #include "DriveBase.h"
+#include "Estimator.h"
 #include "FloodFillPathFinder.h"
 #include "LoopController.h"
 #include "ManeuverExecutor.h"
@@ -17,6 +18,7 @@
 #include "RuntimeSensorSuite.h"
 #include "StartupCalibration.h"
 #include "Vehicle.h"
+#include "VehicleState.h"
 #include "WallBeliefMap.h"
 #include "WallTouch.h"
 
@@ -150,6 +152,8 @@ namespace MazeMap::App::Internal
         // planned higher-level `Drive` translation layer already exists as a separate runtime owner.
         bool SetMotorPWM(float leftMotorPwm, float rightMotorPwm) noexcept;
         DriveBase& Drive() noexcept;
+        MazeMap::Estimator& Estimator() noexcept;
+        MazeMap::VehicleState& RuntimeState() noexcept;
         MazeMap::App::Internal::Drive& DriveService() noexcept;
         StartupCalibration& StartupCalibrationService() noexcept;
         WallTouch& WallTouchService() noexcept;
@@ -176,6 +180,8 @@ namespace MazeMap::App::Internal
         MazeMap::ManeuverPathFinder speedPathFinder;
         MazeMap::WallBeliefMap wallBeliefMap;
         MazeMap::PlantModel plantModel;
+        MazeMap::VehicleState runtimeState;
+        MazeMap::Estimator estimator;
         DriveBase drive;
         MazeMap::App::Internal::Drive driveService;
         StartupCalibration startupCalibrationService;

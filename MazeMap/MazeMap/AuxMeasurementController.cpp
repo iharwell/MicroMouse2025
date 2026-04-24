@@ -36,40 +36,43 @@ namespace
         const std::uint32_t phaseId,
         const bool stationary,
         const bool fanEnabled,
-        const LoopController::ModeState& state,
+        const LoopController& loopController,
+        const MazeMap::VehicleState& state,
         const DriveBase& drive)
     {
+        const SensorSnapshot& sensors = state.GetSensorSnapshot();
+        const DriveTelemetry driveTelemetry = drive.GetTelemetry();
         row = {};
         row.sample = sample;
         row.phase_id = phaseId;
-        row.t_us = state.tickStartUs;
-        row.dt_us = state.dtUs;
+        row.t_us = loopController.CurrentTickStartUs();
+        row.dt_us = loopController.CurrentTickDtUs();
         row.stationary = stationary ? 1U : 0U;
         row.fan_enabled = fanEnabled ? 1U : 0U;
-        row.pose_x_m = state.estimate.xMeters;
-        row.pose_y_m = state.estimate.yMeters;
-        row.yaw_rad = state.estimate.yawRad;
-        row.linear_speed_mps = state.estimate.linearSpeedMps;
-        row.angular_speed_radps = state.estimate.angularSpeedRadps;
-        row.planar_accel_mps2 = state.sensors.planarAccelMps2;
+        row.pose_x_m = state.GetPositionX();
+        row.pose_y_m = state.GetPositionY();
+        row.yaw_rad = state.GetOrientation();
+        row.linear_speed_mps = state.GetVelocity();
+        row.angular_speed_radps = state.GetRotationalVelocity();
+        row.planar_accel_mps2 = sensors.planarAccelMps2;
         row.cmd_linear_mps = drive.GetLastLinearCommandMps();
         row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
-        row.left_drive_cmd = state.driveTelemetry.leftDriveCommand;
-        row.right_drive_cmd = state.driveTelemetry.rightDriveCommand;
-        row.left_encoder_count = state.driveTelemetry.leftEncoderCount;
-        row.right_encoder_count = state.driveTelemetry.rightEncoderCount;
-        row.left_distance_m = state.driveTelemetry.leftDistanceM;
-        row.right_distance_m = state.driveTelemetry.rightDistanceM;
-        row.left_velocity_mps = state.driveTelemetry.leftVelocityMps;
-        row.right_velocity_mps = state.driveTelemetry.rightVelocityMps;
-        row.front_wall = state.sensors.frontWall ? 1U : 0U;
-        row.left_wall = state.sensors.leftWall ? 1U : 0U;
-        row.right_wall = state.sensors.rightWall ? 1U : 0U;
-        row.corridor_error_m = state.sensors.corridorErrorM;
-        row.front_skew_m = state.sensors.frontSkewM;
-        row.gyro_bias_radps = state.sensors.gyroBiasRadps;
-        row.gyro_raw_radps = state.sensors.gyroRawRadps;
-        row.gyro_radps = state.sensors.gyroRadps;
+        row.left_drive_cmd = driveTelemetry.leftDriveCommand;
+        row.right_drive_cmd = driveTelemetry.rightDriveCommand;
+        row.left_encoder_count = driveTelemetry.leftEncoderCount;
+        row.right_encoder_count = driveTelemetry.rightEncoderCount;
+        row.left_distance_m = driveTelemetry.leftDistanceM;
+        row.right_distance_m = driveTelemetry.rightDistanceM;
+        row.left_velocity_mps = driveTelemetry.leftVelocityMps;
+        row.right_velocity_mps = driveTelemetry.rightVelocityMps;
+        row.front_wall = sensors.frontWall ? 1U : 0U;
+        row.left_wall = sensors.leftWall ? 1U : 0U;
+        row.right_wall = sensors.rightWall ? 1U : 0U;
+        row.corridor_error_m = sensors.corridorErrorM;
+        row.front_skew_m = sensors.frontSkewM;
+        row.gyro_bias_radps = sensors.gyroBiasRadps;
+        row.gyro_raw_radps = sensors.gyroRawRadps;
+        row.gyro_radps = sensors.gyroRadps;
     }
 }
 
@@ -202,7 +205,7 @@ private:
     static LoopController::ControlVector ModeWorkThunk(
         void* context,
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         auto* const self = static_cast<AuxMeasurementController*>(context);
@@ -300,7 +303,7 @@ private:
         }
     }
 
-    bool LogSample(const LoopController::ModeState& state)
+    bool LogSample(const MazeMap::VehicleState& state)
     {
         PopulateAuxMeasurementLogRow(
             _logRow,
@@ -308,6 +311,7 @@ private:
             static_cast<std::uint32_t>(_phaseId),
             PhaseIsStationary(),
             _fanEnabled,
+            _loopController,
             state,
             _drive);
         ++_sampleCount;
@@ -344,8 +348,9 @@ private:
         return LoopController::ControlVector::Brake;
     }
 
-    LoopController::ControlVector RunTurningTractionSweep(const LoopController::ModeState& state, LoopController::TickServices& services)
+    LoopController::ControlVector RunTurningTractionSweep(const MazeMap::VehicleState& state, LoopController::TickServices& services)
     {
+        (void)state;
         const unsigned long nowMs = millis();
         if (!_turningTractionStarted)
         {
@@ -361,7 +366,9 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
-        _turningTractionCommandedSpeedMps += AuxMeasurementConfig::kTurningTractionSweepAccelMps2 * state.dtSeconds;
+        _turningTractionCommandedSpeedMps +=
+            AuxMeasurementConfig::kTurningTractionSweepAccelMps2 *
+            (std::max)(0.0f, _loopController.CurrentTickDtSeconds());
         if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
         {
             _turningTractionCommandedSpeedMps =
@@ -380,7 +387,7 @@ private:
 
     LoopController::ControlVector RunTick(
         const std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;

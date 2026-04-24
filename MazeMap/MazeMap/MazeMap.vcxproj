@@ -259,7 +259,7 @@
     <ClInclude Include="MotionTargetProjection.h" />
     <ClInclude Include="MotorEncoderDrive.h" />
     <ClInclude Include="MotorModelUnits.h" />
-    <ClInclude Include="MouseUkfFacade.h" />
+    <ClInclude Include="Estimator.h" />
     <ClInclude Include="OpenFloorMeasurementController.h" />
     <ClInclude Include="Path.h" />
     <ClInclude Include="PathFinder.h" />
@@ -344,7 +344,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="MmLog.cpp" />
-    <ClCompile Include="MouseUkfFacade.cpp" />
+    <ClCompile Include="Estimator.cpp" />
     <ClCompile Include="AuxMeasurementModeSupport.cpp" />
     <ClCompile Include="AuxMeasurementController.cpp">
       <ObjectFileName>$(IntDir)AuxMeasurementController.obj</ObjectFileName>

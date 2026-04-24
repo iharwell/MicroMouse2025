@@ -5,6 +5,7 @@
 #include "Direction.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeCore.h"
+#include "VehicleState.h"
 
 #include <cstdint>
 
@@ -69,18 +70,26 @@ namespace MazeMap::App::Internal
         bool CanStart() const noexcept;
         void ResetActivePhase() noexcept;
         void SetFault(const char* reason) noexcept;
-        const LoopController::ModeState* TryGetLoopState() const noexcept;
         bool BeginHoldBeforeReturn(bool resetPoseDuringHold) noexcept;
         bool BeginReturnToPreferred() noexcept;
         LoopController::ControlVector ForwardControl(
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             float desiredSpeedMps,
             float yawRateBiasRadps = 0.0f) const;
 
-        LoopController::ControlVector SeekControls(const LoopController::ModeState& state, bool& done);
-        LoopController::ControlVector SeatControls(const LoopController::ModeState& state, bool& done);
-        LoopController::ControlVector SquareControls(const LoopController::ModeState& state, bool& done);
-        LoopController::ControlVector HoldBeforeReturnControls(const LoopController::ModeState& state, bool& done);
+        LoopController::ControlVector SeekControls(
+            const MazeMap::VehicleState& state,
+            const SensorSnapshot& sensors,
+            const DriveTelemetry& driveTelemetry,
+            bool& done);
+        LoopController::ControlVector SeatControls(const MazeMap::VehicleState& state, bool& done);
+        LoopController::ControlVector SquareControls(
+            const MazeMap::VehicleState& state,
+            const SensorSnapshot& sensors,
+            bool& done);
+        LoopController::ControlVector HoldBeforeReturnControls(
+            const MazeMap::VehicleState& state,
+            bool& done);
         LoopController::ControlVector ReturnToPreferredControls(bool& done);
 
         SharedRobotRuntime* _runtime{};

@@ -13,7 +13,7 @@
 #include "..\MazeMap\Maze.h"
 #include "..\MazeMap\PathFinder.h"
 #include "..\MazeMap\DirectionalPathFinder.h"
-#include "..\MazeMap\MouseUkfFacade.h"
+#include "..\MazeMap\Estimator.h"
 #include "Mazes.h"
 #include "SimVehicle.h"
 #include "../MazeMap/ManeuverPathFinder.h"
@@ -41,14 +41,14 @@ namespace
         return MazeMap::SrUkfCore::BuildDefaultInitialCovariance();
     }
 
-    void ResetOpenFloorBenchmarkUkf(MazeMap::MouseUkfFacade& ukf)
+    void ResetOpenFloorBenchmarkUkf(MazeMap::Estimator& ukf)
     {
         MazeMap::VehicleState::StateVector state = MazeMap::VehicleState::StateVector::Zero();
         (void)ukf.reset(state, BuildOpenFloorBenchmarkCovariance());
     }
 
     void ApplyOpenFloorBenchmarkRuntimeContext(
-        MazeMap::MouseUkfFacade& ukf,
+        MazeMap::Estimator& ukf,
         const MazeMap::ImuAccelObs& accelObservation) noexcept
     {
         ukf.ukf().setRuntimeContext(
@@ -63,7 +63,7 @@ namespace
     }
 
     bool ExecuteOpenFloorStationaryMeasurementCycle(
-        MazeMap::MouseUkfFacade& ukf,
+        MazeMap::Estimator& ukf,
         float dtSeconds,
         const MazeMap::ControlInput& control,
         const MazeMap::EncoderObs& encoderObservation,
@@ -122,7 +122,7 @@ namespace
 
     int RunOpenFloorUkfStationaryBenchmark(uint32_t iterations)
     {
-        MazeMap::MouseUkfFacade ukf;
+        MazeMap::Estimator ukf;
         ResetOpenFloorBenchmarkUkf(ukf);
 
         const MazeMap::PlantParams& params = ukf.ukf().params();

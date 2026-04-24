@@ -65,9 +65,9 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         void* context,
         std::uint8_t speedIndex,
         float cruiseSpeedMps,
-        const PoseEstimate& startPose,
+        const MazeMap::VehicleState& startPose,
         const DriveTelemetry& startTelemetry,
-        const PoseEstimate& finalPose,
+        const MazeMap::VehicleState& finalPose,
         const DriveTelemetry& finalTelemetry);
 
     EXPORT bool WritePositionStraightAuditResult(
@@ -79,8 +79,8 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         float northStopErrorM,
         float northTouchCorrectionM,
         float encoderOutErrorM,
-        const PoseEstimate& startPose,
-        const PoseEstimate& finalPose);
+        const MazeMap::VehicleState& startPose,
+        const MazeMap::VehicleState& finalPose);
 
     EXPORT bool WritePositionInPlaceTurnAuditResult(
         WriteEventCallback writeEvent,

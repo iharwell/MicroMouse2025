@@ -48,7 +48,7 @@ namespace MazeMap::App::Internal
         using ActivePhaseTickFn = LoopController::ControlVector (ManeuverExecutor::*)(
             void* rawState,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
 
         struct DelegatedDriveRoutineState final
@@ -70,7 +70,7 @@ namespace MazeMap::App::Internal
         static LoopController::ControlVector ActiveRoutineThunk(
             void* context,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
 
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
@@ -99,17 +99,17 @@ namespace MazeMap::App::Internal
         LoopController::ControlVector DelegatedDriveRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
         LoopController::ControlVector QueueDispatchRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
         LoopController::ControlVector QueueAdvanceRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
 
         SharedRobotRuntime* _runtime{};

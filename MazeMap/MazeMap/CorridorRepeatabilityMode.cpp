@@ -149,7 +149,7 @@ namespace MazeMap::App::Internal
         static LoopController::ControlVector ModeWorkThunk(
             void* context,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services)
         {
             auto* const self = static_cast<CorridorRepeatabilityMode*>(context);
@@ -199,7 +199,7 @@ namespace MazeMap::App::Internal
 
         LoopController::ControlVector RunTick(
             const std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services)
         {
             (void)loopEndTimeUs;

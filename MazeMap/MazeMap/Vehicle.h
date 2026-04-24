@@ -60,7 +60,6 @@ namespace MazeMap
             // exists so both anchor radii currently share that fit.
             { 0.063f, 0.13235f, 0.153f, 0.13235f }
         };
-        VehicleState _state;
         float _peakForwardAcceleration;
         float _peakLateralAcceleration;
         float _peakRotationalVelocity;
@@ -89,9 +88,6 @@ namespace MazeMap
         static SensorExtrinsics GetFrontRightSensorExtrinsics() noexcept;
         static SensorExtrinsics GetSideLeftSensorExtrinsics() noexcept;
         static SensorExtrinsics GetSideRightSensorExtrinsics() noexcept;
-
-        const VehicleState& GetVehicleState();
-        const VehicleState& GetVehicleState() const;
 
         void ProgressVehicleState(const VehicleState& previousState, VehicleState& projectedState, float timeDelta);
 

@@ -43,7 +43,7 @@ public:
     // When provided, `callback` may interleave estimator work while the wall sweep remains in flight.
     void Capture(
         bool stationary,
-        const PoseEstimate& pose,
+        const MazeMap::VehicleState& state,
         SensorSnapshot& snapshot,
         CaptureHandler callback = nullptr,
         void* callbackContext = nullptr);

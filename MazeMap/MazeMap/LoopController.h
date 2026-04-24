@@ -90,31 +90,8 @@ namespace MazeMap::App::Internal
             std::uint8_t flags{};
         };
 
-        struct MeasuredMotion final
-        {
-            float linearSpeedMps{};
-            float angularSpeedRadps{};
-        };
-
-        struct ModeState final
-        {
-            std::uint32_t sequence{};
-            std::uint32_t tickStartUs{};
-            std::uint32_t commandApplyTimeUs{};
-            std::uint32_t dtUs{};
-            float dtSeconds{};
-            PoseEstimate estimate{};
-            MeasuredMotion measured{};
-            DriveTelemetry driveTelemetry{};
-            SensorSnapshot sensors{};
-            bool estimatorHealthy{ true };
-            bool overrun{};
-            const char* faultReason{};
-        };
-
         struct PauseContext final
         {
-            ModeState stateEstimate{};
             const char* reason{};
         };
 
@@ -140,7 +117,7 @@ namespace MazeMap::App::Internal
         using ModeWorkCallback = ControlVector (*)(
             void* context,
             std::uint32_t loopEndTimeUs,
-            const ModeState& state,
+            const MazeMap::VehicleState& state,
             TickServices& services);
 
         using PauseCallback = PauseDisposition (*)(
@@ -196,27 +173,16 @@ namespace MazeMap::App::Internal
         bool SessionActive() const noexcept;
         const TimingDiagnostics& LastDiagnostics() const noexcept;
         const ControlVector& LastAppliedCommand() const noexcept;
+        std::uint32_t CurrentTickSequence() const noexcept;
+        std::uint32_t CurrentTickStartUs() const noexcept;
+        std::uint32_t CurrentTickDtUs() const noexcept;
+        float CurrentTickDtSeconds() const noexcept;
 
     private:
         friend class Drive;
         friend class SharedRobotRuntime;
         friend class StartupCalibration;
         friend class WallTouch;
-
-        struct ObservedTickState final
-        {
-            std::uint32_t sequence{};
-            std::uint32_t tickStartUs{};
-            std::uint32_t dtUs{};
-            float dtSeconds{};
-            PoseEstimate estimate{};
-            MeasuredMotion measured{};
-            DriveTelemetry driveTelemetry{};
-            SensorSnapshot sensors{};
-            bool estimatorHealthy{ true };
-            bool overrun{};
-            const char* faultReason{};
-        };
 
         enum class DeferredTerminalOutcome : std::uint8_t
         {
@@ -264,25 +230,14 @@ namespace MazeMap::App::Internal
         static bool IsZeroMotorPwmCommand(const ControlVector& command) noexcept;
         static bool IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
-        static PoseEstimate ProjectEstimate(
-            const PoseEstimate& estimate,
-            std::uint32_t projectionAnchorUs,
-            std::uint32_t commandApplyTimeUs) noexcept;
-
         void RunSessionStartWallSensorAdcProbe() noexcept;
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
+        const TimingDiagnostics* CurrentTimingForReaders() const noexcept;
         void ResetLatchedRequests() noexcept;
         bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
-        bool ExecuteSensingUpdate(ObservedTickState& observed);
-        bool CaptureTickState(ObservedTickState& observed);
-        const ModeState* CurrentModeState() const noexcept;
-        ModeState BuildModeState(
-            const ObservedTickState& observed,
-            std::uint32_t projectionAnchorUs,
-            std::uint32_t commandApplyTimeUs,
-            bool overrunBeforeModeWork) const noexcept;
+        bool CaptureTickState(float dtSeconds, std::uint32_t tickStartUs);
         void ResetWorkingTiming(
             std::uint32_t sequence,
             std::uint32_t tickStartUs,
@@ -298,7 +253,7 @@ namespace MazeMap::App::Internal
         std::uint32_t ComputeRemainingSlackUs(std::uint32_t absoluteDeadlineUs) const noexcept;
         bool ShouldTreatAppliedControlAsStationary() const noexcept;
         bool ResolvePauseRequest(SessionResult& result);
-        bool WaitForPauseSettlement(const PauseRequest& request, ModeState& settledState);
+        bool WaitForPauseSettlement(const PauseRequest& request);
         void ResetSessionState() noexcept;
 
         SharedRobotRuntime* _runtime{};
@@ -323,9 +278,6 @@ namespace MazeMap::App::Internal
         LatchedRequests _requests{};
         DeferredTerminalOutcome _deferredTerminalOutcome{ DeferredTerminalOutcome::None };
         const char* _deferredTerminalReason{};
-        ObservedTickState _observedScratch{};
-        ModeState _callbackModeState{};
-        bool _callbackModeStateValid{};
         PauseContext _pauseContextScratch{};
     };
 }

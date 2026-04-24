@@ -1,5 +1,7 @@
 #pragma once
 
+#include "..\MazeMap\DriveBase.h"
+#include "..\MazeMap\Estimator.h"
 #include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\VehicleState.h"
 #include "..\MazeMap\WallGeometryModel.h"
@@ -58,5 +60,30 @@ namespace MazeMap
         return
             (2.0f * PI_F * params.wheelRadiusM) /
             (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
+    }
+
+    inline void UpdateDriveEstimator(
+        DriveBase& drive,
+        Estimator& estimator,
+        float dtSeconds,
+        const SensorSnapshot& snapshot,
+        const Maze* map = nullptr,
+        ControlCycleTiming* timing = nullptr)
+    {
+        drive.RecordMeasurementInputs(snapshot);
+        const ControlInput control = drive.CurrentControlInput();
+        const EncoderObs encoderObservation = drive.ConsumeEncoderObservation(dtSeconds);
+        (void)estimator.UpdateRuntimeState(
+            dtSeconds,
+            control,
+            drive.GetLastLinearCommandMps(),
+            drive.GetLastAngularCommandRadps(),
+            drive.GetLastSaturationFlags(),
+            drive.GetLastLeftLaunchAssistFloor(),
+            drive.GetLastRightLaunchAssistFloor(),
+            encoderObservation,
+            snapshot,
+            map,
+            timing);
     }
 }

@@ -8,6 +8,7 @@
 #include "SharedRobotRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "RuntimeBinaryLogSupport.h"
+#include "VehicleState.h"
 #include "WallDistanceCalibration.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
@@ -91,8 +92,8 @@ public:
         }
 
         _drive.SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
-        _startX = _drive.GetPose().xMeters;
-        _startY = _drive.GetPose().yMeters;
+        _startX = _runtime.RuntimeState().GetPositionX();
+        _startY = _runtime.RuntimeState().GetPositionY();
 
         return true;
     }
@@ -146,7 +147,7 @@ private:
     using LoopController = MazeMap::App::Internal::LoopController;
     using PhaseFn = LoopController::ControlVector (DiagnosticController::*)(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services);
 
     enum class ScenarioStep : std::uint8_t
@@ -351,12 +352,16 @@ private:
 
     char _circleSequenceNamePrefix[48]{};
     float _circleSequenceCruiseSpeedMps{};
-    PoseEstimate _circleSequenceStartPose{};
+    float _circleSequenceStartX{};
+    float _circleSequenceStartY{};
+    float _circleSequenceStartYawRad{};
     DriveTelemetry _circleSequenceStartTelemetry{};
     ArcPhaseMetrics _circleSequenceTotalMetrics{};
 
     char _squareSequenceNamePrefix[24]{};
-    PoseEstimate _squareSequenceStartPose{};
+    float _squareSequenceStartX{};
+    float _squareSequenceStartY{};
+    float _squareSequenceStartYawRad{};
 
     float _pendingReturnDistanceM;
 
@@ -370,7 +375,7 @@ private:
     static LoopController::ControlVector ModeWorkThunk(
         void* context,
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         auto* const self = static_cast<DiagnosticController*>(context);
@@ -380,41 +385,46 @@ private:
             return LoopController::ControlVector::Brake;
         }
 
-        if (!state.estimatorHealthy)
+        if (self->_runtime.Estimator().HasFault())
         {
-            services.Fault((state.faultReason != nullptr) ? state.faultReason : "Diagnostic estimator fault");
+            services.Fault(self->_runtime.Estimator().FaultReason());
             return LoopController::ControlVector::Brake;
         }
 
-        if (!self->IsWithinBoundary(state.estimate))
+        if (!self->IsWithinBoundary(state))
         {
             services.Fault("Diagnostic boundary exceeded");
             return LoopController::ControlVector::Brake;
         }
 
-        const SensorSnapshot& snapshot = state.sensors;
+        const SensorSnapshot& snapshot = state.GetSensorSnapshot();
+        const DriveTelemetry driveTelemetry = self->_drive.GetTelemetry();
+        const MazeMap::VehicleState::DriveCommandState& commandState = state.GetDriveCommandState();
+        const MazeMap::DriveCommandPair appliedDriveCommand = state.GetAppliedDriveCommand();
         self->_logRow = {};
         self->_logRow.sample = static_cast<std::uint32_t>(self->_sampleCount);
         self->_logRow.phase_id = static_cast<std::uint32_t>(self->_phaseId);
-        self->_logRow.t_us = state.tickStartUs;
-        self->_logRow.dt_us = state.dtUs;
+        self->_logRow.t_us = self->_loopController.CurrentTickStartUs();
+        self->_logRow.dt_us = self->_loopController.CurrentTickDtUs();
         self->_logRow.stationary =
             (self->_phaseFn == &DiagnosticController::HoldPhaseTick && self->_holdStationary) ? 1U : 0U;
-        self->_logRow.pose_x_m = state.estimate.xMeters;
-        self->_logRow.pose_y_m = state.estimate.yMeters;
-        self->_logRow.yaw_rad = state.estimate.yawRad;
-        self->_logRow.linear_speed_mps = state.estimate.linearSpeedMps;
-        self->_logRow.angular_speed_radps = state.estimate.angularSpeedRadps;
-        self->_logRow.cmd_linear_mps = self->_drive.GetLastLinearCommandMps();
-        self->_logRow.cmd_angular_radps = self->_drive.GetLastAngularCommandRadps();
-        self->_logRow.left_drive_cmd = state.driveTelemetry.leftDriveCommand;
-        self->_logRow.right_drive_cmd = state.driveTelemetry.rightDriveCommand;
-        self->_logRow.left_encoder_count = state.driveTelemetry.leftEncoderCount;
-        self->_logRow.right_encoder_count = state.driveTelemetry.rightEncoderCount;
-        self->_logRow.left_distance_m = state.driveTelemetry.leftDistanceM;
-        self->_logRow.right_distance_m = state.driveTelemetry.rightDistanceM;
-        self->_logRow.left_velocity_mps = state.driveTelemetry.leftVelocityMps;
-        self->_logRow.right_velocity_mps = state.driveTelemetry.rightVelocityMps;
+        self->_logRow.pose_x_m = state.GetPositionX();
+        self->_logRow.pose_y_m = state.GetPositionY();
+        self->_logRow.yaw_rad = state.GetOrientation();
+        self->_logRow.linear_speed_mps = state.GetVelocity();
+        self->_logRow.angular_speed_radps = state.GetRotationalVelocity();
+        // LoopController refreshes runtime state before calling the mode callback, so these
+        // command fields match the sampled state for this log row.
+        self->_logRow.cmd_linear_mps = commandState.commandedLinearSpeedMps;
+        self->_logRow.cmd_angular_radps = commandState.commandedAngularSpeedRadps;
+        self->_logRow.left_drive_cmd = appliedDriveCommand.left;
+        self->_logRow.right_drive_cmd = appliedDriveCommand.right;
+        self->_logRow.left_encoder_count = driveTelemetry.leftEncoderCount;
+        self->_logRow.right_encoder_count = driveTelemetry.rightEncoderCount;
+        self->_logRow.left_distance_m = driveTelemetry.leftDistanceM;
+        self->_logRow.right_distance_m = driveTelemetry.rightDistanceM;
+        self->_logRow.left_velocity_mps = driveTelemetry.leftVelocityMps;
+        self->_logRow.right_velocity_mps = driveTelemetry.rightVelocityMps;
         self->_logRow.imu_fr_status = snapshot.imuFrontRight.status;
         self->_logRow.imu_fr_gyro_x = snapshot.imuFrontRight.gyroX;
         self->_logRow.imu_fr_gyro_y = snapshot.imuFrontRight.gyroY;
@@ -526,7 +536,7 @@ private:
         _straightPhaseState.distanceM = distanceM;
         _straightPhaseState.cruiseSpeedMps = cruiseSpeedMps;
         _straightPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
-        _straightPhaseState.targetHeading = _drive.GetPose().headingUnit;
+        _straightPhaseState.targetHeading = _runtime.RuntimeState().GetHeadingUnit();
         _straightPhaseState.timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (6000.0f * distanceM));
         _straightPhaseState.translationWatchdog.Reset(0.0f, millis());
         _straightPhaseState.nextStep = nextStep;
@@ -707,7 +717,7 @@ private:
         _turnPhaseState = TurnPhaseState{};
         _turnPhaseState.phaseName = phaseName;
         _turnPhaseState.angleRad = angleRad;
-        _turnPhaseState.targetYawRad = WrapAngleRad(_drive.GetPose().yawRad + angleRad);
+        _turnPhaseState.targetYawRad = WrapAngleRad(_runtime.RuntimeState().GetOrientation() + angleRad);
         _turnPhaseState.timeoutMs = millis() + 3000UL;
         _turnPhaseState.nextStep = nextStep;
         _turnPhaseState.writeSquareClosure = writeSquareClosure;
@@ -747,7 +757,7 @@ private:
         _arcPhaseState.cruiseSpeedMps = cruiseSpeedMps;
         _arcPhaseState.limits = DiagnosticLimits(cruiseSpeedMps);
         _arcPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
-        _arcPhaseState.startYawRad = _drive.GetPose().yawRad;
+        _arcPhaseState.startYawRad = _runtime.RuntimeState().GetOrientation();
         _arcPhaseState.targetYawRad = WrapAngleRad(_arcPhaseState.startYawRad + angleRad);
         _arcPhaseState.curvature = angleRad / distanceM;
         _arcPhaseState.timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (5000.0f * distanceM));
@@ -762,7 +772,9 @@ private:
     {
         snprintf(_circleSequenceNamePrefix, sizeof(_circleSequenceNamePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
         _circleSequenceCruiseSpeedMps = cruiseSpeedMps;
-        _circleSequenceStartPose = _drive.GetPose();
+        _circleSequenceStartX = _runtime.RuntimeState().GetPositionX();
+        _circleSequenceStartY = _runtime.RuntimeState().GetPositionY();
+        _circleSequenceStartYawRad = _runtime.RuntimeState().GetOrientation();
         _circleSequenceStartTelemetry = _drive.GetTelemetry();
         _circleSequenceTotalMetrics = ArcPhaseMetrics{};
     }
@@ -770,7 +782,9 @@ private:
     void ResetSquareSequence(const char* const namePrefix)
     {
         snprintf(_squareSequenceNamePrefix, sizeof(_squareSequenceNamePrefix), "%s", (namePrefix != nullptr) ? namePrefix : "");
-        _squareSequenceStartPose = _drive.GetPose();
+        _squareSequenceStartX = _runtime.RuntimeState().GetPositionX();
+        _squareSequenceStartY = _runtime.RuntimeState().GetPositionY();
+        _squareSequenceStartYawRad = _runtime.RuntimeState().GetOrientation();
     }
 
     bool StartCharacterizationRecovery(
@@ -1289,11 +1303,12 @@ private:
         float traveledM,
         const Eigen::Vector2f& targetHeading,
         float peakSpeedMps,
-        float maxHeadingErrorRad)
+        float maxHeadingErrorRad,
+        const MazeMap::VehicleState& state)
     {
         char message[192] = {};
         const float stopErrorM = traveledM - distanceM;
-        const float finalYawErrorDeg = RAD_TO_DEG_F * HeadingErrorRad(targetHeading, _drive.GetPose().headingUnit);
+        const float finalYawErrorDeg = RAD_TO_DEG_F * HeadingErrorRad(targetHeading, state.GetHeadingUnit());
         const int length = snprintf(
             message,
             sizeof(message),
@@ -1317,10 +1332,11 @@ private:
         float angleRad,
         float peakOmegaRadps,
         float maxYawErrorRad,
-        float targetYawRad)
+        float targetYawRad,
+        const MazeMap::VehicleState& state)
     {
         char message[176] = {};
-        const float finalYawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
+        const float finalYawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(targetYawRad, state.GetOrientation());
         const int length = snprintf(
             message,
             sizeof(message),
@@ -1343,11 +1359,12 @@ private:
         float angleRad,
         float traveledM,
         float targetYawRad,
-        const ArcPhaseMetrics& metrics)
+        const ArcPhaseMetrics& metrics,
+        const MazeMap::VehicleState& state)
     {
         char message[192] = {};
         const float distanceErrorM = traveledM - distanceM;
-        const float finalYawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(targetYawRad, _drive.GetPose().yawRad);
+        const float finalYawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(targetYawRad, state.GetOrientation());
         const int length = snprintf(
             message,
             sizeof(message),
@@ -1410,14 +1427,20 @@ private:
         return WriteEventOrFail("circle_result", message, "Failed to write circle diagnostic result");
     }
 
-    bool WriteClosureResult(const char* type, const char* phaseName, const PoseEstimate& startPose, const char* failMessage)
+    bool WriteClosureResult(
+        const char* type,
+        const char* phaseName,
+        const float startXM,
+        const float startYM,
+        const float startYawRad,
+        const MazeMap::VehicleState& state,
+        const char* failMessage)
     {
         char message[160] = {};
-        const PoseEstimate& pose = _drive.GetPose();
-        const float deltaXM = pose.xMeters - startPose.xMeters;
-        const float deltaYM = pose.yMeters - startPose.yMeters;
+        const float deltaXM = state.GetPositionX() - startXM;
+        const float deltaYM = state.GetPositionY() - startYM;
         const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
-        const float finalYawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.yawRad, pose.yawRad);
+        const float finalYawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startYawRad, state.GetOrientation());
         const int length = snprintf(
             message,
             sizeof(message),
@@ -1497,15 +1520,15 @@ private:
         return Fail("Failed to write diagnostic phase marker");
     }
 
-    bool IsWithinBoundary(const PoseEstimate& pose) const
+    bool IsWithinBoundary(const MazeMap::VehicleState& state) const
     {
-        return (std::fabs(pose.xMeters - _startX) <= DiagnosticConfig::kBoundaryHalfSpanM) &&
-            (std::fabs(pose.yMeters - _startY) <= DiagnosticConfig::kBoundaryHalfSpanM);
+        return (std::fabs(state.GetPositionX() - _startX) <= DiagnosticConfig::kBoundaryHalfSpanM) &&
+            (std::fabs(state.GetPositionY() - _startY) <= DiagnosticConfig::kBoundaryHalfSpanM);
     }
 
     LoopController::ControlVector HoldPhaseTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -1523,7 +1546,7 @@ private:
 
     LoopController::ControlVector StraightPhaseTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -1533,9 +1556,9 @@ private:
         const float remainingM = (std::max)(0.0f, _straightPhaseState.distanceM - _straightPhaseState.traveledM);
         _straightPhaseState.peakSpeedMps = (std::max)(
             _straightPhaseState.peakSpeedMps,
-            std::fabs(state.estimate.linearSpeedMps));
+            std::fabs(state.GetVelocity()));
         if ((remainingM <= Config::kDistanceToleranceM) &&
-            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+            (std::fabs(state.GetVelocity()) <= Config::kSpeedToleranceMps))
         {
             if (_straightPhaseState.selectReturnDistance)
             {
@@ -1545,12 +1568,13 @@ private:
             }
             if (!WriteStraightResult(
                     _straightPhaseState.phaseName,
-                _straightPhaseState.distanceM,
+                    _straightPhaseState.distanceM,
                 _straightPhaseState.cruiseSpeedMps,
                 _straightPhaseState.traveledM,
                 _straightPhaseState.targetHeading,
                 _straightPhaseState.peakSpeedMps,
-                _straightPhaseState.maxHeadingErrorRad))
+                _straightPhaseState.maxHeadingErrorRad,
+                state))
             {
                 services.Fault("Failed to write straight diagnostic result");
                 return LoopController::ControlVector::Brake;
@@ -1578,17 +1602,17 @@ private:
 
         const float accelLimitedSpeedMps = (std::min)(
             limits.maxSpeedMps,
-            _straightPhaseState.commandedSpeedMps + (limits.accelMps2 * state.dtSeconds));
+            _straightPhaseState.commandedSpeedMps + (limits.accelMps2 * _loopController.CurrentTickDtSeconds()));
         const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
         _straightPhaseState.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
-        const float headingErrorRad = HeadingErrorRad(_straightPhaseState.targetHeading, state.estimate.headingUnit);
+        const float headingErrorRad = HeadingErrorRad(_straightPhaseState.targetHeading, state.GetHeadingUnit());
         _straightPhaseState.maxHeadingErrorRad = (std::max)(
             _straightPhaseState.maxHeadingErrorRad,
             std::fabs(headingErrorRad));
         float angularCommandRadps =
             (Config::kStraightHeadingKp * headingErrorRad) -
-            (Config::kStraightYawD * state.estimate.angularSpeedRadps);
+            (Config::kStraightYawD * state.GetRotationalVelocity());
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
             -limits.maxAngularSpeedRadps,
@@ -1602,7 +1626,7 @@ private:
 
     LoopController::ControlVector KickoffCharacterizationTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -1631,10 +1655,10 @@ private:
 
         _kickoffPhaseState.maxSpeedMps = (std::max)(
             _kickoffPhaseState.maxSpeedMps,
-            std::fabs(state.estimate.linearSpeedMps));
+            std::fabs(state.GetVelocity()));
         if (_kickoffPhaseState.travelLimited &&
             (static_cast<long>(_kickoffPhaseState.travelLimitSettleDeadlineMs - nowMs) <= 0) &&
-            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+            (std::fabs(state.GetVelocity()) <= Config::kSpeedToleranceMps))
         {
             if (!FinishKickoffCharacterizationSample())
             {
@@ -1646,7 +1670,7 @@ private:
         if (!_kickoffPhaseState.travelLimited &&
             !pulseActive &&
             (static_cast<long>(_kickoffPhaseState.settleDeadlineMs - nowMs) <= 0) &&
-            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+            (std::fabs(state.GetVelocity()) <= Config::kSpeedToleranceMps))
         {
             if (!FinishKickoffCharacterizationSample())
             {
@@ -1660,7 +1684,7 @@ private:
 
     LoopController::ControlVector ForwardCharacterizationTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -1698,7 +1722,7 @@ private:
                 _forwardPhaseState.holdStarted = true;
                 _forwardPhaseState.holdStartDistanceM = _drive.GetAverageDistanceMeters();
             }
-            _forwardPhaseState.holdElapsedSeconds += state.dtSeconds;
+            _forwardPhaseState.holdElapsedSeconds += _loopController.CurrentTickDtSeconds();
             command = LoopController::ControlVector::RawMotorPwm(
                 _forwardPhaseState.forwardDriveCommand,
                 _forwardPhaseState.forwardDriveCommand);
@@ -1711,10 +1735,10 @@ private:
 
         _forwardPhaseState.maxSpeedMps = (std::max)(
             _forwardPhaseState.maxSpeedMps,
-            std::fabs(state.estimate.linearSpeedMps));
+            std::fabs(state.GetVelocity()));
         if (_forwardPhaseState.travelLimited &&
             (static_cast<long>(_forwardPhaseState.travelLimitSettleDeadlineMs - nowMs) <= 0) &&
-            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+            (std::fabs(state.GetVelocity()) <= Config::kSpeedToleranceMps))
         {
             if (!FinishForwardCharacterizationSample())
             {
@@ -1726,7 +1750,7 @@ private:
         if (!_forwardPhaseState.travelLimited &&
             _forwardPhaseState.holdComplete &&
             (static_cast<long>(_forwardPhaseState.settleDeadlineMs - nowMs) <= 0) &&
-            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+            (std::fabs(state.GetVelocity()) <= Config::kSpeedToleranceMps))
         {
             if (!FinishForwardCharacterizationSample())
             {
@@ -1740,16 +1764,16 @@ private:
 
     LoopController::ControlVector TurnPhaseTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
-        const float errorRad = AngleErrorRad(_turnPhaseState.targetYawRad, state.estimate.yawRad);
+        const float errorRad = AngleErrorRad(_turnPhaseState.targetYawRad, state.GetOrientation());
         const float remainingRad = std::fabs(errorRad);
         _turnPhaseState.maxYawErrorRad = (std::max)(_turnPhaseState.maxYawErrorRad, remainingRad);
         _turnPhaseState.peakOmegaRadps = (std::max)(
             _turnPhaseState.peakOmegaRadps,
-            std::fabs(state.estimate.angularSpeedRadps));
+            std::fabs(state.GetRotationalVelocity()));
         bool done = false;
         const LoopController::ControlVector control = _driveService.GetNextControls(done);
         if (done)
@@ -1759,21 +1783,24 @@ private:
                     _turnPhaseState.angleRad,
                     _turnPhaseState.peakOmegaRadps,
                     _turnPhaseState.maxYawErrorRad,
-                    _turnPhaseState.targetYawRad))
+                    _turnPhaseState.targetYawRad,
+                    state))
             {
                 services.Fault("Failed to write turn diagnostic result");
                 return LoopController::ControlVector::Brake;
             }
             if (_turnPhaseState.nextStep == ScenarioStep::RecoverySettle)
             {
-                const PoseEstimate& pose = _drive.GetPose();
-                _drive.SetPose(pose.xMeters, pose.yMeters, DirectionToYawRad(MazeMap::Up));
+                _drive.SetPose(state.GetPositionX(), state.GetPositionY(), DirectionToYawRad(MazeMap::Up));
             }
             if (_turnPhaseState.writeSquareClosure &&
                 !WriteClosureResult(
                     "square_result",
                     _squareSequenceNamePrefix,
-                    _squareSequenceStartPose,
+                    _squareSequenceStartX,
+                    _squareSequenceStartY,
+                    _squareSequenceStartYawRad,
+                    state,
                     "Failed to write square diagnostic result"))
             {
                 services.Fault("Failed to write square diagnostic result");
@@ -1797,7 +1824,7 @@ private:
 
     LoopController::ControlVector ArcPhaseTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -1805,20 +1832,21 @@ private:
         const float remainingM = (std::max)(0.0f, _arcPhaseState.distanceM - _arcPhaseState.traveledM);
         _arcPhaseState.metrics.peakSpeedMps = (std::max)(
             _arcPhaseState.metrics.peakSpeedMps,
-            std::fabs(state.estimate.linearSpeedMps));
+            std::fabs(state.GetVelocity()));
         _arcPhaseState.metrics.peakOmegaRadps = (std::max)(
             _arcPhaseState.metrics.peakOmegaRadps,
-            std::fabs(state.estimate.angularSpeedRadps));
-        _arcPhaseState.metrics.durationSeconds += state.dtSeconds;
-        _arcPhaseState.metrics.omegaIntegralRad += state.estimate.angularSpeedRadps * state.dtSeconds;
-        _arcPhaseState.metrics.speedIntegralMpsSeconds += std::fabs(state.estimate.linearSpeedMps) * state.dtSeconds;
-        const float planarAccelMps2 = state.sensors.planarAccelMps2;
-        _arcPhaseState.metrics.planarAccelIntegralMps2Seconds += planarAccelMps2 * state.dtSeconds;
+            std::fabs(state.GetRotationalVelocity()));
+        const float dtSeconds = _loopController.CurrentTickDtSeconds();
+        _arcPhaseState.metrics.durationSeconds += dtSeconds;
+        _arcPhaseState.metrics.omegaIntegralRad += state.GetRotationalVelocity() * dtSeconds;
+        _arcPhaseState.metrics.speedIntegralMpsSeconds += std::fabs(state.GetVelocity()) * dtSeconds;
+        const float planarAccelMps2 = state.GetSensorSnapshot().planarAccelMps2;
+        _arcPhaseState.metrics.planarAccelIntegralMps2Seconds += planarAccelMps2 * dtSeconds;
         _arcPhaseState.metrics.peakPlanarAccelMps2 = (std::max)(
             _arcPhaseState.metrics.peakPlanarAccelMps2,
             planarAccelMps2);
         if ((remainingM <= Config::kDistanceToleranceM) &&
-            (std::fabs(state.estimate.linearSpeedMps) <= Config::kSpeedToleranceMps))
+            (std::fabs(state.GetVelocity()) <= Config::kSpeedToleranceMps))
         {
             AccumulateArcMetrics(_circleSequenceTotalMetrics, _arcPhaseState.metrics);
             if (!WriteArcResult(
@@ -1827,7 +1855,8 @@ private:
                     _arcPhaseState.angleRad,
                     _arcPhaseState.traveledM,
                     _arcPhaseState.targetYawRad,
-                    _arcPhaseState.metrics))
+                    _arcPhaseState.metrics,
+                    state))
             {
                 services.Fault("Failed to write arc diagnostic result");
                 return LoopController::ControlVector::Brake;
@@ -1846,7 +1875,10 @@ private:
                 if (!WriteClosureResult(
                         "arc_circle_result",
                         _circleSequenceNamePrefix,
-                        _circleSequenceStartPose,
+                        _circleSequenceStartX,
+                        _circleSequenceStartY,
+                        _circleSequenceStartYawRad,
+                        state,
                         "Failed to write arc circle diagnostic result"))
                 {
                     services.Fault("Failed to write arc circle diagnostic result");
@@ -1876,21 +1908,21 @@ private:
 
         const float accelLimitedSpeedMps = (std::min)(
             _arcPhaseState.cruiseSpeedMps,
-            _arcPhaseState.commandedSpeedMps + (_arcPhaseState.limits.accelMps2 * state.dtSeconds));
+            _arcPhaseState.commandedSpeedMps + (_arcPhaseState.limits.accelMps2 * _loopController.CurrentTickDtSeconds()));
         const float decelLimitedSpeedMps =
             ReachableSpeedWithBoundary(0.0f, remainingM, _arcPhaseState.limits.decelMps2);
         _arcPhaseState.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
         const float progress = (std::clamp)(_arcPhaseState.traveledM / _arcPhaseState.distanceM, 0.0f, 1.0f);
         const float phaseTargetYawRad = WrapAngleRad(_arcPhaseState.startYawRad + (_arcPhaseState.angleRad * progress));
-        const float headingErrorRad = AngleErrorRad(phaseTargetYawRad, state.estimate.yawRad);
+        const float headingErrorRad = AngleErrorRad(phaseTargetYawRad, state.GetOrientation());
         _arcPhaseState.metrics.maxHeadingErrorRad = (std::max)(
             _arcPhaseState.metrics.maxHeadingErrorRad,
             std::fabs(headingErrorRad));
         float angularCommandRadps =
             (_arcPhaseState.curvature * _arcPhaseState.commandedSpeedMps) +
             (Config::kArcHeadingKp * headingErrorRad) -
-            (Config::kArcYawD * state.estimate.angularSpeedRadps);
+            (Config::kArcYawD * state.GetRotationalVelocity());
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
             -_arcPhaseState.limits.maxAngularSpeedRadps,

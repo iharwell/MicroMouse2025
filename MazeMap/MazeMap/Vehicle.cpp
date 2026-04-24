@@ -121,7 +121,6 @@ namespace MazeMap
     {
     }
 
-    const VehicleState& Vehicle::GetVehicleState() const { return _state; }
     ImuExtrinsics Vehicle::GetBackLeftImuExtrinsics() noexcept
     {
         ImuExtrinsics extrinsics{};
@@ -391,5 +390,4 @@ namespace MazeMap
 
         //result.SetAcceleration(previousState.GetAcceleration() + )
     }
-    const VehicleState& Vehicle::GetVehicleState() { return const_cast<const Vehicle*>(this)->GetVehicleState(); }
 }

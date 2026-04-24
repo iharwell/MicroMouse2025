@@ -166,7 +166,7 @@ private:
     static LoopController::ControlVector ModeWorkThunk(
         void* context,
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         auto* const self = static_cast<FrontWallCharacterizationController*>(context);
@@ -364,7 +364,7 @@ private:
 
     LoopController::ControlVector RunTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -433,7 +433,7 @@ private:
 
     LoopController::ControlVector CaptureCurveTick(
         std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;
@@ -451,7 +451,7 @@ private:
             return LoopController::ControlVector::Brake;
         };
 
-        const SensorSnapshot& snapshot = state.sensors;
+        const SensorSnapshot& snapshot = state.GetSensorSnapshot();
         if (!_captureStarted)
         {
             if (!StartCaptureCurvePhase())
@@ -461,7 +461,7 @@ private:
             }
 
             _captureStarted = true;
-            _captureTargetHeading = state.estimate.headingUnit;
+            _captureTargetHeading = state.GetHeadingUnit();
             _captureStartDistanceM = _drive.GetAverageDistanceMeters();
             _captureStartMs = millis();
             StoreCurveSample(_captureStorage, 0.0f, snapshot);

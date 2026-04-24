@@ -50,6 +50,12 @@ namespace MazeMap
         float batteryVoltageV = 0.0f;
     };
 
+    struct DriveCommandPair
+    {
+        float left = 0.0f;
+        float right = 0.0f;
+    };
+
     struct EncoderObs
     {
         int32_t totalLeftCounts = 0;
@@ -88,6 +94,69 @@ namespace MazeMap
     class EXPORT VehicleState
     {
     public:
+        enum class TranslationSetpointKind : std::uint8_t
+        {
+            None = 0U,
+            Velocity = 1U,
+            Acceleration = 2U
+        };
+
+        enum class RotationSetpointKind : std::uint8_t
+        {
+            None = 0U,
+            Heading = 1U,
+            YawRate = 2U,
+            YawAcceleration = 3U,
+            LateralAcceleration = 4U
+        };
+
+        struct DriveCommandState
+        {
+            static constexpr std::uint8_t kTranslationSetpointKindMask = 0x0FU;
+            static constexpr std::uint8_t kRotationSetpointKindMask = 0xF0U;
+
+            static constexpr std::uint8_t PackSetpointKinds(
+                const TranslationSetpointKind translationSetpointKind,
+                const RotationSetpointKind rotationSetpointKind) noexcept
+            {
+                return
+                    (static_cast<std::uint8_t>(translationSetpointKind) & kTranslationSetpointKindMask) |
+                    ((static_cast<std::uint8_t>(rotationSetpointKind) << 4U) & kRotationSetpointKindMask);
+            }
+
+            TranslationSetpointKind GetTranslationSetpointKind() const noexcept
+            {
+                return static_cast<TranslationSetpointKind>(setpointKindTags & kTranslationSetpointKindMask);
+            }
+
+            RotationSetpointKind GetRotationSetpointKind() const noexcept
+            {
+                return static_cast<RotationSetpointKind>(
+                    (setpointKindTags & kRotationSetpointKindMask) >> 4U);
+            }
+
+            void SetSetpointKinds(
+                const TranslationSetpointKind translationSetpointKind,
+                const RotationSetpointKind rotationSetpointKind) noexcept
+            {
+                setpointKindTags = PackSetpointKinds(translationSetpointKind, rotationSetpointKind);
+            }
+
+            DriveCommandPair feedforward{};
+            DriveCommandPair feedback{};
+            float commandedLinearSpeedMps = 0.0f;
+            float commandedAngularSpeedRadps = 0.0f;
+            float leftTargetVelocityMps = 0.0f;
+            float rightTargetVelocityMps = 0.0f;
+            float leftLaunchAssistFloor = 0.0f;
+            float rightLaunchAssistFloor = 0.0f;
+            float translationSetpoint = 0.0f;
+            float rotationSetpoint = 0.0f;
+            std::uint8_t setpointKindTags = 0U;
+            std::uint16_t modeFlags = 0U;
+            std::uint16_t saturationFlags = 0U;
+        };
+
         static constexpr int kDimension = 9;
         using StateVector = Eigen::Matrix<float, kDimension, 1>;
         using StateMatrix = Eigen::Matrix<float, kDimension, kDimension>;
@@ -113,6 +182,7 @@ namespace MazeMap
             : _state(StateVector::Zero())
             , _sqrtCovariance(StateMatrix::Identity() * 1.0e-3f)
             , _time(0.0f)
+            , _timestampUs(0U)
             , _control()
         {
         }
@@ -202,6 +272,10 @@ namespace MazeMap
         float GetTime() const noexcept { return _time; }
         float GetTime() noexcept { return const_cast<const VehicleState*>(this)->GetTime(); }
 
+        void SetTimestampUs(std::uint32_t timestampUs) noexcept { _timestampUs = timestampUs; }
+        std::uint32_t GetTimestampUs() const noexcept { return _timestampUs; }
+        std::uint32_t GetTimestampUs() noexcept { return const_cast<const VehicleState*>(this)->GetTimestampUs(); }
+
         void SetMotorDriveL(float motorDriveL) noexcept { _control.leftMotorCommand = motorDriveL; }
         float GetMotorDriveL() const noexcept { return _control.leftMotorCommand; }
         float GetMotorDriveL() noexcept { return const_cast<const VehicleState*>(this)->GetMotorDriveL(); }
@@ -217,6 +291,24 @@ namespace MazeMap
         void SetControlInput(const ControlInput& control) noexcept { _control = control; }
         const ControlInput& GetControlInput() const noexcept { return _control; }
         const ControlInput& GetControlInput() noexcept { return const_cast<const VehicleState*>(this)->GetControlInput(); }
+        DriveCommandPair GetAppliedDriveCommand() const noexcept
+        {
+            DriveCommandPair applied{};
+            applied.left = _control.leftMotorCommand;
+            applied.right = _control.rightMotorCommand;
+            return applied;
+        }
+        DriveCommandPair GetAppliedDriveCommand() noexcept
+        {
+            return const_cast<const VehicleState*>(this)->GetAppliedDriveCommand();
+        }
+
+        void SetDriveCommandState(const DriveCommandState& driveCommandState) noexcept
+        {
+            _driveCommandState = driveCommandState;
+        }
+        const DriveCommandState& GetDriveCommandState() const noexcept { return _driveCommandState; }
+        DriveCommandState& GetDriveCommandState() noexcept { return _driveCommandState; }
 
         void SetSensorSnapshot(const ::SensorSnapshot& sensorSnapshot) noexcept { _sensorSnapshot = sensorSnapshot; }
         const ::SensorSnapshot& GetSensorSnapshot() const noexcept { return _sensorSnapshot; }
@@ -360,7 +452,9 @@ namespace MazeMap
         StateVector _state;
         StateMatrix _sqrtCovariance;
         float _time;
+        std::uint32_t _timestampUs;
         ControlInput _control;
+        DriveCommandState _driveCommandState;
         ::SensorSnapshot _sensorSnapshot;
     };
 }

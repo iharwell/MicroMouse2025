@@ -2,7 +2,6 @@
 // Defines the concrete runtime motion owner that produces wheel/motor commands, maintains odometry,
 // and runs the closed-loop wheel/pose control machinery. This is not the planned higher-level
 // "Drive" translation layer; it is the low-level destination for concrete motion commands.
-#include "BootUtilityModeFramework.h"
 #include "CommandPD.h"
 #include "DriveTelemetry.h"
 #include "LaunchAssistProfile.h"
@@ -10,7 +9,7 @@
 #include "Maneuver.h"
 #include "MazeMapRuntimeCore.h"
 #include "MotorEncoderDrive.h"
-#include "MouseUkfFacade.h"
+#include "Estimator.h"
 #include "PlantModel.h"
 #include "ProportionalDerivativeCluster.h"
 #include "SensorSnapshot.h"
@@ -39,7 +38,7 @@ inline MazeMap::WheelControlProfile BuildMappingWheelControlProfile()
 }
 
 // Serves as the concrete runtime drive subsystem for the MazeMap application by coordinating motors,
-// odometry, estimator-facing pose state, and motion-command production. It should not become the
+// encoder measurement capture, borrowed estimator state, and motion-command production. It should not become the
 // owner of higher-level maneuver scheduling or shared multi-tick motion-routine orchestration.
 class DriveBase
 {
@@ -58,13 +57,13 @@ public:
 
     explicit DriveBase(
         const MazeMap::PlantModel& plantModel,
+        MazeMap::Estimator& estimator,
         const MazeMap::ProportionalDerivativeCluster& proportionalDerivativeCluster)
         : _leftMotor(MazeMap::MotorEncoderDrive::CreateDefaultLeftDrive())
         , _rightMotor(MazeMap::MotorEncoderDrive::CreateDefaultRightDrive())
-        , _ukf(MazeMap::PlantParams::Default())
+        , _estimator(estimator)
         , _plantModel(plantModel)
         , _proportionalDerivativeCluster(&proportionalDerivativeCluster)
-        , _poseCache{}
         , _leftIntegral(0.0f)
         , _rightIntegral(0.0f)
         , _lastLinearCommandMps(0.0f)
@@ -88,7 +87,7 @@ public:
         _leftMotor.resetEncoderDistanceMeters();
         _rightMotor.resetEncoderDistanceMeters();
         ResetEncoderTracking();
-        ResetPoseEstimate(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
+        (void)_estimator.ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
         ResetControllers();
         Brake();
         return leftOk && rightOk;
@@ -116,11 +115,11 @@ public:
 
     void SetStartPoint(MazeMap::DirectionalLocation logical)
     {
-		assert(!startSet);
+        assert(!startSet);
         float xMeters = 0.0f;
         float yMeters = 0.0f;
         logical.GetLocation().GetPhysicalLocation(Config::kCellSizeM, xMeters, yMeters);
-        ResetPoseEstimate(xMeters, yMeters, DirectionToYawRad(logical.GetDirection()));
+        (void)_estimator.ResetPose(xMeters, yMeters, DirectionToYawRad(logical.GetDirection()));
         ResetControllers();
 		startSet = true;
     }
@@ -128,7 +127,7 @@ public:
     // DANGEROUS!!!! Do not use unless you've literally made contact with a physical reference like a wall.
     void SetPose(float xMeters, float yMeters, float yawRad)
     {
-        ResetPoseEstimate(xMeters, yMeters, yawRad);
+        (void)_estimator.ResetPose(xMeters, yMeters, yawRad);
         ResetControllers();
     }
 
@@ -137,7 +136,7 @@ public:
     {
         if (std::isfinite(xMeters))
         {
-            SetEstimatorCoordinate(MazeMap::VehicleState::kPx, xMeters);
+            (void)_estimator.SetStateCoordinate(MazeMap::VehicleState::kPx, xMeters);
         }
     }
 
@@ -146,109 +145,87 @@ public:
     {
         if (std::isfinite(yMeters))
         {
-            SetEstimatorCoordinate(MazeMap::VehicleState::kPy, yMeters);
+            (void)_estimator.SetStateCoordinate(MazeMap::VehicleState::kPy, yMeters);
         }
     }
 
-    void UpdateOdometry(
-        float dtSeconds,
-        const SensorSnapshot& snapshot,
-        const MazeMap::Maze* map = nullptr,
-        ControlCycleTiming* timing = nullptr)
+    void SetGyroBiasZ(float gyroBiasRadps)
     {
-        UpdatePoseEstimate(
-            dtSeconds,
-            snapshot,
-            map,
-            timing,
-            MazeMap::NoopUkfLoopHook{},
-            []() noexcept {});
+        (void)_estimator.SetGyroBiasZ(gyroBiasRadps);
     }
 
-    template <typename LoopHook, typename BeforeYawUpdate>
-    void UpdateOdometry(
-        float dtSeconds,
-        const SensorSnapshot& snapshot,
-        const MazeMap::Maze* map,
-        ControlCycleTiming* timing,
-        LoopHook&& loopHook,
-        BeforeYawUpdate&& beforeYawUpdate)
+    void RecordMeasurementInputs(const SensorSnapshot& snapshot) noexcept
     {
-        UpdatePoseEstimate(dtSeconds, snapshot, map, timing, loopHook, beforeYawUpdate);
+        _lastGyroRawRadps = snapshot.gyroRawRadps;
+        _lastImuYawRateRadps = snapshot.gyroRadps;
+        _lastImuYawRateValid = std::isfinite(snapshot.gyroRadps);
+        _lastImuAccelBodyXMps2 = snapshot.accelBodyXMps2;
+        _lastImuAccelBodyYMps2 = snapshot.accelBodyYMps2;
+        _lastImuAccelValid =
+            snapshot.accelBiasValid &&
+            std::isfinite(snapshot.accelBodyXMps2) &&
+            std::isfinite(snapshot.accelBodyYMps2);
     }
 
-    struct MeasuredKinematics
+    MazeMap::ControlInput CurrentControlInput() const noexcept
     {
-        float leftVelocityMps = 0.0f;
-        float rightVelocityMps = 0.0f;
-        float linearSpeedMps = 0.0f;
-        float angularSpeedRadps = 0.0f;
-    };
+        MazeMap::ControlInput control{};
+        control.leftMotorCommand = _leftMotor.getDriveCommand();
+        control.rightMotorCommand = _rightMotor.getDriveCommand();
+        control.fanDutyCycle = GetMissionFanDutyCycle();
+        control.batteryVoltageV = 0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage());
+        return control;
+    }
 
-    MeasuredKinematics GetMeasuredKinematics(
-        float measuredYawRateRadps = std::numeric_limits<float>::quiet_NaN()) const
+    MazeMap::VehicleState::DriveCommandState BuildDriveCommandState(
+        const MazeMap::ControlInput& appliedControl) const noexcept
     {
-        MeasuredKinematics kinematics{};
-        kinematics.leftVelocityMps = _leftEncoderVelocityMps;
-        kinematics.rightVelocityMps = _rightEncoderVelocityMps;
-        const float fallbackYawRateRadps =
-            [&]() noexcept
-            {
-                float resolvedLinearSpeedMps = 0.0f;
-                float resolvedYawRateRadps = 0.0f;
-                _plantModel.resolveBodyVelocityFromWheelSpeeds(
-                    kinematics.leftVelocityMps,
-                    kinematics.rightVelocityMps,
-                    _ukf.ukf().preparedParams(),
-                    resolvedLinearSpeedMps,
-                    resolvedYawRateRadps);
-                kinematics.linearSpeedMps = resolvedLinearSpeedMps;
-                return resolvedYawRateRadps;
-            }();
-        kinematics.angularSpeedRadps =
-            std::isfinite(measuredYawRateRadps) ?
-            measuredYawRateRadps :
-            fallbackYawRateRadps;
-        return kinematics;
+        MazeMap::VehicleState::DriveCommandState commandState{};
+        commandState.feedforward.left = _lastLeftFeedforwardCommand;
+        commandState.feedforward.right = _lastRightFeedforwardCommand;
+        commandState.feedback.left = _lastLeftFeedbackCommand;
+        commandState.feedback.right = _lastRightFeedbackCommand;
+        commandState.commandedLinearSpeedMps = _lastLinearCommandMps;
+        commandState.commandedAngularSpeedRadps = _lastAngularCommandRadps;
+        commandState.leftTargetVelocityMps = _lastLeftTargetVelocityMps;
+        commandState.rightTargetVelocityMps = _lastRightTargetVelocityMps;
+        commandState.leftLaunchAssistFloor = _lastLeftLaunchAssistFloor;
+        commandState.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
+        commandState.translationSetpoint = _lastTranslationSetpoint;
+        commandState.rotationSetpoint = _lastRotationSetpoint;
+        commandState.SetSetpointKinds(_lastTranslationSetpointKind, _lastRotationSetpointKind);
+        commandState.modeFlags = _lastModeFlags;
+        commandState.saturationFlags = _lastSaturationFlags;
+
+        if (!DriveCommandBreakdownMatchesAppliedCommand(
+                appliedControl.leftMotorCommand,
+                appliedControl.rightMotorCommand,
+                _lastLeftFeedforwardCommand + _lastLeftFeedbackCommand,
+                _lastRightFeedforwardCommand + _lastRightFeedbackCommand))
+        {
+            commandState.feedforward = {};
+            commandState.feedback = {};
+        }
+
+        return commandState;
+    }
+
+    MazeMap::EncoderObs ConsumeEncoderObservation(float dtSeconds)
+    {
+        const EncoderCycleSample sample = ConsumeEncoderCycleSample(dtSeconds, _estimator.ukf().params());
+        MazeMap::EncoderObs encoderObservation{};
+        encoderObservation.totalLeftCounts = sample.leftCounts;
+        encoderObservation.totalRightCounts = sample.rightCounts;
+        encoderObservation.omegaLeftRadps = sample.leftOmegaRadps;
+        encoderObservation.omegaRightRadps = sample.rightOmegaRadps;
+        _lastEncoderObservation = encoderObservation;
+        _encoderObservationValid = true;
+        return encoderObservation;
     }
 
     void ProjectMeasuredKinematics(float dtSeconds, float measuredYawRateRadps = std::numeric_limits<float>::quiet_NaN())
     {
-        if (_estimatorFaulted)
-        {
-            return;
-        }
-
-        MazeMap::VehicleState::StateVector state = _ukf.ukf().state();
-        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
-        const MazeMap::PlantParams& params = _ukf.ukf().params();
-        if (!(params.wheelRadiusM > 0.0f) || !std::isfinite(params.wheelRadiusM))
-        {
-            SyncPoseEstimate();
-            return;
-        }
-
-        const MeasuredKinematics measured = GetMeasuredKinematics(measuredYawRateRadps);
-
-        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
-        {
-            const float midYawRad =
-                WrapAngleRad(state(MazeMap::VehicleState::kPsi) + (0.5f * measured.angularSpeedRadps * dtSeconds));
-            const Eigen::Vector2f midHeading = HeadingUnitFromYawRad(midYawRad);
-            state(MazeMap::VehicleState::kPx) += measured.linearSpeedMps * midHeading.x() * dtSeconds;
-            state(MazeMap::VehicleState::kPy) += measured.linearSpeedMps * midHeading.y() * dtSeconds;
-            state(MazeMap::VehicleState::kPsi) =
-                WrapAngleRad(state(MazeMap::VehicleState::kPsi) + (measured.angularSpeedRadps * dtSeconds));
-        }
-
-        state(MazeMap::VehicleState::kU) = measured.linearSpeedMps;
-        state(MazeMap::VehicleState::kV) = 0.0f;
-        state(MazeMap::VehicleState::kR) = measured.angularSpeedRadps;
-        state(MazeMap::VehicleState::kOmegaL) = measured.leftVelocityMps / params.wheelRadiusM;
-        state(MazeMap::VehicleState::kOmegaR) = measured.rightVelocityMps / params.wheelRadiusM;
-        MazeMap::VehicleState::NormalizeStateVector(state);
-        (void)_ukf.ukf().setState(state, covariance);
-        SyncPoseEstimate();
+        _estimator.ProjectMeasuredKinematics(dtSeconds, _lastEncoderObservation, measuredYawRateRadps);
     }
 
     // DeltaCommand resolves a feedforward command from an explicit operating point and an explicit
@@ -394,6 +371,10 @@ public:
         _lastRightLaunchAssistFloor = 0.0f;
         _lastFeedforwardUsedAlignedCycleContext = false;
         _lastFeedforwardUsedGripOnlyFallback = false;
+        _lastTranslationSetpointKind = MazeMap::VehicleState::TranslationSetpointKind::None;
+        _lastRotationSetpointKind = MazeMap::VehicleState::RotationSetpointKind::None;
+        _lastTranslationSetpoint = 0.0f;
+        _lastRotationSetpoint = 0.0f;
         _lastModeFlags = kModeBraking;
         _lastSaturationFlags = 0u;
         _leftMotor.brake();
@@ -407,38 +388,10 @@ public:
             (_rightEncoderDistanceMeters + _rightMotor.pulsesToDistance(_rightMotor.getEncoderCount())));
     }
 
-    const PoseEstimate& GetPose() const
-    {
-        return _poseCache;
-    }
-
-    MazeMap::VehicleState GetVehicleState() const noexcept
-    {
-        MazeMap::VehicleState vehicleState{};
-        vehicleState.SetStateVector(_ukf.ukf().state());
-        vehicleState.SetCovariance(_ukf.ukf().covariance());
-        return vehicleState;
-    }
-
-    const MazeMap::VehicleState::StateVector& GetEstimatorStateVector() const noexcept
-    {
-        return _ukf.ukf().state();
-    }
-
-    bool HasEstimatorFault() const noexcept
-    {
-        return _estimatorFaulted;
-    }
-
-    const char* GetEstimatorFaultReason() const noexcept
-    {
-        return (_estimatorFaultReason[0] != '\0') ? _estimatorFaultReason : "ukf_failure";
-    }
-
     template <typename Sink>
     bool WriteUkfDebugTextDump(Sink&& sink) const noexcept
     {
-        return _ukf.ukf().WriteDebugTextDump(static_cast<Sink&&>(sink));
+        return _estimator.ukf().WriteDebugTextDump(static_cast<Sink&&>(sink));
     }
 
     float GetLastLinearCommandMps() const
@@ -449,6 +402,21 @@ public:
     float GetLastAngularCommandRadps() const
     {
         return _lastAngularCommandRadps;
+    }
+
+    uint16_t GetLastSaturationFlags() const noexcept
+    {
+        return _lastSaturationFlags;
+    }
+
+    float GetLastLeftLaunchAssistFloor() const noexcept
+    {
+        return _lastLeftLaunchAssistFloor;
+    }
+
+    float GetLastRightLaunchAssistFloor() const noexcept
+    {
+        return _lastRightLaunchAssistFloor;
     }
 
     // The generated-command decomposition is cached at the point where DriveBase still owns both
@@ -478,33 +446,37 @@ public:
         const MazeMap::App::Internal::LoopController::ControlVector& command) const noexcept
     {
         DriveTelemetry telemetry{};
-        const MazeMap::ModelCycleContext& cycleContext = _ukf.ukf().modelCycleContext();
-        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
+        MazeMap::ControlInput appliedControl{};
+        appliedControl.leftMotorCommand = command.leftMotorPwm;
+        appliedControl.rightMotorCommand = command.rightMotorPwm;
+        const MazeMap::VehicleState::DriveCommandState commandState = BuildDriveCommandState(appliedControl);
+        const MazeMap::ModelCycleContext& cycleContext = _estimator.ukf().modelCycleContext();
+        const MazeMap::VehicleState::StateMatrix covariance = _estimator.ukf().covariance();
         telemetry.leftDriveCommand = command.leftMotorPwm;
         telemetry.rightDriveCommand = command.rightMotorPwm;
-        telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
-        telemetry.rightFeedforwardCommand = _lastRightFeedforwardCommand;
-        telemetry.leftFeedbackCommand = _lastLeftFeedbackCommand;
-        telemetry.rightFeedbackCommand = _lastRightFeedbackCommand;
-        telemetry.leftTargetVelocityMps = _lastLeftTargetVelocityMps;
-        telemetry.rightTargetVelocityMps = _lastRightTargetVelocityMps;
-        telemetry.leftLaunchAssistFloor = _lastLeftLaunchAssistFloor;
-        telemetry.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
-        telemetry.modeFlags = _lastModeFlags;
-        telemetry.saturationFlags = _lastSaturationFlags;
-        telemetry.ukfModeId = _ukf.ukf().operatingModeId();
-        telemetry.ukfYawValidForFeedforward = _ukf.ukf().yawValidForFeedforward() ? 1U : 0U;
-        telemetry.ukfBiasUpdateEnabled = _ukf.ukf().biasUpdateEnabled() ? 1U : 0U;
-        telemetry.ukfNhcEnabled = _ukf.ukf().nonholonomicConstraintEnabled() ? 1U : 0U;
-        telemetry.ukfGyroBiasAnchorRadps = _ukf.ukf().gyroBiasAnchorRadps();
-        telemetry.ukfYawConsistencyLowPassRadps = _ukf.ukf().yawConsistencyLowPassRadps();
-        telemetry.ukfYawWindowMismatchRad = _ukf.ukf().yawWindowMismatchRad();
-        telemetry.ukfNhcSigmaMps = _ukf.ukf().nhcSigmaMps();
-        telemetry.ukfNhcResidualMps = _ukf.ukf().nhcResidualMps();
-        telemetry.ukfNhcResidualSigma = _ukf.ukf().nhcResidualSigma();
-        telemetry.ukfFeedforwardYawRateRadps = _ukf.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
-        telemetry.ukfClosureResidualLeftMps = _ukf.ukf().closureResidualLeftMps();
-        telemetry.ukfClosureResidualRightMps = _ukf.ukf().closureResidualRightMps();
+        telemetry.leftFeedforwardCommand = commandState.feedforward.left;
+        telemetry.rightFeedforwardCommand = commandState.feedforward.right;
+        telemetry.leftFeedbackCommand = commandState.feedback.left;
+        telemetry.rightFeedbackCommand = commandState.feedback.right;
+        telemetry.leftTargetVelocityMps = commandState.leftTargetVelocityMps;
+        telemetry.rightTargetVelocityMps = commandState.rightTargetVelocityMps;
+        telemetry.leftLaunchAssistFloor = commandState.leftLaunchAssistFloor;
+        telemetry.rightLaunchAssistFloor = commandState.rightLaunchAssistFloor;
+        telemetry.modeFlags = commandState.modeFlags;
+        telemetry.saturationFlags = commandState.saturationFlags;
+        telemetry.ukfModeId = _estimator.ukf().operatingModeId();
+        telemetry.ukfYawValidForFeedforward = _estimator.ukf().yawValidForFeedforward() ? 1U : 0U;
+        telemetry.ukfBiasUpdateEnabled = _estimator.ukf().biasUpdateEnabled() ? 1U : 0U;
+        telemetry.ukfNhcEnabled = _estimator.ukf().nonholonomicConstraintEnabled() ? 1U : 0U;
+        telemetry.ukfGyroBiasAnchorRadps = _estimator.ukf().gyroBiasAnchorRadps();
+        telemetry.ukfYawConsistencyLowPassRadps = _estimator.ukf().yawConsistencyLowPassRadps();
+        telemetry.ukfYawWindowMismatchRad = _estimator.ukf().yawWindowMismatchRad();
+        telemetry.ukfNhcSigmaMps = _estimator.ukf().nhcSigmaMps();
+        telemetry.ukfNhcResidualMps = _estimator.ukf().nhcResidualMps();
+        telemetry.ukfNhcResidualSigma = _estimator.ukf().nhcResidualSigma();
+        telemetry.ukfFeedforwardYawRateRadps = _estimator.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
+        telemetry.ukfClosureResidualLeftMps = _estimator.ukf().closureResidualLeftMps();
+        telemetry.ukfClosureResidualRightMps = _estimator.ukf().closureResidualRightMps();
         telemetry.ukfLongitudinalClosureSeverity = cycleContext.utilization.longitudinalClosureSeverity;
         telemetry.ukfDifferentialClosureSeverity = cycleContext.utilization.differentialClosureSeverity;
         telemetry.ukfLateralAccelerationSeverity = cycleContext.utilization.lateralAccelerationSeverity;
@@ -519,10 +491,10 @@ public:
         telemetry.ukfRightBankRecoveryScore = cycleContext.regrip.rightBankRecoveryScore;
         telemetry.ukfLeftBankRecoveryTimeRemainingS = cycleContext.regrip.leftBankRecoveryTimeRemainingS;
         telemetry.ukfRightBankRecoveryTimeRemainingS = cycleContext.regrip.rightBankRecoveryTimeRemainingS;
-        telemetry.ukfStationaryCandidateDwellS = _ukf.ukf().stationaryCandidateDwellS();
-        telemetry.ukfLaunchHoldRemainingS = _ukf.ukf().launchHoldRemainingS();
-        telemetry.ukfInconsistentHoldRemainingS = _ukf.ukf().inconsistentHoldRemainingS();
-        telemetry.ukfNhcReenableDelayRemainingS = _ukf.ukf().nhcReenableDelayRemainingS();
+        telemetry.ukfStationaryCandidateDwellS = _estimator.ukf().stationaryCandidateDwellS();
+        telemetry.ukfLaunchHoldRemainingS = _estimator.ukf().launchHoldRemainingS();
+        telemetry.ukfInconsistentHoldRemainingS = _estimator.ukf().inconsistentHoldRemainingS();
+        telemetry.ukfNhcReenableDelayRemainingS = _estimator.ukf().nhcReenableDelayRemainingS();
         telemetry.ukfForwardProcessNoiseScale = cycleContext.schedule.forwardSpeedProcessNoiseScale;
         telemetry.ukfLateralProcessNoiseScale = cycleContext.schedule.lateralSpeedProcessNoiseScale;
         telemetry.ukfYawRateProcessNoiseScale = cycleContext.schedule.yawRateProcessNoiseScale;
@@ -533,15 +505,15 @@ public:
         telemetry.ukfLateralPseudoCovarianceScale = cycleContext.schedule.lateralPseudoMeasurementCovarianceScale;
         telemetry.ukfAppliedLeftBankTorqueNm = cycleContext.appliedTorque.leftAppliedBankTorqueNm;
         telemetry.ukfAppliedRightBankTorqueNm = cycleContext.appliedTorque.rightAppliedBankTorqueNm;
-        telemetry.ukfGyroInnovationRadps = _ukf.ukf().gyroInnovationRadps();
-        telemetry.ukfForwardAccelInnovationMps2 = _ukf.ukf().forwardAccelInnovationMps2();
-        telemetry.ukfLateralAccelInnovationMps2 = _ukf.ukf().lateralAccelInnovationMps2();
-        telemetry.ukfGyroInnovationNis = _ukf.ukf().gyroInnovationNis();
-        telemetry.ukfForwardAccelInnovationNis = _ukf.ukf().forwardAccelInnovationNis();
-        telemetry.ukfLateralAccelInnovationNis = _ukf.ukf().lateralAccelInnovationNis();
-        telemetry.ukfClosureLeftNis = _ukf.ukf().closureLeftNis();
-        telemetry.ukfClosureRightNis = _ukf.ukf().closureRightNis();
-        telemetry.ukfLateralPseudoNis = _ukf.ukf().lateralPseudoNis();
+        telemetry.ukfGyroInnovationRadps = _estimator.ukf().gyroInnovationRadps();
+        telemetry.ukfForwardAccelInnovationMps2 = _estimator.ukf().forwardAccelInnovationMps2();
+        telemetry.ukfLateralAccelInnovationMps2 = _estimator.ukf().lateralAccelInnovationMps2();
+        telemetry.ukfGyroInnovationNis = _estimator.ukf().gyroInnovationNis();
+        telemetry.ukfForwardAccelInnovationNis = _estimator.ukf().forwardAccelInnovationNis();
+        telemetry.ukfLateralAccelInnovationNis = _estimator.ukf().lateralAccelInnovationNis();
+        telemetry.ukfClosureLeftNis = _estimator.ukf().closureLeftNis();
+        telemetry.ukfClosureRightNis = _estimator.ukf().closureRightNis();
+        telemetry.ukfLateralPseudoNis = _estimator.ukf().lateralPseudoNis();
         telemetry.ukfForwardSpeedVariance = covariance(MazeMap::VehicleState::kU, MazeMap::VehicleState::kU);
         telemetry.ukfLateralSpeedVariance = covariance(MazeMap::VehicleState::kV, MazeMap::VehicleState::kV);
         telemetry.ukfYawRateVariance = covariance(MazeMap::VehicleState::kR, MazeMap::VehicleState::kR);
@@ -553,8 +525,8 @@ public:
         telemetry.ukfRightBankHoldoffActive = cycleContext.schedule.rightBankHoldoffActive ? 1U : 0U;
         telemetry.ukfLeftBankInRecovery = cycleContext.regrip.leftBankInRecovery ? 1U : 0U;
         telemetry.ukfRightBankInRecovery = cycleContext.regrip.rightBankInRecovery ? 1U : 0U;
-        telemetry.ukfDirectWheelUpdateBodyInvariant = _ukf.ukf().directWheelUpdateBodyStateInvariant() ? 1U : 0U;
-        telemetry.ukfReleaseInflationApplied = _ukf.ukf().releaseInflationApplied() ? 1U : 0U;
+        telemetry.ukfDirectWheelUpdateBodyInvariant = _estimator.ukf().directWheelUpdateBodyStateInvariant() ? 1U : 0U;
+        telemetry.ukfReleaseInflationApplied = _estimator.ukf().releaseInflationApplied() ? 1U : 0U;
         telemetry.feedforwardUsedAlignedCycleContext = _lastFeedforwardUsedAlignedCycleContext ? 1U : 0U;
         telemetry.feedforwardUsedGripOnlyFallback = _lastFeedforwardUsedGripOnlyFallback ? 1U : 0U;
         return telemetry;
@@ -563,19 +535,21 @@ public:
     DriveTelemetry GetTelemetry() const
     {
         DriveTelemetry telemetry{};
+        const MazeMap::ControlInput appliedControl = CurrentControlInput();
+        const MazeMap::VehicleState::DriveCommandState commandState = BuildDriveCommandState(appliedControl);
         const int32_t pendingLeftCounts = _leftMotor.getEncoderCount();
         const int32_t pendingRightCounts = _rightMotor.getEncoderCount();
-        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
-        telemetry.leftDriveCommand = _leftMotor.getDriveCommand();
-        telemetry.rightDriveCommand = _rightMotor.getDriveCommand();
-        telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
-        telemetry.rightFeedforwardCommand = _lastRightFeedforwardCommand;
-        telemetry.leftFeedbackCommand = _lastLeftFeedbackCommand;
-        telemetry.rightFeedbackCommand = _lastRightFeedbackCommand;
-        telemetry.leftTargetVelocityMps = _lastLeftTargetVelocityMps;
-        telemetry.rightTargetVelocityMps = _lastRightTargetVelocityMps;
-        telemetry.leftLaunchAssistFloor = _lastLeftLaunchAssistFloor;
-        telemetry.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
+        const MazeMap::VehicleState::StateMatrix covariance = _estimator.ukf().covariance();
+        telemetry.leftDriveCommand = appliedControl.leftMotorCommand;
+        telemetry.rightDriveCommand = appliedControl.rightMotorCommand;
+        telemetry.leftFeedforwardCommand = commandState.feedforward.left;
+        telemetry.rightFeedforwardCommand = commandState.feedforward.right;
+        telemetry.leftFeedbackCommand = commandState.feedback.left;
+        telemetry.rightFeedbackCommand = commandState.feedback.right;
+        telemetry.leftTargetVelocityMps = commandState.leftTargetVelocityMps;
+        telemetry.rightTargetVelocityMps = commandState.rightTargetVelocityMps;
+        telemetry.leftLaunchAssistFloor = commandState.leftLaunchAssistFloor;
+        telemetry.rightLaunchAssistFloor = commandState.rightLaunchAssistFloor;
         telemetry.leftEncoderCount = _leftEncoderCountTotal + pendingLeftCounts;
         telemetry.rightEncoderCount = _rightEncoderCountTotal + pendingRightCounts;
         telemetry.leftDistanceM = _leftEncoderDistanceMeters + _leftMotor.pulsesToDistance(pendingLeftCounts);
@@ -584,22 +558,22 @@ public:
         telemetry.rightVelocityMps = _rightEncoderVelocityMps;
         telemetry.leftEncoderOmegaRadps = _lastEncoderObservation.omegaLeftRadps;
         telemetry.rightEncoderOmegaRadps = _lastEncoderObservation.omegaRightRadps;
-        telemetry.modeFlags = _lastModeFlags;
-        telemetry.saturationFlags = _lastSaturationFlags;
-        telemetry.ukfModeId = _ukf.ukf().operatingModeId();
-        telemetry.ukfYawValidForFeedforward = _ukf.ukf().yawValidForFeedforward() ? 1U : 0U;
-        telemetry.ukfBiasUpdateEnabled = _ukf.ukf().biasUpdateEnabled() ? 1U : 0U;
-        telemetry.ukfNhcEnabled = _ukf.ukf().nonholonomicConstraintEnabled() ? 1U : 0U;
-        telemetry.ukfGyroBiasAnchorRadps = _ukf.ukf().gyroBiasAnchorRadps();
-        telemetry.ukfYawConsistencyLowPassRadps = _ukf.ukf().yawConsistencyLowPassRadps();
-        telemetry.ukfYawWindowMismatchRad = _ukf.ukf().yawWindowMismatchRad();
-        telemetry.ukfNhcSigmaMps = _ukf.ukf().nhcSigmaMps();
-        telemetry.ukfNhcResidualMps = _ukf.ukf().nhcResidualMps();
-        telemetry.ukfNhcResidualSigma = _ukf.ukf().nhcResidualSigma();
-        telemetry.ukfFeedforwardYawRateRadps = _ukf.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
-        const MazeMap::ModelCycleContext& cycleContext = _ukf.ukf().modelCycleContext();
-        telemetry.ukfClosureResidualLeftMps = _ukf.ukf().closureResidualLeftMps();
-        telemetry.ukfClosureResidualRightMps = _ukf.ukf().closureResidualRightMps();
+        telemetry.modeFlags = commandState.modeFlags;
+        telemetry.saturationFlags = commandState.saturationFlags;
+        telemetry.ukfModeId = _estimator.ukf().operatingModeId();
+        telemetry.ukfYawValidForFeedforward = _estimator.ukf().yawValidForFeedforward() ? 1U : 0U;
+        telemetry.ukfBiasUpdateEnabled = _estimator.ukf().biasUpdateEnabled() ? 1U : 0U;
+        telemetry.ukfNhcEnabled = _estimator.ukf().nonholonomicConstraintEnabled() ? 1U : 0U;
+        telemetry.ukfGyroBiasAnchorRadps = _estimator.ukf().gyroBiasAnchorRadps();
+        telemetry.ukfYawConsistencyLowPassRadps = _estimator.ukf().yawConsistencyLowPassRadps();
+        telemetry.ukfYawWindowMismatchRad = _estimator.ukf().yawWindowMismatchRad();
+        telemetry.ukfNhcSigmaMps = _estimator.ukf().nhcSigmaMps();
+        telemetry.ukfNhcResidualMps = _estimator.ukf().nhcResidualMps();
+        telemetry.ukfNhcResidualSigma = _estimator.ukf().nhcResidualSigma();
+        telemetry.ukfFeedforwardYawRateRadps = _estimator.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
+        const MazeMap::ModelCycleContext& cycleContext = _estimator.ukf().modelCycleContext();
+        telemetry.ukfClosureResidualLeftMps = _estimator.ukf().closureResidualLeftMps();
+        telemetry.ukfClosureResidualRightMps = _estimator.ukf().closureResidualRightMps();
         telemetry.ukfLongitudinalClosureSeverity = cycleContext.utilization.longitudinalClosureSeverity;
         telemetry.ukfDifferentialClosureSeverity = cycleContext.utilization.differentialClosureSeverity;
         telemetry.ukfLateralAccelerationSeverity = cycleContext.utilization.lateralAccelerationSeverity;
@@ -614,10 +588,10 @@ public:
         telemetry.ukfRightBankRecoveryScore = cycleContext.regrip.rightBankRecoveryScore;
         telemetry.ukfLeftBankRecoveryTimeRemainingS = cycleContext.regrip.leftBankRecoveryTimeRemainingS;
         telemetry.ukfRightBankRecoveryTimeRemainingS = cycleContext.regrip.rightBankRecoveryTimeRemainingS;
-        telemetry.ukfStationaryCandidateDwellS = _ukf.ukf().stationaryCandidateDwellS();
-        telemetry.ukfLaunchHoldRemainingS = _ukf.ukf().launchHoldRemainingS();
-        telemetry.ukfInconsistentHoldRemainingS = _ukf.ukf().inconsistentHoldRemainingS();
-        telemetry.ukfNhcReenableDelayRemainingS = _ukf.ukf().nhcReenableDelayRemainingS();
+        telemetry.ukfStationaryCandidateDwellS = _estimator.ukf().stationaryCandidateDwellS();
+        telemetry.ukfLaunchHoldRemainingS = _estimator.ukf().launchHoldRemainingS();
+        telemetry.ukfInconsistentHoldRemainingS = _estimator.ukf().inconsistentHoldRemainingS();
+        telemetry.ukfNhcReenableDelayRemainingS = _estimator.ukf().nhcReenableDelayRemainingS();
         telemetry.ukfForwardProcessNoiseScale = cycleContext.schedule.forwardSpeedProcessNoiseScale;
         telemetry.ukfLateralProcessNoiseScale = cycleContext.schedule.lateralSpeedProcessNoiseScale;
         telemetry.ukfYawRateProcessNoiseScale = cycleContext.schedule.yawRateProcessNoiseScale;
@@ -628,15 +602,15 @@ public:
         telemetry.ukfLateralPseudoCovarianceScale = cycleContext.schedule.lateralPseudoMeasurementCovarianceScale;
         telemetry.ukfAppliedLeftBankTorqueNm = cycleContext.appliedTorque.leftAppliedBankTorqueNm;
         telemetry.ukfAppliedRightBankTorqueNm = cycleContext.appliedTorque.rightAppliedBankTorqueNm;
-        telemetry.ukfGyroInnovationRadps = _ukf.ukf().gyroInnovationRadps();
-        telemetry.ukfForwardAccelInnovationMps2 = _ukf.ukf().forwardAccelInnovationMps2();
-        telemetry.ukfLateralAccelInnovationMps2 = _ukf.ukf().lateralAccelInnovationMps2();
-        telemetry.ukfGyroInnovationNis = _ukf.ukf().gyroInnovationNis();
-        telemetry.ukfForwardAccelInnovationNis = _ukf.ukf().forwardAccelInnovationNis();
-        telemetry.ukfLateralAccelInnovationNis = _ukf.ukf().lateralAccelInnovationNis();
-        telemetry.ukfClosureLeftNis = _ukf.ukf().closureLeftNis();
-        telemetry.ukfClosureRightNis = _ukf.ukf().closureRightNis();
-        telemetry.ukfLateralPseudoNis = _ukf.ukf().lateralPseudoNis();
+        telemetry.ukfGyroInnovationRadps = _estimator.ukf().gyroInnovationRadps();
+        telemetry.ukfForwardAccelInnovationMps2 = _estimator.ukf().forwardAccelInnovationMps2();
+        telemetry.ukfLateralAccelInnovationMps2 = _estimator.ukf().lateralAccelInnovationMps2();
+        telemetry.ukfGyroInnovationNis = _estimator.ukf().gyroInnovationNis();
+        telemetry.ukfForwardAccelInnovationNis = _estimator.ukf().forwardAccelInnovationNis();
+        telemetry.ukfLateralAccelInnovationNis = _estimator.ukf().lateralAccelInnovationNis();
+        telemetry.ukfClosureLeftNis = _estimator.ukf().closureLeftNis();
+        telemetry.ukfClosureRightNis = _estimator.ukf().closureRightNis();
+        telemetry.ukfLateralPseudoNis = _estimator.ukf().lateralPseudoNis();
         telemetry.ukfForwardSpeedVariance = covariance(MazeMap::VehicleState::kU, MazeMap::VehicleState::kU);
         telemetry.ukfLateralSpeedVariance = covariance(MazeMap::VehicleState::kV, MazeMap::VehicleState::kV);
         telemetry.ukfYawRateVariance = covariance(MazeMap::VehicleState::kR, MazeMap::VehicleState::kR);
@@ -648,8 +622,8 @@ public:
         telemetry.ukfRightBankHoldoffActive = cycleContext.schedule.rightBankHoldoffActive ? 1U : 0U;
         telemetry.ukfLeftBankInRecovery = cycleContext.regrip.leftBankInRecovery ? 1U : 0U;
         telemetry.ukfRightBankInRecovery = cycleContext.regrip.rightBankInRecovery ? 1U : 0U;
-        telemetry.ukfDirectWheelUpdateBodyInvariant = _ukf.ukf().directWheelUpdateBodyStateInvariant() ? 1U : 0U;
-        telemetry.ukfReleaseInflationApplied = _ukf.ukf().releaseInflationApplied() ? 1U : 0U;
+        telemetry.ukfDirectWheelUpdateBodyInvariant = _estimator.ukf().directWheelUpdateBodyStateInvariant() ? 1U : 0U;
+        telemetry.ukfReleaseInflationApplied = _estimator.ukf().releaseInflationApplied() ? 1U : 0U;
         telemetry.feedforwardUsedAlignedCycleContext = _lastFeedforwardUsedAlignedCycleContext ? 1U : 0U;
         telemetry.feedforwardUsedGripOnlyFallback = _lastFeedforwardUsedGripOnlyFallback ? 1U : 0U;
         telemetry.encoderObservationValid = _encoderObservationValid;
@@ -691,11 +665,6 @@ private:
         float leftOmegaRadps = 0.0f;
         float rightOmegaRadps = 0.0f;
     };
-
-    static MazeMap::VehicleState::StateMatrix BuildEstimatorCovariance()
-    {
-        return MazeMap::SrUkfCore::BuildDefaultInitialCovariance();
-    }
 
     void ResetEncoderTracking() noexcept
     {
@@ -742,38 +711,6 @@ private:
         return sample;
     }
 
-    void ResetPoseEstimate(float xMeters, float yMeters, float yawRad)
-    {
-        MazeMap::VehicleState::StateVector state = MazeMap::VehicleState::StateVector::Zero();
-        state(MazeMap::VehicleState::kPx) = std::isfinite(xMeters) ? xMeters : 0.0f;
-        state(MazeMap::VehicleState::kPy) = std::isfinite(yMeters) ? yMeters : 0.0f;
-        state(MazeMap::VehicleState::kPsi) = WrapAngleRad(yawRad);
-        ClearEstimatorFault();
-        (void)_ukf.reset(state, BuildEstimatorCovariance());
-        SyncPoseEstimate();
-    }
-
-    void SetEstimatorCoordinate(int stateIndex, float coordinateM)
-    {
-        MazeMap::VehicleState::StateVector state = _ukf.ukf().state();
-        const MazeMap::VehicleState::StateMatrix covariance = _ukf.ukf().covariance();
-        state(stateIndex) = coordinateM;
-        MazeMap::VehicleState::NormalizeStateVector(state);
-        (void)_ukf.ukf().setState(state, covariance);
-        SyncPoseEstimate();
-    }
-
-    void SyncPoseEstimate()
-    {
-        const MazeMap::VehicleState::StateVector& state = _ukf.ukf().state();
-        _poseCache.xMeters = state(MazeMap::VehicleState::kPx);
-        _poseCache.yMeters = state(MazeMap::VehicleState::kPy);
-        _poseCache.yawRad = WrapAngleRad(state(MazeMap::VehicleState::kPsi));
-        _poseCache.headingUnit = HeadingUnitFromYawRad(_poseCache.yawRad);
-        _poseCache.linearSpeedMps = state(MazeMap::VehicleState::kU);
-        _poseCache.angularSpeedRadps = state(MazeMap::VehicleState::kR);
-    }
-
     static bool IsFinitePositive(float value) noexcept
     {
         return std::isfinite(value) && (value > 0.0f);
@@ -782,50 +719,6 @@ private:
     static float ClampMeasuredRange(float value, float maxRangeM) noexcept
     {
         return (std::clamp)(value, 0.01f, maxRangeM);
-    }
-
-    void ClearEstimatorFault() noexcept
-    {
-        _estimatorFaulted = false;
-        _estimatorFaultReason[0] = '\0';
-    }
-
-    void TriggerEstimatorFault(const char* reason) noexcept
-    {
-        Brake();
-        if (_estimatorFaulted)
-        {
-            return;
-        }
-
-        _estimatorFaulted = true;
-        std::snprintf(
-            _estimatorFaultReason,
-            sizeof(_estimatorFaultReason),
-            "%s",
-            (reason != nullptr && reason[0] != '\0') ? reason : "ukf_failure");
-
-        char traceLine[96] = {};
-        std::snprintf(traceLine, sizeof(traceLine), "ukf_fault:%s", _estimatorFaultReason);
-        MazeMap::App::Internal::BootUtilityModeFramework::AppendStartupTrace(traceLine);
-    }
-
-    static MazeMap::ImuMergedObs BuildUkfImuObservation(const SensorSnapshot& snapshot) noexcept
-    {
-        MazeMap::ImuMergedObs observation{};
-        if (!snapshot.accelBiasValid ||
-            !std::isfinite(snapshot.gyroRadps) ||
-            !std::isfinite(snapshot.accelBodyXMps2) ||
-            !std::isfinite(snapshot.accelBodyYMps2))
-        {
-            return observation;
-        }
-
-        observation.valid = true;
-        observation.gyroZRadps = snapshot.gyroRawRadps;
-        observation.accelBodyXMps2 = snapshot.accelBodyXMps2;
-        observation.accelBodyYMps2 = snapshot.accelBodyYMps2;
-        return observation;
     }
 
     static void BuildUkfFrontPairObservations(
@@ -893,161 +786,6 @@ private:
         return observation;
     }
 
-    template <typename TSnapshot>
-    void UpdatePoseEstimate(
-        float dtSeconds,
-        const TSnapshot& snapshot,
-        const MazeMap::Maze* map,
-        ControlCycleTiming* timing)
-    {
-        UpdatePoseEstimate(
-            dtSeconds,
-            snapshot,
-            map,
-            timing,
-            MazeMap::NoopUkfLoopHook{},
-            []() noexcept {});
-    }
-
-    template <typename TSnapshot, typename LoopHook, typename BeforeYawUpdate>
-    void UpdatePoseEstimate(
-        float dtSeconds,
-        const TSnapshot& snapshot,
-        const MazeMap::Maze* map,
-        ControlCycleTiming* timing,
-        LoopHook&& loopHook,
-        BeforeYawUpdate&& beforeYawUpdate)
-    {
-        if (_estimatorFaulted)
-        {
-            SyncPoseEstimate();
-            return;
-        }
-
-        const MazeMap::PlantParams& params = _ukf.ukf().params();
-        (void)map;
-        MazeMap::ControlInput control{};
-        control.leftMotorCommand = _leftMotor.getDriveCommand();
-        control.rightMotorCommand = _rightMotor.getDriveCommand();
-        control.fanDutyCycle = GetMissionFanDutyCycle();
-        control.batteryVoltageV = 0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage());
-        _lastGyroRawRadps = snapshot.gyroRawRadps;
-        _lastImuYawRateRadps = snapshot.gyroRadps;
-        _lastImuYawRateValid = std::isfinite(snapshot.gyroRadps);
-        _lastImuAccelBodyXMps2 = snapshot.accelBodyXMps2;
-        _lastImuAccelBodyYMps2 = snapshot.accelBodyYMps2;
-        _lastImuAccelValid =
-            snapshot.accelBiasValid &&
-            std::isfinite(snapshot.accelBodyXMps2) &&
-            std::isfinite(snapshot.accelBodyYMps2);
-        _ukf.ukf().setRuntimeContext(
-            _lastLinearCommandMps,
-            _lastAngularCommandRadps,
-            _lastSaturationFlags,
-            _lastLeftLaunchAssistFloor,
-            _lastRightLaunchAssistFloor,
-            snapshot.accelBiasValid,
-            snapshot.accelBodyXMps2,
-            snapshot.accelBodyYMps2);
-        const EncoderCycleSample encoderSample = ConsumeEncoderCycleSample(dtSeconds, params);
-
-        if (timing != nullptr)
-        {
-            timing->ukfPredictStartUs = micros();
-        }
-        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
-        {
-            if (!_ukf.predict(dtSeconds, control, loopHook))
-            {
-                TriggerEstimatorFault("predict_failed");
-                if (timing != nullptr)
-                {
-                    timing->ukfPredictEndUs = micros();
-                    timing->ukfPredictDurationUs = timing->ukfPredictEndUs - timing->ukfPredictStartUs;
-                    timing->ukfUpdateStartUs = timing->ukfPredictEndUs;
-                    timing->ukfUpdateEndUs = timing->ukfPredictEndUs;
-                    timing->ukfUpdateDurationUs = 0U;
-                    timing->ukfTotalDurationUs = timing->ukfPredictDurationUs;
-                }
-                return;
-            }
-        }
-        if (timing != nullptr)
-        {
-            timing->ukfPredictEndUs = micros();
-            timing->ukfPredictDurationUs = timing->ukfPredictEndUs - timing->ukfPredictStartUs;
-            timing->ukfUpdateStartUs = micros();
-        }
-
-        MazeMap::EncoderObs encoderObservation{};
-        encoderObservation.totalLeftCounts = encoderSample.leftCounts;
-        encoderObservation.totalRightCounts = encoderSample.rightCounts;
-        encoderObservation.omegaLeftRadps = encoderSample.leftOmegaRadps;
-        encoderObservation.omegaRightRadps = encoderSample.rightOmegaRadps;
-        _lastEncoderObservation = encoderObservation;
-        _encoderObservationValid = true;
-        const bool updateYawFromEncoder = !std::isfinite(snapshot.gyroRawRadps);
-        (void)_ukf.updateEncoderPair(encoderObservation, dtSeconds, updateYawFromEncoder, loopHook);
-
-        beforeYawUpdate();
-
-        if (std::isfinite(snapshot.gyroRawRadps))
-        {
-            const MazeMap::MeasurementUpdateResult yawUpdate = _ukf.updateYawRate(snapshot.gyroRawRadps, loopHook);
-            if (!yawUpdate.accepted)
-            {
-                TriggerEstimatorFault("yaw_update_failed");
-                if (timing != nullptr)
-                {
-                    timing->ukfUpdateEndUs = micros();
-                    timing->ukfUpdateDurationUs = timing->ukfUpdateEndUs - timing->ukfUpdateStartUs;
-                    timing->ukfTotalDurationUs = timing->ukfPredictDurationUs + timing->ukfUpdateDurationUs;
-                }
-                return;
-            }
-        }
-
-        MazeMap::ImuAccelObs accelObservation{};
-        accelObservation.valid =
-            snapshot.accelBiasValid &&
-            std::isfinite(snapshot.accelBodyXMps2) &&
-            std::isfinite(snapshot.accelBodyYMps2);
-        accelObservation.accelBodyXMps2 = snapshot.accelBodyXMps2;
-        accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
-        (void)_ukf.updatePlanarAccel(accelObservation, loopHook);
-
-        if (map != nullptr)
-        {
-            MazeMap::WallObs frontLeftObs{};
-            MazeMap::WallObs frontRightObs{};
-            BuildUkfFrontPairObservations(snapshot, params.noHitRangeM, frontLeftObs, frontRightObs);
-            if (frontLeftObs.valid && frontRightObs.valid)
-            {
-                (void)_ukf.updateFrontPair(frontLeftObs, frontRightObs, *map, true);
-            }
-
-            const MazeMap::WallObs leftSideObs = BuildUkfLeftSideObservation(snapshot, params.noHitRangeM);
-            if (leftSideObs.valid)
-            {
-                (void)_ukf.updateSideSensor(MazeMap::Side::Left, leftSideObs, *map, true);
-            }
-
-            const MazeMap::WallObs rightSideObs = BuildUkfRightSideObservation(snapshot, params.noHitRangeM);
-            if (rightSideObs.valid)
-            {
-                (void)_ukf.updateSideSensor(MazeMap::Side::Right, rightSideObs, *map, true);
-            }
-        }
-        if (timing != nullptr)
-        {
-            timing->ukfUpdateEndUs = micros();
-            timing->ukfUpdateDurationUs = timing->ukfUpdateEndUs - timing->ukfUpdateStartUs;
-            timing->ukfTotalDurationUs = timing->ukfPredictDurationUs + timing->ukfUpdateDurationUs;
-        }
-
-        SyncPoseEstimate();
-    }
-
     void SetOpenLoopRaw(float leftDriveCommand, float rightDriveCommand)
     {
         _leftMotor.setDriveCommand((std::clamp)(leftDriveCommand, -1.0f, 1.0f));
@@ -1055,10 +793,9 @@ private:
     }
     MazeMap::MotorEncoderDrive _leftMotor;
     MazeMap::MotorEncoderDrive _rightMotor;
-    MazeMap::MouseUkfFacade _ukf;
+    MazeMap::Estimator& _estimator;
     const MazeMap::PlantModel& _plantModel;
     const MazeMap::ProportionalDerivativeCluster* _proportionalDerivativeCluster;
-    PoseEstimate _poseCache;
     float _leftIntegral;
     float _rightIntegral;
     mutable float _lastLinearCommandMps;
@@ -1075,6 +812,12 @@ private:
     mutable float _lastRightTargetVelocityMps = 0.0f;
     mutable float _lastLeftLaunchAssistFloor = 0.0f;
     mutable float _lastRightLaunchAssistFloor = 0.0f;
+    mutable MazeMap::VehicleState::TranslationSetpointKind _lastTranslationSetpointKind =
+        MazeMap::VehicleState::TranslationSetpointKind::None;
+    mutable MazeMap::VehicleState::RotationSetpointKind _lastRotationSetpointKind =
+        MazeMap::VehicleState::RotationSetpointKind::None;
+    mutable float _lastTranslationSetpoint = 0.0f;
+    mutable float _lastRotationSetpoint = 0.0f;
     mutable bool _lastFeedforwardUsedAlignedCycleContext = false;
     mutable bool _lastFeedforwardUsedGripOnlyFallback = false;
     int32_t _leftEncoderCountTotal = 0;
@@ -1100,6 +843,7 @@ private:
         MazeMap::PlantDerivatives presentDerivatives{};
         float batteryVoltageV = 0.0f;
         float wheelRadiusM = 0.0f;
+        float trackWidthM = 0.0f;
         float presentYawRad = 0.0f;
         float presentLinearSpeedMps = 0.0f;
         float presentYawRateRadps = 0.0f;
@@ -1145,8 +889,6 @@ private:
     };
     WheelLaunchAssistState _leftLaunchAssist;
     WheelLaunchAssistState _rightLaunchAssist;
-    bool _estimatorFaulted = false;
-    char _estimatorFaultReason[64] = {};
 
     void GetVelocityCommandOperatingState(
         MazeMap::VehicleState::StateVector& presentState,
@@ -1240,6 +982,26 @@ private:
         const MazeMap::App::Internal::LoopController::ControlVector& feedforwardCommand,
         const MazeMap::App::Internal::LoopController::ControlVector& feedbackCommand) const noexcept;
 
+    void CacheCommandSetpointKinds(
+        const CommandContext& context,
+        const CommandTargets& targets) const noexcept;
+
+    static bool DriveCommandBreakdownMatchesAppliedCommand(
+        float appliedLeftDriveCommand,
+        float appliedRightDriveCommand,
+        float resolvedLeftDriveCommand,
+        float resolvedRightDriveCommand) noexcept
+    {
+        constexpr float kDriveCommandMatchTolerance = 1.0e-4f;
+        return
+            std::isfinite(appliedLeftDriveCommand) &&
+            std::isfinite(appliedRightDriveCommand) &&
+            std::isfinite(resolvedLeftDriveCommand) &&
+            std::isfinite(resolvedRightDriveCommand) &&
+            (std::fabs(appliedLeftDriveCommand - resolvedLeftDriveCommand) <= kDriveCommandMatchTolerance) &&
+            (std::fabs(appliedRightDriveCommand - resolvedRightDriveCommand) <= kDriveCommandMatchTolerance);
+    }
+
     float ResolveStraightHeadingYawRateCommand(
         float targetYawRad,
         float measuredYawRad,
@@ -1281,8 +1043,8 @@ private:
         float technicalYawAccelRadps2 = 0.0f;
         _plantModel.velocityTargetTechnicalLimits(
             presentState,
-            _ukf.ukf().preparedParams(),
-            _ukf.ukf().modelCycleContext(),
+            _estimator.ukf().preparedParams(),
+            _estimator.ukf().modelCycleContext(),
             technicalLongitudinalAccelMps2,
             technicalYawAccelRadps2,
             GetMissionFanDutyCycle());

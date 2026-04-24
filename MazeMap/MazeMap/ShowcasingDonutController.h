@@ -170,13 +170,6 @@ namespace MazeMap::App::Internal
             float progressNorm{};
         };
 
-        struct CommandTelemetrySample final
-        {
-            DriveTelemetry driveTelemetry{};
-            float linearCommandMps{};
-            float angularCommandRadps{};
-        };
-
         struct TractionLossState final
         {
             float mismatchDurationS{};
@@ -190,12 +183,12 @@ namespace MazeMap::App::Internal
         static LoopController::ControlVector ModeWorkThunk(
             void* context,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
 
         LoopController::ControlVector RunTick(
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
@@ -203,29 +196,26 @@ namespace MazeMap::App::Internal
         bool BeginMainLog();
         bool LogCurrentSample(
             const LogLabels& labels,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             bool abortMarker);
         void PopulateMainRow(
             const LogLabels& labels,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             bool abortMarker,
             Runtime::ShowcasingDonutMainRow& row) const;
-        CommandTelemetrySample BuildCommandTelemetry(
-            const LoopController::ControlVector& control) const noexcept;
-        CommandTelemetrySample BuildBrakeTelemetry() const noexcept;
-        void UpdatePeaks(const LoopController::ModeState& state) noexcept;
+        void UpdatePeaks(const MazeMap::VehicleState& state) noexcept;
         void ConfigureSelectorMonitor() noexcept;
         void ReleaseSelectorMonitor() noexcept;
         bool SelectorRemoved() const noexcept;
         bool BeginDonutSweep() noexcept;
         bool BeginFlashTurn(float angleRad) noexcept;
-        bool TractionLossDetected(const LoopController::ModeState& state) noexcept;
-        bool EndConditionReached(const LoopController::ModeState& state);
+        bool TractionLossDetected(const MazeMap::VehicleState& state) noexcept;
+        bool EndConditionReached(const MazeMap::VehicleState& state);
         void RecordRequestedEnd(EndReason reason);
         const char* EndReasonText(EndReason reason) const noexcept;
         LogLabels CurrentLabels() const noexcept;
         std::uint8_t SpeedBinForSpeed(float speedMps) const noexcept;
-        float EncoderAverageSpeedMps(const LoopController::ModeState& state) const noexcept;
+        float EncoderAverageSpeedMps(const MazeMap::VehicleState& state) const noexcept;
         float CommandedYawRateRadps() const noexcept;
 
         SharedRobotRuntime& _runtime;
@@ -246,7 +236,6 @@ namespace MazeMap::App::Internal
         float _peakYawRateRadps{};
         float _peakPlanarAccelMps2{};
         std::uint8_t _flashTurnsStarted{};
-        CommandTelemetrySample _appliedCommandTelemetry{};
         TractionLossState _tractionLoss{};
     };
 

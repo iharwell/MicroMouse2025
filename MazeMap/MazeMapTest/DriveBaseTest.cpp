@@ -2,6 +2,7 @@
 #include "CppUnitTest.h"
 
 #include "EstimatorTestSupport.h"
+#include "..\MazeMap\Estimator.h"
 #include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\PlantModel.h"
 
@@ -25,6 +26,20 @@ namespace MazeMap
         constexpr float kDriveBasePredictDtSeconds = 0.01f;
         constexpr int kDriveBaseHoldFeedforwardSteps = 400;
         constexpr int kDriveBaseVelocityTargetSteps = 600;
+
+        struct DriveBaseHarness final
+        {
+            Estimator estimator;
+            DriveBase drive;
+
+            DriveBaseHarness(
+                const PlantModel& plant,
+                const MazeMap::ProportionalDerivativeCluster& cluster)
+                : estimator(PlantParams::Default())
+                , drive(plant, estimator, cluster)
+            {
+            }
+        };
 
         SensorSnapshot BuildDriveBaseSensorSnapshot(float yawRateRadps = 0.0f) noexcept
         {
@@ -65,6 +80,7 @@ namespace MazeMap
 
         void SimulateDriveBaseCycle(
             DriveBase& drive,
+            Estimator& estimator,
             PlantModel& plant,
             PlantModel::StateVector& truthState,
             float& leftEncoderRemainderCounts,
@@ -100,11 +116,11 @@ namespace MazeMap
 
             MazeMap::Platform::WriteEncoderCount(kDriveBaseLeftEncoderChannel, leftCounts);
             MazeMap::Platform::WriteEncoderCount(kDriveBaseRightEncoderChannel, rightCounts);
-            drive.UpdateOdometry(
+            UpdateDriveEstimator(
+                drive,
+                estimator,
                 dtSeconds,
-                BuildDriveBaseSensorSnapshot(truthState(VehicleState::kR)),
-                nullptr,
-                nullptr);
+                BuildDriveBaseSensorSnapshot(truthState(VehicleState::kR)));
         }
 
         void AssertDriveBaseStateNearTarget(
@@ -146,6 +162,7 @@ namespace MazeMap
 
         void UpdateDriveBaseSignals(
             DriveBase& drive,
+            Estimator& estimator,
             const SensorSnapshot& snapshot,
             int32_t leftCounts = 0,
             int32_t rightCounts = 0,
@@ -184,6 +201,7 @@ namespace MazeMap
 
         void PrimeDriveBaseWithEncoderDelta(
             DriveBase& drive,
+            Estimator& estimator,
             const int32_t leftCounts,
             const int32_t rightCounts,
             const float dtSeconds = 0.001f)
@@ -191,11 +209,12 @@ namespace MazeMap
             MazeMap::Platform::WriteEncoderCount(kDriveBaseLeftEncoderChannel, leftCounts);
             MazeMap::Platform::WriteEncoderCount(kDriveBaseRightEncoderChannel, rightCounts);
             const SensorSnapshot snapshot = BuildDriveBaseSensorSnapshot();
-            drive.UpdateOdometry(dtSeconds, snapshot, nullptr, nullptr);
+            UpdateDriveEstimator(drive, estimator, dtSeconds, snapshot);
         }
 
         void UpdateDriveBaseSignals(
             DriveBase& drive,
+            Estimator& estimator,
             const SensorSnapshot& snapshot,
             const int32_t leftCounts,
             const int32_t rightCounts,
@@ -203,7 +222,7 @@ namespace MazeMap
         {
             MazeMap::Platform::WriteEncoderCount(kDriveBaseLeftEncoderChannel, leftCounts);
             MazeMap::Platform::WriteEncoderCount(kDriveBaseRightEncoderChannel, rightCounts);
-            drive.UpdateOdometry(dtSeconds, snapshot, nullptr, nullptr);
+            UpdateDriveEstimator(drive, estimator, dtSeconds, snapshot);
         }
 
         constexpr float kOscillationTraceDeadbandMps = 1.0e-3f;
@@ -318,36 +337,69 @@ namespace MazeMap
             return static_cast<float>(saturatedSampleCount) / static_cast<float>(sampleCount);
         }
 
-        float ComputePeakGrowthRatio(
-            const std::vector<float>& absoluteErrors,
-            const std::size_t endIndexExclusive,
-            const float minimumPeakAmplitude) noexcept
+        struct AlternatingSaturationPatternResult final
         {
-            if (absoluteErrors.size() < 3U)
+            std::uint32_t saturatedRunCount = 0U;
+            std::uint32_t alternationCount = 0U;
+            bool patternDetected = false;
+        };
+
+        enum class OscillationPairingKind
+        {
+            HeadingState,
+            VelocityState,
+            YawRateState,
+            YawRateGyro,
+            LongitudinalAccelerationState,
+            LongitudinalAccelerationImuForwardAccel,
+            WheelVelocityState,
+            WheelVelocityEncoder
+        };
+
+        AlternatingSaturationPatternResult AnalyzeAlternatingSaturationPattern(
+            const std::vector<std::uint16_t>& saturationFlags,
+            const std::size_t startIndex) noexcept
+        {
+            AlternatingSaturationPatternResult result{};
+            if (startIndex >= saturationFlags.size())
             {
-                return 0.0f;
+                return result;
             }
 
-            const std::size_t endIndex = (std::min)(endIndexExclusive, absoluteErrors.size());
-            std::vector<float> peaks;
-            peaks.reserve(endIndex / 2U);
-            for (std::size_t index = 1U; (index + 1U) < endIndex; ++index)
+            std::uint16_t previousOneSidedSaturation = 0U;
+            for (std::size_t index = startIndex; index < saturationFlags.size(); ++index)
             {
-                const float value = absoluteErrors[index];
-                if ((value > minimumPeakAmplitude) &&
-                    (value >= absoluteErrors[index - 1U]) &&
-                    (value > absoluteErrors[index + 1U]))
+                const std::uint16_t saturatedBanks =
+                    static_cast<std::uint16_t>(saturationFlags[index] & 0x3u);
+                if (saturatedBanks == 0U)
                 {
-                    peaks.push_back(value);
+                    continue;
                 }
+
+                // Both-wheel saturation does not establish a left/right alternation pattern.
+                if (saturatedBanks == 0x3u)
+                {
+                    previousOneSidedSaturation = 0U;
+                    continue;
+                }
+
+                if (saturatedBanks == previousOneSidedSaturation)
+                {
+                    continue;
+                }
+
+                ++result.saturatedRunCount;
+                if ((previousOneSidedSaturation != 0U) &&
+                    (saturatedBanks != previousOneSidedSaturation))
+                {
+                    ++result.alternationCount;
+                }
+
+                previousOneSidedSaturation = saturatedBanks;
             }
 
-            if (peaks.size() < 2U)
-            {
-                return 0.0f;
-            }
-
-            return peaks.back() / (std::max)(peaks.front(), 1.0e-6f);
+            result.patternDetected = (result.alternationCount >= 2U);
+            return result;
         }
 
         struct OscillationPairingScenario final
@@ -375,7 +427,7 @@ namespace MazeMap
             float estimatorSignal = 0.0f;
             float truthSignal = 0.0f;
             float feedbackCommandComponent = 0.0f;
-            bool saturated = false;
+            std::uint16_t saturationFlags = 0U;
         };
 
         struct OscillationPairingAuditResult final
@@ -390,28 +442,41 @@ namespace MazeMap
             float steadySignFlipRate = 0.0f;
             float fullSaturationDuty = 0.0f;
             float steadySaturationDuty = 0.0f;
-            float transientPeakGrowthRatio = 0.0f;
-            bool smallJitterDetected = false;
-            bool blowoutDetected = false;
+            std::uint32_t steadySaturatedRunCount = 0U;
+            std::uint32_t steadyAlternatingSaturationCount = 0U;
+            bool steadyAlternatingSaturationPatternDetected = false;
         };
 
-        bool IsSupportedOscillationPairingSource(
-            const MazeMap::CommandPD signalSource) noexcept
+        struct OscillationGeneratedCommand final
         {
-            switch (signalSource)
+            ControlVector command{};
+            float linearCommandTargetMps = 0.0f;
+            float angularCommandTargetRadps = 0.0f;
+            float targetSignal = 0.0f;
+        };
+
+        MazeMap::CommandPD ResolveOscillationPairingSignalSource(
+            const OscillationPairingKind pairingKind) noexcept
+        {
+            switch (pairingKind)
             {
-            case MazeMap::CommandPD::StateHeadingPD:
-            case MazeMap::CommandPD::StateYawPD:
-            case MazeMap::CommandPD::StateWheelOmegaPD:
-            case MazeMap::CommandPD::StateVelocityPD:
-            case MazeMap::CommandPD::StateAccelerationPD:
-            case MazeMap::CommandPD::EncoderVelocity:
-            case MazeMap::CommandPD::IMUYaw:
-            case MazeMap::CommandPD::IMUForwardAccel:
-            case MazeMap::CommandPD::IMULateralAccel:
-                return true;
+            case OscillationPairingKind::HeadingState:
+                return MazeMap::CommandPD::StateHeadingPD;
+            case OscillationPairingKind::VelocityState:
+                return MazeMap::CommandPD::StateVelocityPD;
+            case OscillationPairingKind::YawRateState:
+                return MazeMap::CommandPD::StateYawPD;
+            case OscillationPairingKind::YawRateGyro:
+                return MazeMap::CommandPD::IMUYaw;
+            case OscillationPairingKind::LongitudinalAccelerationState:
+                return MazeMap::CommandPD::StateAccelerationPD;
+            case OscillationPairingKind::LongitudinalAccelerationImuForwardAccel:
+                return MazeMap::CommandPD::IMUForwardAccel;
+            case OscillationPairingKind::WheelVelocityState:
+                return MazeMap::CommandPD::StateWheelOmegaPD;
+            case OscillationPairingKind::WheelVelocityEncoder:
             default:
-                return false;
+                return MazeMap::CommandPD::EncoderVelocity;
             }
         }
 
@@ -459,37 +524,34 @@ namespace MazeMap
 
         MazeMap::ProportionalDerivativeCluster BuildOscillationPairingCluster(
             const MazeMap::ProportionalDerivative& pd,
-            const MazeMap::CommandPD signalSource) noexcept
+            const OscillationPairingKind pairingKind) noexcept
         {
             MazeMap::ProportionalDerivativeCluster cluster{};
-            switch (signalSource)
+            switch (pairingKind)
             {
-            case MazeMap::CommandPD::StateHeadingPD:
+            case OscillationPairingKind::HeadingState:
                 cluster.HeadingStatePD = pd;
                 break;
-            case MazeMap::CommandPD::StateYawPD:
-                cluster.YawRateStatePD = pd;
-                break;
-            case MazeMap::CommandPD::StateWheelOmegaPD:
-                cluster.WheelVelocityStatePD = pd;
-                break;
-            case MazeMap::CommandPD::StateVelocityPD:
+            case OscillationPairingKind::VelocityState:
                 cluster.VelocityStatePD = pd;
                 break;
-            case MazeMap::CommandPD::StateAccelerationPD:
-                cluster.LongitudinalAccelerationStatePD = pd;
+            case OscillationPairingKind::YawRateState:
+                cluster.YawRateStatePD = pd;
                 break;
-            case MazeMap::CommandPD::EncoderVelocity:
-                cluster.WheelVelocityEncoderPD = pd;
-                break;
-            case MazeMap::CommandPD::IMUYaw:
+            case OscillationPairingKind::YawRateGyro:
                 cluster.YawRateGyroPD = pd;
                 break;
-            case MazeMap::CommandPD::IMUForwardAccel:
+            case OscillationPairingKind::LongitudinalAccelerationState:
+                cluster.LongitudinalAccelerationStatePD = pd;
+                break;
+            case OscillationPairingKind::LongitudinalAccelerationImuForwardAccel:
                 cluster.LongitudinalAccelerationIMUForwardAccelPD = pd;
                 break;
-            case MazeMap::CommandPD::IMULateralAccel:
-                cluster.YawRateIMULateralAccelPD = pd;
+            case OscillationPairingKind::WheelVelocityState:
+                cluster.WheelVelocityStatePD = pd;
+                break;
+            case OscillationPairingKind::WheelVelocityEncoder:
+                cluster.WheelVelocityEncoderPD = pd;
                 break;
             default:
                 break;
@@ -498,32 +560,100 @@ namespace MazeMap
             return cluster;
         }
 
-        float ResolveOscillationTelemetryLinearCommandTarget(
-            const MazeMap::CommandPD signalSource,
-            const float setpoint) noexcept
+        OscillationGeneratedCommand GenerateOscillationPairingCommand(
+            DriveBase& drive,
+            const Estimator& estimator,
+            const OscillationPairingKind pairingKind,
+            const float setpoint)
         {
-            switch (signalSource)
-            {
-            case MazeMap::CommandPD::StateVelocityPD:
-            case MazeMap::CommandPD::EncoderVelocity:
-                return setpoint;
-            default:
-                return 0.0f;
-            }
-        }
+            OscillationGeneratedCommand generated{};
+            const PlantModel::StateVector state = estimator.StateVector();
+            const float presentLinearSpeedMps = state(VehicleState::kU);
+            const float presentYawRateRadps = state(VehicleState::kR);
+            const float wheelRadiusM = estimator.ukf().preparedParams().wheelRadiusM;
 
-        float ResolveOscillationTelemetryAngularCommandTarget(
-            const MazeMap::CommandPD signalSource,
-            const float setpoint) noexcept
-        {
-            switch (signalSource)
+            switch (pairingKind)
             {
-            case MazeMap::CommandPD::StateYawPD:
-            case MazeMap::CommandPD::IMUYaw:
-                return setpoint;
-            default:
-                return 0.0f;
+            case OscillationPairingKind::HeadingState:
+                generated.command =
+                    drive.PointCommandWithHeadingTarget(
+                        0.0f,
+                        0.0f,
+                        setpoint,
+                        MazeMap::CommandPD::RawCommand,
+                        MazeMap::CommandPD::StateHeadingPD);
+                generated.targetSignal = setpoint;
+                break;
+            case OscillationPairingKind::VelocityState:
+                generated.command =
+                    drive.PointCommand(
+                        setpoint,
+                        MazeMap::CommandPD::StateVelocityPD);
+                generated.linearCommandTargetMps = setpoint;
+                generated.targetSignal = setpoint;
+                break;
+            case OscillationPairingKind::YawRateState:
+                generated.command =
+                    drive.PointYawRateCommand(
+                        setpoint,
+                        MazeMap::CommandPD::StateYawPD);
+                generated.linearCommandTargetMps = presentLinearSpeedMps;
+                generated.angularCommandTargetRadps = setpoint;
+                generated.targetSignal = setpoint;
+                break;
+            case OscillationPairingKind::YawRateGyro:
+                generated.command =
+                    drive.PointYawRateCommand(
+                        setpoint,
+                        MazeMap::CommandPD::IMUYaw);
+                generated.linearCommandTargetMps = presentLinearSpeedMps;
+                generated.angularCommandTargetRadps = setpoint;
+                generated.targetSignal = setpoint;
+                break;
+            case OscillationPairingKind::LongitudinalAccelerationState:
+                generated.command =
+                    drive.DeltaCommand(
+                        presentLinearSpeedMps,
+                        setpoint,
+                        MazeMap::CommandPD::StateAccelerationPD);
+                generated.linearCommandTargetMps = presentLinearSpeedMps;
+                generated.angularCommandTargetRadps = presentYawRateRadps;
+                generated.targetSignal = setpoint;
+                break;
+            case OscillationPairingKind::LongitudinalAccelerationImuForwardAccel:
+                generated.command =
+                    drive.DeltaCommand(
+                        presentLinearSpeedMps,
+                        setpoint,
+                        MazeMap::CommandPD::IMUForwardAccel);
+                generated.linearCommandTargetMps = presentLinearSpeedMps;
+                generated.angularCommandTargetRadps = presentYawRateRadps;
+                generated.targetSignal = setpoint;
+                break;
+            case OscillationPairingKind::WheelVelocityState:
+            {
+                const float linearSpeedTargetMps = setpoint * wheelRadiusM;
+                generated.command =
+                    drive.PointCommand(
+                        linearSpeedTargetMps,
+                        MazeMap::CommandPD::StateWheelOmegaPD);
+                generated.linearCommandTargetMps = linearSpeedTargetMps;
+                generated.targetSignal = setpoint;
+                break;
             }
+            case OscillationPairingKind::WheelVelocityEncoder:
+                generated.command =
+                    drive.PointCommand(
+                        setpoint,
+                        MazeMap::CommandPD::EncoderVelocity);
+                generated.linearCommandTargetMps = setpoint;
+                generated.targetSignal = setpoint;
+                break;
+            default:
+                break;
+            }
+
+            return generated;
         }
 
         float ResolveOscillationTruthSignal(
@@ -756,6 +886,7 @@ namespace MazeMap
 
         void PrimeOscillationPairingInitialState(
             DriveBase& drive,
+            Estimator& estimator,
             PlantModel& plant,
             const OscillationPairingScenario& scenario,
             PlantModel::StateVector& truthState,
@@ -806,6 +937,7 @@ namespace MazeMap
                     rightEncoderRemainderCounts);
             UpdateDriveBaseSignals(
                 drive,
+                estimator,
                 BuildDriveBaseSensorSnapshot(
                     scenario.initialYawRateRadps,
                     scenario.initialYawRateRadps,
@@ -820,22 +952,19 @@ namespace MazeMap
 
         std::vector<OscillationPairingTraceSample> RunOscillationPairingTrace(
             const MazeMap::ProportionalDerivative& pd,
-            const MazeMap::CommandPD signalSource,
+            const OscillationPairingKind pairingKind,
             const OscillationPairingScenario& scenario)
         {
-            Assert::IsTrue(
-                IsSupportedOscillationPairingSource(signalSource),
-                L"Oscillation pairing trace currently supports heading, yaw-rate, wheel-speed, "
-                L"velocity, longitudinal-acceleration, encoder-velocity, gyro-yaw, IMU-forward-accel, "
-                L"and IMU-lateral-accel sources.");
-
+            const MazeMap::CommandPD signalSource =
+                ResolveOscillationPairingSignalSource(pairingKind);
             PlantModel plant;
             const MazeMap::ProportionalDerivativeCluster pairingCluster =
-                BuildOscillationPairingCluster(pd, signalSource);
-            DriveBase drive(plant, pairingCluster);
+                BuildOscillationPairingCluster(pd, pairingKind);
+            DriveBaseHarness driveHarness(plant, pairingCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            UpdateDriveBaseSignals(drive, BuildDriveBaseSensorSnapshot(0.0f));
+            UpdateDriveBaseSignals(drive, driveHarness.estimator, BuildDriveBaseSensorSnapshot(0.0f));
 
             PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
             float leftEncoderRemainderCounts = 0.0f;
@@ -843,6 +972,7 @@ namespace MazeMap
             const PlantParams& params = PlantParams::Default();
             PrimeOscillationPairingInitialState(
                 drive,
+                driveHarness.estimator,
                 plant,
                 scenario,
                 truthState,
@@ -856,14 +986,16 @@ namespace MazeMap
             {
                 const float setpoint =
                     ResolveOscillationScenarioSetpoint(scenario, stepIndex);
-                const ControlVector command =
-                    drive.FeedbackCommand(
-                        setpoint,
-                        signalSource);
+                const OscillationGeneratedCommand generatedCommand =
+                    GenerateOscillationPairingCommand(
+                        drive,
+                        driveHarness.estimator,
+                        pairingKind,
+                        setpoint);
                 drive.CommandGenerated(
-                    command,
-                    ResolveOscillationTelemetryLinearCommandTarget(signalSource, setpoint),
-                    ResolveOscillationTelemetryAngularCommandTarget(signalSource, setpoint),
+                    generatedCommand.command,
+                    generatedCommand.linearCommandTargetMps,
+                    generatedCommand.angularCommandTargetRadps,
                     true);
 
                 const DriveTelemetry appliedTelemetry = drive.GetTelemetry();
@@ -927,18 +1059,19 @@ namespace MazeMap
                         true);
                 UpdateDriveBaseSignals(
                     drive,
+                    driveHarness.estimator,
                     snapshot,
                     leftCounts + encoderCountDisturbance,
                     rightCounts + encoderCountDisturbance,
                     scenario.dtSeconds);
 
                 const DriveTelemetry updatedTelemetry = drive.GetTelemetry();
-                const PlantModel::StateVector estimatorState = drive.GetEstimatorStateVector();
+                const PlantModel::StateVector estimatorState = driveHarness.estimator.StateVector();
                 const MazeMap::PlantDerivatives estimatorDerivatives =
                     plant.forwardStep(estimatorState, control, params);
 
                 OscillationPairingTraceSample sample{};
-                sample.targetSignal = setpoint;
+                sample.targetSignal = generatedCommand.targetSignal;
                 sample.sourceSignal =
                     ResolveOscillationSourceSignal(
                         signalSource,
@@ -958,7 +1091,7 @@ namespace MazeMap
                         truthDerivatives);
                 sample.feedbackCommandComponent =
                     ResolveOscillationFeedbackComponent(signalSource, updatedTelemetry);
-                sample.saturated = (updatedTelemetry.saturationFlags != 0U);
+                sample.saturationFlags = updatedTelemetry.saturationFlags;
                 samples.push_back(sample);
             }
 
@@ -967,11 +1100,13 @@ namespace MazeMap
 
         OscillationPairingAuditResult AuditOscillationPairingAgainstPlantAndSrUkf(
             const MazeMap::ProportionalDerivative& pd,
-            const MazeMap::CommandPD signalSource,
+            const OscillationPairingKind pairingKind,
             const OscillationPairingScenario& scenario)
         {
+            const MazeMap::CommandPD signalSource =
+                ResolveOscillationPairingSignalSource(pairingKind);
             const std::vector<OscillationPairingTraceSample> samples =
-                RunOscillationPairingTrace(pd, signalSource, scenario);
+                RunOscillationPairingTrace(pd, pairingKind, scenario);
 
             OscillationPairingAuditResult result{};
             if (samples.empty())
@@ -989,12 +1124,12 @@ namespace MazeMap
             std::vector<float> estimatorErrors;
             std::vector<float> truthErrors;
             std::vector<float> feedbackComponents;
-            std::vector<float> absoluteSourceErrors;
+            std::vector<std::uint16_t> saturationFlags;
             sourceErrors.reserve(samples.size());
             estimatorErrors.reserve(samples.size());
             truthErrors.reserve(samples.size());
             feedbackComponents.reserve(samples.size());
-            absoluteSourceErrors.reserve(samples.size());
+            saturationFlags.reserve(samples.size());
 
             for (const OscillationPairingTraceSample& sample : samples)
             {
@@ -1017,7 +1152,7 @@ namespace MazeMap
                 estimatorErrors.push_back(estimatorError);
                 truthErrors.push_back(truthError);
                 feedbackComponents.push_back(sample.feedbackCommandComponent);
-                absoluteSourceErrors.push_back(std::fabs(sourceError));
+                saturationFlags.push_back(sample.saturationFlags);
             }
 
             result.steadySourceErrorHighPassRms =
@@ -1039,36 +1174,19 @@ namespace MazeMap
             {
                 std::vector<bool> saturationSamples;
                 saturationSamples.reserve(samples.size());
-                for (const OscillationPairingTraceSample& sample : samples)
+                for (const std::uint16_t flags : saturationFlags)
                 {
-                    saturationSamples.push_back(sample.saturated);
+                    saturationSamples.push_back(flags != 0U);
                 }
                 result.fullSaturationDuty = ComputeSaturationDuty(saturationSamples, 0U);
                 result.steadySaturationDuty = ComputeSaturationDuty(saturationSamples, steadyStartIndex);
             }
 
-            const float referenceMagnitude =
-                ResolveOscillationScenarioReferenceMagnitude(scenario);
-            result.transientPeakGrowthRatio =
-                ComputePeakGrowthRatio(
-                    absoluteSourceErrors,
-                    steadyStartIndex,
-                    (std::max)(0.02f, 0.10f * referenceMagnitude));
-
-            const float jitterThreshold = ResolveOscillationJitterThreshold(signalSource);
-            const float steadyErrorThreshold =
-                ResolveOscillationSteadyErrorThreshold(signalSource, referenceMagnitude);
-            result.smallJitterDetected =
-                (result.steadySourceErrorHighPassRms > jitterThreshold) &&
-                (result.steadyEstimatorAbsError < steadyErrorThreshold) &&
-                (result.steadyTruthAbsError < steadyErrorThreshold) &&
-                (result.steadySaturationDuty < 0.10f);
-
-            result.blowoutDetected =
-                (result.transientPeakGrowthRatio > 1.05f) ||
-                (result.steadySaturationDuty > 0.15f) ||
-                (result.steadyEstimatorAbsError > steadyErrorThreshold) ||
-                (result.steadyTruthAbsError > steadyErrorThreshold);
+            const AlternatingSaturationPatternResult saturationPattern =
+                AnalyzeAlternatingSaturationPattern(saturationFlags, steadyStartIndex);
+            result.steadySaturatedRunCount = saturationPattern.saturatedRunCount;
+            result.steadyAlternatingSaturationCount = saturationPattern.alternationCount;
+            result.steadyAlternatingSaturationPatternDetected = saturationPattern.patternDetected;
 
             return result;
         }
@@ -1087,9 +1205,9 @@ namespace MazeMap
                 L" steady_sign_flip_rate=" + std::to_wstring(result.steadySignFlipRate) +
                 L" full_sat_duty=" + std::to_wstring(result.fullSaturationDuty) +
                 L" steady_sat_duty=" + std::to_wstring(result.steadySaturationDuty) +
-                L" transient_peak_growth=" + std::to_wstring(result.transientPeakGrowthRatio) +
-                L" small_jitter=" + std::to_wstring(result.smallJitterDetected ? 1 : 0) +
-                L" blowout=" + std::to_wstring(result.blowoutDetected ? 1 : 0);
+                L" steady_sat_runs=" + std::to_wstring(static_cast<unsigned long long>(result.steadySaturatedRunCount)) +
+                L" steady_sat_alternations=" + std::to_wstring(static_cast<unsigned long long>(result.steadyAlternatingSaturationCount)) +
+                L" steady_alt_sat_pattern=" + std::to_wstring(result.steadyAlternatingSaturationPatternDetected ? 1 : 0);
         }
 
         std::wstring BuildOscillationPairingStepMessage(
@@ -1117,48 +1235,133 @@ namespace MazeMap
                 std::isfinite(audit.steadyFeedbackComponentRms) &&
                 std::isfinite(audit.steadySignFlipRate) &&
                 std::isfinite(audit.fullSaturationDuty) &&
-                std::isfinite(audit.steadySaturationDuty) &&
-                std::isfinite(audit.transientPeakGrowthRatio);
+                std::isfinite(audit.steadySaturationDuty);
         }
 
-        void AssertOscillationPairingHasNoJitterOnStepInput(
+        void AssertOscillationPairingMetricsFinite(
             const MazeMap::ProportionalDerivative& pd,
-            const MazeMap::CommandPD signalSource)
+            const OscillationPairingKind pairingKind)
         {
+            const MazeMap::CommandPD signalSource =
+                ResolveOscillationPairingSignalSource(pairingKind);
             const OscillationPairingScenario scenario =
                 BuildStepOscillationPairingScenario(signalSource);
             const OscillationPairingAuditResult audit =
                 AuditOscillationPairingAgainstPlantAndSrUkf(
                     pd,
-                    signalSource,
+                    pairingKind,
                     scenario);
             const std::wstring message =
                 BuildOscillationPairingStepMessage(scenario, audit);
 
             Assert::IsTrue(
-                OscillationPairingAuditHasFiniteMetrics(audit) &&
-                !audit.smallJitterDetected,
+                OscillationPairingAuditHasFiniteMetrics(audit),
                 message.c_str());
         }
 
-        void AssertOscillationPairingHasNoBlowoutOnStepInput(
+        void AssertOscillationPairingSourceJitterLow(
             const MazeMap::ProportionalDerivative& pd,
-            const MazeMap::CommandPD signalSource)
+            const OscillationPairingKind pairingKind)
         {
+            const MazeMap::CommandPD signalSource =
+                ResolveOscillationPairingSignalSource(pairingKind);
             const OscillationPairingScenario scenario =
                 BuildStepOscillationPairingScenario(signalSource);
             const OscillationPairingAuditResult audit =
                 AuditOscillationPairingAgainstPlantAndSrUkf(
                     pd,
+                    pairingKind,
+                    scenario);
+            const float jitterThreshold = ResolveOscillationJitterThreshold(signalSource);
+            const std::wstring message =
+                BuildOscillationPairingStepMessage(scenario, audit) +
+                L" jitter_threshold=" + std::to_wstring(jitterThreshold);
+
+            if (!std::isfinite(audit.steadySourceErrorHighPassRms))
+            {
+                return;
+            }
+
+            Assert::IsTrue(
+                audit.steadySourceErrorHighPassRms <= jitterThreshold,
+                message.c_str());
+        }
+
+        void AssertOscillationPairingEstimatorTrackingAccurate(
+            const MazeMap::ProportionalDerivative& pd,
+            const OscillationPairingKind pairingKind)
+        {
+            const MazeMap::CommandPD signalSource =
+                ResolveOscillationPairingSignalSource(pairingKind);
+            const OscillationPairingScenario scenario =
+                BuildStepOscillationPairingScenario(signalSource);
+            const OscillationPairingAuditResult audit =
+                AuditOscillationPairingAgainstPlantAndSrUkf(
+                    pd,
+                    pairingKind,
+                    scenario);
+            const float steadyErrorThreshold =
+                ResolveOscillationSteadyErrorThreshold(
                     signalSource,
+                    ResolveOscillationScenarioReferenceMagnitude(scenario));
+            const std::wstring message =
+                BuildOscillationPairingStepMessage(scenario, audit) +
+                L" steady_error_threshold=" + std::to_wstring(steadyErrorThreshold);
+
+            if (!std::isfinite(audit.steadyEstimatorAbsError))
+            {
+                return;
+            }
+
+            Assert::IsTrue(audit.steadyEstimatorAbsError <= steadyErrorThreshold, message.c_str());
+        }
+
+        void AssertOscillationPairingPlantTrackingAccurate(
+            const MazeMap::ProportionalDerivative& pd,
+            const OscillationPairingKind pairingKind)
+        {
+            const MazeMap::CommandPD signalSource =
+                ResolveOscillationPairingSignalSource(pairingKind);
+            const OscillationPairingScenario scenario =
+                BuildStepOscillationPairingScenario(signalSource);
+            const OscillationPairingAuditResult audit =
+                AuditOscillationPairingAgainstPlantAndSrUkf(
+                    pd,
+                    pairingKind,
+                    scenario);
+            const float steadyErrorThreshold =
+                ResolveOscillationSteadyErrorThreshold(
+                    signalSource,
+                    ResolveOscillationScenarioReferenceMagnitude(scenario));
+            const std::wstring message =
+                BuildOscillationPairingStepMessage(scenario, audit) +
+                L" steady_error_threshold=" + std::to_wstring(steadyErrorThreshold);
+
+            if (!std::isfinite(audit.steadyTruthAbsError))
+            {
+                return;
+            }
+
+            Assert::IsTrue(audit.steadyTruthAbsError <= steadyErrorThreshold, message.c_str());
+        }
+
+        void AssertOscillationPairingHasNoAlternatingSaturation(
+            const MazeMap::ProportionalDerivative& pd,
+            const OscillationPairingKind pairingKind)
+        {
+            const MazeMap::CommandPD signalSource =
+                ResolveOscillationPairingSignalSource(pairingKind);
+            const OscillationPairingScenario scenario =
+                BuildStepOscillationPairingScenario(signalSource);
+            const OscillationPairingAuditResult audit =
+                AuditOscillationPairingAgainstPlantAndSrUkf(
+                    pd,
+                    pairingKind,
                     scenario);
             const std::wstring message =
                 BuildOscillationPairingStepMessage(scenario, audit);
 
-            Assert::IsTrue(
-                OscillationPairingAuditHasFiniteMetrics(audit) &&
-                !audit.blowoutDetected,
-                message.c_str());
+            Assert::IsFalse(audit.steadyAlternatingSaturationPatternDetected, message.c_str());
         }
 
     }
@@ -1188,10 +1391,11 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandStaysSymmetricAcrossWheelSpeedMismatch)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
 
-            PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 6, 42);
 
             const ControlVector command =
                 drive.DeltaCommand(
@@ -1206,10 +1410,11 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandHeadingHoldStaysSymmetricWhenAlreadyAligned)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
 
-            PrimeDriveBaseWithEncoderDelta(drive, 6, 42);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 6, 42);
 
             const ControlVector command =
                 drive.DeltaCommand(
@@ -1224,7 +1429,8 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandRawMatchesPlantFeedforwardAtSteadyForwardTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -1251,7 +1457,8 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandCombinedRawMatchesPlantFeedforwardAtSteadyTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -1280,7 +1487,8 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaYawRateCommandRawMatchesPlantFeedforwardAtSteadyYawRateTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -1307,7 +1515,8 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandRawMatchesPlantVelocityTargetFeedforwardAtForwardTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -1318,7 +1527,7 @@ namespace MazeMap
                     MazeMap::CommandPD::RawCommand);
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(
-                    drive.GetEstimatorStateVector(),
+                    driveHarness.estimator.StateVector(),
                     0.20f,
                     0.0f,
                     params,
@@ -1332,7 +1541,8 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandCombinedRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -1344,7 +1554,7 @@ namespace MazeMap
                     MazeMap::CommandPD::RawCommand);
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(
-                    drive.GetEstimatorStateVector(),
+                    driveHarness.estimator.StateVector(),
                     0.20f,
                     0.40f,
                     params,
@@ -1358,7 +1568,8 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointYawRateCommandRawMatchesPlantVelocityTargetFeedforwardAtTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
@@ -1369,7 +1580,7 @@ namespace MazeMap
                     MazeMap::CommandPD::RawCommand);
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(
-                    drive.GetEstimatorStateVector(),
+                    driveHarness.estimator.StateVector(),
                     0.0f,
                     0.40f,
                     params,
@@ -1383,7 +1594,8 @@ namespace MazeMap
         TEST_METHOD(DriveBaseRawFeedforwardReportsAlignedCycleContextUsage)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
@@ -1406,10 +1618,11 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandManeuverPointMatchesScalarTargets)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.15f), nullptr, nullptr);
+            UpdateDriveEstimator(drive, driveHarness.estimator, 0.001f, BuildDriveBaseSensorSnapshot(0.15f));
 
             const ManeuverPoint point(0.0f, 0.0f, 0.25f, 0.30f, 0.20f);
             const ControlVector scalarCommand =
@@ -1433,10 +1646,11 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandManeuverPointRejectsNonFiniteTargets)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            drive.UpdateOdometry(0.001f, BuildDriveBaseSensorSnapshot(0.0f), nullptr, nullptr);
+            UpdateDriveEstimator(drive, driveHarness.estimator, 0.001f, BuildDriveBaseSensorSnapshot(0.0f));
 
             const ManeuverPoint invalidPoint(
                 0.0f,
@@ -1457,10 +1671,11 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandCoupledStateYawPdChangesCommandWhenEstimatorYawRateDiffers)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            PrimeDriveBaseWithEncoderDelta(drive, 24, -24);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 24, -24);
 
             const ControlVector rawCommand =
                 drive.PointCommand(
@@ -1481,11 +1696,13 @@ namespace MazeMap
             MazeMap::ProportionalDerivativeCluster defaultCluster = Config::kDriveBasePDCluster;
             MazeMap::ProportionalDerivativeCluster zeroYawCluster = defaultCluster;
             zeroYawCluster.YawRateStatePD.SetGains(0.0f, 0.0f);
-            DriveBase drive(plant, defaultCluster);
+            DriveBaseHarness driveHarness(plant, defaultCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(
                 drive,
+                driveHarness.estimator,
                 BuildDriveBaseSensorSnapshot(
                     0.40f,
                     0.0f,
@@ -1511,11 +1728,13 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandCoupledImuYawIsNoOpWhenOnlyEstimatorYawRateDiffers)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(
                 drive,
+                driveHarness.estimator,
                 BuildDriveBaseSensorSnapshot(
                     0.40f,
                     0.0f,
@@ -1540,11 +1759,13 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandCoupledImuYawChangesCommandWhenImuYawRateDiffers)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(
                 drive,
+                driveHarness.estimator,
                 BuildDriveBaseSensorSnapshot(
                     0.0f,
                     0.40f,
@@ -1569,7 +1790,8 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandStateAccelerationPdChangesCommandWhenStateAccelerationErrorExists)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
@@ -1583,6 +1805,7 @@ namespace MazeMap
             {
                 SimulateDriveBaseCycle(
                     drive,
+                    driveHarness.estimator,
                     plant,
                     truthState,
                     leftEncoderRemainderCounts,
@@ -1590,7 +1813,7 @@ namespace MazeMap
                     kDriveBasePredictDtSeconds);
             }
             const float presentLinearSpeedMps =
-                drive.GetEstimatorStateVector()(VehicleState::kU);
+                driveHarness.estimator.StateVector()(VehicleState::kU);
 
             const ControlVector rawCommand =
                 drive.DeltaCommand(
@@ -1608,11 +1831,13 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandStateAccelerationPdIsNoOpWhenOnlyImuForwardAccelDiffers)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(
                 drive,
+                driveHarness.estimator,
                 BuildDriveBaseSensorSnapshot(
                     0.0f,
                     0.0f,
@@ -1637,11 +1862,13 @@ namespace MazeMap
         TEST_METHOD(DriveBaseDeltaCommandImuForwardAccelChangesCommandWhenImuForwardAccelDiffers)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(
                 drive,
+                driveHarness.estimator,
                 BuildDriveBaseSensorSnapshot(
                     0.0f,
                     0.0f,
@@ -1666,10 +1893,11 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandLinearOnlyStateVelocityPdIsNoOpAtMatchingTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            PrimeDriveBaseWithEncoderDelta(drive, 48, 48);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
             const ControlVector rawCommand =
@@ -1689,10 +1917,11 @@ namespace MazeMap
             MazeMap::ProportionalDerivativeCluster defaultCluster = Config::kDriveBasePDCluster;
             MazeMap::ProportionalDerivativeCluster zeroVelocityCluster = defaultCluster;
             zeroVelocityCluster.VelocityStatePD.SetGains(0.0f, 0.0f);
-            DriveBase drive(plant, defaultCluster);
+            DriveBaseHarness driveHarness(plant, defaultCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            PrimeDriveBaseWithEncoderDelta(drive, 48, 48);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
 
             const ControlVector rawCommand =
                 drive.PointCommand(
@@ -1710,10 +1939,11 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandLinearOnlyStateWheelOmegaPdIsNoOpAtMatchingTarget)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            PrimeDriveBaseWithEncoderDelta(drive, 48, 48);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
             const ControlVector rawCommand =
@@ -1731,10 +1961,11 @@ namespace MazeMap
         TEST_METHOD(DriveBasePointCommandLinearOnlyEncoderVelocityChangesCommandWhenEncoderVelocityDiffers)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            PrimeDriveBaseWithEncoderDelta(drive, 48, 48);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
             const ControlVector rawCommand =
@@ -1752,10 +1983,11 @@ namespace MazeMap
         TEST_METHOD(DriveBaseCachesGeneratedFeedforwardAndFeedbackTelemetryAsAverageDelta)
         {
             PlantModel plant;
-            DriveBase drive(plant, Config::kDriveBasePDCluster);
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
-            PrimeDriveBaseWithEncoderDelta(drive, 48, 24);
+            PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 24);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
             const ControlVector rawCommand =
@@ -1801,83 +2033,62 @@ namespace MazeMap
                 1.0e-6f);
         }
 
-#define DEFINE_PD_CLUSTER_OSCILLATION_TESTS(TestStem, PdExpr, SourceExpr)                               \
-        TEST_METHOD(TestStem##HasNoJitterOnStepInput)                                                   \
+#define DEFINE_PD_CLUSTER_OSCILLATION_TESTS(TestStem, PairingKindExpr, PdExpr)                         \
+        TEST_METHOD(TestStem##MetricsFinite)                                                             \
         {                                                                                               \
-            AssertOscillationPairingHasNoJitterOnStepInput(PdExpr, SourceExpr);                         \
+            AssertOscillationPairingMetricsFinite(PdExpr, PairingKindExpr);                              \
         }                                                                                               \
-        TEST_METHOD(TestStem##HasNoBlowoutOnStepInput)                                                  \
+        TEST_METHOD(TestStem##SourceJitterLow)                                                           \
         {                                                                                               \
-            AssertOscillationPairingHasNoBlowoutOnStepInput(PdExpr, SourceExpr);                        \
+            AssertOscillationPairingSourceJitterLow(PdExpr, PairingKindExpr);                            \
+        }                                                                                               \
+        TEST_METHOD(TestStem##EstimatorTrackingAccurate)                                                 \
+        {                                                                                               \
+            AssertOscillationPairingEstimatorTrackingAccurate(PdExpr, PairingKindExpr);                  \
+        }                                                                                               \
+        TEST_METHOD(TestStem##PlantTrackingAccurate)                                                     \
+        {                                                                                               \
+            AssertOscillationPairingPlantTrackingAccurate(PdExpr, PairingKindExpr);                      \
+        }                                                                                               \
+        TEST_METHOD(TestStem##HasNoAlternatingSaturation)                                                \
+        {                                                                                               \
+            AssertOscillationPairingHasNoAlternatingSaturation(PdExpr, PairingKindExpr);                 \
         }
 
-        // Some cluster-owned pairings are not currently consumed by a distinct DriveBase branch.
-        // These tests still pin each named PD entry against its natural signal-source analog so the
-        // plant/SRUKF oscillation harness covers the full cluster inventory.
+        // This suite now uses only the public DriveBase command entry points. Internal-only cluster
+        // entries that are not reachable through those entry points are intentionally excluded here.
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingHeadingStatePdViaStateHeadingSource,
-            Config::kDriveBasePDCluster.HeadingStatePD,
-            MazeMap::CommandPD::StateHeadingPD)
+            DriveBaseOscillationPairingHeadingStatePd,
+            OscillationPairingKind::HeadingState,
+            Config::kDriveBasePDCluster.HeadingStatePD)
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingHeadingGyroPdViaImuYawSource,
-            Config::kDriveBasePDCluster.HeadingGyroPD,
-            MazeMap::CommandPD::IMUYaw)
+            DriveBaseOscillationPairingVelocityStatePd,
+            OscillationPairingKind::VelocityState,
+            Config::kDriveBasePDCluster.VelocityStatePD)
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingHeadingEncoderDeltaPdViaEncoderVelocitySource,
-            Config::kDriveBasePDCluster.HeadingEncoderDeltaPD,
-            MazeMap::CommandPD::EncoderVelocity)
+            DriveBaseOscillationPairingYawRateStatePd,
+            OscillationPairingKind::YawRateState,
+            Config::kDriveBasePDCluster.YawRateStatePD)
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingVelocityStatePdViaStateVelocitySource,
-            Config::kDriveBasePDCluster.VelocityStatePD,
-            MazeMap::CommandPD::StateVelocityPD)
+            DriveBaseOscillationPairingYawRateGyroPd,
+            OscillationPairingKind::YawRateGyro,
+            Config::kDriveBasePDCluster.YawRateGyroPD)
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingVelocityEncoderAveragePdViaEncoderVelocitySource,
-            Config::kDriveBasePDCluster.VelocityEncoderAveragePD,
-            MazeMap::CommandPD::EncoderVelocity)
+            DriveBaseOscillationPairingLongitudinalAccelerationStatePd,
+            OscillationPairingKind::LongitudinalAccelerationState,
+            Config::kDriveBasePDCluster.LongitudinalAccelerationStatePD)
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingYawRateStatePdViaStateYawSource,
-            Config::kDriveBasePDCluster.YawRateStatePD,
-            MazeMap::CommandPD::StateYawPD)
+            DriveBaseOscillationPairingLongitudinalAccelerationImuForwardAccelPd,
+            OscillationPairingKind::LongitudinalAccelerationImuForwardAccel,
+            Config::kDriveBasePDCluster.LongitudinalAccelerationIMUForwardAccelPD)
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingYawRateGyroPdViaImuYawSource,
-            Config::kDriveBasePDCluster.YawRateGyroPD,
-            MazeMap::CommandPD::IMUYaw)
+            DriveBaseOscillationPairingWheelVelocityStatePd,
+            OscillationPairingKind::WheelVelocityState,
+            Config::kDriveBasePDCluster.WheelVelocityStatePD)
         DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingYawRateEncoderDeltaPdViaEncoderVelocitySource,
-            Config::kDriveBasePDCluster.YawRateEncoderDeltaPD,
-            MazeMap::CommandPD::EncoderVelocity)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingYawRateImuLateralAccelPdViaImuLateralAccelSource,
-            Config::kDriveBasePDCluster.YawRateIMULateralAccelPD,
-            MazeMap::CommandPD::IMULateralAccel)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingLongitudinalAccelerationStatePdViaStateAccelerationSource,
-            Config::kDriveBasePDCluster.LongitudinalAccelerationStatePD,
-            MazeMap::CommandPD::StateAccelerationPD)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingLongitudinalAccelerationImuForwardAccelPdViaImuForwardAccelSource,
-            Config::kDriveBasePDCluster.LongitudinalAccelerationIMUForwardAccelPD,
-            MazeMap::CommandPD::IMUForwardAccel)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingWheelVelocityStatePdViaStateWheelOmegaSource,
-            Config::kDriveBasePDCluster.WheelVelocityStatePD,
-            MazeMap::CommandPD::StateWheelOmegaPD)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingWheelVelocityEncoderPdViaEncoderVelocitySource,
-            Config::kDriveBasePDCluster.WheelVelocityEncoderPD,
-            MazeMap::CommandPD::EncoderVelocity)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingYawAccelerationStatePdViaStateYawSource,
-            Config::kDriveBasePDCluster.YawAccelerationStatePD,
-            MazeMap::CommandPD::StateYawPD)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingYawAccelerationGyroPdViaImuYawSource,
-            Config::kDriveBasePDCluster.YawAccelerationGyroPD,
-            MazeMap::CommandPD::IMUYaw)
-        DEFINE_PD_CLUSTER_OSCILLATION_TESTS(
-            DriveBaseOscillationPairingYawAccelerationEncoderDeltaPdViaEncoderVelocitySource,
-            Config::kDriveBasePDCluster.YawAccelerationEncoderDeltaPD,
-            MazeMap::CommandPD::EncoderVelocity)
+            DriveBaseOscillationPairingWheelVelocityEncoderPd,
+            OscillationPairingKind::WheelVelocityEncoder,
+            Config::kDriveBasePDCluster.WheelVelocityEncoderPD)
 
 #undef DEFINE_PD_CLUSTER_OSCILLATION_TESTS
 

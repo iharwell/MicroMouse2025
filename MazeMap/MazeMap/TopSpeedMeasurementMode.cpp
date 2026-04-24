@@ -161,7 +161,7 @@ namespace MazeMap::App::Internal
         static LoopController::ControlVector ModeWorkThunk(
             void* context,
             std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services)
         {
             auto* const self = static_cast<TopSpeedMeasurementMode*>(context);
@@ -239,10 +239,10 @@ namespace MazeMap::App::Internal
         bool StartStraightRun() noexcept
         {
             const Eigen::Vector2f heading(0.0f, 1.0f);
-            const PoseEstimate& pose = _drive.GetPose();
+            const MazeMap::VehicleState& pose = _runtime.RuntimeState();
             const Eigen::Vector2f targetPosition(
-                pose.xMeters,
-                pose.yMeters + kTopSpeedMeasurementDistanceM);
+                pose.GetPositionX(),
+                pose.GetPositionY() + kTopSpeedMeasurementDistanceM);
             _driveService.Cancel();
             _driveService.SetLimits(BuildTopSpeedLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
@@ -255,17 +255,17 @@ namespace MazeMap::App::Internal
             return _driveService.Active();
         }
 
-        void UpdatePeaks(const LoopController::ModeState& state) noexcept
+        void UpdatePeaks(const MazeMap::VehicleState& state) noexcept
         {
-            if (std::isfinite(state.measured.linearSpeedMps))
+            if (std::isfinite(state.GetVelocity()))
             {
                 _peakMeasuredSpeedMps =
-                    (std::max)(_peakMeasuredSpeedMps, std::fabs(state.measured.linearSpeedMps));
+                    (std::max)(_peakMeasuredSpeedMps, std::fabs(state.GetVelocity()));
             }
-            if (std::isfinite(state.sensors.planarAccelMps2))
+            if (std::isfinite(state.GetSensorSnapshot().planarAccelMps2))
             {
                 _peakPlanarAccelMps2 =
-                    (std::max)(_peakPlanarAccelMps2, std::fabs(state.sensors.planarAccelMps2));
+                    (std::max)(_peakPlanarAccelMps2, std::fabs(state.GetSensorSnapshot().planarAccelMps2));
             }
         }
 
@@ -284,7 +284,7 @@ namespace MazeMap::App::Internal
 
         LoopController::ControlVector RunTick(
             const std::uint32_t loopEndTimeUs,
-            const LoopController::ModeState& state,
+            const MazeMap::VehicleState& state,
             LoopController::TickServices& services)
         {
             (void)loopEndTimeUs;

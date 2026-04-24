@@ -1,4 +1,4 @@
-#include "..\..\MazeMap\MazeMap\MouseUkfFacade.h"
+#include "..\..\MazeMap\MazeMap\Estimator.h"
 #include "..\..\MazeMap\MazeMap\OpenFloorMeasurementSpec.h"
 #include "..\..\MazeMap\MazeMap\PlantModel.h"
 
@@ -2523,7 +2523,7 @@ namespace
             return report;
         }
 
-        MazeMap::MouseUkfFacade ukf;
+        MazeMap::Estimator ukf;
         MazeMap::PlantModel plantModel;
         const MazeMap::SrUkfCore::StateVector initialState =
             options.useKnownStationarySeed ?

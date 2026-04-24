@@ -3,13 +3,13 @@
 #include "Defines.h"
 #include "WallDetectionThresholds.h"
 
-struct PoseEstimate;
 struct SensorSnapshot;
 
 namespace MazeMap
 {
     class Maze;
     class Vehicle;
+    class VehicleState;
     class DirectionalLocation;
 }
 
@@ -40,7 +40,7 @@ namespace MazeMap::App::Internal::Runtime
         const MazeMap::Maze& maze,
         const MazeMap::Vehicle& vehicle,
         const MazeMap::DirectionalLocation& currentLocation,
-        const PoseEstimate& pose,
+        const MazeMap::VehicleState& state,
         const SensorSnapshot& snapshot,
         float& coordinateM,
         bool& correctsXAxis);
@@ -50,7 +50,7 @@ namespace MazeMap::App::Internal::Runtime
         const MazeMap::Maze& maze,
         const MazeMap::Vehicle& vehicle,
         const MazeMap::DirectionalLocation& currentLocation,
-        const PoseEstimate& pose,
+        const MazeMap::VehicleState& state,
         const SensorSnapshot& snapshot,
         float& corridorErrorM);
 

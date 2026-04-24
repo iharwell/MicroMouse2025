@@ -102,7 +102,7 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector WallSensorLedCalibrationController::ModeWorkThunk(
         void* context,
         const std::uint32_t loopEndTimeUs,
-        const LoopController::ModeState& state,
+        const MazeMap::VehicleState& state,
         LoopController::TickServices& services)
     {
         (void)loopEndTimeUs;

@@ -84,7 +84,7 @@ namespace MazeMap::App::Internal
         {
             if (_drive != nullptr)
             {
-                const_cast<MazeMap::VehicleState::StateVector&>(_drive->GetEstimatorStateVector())(MazeMap::VehicleState::kBgz) = _sensors->GetGyroBiasRadps();
+                _drive->SetGyroBiasZ(_sensors->GetGyroBiasRadps());
             }
         }
         return ok;
@@ -301,17 +301,17 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        const PoseEstimate& pose = _drive->GetPose();
+        const MazeMap::VehicleState& pose = _runtime->RuntimeState();
         float distanceM = 0.0f;
         switch (headingDirection)
         {
         case MazeMap::Left:
         case MazeMap::Right:
-            distanceM = std::fabs(targetXMeters - pose.xMeters);
+            distanceM = std::fabs(targetXMeters - pose.GetPositionX());
             break;
         case MazeMap::Up:
         case MazeMap::Down:
-            distanceM = std::fabs(targetYMeters - pose.yMeters);
+            distanceM = std::fabs(targetYMeters - pose.GetPositionY());
             break;
         default:
             return false;
@@ -352,7 +352,7 @@ namespace MazeMap::App::Internal
         }
 
         const float targetYawRad = DirectionToYawRad(targetDirection);
-        const float angleRad = AngleErrorRad(targetYawRad, _drive->GetPose().yawRad);
+        const float angleRad = AngleErrorRad(targetYawRad, _runtime->RuntimeState().GetOrientation());
         if (!std::isfinite(angleRad))
         {
             return false;
@@ -508,7 +508,7 @@ namespace MazeMap::App::Internal
 
         float actualDistanceM = 0.0f;
         if ((_drive == nullptr) ||
-            !TryDistanceToSouthWall(_drive->GetPose(), _speedVehicle->SideLeft, actualDistanceM))
+            !TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideLeft, actualDistanceM))
         {
             Fail("StartupCalibration could not store the west-facing side-wall calibration1");
             return false;
@@ -556,7 +556,7 @@ namespace MazeMap::App::Internal
 
         float actualDistanceM = 0.0f;
         if ((_drive == nullptr) ||
-            !TryDistanceToSouthWall(_drive->GetPose(), _speedVehicle->SideRight, actualDistanceM) ||
+            !TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideRight, actualDistanceM) ||
             !StoreSideReference(WallSensorId::SideRight, rightCapture, actualDistanceM) ||
             !StoreSideBaseline(WallSensorId::SideLeft, leftCapture))
         {

@@ -32,8 +32,8 @@ $mazeMapBinDir = Join-Path $repoRoot "MazeMap\MazeMap\x64\Release"
 $mazeMapDllPath = Join-Path $mazeMapBinDir "MazeMap.dll"
 $mazeMapLibPath = Join-Path $mazeMapBinDir "MazeMap.lib"
 $mazeMapFreshnessInputs = @(
-    (Join-Path $repoRoot "MazeMap\MazeMap\MouseUkfFacade.h"),
-    (Join-Path $repoRoot "MazeMap\MazeMap\MouseUkfFacade.cpp"),
+    (Join-Path $repoRoot "MazeMap\MazeMap\Estimator.h"),
+    (Join-Path $repoRoot "MazeMap\MazeMap\Estimator.cpp"),
     (Join-Path $repoRoot "MazeMap\MazeMap\PlantModel.h"),
     (Join-Path $repoRoot "MazeMap\MazeMap\PlantModel.cpp"),
     (Join-Path $repoRoot "MazeMap\MazeMap\SrUkfCore.h"),
