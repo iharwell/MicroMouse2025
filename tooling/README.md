@@ -208,3 +208,45 @@ Method notes:
 - The competition analyzer intentionally uses the current repo setup, not the old `# meta` feedforward constants in the legacy logs.
 - `forward_*_probe` phases are split by the actual logged drive command so the steady hold segment is analyzed separately from the kickoff pulse and zero-command settle.
 - The current static-friction torque used by the inverse model is derived from the current plant breakaway command in `PlantModel.cpp`, while the runtime launch-assist settings from `MazeMapRuntimeCore.h` are reported beside it so mismatches are visible.
+
+## `build_feedforward_tensor.py`
+
+Purpose: scan every feedforward-relevant capture under `TestResults`, quantize the observed transition data into a 4D tensor over `(present velocity, present yaw rate, desired acceleration, desired alpha)`, and provide a small evaluator for recovering left/right raw command estimates from that tensor.
+
+What it reads:
+
+- Every decoded `open_floor_main.csv` under `TestResults`.
+- Every archival competition `diag*.csv` under `TestResults`.
+- Any `sensor_feedforward.csv` replay export already present.
+- Any `feedforward_paths.csv` replay export already present, using one canonical `path_id` (default `state_closed_velocity`) so path-matrix duplicates do not get counted multiple times.
+
+What it writes:
+
+- `feedforward_tensor.json`: tensor axes, populated-cell means/stddevs, counts, and source totals.
+- `feedforward_tensor_cells.csv`: one row per populated tensor cell for inspection in spreadsheets.
+- `feedforward_tensor_summary.txt`: human-readable build summary.
+
+Build example:
+
+```powershell
+python tooling\build_feedforward_tensor.py build
+```
+
+Evaluation example:
+
+```powershell
+python tooling\build_feedforward_tensor.py evaluate `
+  --tensor-json TestResults\feedforward_tensor_dataset\feedforward_tensor.json `
+  --present-velocity-mps 0.45 `
+  --present-yaw-rate-radps 1.2 `
+  --desired-accel-mps2 6.0 `
+  --desired-alpha-radps2 30.0
+```
+
+Method notes:
+
+- For paired logs, the script uses the current row's logged raw commands and the next row's sensor state to derive the desired body acceleration and yaw acceleration over that tick horizon.
+- Forward velocity is treated as the mean of left/right encoder velocity when wheel-side sensors are available.
+- Yaw-rate input is taken from `gyro_raw_radps - gyro_bias_radps` when available, otherwise from the schema's corrected yaw-rate field.
+- Tensor axes are fit from a deterministic reservoir sample using quantile centers so the grid stays compact even though the raw corpus is large.
+- Evaluation first tries multilinear interpolation across populated neighboring cells and falls back to the nearest populated cell when the local neighborhood is empty.

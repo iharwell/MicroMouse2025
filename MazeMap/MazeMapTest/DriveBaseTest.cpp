@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -23,9 +24,19 @@ namespace MazeMap
 
         constexpr std::uint8_t kDriveBaseRightEncoderChannel = 1U;
         constexpr std::uint8_t kDriveBaseLeftEncoderChannel = 2U;
-        constexpr float kDriveBasePredictDtSeconds = 0.01f;
+        constexpr float kDriveBaseLoopDtSeconds = 0.001f;
+        constexpr float kDriveBaseLegacyLoopDtSeconds = 0.01f;
+        constexpr float kDriveBaseInPlaceTurnMinimumDriveCommand = 0.60f;
         constexpr int kDriveBaseHoldFeedforwardSteps = 400;
         constexpr int kDriveBaseVelocityTargetSteps = 600;
+
+        constexpr int kDriveBaseLegacyLoopStepScale =
+            static_cast<int>((kDriveBaseLegacyLoopDtSeconds / kDriveBaseLoopDtSeconds) + 0.5f);
+
+        constexpr int ScaleLegacyLoopSteps(const int legacyStepCount) noexcept
+        {
+            return legacyStepCount * kDriveBaseLegacyLoopStepScale;
+        }
 
         struct DriveBaseHarness final
         {
@@ -197,6 +208,15 @@ namespace MazeMap
             Assert::IsTrue(IsFiniteControlVector(command));
             Assert::AreEqual(solution.control.leftMotorCommand, command.leftMotorPwm, tolerance);
             Assert::AreEqual(solution.control.rightMotorCommand, command.rightMotorPwm, tolerance);
+        }
+
+        void AssertPositiveInPlaceTurnCommandMeetsMinimumDrive(
+            const ControlVector& command,
+            float minimumDriveCommand = kDriveBaseInPlaceTurnMinimumDriveCommand)
+        {
+            Assert::IsTrue(IsFiniteControlVector(command));
+            Assert::IsTrue(command.leftMotorPwm >= minimumDriveCommand);
+            Assert::IsTrue(command.rightMotorPwm <= -minimumDriveCommand);
         }
 
         void PrimeDriveBaseWithEncoderDelta(
@@ -406,10 +426,10 @@ namespace MazeMap
         {
             float initialSetpoint = 0.0f;
             float stepSetpoint = 0.20f;
-            float dtSeconds = kDriveBasePredictDtSeconds;
-            int totalSteps = 320;
-            int stepStartStep = 40;
-            int steadyWindowStartStep = 200;
+            float dtSeconds = kDriveBaseLoopDtSeconds;
+            int totalSteps = ScaleLegacyLoopSteps(320);
+            int stepStartStep = ScaleLegacyLoopSteps(40);
+            int steadyWindowStartStep = ScaleLegacyLoopSteps(200);
             float initialForwardSpeedMps = 0.0f;
             float initialYawRateRadps = 0.0f;
             int disturbanceStartStep = std::numeric_limits<int>::max();
@@ -423,21 +443,15 @@ namespace MazeMap
         struct OscillationPairingTraceSample final
         {
             float targetSignal = 0.0f;
-            float sourceSignal = 0.0f;
-            float estimatorSignal = 0.0f;
-            float truthSignal = 0.0f;
+            float feedbackSignal = 0.0f;
             float feedbackCommandComponent = 0.0f;
             std::uint16_t saturationFlags = 0U;
         };
 
         struct OscillationPairingAuditResult final
         {
-            float steadySourceErrorHighPassRms = 0.0f;
-            float steadyEstimatorErrorHighPassRms = 0.0f;
-            float steadyTruthErrorHighPassRms = 0.0f;
-            float steadySourceAbsError = 0.0f;
-            float steadyEstimatorAbsError = 0.0f;
-            float steadyTruthAbsError = 0.0f;
+            float steadyErrorHighPassRms = 0.0f;
+            float steadyAbsError = 0.0f;
             float steadyFeedbackComponentRms = 0.0f;
             float steadySignFlipRate = 0.0f;
             float fullSaturationDuty = 0.0f;
@@ -445,6 +459,14 @@ namespace MazeMap
             std::uint32_t steadySaturatedRunCount = 0U;
             std::uint32_t steadyAlternatingSaturationCount = 0U;
             bool steadyAlternatingSaturationPatternDetected = false;
+            int collectionStartStep = 0;
+            int collectionEndStep = 0;
+        };
+
+        struct OscillationPairingAuditWindow final
+        {
+            std::size_t startIndex = 0U;
+            std::size_t endIndex = 0U;
         };
 
         struct OscillationGeneratedCommand final
@@ -656,61 +678,7 @@ namespace MazeMap
             return generated;
         }
 
-        float ResolveOscillationTruthSignal(
-            const MazeMap::CommandPD signalSource,
-            const PlantModel::StateVector& truthState,
-            const MazeMap::PlantDerivatives& truthDerivatives) noexcept
-        {
-            switch (signalSource)
-            {
-            case MazeMap::CommandPD::StateHeadingPD:
-                return WrapAngleRad(truthState(VehicleState::kPsi));
-            case MazeMap::CommandPD::StateYawPD:
-            case MazeMap::CommandPD::IMUYaw:
-                return truthState(VehicleState::kR);
-            case MazeMap::CommandPD::StateWheelOmegaPD:
-                return 0.5f * (truthState(VehicleState::kOmegaL) + truthState(VehicleState::kOmegaR));
-            case MazeMap::CommandPD::StateAccelerationPD:
-                return truthDerivatives.longitudinalAccelMps2;
-            case MazeMap::CommandPD::IMUForwardAccel:
-                return truthDerivatives.imuAccelBodyMps2.y();
-            case MazeMap::CommandPD::IMULateralAccel:
-                return truthDerivatives.imuAccelBodyMps2.x();
-            case MazeMap::CommandPD::StateVelocityPD:
-            case MazeMap::CommandPD::EncoderVelocity:
-            default:
-                return truthState(VehicleState::kU);
-            }
-        }
-
-        float ResolveOscillationEstimatorSignal(
-            const MazeMap::CommandPD signalSource,
-            const PlantModel::StateVector& estimatorState,
-            const MazeMap::PlantDerivatives& estimatorDerivatives) noexcept
-        {
-            switch (signalSource)
-            {
-            case MazeMap::CommandPD::StateHeadingPD:
-                return WrapAngleRad(estimatorState(VehicleState::kPsi));
-            case MazeMap::CommandPD::StateYawPD:
-            case MazeMap::CommandPD::IMUYaw:
-                return estimatorState(VehicleState::kR);
-            case MazeMap::CommandPD::StateWheelOmegaPD:
-                return 0.5f * (estimatorState(VehicleState::kOmegaL) + estimatorState(VehicleState::kOmegaR));
-            case MazeMap::CommandPD::StateAccelerationPD:
-                return estimatorDerivatives.longitudinalAccelMps2;
-            case MazeMap::CommandPD::IMUForwardAccel:
-                return estimatorDerivatives.imuAccelBodyMps2.y();
-            case MazeMap::CommandPD::IMULateralAccel:
-                return estimatorDerivatives.imuAccelBodyMps2.x();
-            case MazeMap::CommandPD::StateVelocityPD:
-            case MazeMap::CommandPD::EncoderVelocity:
-            default:
-                return estimatorState(VehicleState::kU);
-            }
-        }
-
-        float ResolveOscillationSourceSignal(
+        float ResolveOscillationFeedbackSignal(
             const MazeMap::CommandPD signalSource,
             const SensorSnapshot& snapshot,
             const DriveTelemetry& telemetry,
@@ -724,7 +692,7 @@ namespace MazeMap
             case MazeMap::CommandPD::StateYawPD:
                 return estimatorState(VehicleState::kR);
             case MazeMap::CommandPD::StateWheelOmegaPD:
-                return 0.5f * (telemetry.leftEncoderOmegaRadps + telemetry.rightEncoderOmegaRadps);
+                return 0.5f * (estimatorState(VehicleState::kOmegaL) + estimatorState(VehicleState::kOmegaR));
             case MazeMap::CommandPD::StateAccelerationPD:
                 return estimatorDerivatives.longitudinalAccelMps2;
             case MazeMap::CommandPD::EncoderVelocity:
@@ -767,6 +735,109 @@ namespace MazeMap
             return targetSignal - actualSignal;
         }
 
+        bool IsAccelerationLikeOscillationSignal(
+            const MazeMap::CommandPD signalSource) noexcept
+        {
+            return
+                (signalSource == MazeMap::CommandPD::StateAccelerationPD) ||
+                (signalSource == MazeMap::CommandPD::IMUForwardAccel) ||
+                (signalSource == MazeMap::CommandPD::IMULateralAccel);
+        }
+
+        bool IsVelocityOrYawRateOscillationSignal(
+            const MazeMap::CommandPD signalSource) noexcept
+        {
+            return
+                (signalSource == MazeMap::CommandPD::StateVelocityPD) ||
+                (signalSource == MazeMap::CommandPD::EncoderVelocity) ||
+                (signalSource == MazeMap::CommandPD::StateWheelOmegaPD) ||
+                (signalSource == MazeMap::CommandPD::StateYawPD) ||
+                (signalSource == MazeMap::CommandPD::IMUYaw);
+        }
+
+        bool HasReachedOscillationTarget(
+            const float initialSetpoint,
+            const float targetSignal,
+            const float actualSignal) noexcept
+        {
+            const float targetDelta = targetSignal - initialSetpoint;
+            if (std::fabs(targetDelta) <= 1.0e-6f)
+            {
+                return true;
+            }
+
+            return
+                (targetDelta > 0.0f) ?
+                (actualSignal >= targetSignal) :
+                (actualSignal <= targetSignal);
+        }
+
+        OscillationPairingAuditWindow ResolveOscillationAuditWindow(
+            const MazeMap::CommandPD signalSource,
+            const OscillationPairingScenario& scenario,
+            const std::vector<OscillationPairingTraceSample>& samples) noexcept
+        {
+            const int sampleCount = static_cast<int>(samples.size());
+            const int lastSampleIndex = (std::max)(sampleCount - 1, 0);
+            int startStep =
+                (std::clamp)(
+                    scenario.steadyWindowStartStep,
+                    0,
+                    lastSampleIndex);
+            int endStep = sampleCount;
+
+            if (IsAccelerationLikeOscillationSignal(signalSource))
+            {
+                startStep =
+                    (std::clamp)(
+                        scenario.stepStartStep + 10,
+                        0,
+                        lastSampleIndex);
+                endStep = (std::min)(sampleCount, startStep + 3000);
+                for (int sampleIndex = startStep; sampleIndex < endStep; ++sampleIndex)
+                {
+                    if (samples[static_cast<std::size_t>(sampleIndex)].saturationFlags != 0U)
+                    {
+                        endStep = sampleIndex;
+                        break;
+                    }
+                }
+            }
+            else if (IsVelocityOrYawRateOscillationSignal(signalSource))
+            {
+                const int timeBasedStartStep =
+                    (std::clamp)(
+                        scenario.stepStartStep + 1000,
+                        0,
+                        lastSampleIndex);
+                int firstTargetHitStep = sampleCount;
+                for (int sampleIndex = scenario.stepStartStep; sampleIndex < sampleCount; ++sampleIndex)
+                {
+                    const OscillationPairingTraceSample& sample =
+                        samples[static_cast<std::size_t>(sampleIndex)];
+                    if (HasReachedOscillationTarget(
+                        scenario.initialSetpoint,
+                        sample.targetSignal,
+                        sample.feedbackSignal))
+                    {
+                        firstTargetHitStep = sampleIndex;
+                        break;
+                    }
+                }
+
+                startStep = (std::min)(timeBasedStartStep, firstTargetHitStep);
+                startStep = (std::clamp)(startStep, 0, lastSampleIndex);
+                endStep = (std::min)(sampleCount, startStep + 2000);
+            }
+
+            endStep = (std::clamp)(endStep, startStep + 1, sampleCount);
+            return
+                OscillationPairingAuditWindow{
+                    static_cast<std::size_t>(startStep),
+                    static_cast<std::size_t>(endStep)
+                };
+        }
+
         float ResolveOscillationScenarioSetpoint(
             const OscillationPairingScenario& scenario,
             const int stepIndex) noexcept
@@ -775,19 +846,6 @@ namespace MazeMap
                 (stepIndex >= scenario.stepStartStep) ?
                 scenario.stepSetpoint :
                 scenario.initialSetpoint;
-        }
-
-        float ResolveOscillationScenarioReferenceMagnitude(
-            const OscillationPairingScenario& scenario) noexcept
-        {
-            const float initialMagnitude = std::fabs(scenario.initialSetpoint);
-            const float stepMagnitude = std::fabs(scenario.stepSetpoint);
-            const float stepDeltaMagnitude =
-                std::fabs(scenario.stepSetpoint - scenario.initialSetpoint);
-            return
-                (std::max)(
-                    (std::max)(initialMagnitude, stepMagnitude),
-                    stepDeltaMagnitude);
         }
 
         float ResolveOscillationJitterThreshold(
@@ -813,30 +871,6 @@ namespace MazeMap
             }
         }
 
-        float ResolveOscillationSteadyErrorThreshold(
-            const MazeMap::CommandPD signalSource,
-            const float setpoint) noexcept
-        {
-            switch (signalSource)
-            {
-            case MazeMap::CommandPD::StateHeadingPD:
-                return (std::max)(0.15f, 0.50f * std::fabs(setpoint));
-            case MazeMap::CommandPD::StateYawPD:
-            case MazeMap::CommandPD::IMUYaw:
-                return (std::max)(0.15f, 0.25f * std::fabs(setpoint));
-            case MazeMap::CommandPD::StateWheelOmegaPD:
-                return (std::max)(0.50f, 0.25f * std::fabs(setpoint));
-            case MazeMap::CommandPD::StateAccelerationPD:
-            case MazeMap::CommandPD::IMUForwardAccel:
-            case MazeMap::CommandPD::IMULateralAccel:
-                return (std::max)(0.15f, 0.50f * std::fabs(setpoint));
-            case MazeMap::CommandPD::StateVelocityPD:
-            case MazeMap::CommandPD::EncoderVelocity:
-            default:
-                return (std::max)(0.15f, 0.25f * std::fabs(setpoint));
-            }
-        }
-
         OscillationPairingScenario BuildStepOscillationPairingScenario(
             const MazeMap::CommandPD signalSource) noexcept
         {
@@ -845,39 +879,43 @@ namespace MazeMap
             {
             case MazeMap::CommandPD::StateHeadingPD:
                 scenario.stepSetpoint = 0.15f;
-                scenario.totalSteps = 520;
-                scenario.steadyWindowStartStep = 360;
+                scenario.totalSteps = ScaleLegacyLoopSteps(520);
+                scenario.steadyWindowStartStep = ScaleLegacyLoopSteps(360);
                 break;
             case MazeMap::CommandPD::StateYawPD:
             case MazeMap::CommandPD::IMUYaw:
-                scenario.stepSetpoint = 0.35f;
-                scenario.totalSteps = 520;
-                scenario.steadyWindowStartStep = 360;
+                scenario.stepSetpoint = 10.0f;
+                scenario.stepStartStep = 1;
+                scenario.totalSteps = 3001;
+                scenario.steadyWindowStartStep = 1001;
                 break;
             case MazeMap::CommandPD::StateWheelOmegaPD:
-                scenario.stepSetpoint = 4.0f;
-                scenario.totalSteps = 520;
-                scenario.steadyWindowStartStep = 360;
+                scenario.stepSetpoint = 0.60f / PlantParams::Default().wheelRadiusM;
+                scenario.stepStartStep = 1;
+                scenario.totalSteps = 3001;
+                scenario.steadyWindowStartStep = 1001;
                 break;
             case MazeMap::CommandPD::StateAccelerationPD:
             case MazeMap::CommandPD::IMUForwardAccel:
-                scenario.stepSetpoint = 0.75f;
-                scenario.stepStartStep = 30;
-                scenario.totalSteps = 460;
-                scenario.steadyWindowStartStep = 300;
+                scenario.stepSetpoint = 0.5f * 9.80665f;
+                scenario.initialForwardSpeedMps = 0.60f;
+                scenario.stepStartStep = 1;
+                scenario.totalSteps = 3011;
+                scenario.steadyWindowStartStep = 11;
                 break;
             case MazeMap::CommandPD::IMULateralAccel:
                 scenario.stepSetpoint = 0.30f;
                 scenario.initialForwardSpeedMps = 0.20f;
-                scenario.totalSteps = 520;
-                scenario.steadyWindowStartStep = 360;
+                scenario.totalSteps = ScaleLegacyLoopSteps(520);
+                scenario.steadyWindowStartStep = ScaleLegacyLoopSteps(360);
                 break;
             case MazeMap::CommandPD::StateVelocityPD:
             case MazeMap::CommandPD::EncoderVelocity:
             default:
-                scenario.stepSetpoint = 0.20f;
-                scenario.totalSteps = 840;
-                scenario.steadyWindowStartStep = 640;
+                scenario.stepSetpoint = 0.60f;
+                scenario.stepStartStep = 1;
+                scenario.totalSteps = 3001;
+                scenario.steadyWindowStartStep = 1001;
                 break;
             }
 
@@ -1072,23 +1110,13 @@ namespace MazeMap
 
                 OscillationPairingTraceSample sample{};
                 sample.targetSignal = generatedCommand.targetSignal;
-                sample.sourceSignal =
-                    ResolveOscillationSourceSignal(
+                sample.feedbackSignal =
+                    ResolveOscillationFeedbackSignal(
                         signalSource,
                         snapshot,
                         updatedTelemetry,
                         estimatorState,
                         estimatorDerivatives);
-                sample.estimatorSignal =
-                    ResolveOscillationEstimatorSignal(
-                        signalSource,
-                        estimatorState,
-                        estimatorDerivatives);
-                sample.truthSignal =
-                    ResolveOscillationTruthSignal(
-                        signalSource,
-                        truthState,
-                        truthDerivatives);
                 sample.feedbackCommandComponent =
                     ResolveOscillationFeedbackComponent(signalSource, updatedTelemetry);
                 sample.saturationFlags = updatedTelemetry.saturationFlags;
@@ -1114,63 +1142,53 @@ namespace MazeMap
                 return result;
             }
 
-            const std::size_t steadyStartIndex =
-                static_cast<std::size_t>((std::clamp)(
-                    scenario.steadyWindowStartStep,
-                    0,
-                    static_cast<int>(samples.size())));
-
-            std::vector<float> sourceErrors;
-            std::vector<float> estimatorErrors;
-            std::vector<float> truthErrors;
+            std::vector<float> errors;
             std::vector<float> feedbackComponents;
             std::vector<std::uint16_t> saturationFlags;
-            sourceErrors.reserve(samples.size());
-            estimatorErrors.reserve(samples.size());
-            truthErrors.reserve(samples.size());
+            errors.reserve(samples.size());
             feedbackComponents.reserve(samples.size());
             saturationFlags.reserve(samples.size());
 
             for (const OscillationPairingTraceSample& sample : samples)
             {
-                const float sourceError =
+                const float error =
                     ComputeOscillationTrackingError(
                         signalSource,
                         sample.targetSignal,
-                        sample.sourceSignal);
-                const float estimatorError =
-                    ComputeOscillationTrackingError(
-                        signalSource,
-                        sample.targetSignal,
-                        sample.estimatorSignal);
-                const float truthError =
-                    ComputeOscillationTrackingError(
-                        signalSource,
-                        sample.targetSignal,
-                        sample.truthSignal);
-                sourceErrors.push_back(sourceError);
-                estimatorErrors.push_back(estimatorError);
-                truthErrors.push_back(truthError);
+                        sample.feedbackSignal);
+                errors.push_back(error);
                 feedbackComponents.push_back(sample.feedbackCommandComponent);
                 saturationFlags.push_back(sample.saturationFlags);
             }
 
-            result.steadySourceErrorHighPassRms =
-                ComputeHighPassRms(sourceErrors, steadyStartIndex);
-            result.steadyEstimatorErrorHighPassRms =
-                ComputeHighPassRms(estimatorErrors, steadyStartIndex);
-            result.steadyTruthErrorHighPassRms =
-                ComputeHighPassRms(truthErrors, steadyStartIndex);
-            result.steadySourceAbsError =
-                ComputeMeanAbsoluteValue(sourceErrors, steadyStartIndex);
-            result.steadyEstimatorAbsError =
-                ComputeMeanAbsoluteValue(estimatorErrors, steadyStartIndex);
-            result.steadyTruthAbsError =
-                ComputeMeanAbsoluteValue(truthErrors, steadyStartIndex);
+            const OscillationPairingAuditWindow auditWindow =
+                ResolveOscillationAuditWindow(signalSource, scenario, samples);
+            result.collectionStartStep = static_cast<int>(auditWindow.startIndex);
+            result.collectionEndStep = static_cast<int>(auditWindow.endIndex);
+
+            const auto errorsWindowBegin = errors.begin() + static_cast<std::ptrdiff_t>(auditWindow.startIndex);
+            const auto errorsWindowEnd = errors.begin() + static_cast<std::ptrdiff_t>(auditWindow.endIndex);
+            const auto feedbackWindowBegin =
+                feedbackComponents.begin() + static_cast<std::ptrdiff_t>(auditWindow.startIndex);
+            const auto feedbackWindowEnd =
+                feedbackComponents.begin() + static_cast<std::ptrdiff_t>(auditWindow.endIndex);
+            const auto saturationWindowBegin =
+                saturationFlags.begin() + static_cast<std::ptrdiff_t>(auditWindow.startIndex);
+            const auto saturationWindowEnd =
+                saturationFlags.begin() + static_cast<std::ptrdiff_t>(auditWindow.endIndex);
+
+            const std::vector<float> windowErrors(errorsWindowBegin, errorsWindowEnd);
+            const std::vector<float> windowFeedbackComponents(feedbackWindowBegin, feedbackWindowEnd);
+            const std::vector<std::uint16_t> windowSaturationFlags(saturationWindowBegin, saturationWindowEnd);
+
+            result.steadyErrorHighPassRms =
+                ComputeHighPassRms(windowErrors, 0U);
+            result.steadyAbsError =
+                ComputeMeanAbsoluteValue(windowErrors, 0U);
             result.steadyFeedbackComponentRms =
-                ComputeHighPassRms(feedbackComponents, steadyStartIndex);
+                ComputeHighPassRms(windowFeedbackComponents, 0U);
             result.steadySignFlipRate =
-                ComputeSignFlipRate(sourceErrors, steadyStartIndex, kOscillationTraceDeadbandMps);
+                ComputeSignFlipRate(windowErrors, 0U, kOscillationTraceDeadbandMps);
             {
                 std::vector<bool> saturationSamples;
                 saturationSamples.reserve(samples.size());
@@ -1179,11 +1197,18 @@ namespace MazeMap
                     saturationSamples.push_back(flags != 0U);
                 }
                 result.fullSaturationDuty = ComputeSaturationDuty(saturationSamples, 0U);
-                result.steadySaturationDuty = ComputeSaturationDuty(saturationSamples, steadyStartIndex);
+
+                std::vector<bool> windowSaturationSamples;
+                windowSaturationSamples.reserve(windowSaturationFlags.size());
+                for (const std::uint16_t flags : windowSaturationFlags)
+                {
+                    windowSaturationSamples.push_back(flags != 0U);
+                }
+                result.steadySaturationDuty = ComputeSaturationDuty(windowSaturationSamples, 0U);
             }
 
             const AlternatingSaturationPatternResult saturationPattern =
-                AnalyzeAlternatingSaturationPattern(saturationFlags, steadyStartIndex);
+                AnalyzeAlternatingSaturationPattern(windowSaturationFlags, 0U);
             result.steadySaturatedRunCount = saturationPattern.saturatedRunCount;
             result.steadyAlternatingSaturationCount = saturationPattern.alternationCount;
             result.steadyAlternatingSaturationPatternDetected = saturationPattern.patternDetected;
@@ -1195,12 +1220,8 @@ namespace MazeMap
             const OscillationPairingAuditResult& result)
         {
             return
-                std::wstring(L"steady_source_hp_rms=") + std::to_wstring(result.steadySourceErrorHighPassRms) +
-                L" steady_estimator_hp_rms=" + std::to_wstring(result.steadyEstimatorErrorHighPassRms) +
-                L" steady_truth_hp_rms=" + std::to_wstring(result.steadyTruthErrorHighPassRms) +
-                L" steady_source_abs_err=" + std::to_wstring(result.steadySourceAbsError) +
-                L" steady_estimator_abs_err=" + std::to_wstring(result.steadyEstimatorAbsError) +
-                L" steady_truth_abs_err=" + std::to_wstring(result.steadyTruthAbsError) +
+                std::wstring(L"steady_signal_hp_rms=") + std::to_wstring(result.steadyErrorHighPassRms) +
+                L" steady_signal_abs_err=" + std::to_wstring(result.steadyAbsError) +
                 L" steady_feedback_component_rms=" + std::to_wstring(result.steadyFeedbackComponentRms) +
                 L" steady_sign_flip_rate=" + std::to_wstring(result.steadySignFlipRate) +
                 L" full_sat_duty=" + std::to_wstring(result.fullSaturationDuty) +
@@ -1219,19 +1240,16 @@ namespace MazeMap
                 L" initial_setpoint=" + std::to_wstring(scenario.initialSetpoint) +
                 L" step_setpoint=" + std::to_wstring(scenario.stepSetpoint) +
                 L" step_start=" + std::to_wstring(scenario.stepStartStep) +
-                L" steady_start=" + std::to_wstring(scenario.steadyWindowStartStep);
+                L" collect_start=" + std::to_wstring(audit.collectionStartStep) +
+                L" collect_end=" + std::to_wstring(audit.collectionEndStep);
         }
 
         bool OscillationPairingAuditHasFiniteMetrics(
             const OscillationPairingAuditResult& audit) noexcept
         {
             return
-                std::isfinite(audit.steadySourceErrorHighPassRms) &&
-                std::isfinite(audit.steadyEstimatorErrorHighPassRms) &&
-                std::isfinite(audit.steadyTruthErrorHighPassRms) &&
-                std::isfinite(audit.steadySourceAbsError) &&
-                std::isfinite(audit.steadyEstimatorAbsError) &&
-                std::isfinite(audit.steadyTruthAbsError) &&
+                std::isfinite(audit.steadyErrorHighPassRms) &&
+                std::isfinite(audit.steadyAbsError) &&
                 std::isfinite(audit.steadyFeedbackComponentRms) &&
                 std::isfinite(audit.steadySignFlipRate) &&
                 std::isfinite(audit.fullSaturationDuty) &&
@@ -1259,7 +1277,7 @@ namespace MazeMap
                 message.c_str());
         }
 
-        void AssertOscillationPairingSourceJitterLow(
+        void AssertOscillationPairingSignalJitterLow(
             const MazeMap::ProportionalDerivative& pd,
             const OscillationPairingKind pairingKind)
         {
@@ -1277,72 +1295,14 @@ namespace MazeMap
                 BuildOscillationPairingStepMessage(scenario, audit) +
                 L" jitter_threshold=" + std::to_wstring(jitterThreshold);
 
-            if (!std::isfinite(audit.steadySourceErrorHighPassRms))
+            if (!std::isfinite(audit.steadyErrorHighPassRms))
             {
                 return;
             }
 
             Assert::IsTrue(
-                audit.steadySourceErrorHighPassRms <= jitterThreshold,
+                audit.steadyErrorHighPassRms <= jitterThreshold,
                 message.c_str());
-        }
-
-        void AssertOscillationPairingEstimatorTrackingAccurate(
-            const MazeMap::ProportionalDerivative& pd,
-            const OscillationPairingKind pairingKind)
-        {
-            const MazeMap::CommandPD signalSource =
-                ResolveOscillationPairingSignalSource(pairingKind);
-            const OscillationPairingScenario scenario =
-                BuildStepOscillationPairingScenario(signalSource);
-            const OscillationPairingAuditResult audit =
-                AuditOscillationPairingAgainstPlantAndSrUkf(
-                    pd,
-                    pairingKind,
-                    scenario);
-            const float steadyErrorThreshold =
-                ResolveOscillationSteadyErrorThreshold(
-                    signalSource,
-                    ResolveOscillationScenarioReferenceMagnitude(scenario));
-            const std::wstring message =
-                BuildOscillationPairingStepMessage(scenario, audit) +
-                L" steady_error_threshold=" + std::to_wstring(steadyErrorThreshold);
-
-            if (!std::isfinite(audit.steadyEstimatorAbsError))
-            {
-                return;
-            }
-
-            Assert::IsTrue(audit.steadyEstimatorAbsError <= steadyErrorThreshold, message.c_str());
-        }
-
-        void AssertOscillationPairingPlantTrackingAccurate(
-            const MazeMap::ProportionalDerivative& pd,
-            const OscillationPairingKind pairingKind)
-        {
-            const MazeMap::CommandPD signalSource =
-                ResolveOscillationPairingSignalSource(pairingKind);
-            const OscillationPairingScenario scenario =
-                BuildStepOscillationPairingScenario(signalSource);
-            const OscillationPairingAuditResult audit =
-                AuditOscillationPairingAgainstPlantAndSrUkf(
-                    pd,
-                    pairingKind,
-                    scenario);
-            const float steadyErrorThreshold =
-                ResolveOscillationSteadyErrorThreshold(
-                    signalSource,
-                    ResolveOscillationScenarioReferenceMagnitude(scenario));
-            const std::wstring message =
-                BuildOscillationPairingStepMessage(scenario, audit) +
-                L" steady_error_threshold=" + std::to_wstring(steadyErrorThreshold);
-
-            if (!std::isfinite(audit.steadyTruthAbsError))
-            {
-                return;
-            }
-
-            Assert::IsTrue(audit.steadyTruthAbsError <= steadyErrorThreshold, message.c_str());
         }
 
         void AssertOscillationPairingHasNoAlternatingSaturation(
@@ -1591,6 +1551,60 @@ namespace MazeMap
             AssertDriveCommandMatchesSolution(command, solution);
         }
 
+        TEST_METHOD(DriveBasePointYawRateCommandStateYawPdAtRestMeetsInPlaceTurnMinimumDrive)
+        {
+            PlantModel plant;
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            UpdateDriveBaseSignals(drive, driveHarness.estimator, BuildDriveBaseSensorSnapshot(0.0f));
+
+            const ControlVector command =
+                drive.PointYawRateCommand(
+                    3.0f,
+                    MazeMap::CommandPD::StateYawPD);
+
+            AssertPositiveInPlaceTurnCommandMeetsMinimumDrive(command);
+        }
+
+        TEST_METHOD(DriveBasePointYawRateCommandImuYawPdAtRestMeetsInPlaceTurnMinimumDrive)
+        {
+            PlantModel plant;
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            UpdateDriveBaseSignals(drive, driveHarness.estimator, BuildDriveBaseSensorSnapshot(0.0f));
+
+            const ControlVector command =
+                drive.PointYawRateCommand(
+                    3.0f,
+                    MazeMap::CommandPD::IMUYaw);
+
+            AssertPositiveInPlaceTurnCommandMeetsMinimumDrive(command);
+        }
+
+        TEST_METHOD(DriveBasePointCommandWithHeadingTargetAtRestMeetsInPlaceTurnMinimumDrive)
+        {
+            PlantModel plant;
+            DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
+            DriveBase& drive = driveHarness.drive;
+            Assert::IsTrue(drive.Begin());
+            drive.SetPose(0.0f, 0.0f, 0.0f);
+            UpdateDriveBaseSignals(drive, driveHarness.estimator, BuildDriveBaseSensorSnapshot(0.0f));
+
+            const ControlVector command =
+                drive.PointCommandWithHeadingTarget(
+                    0.0f,
+                    0.0f,
+                    0.15f,
+                    MazeMap::CommandPD::RawCommand,
+                    MazeMap::CommandPD::StateHeadingPD);
+
+            AssertPositiveInPlaceTurnCommandMeetsMinimumDrive(command);
+        }
+
         TEST_METHOD(DriveBaseRawFeedforwardReportsAlignedCycleContextUsage)
         {
             PlantModel plant;
@@ -1801,7 +1815,7 @@ namespace MazeMap
             appliedCommand.leftMotorPwm = 0.80f;
             appliedCommand.rightMotorPwm = 0.80f;
             drive.CommandGenerated(appliedCommand, 0.0f, 0.0f, false);
-            for (int cycleIndex = 0; cycleIndex < 24; ++cycleIndex)
+            for (int cycleIndex = 0; cycleIndex < ScaleLegacyLoopSteps(24); ++cycleIndex)
             {
                 SimulateDriveBaseCycle(
                     drive,
@@ -1810,7 +1824,7 @@ namespace MazeMap
                     truthState,
                     leftEncoderRemainderCounts,
                     rightEncoderRemainderCounts,
-                    kDriveBasePredictDtSeconds);
+                    kDriveBaseLoopDtSeconds);
             }
             const float presentLinearSpeedMps =
                 driveHarness.estimator.StateVector()(VehicleState::kU);
@@ -2038,17 +2052,9 @@ namespace MazeMap
         {                                                                                               \
             AssertOscillationPairingMetricsFinite(PdExpr, PairingKindExpr);                              \
         }                                                                                               \
-        TEST_METHOD(TestStem##SourceJitterLow)                                                           \
+        TEST_METHOD(TestStem##SignalJitterLow)                                                           \
         {                                                                                               \
-            AssertOscillationPairingSourceJitterLow(PdExpr, PairingKindExpr);                            \
-        }                                                                                               \
-        TEST_METHOD(TestStem##EstimatorTrackingAccurate)                                                 \
-        {                                                                                               \
-            AssertOscillationPairingEstimatorTrackingAccurate(PdExpr, PairingKindExpr);                  \
-        }                                                                                               \
-        TEST_METHOD(TestStem##PlantTrackingAccurate)                                                     \
-        {                                                                                               \
-            AssertOscillationPairingPlantTrackingAccurate(PdExpr, PairingKindExpr);                      \
+            AssertOscillationPairingSignalJitterLow(PdExpr, PairingKindExpr);                            \
         }                                                                                               \
         TEST_METHOD(TestStem##HasNoAlternatingSaturation)                                                \
         {                                                                                               \

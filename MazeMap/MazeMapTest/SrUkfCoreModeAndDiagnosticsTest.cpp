@@ -336,7 +336,8 @@ namespace MazeMap
                 MeasurementUpdateResult yawResult;
             };
 
-            constexpr float kPivotDtSeconds = 0.01f;
+            constexpr float kPivotDtSeconds = 0.001f;
+            constexpr int kPivotLegacyStepScale = 10;
             const auto runPivotTick =
                 [&](int totalLeftCounts,
                     int totalRightCounts,
@@ -361,10 +362,10 @@ namespace MazeMap
             int seedLeftCounts = 0;
             int seedRightCounts = 0;
             bool yawConflictSeeded = false;
-            for (int seedIndex = 0; seedIndex < 8; ++seedIndex)
+            for (int seedIndex = 0; seedIndex < (8 * kPivotLegacyStepScale); ++seedIndex)
             {
-                seedLeftCounts += 100;
-                seedRightCounts -= 100;
+                seedLeftCounts += (100 / kPivotLegacyStepScale);
+                seedRightCounts -= (100 / kPivotLegacyStepScale);
                 const PivotTickResults seedResults = runPivotTick(seedLeftCounts, seedRightCounts, 12.0f, -12.0f, 0.0f);
                 Assert::IsTrue(seedResults.predictAccepted);
                 Assert::IsTrue(seedResults.encoderResult.attempted);
@@ -385,7 +386,12 @@ namespace MazeMap
             Assert::IsTrue(yawConflictSeeded, L"Pivot scrub seed phase never produced a yaw conflict.");
 
             const PivotTickResults pivotResults =
-                runPivotTick(seedLeftCounts + 120, seedRightCounts - 120, 18.0f, -18.0f, 1.80f);
+                runPivotTick(
+                    seedLeftCounts + (120 / kPivotLegacyStepScale),
+                    seedRightCounts - (120 / kPivotLegacyStepScale),
+                    18.0f,
+                    -18.0f,
+                    1.80f);
             Assert::IsTrue(pivotResults.predictAccepted, L"Pivot scrub predict step was rejected.");
             Assert::IsTrue(pivotResults.encoderResult.attempted, L"Pivot scrub encoder update was not attempted.");
             Assert::IsTrue(pivotResults.encoderResult.accepted, L"Pivot scrub encoder update was rejected.");

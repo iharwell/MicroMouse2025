@@ -67,7 +67,7 @@ namespace
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
         const float leftWheelSpeedMps,
         const float rightWheelSpeedMps,
-        const float dtSeconds = 0.01f) noexcept
+        const float dtSeconds = 0.001f) noexcept
     {
         const MazeMap::PlantParams params = MazeMap::PlantParams::Default();
         const float distancePerCountM = MazeMap::DistancePerEncoderCountMeters(params);

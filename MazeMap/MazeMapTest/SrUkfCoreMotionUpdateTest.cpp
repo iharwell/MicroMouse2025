@@ -17,7 +17,7 @@ namespace MazeMap
     {
         constexpr float kZeroVelocityToleranceMps = 0.008f;
 
-        VehicleState::StateVector PredictStationarySplitCommandStateAfterFifteenPredicts()
+        VehicleState::StateVector PredictStationarySplitCommandStateAfterPivotPredictSequence()
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core(params);
@@ -43,8 +43,8 @@ namespace MazeMap
             control.fanDutyCycle = 0.80f;
             control.batteryVoltageV = params.supplyVoltageV;
 
-            constexpr float dtSeconds = 0.01f;
-            constexpr int kPredictSteps = 15;
+            constexpr float dtSeconds = 0.001f;
+            constexpr int kPredictSteps = 500;
             const float pivotScrubCommandAngularRadps =
                 SrUkfCore::GetRuntimeTuning().pivotScrubMinCommandAngularRadps;
             SyntheticEncoderRemainderState syntheticEncoderState{};
@@ -207,7 +207,7 @@ namespace MazeMap
             };
             SrUkfCore core(params);
             ControlInput control{};
-            constexpr float dt = 0.010f;
+            constexpr float dt = 0.001f;
 
             Assert::IsTrue(core.predict(dt, control));
             EncoderObs first{};
@@ -278,7 +278,7 @@ namespace MazeMap
             encoder.omegaLeftRadps = 10.6f;
             encoder.omegaRightRadps = 2.4f;
 
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.010f);
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.001f);
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
 
@@ -323,7 +323,7 @@ namespace MazeMap
             encoder.omegaLeftRadps = 120.0f;
             encoder.omegaRightRadps = -115.0f;
 
-            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.010f);
+            const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.001f);
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
             Assert::IsTrue(encoderResult.nis > SrUkfCore::GetRuntimeTuning().encoderPairNisThreshold);
@@ -403,15 +403,14 @@ namespace MazeMap
         TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandKeepsZeroForwardVelocity)
         {
             const VehicleState::StateVector predictedState =
-                PredictStationarySplitCommandStateAfterFifteenPredicts();
-
+                PredictStationarySplitCommandStateAfterPivotPredictSequence();
             Assert::AreEqual(0.0f, predictedState(VehicleState::kU), kZeroVelocityToleranceMps);
         }
 
         TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandProducesPositiveLeftWheelSpeed)
         {
             const VehicleState::StateVector predictedState =
-                PredictStationarySplitCommandStateAfterFifteenPredicts();
+                PredictStationarySplitCommandStateAfterPivotPredictSequence();
 
             Assert::IsTrue(predictedState(VehicleState::kOmegaL) > 0.0f);
         }
@@ -419,7 +418,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandProducesNegativeRightWheelSpeed)
         {
             const VehicleState::StateVector predictedState =
-                PredictStationarySplitCommandStateAfterFifteenPredicts();
+                PredictStationarySplitCommandStateAfterPivotPredictSequence();
 
             Assert::IsTrue(predictedState(VehicleState::kOmegaR) < 0.0f);
         }
@@ -427,7 +426,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandKeepsZeroAverageWheelSpeed)
         {
             const VehicleState::StateVector predictedState =
-                PredictStationarySplitCommandStateAfterFifteenPredicts();
+                PredictStationarySplitCommandStateAfterPivotPredictSequence();
             const float averageWheelLinearSpeedMps =
                 0.5f *
                 (predictedState(VehicleState::kOmegaL) + predictedState(VehicleState::kOmegaR)) *
@@ -934,7 +933,7 @@ namespace MazeMap
                 0.02f);
             input.leftAppliedBankTorqueNm = 0.10f;
             input.rightAppliedBankTorqueNm = -0.08f;
-            input.dtS = 0.010f;
+            input.dtS = 0.001f;
 
             ModelCycleContext cycleContext{};
             cycleContext.schedule.exactStationaryLock = true;
