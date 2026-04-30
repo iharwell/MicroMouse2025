@@ -175,7 +175,6 @@ namespace MazeMap::App::Internal
         {
             (void)_runtime.FailActiveMode("Showcasing donut sweep could not start");
             ReleaseSelectorMonitor();
-            _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
             SetMissionLevelFanEnabled(false);
@@ -209,7 +208,6 @@ namespace MazeMap::App::Internal
         }
 
         ReleaseSelectorMonitor();
-        _driveService.Cancel();
         _drive.Brake();
         _drive.UseNominalWheelControlProfile();
         SetMissionLevelFanEnabled(false);
@@ -238,7 +236,6 @@ namespace MazeMap::App::Internal
 
         self->ReleaseSelectorMonitor();
         self->_phase = Phase::Idle;
-        self->_driveService.Cancel();
         self->_drive.Brake();
         self->_drive.UseNominalWheelControlProfile();
         SetMissionLevelFanEnabled(false);
@@ -271,7 +268,6 @@ namespace MazeMap::App::Internal
     void ShowcasingDonutController::ResetState() noexcept
     {
         ReleaseSelectorMonitor();
-        _driveService.Cancel();
         _phase = Phase::Idle;
         _endReason = EndReason::None;
         _logFileName[0] = '\0';
@@ -387,7 +383,6 @@ namespace MazeMap::App::Internal
 
     bool ShowcasingDonutController::BeginDonutSweep() noexcept
     {
-        _driveService.Cancel();
         _commandedSpeedMps = kShowcasingDonutInitialSpeedMps;
         _endReason = EndReason::None;
         _flashTurnsStarted = 0U;
@@ -397,11 +392,10 @@ namespace MazeMap::App::Internal
 
     bool ShowcasingDonutController::BeginFlashTurn(const float angleRad) noexcept
     {
-        _driveService.Cancel();
         _driveService.SetLimits(BuildShowcasingDonutLimits(_vehicle));
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService.StartTurn(angleRad);
-        return _driveService.Active();
+        return true;
     }
 
     bool ShowcasingDonutController::TractionLossDetected(const MazeMap::VehicleState& state) noexcept
@@ -807,19 +801,11 @@ namespace MazeMap::App::Internal
         }
 
         case Phase::FlashyMoves:
-            if (_driveService.Active())
+        {
+            bool done = false;
+            const LoopController::ControlVector control = _driveService.GetNextControls(done);
+            if (!done)
             {
-                bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
-                if (done)
-                {
-                    if (_flashTurnsStarted >= kShowcasingDonutFlashTurnCount)
-                    {
-                        _phase = Phase::Complete;
-                    }
-                    return LoopController::ControlVector::Brake;
-                }
-
                 return control;
             }
 
@@ -837,6 +823,7 @@ namespace MazeMap::App::Internal
 
             ++_flashTurnsStarted;
             return LoopController::ControlVector::Brake;
+        }
 
         case Phase::Complete:
             services.RequestEndLoop();

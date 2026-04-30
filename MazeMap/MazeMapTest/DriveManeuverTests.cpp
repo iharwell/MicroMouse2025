@@ -333,7 +333,7 @@ namespace MazeMap::App
 
             Internal::Drive& driveService = runtime.DriveService();
             driveService.StartManeuver(maneuver);
-            trace.started = driveService.Active();
+            trace.started = true;
 
             for (int stepIndex = 0; stepIndex < kMaxSimulationSteps; ++stepIndex)
             {

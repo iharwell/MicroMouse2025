@@ -102,7 +102,6 @@ namespace MazeMap::App::Internal
 
             _wallTouch.Cancel();
             _startupCalibration.Cancel();
-            _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
         }
@@ -141,7 +140,6 @@ namespace MazeMap::App::Internal
             self->_phase = Phase::Idle;
             self->_wallTouch.Cancel();
             self->_startupCalibration.Cancel();
-            self->_driveService.Cancel();
             self->_drive.Brake();
             self->_drive.UseNominalWheelControlProfile();
         }
@@ -175,7 +173,6 @@ namespace MazeMap::App::Internal
             _phase = Phase::Idle;
             _wallTouch.Cancel();
             _startupCalibration.Cancel();
-            _driveService.Cancel();
         }
 
         float OutboundDistanceM() const noexcept
@@ -233,21 +230,13 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::LaunchStartHold:
-                _driveService.Cancel();
                 _driveService.SetLimits(
                     BuildCorridorMotionLimits(
                         _vehicle,
                         AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
                 _driveService.SetOperationMode(Drive::OperationMode::Maze);
                 _driveService.StartHold(AuxMeasurementConfig::kCorridorRepeatabilityStartSettleMs, true);
-                if (!_driveService.Active())
-                {
-                    services.Fault("Corridor repeatability start hold could not start");
-                }
-                else
-                {
-                    _phase = Phase::RunStartHold;
-                }
+                _phase = Phase::RunStartHold;
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunStartHold:
@@ -267,7 +256,6 @@ namespace MazeMap::App::Internal
             {
                 const Eigen::Vector2f heading = DirectionToUnitVector(MazeMap::Up);
                 const Eigen::Vector2f targetPosition = FarCellCenter();
-                _driveService.Cancel();
                 _driveService.SetLimits(
                     BuildCorridorMotionLimits(
                         _vehicle,
@@ -279,14 +267,7 @@ namespace MazeMap::App::Internal
                     0.0f,
                     &heading,
                     &targetPosition);
-                if (!_driveService.Active())
-                {
-                    services.Fault("Corridor repeatability outbound drive could not start");
-                }
-                else
-                {
-                    _phase = Phase::RunOutbound;
-                }
+                _phase = Phase::RunOutbound;
                 return LoopController::ControlVector::Brake;
             }
 
@@ -336,21 +317,13 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::LaunchTurnHome:
-                _driveService.Cancel();
                 _driveService.SetLimits(
                     BuildCorridorMotionLimits(
                         _vehicle,
                         AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
                 _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
                 _driveService.StartTurn(PI_F);
-                if (!_driveService.Active())
-                {
-                    services.Fault("Corridor repeatability turn-home could not start");
-                }
-                else
-                {
-                    _phase = Phase::RunTurnHome;
-                }
+                _phase = Phase::RunTurnHome;
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunTurnHome:
@@ -370,7 +343,6 @@ namespace MazeMap::App::Internal
             {
                 const Eigen::Vector2f heading = DirectionToUnitVector(MazeMap::Down);
                 const Eigen::Vector2f targetPosition = StartCellCenter();
-                _driveService.Cancel();
                 _driveService.SetLimits(
                     BuildCorridorMotionLimits(
                         _vehicle,
@@ -382,14 +354,7 @@ namespace MazeMap::App::Internal
                     0.0f,
                     &heading,
                     &targetPosition);
-                if (!_driveService.Active())
-                {
-                    services.Fault("Corridor repeatability return drive could not start");
-                }
-                else
-                {
-                    _phase = Phase::RunReturn;
-                }
+                _phase = Phase::RunReturn;
                 return LoopController::ControlVector::Brake;
             }
 
@@ -407,21 +372,13 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::LaunchFaceNorth:
-                _driveService.Cancel();
                 _driveService.SetLimits(
                     BuildCorridorMotionLimits(
                         _vehicle,
                         AuxMeasurementConfig::kCorridorRepeatabilitySpeedsMps[_speedIndex]));
                 _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
                 _driveService.StartTurn(PI_F);
-                if (!_driveService.Active())
-                {
-                    services.Fault("Corridor repeatability face-north turn could not start");
-                }
-                else
-                {
-                    _phase = Phase::RunFaceNorth;
-                }
+                _phase = Phase::RunFaceNorth;
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunFaceNorth:

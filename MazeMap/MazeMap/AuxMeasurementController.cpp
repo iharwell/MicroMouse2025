@@ -133,7 +133,6 @@ public:
             return _runtime.FailActiveMode("Auxiliary measurement drive base init failed");
         }
 
-        _startupCalibration.Cancel();
         if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
         {
             _drive.SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
@@ -194,7 +193,6 @@ public:
         }
 
         _startupCalibration.Cancel();
-        _driveService.Cancel();
         _drive.Brake();
         _drive.UseNominalWheelControlProfile();
         SetFanEnabled(false);
@@ -228,7 +226,6 @@ private:
         (void)reason;
         self->_runtimeFaulted = true;
         self->_phase = Phase::Idle;
-        self->_driveService.Cancel();
         self->_startupCalibration.Cancel();
         self->_drive.Brake();
         self->SetFanEnabled(false);
@@ -252,7 +249,6 @@ private:
         _logRow = {};
         ResetTurningTractionState();
         _startupCalibration.Cancel();
-        _driveService.Cancel();
     }
 
     void ResetTurningTractionState() noexcept
@@ -331,12 +327,7 @@ private:
 
     LoopController::ControlVector PollDriveHold(const Phase nextPhase, const char* inactiveReason, LoopController::TickServices& services)
     {
-        if (!_driveService.Active())
-        {
-            services.Fault(inactiveReason);
-            return LoopController::ControlVector::Brake;
-        }
-
+        (void)inactiveReason;
         bool done = false;
         const LoopController::ControlVector control = _driveService.GetNextControls(done);
         if (!done)
@@ -431,11 +422,10 @@ private:
         case Phase::LaunchBaselineHold:
             if (!BeginPhase("fan_off_baseline")) { services.Fault("Failed to log auxiliary baseline phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(false);
-            _driveService.Cancel();
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(AuxMeasurementConfig::kBaselineHoldMs, true);
-            if (!_driveService.Active()) { services.Fault("Auxiliary baseline Drive hold could not start"); } else { _phase = Phase::RunBaselineHold; }
+            _phase = Phase::RunBaselineHold;
             return LoopController::ControlVector::Brake;
 
         case Phase::RunBaselineHold:
@@ -444,11 +434,10 @@ private:
         case Phase::LaunchFanOnHold:
             if (!BeginPhase("fan_on_hold")) { services.Fault("Failed to log auxiliary fan-on phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(true);
-            _driveService.Cancel();
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(AuxMeasurementConfig::kFanHoldMs, true);
-            if (!_driveService.Active()) { services.Fault("Auxiliary fan-on Drive hold could not start"); } else { _phase = Phase::RunFanOnHold; }
+            _phase = Phase::RunFanOnHold;
             return LoopController::ControlVector::Brake;
 
         case Phase::RunFanOnHold:
@@ -457,11 +446,10 @@ private:
         case Phase::LaunchRecoveryHold:
             if (!BeginPhase("fan_off_recovery")) { services.Fault("Failed to log auxiliary recovery phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(false);
-            _driveService.Cancel();
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(AuxMeasurementConfig::kRecoveryHoldMs, true);
-            if (!_driveService.Active()) { services.Fault("Auxiliary recovery Drive hold could not start"); } else { _phase = Phase::RunRecoveryHold; }
+            _phase = Phase::RunRecoveryHold;
             return LoopController::ControlVector::Brake;
 
         case Phase::RunRecoveryHold:
@@ -470,11 +458,10 @@ private:
         case Phase::LaunchStartupHold:
             if (!BeginPhase("startup_settle")) { services.Fault("Failed to log auxiliary startup phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(false);
-            _driveService.Cancel();
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartHold(AuxMeasurementConfig::kStartupSettleMs, true);
-            if (!_driveService.Active()) { services.Fault("Auxiliary startup Drive hold could not start"); } else { _phase = Phase::RunStartupHold; }
+            _phase = Phase::RunStartupHold;
             return LoopController::ControlVector::Brake;
 
         case Phase::RunStartupHold:
@@ -483,11 +470,10 @@ private:
         case Phase::LaunchFanSpinupHold:
             if (!BeginPhase("fan_spinup")) { services.Fault("Failed to log auxiliary fan-spinup phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(true);
-            _driveService.Cancel();
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartHold(AuxMeasurementConfig::kTurningTractionSweepFanSettleMs, true);
-            if (!_driveService.Active()) { services.Fault("Auxiliary fan-spinup Drive hold could not start"); } else { _phase = Phase::RunFanSpinupHold; }
+            _phase = Phase::RunFanSpinupHold;
             return LoopController::ControlVector::Brake;
 
         case Phase::RunFanSpinupHold:

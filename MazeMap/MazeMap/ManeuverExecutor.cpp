@@ -110,10 +110,6 @@ namespace MazeMap::App::Internal
         _activeState = nullptr;
         _activePhaseTick = nullptr;
         _returnCallbacks = LoopController::ModeCallbacks{};
-        if ((_driveService != nullptr) && _driveService->Active())
-        {
-            _driveService->Cancel();
-        }
         _delegatedDriveState = DelegatedDriveRoutineState{};
         _queueState = QueueRoutineState{};
     }
@@ -239,10 +235,6 @@ namespace MazeMap::App::Internal
         {
             return FaultPhase(services, "Queued maneuver Drive service was unavailable");
         }
-        if (!_driveService->Active())
-        {
-            return CompleteCurrentPhase(delegated.nextState, delegated.nextPhaseTick, services);
-        }
 
         bool done = false;
         const LoopController::ControlVector control = _driveService->GetNextControls(done);
@@ -286,13 +278,8 @@ namespace MazeMap::App::Internal
         // relative to ManeuverExecutor's intended final role; queue-specific execution behavior
         // still needs to be rebuilt on top of Drive rather than bypassing it.
         _delegatedDriveState = DelegatedDriveRoutineState{};
-        _driveService->Cancel();
         _driveService->SetLimits(queueState.limits);
         _driveService->StartManeuver(entry);
-        if (!_driveService->Active())
-        {
-            return FaultPhase(services, "Queued maneuver Drive primitive could not start");
-        }
 
         _delegatedDriveState.nextState = &queueState;
         _delegatedDriveState.nextPhaseTick = &ManeuverExecutor::QueueAdvanceRoutineTick;

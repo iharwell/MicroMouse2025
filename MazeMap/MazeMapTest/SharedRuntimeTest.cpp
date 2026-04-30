@@ -254,7 +254,6 @@ namespace MazeMap::App
             drive.SetLimits(limits);
 
             drive.StartStraight(0.25f, 0.20f, 0.0f);
-            Assert::IsTrue(drive.Active());
 
             bool done = false;
             const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
@@ -289,7 +288,6 @@ namespace MazeMap::App
                     drive.GetCommandPDSettings().heading);
 
             drive.StartTurn(HALF_PI_F);
-            Assert::IsTrue(drive.Active());
 
             bool done = false;
             const Internal::LoopController::ControlVector actual = drive.GetNextControls(done);
@@ -321,9 +319,7 @@ namespace MazeMap::App
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
                 runtime.Drive().SetPose(0.0f, 0.0f, 0.20f);
-                drive.Cancel();
                 drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
-                Assert::IsTrue(drive.Active());
 
                 bool done = false;
                 const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
@@ -356,40 +352,550 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             drive.StartHold(1U, true);
-            Assert::IsTrue(drive.Active());
 
             bool done = false;
             (void)drive.GetNextControls(done);
             Assert::IsFalse(done);
-            Assert::IsTrue(drive.Active());
         }
 
-        TEST_METHOD(SharedRuntime_DriveServiceOmitsUnavailableLimitsInCommandPath)
+        TEST_METHOD(SharedRuntime_DriveCompletionDoesNotCancelLatestInstruction)
         {
             Internal::SharedRobotRuntime runtime;
-            runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+            Internal::Drive& drive = runtime.DriveService();
+
+            drive.StartHold(0U, true);
+            Assert::IsFalse(drive.IsEffectivelyComplete());
+
+            bool firstDone = false;
+            const Internal::LoopController::ControlVector firstControl = drive.GetNextControls(firstDone);
+            Assert::IsTrue(firstDone);
+            Assert::IsTrue(drive.IsEffectivelyComplete());
+            Assert::IsFalse(std::isfinite(firstControl.leftMotorPwm));
+            Assert::IsFalse(std::isfinite(firstControl.rightMotorPwm));
+
+            bool secondDone = false;
+            (void)drive.GetNextControls(secondDone);
+            Assert::IsTrue(secondDone);
+            Assert::IsTrue(drive.IsEffectivelyComplete());
+        }
+
+        TEST_METHOD(SharedRuntime_DriveIsEffectivelyCompleteStartsTrueAndClearsOnNewInstruction)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Internal::Drive& drive = runtime.DriveService();
+
+            Assert::IsTrue(drive.IsEffectivelyComplete());
+
+            drive.StartHold(0U, true);
+            Assert::IsFalse(drive.IsEffectivelyComplete());
+
+            bool done = false;
+            (void)drive.GetNextControls(done);
+            Assert::IsTrue(done);
+            Assert::IsTrue(drive.IsEffectivelyComplete());
+
+            drive.StartHold(1U, true);
+            Assert::IsFalse(drive.IsEffectivelyComplete());
+        }
+
+        TEST_METHOD(SharedRuntime_DriveNoneManeuverStillLatchesLatestInstruction)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Internal::Drive& drive = runtime.DriveService();
+
+            MazeMap::ManeuverInstance maneuver;
+            drive.StartManeuver(maneuver);
+            Assert::IsFalse(drive.IsEffectivelyComplete());
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsTrue(done);
+            Assert::IsTrue(drive.IsEffectivelyComplete());
+            Assert::IsFalse(std::isfinite(control.leftMotorPwm));
+            Assert::IsFalse(std::isfinite(control.rightMotorPwm));
+        }
+
+        TEST_METHOD(SharedRuntime_DriveIllPosedStraightRequestRemainsActiveAndFinite)
+        {
+            Internal::SharedRobotRuntime runtime;
             Internal::Drive& drive = runtime.DriveService();
 
             MotionLimits limits{};
             limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = -2.0f;
-            limits.decelMps2 = -2.0f;
-            limits.maxAngularSpeedRadps = -6.0f;
-            limits.angularAccelRadps2 = -30.0f;
-            limits.angleToleranceRad = -Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = -Config::kAngularSpeedToleranceRadps;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
             drive.SetLimits(limits);
 
-            const Eigen::Vector2f targetHeadingUnit(1.0f, 0.0f);
-            drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
-            Assert::IsTrue(drive.Active());
+            drive.StartStraight(NAN, INFINITY, NAN);
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+        }
+
+        TEST_METHOD(SharedRuntime_DriveZeroVectorHeadingOverrideFallsBackToCapturedHeading)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            const Eigen::Vector2f zeroHeading(0.0f, 0.0f);
+            const auto sampleStraightControl =
+                [&runtime, &drive, &limits](const Eigen::Vector2f* headingOverride) -> Internal::LoopController::ControlVector
+            {
+                runtime.Drive().Brake();
+                runtime.Drive().ResetControllers();
+                runtime.Drive().SetPose(0.0f, 0.0f, 0.35f);
+                drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
+                drive.SetLimits(limits);
+                drive.StartStraight(0.25f, 0.20f, 0.0f, headingOverride, nullptr);
+
+                bool done = false;
+                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                Assert::IsFalse(done);
+                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                return control;
+            };
+
+            const Internal::LoopController::ControlVector zeroHeadingControl = sampleStraightControl(&zeroHeading);
+            const Internal::LoopController::ControlVector nullHeadingControl = sampleStraightControl(nullptr);
+            Assert::AreEqual(nullHeadingControl.leftMotorPwm, zeroHeadingControl.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(nullHeadingControl.rightMotorPwm, zeroHeadingControl.rightMotorPwm, 1.0e-6f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveInfiniteHeadingCoordinatesBehaveLikeFiniteDirectionHints)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            const auto sampleStraightControl =
+                [&runtime, &drive, &limits](const Eigen::Vector2f& headingOverride) -> Internal::LoopController::ControlVector
+            {
+                runtime.Drive().Brake();
+                runtime.Drive().ResetControllers();
+                runtime.Drive().SetPose(0.0f, 0.0f, 0.35f);
+                drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
+                drive.SetLimits(limits);
+                drive.StartStraight(0.25f, 0.20f, 0.0f, &headingOverride, nullptr);
+
+                bool done = false;
+                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                Assert::IsFalse(done);
+                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                return control;
+            };
+
+            const Eigen::Vector2f rightInfiniteHeading(INFINITY, 1.0f);
+            const Eigen::Vector2f rightFiniteHeading(1.0f, 0.0f);
+            const Internal::LoopController::ControlVector rightInfiniteControl = sampleStraightControl(rightInfiniteHeading);
+            const Internal::LoopController::ControlVector rightFiniteControl = sampleStraightControl(rightFiniteHeading);
+            Assert::AreEqual(rightFiniteControl.leftMotorPwm, rightInfiniteControl.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(rightFiniteControl.rightMotorPwm, rightInfiniteControl.rightMotorPwm, 1.0e-6f);
+
+            const Eigen::Vector2f diagonalInfiniteHeading(INFINITY, INFINITY);
+            const Eigen::Vector2f diagonalFiniteHeading(1.0f, 1.0f);
+            const Internal::LoopController::ControlVector diagonalInfiniteControl = sampleStraightControl(diagonalInfiniteHeading);
+            const Internal::LoopController::ControlVector diagonalFiniteControl = sampleStraightControl(diagonalFiniteHeading);
+            Assert::AreEqual(diagonalFiniteControl.leftMotorPwm, diagonalInfiniteControl.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(diagonalFiniteControl.rightMotorPwm, diagonalInfiniteControl.rightMotorPwm, 1.0e-6f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveInfiniteTargetPositionCoordinatesRemainFunctional)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            const auto sampleStraightControl =
+                [&runtime, &drive, &limits](
+                    const Eigen::Vector2f& headingOverride,
+                    const Eigen::Vector2f& targetPositionOverride,
+                    bool& done) -> Internal::LoopController::ControlVector
+            {
+                runtime.Drive().Brake();
+                runtime.Drive().ResetControllers();
+                runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+                drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
+                drive.SetLimits(limits);
+                drive.StartStraight(NAN, 0.20f, 0.0f, &headingOverride, &targetPositionOverride);
+
+                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                return control;
+            };
+
+            const Eigen::Vector2f rightHeading(1.0f, 0.0f);
+            const Eigen::Vector2f oneInfiniteTarget(INFINITY, 0.0f);
+            bool oneInfiniteDone = false;
+            (void)sampleStraightControl(rightHeading, oneInfiniteTarget, oneInfiniteDone);
+            Assert::IsTrue(oneInfiniteDone);
+
+            const Eigen::Vector2f diagonalHeading(1.0f, 1.0f);
+            const Eigen::Vector2f bothInfiniteTarget(INFINITY, INFINITY);
+            bool bothInfiniteDone = false;
+            (void)sampleStraightControl(diagonalHeading, bothInfiniteTarget, bothInfiniteDone);
+            Assert::IsTrue(bothInfiniteDone);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveInfiniteTurnReportsDoneWhileContinuingMotion)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            runtime.Drive().SetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            drive.SetLimits(limits);
+            drive.StartTurn(INFINITY);
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsTrue(done);
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveInfiniteArcReportsDoneWhileContinuingMotion)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            runtime.Drive().SetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            drive.SetLimits(limits);
+            drive.StartArc(INFINITY, 4.0f);
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsTrue(done);
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-4f);
+            Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveArcUsesMazeContextWhenDirectInputsAreIllPosed)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+
+            const float cellSizeM = MazeMap::Maze::GetCellDimension();
+            runtime.Drive().SetPose(1.5f * cellSizeM, 1.5f * cellSizeM, DirectionToYawRad(MazeMap::Up));
+
+            MazeMap::Maze& maze = runtime.Maze();
+            const MazeMap::CellCoordinates cell(1U, 1U);
+            maze.SetWall(cell, MazeMap::Up, MazeMap::WallState::Wall);
+            maze.SetWall(cell, MazeMap::Left, MazeMap::WallState::Wall);
+            maze.SetWall(cell, MazeMap::Right, MazeMap::WallState::NoWall);
+            maze.SetWall(cell, MazeMap::Down, MazeMap::WallState::NoWall);
+
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            Internal::Drive& drive = runtime.DriveService();
+            drive.SetOperationMode(Internal::Drive::OperationMode::Maze);
+            drive.SetLimits(limits);
+            drive.StartArc(NAN, NAN);
 
             bool done = false;
             const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
             Assert::IsTrue(std::isfinite(control.leftMotorPwm));
             Assert::IsTrue(std::isfinite(control.rightMotorPwm));
-            Assert::IsTrue(std::fabs(control.leftMotorPwm - control.rightMotorPwm) > 1.0e-6f);
+            Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-6f);
+            Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-6f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveMalformedRequestIsNonSticky)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+
+            Internal::Drive& drive = runtime.DriveService();
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            drive.SetLimits(limits);
+
+            drive.StartTurn(NAN);
+
+            bool malformedDone = false;
+            const Internal::LoopController::ControlVector malformedControl = drive.GetNextControls(malformedDone);
+            Assert::IsFalse(malformedDone);
+            Assert::IsTrue(std::isfinite(malformedControl.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(malformedControl.rightMotorPwm));
+            Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
+
+            drive.StartTurn(HALF_PI_F);
+
+            bool recoveredDone = false;
+            const Internal::LoopController::ControlVector recoveredControl = drive.GetNextControls(recoveredDone);
+            Assert::IsFalse(recoveredDone);
+            Assert::IsTrue(std::isfinite(recoveredControl.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(recoveredControl.rightMotorPwm));
+        }
+
+        TEST_METHOD(SharedRuntime_DriveServicePreservesExplicitStraightDirectionAgainstSignedLimits)
+        {
+            Internal::SharedRobotRuntime runtime;
+            runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+            Internal::Drive& drive = runtime.DriveService();
+
+            const Eigen::Vector2f targetHeadingUnit(1.0f, 0.0f);
+            const auto sampleStraightControl =
+                [&drive, &targetHeadingUnit](const MotionLimits& limits) -> Internal::LoopController::ControlVector
+            {
+                drive.SetLimits(limits);
+                drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
+
+                bool done = false;
+                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                Assert::IsFalse(done);
+                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                return control;
+            };
+
+            MotionLimits positiveLimits{};
+            positiveLimits.maxSpeedMps = 0.40f;
+            positiveLimits.accelMps2 = 2.0f;
+            positiveLimits.decelMps2 = 2.0f;
+            positiveLimits.maxAngularSpeedRadps = 6.0f;
+            positiveLimits.angularAccelRadps2 = 30.0f;
+            positiveLimits.angleToleranceRad = Config::kAngleToleranceRad;
+            positiveLimits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            MotionLimits signedLimits = positiveLimits;
+            signedLimits.maxSpeedMps = -positiveLimits.maxSpeedMps;
+            signedLimits.accelMps2 = -positiveLimits.accelMps2;
+            signedLimits.decelMps2 = -positiveLimits.decelMps2;
+            signedLimits.maxAngularSpeedRadps = -positiveLimits.maxAngularSpeedRadps;
+            signedLimits.angularAccelRadps2 = -positiveLimits.angularAccelRadps2;
+            signedLimits.angleToleranceRad = -positiveLimits.angleToleranceRad;
+            signedLimits.angularSpeedToleranceRadps = -positiveLimits.angularSpeedToleranceRadps;
+
+            const Internal::LoopController::ControlVector positiveControl = sampleStraightControl(positiveLimits);
+            const Internal::LoopController::ControlVector signedControl = sampleStraightControl(signedLimits);
+            Assert::AreEqual(positiveControl.leftMotorPwm, signedControl.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(positiveControl.rightMotorPwm, signedControl.rightMotorPwm, 1.0e-6f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveTurnRecoversMazeRightTurnFromDegenerateRequest)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            runtime.Drive().SetPose(
+                1.5f * Config::kCellSizeM,
+                1.5f * Config::kCellSizeM,
+                DirectionToYawRad(MazeMap::Up));
+
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Up, MazeMap::Wall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::Wall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::NoWall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Down, MazeMap::NoWall);
+
+            Internal::Drive& drive = runtime.DriveService();
+            drive.SetLimits(limits);
+            drive.StartTurn(NAN);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::NoWall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::Wall);
+            limits.maxAngularSpeedRadps = -limits.maxAngularSpeedRadps;
+            drive.SetLimits(limits);
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsFalse(done);
+            Assert::IsFalse(drive.IsEffectivelyComplete());
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveArcRecoversMazeRightTurnFromDegenerateRequest)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            runtime.Drive().SetPose(
+                1.5f * Config::kCellSizeM,
+                1.5f * Config::kCellSizeM,
+                DirectionToYawRad(MazeMap::Up));
+
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Up, MazeMap::Wall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::Wall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::NoWall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Down, MazeMap::NoWall);
+
+            Internal::Drive& drive = runtime.DriveService();
+            drive.SetLimits(limits);
+            drive.StartArc(NAN, NAN);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::NoWall);
+            runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::Wall);
+            limits.maxAngularSpeedRadps = -limits.maxAngularSpeedRadps;
+            drive.SetLimits(limits);
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsFalse(done);
+            Assert::IsFalse(drive.IsEffectivelyComplete());
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
+            Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-4f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveArcChoosesDeterministicMotionWhenAllInputsAreAmbiguous)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            runtime.Drive().SetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
+
+            MotionLimits limits{};
+            limits.maxSpeedMps = 0.40f;
+            limits.accelMps2 = 2.0f;
+            limits.decelMps2 = 2.0f;
+            limits.maxAngularSpeedRadps = 6.0f;
+            limits.angularAccelRadps2 = 30.0f;
+            limits.angleToleranceRad = Config::kAngleToleranceRad;
+            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            Internal::Drive& drive = runtime.DriveService();
+            drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
+            drive.SetLimits(limits);
+            drive.StartArc(NAN, NAN);
+
+            bool done = false;
+            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            Assert::IsFalse(done);
+            Assert::IsFalse(drive.IsEffectivelyComplete());
+            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-4f);
+            Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
+        }
+
+        TEST_METHOD(SharedRuntime_DriveServiceRecoversManeuverDirectionFromSignedLimitsWhenSpeedIsAmbiguous)
+        {
+            Internal::SharedRobotRuntime runtime;
+            Assert::IsTrue(runtime.Drive().Begin());
+            runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+
+            Internal::Drive& drive = runtime.DriveService();
+            const auto sampleRecoveredLinearCommandMps =
+                [&runtime, &drive](const MotionLimits& limits) -> float
+            {
+                drive.SetLimits(limits);
+                MazeMap::ManeuverInstance maneuver(MazeMap::S1, MazeMap::DirectionalLocation(), 0.0f, 0.0f);
+                drive.StartManeuver(maneuver);
+                MotionLimits changedLimits = limits;
+                changedLimits.maxSpeedMps = -changedLimits.maxSpeedMps;
+                drive.SetLimits(changedLimits);
+
+                bool done = false;
+                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                Assert::IsFalse(done);
+                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
+                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                return runtime.Drive().GetLastLinearCommandMps();
+            };
+
+            MotionLimits forwardLimits{};
+            forwardLimits.maxSpeedMps = 0.40f;
+            forwardLimits.accelMps2 = 2.0f;
+            forwardLimits.decelMps2 = 2.0f;
+            forwardLimits.maxAngularSpeedRadps = 6.0f;
+            forwardLimits.angularAccelRadps2 = 30.0f;
+            forwardLimits.angleToleranceRad = Config::kAngleToleranceRad;
+            forwardLimits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+
+            MotionLimits reverseHintLimits = forwardLimits;
+            reverseHintLimits.maxSpeedMps = -forwardLimits.maxSpeedMps;
+
+            const float forwardCommandMps = sampleRecoveredLinearCommandMps(forwardLimits);
+            const float reverseCommandMps = sampleRecoveredLinearCommandMps(reverseHintLimits);
+            Assert::IsTrue(forwardCommandMps > 1.0e-6f);
+            Assert::IsTrue(reverseCommandMps < -1.0e-6f);
+            Assert::AreEqual(std::fabs(forwardCommandMps), std::fabs(reverseCommandMps), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_SingletonIsStable)

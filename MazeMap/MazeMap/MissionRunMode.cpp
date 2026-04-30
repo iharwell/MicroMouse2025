@@ -81,7 +81,6 @@ namespace MazeMap::App::Internal
             }
 
             _startupCalibration.Cancel();
-            _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
         }
@@ -124,15 +123,13 @@ namespace MazeMap::App::Internal
         {
             _phase = Phase::Idle;
             _startupCalibration.Cancel();
-            _driveService.Cancel();
         }
 
         bool StartMissionHold(const std::uint16_t durationMs) noexcept
         {
-            _driveService.Cancel();
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartHold(durationMs, true);
-            return _driveService.Active();
+            return true;
         }
 
         LoopController::ControlVector RunTick(

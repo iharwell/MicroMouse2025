@@ -132,7 +132,6 @@ public:
             _loopController.EndSession();
         }
 
-        _driveService.Cancel();
         _startupCalibration.Cancel();
         _drive.Brake();
         _phase = Phase::Idle;
@@ -190,7 +189,6 @@ private:
 
         self->_phase = Phase::Idle;
         self->_pauseAction = PauseAction::None;
-        self->_driveService.Cancel();
         self->_startupCalibration.Cancel();
         self->_drive.Brake();
         SetMissionLevelFanEnabled(false);
@@ -263,10 +261,9 @@ private:
             AppendStartupTrace(line);
         }
 
-        _driveService.Cancel();
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService.StartHold(durationMs, true);
-        return _driveService.Active();
+        return true;
     }
 
     bool StartCaptureCurvePhase()
@@ -345,12 +342,6 @@ private:
         const char* inactiveReason,
         LoopController::TickServices& services)
     {
-        if (!_driveService.Active())
-        {
-            services.Fault(inactiveReason);
-            return LoopController::ControlVector::Brake;
-        }
-
         bool done = false;
         const LoopController::ControlVector control = _driveService.GetNextControls(done);
         if (!done)
@@ -403,12 +394,6 @@ private:
 
         case Phase::RunPostCaptureSettle:
         {
-            if (!_driveService.Active())
-            {
-                services.Fault("Front wall characterization post-capture settle was not active");
-                return LoopController::ControlVector::Brake;
-            }
-
             bool done = false;
             const LoopController::ControlVector control = _driveService.GetNextControls(done);
             if (!done)
@@ -466,7 +451,6 @@ private:
             _captureStartMs = millis();
             StoreCurveSample(_captureStorage, 0.0f, snapshot);
 
-            _driveService.Cancel();
             _driveService.SetLimits(BuildReverseCaptureLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartStraight(
@@ -474,11 +458,6 @@ private:
                 -FrontWallCharacterizationConfig::kReverseSpeedMps,
                 0.0f,
                 &_captureTargetHeading);
-            if (!_driveService.Active())
-            {
-                services.Fault("Front wall characterization reverse capture could not start");
-                return LoopController::ControlVector::Brake;
-            }
         }
 
         const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _captureStartDistanceM);
@@ -508,13 +487,11 @@ private:
 
         if (_captureCollapsedConsecutiveSamples >= FrontWallCharacterizationConfig::kCollapsedConsecutiveSamples)
         {
-            _driveService.Cancel();
             return requestPersistPause(traveledDistanceM, "collapsed_to_zero");
         }
 
         if (traveledDistanceM >= FrontWallCharacterizationConfig::kMaxReverseTravelM)
         {
-            _driveService.Cancel();
             return requestPersistPause(traveledDistanceM, "max_reverse_travel");
         }
 
@@ -537,7 +514,6 @@ private:
         const LoopController::ControlVector control = _driveService.GetNextControls(driveDone);
         if (driveDone)
         {
-            _driveService.Cancel();
             return requestPersistPause(traveledDistanceM, "drive_complete");
         }
 

@@ -1,6 +1,6 @@
-# Micromouse UKF Plant and Measurement Model Design
+# Micromouse UKF Plant and Measurement Model Specification
 
-**Purpose:** define a single, continuous 9-state plant and measurement model for the vehicle UKF. This document assumes the UKF implementation itself is already sound; it specifies only the state definition, propagation model, measurement functions, noise scheduling, and the reasoning behind included and excluded states.
+**Purpose:** define a complete, standalone specification for the vehicle UKF plant model, measurement functions, process-noise handling, encoder-input treatment, covariance scheduling, and state-inclusion decisions. This document assumes the UKF implementation itself is numerically sound; it specifies the model and the estimator contracts that the implementation must satisfy.
 
 ---
 
@@ -28,7 +28,7 @@ Px & Py & heading & Vf & Vr & yawRate & \Delta Af & \Delta Ar & \Delta yawAccel
 | `DeltaAr` | m/s² | colored lateral-acceleration residual |
 | `DeltaYawAccel` | rad/s² | colored yaw-acceleration residual |
 
-The model is explicitly **not** a no-slip differential-drive model. It uses measured wheel-bank rates to compute contact-patch slip velocities, then maps those slip velocities into contact forces using a smooth combined-slip tire model. The residual states then correct remaining body-force mismatch.
+The model is explicitly **not** a no-slip differential-drive model. It uses validated measured wheel-bank rates to compute motor algebra, contact-patch slip velocities, contact forces, utilization, and regime-dependent covariance scheduling. Encoder acquisition faults are handled as faults, not as nominal Gaussian missed-pulse noise. The residual states then correct remaining body-force mismatch, and residual-driving noise must propagate into the full state covariance rather than only into the residual-state block.
 
 ---
 
@@ -108,16 +108,21 @@ estimator_tick = {
 }
 ```
 
-The plant-specific drive input should contain only drive-relevant values sampled for that tick:
+The plant-specific drive input should contain only drive-relevant values sampled or derived for that tick:
 
 ```text
 drive_sample = {
-    CL, CR,                   // signed left/right motor commands
-    wheelRateL, wheelRateR,   // encoder-derived wheel-bank rates, rad/s
-    motorPhaseL, motorPhaseR, // optional encoder phase for ripple fits
-    fanCommand                // external fan/downforce command
+    CL, CR,                       // signed left/right motor commands
+    wheelRateL, wheelRateR,       // validated encoder-derived wheel-bank rates, rad/s
+    wheelRateCov,                 // 2x2 covariance R_omega for [wheelRateL, wheelRateR]^T
+    encoderSampleValid,           // acquisition validation result for this tick
+    encoderFaultFlags,            // empty/zero in valid operation; logged on fault
+    motorPhaseL, motorPhaseR,     // optional encoder phase for ripple fits
+    fanCommand                    // external fan/downforce command
 }
 ```
+
+The estimator may receive raw encoder counts in a separate `encoder_sample`, but the plant consumes validated wheel-rate inputs plus their covariance. A sample marked invalid shall not be silently treated as a normal noisy input. Invalid encoder samples activate the degraded prediction and logging path defined in Section 7.5.
 
 This document does not specify the acquisition schedule beyond requiring that the measurement functions receive calibrated samples, timestamps/phase metadata, and the correct sensor extrinsics. Non-IMU sensors are treated as fixed-phase once-per-tick samples; the IMU may have an asynchronous phase and should carry its own measurement timestamp or equivalent phase metadata. The estimator converts those timestamps/phases into local propagation or interpolation intervals.
 
@@ -165,7 +170,7 @@ Their deterministic mean dynamics are first-order decay:
 \dot{\Delta yawAccel} = -\frac{\Delta yawAccel}{\tau_y}
 \]
 
-Their stochastic dynamics are defined as exact discrete Ornstein-Uhlenbeck residual updates in Section 15.1. The scheduled residual `sigma` values are steady-state residual-state standard deviations, not per-tick perturbations and not continuous-time spectral densities.[^stochastic]
+Their stochastic dynamics are defined as exact discrete Ornstein-Uhlenbeck residual updates in Section 15.1. The scheduled residual `sigma` values are steady-state residual-state standard deviations, not per-tick perturbations and not continuous-time spectral densities.[^residual_covariance]
 
 The nominal plant computes:
 
@@ -430,6 +435,16 @@ clipAsymE(x,x_{min},x_{max},e)=maxE(x_{min},minE(x,x_{max},e),e)
 
 ## 7. Encoder-derived drivetrain inputs
 
+The encoder subsystem provides drivetrain measurements, not body-motion measurements. The plant consumes validated wheel-bank rates:
+
+\[
+\hat{wheelRate}_L,\quad \hat{wheelRate}_R
+\]
+
+and their covariance. The estimator shall not create UKF wheel-rate states merely to smooth encoder data.
+
+### 7.1 Wheel-rate conversion
+
 For each side \(j\in\{L,R\}\):
 
 \[
@@ -455,25 +470,157 @@ If firmware uses 4× quadrature:
 countsPerMotorRev=4096
 \]
 
-If it counts lines or a different edge convention, use the firmware’s actual convention.
+If firmware counts lines or uses a different edge convention, use the firmware's actual convention. With the 4× convention:
 
-The encoder input covariance should start from quantization:
+\[
+countsPerWheelRev = 4096\frac{56}{17}\approx13493
+\]
+
+For a 25 mm wheel:
+
+\[
+distancePerCount=\frac{\pi(0.025)}{13493}\approx5.82\ \mu m
+\]
+
+This supports treating validated encoder samples as high-quality drivetrain inputs. It does **not** support treating drivetrain motion as body motion during scrub or slip.
+
+### 7.2 Encoder sample validation
+
+Each encoder-derived sample shall carry `encoderSampleValid` or an equivalent validation result. A sample is valid only if all configured acquisition checks pass, including at minimum:
+
+```text
+timestamp monotonic
+count delta finite
+count delta physically plausible for the sample interval
+left/right polarity and direction convention valid
+quadrature transition legal, if decoded in software or exposed by hardware
+counter continuity preserved
+sample interval inside accepted timing bounds
+```
+
+Additional hardware-specific checks may be added, such as counter-wrap validation, DMA/ISR overrun detection, and timestamp-source continuity.
+
+### 7.3 Nominal wheel-rate covariance
+
+For a valid encoder sample, the nominal wheel-rate variance is:
+
+\[
+\sigma^2_{wheelRate,j,normal}
+=
+\left(\frac{2\pi}{G\,countsPerMotorRev\,\Delta t}\right)^2
+\sigma^2_{\Delta N}
++
+\sigma^2_{wheelRate,timing,j}
+\]
+
+with first-pass count-quantization variance:
 
 \[
 \sigma^2_{\Delta N}\approx \frac{1}{12}
 \]
 
-then add terms for timestamp jitter, missed edges, and filtering delay:
+A practical first timing term is:
 
 \[
-\sigma^2_{wheelRate,j} =
-\left(\frac{2\pi}{G\,countsPerMotorRev\,\Delta t}\right)^2\sigma^2_{\Delta N}
-+\sigma^2_{timestamp,j}
-+\sigma^2_{missedEdge,j}
-+\sigma^2_{filterDelay,j}
+\sigma_{wheelRate,timing,j}
+\approx
+|\hat{wheelRate}_j|\frac{\sigma_{\Delta t,j}}{\Delta t}
 \]
 
-This covariance feeds process noise; it is not a direct UKF measurement covariance unless the optional rolling pseudo-measurement is enabled.
+or an equivalent phase/timestamp uncertainty term derived from logged firmware timing characterization.
+
+The nominal covariance for validated samples explicitly excludes routine missed-edge and filter-delay terms:
+
+\[
+\sigma^2_{wheelRate,missedEdge,j}=0
+\]
+
+\[
+\sigma^2_{wheelRate,filterDelay,j}=0
+\]
+
+unless firmware actually applies a wheel-rate filter. If such a filter exists, its delay/phase uncertainty must be modeled from the actual filter implementation and logs, not inserted as a generic placeholder.
+
+Therefore the valid-sample covariance is:
+
+\[
+\boxed{
+\sigma^2_{wheelRate,j,normal}
+=
+\sigma^2_{quantization,j}+\sigma^2_{timing/phase,j}
+}
+\]
+
+not:
+
+\[
+\sigma^2_{quantization}
++\sigma^2_{timing}
++\sigma^2_{missedEdge}
++\sigma^2_{filterDelay}
+\]
+
+### 7.4 Wheel-rate covariance matrix
+
+Define:
+
+\[
+u_\omega =
+\begin{bmatrix}
+\hat{wheelRate}_L \\
+\hat{wheelRate}_R
+\end{bmatrix}
+\]
+
+\[
+R_\omega =
+\begin{bmatrix}
+\sigma^2_{wheelRate,L} & \sigma_{LR} \\
+\sigma_{LR} & \sigma^2_{wheelRate,R}
+\end{bmatrix}
+\]
+
+Usually:
+
+\[
+\sigma_{LR}=0
+\]
+
+unless a shared timing or sample-phase error creates correlated wheel-rate uncertainty. For invalid samples, the estimator shall either not form a normal \(R_\omega\) or shall mark it as degraded and use one of the explicit degraded prediction choices in Section 7.5.
+
+### 7.5 Invalid-sample fault handling
+
+When `encoderSampleValid == true`:
+
+```text
+use normal encoder wheel-rate covariance
+propagate wheel-rate input uncertainty through the nonlinear plant
+allow the rolling pseudo-measurement only if regime gates also pass
+```
+
+When `encoderSampleValid == false`:
+
+```text
+do not consume the sample as a normal drivetrain input
+disable the rolling pseudo-measurement for that tick
+activate encoder-fault process-noise scheduling
+mark estimator/input degraded for logging
+log count delta, timestamp, validation result, and fault reason
+```
+
+Permitted degraded prediction choices are:
+
+1. propagate from the command-to-torque prior with high process noise;
+2. hold the previous valid wheel rates for one tick with high input covariance;
+3. skip encoder-dependent contact-force refinement for that tick and rely on IMU/wall updates plus residual process noise.
+
+The implementation shall not silently absorb an invalid encoder sample by increasing nominal encoder covariance. Missed edges, illegal transitions, counter discontinuities, implausible deltas, timestamp discontinuities, or acquisition overruns are fault events.
+
+### 7.6 Required propagation of wheel-rate input uncertainty
+
+Wheel-rate uncertainty affects motor back-EMF, command/rate torque mapping, contact-patch slip velocity, tire force, combined-slip utilization, regime scheduling, and the optional rolling pseudo-measurement. Therefore \(R_\omega\) must enter before these nonlinear calculations, not only as a final additive acceleration covariance.
+
+The compliant propagation methods are specified in Section 15.4.
 
 ---
 
@@ -996,13 +1143,13 @@ Handling:
 
 ---
 
-## 15. Process-noise scheduling
+## 15. Process-noise scheduling and covariance propagation
 
-Use continuous scheduling; do not switch plant models. This section defines the regime scalars used for scheduling, the stochastic semantics of the three colored residual states, and how residual-driving noise must propagate into the full state covariance.[^stochastic][^covprop]
+Use continuous scheduling; do not switch plant models. This section defines the regime scalars used for scheduling, the stochastic semantics of the three colored residual states, and the required covariance propagation for both residual innovations and encoder wheel-rate input uncertainty.[^residual_covariance][^encoder_uncertainty]
 
 ### 15.1 Residual-state stochastic semantics
 
-The scheduled residual-noise values are defined as **steady-state standard deviations of the residual states**:
+The scheduled residual-noise values are **steady-state standard deviations of the residual states**:
 
 \[
 \sigma_{\Delta Af,ss},\quad \sigma_{\Delta Ar,ss},\quad \sigma_{\Delta yawAccel,ss}
@@ -1061,121 +1208,7 @@ q_{c,q}=\frac{2\sigma_{\Delta q,ss}^2}{\tau_q}
 
 but this document does not use \(q_c\) as the scheduled tuning parameter.
 
-### 15.2 Residual process-noise covariance propagation
-
-The variances \(Q_{\Delta Af}\), \(Q_{\Delta Ar}\), and \(Q_{\Delta yawAccel}\) are the covariance of the residual-driving innovations:
-
-\[
-\eta_{Af},\quad \eta_{Ar},\quad \eta_{yaw}
-\]
-
-They are **not** an instruction to add covariance only to the last three diagonal entries of the state covariance after propagation.
-
-Residual acceleration uncertainty affects the full propagated state. It changes the residual state itself, immediately changes the corresponding velocity or yaw-rate trajectory, and then propagates into position, heading, and cross-covariances through the plant. Therefore, residual-driving noise must be propagated through the plant into the full state covariance.
-
-A covariance update of only this form is not compliant:
-
-\[
-P_{\Delta Af,\Delta Af}\leftarrow P_{\Delta Af,\Delta Af}+Q_{\Delta Af}
-\]
-
-\[
-P_{\Delta Ar,\Delta Ar}\leftarrow P_{\Delta Ar,\Delta Ar}+Q_{\Delta Ar}
-\]
-
-\[
-P_{\Delta yawAccel,\Delta yawAccel}\leftarrow P_{\Delta yawAccel,\Delta yawAccel}+Q_{\Delta yawAccel}
-\]
-
-because it leaves \(Vf\), \(Vr\), \(yawRate\), \(Px\), \(Py\), \(heading\), and the residual-to-motion cross-covariances artificially overconfident.
-
-Use one of the following two methods.
-
-#### Option A: augmented sigma points
-
-Augment the UKF sigma vector with three residual-driving innovations:
-
-\[
-\eta_{Af},\quad \eta_{Ar},\quad \eta_{yaw}
-\]
-
-with covariance:
-
-\[
-Q_\eta=\operatorname{diag}\left(Q_{\Delta Af},Q_{\Delta Ar},Q_{\Delta yawAccel}\right)
-\]
-
-Each augmented sigma point applies the exact residual update:
-
-\[
-\Delta Af_{k+1}=\phi_f\Delta Af_k+\eta_{Af}
-\]
-
-\[
-\Delta Ar_{k+1}=\phi_r\Delta Ar_k+\eta_{Ar}
-\]
-
-\[
-\Delta yawAccel_{k+1}=\phi_y\Delta yawAccel_k+\eta_{yaw}
-\]
-
-and propagates the full state normally with the same plant equations used for the non-augmented sigma points.
-
-This is the cleanest UKF formulation if the computation budget permits it. It lets the unscented transform carry the residual-driving noise through the nonlinear plant into velocities, yaw rate, pose, heading, and cross-covariances.
-
-#### Option B: sensitivity-mapped additive process noise
-
-If the implementation uses additive process noise rather than augmented sigma points, compute a local process-noise injection matrix:
-
-\[
-Q_{x,res}=G_\eta Q_\eta G_\eta^T
-\]
-
-and include it in the predicted state covariance:
-
-\[
-P^-\leftarrow P^-+Q_{x,res}
-\]
-
-The matrix \(G_\eta\) maps the three residual-driving innovations into the full 9-state propagated output:
-
-\[
-G_\eta=\frac{\partial state\_vec_{k+1}}{\partial \eta}
-\]
-
-where:
-
-\[
-\eta=\begin{bmatrix}\eta_{Af}&\eta_{Ar}&\eta_{yaw}\end{bmatrix}^T
-\]
-
-A robust implementation method is finite differencing:
-
-1. Propagate the nominal state with \(\eta=0\).
-2. Propagate three perturbed versions with small residual innovations \(\eta_{Af}=\epsilon_{Af}\), \(\eta_{Ar}=\epsilon_{Ar}\), and \(\eta_{yaw}=\epsilon_{yaw}\).
-3. Compute the output-state differences after wrapping `heading` with the same angular-difference convention used by the UKF.
-4. Form the columns of \(G_\eta\) from those output-state differences divided by the perturbation sizes.
-
-This method keeps the covariance requirement independent of whether the deterministic plant uses Euler, RK2, RK4, or another integration scheme.
-
-The perturbation sizes should be large enough to avoid numerical roundoff and small enough to stay local to the current operating regime. They should use the same units as the residual innovations:
-
-\[
-\epsilon_{Af},\epsilon_{Ar}\quad [\mathrm{m/s^2}],\qquad \epsilon_{yaw}\quad [\mathrm{rad/s^2}]
-\]
-
-#### Minimum practical approximation
-
-At minimum, the residual-driving-noise contribution must affect:
-
-* the residual state itself,
-* the corresponding velocity or yaw-rate state,
-* downstream pose or heading over propagation,
-* and the residual-to-motion cross-covariances.
-
-A residual-diagonal-only addition is acceptable only as a temporary bring-up simplification, not as the specified estimator model.
-
-### 15.3 Regime scalars
+### 15.2 Regime scalars
 
 Define:
 
@@ -1213,7 +1246,16 @@ smoothStepE(|Az-g|,zLow,zHigh)
 +k_s inPlaceBlend\,util_{max}
 \]
 
-### 15.4 Scheduled steady-state residual sigmas
+Define a binary encoder-fault indicator for the current propagation tick:
+
+\[
+I_{encoderFault}=\begin{cases}
+0, & encoderSampleValid=true\\
+1, & encoderSampleValid=false
+\end{cases}
+\]
+
+### 15.3 Scheduled steady-state residual sigmas
 
 Schedule the steady-state residual standard deviations. These equations produce \(\sigma_{\Delta q,ss}\), not the discrete covariance entries directly:
 
@@ -1224,6 +1266,7 @@ Schedule the steady-state residual standard deviations. These equations produce 
 +k_{Af,drive}driveSaturationIndex^2
 +k_{Af,supply}driveAuthorityUncertainty
 +k_{Af,impact}impactSuspect
++k_{Af,encoderFault}I_{encoderFault}
 \]
 
 \[
@@ -1234,6 +1277,7 @@ Schedule the steady-state residual standard deviations. These equations produce 
 +k_{Ar,drive}driveSaturationIndex^2
 +k_{Ar,supply}driveAuthorityUncertainty
 +k_{Ar,impact}impactSuspect
++k_{Ar,encoderFault}I_{encoderFault}
 \]
 
 \[
@@ -1244,11 +1288,116 @@ Schedule the steady-state residual standard deviations. These equations produce 
 +k_{yaw,drive}driveSaturationIndex^2
 +k_{yaw,supply}driveAuthorityUncertainty
 +k_{yaw,impact}impactSuspect
++k_{yaw,encoderFault}I_{encoderFault}
 \]
 
-Convert those scheduled steady-state standard deviations into discrete residual-driving innovation variances using the exact OU equations in Section 15.1. Then propagate those innovation variances into the full state covariance using Section 15.2. Do not add them only to the residual-state diagonal entries.
+Convert those scheduled steady-state standard deviations into discrete residual-state variances using the exact OU equations in Section 15.1 before applying them to the process covariance.
 
-Also add encoder-input uncertainty to the acceleration/yaw channels. If wheel-rate noise is high, increase process noise rather than adding wheel-rate states.
+The encoder-fault terms are a degraded-data path. They are not a substitute for a nominal missed-pulse covariance term.
+
+### 15.4 Required process-noise and input-noise propagation
+
+Residual acceleration noise and encoder wheel-rate uncertainty shall propagate through the plant into the full state covariance. It is not compliant to add \(Q_{\Delta Af}\), \(Q_{\Delta Ar}\), and \(Q_{\Delta yawAccel}\) only to the last three diagonal entries after state propagation.
+
+At minimum, residual process noise must affect:
+
+```text
+DeltaAf, DeltaAr, DeltaYawAccel
+Vf, Vr, yawRate
+Px, Py, heading over propagation
+residual-to-motion cross-covariances
+```
+
+Wheel-rate input uncertainty must enter before the nonlinear calculations that depend on wheel rate:
+
+```text
+motor back-EMF
+command/rate/phase torque map
+drive-force feedforward
+contact-patch slip velocity
+tire-force model
+combined-slip utilization
+regime/noise scheduling
+rolling pseudo-measurement covariance
+```
+
+Use one of the following two compliant methods.
+
+#### Method A — augmented prediction noise
+
+Augment the UKF prediction with process/input-noise variables at least for:
+
+\[
+\nu =
+\begin{bmatrix}
+\eta_f & \eta_r & \eta_y & \delta wheelRate_L & \delta wheelRate_R
+\end{bmatrix}^T
+\]
+
+where \(\eta_f,\eta_r,\eta_y\) are the exact discrete OU residual innovations, and \(\delta wheelRate_L,\delta wheelRate_R\) are encoder wheel-rate input perturbations with covariance \(R_\omega\).
+
+For each augmented sigma point:
+
+\[
+wheelRate_j^{sample}=\hat{wheelRate}_j+\delta wheelRate_j
+\]
+
+apply:
+
+\[
+\Delta Af_{k+1}=\phi_f\Delta Af_k+\eta_f
+\]
+
+\[
+\Delta Ar_{k+1}=\phi_r\Delta Ar_k+\eta_r
+\]
+
+\[
+\Delta yawAccel_{k+1}=\phi_y\Delta yawAccel_k+\eta_y
+\]
+
+Then run the complete plant propagation with the sampled wheel rates and sampled residual innovations.
+
+Optional stochastic terms for \(\delta VbusEff\), \(\delta u_L\), or \(\delta u_R\) may be added only if their uncertainty is characterized and the added terms are not double-counted in the residual schedule.
+
+#### Method B — sensitivity-mapped additive covariance
+
+If the implementation uses additive process covariance, compute local sensitivity mappings and apply:
+
+\[
+Q_x \leftarrow Q_x + G_\eta Q_\eta G_\eta^T + J_\omega R_\omega J_\omega^T
+\]
+
+where:
+
+\[
+Q_\eta=\operatorname{diag}
+\left(
+Q_{\Delta Af},Q_{\Delta Ar},Q_{\Delta yawAccel}
+\right)
+\]
+
+Residual-noise sensitivity:
+
+\[
+G_\eta[:,i]\approx
+\frac{
+wrapStateDelta\left(f(x,u,\eta=\epsilon e_i)-f(x,u,\eta=0)\right)
+}{\epsilon}
+\]
+
+Encoder-input sensitivity:
+
+\[
+J_\omega[:,j]\approx
+\frac{
+wrapStateDelta\left(f(x,u_\omega+\epsilon e_j)-f(x,u_\omega-\epsilon e_j)\right)
+}{2\epsilon}
+\]
+
+The finite difference shall be applied to the complete propagation function, including motor algebra, slip calculation, tire-force calculation, utilization, regime scheduling, residual application, and integration. Heading differences shall be angle-wrapped before forming sensitivity columns.
+
+The sensitivity method may use the predicted mean state for computational economy, but the resulting covariance must be inflated conservatively if the operating point is near a saturation, breakaway threshold, stick-slip boundary, or encoder-fault state.
 
 ### 15.5 Schedule evaluation convention
 
@@ -1257,25 +1406,27 @@ The preferred convention is sigma-point-local scheduling:
 1. For each sigma point, compute the algebraic plant terms and regime scalars: `utilMax`, `inPlaceBlend`, `rollingBlend`, `stickSlipIndex`, `groundUse`, `impactSuspect`, and drive-authority terms.
 2. Compute \(\sigma_{\Delta Af,ss}\), \(\sigma_{\Delta Ar,ss}\), and \(\sigma_{\Delta yawAccel,ss}\) for that sigma point.
 3. Convert those values to discrete OU variances over the propagation substep.
-4. Freeze those scheduled values over that propagation substep.
+4. Propagate residual and encoder-input uncertainty using Method A or Method B from Section 15.4.
+5. Freeze scheduled values over that propagation substep.
 
-If the UKF implementation does not support sigma-point-specific process noise, use predicted-mean regime scalars to compute one shared process-noise matrix, then inflate conservatively. That shared matrix must still satisfy Section 15.2: residual-driving noise must enter the full state covariance, not only the residual-state diagonal block. Use prior-mean scalars only as a documented fallback when predicted-mean auxiliary terms are unavailable. Do not mix per-sigma-point regime scalars with a process-noise matrix computed from a different state without documenting the approximation.
+If the UKF implementation does not support sigma-point-specific process noise, use predicted-mean regime scalars to compute one shared process-noise matrix, then inflate conservatively. Use prior-mean scalars only as a documented fallback when predicted-mean auxiliary terms are unavailable. Do not mix per-sigma-point regime scalars with a process-noise matrix computed from a different state without documenting the approximation.
 
 If the deterministic integrator uses RK2/RK4 substeps, either recompute the regime scalars at each substep or freeze them at the start of the substep. Do not let the schedule change discontinuously inside a single integration substep.
 
 ### 15.6 Acceptance checks
 
-The implementation should pass these stochastic-model and covariance-propagation checks:
+The implementation should pass these process-noise and covariance checks:
 
 1. With constant \(\sigma_{\Delta q,ss}\) and \(\tau_q\), a stationary residual-only simulation converges to RMS \(\sigma_{\Delta q,ss}\), independent of \(\Delta t\).
 2. Changing \(\Delta t\) from 1.0 ms to 0.5 ms while preserving the same continuous trajectory does not materially change residual variance.
 3. With \(\sigma_{\Delta q,ss}=0\), residual states decay exactly by \(e^{-\Delta t/\tau_q}\).
 4. Scheduled noise does not jump discontinuously at regime boundaries, because the schedule inputs use smooth scalars.
-5. With IMU and wall updates disabled, increasing \(\sigma_{\Delta Af,ss}\) increases uncertainty in `Vf` and position, not only in `DeltaAf`.
-6. With IMU and wall updates disabled, increasing \(\sigma_{\Delta Ar,ss}\) increases uncertainty in `Vr` and position, not only in `DeltaAr`.
-7. Increasing \(\sigma_{\Delta yawAccel,ss}\) increases uncertainty in `yawRate` and `heading`, not only in `DeltaYawAccel`.
-8. Residual-to-motion cross-covariances become nonzero after propagation when residual process noise is nonzero.
-9. A replay with high residual noise remains statistically conservative under NIS/NEES checks where ground truth or credible proxy truth exists.
+5. With IMU and wall updates disabled, increasing `sigmaDeltaAfSs` increases covariance in `Vf`, `Px`, and `Py`, not only `DeltaAf`.
+6. Increasing `sigmaDeltaYawAccelSs` increases covariance in `yawRate` and `heading`, not only `DeltaYawAccel`.
+7. Residual-to-motion cross-covariances become nonzero after prediction.
+8. Increasing valid-sample encoder quantization/timing covariance increases predicted state covariance through the nonlinear plant.
+9. Encoder wheel-rate uncertainty affects utilization-derived noise scheduling when the nominal operating point is near a utilization threshold.
+10. Setting `encoderSampleValid=false` disables the rolling pseudo-measurement and activates the encoder-fault degraded-data process-noise path.
 
 ---
 
@@ -1411,7 +1562,7 @@ Inflate accelerometer measurement covariance when any of these are high:
 
 Do not force a planar acceleration model to explain pitch/roll/vertical impulses.
 
-## 18. Encoder treatment
+## 18. Encoder treatment and rolling pseudo-measurement
 
 The encoders are not ordinary pose measurements in this design. They are converted into drivetrain inputs before UKF prediction.
 
@@ -1423,15 +1574,16 @@ Use:
 
 inside the plant for:
 
-* motor back-EMF,
-* slip velocity,
-* gear ripple phase,
-* drive force feedforward,
+* motor back-EMF;
+* command/rate/phase torque mapping;
+* slip velocity;
+* gear-ripple phase;
+* drive-force feedforward;
 * contact-utilization scheduling.
 
 This avoids the incorrect assumption that drivetrain motion equals body motion. The encoders directly observe wheel-bank motion; they do not directly observe `Vf`, `Vr`, or `yawRate` when tires are scrubbing or slipping.
 
-### Optional rolling pseudo-measurement
+### 18.1 Optional rolling pseudo-measurement
 
 In benign rolling operation only, use:
 
@@ -1447,23 +1599,54 @@ h_{roll,L}=r_w\hat{wheelRate}_L-\left(Vf+\frac{b}{2}yawRate\right)
 h_{roll,R}=r_w\hat{wheelRate}_R-\left(Vf-\frac{b}{2}yawRate\right)
 \]
 
-with covariance:
+Define the regime part of the covariance:
 
 \[
-R_{roll}=R_{rollBase}
+R_{roll,regime}=R_{rollBase}
 +k_{roll,util}util_{max}^4
 +k_{roll,inPlace}inPlaceBlend
 +k_{roll,ss}stickSlipIndex
 +k_{roll,lowSpeed}\left(\frac{v_{low}}{\sqrt{Vf^2+Vr^2+v_E^2}}\right)^2
 \]
 
-This means:
+Add the encoder wheel-rate contribution using the same \(R_\omega\) convention as the prediction model:
 
-* strong in mid-speed rolling turns,
-* weak at low speeds,
-* weak during launch,
-* weak during in-place turns,
-* weak during high-speed stick-slip.
+\[
+R_{roll,total}=R_{roll,regime}+H_{\omega,roll}R_\omega H_{\omega,roll}^T
+\]
+
+with:
+
+\[
+H_{\omega,roll}=r_w
+\begin{bmatrix}
+1 & 0\\
+0 & 1
+\end{bmatrix}
+\]
+
+For independent encoder uncertainty:
+
+\[
+R_{roll,total}=R_{roll,regime}+
+\begin{bmatrix}
+r_w^2\sigma^2_{wheelRate,L} & 0\\
+0 & r_w^2\sigma^2_{wheelRate,R}
+\end{bmatrix}
+\]
+
+The rolling pseudo-measurement is:
+
+```text
+strong in mid-speed, low-utilization rolling motion
+weak at low speed
+weak during launch
+disabled or extremely weak during in-place turns
+disabled or extremely weak during high-speed stick-slip arcs
+disabled when encoderSampleValid == false
+```
+
+Do not infer yaw rate from encoder differential during in-place turns. That assumes rolling contact, which is exactly false in scrubbed in-place turns.
 
 ---
 
@@ -1625,15 +1808,17 @@ StateVec integratePlant(
     const Params& params,
     double deltaTime)
 {
-    // 1. Use wheel rates already present in DriveSample.
-    // 2. Compute nominal bank torque algebraically from command, wheel rate,
+    // 1. Use validated wheel rates and wheelRateCov from DriveSample.
+    // 2. If encoderSampleValid is false, select an explicit degraded prediction path.
+    // 3. Compute nominal bank torque algebraically from command, wheel rate,
     //    and fitted torque-map parameters.
-    // 3. Compute contact-patch slip velocities for each sigma point.
-    // 4. Compute normal loads, tire forces, utilization, and regime scalars.
-    // 5. Compute AfNom, ArNom, yawAccelNom.
-    // 6. Add DeltaAf, DeltaAr, DeltaYawAccel.
-    // 7. Integrate planar body dynamics over the locally derived deltaTime.
-    // 8. Wrap heading.
+    // 4. Compute contact-patch slip velocities for each sigma point.
+    // 5. Compute normal loads, tire forces, utilization, and regime scalars.
+    // 6. Compute AfNom, ArNom, yawAccelNom.
+    // 7. Add DeltaAf, DeltaAr, DeltaYawAccel.
+    // 8. Propagate residual and encoder-input covariance by Section 15.4.
+    // 9. Integrate planar body dynamics over the locally derived deltaTime.
+    // 10. Wrap heading.
 }
 ```
 
@@ -1663,8 +1848,8 @@ These are not UKF states. They are deterministic outputs used by measurement fun
 1. **Coordinate/sign validation**  
    Verify that hardware-layer IMU signs match the project contract. Do not fix signs in the UKF.
 
-2. **Encoder scale and timing**  
-   Confirm actual count convention, gear ratio sign, left/right polarity, timestamping, and wheel radius.
+2. **Encoder scale, timing, and validation**  
+   Confirm actual count convention, gear ratio sign, left/right polarity, timestamping, wheel radius, sample-valid logic, and fault logging. Validate that missed edges or illegal transitions are reported as acquisition faults rather than absorbed into nominal covariance.
 
 3. **Gyro external bias stability**  
    Fit `gyroBiasYawExt` and covariance from stationary logs. Confirm the observed 15-minute stability claim over temperature, battery state, and run duration.
@@ -1694,9 +1879,7 @@ These are not UKF states. They are deterministic outputs used by measurement fun
 
 ## 23. Validation tests
 
-Use held-out logs, not only fit logs.
-
-The residual stochastic-model acceptance checks are listed in Section 15.6. The table below focuses on held-out vehicle logs.
+Use held-out logs, not only fit logs. The residual and encoder-input covariance checks are listed in Section 15.6. The table below focuses on whole-vehicle behavior.
 
 | Test | Expected behavior |
 |---|---|
@@ -1704,10 +1887,13 @@ The residual stochastic-model acceptance checks are listed in Section 15.6. The 
 | Straight launch | launch threshold and acceleration envelope prevent unrealistic body acceleration |
 | Constant-speed straight | residuals decay; no artificial viscous drag required |
 | In-place turn | yaw-rate follows gyro; rolling pseudo-measurement disabled; `DeltaYawAccel` absorbs scrub mismatch |
-| Mid-speed rolling arc | low residuals; rolling pseudo-measurement helpful but not dominant |
+| Mid-speed rolling arc | low residuals; rolling pseudo-measurement helpful but not dominant; rolling covariance includes encoder-rate covariance |
 | High-speed arc | `stickSlipIndex` high; residuals active; filter does not diverge on slip events |
 | Wall-edge pass | wall prediction transitions continuously via soft-min ray model |
 | Floor strike / impact | accelerometer R inflates; planar state not forced to absorb vertical impulse |
+| Residual covariance replay | increasing residual steady-state sigmas increases motion-state covariance and residual-to-motion cross-covariance |
+| Encoder timing/quantization replay | increasing valid-sample wheel-rate covariance increases prediction covariance through the plant |
+| Encoder fault injection | illegal transition, implausible count delta, or timestamp discontinuity disables rolling pseudo-measurement, activates degraded prediction, and logs the fault reason |
 
 ---
 
@@ -1753,11 +1939,6 @@ Subscript conventions:
 | `eta_y` | rad/s² | Discrete OU process sample added to `DeltaYawAccel`. |
 | `Q_DeltaAf`, `Q_DeltaAr` | (m/s²)² | Exact discrete OU process variances for translational residual states. |
 | `Q_DeltaYawAccel` | (rad/s²)² | Exact discrete OU process variance for the yaw-acceleration residual state. |
-| `Q_eta` | mixed residual² | Diagonal covariance of residual-driving innovations `eta_Af`, `eta_Ar`, and `eta_yaw`. |
-| `G_eta` | mixed | Local process-noise sensitivity matrix mapping residual-driving innovations into the full 9-state propagated output. Do not confuse with gear ratio `G`. |
-| `Q_x,res` | state-units product | Full-state covariance contribution from residual-driving noise, computed as `G_eta Q_eta G_eta^T` when additive process noise is used. |
-| `epsilon_Af`, `epsilon_Ar` | m/s² | Finite-difference perturbation sizes for translational residual-driving innovations. |
-| `epsilon_yaw` | rad/s² | Finite-difference perturbation size for yaw-acceleration residual-driving innovation. |
 | `q_c,q` | residual²/s | Equivalent continuous-time driving-noise spectral density for residual `q`; documented for reference, not the scheduled tuning parameter. |
 | `w_f`, `w_r` | m/s³ | Continuous-time disturbance notation used only in the formal OU interpretation; implementation uses the exact discrete OU samples `eta_f` and `eta_r`. |
 | `w_y` | rad/s³ | Continuous-time disturbance notation used only in the formal OU interpretation; implementation uses the exact discrete OU sample `eta_y`. |
@@ -1795,16 +1976,21 @@ Subscript conventions:
 | `countsPerWheelRev` | counts/rev | Encoder counts per wheel-bank revolution. |
 | `wheelCircumference` | m | Wheel rolling circumference. |
 | `distancePerCount` | m/count | Wheel-surface distance represented by one encoder count under rolling geometry. |
-| `wheelRateL`, `wheelRateR`, `hat{wheelRate}_j` | rad/s | Encoder-derived wheel-bank angular rate. |
+| `wheelRateL`, `wheelRateR`, `hat{wheelRate}_j` | rad/s | Validated encoder-derived wheel-bank angular rate. |
+| `encoderSampleValid` | Boolean | Encoder acquisition validation result for the tick. False activates degraded prediction and disables rolling pseudo-measurement. |
+| `encoderFaultFlags` | bitset / enum | Logged reason for invalid encoder sample, such as illegal transition, implausible delta, timestamp discontinuity, or counter discontinuity. |
+| `I_encoderFault` | dimensionless | Binary process-noise scheduling indicator derived from `encoderSampleValid`. |
 | `wheelAccelL`, `wheelAccelR`, `hat{wheelAccel}_j` | rad/s² | Deprecated/excluded encoder-derived wheel-bank angular acceleration; useful for diagnostics/offline identification only, not part of `drive_sample`. |
 | `wheelRate_E` | rad/s | Smoothing scale for wheel-rate sign approximation. |
 | `phi_m`, `phi_w` | rad | Motor shaft angle and wheel-bank angle. |
 | `motorPhase_j` | rad | Motor/gear phase used by ripple fits. |
 | `sigma^2_DeltaN` | counts² | Encoder count-increment quantization variance. |
-| `sigma^2_wheelRate,j` | (rad/s)² | Wheel-rate input variance for side `j`. |
-| `sigma^2_timestamp,j` | (rad/s)² | Wheel-rate-equivalent variance due to timestamp uncertainty. |
-| `sigma^2_missedEdge,j` | (rad/s)² | Wheel-rate-equivalent variance due to missed-edge risk. |
-| `sigma^2_filterDelay,j` | (rad/s)² | Wheel-rate-equivalent variance due to rate-filter delay/error. |
+| `sigma^2_wheelRate,j` | (rad/s)² | Valid-sample wheel-rate input variance for side `j`, from quantization plus timing/phase uncertainty. |
+| `R_omega` | (rad/s)² | 2x2 covariance matrix for `[wheelRateL, wheelRateR]^T`. |
+| `sigma_LR` | (rad/s)² | Optional covariance between left/right wheel-rate errors from shared timing or sample-phase uncertainty. |
+| `sigma^2_timestamp,j`, `sigma^2_wheelRate,timing,j` | (rad/s)² | Wheel-rate-equivalent variance due to timestamp/sample-phase uncertainty. |
+| `sigma^2_missedEdge,j` | (rad/s)² | Must be zero for valid samples. Missed edges are acquisition faults, not nominal covariance. |
+| `sigma^2_filterDelay,j` | (rad/s)² | Must be zero unless firmware actually applies an encoder-rate filter. |
 
 ### 24.3 Motor, driver, and torque algebra
 
@@ -1916,9 +2102,16 @@ Subscript conventions:
 | `sigma_b` | rad/s | External yaw-gyro bias uncertainty. |
 | `k_*` | context-dependent | Scheduling gains; units must make each summed covariance/noise expression dimensionally consistent. |
 | `P` | state-units product | UKF state covariance matrix. |
-| `Q` | state-units product | UKF process-noise covariance matrix. Residual-driving noise uses exact OU innovation variances and must be propagated into the full state covariance through augmented sigma points or `Q_x,res = G_eta Q_eta G_eta^T`. |
+| `Q`, `Q_x` | state-units product | UKF process-noise covariance matrix. Residual and encoder-input terms must be mapped into the full state covariance, not only appended to residual diagonals. |
+| `Q_eta` | residual-state-units product | Diagonal covariance of residual OU innovations `[eta_f, eta_r, eta_y]^T`. |
+| `G_eta` | state/residual units | Local sensitivity mapping residual OU innovations into the full propagated state. |
+| `J_omega` | state/(rad/s) | Local sensitivity mapping encoder wheel-rate input perturbations into the full propagated state. |
+| `wrapStateDelta(...)` | mixed | Difference operation that wraps heading before forming covariance sensitivities. |
 | `R` | measurement-units product | Measurement covariance matrix. Do not confuse with resistance symbols such as `R_m`. |
 | `R_roll`, `R_rollBase` | (m/s)² | Rolling pseudo-measurement covariance and its base value because `h_roll` has velocity units. |
+| `R_roll,regime` | (m/s)² | Rolling pseudo-measurement covariance from regime scheduling before encoder-rate contribution. |
+| `R_roll,total` | (m/s)² | Final rolling pseudo-measurement covariance including `H_omega,roll R_omega H_omega,roll^T`. |
+| `H_omega,roll` | m | Sensitivity from wheel angular rate to rolling pseudo-measurement velocity residual. |
 
 ### 24.6 IMU, wall-sensor, and external-bias measurement symbols
 
@@ -1991,43 +2184,49 @@ These symbols appear only in exclusion rationale or migration notes; they are no
 
 ---
 
-## 25. Glossary audit notes
+## 25. Consistency requirements
 
-The glossary was checked against the equations and code identifiers used in the document. The following consistency points are intentional:
+The following consistency requirements are part of this specification.
 
 1. **Position and velocity transforms are dimensionally valid.** `sin(heading)` and `cos(heading)` are dimensionless, so `dPx/dt` and `dPy/dt` have units m/s.
 
-2. **Body dynamics are dimensionally valid.** `Af` and `Ar` are m/s². The coupling terms `yawRate*Vr` and `yawRate*Vf` are also m/s² because `yawRate` is rad/s and radians are dimensionless.
+2. **Body dynamics are dimensionally valid.** `Af` and `Ar` are m/s². The coupling terms `yawRate*Vr` and `yawRate*Vf` are also m/s² because radians are dimensionless.
 
 3. **Yaw dynamics are dimensionally valid.** `yawMoment / I_z` gives rad/s² under the planar rigid-body convention.
 
 4. **Encoder conversion is dimensionally valid.** `DeltaN / Delta t` gives counts/s; multiplying by `2*pi/(G*countsPerMotorRev)` gives rad/s.
 
-5. **Motor algebra is dimensionally valid.** `K_e*motorRate` gives volts, the current equation gives amperes, and `K_t*I_j` gives N·m.
+5. **Encoder fault treatment is explicit.** Missed edges, illegal quadrature transitions, counter discontinuities, implausible count deltas, and timestamp discontinuities are acquisition faults. They are not nominal Gaussian covariance terms for validated samples.
 
-6. **Slip-stiffness force requests are dimensionally valid.** `K_f,i` and `K_r,i` are N·s/m, so multiplying by slip velocity gives newtons.
+6. **Encoder input covariance enters before nonlinear plant calculations.** `R_omega` must be propagated through motor algebra, slip velocity, tire force, utilization, regime scheduling, and rolling pseudo-measurement covariance.
 
-7. **Combined-slip utilization is dimensionless.** Each force request is divided by a force limit; `lambda_f`, `lambda_r`, `mu`, `util_i`, and `forceScale_i` are dimensionless.
+7. **Residual process noise maps into the full state covariance.** Adding residual process variance only to `DeltaAf`, `DeltaAr`, and `DeltaYawAccel` diagonal entries after propagation is not compliant.
 
-8. **Soft-min wall distance is dimensionally valid.** `beta_s` has units 1/m so `beta_s*d_s,q` is dimensionless and `d_eff,s` has units m.
+8. **Motor algebra is dimensionally valid.** `K_e*motorRate` gives volts, the current equation gives amperes, and `K_t*I_j` gives N·m.
 
-9. **Wall-sensor extrinsics now use body-frame unit vectors.** The prior scalar `sensorYaw_s` representation was removed from the model equations. The audited model now uses `(r_s, f_s)` plus `hat{u}_s=(u_f,s,u_r,s)`, which matches the requested extrinsics format and avoids angle-wrap issues.
+9. **Slip-stiffness force requests are dimensionally valid.** `K_f,i` and `K_r,i` are N·s/m, so multiplying by slip velocity gives newtons.
 
-10. **IMU axis unit vectors are optional and dimensionless.** The default measurement model assumes hardware-layer canonical body-frame acceleration channels. Optional accelerometer-channel unit vectors only project the predicted body-frame acceleration into slightly misaligned reported axes. No planar heading unit vector is needed for the yaw gyro unless a separate calibration layer chooses to model gyro-axis projection.
+10. **Combined-slip utilization is dimensionless.** Each force request is divided by a force limit; `lambda_f`, `lambda_r`, `mu`, `util_i`, and `forceScale_i` are dimensionless.
 
-11. **HAODR/raw-IMU scope is reflected.** Embedded SFLP/game-vector/gravity/bias outputs are excluded from the estimator path. The only IMU software settings discussed are LPF/HPF choices, and HPF/slope output is reserved for event gating rather than the primary acceleration measurement.
+11. **Soft-min wall distance is dimensionally valid.** `beta_s` has units 1/m so `beta_s*d_s,q` is dimensionless and `d_eff,s` has units m.
 
-12. **Overloaded symbols are disambiguated.** `R` is measurement covariance, while `R_m`, `R_drv`, `R_wire`, and `R_ILIM` are resistances. `N_i` is normal load in newtons, while `DeltaN_j` is encoder count increment and `N_samples` is a sample count.
+12. **Wall-sensor extrinsics use body-frame unit vectors.** The active model uses `(r_s, f_s)` plus `hat{u}_s=(u_f,s,u_r,s)`, which matches the project extrinsics representation and avoids angle-wrap issues.
 
-13. **Residual process-noise semantics are exact and timestep-independent.** The scheduled `sigmaDelta*Ss` terms are steady-state residual-state standard deviations. Discrete residual process variance is computed as `sigma^2 * (1 - phi^2)` with `phi = exp(-Delta t / tau)`. The scheduled sigmas are not per-tick standard deviations and not continuous-time spectral-density values; the equivalent `q_c = 2*sigma^2/tau` relationship is stated only for comparison.
+13. **IMU axis unit vectors are optional and dimensionless.** The default measurement model assumes hardware-layer canonical body-frame acceleration channels. Optional accelerometer-channel unit vectors only project the predicted body-frame acceleration into slightly misaligned reported axes. No planar heading unit vector is needed for the yaw gyro unless a separate calibration layer models gyro-axis projection.
 
-14. **Residual-driving noise propagates into full-state covariance.** `Q_DeltaAf`, `Q_DeltaAr`, and `Q_DeltaYawAccel` are innovation variances. They must be carried through augmented sigma points or through `Q_x,res = G_eta Q_eta G_eta^T`. Adding them only to the residual-state diagonal entries is not compliant.
+14. **HAODR/raw-IMU scope is reflected.** Embedded SFLP/game-vector/gravity/bias outputs are excluded from the estimator path. The only IMU software settings discussed are LPF/HPF choices, and HPF/slope output is reserved for event gating rather than the primary acceleration measurement.
 
-15. **Timing contract is disambiguated.** `timestamp` is externally supplied and is the source of truth for propagation timing. `Delta t` / `dt` remains a mathematical/internal estimator variable derived from consecutive timestamps; it is intentionally not duplicated in `drive_sample`.
+15. **Overloaded symbols are disambiguated.** `R` is measurement covariance, while `R_m`, `R_drv`, `R_wire`, and `R_ILIM` are resistances. `N_i` is normal load in newtons, while `DeltaN_j` is encoder count increment and `N_samples` is a sample count.
 
-16. **Drive-sample contract is disambiguated.** `Vbat` and `wheelAccelL/R` are excluded from `drive_sample`. `VbusEff` is a calibrated parameter, and wheel acceleration is diagnostic/offline-identification data only.
+16. **Residual process-noise semantics are exact and timestep-independent.** The scheduled `sigmaDelta*Ss` terms are steady-state residual-state standard deviations. Discrete residual process variance is computed as `sigma^2 * (1 - phi^2)` with `phi = exp(-Delta t / tau)`. The scheduled sigmas are not per-tick standard deviations and not continuous-time spectral-density values; the equivalent `q_c = 2*sigma^2/tau` relationship is stated only for comparison.
 
-17. **Process-noise schedule evaluation is specified.** The preferred convention is sigma-point-specific regime-scalar evaluation with the scheduled sigmas frozen over each propagation substep. If the implementation cannot support sigma-point-specific process noise, predicted-mean scalars with conservative inflation are required.
+17. **Timing contract is disambiguated.** `timestamp` is externally supplied and is the source of truth for propagation timing. `Delta t` / `dt` remains a mathematical/internal estimator variable derived from consecutive timestamps; it is intentionally not duplicated in `drive_sample`.
+
+18. **Drive-sample contract is disambiguated.** `Vbat` and `wheelAccelL/R` are excluded from `drive_sample`. `VbusEff` is a calibrated parameter, and wheel acceleration is diagnostic/offline-identification data only.
+
+19. **Process-noise schedule evaluation is specified.** The preferred convention is sigma-point-specific regime-scalar evaluation with scheduled values frozen over each propagation substep. If the implementation cannot support sigma-point-specific process noise, predicted-mean scalars with conservative inflation are required.
+
+20. **Rolling pseudo-measurement covariance is not allowed to treat encoders as exact.** `R_roll,total` must include the `R_omega` contribution when the pseudo-measurement is enabled.
 
 ---
 
@@ -2066,6 +2265,8 @@ and not:
 
 This design is better matched to the application because the difficult regimes are not merely wheel-slip estimation problems. They are body-force prediction problems across launch, scrubbed in-place turns, rolling turns, high-speed stick-slip arcs, ground-strike limits, and wall-sensor correction. The residual acceleration states act directly on the body dynamics while the algebraic slip model preserves the essential contact physics without consuming state budget.
 
+Estimator covariance consistency depends on two additional requirements: residual-driving noise must propagate into motion-state covariance and cross-covariances, and encoder wheel-rate covariance must enter the nonlinear plant before motor, slip, tire-force, utilization, and rolling pseudo-measurement calculations. Encoder acquisition faults are handled by validation, logging, degraded prediction, and process-noise inflation, not by a nominal missed-pulse covariance term.
+
 ---
 
 ## References
@@ -2077,5 +2278,5 @@ This design is better matched to the application because the difficult regimes a
 [^encoder]: `EN_IE2-1024_DFF.pdf`, Faulhaber IE2-1024 encoder datasheet, page 1 table and characteristics text.
 [^driver]: `drv8871.pdf`, Texas Instruments DRV8871 datasheet: features, recommended operating conditions, electrical characteristics, current regulation, and H-bridge modes.
 [^imu]: `lsm6dsv16x.pdf`, STMicroelectronics LSM6DSV16X datasheet: features, mechanical characteristics, HAODR and ODR/full-scale tables, timestamp registers, and UI-path LPF/HPF filtering registers. Embedded SFLP/game outputs are not used in the HAODR estimator path described here.
-[^stochastic]: `01_stochastic_model_semantics.md`, audit issue describing residual-state process-noise ambiguity and recommending exact OU discretization with scheduled steady-state residual standard deviations.
-[^covprop]: `02_residual_noise_covariance_propagation.md`, audit issue requiring residual-driving process noise to be propagated through the full state covariance rather than being added only to the residual-state diagonal block.
+[^residual_covariance]: `02_residual_noise_covariance_propagation.md`, covariance requirement that residual-state process noise be propagated into the full state covariance rather than only the residual-state diagonal block.
+[^encoder_uncertainty]: `03_encoder_input_uncertainty.md`, covariance requirement that encoder wheel-rate uncertainty enter the nonlinear plant before motor, slip, tire-force, utilization, regime-scheduling, and rolling pseudo-measurement calculations.

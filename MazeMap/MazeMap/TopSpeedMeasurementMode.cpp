@@ -123,7 +123,6 @@ namespace MazeMap::App::Internal
 
             ReleaseSelectorMonitor();
             _startupCalibration.Cancel();
-            _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
         }
@@ -153,7 +152,6 @@ namespace MazeMap::App::Internal
             self->ReleaseSelectorMonitor();
             self->_phase = Phase::Idle;
             self->_startupCalibration.Cancel();
-            self->_driveService.Cancel();
             self->_drive.Brake();
             self->_drive.UseNominalWheelControlProfile();
         }
@@ -192,7 +190,6 @@ namespace MazeMap::App::Internal
             _selectorSensePin = 0U;
             _selectorMonitorArmed = false;
             _startupCalibration.Cancel();
-            _driveService.Cancel();
         }
 
         void ConfigureSelectorMonitor() noexcept
@@ -229,11 +226,10 @@ namespace MazeMap::App::Internal
 
         bool StartHold(const std::uint16_t durationMs) noexcept
         {
-            _driveService.Cancel();
             _driveService.SetLimits(BuildTopSpeedLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartHold(durationMs, true);
-            return _driveService.Active();
+            return true;
         }
 
         bool StartStraightRun() noexcept
@@ -243,7 +239,6 @@ namespace MazeMap::App::Internal
             const Eigen::Vector2f targetPosition(
                 pose.GetPositionX(),
                 pose.GetPositionY() + kTopSpeedMeasurementDistanceM);
-            _driveService.Cancel();
             _driveService.SetLimits(BuildTopSpeedLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartStraight(
@@ -252,7 +247,7 @@ namespace MazeMap::App::Internal
                 0.0f,
                 &heading,
                 &targetPosition);
-            return _driveService.Active();
+            return true;
         }
 
         void UpdatePeaks(const MazeMap::VehicleState& state) noexcept

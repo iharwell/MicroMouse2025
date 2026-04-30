@@ -34,11 +34,6 @@ namespace MazeMap::App::Internal
 
     void WallTouch::Cancel() noexcept
     {
-        if (_driveService != nullptr)
-        {
-            _driveService->Cancel();
-        }
-
         ResetActivePhase();
         _faulted = false;
     }
@@ -119,11 +114,6 @@ namespace MazeMap::App::Internal
             !(maxApproachTravelM > 0.0f))
         {
             return;
-        }
-
-        if (_driveService != nullptr)
-        {
-            _driveService->Cancel();
         }
 
         ResetActivePhase();
@@ -236,11 +226,6 @@ namespace MazeMap::App::Internal
     void WallTouch::SetFault(const char* reason) noexcept
     {
         _faulted = true;
-        if (_driveService != nullptr)
-        {
-            _driveService->Cancel();
-        }
-
         ResetActivePhase();
         if (_runtime != nullptr)
         {
@@ -299,7 +284,6 @@ namespace MazeMap::App::Internal
         }
 
         const Eigen::Vector2f targetPosition(_state.preferredXMeters, _state.preferredYMeters);
-        _driveService->Cancel();
         _driveService->SetLimits(_limits);
         _driveService->SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService->StartStraight(
@@ -308,11 +292,6 @@ namespace MazeMap::App::Internal
             0.0f,
             &heading,
             &targetPosition);
-        if (!_driveService->Active())
-        {
-            return false;
-        }
-
         _activePhase = ActivePhase::ReturnToPreferred;
         return true;
     }
@@ -611,11 +590,6 @@ namespace MazeMap::App::Internal
         if (_driveService == nullptr)
         {
             SetFault("WallTouch delegated Drive service is unavailable");
-            done = true;
-            return LoopController::ControlVector::Brake;
-        }
-        if (!_driveService->Active())
-        {
             done = true;
             return LoopController::ControlVector::Brake;
         }

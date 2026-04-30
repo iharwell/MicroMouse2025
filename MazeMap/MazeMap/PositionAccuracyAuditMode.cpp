@@ -104,7 +104,6 @@ namespace MazeMap::App::Internal
 
             _wallTouch.Cancel();
             _startupCalibration.Cancel();
-            _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
         }
@@ -143,7 +142,6 @@ namespace MazeMap::App::Internal
             self->_phase = Phase::Idle;
             self->_wallTouch.Cancel();
             self->_startupCalibration.Cancel();
-            self->_driveService.Cancel();
             self->_drive.Brake();
             self->_drive.UseNominalWheelControlProfile();
         }
@@ -178,7 +176,6 @@ namespace MazeMap::App::Internal
             _fixture = {};
             _wallTouch.Cancel();
             _startupCalibration.Cancel();
-            _driveService.Cancel();
         }
 
         float OutboundDistanceM() const noexcept
@@ -198,13 +195,12 @@ namespace MazeMap::App::Internal
 
         bool StartDriveHold(const std::uint16_t durationMs) noexcept
         {
-            _driveService.Cancel();
             _driveService.SetLimits(
                 AuxMeasurementModeSupport::PositionAccuracyAuditStraightLimits(
                     AuxMeasurementConfig::kPositionAuditStraightSpeedsMps[_speedIndex]));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(durationMs, true);
-            return _driveService.Active();
+            return true;
         }
 
         bool StartDriveStraight(
@@ -213,20 +209,18 @@ namespace MazeMap::App::Internal
             const Eigen::Vector2f& heading,
             const Eigen::Vector2f& targetPosition) noexcept
         {
-            _driveService.Cancel();
             _driveService.SetLimits(AuxMeasurementModeSupport::PositionAccuracyAuditStraightLimits(cruiseSpeedMps));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartStraight(distanceM, cruiseSpeedMps, 0.0f, &heading, &targetPosition);
-            return _driveService.Active();
+            return true;
         }
 
         bool StartTurnAround() noexcept
         {
-            _driveService.Cancel();
             _driveService.SetLimits(AuxMeasurementModeSupport::PositionAccuracyAuditTurnLimits());
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartTurn(PI_F);
-            return _driveService.Active();
+            return true;
         }
 
         bool StartWallTouch() noexcept

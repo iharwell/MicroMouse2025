@@ -130,7 +130,6 @@ public:
         }
 
         _drive.Brake();
-        _driveService.Cancel();
         _drive.UseNominalWheelControlProfile();
 
         if (ok)
@@ -721,14 +720,9 @@ private:
         _turnPhaseState.timeoutMs = millis() + 3000UL;
         _turnPhaseState.nextStep = nextStep;
         _turnPhaseState.writeSquareClosure = writeSquareClosure;
-        _driveService.Cancel();
         _driveService.SetLimits(DiagnosticLimits(0.0f));
         _driveService.SetOperationMode(MazeMap::App::Internal::Drive::OperationMode::OpenFloor);
         _driveService.StartTurn(angleRad);
-        if (!_driveService.Active())
-        {
-            return Fail("Diagnostic turn phase could not start");
-        }
         _phaseFn = &DiagnosticController::TurnPhaseTick;
         return true;
     }
@@ -1814,7 +1808,6 @@ private:
         }
         if (static_cast<long>(_turnPhaseState.timeoutMs - millis()) <= 0)
         {
-            _driveService.Cancel();
             services.Fault("Turn diagnostic phase timed out");
             return LoopController::ControlVector::Brake;
         }

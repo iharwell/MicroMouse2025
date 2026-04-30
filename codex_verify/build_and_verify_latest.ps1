@@ -1430,7 +1430,6 @@ try {
         $teensyBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         Invoke-External -FilePath $arduinoCli -Arguments @(
             'compile',
-            '--clean',
             '--fqbn', $fqbn,
             '--board-options', ($teensyBoardOptions -join ','),
             '--libraries', $arduinoLibrariesDir,

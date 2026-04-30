@@ -197,7 +197,6 @@ namespace MazeMap::App::Internal
             }
 
             _startupCalibration.Cancel();
-            _driveService.Cancel();
             _drive.Brake();
             _drive.UseNominalWheelControlProfile();
         }
@@ -246,7 +245,6 @@ namespace MazeMap::App::Internal
             _queueActiveIndex = 0U;
             _phase = Phase::Idle;
             _startupCalibration.Cancel();
-            _driveService.Cancel();
         }
 
         bool Fail(const char* reason)
@@ -264,7 +262,6 @@ namespace MazeMap::App::Internal
 
             auto* const self = static_cast<ManeuverFileTestMode*>(context);
             self->_startupCalibration.Cancel();
-            self->_driveService.Cancel();
             self->_drive.Brake();
             self->_drive.UseNominalWheelControlProfile();
         }
@@ -305,17 +302,9 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::LaunchPostStartupHold:
-                _driveService.Cancel();
                 _driveService.SetOperationMode(Drive::OperationMode::Maze);
                 _driveService.StartHold(kManeuverFilePostStartupHoldMs, true);
-                if (!_driveService.Active())
-                {
-                    services.Fault("Maneuver file test post-startup hold could not start");
-                }
-                else
-                {
-                    _phase = Phase::RunPostStartupHold;
-                }
+                _phase = Phase::RunPostStartupHold;
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunPostStartupHold:
@@ -350,17 +339,9 @@ namespace MazeMap::App::Internal
                         static_cast<int>(static_cast<MazeMap::CellCoordinates>(entry.getStart().GetLocation()).GetY()),
                         DirectionName(entry.getStart().GetDirection()));
 
-                    _driveService.Cancel();
                     _driveService.SetOperationMode(Drive::OperationMode::Maze);
                     _driveService.StartManeuver(entry);
-                    if (!_driveService.Active())
-                    {
-                        services.Fault("Maneuver file test queue entry could not start");
-                    }
-                    else
-                    {
-                        _phase = Phase::RunQueueEntry;
-                    }
+                    _phase = Phase::RunQueueEntry;
                 }
                 return LoopController::ControlVector::Brake;
 
@@ -405,17 +386,9 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::LaunchCompletionHold:
-                _driveService.Cancel();
                 _driveService.SetOperationMode(Drive::OperationMode::Maze);
                 _driveService.StartHold(kManeuverFileCompletionHoldMs, true);
-                if (!_driveService.Active())
-                {
-                    services.Fault("Maneuver file test completion hold could not start");
-                }
-                else
-                {
-                    _phase = Phase::RunCompletionHold;
-                }
+                _phase = Phase::RunCompletionHold;
                 return LoopController::ControlVector::Brake;
 
             case Phase::RunCompletionHold:

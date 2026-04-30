@@ -22,19 +22,84 @@ namespace MazeMap::App::Internal
 {
     class SharedRobotRuntime;
 
-    // Owns the ordinary shared multi-tick motion primitives that mode code may use while still
-    // doing other work inside the same LoopController callback. The mode keeps callback ownership:
-    // it arms one primitive through a Start... member, then calls GetNextControls(bool& done) from
-    // its callback and decides whether to return Drive's proposed controls or do something else.
+    // Stateful, total command-proposal engine for ordinary shared multi-tick motion
+    // primitives that mode code may consult while still doing other work inside the
+    // same LoopController callback.
     //
-    // This is intentionally a simpler, cadence-safe owner than ManeuverExecutor. Drive keeps the
-    // primitive-specific progression state private and requests any closed-loop tracking through
-    // DriveBase's canonical command entry points, so most mode logic does not need to care which
-    // primitive is currently active.
+    // Layering contract:
+    // DriveBase is the low-level drive mechanism. It exposes canonical command helpers
+    // and explicit feedback composition. Drive owns the higher-level primitive
+    // semantics used by normal mode code: primitive progression state, retained live
+    // execution configuration, standard DriveBase feedback selections, command
+    // interpretation, and degraded-input behavior.
+    //
+    // Mode code keeps callback ownership:
+    // - A mode arms one primitive or maneuver through a Start... member.
+    // - On later ticks, the mode may call GetNextControls(bool& done) when it wants
+    //   Drive's current proposal.
+    // - The mode may return Drive's proposal, override it, ignore it, or stop querying
+    //   Drive without transferring lifecycle ownership to Drive.
+    //
+    // Public state model:
+    // - Set... members install retained live Drive configuration. These settings are
+    //   normally established during boot-time setup and reused across primitives, but
+    //   mode code may change them while running. Active primitives observe changed
+    //   settings on later GetNextControls(...) calls when applicable.
+    // - Each Start... member supersedes the previous instruction and latches a new
+    //   latest instruction. Within Drive, that latest instruction is authoritative
+    //   until another Start... call supersedes it. Numeric Start arguments have no
+    //   validity precondition:
+    //   NaN, infinity, out-of-range, physically impossible, or otherwise ill-posed
+    //   numeric requests do not cause Drive to reject the Start call, retain an older
+    //   instruction, fault, or become incoherent.
+    // - GetNextControls(...) combines the latest latched instruction, the current live
+    //   Drive configuration, and the current runtime state to produce one advisory
+    //   control proposal.
+    //
+    // Robustness and semantic-recovery model:
+    // Public numeric inputs are requests, not scalar validity preconditions. Drive does
+    // not merely discard unexpected numeric values. When a value is not directly usable,
+    // Drive may derive meaning from the field's domain, the active primitive, sibling
+    // parameters, retained live configuration, captured start state, current robot
+    // state, vehicle facts, maze facts, project sign conventions, and any other
+    // available local context.
+    //
+    // Extended numeric values may have domain meaning. For example, an infinite limit
+    // may be interpreted as an unbounded constraint when the field semantics support
+    // that reading. A negative value in a field normally used as an upper acceleration
+    // or speed bound may, when that is the most coherent interpretation, be treated as
+    // a signed lower bound or reverse-direction constraint rather than as an immediate
+    // error.
+    //
+    // Only when Drive cannot derive a coherent meaning for a supplied value does it
+    // neutralize or ignore the affected term, and then only locally. When multiple
+    // coherent interpretations remain and no retained caller signal or local context
+    // distinguishes them, Drive still chooses one coherent interpretation instead of
+    // treating ambiguity as failure. Degraded evaluation is still evaluation of the
+    // latest installed instruction; Drive must not substitute an unrelated primitive
+    // or route command generation through a separate fault mode.
+    //
+    // Malformed numeric input is non-sticky. It will not, under any circumstances
+    // within normal C++ object validity, poison Drive's state to the point of loss of
+    // usability. Drive remains able to accept later Start... calls, accept later Set...
+    // calls, produce coherent control proposals, and return to normal behavior once
+    // coherent inputs are supplied.
+    //
+    // Drive is not the vehicle safety owner. Its responsibility is to produce commands
+    // aligned with the best available interpretation of the caller's latest request.
+    // Supervisory safety logic, stop authority, and decision-level permission to move
+    // belong outside this class. Drive respects finite and physically plausible
+    // configured constraints because they are part of the interpreted request, not
+    // because Drive is a global safety envelope.
+    //
+    // This contract assumes normal C++ validity: intact object storage, intact code,
+    // valid non-null caller-owned pointers according to their documented lifetime
+    // rules, and no external memory corruption. Ill-posed numeric requests are inside
+    // Drive's robustness contract; C++ undefined behavior is not.
     class EXPORT Drive final
     {
     public:
-        // Selects whether eligible primitives may use maze-wall observations for pose maintenance.
+        // Selects the Drive-level live wall-correction mode used by eligible primitives.
         //
         // Behavior:
         // `Maze` allows wall-grounded correction when the active primitive supports it.
@@ -45,9 +110,17 @@ namespace MazeMap::App::Internal
             OpenFloor
         };
 
-        // Owner-level DriveBase feedback-selection defaults reused across subsequent primitive
-        // starts. This intentionally borrows DriveBase's CommandPD flag vocabulary instead of
-        // introducing another control-settings dialect or local feedback owner in Drive.
+        // Drive-level live DriveBase feedback-selection settings.
+        //
+        // These settings select which DriveBase CommandPD feedback terms Drive uses when
+        // generating standard primitive control proposals. They are retained on Drive,
+        // reused across primitive starts, and may be changed while a primitive is active.
+        // Active primitives observe the current selections on later GetNextControls(...)
+        // calls when they request the corresponding feedback objective.
+        //
+        // This intentionally borrows DriveBase's CommandPD flag vocabulary instead of
+        // introducing another control-settings dialect, local feedback owner, or separate
+        // configuration bag inside Drive.
         //
         // `heading`:
         // Flags used when a primitive is correcting a heading target.
@@ -71,53 +144,111 @@ namespace MazeMap::App::Internal
 
         Drive();
 
-        // Owner-level configuration follows the "set up once, use forever" model.
+        // Drive-level configuration is retained and live.
+        //
+        // These settings are typically installed during boot-time setup and reused across
+        // primitives. They may also be changed by mode code while the robot is running;
+        // active primitives observe the new values on subsequent GetNextControls(...) calls
+        // when the primitive consults that setting.
         //
         // `SetOperationMode(mode)`:
-        // Changes whether eligible primitives may use maze-wall correction.
+        // Installs the live wall-correction mode used by primitives that support
+        // wall-grounded correction.
         //
         // Parameters:
         // `mode`:
-        // Operation policy consulted by active execution for primitives that support wall-grounded
-        // correction.
+        // Wall-correction mode consulted by active execution for eligible primitives.
         //
         // `GetOperationMode()`:
-        // Returns the current wall-usage policy.
+        // Returns the current wall-correction mode.
         void SetOperationMode(OperationMode mode) noexcept;
         OperationMode GetOperationMode() const noexcept;
 
         // `SetLimits(limits)`:
-        // Installs the owner-level motion envelope.
+        // Installs the Drive-level live motion envelope.
+        //
+        // Limits are retained on Drive rather than passed to individual Start... calls.
+        // A mode may change them while a primitive is active; subsequent
+        // GetNextControls(...) calls use the current limits wherever that primitive applies
+        // motion limiting.
         //
         // Parameters:
         // `limits`:
-        // Owner-level speed, acceleration, deceleration, and angular bounds consulted until changed.
-        // Drive stores exactly what the caller sets here; it does not sanitize or reinterpret the
-        // requested envelope before execution.
+        // Speed, acceleration, deceleration, and angular bounds consulted until changed.
+        // Drive stores the supplied MotionLimits object verbatim. It does not clamp,
+        // sanitize, or rewrite the retained configuration at SetLimits(...) time. Limit
+        // fields are interpreted defensively at the point of use.
+        //
+        // Finite and physically plausible limit fields are binding in the direction Drive
+        // coherently interprets them and must be respected whenever the corresponding
+        // constrained quantity is commanded. Non-finite, contradictory, signed in an
+        // unexpected direction, or physically implausible fields are not automatically
+        // discarded: Drive first attempts to interpret them according to the field's
+        // semantics and the current execution context.
+        //
+        // Examples of possible interpretations include treating an infinite upper bound as
+        // an unbounded constraint, or treating a negative acceleration-like upper bound as a
+        // signed lower bound/reverse-direction constraint when that best matches the
+        // caller's apparent request. If no coherent meaning can be derived for a limit
+        // field, Drive treats that field as unavailable for that particular limiting
+        // operation. That does not authorize violation of other usable limits, cancel the
+        // active primitive, revive an older instruction, or corrupt Drive's retained state.
+        //
+        // Malformed or uninterpretable limit fields are non-sticky: they may reduce the
+        // constrainedness or quality of proposals while configured, but they will not, under
+        // any circumstances within normal C++ object validity, poison Drive's state to the
+        // point of loss of usability. Later coherent limits must restore coherent limit
+        // behavior without requiring Drive to be reconstructed.
+        //
+        // These limits express the caller's requested motion envelope as interpreted by
+        // Drive. They are not a vehicle-safety boundary and do not make Drive responsible
+        // for deciding whether the vehicle should be allowed to move.
         void SetLimits(const MotionLimits& limits) noexcept;
 
-        // Returns the current owner-level motion envelope.
+        // Returns the current Drive-level live motion envelope exactly as retained by Drive.
         const MotionLimits& GetLimits() const noexcept;
 
         // `SetCommandPDSettings(settings)`:
-        // Installs the owner-level DriveBase feedback-selection flags.
+        // Installs the Drive-level live DriveBase feedback-selection flags.
         //
         // Parameters:
         // `settings`:
-        // Per-objective CommandPD flag selections consulted until changed.
+        // Per-objective CommandPD flag selections consulted until changed. These selections
+        // define Drive's standard feedback topology for ordinary primitives; they are not
+        // latched by Start... calls.
         void SetCommandPDSettings(const CommandPDSettings& settings) noexcept;
 
-        // Returns the current owner-level feedback-selection defaults.
+        // Returns the current Drive-level live feedback-selection settings.
         const CommandPDSettings& GetCommandPDSettings() const noexcept;
 
-        // Reports whether Drive currently owns an active primitive or maneuver that has not yet been
-        // cancelled or completed.
-        bool Active() const noexcept;
+        // Convenience completion query.
+        //
+        // This reports whether Drive is currently acting as though the latest observed
+        // `GetNextControls(...)` completion result was `done == true`. Before any command is
+        // installed, Drive behaves as though a hold had already completed. Arming a new
+        // instruction clears this cached observation until Drive evaluates that instruction.
+        bool IsEffectivelyComplete() const noexcept;
 
-        // Drops the active primitive immediately and clears Drive's private execution state.
-        // This is the explicit escape hatch when a mode decides the currently armed motion should
-        // no longer contribute controls on future ticks.
-        void Cancel() noexcept;
+        // Start... members are total instruction setters.
+        //
+        // Each Start... call replaces the previous installed instruction with the newly
+        // requested primitive or maneuver. Numeric arguments are accepted as the caller's
+        // latest request even when they are NaN, infinite, out of range, or physically
+        // unattainable. Such values may require semantic recovery, but they do not cause
+        // the Start call to fail, leave the previous instruction active, install a
+        // different primitive, or make Drive unusable.
+        //
+        // Drive may resolve that request into retained internal execution state during the
+        // Start call itself. Later GetNextControls(...) calls should then execute and track
+        // that retained instruction coherently rather than re-deciding what the caller
+        // meant on every tick. Only irrecoverably meaningless terms are neutralized or
+        // ignored.
+        //
+        // Unless explicitly documented as a retained observer pointer, Start arguments are
+        // sampled during the call and latched into Drive's active primitive state. Numeric
+        // robustness does not relax pointer validity requirements: non-null pointer
+        // arguments must satisfy the lifetime and validity rules documented for that
+        // parameter.
 
         // Hold measures stationary time, not raw wall-clock time with brake output forced. If a
         // caller only wants to return ControlVector::Brake for some interval, it should do that in
@@ -144,7 +275,7 @@ namespace MazeMap::App::Internal
         //
         // Parameters:
         // `distanceM`:
-        // Requested travel magnitude along the held heading line.
+        // Requested travel amount along the held heading line.
         //
         // `cruiseSpeed`:
         // Requested steady signed speed target while translation remains in progress.
@@ -155,11 +286,14 @@ namespace MazeMap::App::Internal
         //
         // `targetHeadingOverride`:
         // Optional heading target to hold during the motion. When null, Drive captures the current
-        // heading at arm time.
+        // heading at arm time. When non-null, the pointed-to numeric values are sampled during this
+        // Start call and resolved into the retained instruction under Drive's recovery rules.
         //
         // `targetPositionOverride`:
         // Optional projected position target used for completion logic instead of pure
-        // encoder-distance progress from the initiation point.
+        // encoder-distance progress from the initiation point. When non-null, the pointed-to
+        // numeric values are sampled during this Start call and resolved into the retained
+        // instruction under Drive's recovery rules.
         void StartStraight(
             float distanceM,
             float cruiseSpeed,
@@ -176,9 +310,10 @@ namespace MazeMap::App::Internal
         // convention of clockwise-positive yaw.
         //
         // `wallEdgeTracker`:
-        // Optional observer updated while the turn runs. This is observational support for callers
-        // that care about wall-edge tracking during the turn; it does not change the public control
-        // protocol.
+        // Optional non-owning observer pointer latched into the turn instruction. When non-null,
+        // it may be updated while the turn runs and must remain valid until the turn is
+        // superseded or no longer queried. This observational support does not change the public
+        // control protocol.
         void StartTurn(
             float angleRad,
             MazeMap::TurnWallEdgeTracker* wallEdgeTracker = nullptr);
@@ -219,24 +354,52 @@ namespace MazeMap::App::Internal
         // `maneuver`:
         // Canonical maneuver instance to execute. For point-trackable smooth turns, this preserves
         // maneuver-native geometry and uses maneuver-point evaluation instead of reducing the motion
-        // to ad hoc straight/transition/arc parameters.
+        // to ad hoc straight/transition/arc parameters. The maneuver request is latched as the
+        // latest instruction.
         void StartManeuver(
             const MazeMap::ManeuverInstance& maneuver);
 
         // Generic per-tick query used by the active mode callback. The caller may return the
-        // proposed controls to LoopController, override them, or ignore them. `done` reports
-        // completion of the currently armed primitive. Drive uses configured limits only when they
-        // are actually available; it does not invent substitute limits or route command-path
-        // decisions through a separate fault protocol.
+        // proposed controls to LoopController, override them, ignore them, or stop querying Drive
+        // altogether without transferring lifecycle ownership to the service.
+        //
+        // Each call evaluates:
+        //   latest latched instruction
+        //   + current live Drive configuration
+        //   + current runtime state
+        // to produce the best coherent ControlVector Drive can infer for the present tick.
+        //
+        // Unexpected or non-finite inputs are handled by semantic recovery rather than by a
+        // separate fault path. That recovery should converge onto one retained instruction rather
+        // than re-deciding the instruction on every tick. Later calls then combine that retained
+        // instruction with current live configuration and runtime state to keep the returned
+        // command coherent.
+        //
+        // The returned proposal must remain aligned with the latest installed instruction as Drive
+        // best understands it. Drive may degrade toward neutral/brake behavior when no meaningful
+        // progress command can be computed, but it must not revive an older instruction, reset
+        // itself to None, or substitute an unrelated primitive merely because the latest request is
+        // ill-posed.
+        //
+        // The returned proposal must respect every applicable finite and physically plausible limit
+        // that Drive can coherently interpret. Uninterpretable limit fields remove only their own
+        // constraint; they do not release other usable constraints or permit unrelated motion
+        // objectives. Drive's responsibility here is request alignment, not global vehicle safety.
         //
         // Parameters:
         // `done`:
-        // Set to `true` when the active primitive or maneuver completes normally on this tick.
+        // Set to `true` when the installed primitive or maneuver has reached its completion
+        // condition on this tick. When the retained instruction has no finite completion
+        // condition, `done` is also reported as `true` so callers that assume commands normally
+        // complete can still behave reasonably while Drive continues proposing motion for the
+        // retained instruction. This observation is advisory and should not be treated as a
+        // validity signal, fault signal, safety signal, or implicit permission for Drive to revoke
+        // or forget the installed instruction.
         //
         // Return value:
         // Proposed control vector for the present tick. The mode may return it directly to
         // LoopController, replace it, or ignore it. Drive does not inject an independent fault or
-        // "safe fallback" policy into this command path.
+        // "safe fallback" behavior into this command path.
         LoopController::ControlVector GetNextControls(bool& done);
 
     private:
@@ -256,7 +419,6 @@ namespace MazeMap::App::Internal
 
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
 
-        bool CanStart() const noexcept;
         void ResetActivePrimitive() noexcept;
 
         // Primitive-specific stepping helpers behind the generic public GetNextControls(...).
@@ -279,6 +441,8 @@ namespace MazeMap::App::Internal
             const DriveTelemetry& driveTelemetry,
             bool& done);
         LoopController::ControlVector ArcControls(
+            const MazeMap::VehicleState& state,
+            const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
             bool& done);
         LoopController::ControlVector ManeuverControls(
@@ -292,10 +456,11 @@ namespace MazeMap::App::Internal
         DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
         MazeMap::Vehicle* _speedVehicle{};  // Vehicle facts used for speed-limit derivation.
         MazeMap::Maze* _maze{};             // Maze facts used when maze-mode wall correction is enabled.
-        MotionLimits _limits{};                              // Owner-level motion envelope.
-        CommandPDSettings _commandPdSettings{};              // Owner-level CommandPD selections.
-        OperationMode _operationMode{ OperationMode::Maze }; // Owner-level wall-correction policy.
-        ActivePrimitive _activePrimitive{ ActivePrimitive::None }; // Currently armed primitive kind.
+        MotionLimits _limits{};             // Drive-level live motion envelope, interpreted at use.
+        CommandPDSettings _commandPdSettings{};              // Drive-level live CommandPD selections.
+        OperationMode _operationMode{ OperationMode::Maze }; // Drive-level live wall-correction mode.
+        ActivePrimitive _activePrimitive{ ActivePrimitive::None }; // Latest installed instruction kind.
+        bool _effectivelyComplete{ true };  // Latest completion observation, defaulting to the no-command hold-like state.
 
         // Opaque active-primitive storage. Drive.cpp privately overlays this with the active union
         // state and is responsible for asserting that the chosen union fits in this buffer.

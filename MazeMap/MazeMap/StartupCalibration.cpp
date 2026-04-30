@@ -92,10 +92,6 @@ namespace MazeMap::App::Internal
 
     void StartupCalibration::Cancel() noexcept
     {
-        if (_driveService != nullptr)
-        {
-            _driveService->Cancel();
-        }
         if (_wallTouch != nullptr)
         {
             _wallTouch->Cancel();
@@ -198,7 +194,7 @@ namespace MazeMap::App::Internal
             return LoopController::ControlVector::Brake;
         }
 
-        if ((_driveService == nullptr) || !_driveService->Active())
+        if (_driveService == nullptr)
         {
             Fail("StartupCalibration expected an active Drive phase");
             done = true;
@@ -240,7 +236,6 @@ namespace MazeMap::App::Internal
             (_speedVehicle != nullptr) &&
             _broughtUp &&
             !Active() &&
-            !_driveService->Active() &&
             !_wallTouch->Active();
     }
 
@@ -255,10 +250,6 @@ namespace MazeMap::App::Internal
     void StartupCalibration::Fail(const char* const reason) noexcept
     {
         _faulted = true;
-        if (_driveService != nullptr)
-        {
-            _driveService->Cancel();
-        }
         if (_wallTouch != nullptr)
         {
             _wallTouch->Cancel();
@@ -277,15 +268,9 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        _driveService->Cancel();
         _driveService->SetLimits(_travelLimits);
         _driveService->SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService->StartHold(durationMs, true);
-        if (!_driveService->Active())
-        {
-            return false;
-        }
-
         _phase = phase;
         return true;
     }
@@ -324,7 +309,6 @@ namespace MazeMap::App::Internal
 
         const Eigen::Vector2f heading = DirectionToUnitVector(headingDirection);
         const Eigen::Vector2f targetPosition(targetXMeters, targetYMeters);
-        _driveService->Cancel();
         _driveService->SetLimits(_travelLimits);
         _driveService->SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService->StartStraight(
@@ -333,11 +317,6 @@ namespace MazeMap::App::Internal
             0.0f,
             &heading,
             &targetPosition);
-        if (!_driveService->Active())
-        {
-            return false;
-        }
-
         _phase = phase;
         return true;
     }
@@ -358,15 +337,9 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        _driveService->Cancel();
         _driveService->SetLimits(_travelLimits);
         _driveService->SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService->StartTurn(angleRad);
-        if (!_driveService->Active())
-        {
-            return false;
-        }
-
         _phase = phase;
         return true;
     }

@@ -37,7 +37,9 @@ Use this document together with [AGENTS.md](AGENTS.md) and [project_vocabulary.m
 - Shared execution owners such as `ManeuverExecutor` may host reusable routines.
 - They may own reusable per-tick state, continuation plumbing, and shared drive behavior.
 - They must not invent separate phase systems or claim ownership of mode phase semantics.
-- A shared `Drive`-style service is not a callback owner. Mode logic may arm or reconfigure it, and the active mode callback may call a generic per-tick method such as `GetNextControls(bool& done)` while motion or maneuver execution is in progress. That still keeps timing aligned because the call happens inside the authoritative callback point for that tick, not through a separate callback owner.
+- A shared `Drive`-style service is not a callback owner. Mode logic may arm or reconfigure it, and the active mode callback may call a generic per-tick method such as `GetNextControls(bool& done)` while motion or maneuver execution is in progress.
+- Such a service is deferent to mode logic: the mode may return the proposed control, override it, ignore it, or stop polling the service altogether without transferring lifecycle ownership to the service.
+- `done` from a shared `Drive`-style service is advisory. Ignoring it must not make the service incoherent or implicitly revoke the last explicit instruction the mode gave it.
 - The current `Drive` class is the exemplar template of a solid multi-tick service in this architecture: it keeps primitive state internally, does bounded per-tick work, and leaves callback ownership with the mode.
 
 ## What A Phase Is
@@ -68,7 +70,7 @@ Typical control flow looks like this:
 
 That means the mode cannot keep doing other phase work in parallel while the routine is active. If something must happen during motion, it must live in the active routine or in shared services called by that routine's callback.
 
-A simple shared motion primitive or a shared `Drive` service that computes the current tick's drive output is normally one of those called services, not a separate callback owner. The active callback may brake, override, cancel, or reconfigure motion, and may choose whether to return `Drive`'s proposed output to `LoopController` at all.
+A simple shared motion primitive or a shared `Drive` service that computes the current tick's drive output is normally one of those called services, not a separate callback owner. The active callback may brake, override, replace, or reconfigure motion, may stop polling the service, and may choose whether to return `Drive`'s proposed output to `LoopController` at all.
 
 A routine entrypoint is non-blocking. It uses `SetNextModeWorkCallbacks(...)` or `SetNextModeWorkCallback(...)` to transfer control to the routine work callback, stores the continuation callback it should restore on completion, and then returns.
 

@@ -10,6 +10,8 @@ Key assumptions confirmed in discussion:
 - Do not widen stored spec fields.
 - Reverse straight is redundant with signed linear velocity. `StartReverseStraight(...)` arms the same linear-motion branch as `StartStraight(...)`, with negative commanded speed.
 - Maneuver execution uses encoder progress plus yaw-rate targets only. It does not depend on `ManeuverPoint.X`, `Y`, or `Theta`.
+- `done` from `GetNextControls(...)` is advisory. Ignoring it must not make `Drive` incoherent or implicitly revoke the last explicit instruction the mode gave it.
+- `Drive` is deferent to mode logic: the mode may return Drive's proposed output, override it, ignore it, or stop polling it without transferring lifecycle ownership to the service.
 
 Internal branch storage target:
 

@@ -778,7 +778,6 @@ namespace MazeMap::App::Internal
 
         ReleaseSelectorMonitor();
         _startupCalibration.Cancel();
-        _driveService.Cancel();
         _drive.Brake();
         _drive.UseNominalWheelControlProfile();
         SetMissionLevelFanEnabled(false);
@@ -799,7 +798,6 @@ namespace MazeMap::App::Internal
 
     void OpenFloorMeasurementController::State::ResetState() noexcept
     {
-        _driveService.Cancel();
         _startupCalibration.Cancel();
         _timingLogOpen = false;
         _mainLogOpen = false;
@@ -1287,7 +1285,6 @@ namespace MazeMap::App::Internal
         const HoldContinuation continuation,
         const std::uint16_t durationMs) noexcept
     {
-        _driveService.Cancel();
         _holdState = {};
         _holdState.continuation = continuation;
         _driveService.SetLimits(StraightLimits(0.0f));
@@ -1484,15 +1481,9 @@ namespace MazeMap::App::Internal
             }
 
             const float speedMps = MazeMap::kOpenFloorStraightSpeedBinsMps[_straightState.speedIndex];
-            _driveService.Cancel();
             _driveService.SetLimits(StraightLimits(speedMps));
             _driveService.SetOperationMode(OpenFloorOperationMode());
             _driveService.StartStraight(straightDistanceM, negative ? -speedMps : speedMps, 0.0f);
-            if (!_driveService.Active())
-            {
-                return false;
-            }
-
             _straightState.active = true;
             _straightState.labels = {};
             _straightState.labels.sectionId = OpenFloorSectionId::Sec30Straight;
@@ -1540,15 +1531,9 @@ namespace MazeMap::App::Internal
             const float angleRad = MazeMap::kOpenFloorYawNominalAnglesRad[primitiveIndex];
 
             const float maxOmegaRadps = MazeMap::kOpenFloorYawOmegaBinsRadps[_yawState.speedIndex];
-            _driveService.Cancel();
             _driveService.SetLimits(TurnLimits(maxOmegaRadps));
             _driveService.SetOperationMode(OpenFloorOperationMode());
             _driveService.StartTurn(angleRad);
-            if (!_driveService.Active())
-            {
-                return false;
-            }
-
             _yawState.active = true;
             _yawState.labels = {};
             _yawState.labels.sectionId = OpenFloorSectionId::Sec40Yaw;
@@ -1621,15 +1606,9 @@ namespace MazeMap::App::Internal
             }
 
             const MazeMap::ManeuverInstance& entry = _smoothState.queue[_smoothState.entryIndex];
-            _driveService.Cancel();
             _driveService.SetLimits(StraightLimits(OpenFloorMeasurementSmoothSpeedMps(_smoothState.speedIndex)));
             _driveService.SetOperationMode(OpenFloorOperationMode());
             _driveService.StartManeuver(entry);
-            if (!_driveService.Active())
-            {
-                return false;
-            }
-
             const float angleRad = static_cast<float>(MazeMap::CodeDegrees(entry.getCode())) * DEG_TO_RAD_F;
             _smoothState.active = true;
             _smoothState.labels = {};
@@ -1678,15 +1657,9 @@ namespace MazeMap::App::Internal
             }
 
             const MazeMap::ManeuverInstance& entry = _loopState.queue[_loopState.entryIndex];
-            _driveService.Cancel();
             _driveService.SetLimits(StraightLimits(MazeMap::kOpenFloorStraightSpeedBinsMps[0]));
             _driveService.SetOperationMode(OpenFloorOperationMode());
             _driveService.StartManeuver(entry);
-            if (!_driveService.Active())
-            {
-                return false;
-            }
-
             const float angleRad = static_cast<float>(MazeMap::CodeDegrees(entry.getCode())) * DEG_TO_RAD_F;
             _loopState.active = true;
             _loopState.labels = {};
@@ -1988,12 +1961,6 @@ namespace MazeMap::App::Internal
         if (_runtime.Estimator().HasFault())
         {
             services.Fault("Estimator fault during inter-phase hold");
-            return stopControl;
-        }
-
-        if (!_driveService.Active())
-        {
-            services.Fault("Open-floor cumulative hold primitive was not active");
             return stopControl;
         }
 
