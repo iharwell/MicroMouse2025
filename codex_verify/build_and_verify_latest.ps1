@@ -387,6 +387,23 @@ function Assert-PathExists {
     }
 }
 
+function Resolve-ExistingPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$CandidatePaths,
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    foreach ($candidatePath in $CandidatePaths) {
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return [System.IO.Path]::GetFullPath($candidatePath)
+        }
+    }
+
+    throw ("{0} not found. Checked: {1}" -f $Description, ($CandidatePaths -join ', '))
+}
+
 function Test-IsCodexShell {
     return ($env:CODEX_SHELL -eq '1') -or (-not [string]::IsNullOrWhiteSpace($env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE))
 }
@@ -675,6 +692,7 @@ function Invoke-HostMsBuild {
         '/p:Platform=x64',
         '/p:PreferredToolArchitecture=x64',
         '/p:UseMultiToolTask=true',
+        '/p:EnableClServerMode=true',
         ('/p:CL_MPCount=' + $HostClMpCount),
         '/v:m'
     )
@@ -1050,9 +1068,13 @@ function Get-LatestRepoInputWriteTimeFromProjectTLogs {
     )
 
     $repoLocalPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($tlogName in @('CL.read.1.tlog', 'link.read.1.tlog')) {
-        $tlogPath = Join-Path $Project.TLogDir $tlogName
-        Assert-PathExists -Path $tlogPath -Description ("{0} tracking log" -f $Project.Name)
+    foreach ($tlogNames in @(
+        @('CL.read.1.tlog', 'Microsoft.Build.CPPTasks.CL.read.1.tlog'),
+        @('link.read.1.tlog')
+    )) {
+        $tlogPath = Resolve-ExistingPath `
+            -CandidatePaths ($tlogNames | ForEach-Object { Join-Path $Project.TLogDir $_ }) `
+            -Description ("{0} tracking log" -f $Project.Name)
 
         foreach ($trackedPath in Get-TrackedPathsFromReadTLog -Path $tlogPath) {
             if (Test-IsPathUnderRoot -Path $trackedPath -Root $RepoRoot) {
@@ -1453,7 +1475,7 @@ try {
         Write-Step 'Building the Release host targets'
         Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
         Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
-        Write-LogLine ("Host CL parallelism: UseMultiToolTask=true, CL_MPCount={0}" -f $HostClMpCount) 'DarkCyan'
+        Write-LogLine ("Host CL parallelism: UseMultiToolTask=true, EnableClServerMode=true, CL_MPCount={0}" -f $HostClMpCount) 'DarkCyan'
         Write-LogLine 'Host toolchain entry: VsDevCmd -host_arch=x64 -arch=x64' 'DarkCyan'
         $hostProjectTargetNames = [System.Collections.Generic.List[string]]::new()
         $hostProjectTargetNames.Add($mazeMapTestHostProject.Name)

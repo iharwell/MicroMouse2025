@@ -446,8 +446,6 @@ namespace MazeMap::App::Internal
             const DriveTelemetry& driveTelemetry,
             bool& done);
         LoopController::ControlVector ManeuverControls(
-            const MazeMap::VehicleState& state,
-            const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
             bool& done);
 
