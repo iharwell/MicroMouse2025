@@ -77,15 +77,10 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, dt_us)                        \
     X(std::uint8_t,  section_id)                   \
     X(std::uint8_t,  primitive_id)                 \
-    X(std::uint8_t,  primitive_family)             \
-    X(std::uint8_t,  direction_id)                 \
     X(std::uint8_t,  phase_id)                     \
     X(std::uint8_t,  speed_bin)                    \
-    X(std::uint8_t,  start_marker_id)              \
     X(std::uint16_t, repeat_index)                 \
-    X(float,         progress_norm)                \
     X(std::uint16_t, mode_flags)                   \
-    X(std::uint32_t, clipping_flags)               \
     X(std::uint16_t, saturation_flags)             \
     X(std::uint8_t,  ukf_mode_id)                  \
     X(std::uint8_t,  ukf_yaw_valid_for_feedforward)\
@@ -146,8 +141,7 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         planar_accel_mps2)            \
     X(std::uint32_t, front_timestamp_us)           \
     X(std::uint32_t, left_timestamp_us)            \
-    X(std::uint32_t, right_timestamp_us)           \
-    X(float,         fan_duty_cycle)
+    X(std::uint32_t, right_timestamp_us)
 
     MMLOG_DEFINE_ROW(OpenFloorMainRow, OPEN_FLOOR_MAIN_FIELDS);
 }
@@ -890,6 +884,7 @@ namespace MazeMap::App::Internal
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
         if (!WriteOpenFloorV62Metadata(_runtime)) return false;
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("fan_duty_cycle", GetMissionFanDutyCycle(), 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", _sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", _sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
         if (!_runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", _sensors.GetGyroBiasRadps(), 6)) return false;
@@ -1034,17 +1029,12 @@ namespace MazeMap::App::Internal
         row.dt_us = _loopController.CurrentTickDtUs();
         row.section_id = static_cast<std::uint8_t>(labels.sectionId);
         row.primitive_id = static_cast<std::uint8_t>(labels.primitiveId);
-        row.primitive_family = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveFamilyForId(labels.primitiveId));
-        row.direction_id = static_cast<std::uint8_t>(labels.directionId);
         row.phase_id = static_cast<std::uint8_t>(labels.phaseId);
         row.speed_bin = static_cast<std::uint8_t>(labels.speedBin);
-        row.start_marker_id = static_cast<std::uint8_t>(labels.startMarkerId);
         row.repeat_index = labels.repeatIndex;
-        row.progress_norm = labels.progressNorm;
         // LoopController updates runtime state before invoking mode work, so these command fields
         // belong to the same sampled tick as the rest of this row.
         row.mode_flags = commandState.modeFlags;
-        row.clipping_flags = 0U;
         row.saturation_flags = commandState.saturationFlags;
         row.ukf_mode_id = driveTelemetry.ukfModeId;
         row.ukf_yaw_valid_for_feedforward = driveTelemetry.ukfYawValidForFeedforward;
@@ -1106,7 +1096,6 @@ namespace MazeMap::App::Internal
         row.front_timestamp_us = sensors.frontTiming.observationReadyUs;
         row.left_timestamp_us = sensors.leftTiming.observationReadyUs;
         row.right_timestamp_us = sensors.rightTiming.observationReadyUs;
-        row.fan_duty_cycle = GetMissionFanDutyCycle();
     }
 
     OpenFloorPrimitiveId OpenFloorMeasurementController::State::PrimitiveIdForCode(

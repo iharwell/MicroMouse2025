@@ -376,11 +376,9 @@ def is_comparable_diag_transition(current_row: dict[str, str], next_row: dict[st
 
 
 def flags_are_clear(row: dict[str, str]) -> bool:
-    clipping_flags = parse_int(row, "clipping_flags")
     saturation_flags = parse_int(row, "saturation_flags")
     watchdog_flags = parse_int(row, "watchdog_flags")
     return (
-        (clipping_flags in (None, 0)) and
         (saturation_flags in (None, 0)) and
         (watchdog_flags in (None, 0))
     )

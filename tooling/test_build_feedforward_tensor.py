@@ -28,7 +28,6 @@ class BuildFeedforwardTensorTest(unittest.TestCase):
                     "primitive_id",
                     "repeat_index",
                     "dt_us",
-                    "clipping_flags",
                     "saturation_flags",
                     "watchdog_flags",
                     "left_drive_command",
@@ -39,8 +38,8 @@ class BuildFeedforwardTensorTest(unittest.TestCase):
                     "gyro_bias_radps",
                 ],
                 [
-                    [1, 7, 2, 10000, 0, 0, 0, 0.30, 0.50, 0.18, 0.22, 0.12, 0.02],
-                    [1, 7, 2, 10000, 0, 0, 0, 0.31, 0.51, 0.22, 0.26, 0.10, 0.04],
+                    [1, 7, 2, 10000, 0, 0, 0.30, 0.50, 0.18, 0.22, 0.12, 0.02],
+                    [1, 7, 2, 10000, 0, 0, 0.31, 0.51, 0.22, 0.26, 0.10, 0.04],
                 ],
             )
 
@@ -66,7 +65,6 @@ class BuildFeedforwardTensorTest(unittest.TestCase):
                     "primitive_id",
                     "repeat_index",
                     "dt_us",
-                    "clipping_flags",
                     "saturation_flags",
                     "watchdog_flags",
                     "left_drive_command",
@@ -77,8 +75,8 @@ class BuildFeedforwardTensorTest(unittest.TestCase):
                     "gyro_bias_radps",
                 ],
                 [
-                    [1, 1, 1, 10000, 0, 0, 0, 0.25, 0.35, 0.18, 0.22, 0.24, 0.04],
-                    [1, 1, 1, 10000, 0, 0, 0, 0.00, 0.00, 0.22, 0.26, 0.10, 0.02],
+                    [1, 1, 1, 10000, 0, 0, 0.25, 0.35, 0.18, 0.22, 0.24, 0.04],
+                    [1, 1, 1, 10000, 0, 0, 0.00, 0.00, 0.22, 0.26, 0.10, 0.02],
                 ],
             )
 

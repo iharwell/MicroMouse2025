@@ -23,7 +23,6 @@ class OpenFloorRecoveryTest(unittest.TestCase):
             "section_id": "3",
             "primitive_id": str(open_floor_recovery.RECOVERY_PRIMITIVE_ID),
             "repeat_index": "2",
-            "start_marker_id": "2",
             "gyro_raw_radps": f"{gyro_radps + gyro_bias_radps}",
             "gyro_bias_radps": f"{gyro_bias_radps}",
             "gyro_radps": f"{logged_corrected_gyro_radps}",

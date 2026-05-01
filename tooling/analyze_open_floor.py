@@ -115,6 +115,29 @@ STATIC_SECTION_ID = 1
 STATIC_PRIMITIVE_ID = 2
 LAUNCH_SECTION_ID = 2
 LAUNCH_PRIMITIVE_ID = 3
+MIRRORED_PRIMITIVE_IDS = {8, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37}
+YAW_CLOCKWISE_PRIMITIVE_IDS = {7, 9}
+YAW_COUNTERCLOCKWISE_PRIMITIVE_IDS = {8, 37}
+
+
+def direction_id_for_row(row: dict[str, str]) -> int:
+    section_id = int(row["section_id"])
+    primitive_id = int(row["primitive_id"])
+    if section_id in (2, 3):
+        return 1 if float(row["left_drive_command"]) >= 0.0 else 2
+    if section_id == 4:
+        if primitive_id in YAW_CLOCKWISE_PRIMITIVE_IDS:
+            return 5
+        if primitive_id in YAW_COUNTERCLOCKWISE_PRIMITIVE_IDS:
+            return 6
+        return 0
+    if section_id == 5:
+        return 8 if primitive_id in MIRRORED_PRIMITIVE_IDS else 9
+    if section_id == 6:
+        return 5
+    if section_id == 7:
+        return 6
+    return 0
 
 
 @dataclass
@@ -840,7 +863,7 @@ def analyze_main_csv(
 
     recovery_segments: list[list[dict[str, str]]] = []
     current_recovery_segment: list[dict[str, str]] = []
-    current_recovery_key: tuple[int, int, int] | None = None
+    current_recovery_key: tuple[int, int] | None = None
     yaw_rows_by_key: DefaultDict[tuple[int, int], list[dict[str, str]]] = defaultdict(list)
     available_section_ids: set[int] = set()
     rotational_track_width_segments_by_label: DefaultDict[str, list[RotationalTrackWidthSegment]] = defaultdict(list)
@@ -875,7 +898,6 @@ def analyze_main_csv(
                 recovery_key = (
                     section_id,
                     int(row["repeat_index"]),
-                    int(row["start_marker_id"]),
                 )
                 if current_recovery_segment and recovery_key != current_recovery_key:
                     recovery_segments.append(current_recovery_segment)
@@ -932,7 +954,7 @@ def analyze_main_csv(
                     rotational_label,
                     primitive_id,
                     int(row["repeat_index"]),
-                    int(row["direction_id"]),
+                    direction_id_for_row(row),
                     int(row["speed_bin"]),
                 )
                 if current_rotational_segment_key != rotational_key:
@@ -983,7 +1005,7 @@ def analyze_main_csv(
                     decay_label,
                     primitive_id,
                     int(row["repeat_index"]),
-                    int(row["direction_id"]),
+                    direction_id_for_row(row),
                     int(row["speed_bin"]),
                 )
                 if current_decay_key != decay_key:
@@ -1008,7 +1030,7 @@ def analyze_main_csv(
                 continue
 
             repeat_index = int(row["repeat_index"])
-            direction_id = int(row["direction_id"])
+            direction_id = direction_id_for_row(row)
             sign = 1.0 if direction_id == 1 else -1.0 if direction_id == 2 else 1.0
             sample_index = launch_active_sample_index_by_repeat.get(repeat_index, 0)
             launch_active_sample_index_by_repeat[repeat_index] = sample_index + 1

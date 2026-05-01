@@ -1711,6 +1711,14 @@ namespace
             indices.emplace(headerFields[index], index);
         }
 
+        const auto fanIt = candidate.sidecar.metadata.find("fan_duty_cycle");
+        float loggedFanDutyCycle = 0.0f;
+        if (fanIt == candidate.sidecar.metadata.end() || !ParseFloat(fanIt->second, loggedFanDutyCycle))
+        {
+            error = "Missing or invalid fan_duty_cycle metadata: " + candidate.sidecar.path.string();
+            return false;
+        }
+
         rows.clear();
         std::string line;
         while (std::getline(stream, line))
@@ -1766,8 +1774,7 @@ namespace
                 !ParseField(tokens, indices, "gyro_radps", row.gyroCorrectedRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "accel_body_x_mps2", row.accelBodyXMps2, ParseFloat, error) ||
                 !ParseField(tokens, indices, "accel_body_y_mps2", row.accelBodyYMps2, ParseFloat, error) ||
-                !ParseField(tokens, indices, "planar_accel_mps2", row.planarAccelMps2, ParseFloat, error) ||
-                !ParseField(tokens, indices, "fan_duty_cycle", row.fanDutyCycle, ParseFloat, error))
+                !ParseField(tokens, indices, "planar_accel_mps2", row.planarAccelMps2, ParseFloat, error))
             {
                 return false;
             }
@@ -1779,6 +1786,7 @@ namespace
             }
 
             row.accelBiasValid = (accelBiasValid != 0U);
+            row.fanDutyCycle = loggedFanDutyCycle;
             MazeMap::VehicleState::NormalizeStateVector(row.loggedState);
             rows.push_back(row);
         }

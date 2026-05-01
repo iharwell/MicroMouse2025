@@ -56,7 +56,6 @@ class OpenFloorYawFftTest(unittest.TestCase):
                     "repeat_index": "2",
                     "phase_id": "9",
                     "dt_us": str(dt_us),
-                    "clipping_flags": "0",
                     "saturation_flags": "0",
                     "left_drive_command": f"{left_command}",
                     "right_drive_command": f"{right_command}",

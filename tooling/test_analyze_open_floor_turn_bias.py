@@ -36,7 +36,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
         cor_x_m: float,
         primitive_id: int = 7,
         repeat_index: int = 1,
-        direction_id: int = turn_bias.DIRECTION_CLOCKWISE_ID,
         speed_bin: int = 2,
         center_accel_y_mps2: float = 0.0,
         gyro_alpha_radps2: float = 0.0,
@@ -60,7 +59,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
             "section_id": str(turn_bias.YAW_SECTION_ID),
             "primitive_id": str(primitive_id),
             "repeat_index": str(repeat_index),
-            "direction_id": str(direction_id),
             "speed_bin": str(speed_bin),
             "phase_id": str(phase_id),
             "dt_us": "1000",
@@ -149,7 +147,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
                     cor_x_m=0.0,
                     primitive_id=37,
                     repeat_index=24,
-                    direction_id=turn_bias.DIRECTION_COUNTERCLOCKWISE_ID,
                     speed_bin=2,
                 )
             )
@@ -162,7 +159,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
                     cor_x_m=0.037,
                     primitive_id=37,
                     repeat_index=24,
-                    direction_id=turn_bias.DIRECTION_COUNTERCLOCKWISE_ID,
                     speed_bin=2,
                 )
             )
@@ -191,7 +187,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
                     cor_x_m=0.0,
                     primitive_id=9,
                     repeat_index=31,
-                    direction_id=turn_bias.DIRECTION_CLOCKWISE_ID,
                     speed_bin=3,
                 )
             )
@@ -204,7 +199,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
                     cor_x_m=-0.037,
                     primitive_id=9,
                     repeat_index=31,
-                    direction_id=turn_bias.DIRECTION_CLOCKWISE_ID,
                     speed_bin=3,
                 )
             )
@@ -232,7 +226,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
                     cor_x_m=0.0,
                     primitive_id=9,
                     repeat_index=35,
-                    direction_id=turn_bias.DIRECTION_CLOCKWISE_ID,
                     speed_bin=3,
                 )
             )
@@ -245,7 +238,6 @@ class AnalyzeOpenFloorTurnBiasTest(unittest.TestCase):
                     cor_x_m=0.060,
                     primitive_id=9,
                     repeat_index=35,
-                    direction_id=turn_bias.DIRECTION_CLOCKWISE_ID,
                     speed_bin=3,
                 )
             )

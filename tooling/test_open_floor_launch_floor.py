@@ -24,7 +24,6 @@ class OpenFloorLaunchFloorTest(unittest.TestCase):
             "right_encoder_count": str(right_encoder_count),
             "ukf_state_py_m": f"{ukf_state_py_m}",
             "saturation_flags": "0",
-            "clipping_flags": "0",
         }
 
     def make_backlash_repeat(

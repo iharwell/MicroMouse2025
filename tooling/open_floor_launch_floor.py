@@ -72,7 +72,6 @@ def build_active_launch_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]
             abs(right_command) <= 1.0e-6 or
             abs(left_command - right_command) > 1.0e-6 or
             int(row["saturation_flags"]) != 0 or
-            int(row["clipping_flags"]) != 0 or
             row_watchdog_flags(row) != 0
         ):
             continue

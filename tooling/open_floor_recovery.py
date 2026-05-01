@@ -134,6 +134,14 @@ def independent_gyro_radps(row: dict[str, str], gyro_bias_radps: float) -> float
     return parse_float(row["gyro_raw_radps"]) - gyro_bias_radps
 
 
+def section_start_marker_name(section_id: int) -> str:
+    if section_id == 6:
+        return MARKER_NAMES[3]
+    if section_id == 7:
+        return MARKER_NAMES[4]
+    return MARKER_NAMES[0]
+
+
 def interpolated_percentile(sorted_values: list[float], fraction: float) -> float:
     if not sorted_values:
         raise ValueError("percentile requires at least one value")
@@ -490,7 +498,7 @@ def summarize_recovery_segments(
                 section_id=parse_int(window_rows[0]["section_id"]),
                 section_name=SECTION_NAMES.get(parse_int(window_rows[0]["section_id"]), "UNKNOWN"),
                 repeat_index=parse_int(window_rows[0]["repeat_index"]),
-                start_marker_name=MARKER_NAMES.get(parse_int(window_rows[0]["start_marker_id"]), "UNKNOWN"),
+                start_marker_name=section_start_marker_name(parse_int(window_rows[0]["section_id"])),
                 row_count=len(window_rows),
                 duration_seconds=sum(row_dt_seconds(row) for row in window_rows),
                 angle_rad=angle_rad,

@@ -239,7 +239,6 @@ def summarize_yaw_fft(
             row
             for row in rows
             if int(row["phase_id"]) == 9 and
-            int(row["clipping_flags"]) == 0 and
             int(row["saturation_flags"]) == 0 and
             row_watchdog_flags(row) == 0
         ]

@@ -82,6 +82,9 @@ DIRECTION_NAMES = {
     9: "RIGHT",
 }
 
+YAW_CLOCKWISE_PRIMITIVE_IDS = {7, 9}
+YAW_COUNTERCLOCKWISE_PRIMITIVE_IDS = {8, 37}
+
 
 @dataclass(frozen=True)
 class VehicleTurnGeometry:
@@ -453,6 +456,14 @@ def _pick_side_from_runs(right_run: int, left_run: int, minimum_run: int) -> tup
     return "left", left_run
 
 
+def direction_id_for_yaw_primitive(primitive_id: int) -> int:
+    if primitive_id in YAW_CLOCKWISE_PRIMITIVE_IDS:
+        return DIRECTION_CLOCKWISE_ID
+    if primitive_id in YAW_COUNTERCLOCKWISE_PRIMITIVE_IDS:
+        return DIRECTION_COUNTERCLOCKWISE_ID
+    return 0
+
+
 def _commanded_turn_sign(turn_key: TurnKey, samples: list[TurnSample]) -> float:
     if turn_key.direction_id == DIRECTION_CLOCKWISE_ID:
         return 1.0
@@ -652,7 +663,7 @@ def summarize_yaw_turn_rows(
     turn_key = TurnKey(
         primitive_id=int(rows[0]["primitive_id"]),
         repeat_index=int(rows[0]["repeat_index"]),
-        direction_id=int(rows[0]["direction_id"]),
+        direction_id=direction_id_for_yaw_primitive(int(rows[0]["primitive_id"])),
         speed_bin=int(rows[0]["speed_bin"]),
     )
     samples = _build_turn_samples(rows, geometry, biases)
@@ -728,7 +739,7 @@ def summarize_turn_bias_csv(
         key = TurnKey(
             primitive_id=int(row["primitive_id"]),
             repeat_index=int(row["repeat_index"]),
-            direction_id=int(row["direction_id"]),
+            direction_id=direction_id_for_yaw_primitive(int(row["primitive_id"])),
             speed_bin=int(row["speed_bin"]),
         )
         yaw_rows_by_turn[key].append(row)
