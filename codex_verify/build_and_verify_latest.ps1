@@ -5,6 +5,10 @@ param(
     [string]$HostBuildTarget = 'Build',
     [ValidateSet('Incremental', 'ProjectDefault')]
     [string]$HostLtcgMode = 'ProjectDefault',
+    [ValidateRange(1, 128)]
+    [int]$HostClMpCount = 12,
+    [ValidateRange(1, 128)]
+    [int]$TeensyCompileJobs = 12,
     [string]$LogFilePath
 )
 
@@ -645,7 +649,9 @@ function Invoke-HostMsBuild {
         [Parameter(Mandatory = $true)]
         [string]$HostBuildTarget,
         [Parameter(Mandatory = $true)]
-        [string]$HostLtcgMode
+        [string]$HostLtcgMode,
+        [Parameter(Mandatory = $true)]
+        [int]$HostClMpCount
     )
 
     $vsDevCmdArguments = @(
@@ -668,6 +674,8 @@ function Invoke-HostMsBuild {
         '/p:Configuration=Release',
         '/p:Platform=x64',
         '/p:PreferredToolArchitecture=x64',
+        '/p:UseMultiToolTask=true',
+        ('/p:CL_MPCount=' + $HostClMpCount),
         '/v:m'
     )
 
@@ -1427,9 +1435,11 @@ try {
 
         Write-Step 'Compiling the Teensy sketch'
         Write-LogLine ("Teensy compile profile: {0} ({1})" -f $teensyOptimizationProfile, ($teensyBoardOptions -join ', ')) 'DarkCyan'
+        Write-LogLine ("Teensy compile parallelism: --jobs {0}" -f $TeensyCompileJobs) 'DarkCyan'
         $teensyBuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         Invoke-External -FilePath $arduinoCli -Arguments @(
             'compile',
+            '--jobs', $TeensyCompileJobs.ToString(),
             '--fqbn', $fqbn,
             '--board-options', ($teensyBoardOptions -join ','),
             '--libraries', $arduinoLibrariesDir,
@@ -1443,6 +1453,7 @@ try {
         Write-Step 'Building the Release host targets'
         Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
         Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
+        Write-LogLine ("Host CL parallelism: UseMultiToolTask=true, CL_MPCount={0}" -f $HostClMpCount) 'DarkCyan'
         Write-LogLine 'Host toolchain entry: VsDevCmd -host_arch=x64 -arch=x64' 'DarkCyan'
         $hostProjectTargetNames = [System.Collections.Generic.List[string]]::new()
         $hostProjectTargetNames.Add($mazeMapTestHostProject.Name)
@@ -1457,7 +1468,8 @@ try {
             -SolutionPath $solutionPath `
             -ProjectTargetNames $hostProjectTargetNames.ToArray() `
             -HostBuildTarget $HostBuildTarget `
-            -HostLtcgMode $HostLtcgMode
+            -HostLtcgMode $HostLtcgMode `
+            -HostClMpCount $HostClMpCount
         $hostBuildStopwatch.Stop()
         Write-LogLine ("Host build completed in {0:n1}s" -f $hostBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
     }

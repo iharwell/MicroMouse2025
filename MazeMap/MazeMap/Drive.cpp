@@ -92,26 +92,6 @@ namespace MazeMap::App::Internal
         static_assert(alignof(ArcState) <= kPrimitiveStorageAlignment);
         static_assert(alignof(ManeuverState) <= kPrimitiveStorageAlignment);
 
-        float FallbackFinite(const float preferred, const float replacement) noexcept
-        {
-            return std::isfinite(preferred) ? preferred : replacement;
-        }
-
-        bool HasFiniteNonZeroMagnitude(const float value) noexcept
-        {
-            return std::isfinite(value) && (std::fabs(value) > 0.0f);
-        }
-
-        float FiniteMagnitudeOrZero(const float value) noexcept
-        {
-            return std::isfinite(value) ? std::fabs(value) : 0.0f;
-        }
-
-        bool HasFiniteLimit(const float value) noexcept
-        {
-            return std::isfinite(value);
-        }
-
         float ResolveSignedPreference(std::initializer_list<float> signedValues) noexcept
         {
             for (const float value : signedValues)
@@ -145,7 +125,10 @@ namespace MazeMap::App::Internal
                 return (std::numeric_limits<float>::infinity)();
             }
 
-            const float primaryMagnitude = FiniteMagnitudeOrZero(primaryValue);
+            const float primaryMagnitude =
+                std::isfinite(primaryValue) ?
+                std::fabs(primaryValue) :
+                0.0f;
             if (primaryMagnitude > 0.0f)
             {
                 return primaryMagnitude;
@@ -156,7 +139,10 @@ namespace MazeMap::App::Internal
                 return (std::numeric_limits<float>::infinity)();
             }
 
-            const float secondaryMagnitude = FiniteMagnitudeOrZero(secondaryValue);
+            const float secondaryMagnitude =
+                std::isfinite(secondaryValue) ?
+                std::fabs(secondaryValue) :
+                0.0f;
             if (secondaryMagnitude > 0.0f)
             {
                 return secondaryMagnitude;
@@ -167,25 +153,10 @@ namespace MazeMap::App::Internal
                 return (std::numeric_limits<float>::infinity)();
             }
 
-            return FiniteMagnitudeOrZero(fallbackValue);
-        }
-
-        float ResolveDistanceRequestMagnitude(
-            const float requestedDistanceM,
-            const float fallbackDistanceM = 0.0f) noexcept
-        {
-            return ResolveRequestedMagnitude(
-                requestedDistanceM,
-                0.0f,
-                fallbackDistanceM);
-        }
-
-        float ResolveMotionSettleSpeedThresholdMps() noexcept
-        {
-            const float baseThresholdMps = Config::kMotionSettleSpeedThresholdMps;
-            return (GetMissionFanDutyCycle() > 0.0f) ?
-                (baseThresholdMps * 5.0f) :
-                baseThresholdMps;
+            return
+                std::isfinite(fallbackValue) ?
+                std::fabs(fallbackValue) :
+                0.0f;
         }
 
         MazeMap::Direction ResolveNearestCardinalDirectionFromYawRad(const float yawRad) noexcept
@@ -198,7 +169,11 @@ namespace MazeMap::App::Internal
                 MazeMap::Left
             };
 
-            const float resolvedYawRad = WrapAngleRad(FallbackFinite(yawRad, 0.0f));
+            const float resolvedYawRad =
+                WrapAngleRad(
+                    std::isfinite(yawRad) ?
+                    yawRad :
+                    0.0f);
             MazeMap::Direction bestDirection = MazeMap::Up;
             float bestAbsErrorRad = (std::numeric_limits<float>::infinity)();
             for (const MazeMap::Direction direction : kCardinalDirections)
@@ -383,34 +358,6 @@ namespace MazeMap::App::Internal
                 limits.angularAccelRadps2 }) * HALF_PI_F;
         }
 
-        float ResolveRecoveredTurnAngleRad(
-            const float requestedAngleRad,
-            const MotionLimits& limits,
-            const MazeMap::VehicleState& state,
-            const SensorSnapshot& sensors,
-            const MazeMap::Maze* maze,
-            const Drive::OperationMode operationMode) noexcept
-        {
-            if (std::isfinite(requestedAngleRad))
-            {
-                return requestedAngleRad;
-            }
-
-            return ResolveRecoveredQuarterTurnAngleRad(
-                requestedAngleRad,
-                limits,
-                state,
-                sensors,
-                maze,
-                operationMode);
-        }
-
-        bool TryResolveNominalArcRadiusM(float& nominalRadiusM) noexcept
-        {
-            nominalRadiusM = 0.5f * MazeMap::Maze::GetCellDimension();
-            return nominalRadiusM > 0.0f;
-        }
-
         bool RecoverArcGeometry(
             const float requestedDistanceM,
             const float requestedCurvature,
@@ -424,7 +371,7 @@ namespace MazeMap::App::Internal
         {
             const bool hasDistanceDescriptor = !std::isnan(requestedDistanceM);
             const bool hasCurvatureDescriptor = !std::isnan(requestedCurvature);
-            distanceM = ResolveDistanceRequestMagnitude(requestedDistanceM);
+            distanceM = ResolveRequestedMagnitude(requestedDistanceM);
             curvature = std::isfinite(requestedCurvature) ? requestedCurvature : 0.0f;
 
             if (hasDistanceDescriptor && std::isfinite(requestedCurvature))
@@ -439,8 +386,8 @@ namespace MazeMap::App::Internal
                 sensors,
                 maze,
                 operationMode);
-            float nominalRadiusM = 0.0f;
-            const bool hasNominalRadius = TryResolveNominalArcRadiusM(nominalRadiusM);
+            const float nominalRadiusM = 0.5f * MazeMap::Maze::GetCellDimension();
+            const bool hasNominalRadius = nominalRadiusM > 0.0f;
 
             if (hasDistanceDescriptor)
             {
@@ -452,7 +399,8 @@ namespace MazeMap::App::Internal
                     }
 
                     curvature = SignF(recoveredAngleRad) / nominalRadiusM;
-                    return HasFiniteNonZeroMagnitude(curvature);
+                    // Recovered curvature is only usable when it is finite and nonzero.
+                    return std::isfinite(curvature) && (std::fabs(curvature) > 0.0f);
                 }
 
                 if (distanceM <= Config::kDistanceToleranceM)
@@ -462,14 +410,14 @@ namespace MazeMap::App::Internal
                 }
 
                 curvature = recoveredAngleRad / distanceM;
-                return HasFiniteNonZeroMagnitude(curvature);
+                return std::isfinite(curvature) && (std::fabs(curvature) > 0.0f);
             }
 
             if (hasCurvatureDescriptor)
             {
                 if (std::isfinite(requestedCurvature))
                 {
-                    if (!HasFiniteNonZeroMagnitude(curvature))
+                    if (!std::isfinite(curvature) || (std::fabs(curvature) <= 0.0f))
                     {
                         distanceM = (std::numeric_limits<float>::infinity)();
                         return true;
@@ -485,7 +433,7 @@ namespace MazeMap::App::Internal
                 }
 
                 curvature = SignF(recoveredAngleRad) / nominalRadiusM;
-                if (!HasFiniteNonZeroMagnitude(curvature))
+                if (!std::isfinite(curvature) || (std::fabs(curvature) <= 0.0f))
                 {
                     return false;
                 }
@@ -500,7 +448,7 @@ namespace MazeMap::App::Internal
             }
 
             curvature = SignF(recoveredAngleRad) / nominalRadiusM;
-            if (!HasFiniteNonZeroMagnitude(curvature))
+            if (!std::isfinite(curvature) || (std::fabs(curvature) <= 0.0f))
             {
                 return false;
             }
@@ -511,8 +459,8 @@ namespace MazeMap::App::Internal
 
         float LimitByConfiguredMagnitude(const float command, const float configuredLimit) noexcept
         {
-            const float finiteCommand = FallbackFinite(command, 0.0f);
-            if (!HasFiniteLimit(configuredLimit))
+            const float finiteCommand = std::isfinite(command) ? command : 0.0f;
+            if (!std::isfinite(configuredLimit))
             {
                 return finiteCommand;
             }
@@ -523,8 +471,8 @@ namespace MazeMap::App::Internal
 
         float LimitMagnitudeByConfiguredMagnitude(const float value, const float configuredLimit) noexcept
         {
-            const float magnitude = FiniteMagnitudeOrZero(value);
-            if (!HasFiniteLimit(configuredLimit))
+            const float magnitude = std::isfinite(value) ? std::fabs(value) : 0.0f;
+            if (!std::isfinite(configuredLimit))
             {
                 return magnitude;
             }
@@ -532,35 +480,16 @@ namespace MazeMap::App::Internal
             return (std::min)(magnitude, std::fabs(configuredLimit));
         }
 
-        float ResolveConfiguredToleranceMagnitude(
-            const float configuredTolerance,
-            const float fallbackTolerance) noexcept
-        {
-            return
-                HasFiniteLimit(configuredTolerance) ?
-                std::fabs(configuredTolerance) :
-                std::fabs(FallbackFinite(fallbackTolerance, 0.0f));
-        }
-
         bool WithinConfiguredTolerance(
             const float error,
             const float configuredTolerance,
             const float fallbackTolerance) noexcept
         {
-            return
-                (std::fabs(FallbackFinite(error, std::numeric_limits<float>::infinity())) <=
-                    ResolveConfiguredToleranceMagnitude(configuredTolerance, fallbackTolerance));
-        }
-
-        float ReachableSpeedWithConfiguredLimit(
-            const float boundarySpeedMps,
-            const float remainingDistanceM,
-            const float accelLimitMps2,
-            const float fallbackSpeedMps) noexcept
-        {
-            return HasFiniteLimit(accelLimitMps2) ?
-                ReachableSpeedWithBoundary(boundarySpeedMps, remainingDistanceM, std::fabs(accelLimitMps2)) :
-                fallbackSpeedMps;
+            const float tolerance =
+                std::isfinite(configuredTolerance) ?
+                std::fabs(configuredTolerance) :
+                std::fabs(std::isfinite(fallbackTolerance) ? fallbackTolerance : 0.0f);
+            return std::fabs(std::isfinite(error) ? error : std::numeric_limits<float>::infinity()) <= tolerance;
         }
 
         bool IsTurnComplete(
@@ -576,6 +505,17 @@ namespace MazeMap::App::Internal
                     Config::kAngularSpeedToleranceRadps);
         }
 
+        bool IsMotionSettled(const SensorSnapshot& sensors, const DriveTelemetry& driveTelemetry) noexcept
+        {
+            const float baseThresholdMps = Config::kMotionSettleSpeedThresholdMps;
+            return MazeMap::IsMissionStartupStationaryFromSensors(
+                driveTelemetry.leftVelocityMps,
+                driveTelemetry.rightVelocityMps,
+                sensors.gyroRadps,
+                (GetMissionFanDutyCycle() > 0.0f) ? (baseThresholdMps * 5.0f) : baseThresholdMps,
+                Config::kMotionSettleAngularSpeedThresholdRadps);
+        }
+
         template <typename T>
         T* StorageAs(void* storage) noexcept
         {
@@ -586,21 +526,6 @@ namespace MazeMap::App::Internal
         const T* StorageAs(const void* storage) noexcept
         {
             return std::launder(reinterpret_cast<const T*>(storage));
-        }
-
-        float AverageDistanceMeters(const DriveTelemetry& telemetry) noexcept
-        {
-            return 0.5f * (telemetry.leftDistanceM + telemetry.rightDistanceM);
-        }
-
-        float SafeAverageDistanceMeters(const DriveBase* drive) noexcept
-        {
-            return (drive != nullptr) ? drive->GetAverageDistanceMeters() : 0.0f;
-        }
-
-        float HeadingYawRad(const Eigen::Vector2f& headingUnit) noexcept
-        {
-            return std::atan2(headingUnit.x(), headingUnit.y());
         }
 
         bool TryResolveHeadingYawRadFromComponents(
@@ -624,34 +549,12 @@ namespace MazeMap::App::Internal
                 const float headingMagnitudeSq = (headingX * headingX) + (headingY * headingY);
                 if (headingMagnitudeSq > 0.0f)
                 {
-                    targetYawRad = HeadingYawRad(Eigen::Vector2f(headingX, headingY));
+                    targetYawRad = std::atan2(headingX, headingY);
                     return true;
                 }
             }
 
             return false;
-        }
-
-        float ResolveStraightTargetYawRad(
-            const MazeMap::VehicleState* state,
-            const Eigen::Vector2f* targetHeadingOverride) noexcept
-        {
-            const float capturedYawRad =
-                (state != nullptr) ?
-                FallbackFinite(state->GetOrientation(), 0.0f) :
-                0.0f;
-
-            float resolvedTargetYawRad = 0.0f;
-            if ((targetHeadingOverride != nullptr) &&
-                TryResolveHeadingYawRadFromComponents(
-                    targetHeadingOverride->x(),
-                    targetHeadingOverride->y(),
-                    resolvedTargetYawRad))
-            {
-                return resolvedTargetYawRad;
-            }
-
-            return capturedYawRad;
         }
 
         bool TryResolveProjectedAxisContribution(
@@ -745,32 +648,6 @@ namespace MazeMap::App::Internal
             return !std::isnan(projectedTargetDistanceM);
         }
 
-        float ResolveInitialLinearSpeedMps(
-            const MazeMap::VehicleState* state,
-            const DriveBase* drive) noexcept
-        {
-            const float driveCommandMps = (drive != nullptr) ? drive->GetLastLinearCommandMps() : 0.0f;
-            if (state != nullptr)
-            {
-                return FallbackFinite(state->GetVelocity(), driveCommandMps);
-            }
-
-            return driveCommandMps;
-        }
-
-        float ResolveInitialYawRateRadps(
-            const MazeMap::VehicleState* state,
-            const DriveBase* drive) noexcept
-        {
-            const float driveCommandRadps = (drive != nullptr) ? drive->GetLastAngularCommandRadps() : 0.0f;
-            if (state != nullptr)
-            {
-                return FallbackFinite(state->GetRotationalVelocity(), driveCommandRadps);
-            }
-
-            return driveCommandRadps;
-        }
-
         float ResolveTurnCommandMagnitudeRadps(
             const float retainedYawRateRadps,
             const MotionLimits& limits,
@@ -781,18 +658,21 @@ namespace MazeMap::App::Internal
                 return (std::numeric_limits<float>::infinity)();
             }
 
-            const float retainedMagnitudeRadps = FiniteMagnitudeOrZero(retainedYawRateRadps);
+            const float retainedMagnitudeRadps =
+                std::isfinite(retainedYawRateRadps) ?
+                std::fabs(retainedYawRateRadps) :
+                0.0f;
             if (retainedMagnitudeRadps > 0.0f)
             {
                 return retainedMagnitudeRadps;
             }
 
-            if (HasFiniteLimit(limits.maxAngularSpeedRadps))
+            if (std::isfinite(limits.maxAngularSpeedRadps))
             {
                 return std::fabs(limits.maxAngularSpeedRadps);
             }
 
-            if ((vehicle != nullptr) && HasFiniteLimit(vehicle->GetMaxRotationalVelocity()))
+            if ((vehicle != nullptr) && std::isfinite(vehicle->GetMaxRotationalVelocity()))
             {
                 return std::fabs(vehicle->GetMaxRotationalVelocity());
             }
@@ -811,7 +691,7 @@ namespace MazeMap::App::Internal
             {
                 if (maneuver.IsStraight())
                 {
-                    if (HasFiniteLimit(limits.maxSpeedMps))
+                    if (std::isfinite(limits.maxSpeedMps))
                     {
                         speedLimitMps = std::fabs(limits.maxSpeedMps);
                         hasSpeedLimit = true;
@@ -820,8 +700,8 @@ namespace MazeMap::App::Internal
                 else if (vehicle != nullptr)
                 {
                     const float maneuverLimitMps = maneuver.GetSpeedLimit(*vehicle);
-                    const bool hasConfiguredLimit = HasFiniteLimit(limits.maxSpeedMps);
-                    const bool hasManeuverLimit = HasFiniteLimit(maneuverLimitMps);
+                    const bool hasConfiguredLimit = std::isfinite(limits.maxSpeedMps);
+                    const bool hasManeuverLimit = std::isfinite(maneuverLimitMps);
                     if (hasConfiguredLimit && hasManeuverLimit)
                     {
                         speedLimitMps = (std::min)(std::fabs(limits.maxSpeedMps), std::fabs(maneuverLimitMps));
@@ -859,17 +739,12 @@ namespace MazeMap::App::Internal
                 (std::min)(std::fabs(usableRequestedSpeedMps), speedLimitMps);
         }
 
-        float ResolveCommandTargetYawRad(const float targetYawRad, const float fallbackYawRad) noexcept
-        {
-            return WrapAngleRad(FallbackFinite(targetYawRad, fallbackYawRad));
-        }
-
         float ResolveSignedCommandForDriveBase(
             const float requestedCommand,
             const float configuredLimit,
             const float fallbackCommand = 0.0f) noexcept
         {
-            float resolvedCommand = FallbackFinite(fallbackCommand, 0.0f);
+            float resolvedCommand = std::isfinite(fallbackCommand) ? fallbackCommand : 0.0f;
             if (std::isfinite(requestedCommand))
             {
                 resolvedCommand = requestedCommand;
@@ -877,9 +752,10 @@ namespace MazeMap::App::Internal
             else if (std::isinf(requestedCommand))
             {
                 resolvedCommand =
-                    HasFiniteLimit(configuredLimit) ?
+                    std::isfinite(configuredLimit) ?
                     (SignF(requestedCommand) * std::fabs(configuredLimit)) :
-                    (SignF(requestedCommand) * FiniteMagnitudeOrZero(fallbackCommand));
+                    (SignF(requestedCommand) *
+                        (std::isfinite(fallbackCommand) ? std::fabs(fallbackCommand) : 0.0f));
             }
 
             return LimitByConfiguredMagnitude(resolvedCommand, configuredLimit);
@@ -909,8 +785,8 @@ namespace MazeMap::App::Internal
         {
             return (drive != nullptr) ?
                 drive->PointControlVector(
-                    FallbackFinite(desiredSpeedMps, 0.0f),
-                    FallbackFinite(desiredYawRateRadps, 0.0f),
+                    std::isfinite(desiredSpeedMps) ? desiredSpeedMps : 0.0f,
+                    std::isfinite(desiredYawRateRadps) ? desiredYawRateRadps : 0.0f,
                     commandPd) :
                 LoopController::ControlVector::Brake;
         }
@@ -925,12 +801,56 @@ namespace MazeMap::App::Internal
         {
             return (drive != nullptr) ?
                 drive->PointControlVectorWithHeadingTarget(
-                    FallbackFinite(desiredSpeedMps, 0.0f),
-                    FallbackFinite(desiredYawRateRadps, 0.0f),
-                    FallbackFinite(targetYawRad, 0.0f),
+                    std::isfinite(desiredSpeedMps) ? desiredSpeedMps : 0.0f,
+                    std::isfinite(desiredYawRateRadps) ? desiredYawRateRadps : 0.0f,
+                    std::isfinite(targetYawRad) ? targetYawRad : 0.0f,
                     velocityAndYawPd,
                     headingPd) :
                 LoopController::ControlVector::Brake;
+        }
+
+        bool IsLinearMotionCompleteAtExit(
+            const MazeMap::VehicleState& state,
+            const SensorSnapshot& sensors,
+            const DriveTelemetry& driveTelemetry,
+            const float desiredSpeedMps,
+            const float exitMagnitudeMps) noexcept
+        {
+            return (exitMagnitudeMps <= Config::kSpeedToleranceMps) ?
+                IsMotionSettled(sensors, driveTelemetry) :
+                (std::fabs((std::isfinite(state.GetVelocity()) ? state.GetVelocity() : desiredSpeedMps) - desiredSpeedMps) <=
+                    Config::kSpeedToleranceMps);
+        }
+
+        ControlVector MakeFiniteTurnToHeadingControls(
+            DriveBase* drive,
+            const MotionLimits& limits,
+            const Drive::CommandPDSettings& commandPdSettings,
+            const MazeMap::VehicleState& state,
+            const float targetYawRad,
+            bool& done) noexcept
+        {
+            const float measuredYawRad = std::isfinite(state.GetOrientation()) ? state.GetOrientation() : 0.0f;
+            const float remainingRad = AngleErrorRad(targetYawRad, measuredYawRad);
+            if (IsTurnComplete(remainingRad, state.GetRotationalVelocity(), limits))
+            {
+                done = true;
+                return ControlVector::Brake;
+            }
+
+            const float finiteRemainingRad = std::isfinite(remainingRad) ? remainingRad : 0.0f;
+            const float feedforwardYawRateRadps =
+                std::isfinite(limits.angularAccelRadps2) ?
+                (SignF(finiteRemainingRad) *
+                    ReachableSpeedWithBoundary(0.0f, std::fabs(finiteRemainingRad), std::fabs(limits.angularAccelRadps2))) :
+                0.0f;
+            return MakePointControlVectorWithHeadingTarget(
+                drive,
+                0.0f,
+                ResolveSignedCommandForDriveBase(feedforwardYawRateRadps, limits.maxAngularSpeedRadps),
+                targetYawRad,
+                commandPdSettings.yawRate,
+                commandPdSettings.heading);
         }
 
     }
@@ -997,11 +917,20 @@ namespace MazeMap::App::Internal
 
         const MazeMap::VehicleState* const runtimeState =
             (_runtime != nullptr) ? &_runtime->RuntimeState() : nullptr;
-        const float targetYawRad =
-            ResolveStraightTargetYawRad(
-                runtimeState,
-                targetHeadingOverride);
-        float targetDistanceM = ResolveDistanceRequestMagnitude(distanceM);
+        const float capturedYawRad =
+            (runtimeState != nullptr) ?
+            (std::isfinite(runtimeState->GetOrientation()) ? runtimeState->GetOrientation() : 0.0f) :
+            0.0f;
+        // Default to captured yaw unless a usable heading override is provided.
+        float targetYawRad = capturedYawRad;
+        if (targetHeadingOverride != nullptr)
+        {
+            (void)TryResolveHeadingYawRadFromComponents(
+                targetHeadingOverride->x(),
+                targetHeadingOverride->y(),
+                targetYawRad);
+        }
+        float targetDistanceM = ResolveRequestedMagnitude(distanceM);
         float projectedTargetDistanceM = 0.0f;
         if (TryResolveStraightTargetDistanceM(
                 runtimeState,
@@ -1012,7 +941,12 @@ namespace MazeMap::App::Internal
             targetDistanceM = projectedTargetDistanceM;
         }
 
-        float commandedSpeedMps = ResolveInitialLinearSpeedMps(runtimeState, _drive);
+        const float driveCommandMps = (_drive != nullptr) ? _drive->GetLastLinearCommandMps() : 0.0f;
+        // Prefer the live translational estimate at arm time; otherwise continue from the last command.
+        float commandedSpeedMps =
+            (runtimeState != nullptr) ?
+            (std::isfinite(runtimeState->GetVelocity()) ? runtimeState->GetVelocity() : driveCommandMps) :
+            driveCommandMps;
         const float direction = ResolveRequestedDirection({
             cruiseSpeed,
             exitSpeed,
@@ -1041,7 +975,8 @@ namespace MazeMap::App::Internal
             exitMagnitudeMps,
             targetYawRad,
             direction,
-            SafeAverageDistanceMeters(_drive),
+            // Latch wheel-average distance so primitive progress stays relative to this start point.
+            (_drive != nullptr) ? _drive->GetAverageDistanceMeters() : 0.0f,
             commandedSpeedMps };
         _activePrimitive = ActivePrimitive::LinearMotion;
         _effectivelyComplete = false;
@@ -1056,9 +991,14 @@ namespace MazeMap::App::Internal
             (runtimeState != nullptr) ? *runtimeState : MazeMap::VehicleState{};
         const float startYawRad =
             (runtimeState != nullptr) ?
-            FallbackFinite(runtimeState->GetOrientation(), 0.0f) :
+            (std::isfinite(runtimeState->GetOrientation()) ? runtimeState->GetOrientation() : 0.0f) :
             0.0f;
-        const float initialYawRateRadps = ResolveInitialYawRateRadps(runtimeState, _drive);
+        const float driveCommandRadps = (_drive != nullptr) ? _drive->GetLastAngularCommandRadps() : 0.0f;
+        // Prefer the live rotational estimate at arm time; otherwise continue from the last command.
+        const float initialYawRateRadps =
+            (runtimeState != nullptr) ?
+            (std::isfinite(runtimeState->GetRotationalVelocity()) ? runtimeState->GetRotationalVelocity() : driveCommandRadps) :
+            driveCommandRadps;
         const float resolvedTurnDirection =
             std::isinf(angleRad) ?
             ResolveRequestedDirection({
@@ -1070,13 +1010,15 @@ namespace MazeMap::App::Internal
         const bool hasFiniteStopCondition = !std::isinf(angleRad);
         const float resolvedAngleRad =
             hasFiniteStopCondition ?
-            ResolveRecoveredTurnAngleRad(
-                angleRad,
-                _limits,
-                state,
-                state.GetSensorSnapshot(),
-                _maze,
-                _operationMode) :
+            (std::isfinite(angleRad) ?
+                angleRad :
+                ResolveRecoveredQuarterTurnAngleRad(
+                    angleRad,
+                    _limits,
+                    state,
+                    state.GetSensorSnapshot(),
+                    _maze,
+                    _operationMode)) :
             0.0f;
         float retainedYawRateRadps = initialYawRateRadps;
         if (hasFiniteStopCondition || (SignF(retainedYawRateRadps) != resolvedTurnDirection))
@@ -1084,7 +1026,10 @@ namespace MazeMap::App::Internal
             retainedYawRateRadps = 0.0f;
         }
         (void)::new (_primitiveStorageWords) TurnState{
-            ResolveCommandTargetYawRad(startYawRad + resolvedAngleRad, startYawRad),
+            WrapAngleRad(
+                std::isfinite(startYawRad + resolvedAngleRad) ?
+                (startYawRad + resolvedAngleRad) :
+                startYawRad),
             resolvedTurnDirection,
             retainedYawRateRadps,
             hasFiniteStopCondition,
@@ -1097,11 +1042,23 @@ namespace MazeMap::App::Internal
     {
         const MazeMap::VehicleState* const runtimeState =
             (_runtime != nullptr) ? &_runtime->RuntimeState() : nullptr;
-        const float initialSpeedMps = ResolveInitialLinearSpeedMps(runtimeState, _drive);
-        const float resolvedDistanceM = ResolveDistanceRequestMagnitude(distanceM);
+        const float driveCommandMps = (_drive != nullptr) ? _drive->GetLastLinearCommandMps() : 0.0f;
+        // Prefer the live translational estimate at arm time; otherwise continue from the last command.
+        const float initialSpeedMps =
+            (runtimeState != nullptr) ?
+            (std::isfinite(runtimeState->GetVelocity()) ? runtimeState->GetVelocity() : driveCommandMps) :
+            driveCommandMps;
+        const float resolvedDistanceM = ResolveRequestedMagnitude(distanceM);
         const bool hasProgressObjective =
             !std::isfinite(resolvedDistanceM) ||
             (resolvedDistanceM > Config::kDistanceToleranceM);
+
+        const float driveCommandRadps = (_drive != nullptr) ? _drive->GetLastAngularCommandRadps() : 0.0f;
+        // Prefer the live rotational estimate at arm time; otherwise continue from the last command.
+        const float initialYawRateRadps =
+            (runtimeState != nullptr) ?
+            (std::isfinite(runtimeState->GetRotationalVelocity()) ? runtimeState->GetRotationalVelocity() : driveCommandRadps) :
+            driveCommandRadps;
 
         ResetActivePrimitive();
         (void)::new (_primitiveStorageWords) TurnTransitionState{
@@ -1111,8 +1068,9 @@ namespace MazeMap::App::Internal
                 initialSpeedMps,
                 _limits.maxSpeedMps,
                 hasProgressObjective),
-            ResolveInitialYawRateRadps(runtimeState, _drive),
-            SafeAverageDistanceMeters(_drive) };
+            initialYawRateRadps,
+            // Latch wheel-average distance so primitive progress stays relative to this start point.
+            (_drive != nullptr) ? _drive->GetAverageDistanceMeters() : 0.0f };
         _activePrimitive = ActivePrimitive::TurnTransition;
         _effectivelyComplete = false;
     }
@@ -1123,7 +1081,12 @@ namespace MazeMap::App::Internal
             (_runtime != nullptr) ? &_runtime->RuntimeState() : nullptr;
         const MazeMap::VehicleState state =
             (runtimeState != nullptr) ? *runtimeState : MazeMap::VehicleState{};
-        const float initialSpeedMps = ResolveInitialLinearSpeedMps(runtimeState, _drive);
+        const float driveCommandMps = (_drive != nullptr) ? _drive->GetLastLinearCommandMps() : 0.0f;
+        // Prefer the live translational estimate at arm time; otherwise continue from the last command.
+        const float initialSpeedMps =
+            (runtimeState != nullptr) ?
+            (std::isfinite(runtimeState->GetVelocity()) ? runtimeState->GetVelocity() : driveCommandMps) :
+            driveCommandMps;
         float resolvedDistanceM = 0.0f;
         float resolvedCurvature = 0.0f;
         (void)RecoverArcGeometry(
@@ -1148,7 +1111,8 @@ namespace MazeMap::App::Internal
                 initialSpeedMps,
                 _limits.maxSpeedMps,
                 hasProgressObjective),
-            SafeAverageDistanceMeters(_drive) };
+            // Latch wheel-average distance so primitive progress stays relative to this start point.
+            (_drive != nullptr) ? _drive->GetAverageDistanceMeters() : 0.0f };
         _activePrimitive = ActivePrimitive::Arc;
         _effectivelyComplete = false;
     }
@@ -1174,8 +1138,11 @@ namespace MazeMap::App::Internal
         ResetActivePrimitive();
         (void)::new (_primitiveStorageWords) ManeuverState{
             maneuver,
-            SafeAverageDistanceMeters(_drive),
-            (_runtime != nullptr) ? FallbackFinite(_runtime->RuntimeState().GetOrientation(), 0.0f) : 0.0f,
+            // Latch wheel-average distance so primitive progress stays relative to this start point.
+            (_drive != nullptr) ? _drive->GetAverageDistanceMeters() : 0.0f,
+            (_runtime != nullptr) ?
+                (std::isfinite(_runtime->RuntimeState().GetOrientation()) ? _runtime->RuntimeState().GetOrientation() : 0.0f) :
+                0.0f,
             maneuverSpeedMps,
             initialPoint,
             initialPointValid };
@@ -1281,12 +1248,7 @@ namespace MazeMap::App::Internal
         bool& done)
     {
         auto& hold = *StorageAs<HoldState>(_primitiveStorageWords);
-        const bool stationary = MazeMap::IsMissionStartupStationaryFromSensors(
-            driveTelemetry.leftVelocityMps,
-            driveTelemetry.rightVelocityMps,
-            sensors.gyroRadps,
-            ResolveMotionSettleSpeedThresholdMps(),
-            Config::kMotionSettleAngularSpeedThresholdRadps);
+        const bool stationary = IsMotionSettled(sensors, driveTelemetry);
         if (stationary)
         {
             if (hold.remainingTicks > 0U)
@@ -1311,9 +1273,12 @@ namespace MazeMap::App::Internal
         bool& done)
     {
         auto& linear = *StorageAs<LinearMotionState>(_primitiveStorageWords);
-        const float traveledM = std::fabs(AverageDistanceMeters(driveTelemetry) - linear.startDistanceM);
+        // Measure primitive progress from the wheel-average distance latched when the primitive was armed.
+        const float traveledM =
+            std::fabs((0.5f * (driveTelemetry.leftDistanceM + driveTelemetry.rightDistanceM)) - linear.startDistanceM);
+        const float measuredYawRad = std::isfinite(state.GetOrientation()) ? state.GetOrientation() : 0.0f;
         const float resolvedTargetYawRad =
-            ResolveCommandTargetYawRad(linear.targetYawRad, FallbackFinite(state.GetOrientation(), 0.0f));
+            WrapAngleRad(std::isfinite(linear.targetYawRad) ? linear.targetYawRad : measuredYawRad);
         const bool hasFiniteStopCondition = std::isfinite(linear.targetDistanceM);
         const float remainingM =
             hasFiniteStopCondition ?
@@ -1334,14 +1299,15 @@ namespace MazeMap::App::Internal
         {
             const float accelLimitedSpeedMps = (std::min)(
                 cruiseMagnitudeMps,
-                (HasFiniteLimit(_limits.accelMps2) && std::isfinite(dtSeconds) && (dtSeconds >= 0.0f)) ?
-                    (std::fabs(FallbackFinite(linear.commandedSpeedMps, 0.0f)) + (std::fabs(_limits.accelMps2) * dtSeconds)) :
+                (std::isfinite(_limits.accelMps2) && std::isfinite(dtSeconds) && (dtSeconds >= 0.0f)) ?
+                    (std::fabs(std::isfinite(linear.commandedSpeedMps) ? linear.commandedSpeedMps : 0.0f) +
+                        (std::fabs(_limits.accelMps2) * dtSeconds)) :
                     cruiseMagnitudeMps);
-            const float decelLimitedSpeedMps = ReachableSpeedWithConfiguredLimit(
-                exitMagnitudeMps,
-                remainingM,
-                _limits.decelMps2,
-                cruiseMagnitudeMps);
+            // Only apply reachable-speed braking when the configured decel limit is usable.
+            const float decelLimitedSpeedMps =
+                std::isfinite(_limits.decelMps2) ?
+                ReachableSpeedWithBoundary(exitMagnitudeMps, remainingM, std::fabs(_limits.decelMps2)) :
+                cruiseMagnitudeMps;
             linear.commandedSpeedMps = ResolveSignedCommandForDriveBase(
                 direction * (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps),
                 _limits.maxSpeedMps,
@@ -1354,15 +1320,12 @@ namespace MazeMap::App::Internal
                 direction * exitMagnitudeMps,
                 _limits.maxSpeedMps,
                 direction * linear.commandedSpeedMps);
-            done =
-                (exitMagnitudeMps <= Config::kSpeedToleranceMps) ?
-                MazeMap::IsMissionStartupStationaryFromSensors(
-                    driveTelemetry.leftVelocityMps,
-                    driveTelemetry.rightVelocityMps,
-                    sensors.gyroRadps,
-                    ResolveMotionSettleSpeedThresholdMps(),
-                    Config::kMotionSettleAngularSpeedThresholdRadps) :
-                (std::fabs(FallbackFinite(state.GetVelocity(), desiredSpeedMps) - desiredSpeedMps) <= Config::kSpeedToleranceMps);
+            done = IsLinearMotionCompleteAtExit(
+                state,
+                sensors,
+                driveTelemetry,
+                desiredSpeedMps,
+                exitMagnitudeMps);
         }
 
         float desiredYawRateRadps = 0.0f;
@@ -1400,7 +1363,7 @@ namespace MazeMap::App::Internal
             MazeMap::ObserveTurnWallStates(*turn.wallEdgeTracker, sensors.leftWall, sensors.rightWall);
         }
 
-        const float measuredYawRad = FallbackFinite(state.GetOrientation(), 0.0f);
+        const float measuredYawRad = std::isfinite(state.GetOrientation()) ? state.GetOrientation() : 0.0f;
         if (!turn.hasFiniteStopCondition)
         {
             done = true;
@@ -1416,27 +1379,14 @@ namespace MazeMap::App::Internal
                 _commandPdSettings.yawRate);
         }
 
-        const float targetYawRad = ResolveCommandTargetYawRad(turn.targetYawRad, measuredYawRad);
-        const float remainingRad = AngleErrorRad(targetYawRad, measuredYawRad);
-        if (IsTurnComplete(remainingRad, state.GetRotationalVelocity(), _limits))
-        {
-            done = true;
-            return LoopController::ControlVector::Brake;
-        }
-
-        const float resolvedRemainingRad = FallbackFinite(remainingRad, 0.0f);
-        const float feedforwardYawRateRadps =
-            HasFiniteLimit(_limits.angularAccelRadps2) ?
-            (SignF(resolvedRemainingRad) *
-                ReachableSpeedWithBoundary(0.0f, std::fabs(resolvedRemainingRad), std::fabs(_limits.angularAccelRadps2))) :
-            0.0f;
-        return MakePointControlVectorWithHeadingTarget(
+        const float targetYawRad = WrapAngleRad(std::isfinite(turn.targetYawRad) ? turn.targetYawRad : measuredYawRad);
+        return MakeFiniteTurnToHeadingControls(
             _drive,
-            0.0f,
-            ResolveSignedCommandForDriveBase(feedforwardYawRateRadps, _limits.maxAngularSpeedRadps),
+            _limits,
+            _commandPdSettings,
+            state,
             targetYawRad,
-            _commandPdSettings.yawRate,
-            _commandPdSettings.heading);
+            done);
     }
 
     LoopController::ControlVector Drive::TurnTransitionControls(
@@ -1445,7 +1395,9 @@ namespace MazeMap::App::Internal
         bool& done)
     {
         auto& transition = *StorageAs<TurnTransitionState>(_primitiveStorageWords);
-        const float traveledM = std::fabs(AverageDistanceMeters(driveTelemetry) - transition.startDistanceM);
+        // Measure primitive progress from the wheel-average distance latched when the primitive was armed.
+        const float traveledM =
+            std::fabs((0.5f * (driveTelemetry.leftDistanceM + driveTelemetry.rightDistanceM)) - transition.startDistanceM);
         const float distanceM = transition.distanceM;
         const bool hasFiniteStopCondition = std::isfinite(distanceM);
         const float progressM =
@@ -1459,7 +1411,7 @@ namespace MazeMap::App::Internal
                 transition.speedMps);
         const float initialYawRateRadps =
             ResolveSignedCommandForDriveBase(transition.initialYawRateRadps, _limits.maxAngularSpeedRadps);
-        const float resolvedCurvatureRate = FallbackFinite(transition.dCurvatureDs, 0.0f);
+        const float resolvedCurvatureRate = std::isfinite(transition.dCurvatureDs) ? transition.dCurvatureDs : 0.0f;
         const float finalYawRateRadps =
             initialYawRateRadps +
             (initialSpeedMps * resolvedCurvatureRate * distanceM);
@@ -1496,7 +1448,9 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)sensors;
         auto& arc = *StorageAs<ArcState>(_primitiveStorageWords);
-        const float traveledM = std::fabs(AverageDistanceMeters(driveTelemetry) - arc.startDistanceM);
+        // Measure primitive progress from the wheel-average distance latched when the primitive was armed.
+        const float traveledM =
+            std::fabs((0.5f * (driveTelemetry.leftDistanceM + driveTelemetry.rightDistanceM)) - arc.startDistanceM);
         const float distanceM = arc.distanceM;
         const float curvature = arc.curvature;
         const bool hasFiniteStopCondition = std::isfinite(distanceM);
@@ -1525,8 +1479,10 @@ namespace MazeMap::App::Internal
         auto& maneuverState = *StorageAs<ManeuverState>(_primitiveStorageWords);
         const MazeMap::ManeuverInstance& maneuver = maneuverState.maneuver;
         const MazeMap::ManeuverCode code = maneuver.getCode();
-        const float traveledM = std::fabs(AverageDistanceMeters(driveTelemetry) - maneuverState.startDistanceM);
-        const float totalDistanceM = ResolveDistanceRequestMagnitude(maneuver.GetTravelDistanceMeters(Config::kCellSizeM));
+        // Measure primitive progress from the wheel-average distance latched when the primitive was armed.
+        const float traveledM =
+            std::fabs((0.5f * (driveTelemetry.leftDistanceM + driveTelemetry.rightDistanceM)) - maneuverState.startDistanceM);
+        const float totalDistanceM = ResolveRequestedMagnitude(maneuver.GetTravelDistanceMeters(Config::kCellSizeM));
         const bool hasFiniteStopCondition = std::isfinite(totalDistanceM);
         const float desiredSpeedMps =
             ResolveSignedCommandForDriveBase(
@@ -1566,30 +1522,19 @@ namespace MazeMap::App::Internal
         const float angleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
         if (totalDistanceM <= Config::kDistanceToleranceM)
         {
+            const float measuredYawRad = std::isfinite(state.GetOrientation()) ? state.GetOrientation() : 0.0f;
             const float targetYawRad =
-                ResolveCommandTargetYawRad(
-                    maneuverState.startYawRad + angleRad,
-                    FallbackFinite(state.GetOrientation(), 0.0f));
-            const float remainingRad = AngleErrorRad(targetYawRad, FallbackFinite(state.GetOrientation(), 0.0f));
-            if (IsTurnComplete(remainingRad, state.GetRotationalVelocity(), _limits))
-            {
-                done = true;
-                return LoopController::ControlVector::Brake;
-            }
-
-            const float resolvedRemainingRad = FallbackFinite(remainingRad, 0.0f);
-            const float feedforwardYawRateRadps =
-                HasFiniteLimit(_limits.angularAccelRadps2) ?
-                (SignF(resolvedRemainingRad) *
-                    ReachableSpeedWithBoundary(0.0f, std::fabs(resolvedRemainingRad), std::fabs(_limits.angularAccelRadps2))) :
-                0.0f;
-            return MakePointControlVectorWithHeadingTarget(
+                WrapAngleRad(
+                    std::isfinite(maneuverState.startYawRad + angleRad) ?
+                    (maneuverState.startYawRad + angleRad) :
+                    measuredYawRad);
+            return MakeFiniteTurnToHeadingControls(
                 _drive,
-                0.0f,
-                ResolveSignedCommandForDriveBase(feedforwardYawRateRadps, _limits.maxAngularSpeedRadps),
+                _limits,
+                _commandPdSettings,
+                state,
                 targetYawRad,
-                _commandPdSettings.yawRate,
-                _commandPdSettings.heading);
+                done);
         }
 
         if (std::fabs(angleRad) > 0.0f)
@@ -1615,28 +1560,28 @@ namespace MazeMap::App::Internal
             ResolveSignedCommandForDriveBase(sign * exitMagnitudeMps, _limits.maxSpeedMps, sign * desiredSpeedMps) :
             (sign * (std::min)(
                 std::fabs(desiredSpeedMps),
-                ReachableSpeedWithConfiguredLimit(
-                    exitMagnitudeMps,
-                    remainingM,
-                    _limits.decelMps2,
+                // Only apply reachable-speed braking when the configured decel limit is usable.
+                (std::isfinite(_limits.decelMps2) ?
+                    ReachableSpeedWithBoundary(exitMagnitudeMps, remainingM, std::fabs(_limits.decelMps2)) :
                     std::fabs(desiredSpeedMps))));
         done =
             !hasFiniteStopCondition ||
             ((remainingM <= Config::kDistanceToleranceM) &&
-            ((exitMagnitudeMps <= Config::kSpeedToleranceMps) ?
-                MazeMap::IsMissionStartupStationaryFromSensors(
-                    driveTelemetry.leftVelocityMps,
-                    driveTelemetry.rightVelocityMps,
-                    sensors.gyroRadps,
-                    ResolveMotionSettleSpeedThresholdMps(),
-                    Config::kMotionSettleAngularSpeedThresholdRadps) :
-                (std::fabs(FallbackFinite(state.GetVelocity(), desiredStraightSpeedMps) - desiredStraightSpeedMps) <= Config::kSpeedToleranceMps)));
+            IsLinearMotionCompleteAtExit(
+                state,
+                sensors,
+                driveTelemetry,
+                desiredStraightSpeedMps,
+                exitMagnitudeMps));
 
         return MakePointControlVectorWithHeadingTarget(
             _drive,
             desiredStraightSpeedMps,
             0.0f,
-            ResolveCommandTargetYawRad(maneuverState.startYawRad, FallbackFinite(state.GetOrientation(), 0.0f)),
+            WrapAngleRad(
+                std::isfinite(maneuverState.startYawRad) ?
+                maneuverState.startYawRad :
+                (std::isfinite(state.GetOrientation()) ? state.GetOrientation() : 0.0f)),
             _commandPdSettings.velocity | _commandPdSettings.yawRate,
             _commandPdSettings.heading);
     }
