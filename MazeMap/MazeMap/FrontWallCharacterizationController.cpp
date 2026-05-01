@@ -64,7 +64,7 @@ public:
 
         if (!SetupHardware())
         {
-            return Fail("Hardware setup failed");
+            return _runtime.FailActiveMode("Hardware setup failed");
         }
         (void)ResetStartupTrace("mode:front_wall_characterization");
         (void)_runtime.AppendTextLogLine("Front wall characterization mode");
@@ -103,11 +103,11 @@ public:
 
         if (!driveOk)
         {
-            return Fail("Drive initialization failed");
+            return _runtime.FailActiveMode("Drive initialization failed");
         }
         if (!sensorsOk)
         {
-            return Fail("Sensor initialization failed");
+            return _runtime.FailActiveMode("Sensor initialization failed");
         }
 
         return true;
@@ -123,7 +123,7 @@ public:
         callbacks.context = this;
         if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
         {
-            ok = Fail("Front wall characterization loop session start failed");
+            ok = _runtime.FailActiveMode("Front wall characterization loop session start failed");
         }
         else
         {
@@ -547,13 +547,13 @@ private:
     {
         if (!WritePersistedFrontWallCharacterization(storage))
         {
-            return Fail("Failed to persist front wall characterization");
+            return _runtime.FailActiveMode("Failed to persist front wall characterization");
         }
 
         MazeMap::FrontWallCharacterizationStorage verify{};
         if (!TryReadPersistedFrontWallCharacterization(verify))
         {
-            return Fail("Failed to verify persisted front wall characterization");
+            return _runtime.FailActiveMode("Failed to verify persisted front wall characterization");
         }
 
         char line[160] = {};
@@ -572,7 +572,7 @@ private:
     {
         if (!MazeMap::IsValidFrontWallCharacterizationStorage(storage))
         {
-            return Fail("Invalid front wall characterization cannot be exported");
+            return _runtime.FailActiveMode("Invalid front wall characterization cannot be exported");
         }
 
         char fileName[32] = {};
@@ -583,22 +583,22 @@ private:
                 "fwc%03u.mmlog",
                 "front_wall_characterization.mmlog"))
         {
-            return Fail("Front wall characterization log name unavailable");
+            return _runtime.FailActiveMode("Front wall characterization log name unavailable");
         }
 
-        if (!_runtime.WriteUtilityDataLogMetadata("mode", "front_wall_characterization")) return Fail("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("samples", static_cast<unsigned long>(storage.sampleCount))) return Fail("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("distance_step_m", storage.distanceStepM, 6)) return Fail("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("reverse_speed_mps", storage.commandedReverseSpeedMps, 6)) return Fail("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("zero_threshold_differential_light", storage.zeroThresholdDifferentialLight, 6)) return Fail("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("terminal_distance_m", storage.terminalDistanceM, 6)) return Fail("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return Fail("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return Fail("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadata("mode", "front_wall_characterization")) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("samples", static_cast<unsigned long>(storage.sampleCount))) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("distance_step_m", storage.distanceStepM, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("reverse_speed_mps", storage.commandedReverseSpeedMps, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("zero_threshold_differential_light", storage.zeroThresholdDifferentialLight, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("terminal_distance_m", storage.terminalDistanceM, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
 
         _logRow = {};
         if (!_runtime.BeginUtilityDataLogSchema(_logRow))
         {
-            return Fail("Front wall characterization log open failed");
+            return _runtime.FailActiveMode("Front wall characterization log open failed");
         }
 
         for (uint16_t index = 0U; index < storage.sampleCount; ++index)
@@ -614,13 +614,13 @@ private:
             _logRow.front_right_delta = storage.frontRightDifferentialLight[index];
             if (!_runtime.LogUtilityDataRow(_logRow))
             {
-                return Fail("Front wall characterization log write failed");
+                return _runtime.FailActiveMode("Front wall characterization log write failed");
             }
         }
 
         if (!_runtime.CloseUtilityDataLog())
         {
-            return Fail("Front wall characterization log write failed");
+            return _runtime.FailActiveMode("Front wall characterization log write failed");
         }
 
         char line[224] = {};
@@ -633,11 +633,6 @@ private:
         AppendStartupTrace(line);
         (void)_runtime.AppendTextLogLine(line);
         return true;
-    }
-
-    bool Fail(const char* reason)
-    {
-        return _runtime.FailActiveMode(reason);
     }
 
 };

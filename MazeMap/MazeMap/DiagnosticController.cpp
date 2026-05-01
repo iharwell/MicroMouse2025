@@ -71,24 +71,24 @@ public:
 
         if (!SetupHardware())
         {
-            return Fail("Hardware setup failed");
+            return _runtime.FailActiveMode("Hardware setup failed");
         }
         ResetStartupTrace("mode:primary_diagnostic");
         (void)_runtime.AppendTextLogLine("Micromouse diagnostic setup");
         if (!_drive.Begin())
         {
-            return Fail("Drive base init failed");
+            return _runtime.FailActiveMode("Drive base init failed");
         }
         _drive.SetWheelControlProfile(BuildDiagnosticWheelControlProfile());
         SetMissionLevelFanEnabled(true);
         gWallDistanceCalibration.Clear();
         if (!_sensors.Begin(DiagnosticConfig::kControlPeriodUs))
         {
-            return Fail("Diagnostic sensor init failed");
+            return _runtime.FailActiveMode("Diagnostic sensor init failed");
         }
         if (!BeginLog())
         {
-            return Fail("Diagnostic log open failed");
+            return _runtime.FailActiveMode("Diagnostic log open failed");
         }
 
         _drive.SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
@@ -115,7 +115,7 @@ public:
             if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
             {
                 _phaseFn = nullptr;
-                ok = Fail("Diagnostic loop session start failed");
+                ok = _runtime.FailActiveMode("Diagnostic loop session start failed");
             }
             else
             {
@@ -600,7 +600,7 @@ private:
             _kickoffPhaseState.travelLimited ? 1U : 0U);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return Fail("Failed to format kickoff characterization result");
+            return _runtime.FailActiveMode("Failed to format kickoff characterization result");
         }
         if (!WriteEventOrFail("kickoff_result", message, "Failed to write kickoff characterization result"))
         {
@@ -689,7 +689,7 @@ private:
             _forwardPhaseState.travelLimited ? 1U : 0U);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return Fail("Failed to format forward characterization result");
+            return _runtime.FailActiveMode("Failed to format forward characterization result");
         }
         if (!WriteEventOrFail("forward_result", message, "Failed to write forward characterization result"))
         {
@@ -737,7 +737,7 @@ private:
     {
         if (distanceM <= 0.0f)
         {
-            return Fail("Diagnostic arc distance must be positive");
+            return _runtime.FailActiveMode("Diagnostic arc distance must be positive");
         }
         if (!StartPhase(phaseName))
         {
@@ -1316,7 +1316,7 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return Fail("Failed to format straight diagnostic result");
+            return _runtime.FailActiveMode("Failed to format straight diagnostic result");
         }
         return WriteEventOrFail("straight_result", message, "Failed to write straight diagnostic result");
     }
@@ -1342,7 +1342,7 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return Fail("Failed to format turn diagnostic result");
+            return _runtime.FailActiveMode("Failed to format turn diagnostic result");
         }
         return WriteEventOrFail("turn_result", message, "Failed to write turn diagnostic result");
     }
@@ -1372,7 +1372,7 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return Fail("Failed to format arc diagnostic result");
+            return _runtime.FailActiveMode("Failed to format arc diagnostic result");
         }
         return WriteEventOrFail("arc_result", message, "Failed to write arc diagnostic result");
     }
@@ -1416,7 +1416,7 @@ private:
             metrics.peakPlanarAccelMps2);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return Fail("Failed to format circle diagnostic result");
+            return _runtime.FailActiveMode("Failed to format circle diagnostic result");
         }
         return WriteEventOrFail("circle_result", message, "Failed to write circle diagnostic result");
     }
@@ -1444,7 +1444,7 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return Fail("Failed to format diagnostic closure result");
+            return _runtime.FailActiveMode("Failed to format diagnostic closure result");
         }
         return WriteEventOrFail(type, message, failMessage);
     }
@@ -1472,16 +1472,6 @@ private:
         return limits;
     }
 
-    bool WriteEventOrFail(const char* type, const char* message, const char* failMessage)
-    {
-        if (WriteLogEvent(type, message))
-        {
-            return true;
-        }
-
-        return Fail(failMessage);
-    }
-
     static void BuildDriveCommandLabel(const char* prefix, float driveCommand, char* buffer, size_t bufferSize)
     {
         const unsigned drivePercent = static_cast<unsigned>((100.0f * driveCommand) + 0.5f);
@@ -1493,9 +1483,14 @@ private:
         return BuildNominalWheelControlProfile();
     }
 
-    bool Fail(const char* message)
+    bool WriteEventOrFail(const char* type, const char* message, const char* failMessage)
     {
-        return _runtime.FailActiveMode(message);
+        if (WriteLogEvent(type, message))
+        {
+            return true;
+        }
+
+        return _runtime.FailActiveMode(failMessage);
     }
 
     void OnRuntimeFault(const char* message) noexcept
@@ -1511,7 +1506,7 @@ private:
         {
             return true;
         }
-        return Fail("Failed to write diagnostic phase marker");
+        return _runtime.FailActiveMode("Failed to write diagnostic phase marker");
     }
 
     bool IsWithinBoundary(const MazeMap::VehicleState& state) const

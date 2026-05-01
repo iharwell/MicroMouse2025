@@ -140,7 +140,7 @@ namespace MazeMap::App::Internal
 
             if (!SetupHardware())
             {
-                return Fail("Maneuver file test hardware setup failed");
+                return _runtime.FailActiveMode("Maneuver file test hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:maneuver_file_test");
@@ -150,7 +150,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return Fail("Maneuver file test drive base init failed");
+                return _runtime.FailActiveMode("Maneuver file test drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -158,12 +158,12 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(true);
             if (!_startupCalibration.BringUp())
             {
-                return Fail("Maneuver file test startup bring-up failed");
+                return _runtime.FailActiveMode("Maneuver file test startup bring-up failed");
             }
 
             if (!LoadManeuverQueueFromSd(_runtime, _speedVehicle, _queue))
             {
-                return Fail("Maneuver file test could not load test.txt");
+                return _runtime.FailActiveMode("Maneuver file test could not load test.txt");
             }
 
             (void)_runtime.AppendTextLogFormatted(
@@ -181,7 +181,7 @@ namespace MazeMap::App::Internal
             callbacks.context = this;
             if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
             {
-                (void)Fail("Maneuver file test loop session start failed");
+                (void)_runtime.FailActiveMode("Maneuver file test loop session start failed");
             }
             else
             {
@@ -245,11 +245,6 @@ namespace MazeMap::App::Internal
             _queueActiveIndex = 0U;
             _phase = Phase::Idle;
             _startupCalibration.Cancel();
-        }
-
-        bool Fail(const char* reason)
-        {
-            return _runtime.FailActiveMode(reason);
         }
 
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept

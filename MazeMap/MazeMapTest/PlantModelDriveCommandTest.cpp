@@ -267,7 +267,7 @@ namespace MazeMap
                         std::to_wstring(forwardToleranceMps) + L"," +
                         std::to_wstring(yawToleranceRadps) + L"," +
                         std::to_wstring(maxLateralVelocityMps));
-                Assert::Fail(message.c_str());
+                Assert::IsTrue(false, message.c_str());
             }
         }
 
@@ -537,7 +537,7 @@ namespace MazeMap
 
             if (!failure.empty())
             {
-                Assert::Fail(failure.c_str());
+                Assert::IsTrue(failure.empty(), failure.c_str());
             }
         }
 
@@ -832,7 +832,7 @@ namespace MazeMap
 
             if (!failure.empty())
             {
-                Assert::Fail(failure.c_str());
+                Assert::IsTrue(failure.empty(), failure.c_str());
             }
         }
 
@@ -1193,7 +1193,7 @@ namespace MazeMap
 
             if (!failure.empty())
             {
-                Assert::Fail(failure.c_str());
+                Assert::IsTrue(failure.empty(), failure.c_str());
             }
         }
 
@@ -1289,7 +1289,7 @@ namespace MazeMap
 
             if (!failure.empty())
             {
-                Assert::Fail(failure.c_str());
+                Assert::IsTrue(failure.empty(), failure.c_str());
             }
         }
 
@@ -1574,7 +1574,7 @@ namespace MazeMap
 
             if (!failure.empty())
             {
-                Assert::Fail(failure.c_str());
+                Assert::IsTrue(failure.empty(), failure.c_str());
             }
         }
 

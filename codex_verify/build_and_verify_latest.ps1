@@ -6,8 +6,6 @@ param(
     [ValidateSet('Incremental', 'ProjectDefault')]
     [string]$HostLtcgMode = 'ProjectDefault',
     [ValidateRange(1, 128)]
-    [int]$HostClMpCount = 12,
-    [ValidateRange(1, 128)]
     [int]$TeensyCompileJobs = 12,
     [string]$LogFilePath
 )
@@ -404,6 +402,57 @@ function Resolve-ExistingPath {
     throw ("{0} not found. Checked: {1}" -f $Description, ($CandidatePaths -join ', '))
 }
 
+function Set-FileContentIfChanged {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string[]]$Lines,
+        [ValidateSet('ASCII', 'UTF8')]
+        [string]$Encoding = 'ASCII'
+    )
+
+    $newContent = ($Lines -join [Environment]::NewLine) + [Environment]::NewLine
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        $existingContent = [System.IO.File]::ReadAllText($Path)
+        if ($existingContent -ceq $newContent) {
+            return
+        }
+    }
+
+    Set-Content -LiteralPath $Path -Value $Lines -Encoding $Encoding
+}
+
+function Ensure-JunctionTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Target
+    )
+
+    $expectedTarget = [System.IO.Path]::GetFullPath($Target)
+    $existingItem = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $existingItem) {
+        $existingTargets = @($existingItem.Target | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $isReparsePoint = (($existingItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+        if ($isReparsePoint -and $existingTargets.Count -gt 0) {
+            foreach ($existingTarget in $existingTargets) {
+                if ([System.StringComparer]::OrdinalIgnoreCase.Equals(
+                        [System.IO.Path]::GetFullPath($existingTarget),
+                        $expectedTarget)) {
+                    return
+                }
+            }
+        }
+
+        Remove-Item -LiteralPath $Path -Force -Recurse
+    }
+
+    New-Item -ItemType Junction -Path $Path -Target $expectedTarget | Out-Null
+}
+
 function Test-IsCodexShell {
     return ($env:CODEX_SHELL -eq '1') -or (-not [string]::IsNullOrWhiteSpace($env:CODEX_INTERNAL_ORIGINATOR_OVERRIDE))
 }
@@ -565,10 +614,11 @@ function Invoke-External {
     $stderrPath = [System.IO.Path]::GetTempFileName()
 
     try {
-        $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        & $FilePath @Arguments 1> $stdoutPath 2> $stderrPath
+        $exitCode = $LASTEXITCODE
         Append-FileToLog -Path $stdoutPath
         Append-FileToLog -Path $stderrPath
-        if ($process.ExitCode -ne 0) {
+        if ($exitCode -ne 0) {
             if ($FailureConsoleOutputMode -eq 'VSTestFailuresOnly') {
                 $script:SuppressTerminalErrorSummary = $true
                 Write-VsTestFailureConsoleOutput -StdoutPath $stdoutPath -StderrPath $stderrPath
@@ -578,7 +628,7 @@ function Invoke-External {
                 Write-LogFileContents -Path $stderrPath -Color 'Red'
             }
 
-            throw "Command failed with exit code $($process.ExitCode)."
+            throw "Command failed with exit code $exitCode."
         }
 
         if ($SuccessTailLineCount -gt 0) {
@@ -625,13 +675,14 @@ function Invoke-CmdChain {
     $stderrPath = [System.IO.Path]::GetTempFileName()
 
     try {
-        $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $CommandLine -Wait -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        & cmd.exe /c $CommandLine 1> $stdoutPath 2> $stderrPath
+        $exitCode = $LASTEXITCODE
         Append-FileToLog -Path $stdoutPath
         Append-FileToLog -Path $stderrPath
-        if ($process.ExitCode -ne 0) {
+        if ($exitCode -ne 0) {
             Write-LogFileContents -Path $stdoutPath
             Write-LogFileContents -Path $stderrPath -Color 'Red'
-            throw "Command failed with exit code $($process.ExitCode)."
+            throw "Command failed with exit code $exitCode."
         }
     }
     finally {
@@ -666,9 +717,7 @@ function Invoke-HostMsBuild {
         [Parameter(Mandatory = $true)]
         [string]$HostBuildTarget,
         [Parameter(Mandatory = $true)]
-        [string]$HostLtcgMode,
-        [Parameter(Mandatory = $true)]
-        [int]$HostClMpCount
+        [string]$HostLtcgMode
     )
 
     $vsDevCmdArguments = @(
@@ -691,9 +740,8 @@ function Invoke-HostMsBuild {
         '/p:Configuration=Release',
         '/p:Platform=x64',
         '/p:PreferredToolArchitecture=x64',
-        '/p:UseMultiToolTask=true',
-        '/p:EnableClServerMode=true',
-        ('/p:CL_MPCount=' + $HostClMpCount),
+        '/p:UseMultiToolTask=false',
+        '/p:BuildPassReferences=true',
         '/v:m'
     )
 
@@ -736,27 +784,20 @@ function Ensure-ArduinoEigenLibrary {
     $entryHeaderPath = Join-Path $srcRoot 'Eigen.h'
     $libraryPropertiesPath = Join-Path $eigenLibraryRoot 'library.properties'
     $eigenHeaderPath = Join-Path $EigenSourceRoot 'Eigen\Core'
-    $unsupportedIncludeRoot = Join-Path $srcRoot 'unsupported'
 
     New-Item -ItemType Directory -Path $srcRoot -Force | Out-Null
     Assert-PathExists -Path $eigenHeaderPath -Description 'Eigen core header'
 
-    foreach ($generatedIncludeRoot in @($eigenIncludeRoot, $unsupportedIncludeRoot)) {
-        if (Test-Path -LiteralPath $generatedIncludeRoot) {
-            Remove-Item -LiteralPath $generatedIncludeRoot -Force -Recurse
-        }
-    }
+    Ensure-JunctionTarget -Path $eigenIncludeRoot -Target (Join-Path $EigenSourceRoot 'Eigen')
 
-    New-Item -ItemType Junction -Path $eigenIncludeRoot -Target (Join-Path $EigenSourceRoot 'Eigen') | Out-Null
-
-    @(
+    Set-FileContentIfChanged -Path $entryHeaderPath -Encoding ASCII -Lines @(
         '#pragma once'
         ''
         '// Marker header for Arduino library discovery. Runtime code includes'
         '// Eigen through MazeMap/EigenCompat.h so this header stays zero-cost.'
-    ) | Set-Content -Path $entryHeaderPath -Encoding ASCII
+    )
 
-    @(
+    Set-FileContentIfChanged -Path $libraryPropertiesPath -Encoding ASCII -Lines @(
         'name=Eigen'
         'version=5.0.0'
         'author=Eigen Project'
@@ -766,7 +807,7 @@ function Ensure-ArduinoEigenLibrary {
         'category=Data Processing'
         'includes=Eigen.h'
         'architectures=*'
-    ) | Set-Content -Path $libraryPropertiesPath -Encoding ASCII
+    )
 
     return $LibraryRoot
 }
@@ -1475,7 +1516,8 @@ try {
         Write-Step 'Building the Release host targets'
         Write-LogLine ("Host build target: {0} (Release|x64)" -f $HostBuildTarget) 'DarkCyan'
         Write-LogLine ("Host LTCG mode: {0}" -f $HostLtcgMode) 'DarkCyan'
-        Write-LogLine ("Host CL parallelism: UseMultiToolTask=true, EnableClServerMode=true, CL_MPCount={0}" -f $HostClMpCount) 'DarkCyan'
+        Write-LogLine 'Host CL parallelism: project /MP settings from the vcxproj (UseMultiToolTask=false)' 'DarkCyan'
+        Write-LogLine 'Host native project overlap: BuildPassReferences=true' 'DarkCyan'
         Write-LogLine 'Host toolchain entry: VsDevCmd -host_arch=x64 -arch=x64' 'DarkCyan'
         $hostProjectTargetNames = [System.Collections.Generic.List[string]]::new()
         $hostProjectTargetNames.Add($mazeMapTestHostProject.Name)
@@ -1490,8 +1532,7 @@ try {
             -SolutionPath $solutionPath `
             -ProjectTargetNames $hostProjectTargetNames.ToArray() `
             -HostBuildTarget $HostBuildTarget `
-            -HostLtcgMode $HostLtcgMode `
-            -HostClMpCount $HostClMpCount
+            -HostLtcgMode $HostLtcgMode
         $hostBuildStopwatch.Stop()
         Write-LogLine ("Host build completed in {0:n1}s" -f $hostBuildStopwatch.Elapsed.TotalSeconds) 'DarkCyan'
     }

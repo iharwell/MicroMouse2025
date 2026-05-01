@@ -40,10 +40,6 @@ namespace MazeMap
             return (std::max)(0.25f, (std::min)(value, 8.0f));
         }
 
-        float FiniteOrZero(float value) noexcept
-        {
-            return std::isfinite(value) ? value : 0.0f;
-        }
     }
 
     FrozenCycleSchedule UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
@@ -116,8 +112,8 @@ namespace MazeMap
             (meanMemory >= 0.60f) &&
             (meanRecovery >= 0.60f) &&
             ((std::max)(
-                FiniteOrZero(utilization.leftBankPreProjectionUtilization),
-                FiniteOrZero(utilization.rightBankPreProjectionUtilization)) >= 1.0f);
+                std::isfinite(utilization.leftBankPreProjectionUtilization) ? utilization.leftBankPreProjectionUtilization : 0.0f,
+                std::isfinite(utilization.rightBankPreProjectionUtilization) ? utilization.rightBankPreProjectionUtilization : 0.0f) >= 1.0f);
         if (severeTwoBankEdge)
         {
             schedule.lateralPseudoMeasurementCovarianceScale = 64.0f;

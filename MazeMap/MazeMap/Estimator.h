@@ -281,14 +281,6 @@ namespace MazeMap
         {
             return SrUkfCore::BuildDefaultInitialCovariance();
         }
-        static bool IsFinitePositive(float value) noexcept
-        {
-            return std::isfinite(value) && (value > 0.0f);
-        }
-        static float ClampMeasuredRange(float value, float maxRangeM) noexcept
-        {
-            return (std::clamp)(value, 0.01f, maxRangeM);
-        }
         static void BuildFrontPairObservations(
             const SensorSnapshot& snapshot,
             float maxRangeM,
@@ -299,8 +291,8 @@ namespace MazeMap
             right = WallObs{};
             if (!snapshot.frontWallObservationValid ||
                 !snapshot.frontWall ||
-                !IsFinitePositive(snapshot.frontLeftDistanceM) ||
-                !IsFinitePositive(snapshot.frontRightDistanceM))
+                !(std::isfinite(snapshot.frontLeftDistanceM) && (snapshot.frontLeftDistanceM > 0.0f)) ||
+                !(std::isfinite(snapshot.frontRightDistanceM) && (snapshot.frontRightDistanceM > 0.0f)))
             {
                 return;
             }
@@ -309,11 +301,11 @@ namespace MazeMap
                 snapshot.frontWallUsesCharacterizationDetection ? 0.90f :
                 (snapshot.frontWallUsesFallbackDetection ? 0.60f : 0.80f);
             left.valid = true;
-            left.rho = ClampMeasuredRange(snapshot.frontLeftDistanceM, maxRangeM);
+            left.rho = (std::clamp)(snapshot.frontLeftDistanceM, 0.01f, maxRangeM);
             left.confidence = confidence;
             left.cls = ObsClass::WallLike;
             right.valid = true;
-            right.rho = ClampMeasuredRange(snapshot.frontRightDistanceM, maxRangeM);
+            right.rho = (std::clamp)(snapshot.frontRightDistanceM, 0.01f, maxRangeM);
             right.confidence = confidence;
             right.cls = ObsClass::WallLike;
         }
@@ -328,13 +320,13 @@ namespace MazeMap
             if (!distanceValidForControl ||
                 transitionDetected ||
                 !wallObservation ||
-                !IsFinitePositive(sideDistanceM))
+                !(std::isfinite(sideDistanceM) && (sideDistanceM > 0.0f)))
             {
                 return observation;
             }
 
             observation.valid = true;
-            observation.rho = ClampMeasuredRange(sideDistanceM, maxRangeM);
+            observation.rho = (std::clamp)(sideDistanceM, 0.01f, maxRangeM);
             observation.confidence = 0.80f;
             observation.cls = ObsClass::WallLike;
             return observation;

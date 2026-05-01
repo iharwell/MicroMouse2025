@@ -7,14 +7,6 @@
 
 namespace MazeMap
 {
-    namespace
-    {
-        float FiniteOrZero(float value) noexcept
-        {
-            return std::isfinite(value) ? value : 0.0f;
-        }
-    }
-
     EstimatorGeometry BuildEstimatorGeometry(const PlantPreparedParams& params) noexcept
     {
         EstimatorGeometry geometry{};
@@ -46,10 +38,12 @@ namespace MazeMap
         estimate.batteryVoltageAvailable = std::isfinite(batteryVoltageV) && (batteryVoltageV > 0.0f);
         const float resolvedBatteryVoltageV = estimate.batteryVoltageAvailable ? batteryVoltageV : params.supplyVoltageV;
 
-        const float leftWheelSpeedRadps = FiniteOrZero(currentState(VehicleState::kOmegaL));
-        const float rightWheelSpeedRadps = FiniteOrZero(currentState(VehicleState::kOmegaR));
-        const float leftMotorCommand = FiniteOrZero(control.leftMotorCommand);
-        const float rightMotorCommand = FiniteOrZero(control.rightMotorCommand);
+        const float leftWheelSpeedRadps =
+            std::isfinite(currentState(VehicleState::kOmegaL)) ? currentState(VehicleState::kOmegaL) : 0.0f;
+        const float rightWheelSpeedRadps =
+            std::isfinite(currentState(VehicleState::kOmegaR)) ? currentState(VehicleState::kOmegaR) : 0.0f;
+        const float leftMotorCommand = std::isfinite(control.leftMotorCommand) ? control.leftMotorCommand : 0.0f;
+        const float rightMotorCommand = std::isfinite(control.rightMotorCommand) ? control.rightMotorCommand : 0.0f;
 
         estimate.leftAppliedBankTorqueNm =
             plant.driveTorqueFromCommand(leftMotorCommand, leftWheelSpeedRadps, resolvedBatteryVoltageV, params);

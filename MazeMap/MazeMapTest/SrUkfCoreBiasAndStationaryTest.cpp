@@ -596,7 +596,7 @@ namespace MazeMap
                 L" v_var=" + std::to_wstring(covariance(VehicleState::kV, VehicleState::kV)) +
                 L" omega_l_var=" + std::to_wstring(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL)) +
                 L" omega_r_var=" + std::to_wstring(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR));
-            Assert::Fail(message.c_str());
+            Assert::IsTrue(false, message.c_str());
         }
     };
 }

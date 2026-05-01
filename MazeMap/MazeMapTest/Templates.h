@@ -2,9 +2,9 @@
 
 // add headers that you want to pre-compile here
 
+#include "CppUnitTest.h"
 #include "..\MazeMap\Cell.h"
 #include "..\MazeMap\Maze.h"
-#include "CppUnitTest.h"
 #include <sstream>
 #include "../MazeMap/Maneuver.h"
 

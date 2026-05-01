@@ -28,6 +28,17 @@ namespace MazeMap::App::Internal
     class EXPORT StartupCalibration final
     {
     public:
+        enum class SensorCalibration : std::uint8_t
+        {
+            None = 0U,
+            Imu = 1U << 0,
+            FrontLeft = 1U << 1,
+            FrontRight = 1U << 2,
+            SideLeft = 1U << 3,
+            SideRight = 1U << 4,
+            AllSensors = (1U << 0) | (1U << 1) | (1U << 2) | (1U << 3) | (1U << 4)
+        };
+
         StartupCalibration();
 
         // `SetIsInMaze(isInMaze)`:
@@ -48,16 +59,22 @@ namespace MazeMap::App::Internal
         // Cancels the active startup sequence immediately and clears private execution state.
         void Cancel() noexcept;
 
-        // Arms the startup-calibration sequence using the currently configured startup mode.
-        //
-        // `BringUp()` must have completed successfully first.
+        // Arms the best-effort startup-calibration advisory job using the currently configured
+        // startup mode. After `BringUp()`, this remains total: if the service cannot complete the
+        // full maze-oriented procedure, it must still accept the work and finish with the best
+        // calibration coverage it can provide. If controlled wall-calibration data already exists,
+        // `Start()` reuses it intact instead of overwriting it with startup-time samples.
         void Start();
+
+        // Returns the current best-known calibration coverage for the IMU and wall sensors.
+        SensorCalibration GetSensorsCalibrated() const noexcept;
 
         // Generic per-tick query used by the active mode callback.
         //
         // Parameters:
         // `done`:
-        // Set to `true` when the active startup sequence completes normally on this tick.
+        // Set to `true` when the active startup sequence completes to the best calibration result
+        // the service can produce on this tick.
         //
         // Return value:
         // Proposed control vector for the present tick. The mode may return it directly to
@@ -70,6 +87,7 @@ namespace MazeMap::App::Internal
         enum class Phase : std::uint8_t
         {
             None,
+            ReportCompletion,
             SouthStartHold,
             MoveToCenter,
             CenterHold,
@@ -91,9 +109,12 @@ namespace MazeMap::App::Internal
 
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
 
-        bool CanStart() const noexcept;
         void ResetState() noexcept;
-        void Fail(const char* reason) noexcept;
+        void UpdateDoneState(bool& done) noexcept;
+        void LogIssue(const char* reason) noexcept;
+        void CompleteBestEffort(const char* reason) noexcept;
+        void RefreshSensorsCalibrated() noexcept;
+        void RestoreSideReferenceStateFromCalibration() noexcept;
         bool BeginDriveHoldPhase(Phase phase, std::uint16_t durationMs) noexcept;
         bool BeginDriveMovePhase(Phase phase, float targetXMeters, float targetYMeters, MazeMap::Direction headingDirection) noexcept;
         bool BeginDriveTurnPhase(Phase phase, MazeMap::Direction targetDirection) noexcept;
@@ -125,9 +146,34 @@ namespace MazeMap::App::Internal
         MotionLimits _travelLimits{};
         bool _isInMaze{};
         bool _broughtUp{};
-        bool _faulted{};
+        bool _useFallbackWallCalibration{};
         Phase _phase{ Phase::None };
+        SensorCalibration _sensorsCalibrated{ SensorCalibration::None };
         std::array<float, 2U> _sideReferenceDistancesM{};
         std::array<bool, 2U> _sideReferenceValid{};
     };
+
+    inline constexpr StartupCalibration::SensorCalibration operator|(
+        const StartupCalibration::SensorCalibration lhs,
+        const StartupCalibration::SensorCalibration rhs) noexcept
+    {
+        return static_cast<StartupCalibration::SensorCalibration>(
+            static_cast<std::uint8_t>(lhs) | static_cast<std::uint8_t>(rhs));
+    }
+
+    inline constexpr StartupCalibration::SensorCalibration operator&(
+        const StartupCalibration::SensorCalibration lhs,
+        const StartupCalibration::SensorCalibration rhs) noexcept
+    {
+        return static_cast<StartupCalibration::SensorCalibration>(
+            static_cast<std::uint8_t>(lhs) & static_cast<std::uint8_t>(rhs));
+    }
+
+    inline constexpr StartupCalibration::SensorCalibration& operator|=(
+        StartupCalibration::SensorCalibration& lhs,
+        const StartupCalibration::SensorCalibration rhs) noexcept
+    {
+        lhs = lhs | rhs;
+        return lhs;
+    }
 }

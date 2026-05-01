@@ -711,16 +711,6 @@ private:
         return sample;
     }
 
-    static bool IsFinitePositive(float value) noexcept
-    {
-        return std::isfinite(value) && (value > 0.0f);
-    }
-
-    static float ClampMeasuredRange(float value, float maxRangeM) noexcept
-    {
-        return (std::clamp)(value, 0.01f, maxRangeM);
-    }
-
     static void BuildUkfFrontPairObservations(
         const SensorSnapshot& snapshot,
         float maxRangeM,
@@ -731,8 +721,8 @@ private:
         right = MazeMap::WallObs{};
         if (!snapshot.frontWallObservationValid ||
             !snapshot.frontWall ||
-            !IsFinitePositive(snapshot.frontLeftDistanceM) ||
-            !IsFinitePositive(snapshot.frontRightDistanceM))
+            !(std::isfinite(snapshot.frontLeftDistanceM) && (snapshot.frontLeftDistanceM > 0.0f)) ||
+            !(std::isfinite(snapshot.frontRightDistanceM) && (snapshot.frontRightDistanceM > 0.0f)))
         {
             return;
         }
@@ -741,11 +731,11 @@ private:
             snapshot.frontWallUsesCharacterizationDetection ? 0.90f :
             (snapshot.frontWallUsesFallbackDetection ? 0.60f : 0.80f);
         left.valid = true;
-        left.rho = ClampMeasuredRange(snapshot.frontLeftDistanceM, maxRangeM);
+        left.rho = (std::clamp)(snapshot.frontLeftDistanceM, 0.01f, maxRangeM);
         left.confidence = confidence;
         left.cls = MazeMap::ObsClass::WallLike;
         right.valid = true;
-        right.rho = ClampMeasuredRange(snapshot.frontRightDistanceM, maxRangeM);
+        right.rho = (std::clamp)(snapshot.frontRightDistanceM, 0.01f, maxRangeM);
         right.confidence = confidence;
         right.cls = MazeMap::ObsClass::WallLike;
     }
@@ -756,13 +746,13 @@ private:
         if (!snapshot.leftDistanceValidForControl ||
             snapshot.leftTransitionDetected ||
             !snapshot.leftWallObservation ||
-            !IsFinitePositive(snapshot.sideLeftDistanceM))
+            !(std::isfinite(snapshot.sideLeftDistanceM) && (snapshot.sideLeftDistanceM > 0.0f)))
         {
             return observation;
         }
 
         observation.valid = true;
-        observation.rho = ClampMeasuredRange(snapshot.sideLeftDistanceM, maxRangeM);
+        observation.rho = (std::clamp)(snapshot.sideLeftDistanceM, 0.01f, maxRangeM);
         observation.confidence = 0.80f;
         observation.cls = MazeMap::ObsClass::WallLike;
         return observation;
@@ -774,13 +764,13 @@ private:
         if (!snapshot.rightDistanceValidForControl ||
             snapshot.rightTransitionDetected ||
             !snapshot.rightWallObservation ||
-            !IsFinitePositive(snapshot.sideRightDistanceM))
+            !(std::isfinite(snapshot.sideRightDistanceM) && (snapshot.sideRightDistanceM > 0.0f)))
         {
             return observation;
         }
 
         observation.valid = true;
-        observation.rho = ClampMeasuredRange(snapshot.sideRightDistanceM, maxRangeM);
+        observation.rho = (std::clamp)(snapshot.sideRightDistanceM, 0.01f, maxRangeM);
         observation.confidence = 0.80f;
         observation.cls = MazeMap::ObsClass::WallLike;
         return observation;

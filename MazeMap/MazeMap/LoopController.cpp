@@ -22,11 +22,6 @@ namespace MazeMap::App::Internal
         constexpr float kDefaultPauseAngularThresholdRadps = 0.05f;
         constexpr std::uint8_t kDefaultPauseSettledTicks = 2U;
 
-        inline bool IsFinitePositive(const float value) noexcept
-        {
-            return std::isfinite(value) && (value > 0.0f);
-        }
-
         bool SetMotorPwmThunk(void* const context, const float leftMotorPwm, const float rightMotorPwm) noexcept
         {
             if (context == nullptr)
@@ -842,11 +837,11 @@ namespace MazeMap::App::Internal
         }
 
         const float linearThreshold =
-            IsFinitePositive(request.maxAbsLinearSpeed) ?
+            (std::isfinite(request.maxAbsLinearSpeed) && (request.maxAbsLinearSpeed > 0.0f)) ?
             request.maxAbsLinearSpeed :
             kDefaultPauseLinearThresholdMps;
         const float angularThreshold =
-            IsFinitePositive(request.maxAbsAngularSpeed) ?
+            (std::isfinite(request.maxAbsAngularSpeed) && (request.maxAbsAngularSpeed > 0.0f)) ?
             request.maxAbsAngularSpeed :
             kDefaultPauseAngularThresholdRadps;
         const std::uint8_t settledTicks =

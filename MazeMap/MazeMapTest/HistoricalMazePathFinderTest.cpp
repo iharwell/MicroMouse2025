@@ -468,16 +468,16 @@ namespace MazeMap
 					{
 						message << L"\n" << failure;
 					}
-					Assert::Fail(message.str().c_str());
+					Assert::IsTrue(failures.empty(), message.str().c_str());
 				}
 			}
 			catch (const std::exception& ex)
 			{
-				Assert::Fail(ToWide(ex.what()).c_str());
+				Assert::IsTrue(false, ToWide(ex.what()).c_str());
 			}
 			catch (...)
 			{
-				Assert::Fail(L"Historical maze setup failed with an unexpected exception.");
+				Assert::IsTrue(false, L"Historical maze setup failed with an unexpected exception.");
 			}
 		}
 	}

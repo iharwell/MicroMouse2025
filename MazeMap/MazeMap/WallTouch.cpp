@@ -12,6 +12,11 @@
 
 namespace MazeMap::App::Internal
 {
+    namespace
+    {
+        constexpr const char* kWallTouchLogSource = "wall_touch";
+    }
+
     WallTouch::WallTouch()
         : _trackingCommandPd(Config::kWallTouchTrackingCommandPd)
     {
@@ -227,9 +232,13 @@ namespace MazeMap::App::Internal
     {
         _faulted = true;
         ResetActivePhase();
-        if (_runtime != nullptr)
+        if ((_runtime != nullptr) && (reason != nullptr) && (reason[0] != '\0'))
         {
-            (void)_runtime->FailActiveMode((reason != nullptr) ? reason : "WallTouch fault");
+            (void)_runtime->WriteTextLogEntry(
+                kWallTouchLogSource,
+                micros(),
+                "issue",
+                reason);
         }
     }
 

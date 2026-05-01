@@ -16,6 +16,18 @@ constexpr float MIN_CLEARANCE = 0.012f;
 constexpr float GRAVITY_MPS2 = 9.80665f;
 
 #include <assert.h>
+
+#define MAZEMAP_HELPER_WRAPPER_BLOAT_FAILURE_MESSAGE \
+    "Don't use helper/wrapper functions where a simple comment does the same job without bloat."
+
+#define MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(name) \
+    static_assert(false, MAZEMAP_HELPER_WRAPPER_BLOAT_FAILURE_MESSAGE)
+
+#define FiniteOrZero(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(FiniteOrZero)
+#define IsFinitePositive(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(IsFinitePositive)
+#define ClampMeasuredRange(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(ClampMeasuredRange)
+#define Fail(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(Fail)
+
 #if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
 #include <arm_math.h>
 #include <Arduino.h>

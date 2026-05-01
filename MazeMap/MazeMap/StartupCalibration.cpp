@@ -14,6 +14,8 @@ namespace MazeMap::App::Internal
 {
     namespace
     {
+        constexpr const char* kStartupCalibrationLogSource = "startup_calibration";
+
         float StartupCellCenterCoordinateM() noexcept
         {
             return 0.5f * Config::kCellSizeM;
@@ -45,6 +47,68 @@ namespace MazeMap::App::Internal
                 (band.low >= 0.0f) &&
                 (band.high >= band.low);
         }
+
+        bool HasFrontBaselineCalibration(const WallSensorId sensorId) noexcept
+        {
+            float differentialLight = 0.0f;
+            float lowDifferentialLight = 0.0f;
+            float highDifferentialLight = 0.0f;
+            return gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLight(
+                    sensorId,
+                    differentialLight) &&
+                gWallDistanceCalibration.TryGetFrontWallBaselineDifferentialLightBand(
+                    sensorId,
+                    lowDifferentialLight,
+                    highDifferentialLight) &&
+                std::isfinite(differentialLight) &&
+                (differentialLight >= 0.0f) &&
+                IsValidNonNegativeBand(RobustSignalBand{ lowDifferentialLight, highDifferentialLight });
+        }
+
+        bool HasFullSideCalibration(const WallSensorId sensorId) noexcept
+        {
+            float baselineDifferentialLight = 0.0f;
+            float referenceDifferentialLight = 0.0f;
+            float referenceDistanceM = 0.0f;
+            return gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(
+                    sensorId,
+                    baselineDifferentialLight) &&
+                gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(
+                    sensorId,
+                    referenceDifferentialLight) &&
+                gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
+                    sensorId,
+                    referenceDistanceM) &&
+                std::isfinite(baselineDifferentialLight) &&
+                (baselineDifferentialLight >= 0.0f) &&
+                std::isfinite(referenceDifferentialLight) &&
+                (referenceDifferentialLight > 0.0f) &&
+                std::isfinite(referenceDistanceM) &&
+                (referenceDistanceM > 0.0f);
+        }
+
+        bool HasAnySideCalibrationData(const WallSensorId sensorId) noexcept
+        {
+            float differentialLight = 0.0f;
+            float distanceM = 0.0f;
+            return gWallDistanceCalibration.TryGetSideWallBaselineDifferentialLight(
+                    sensorId,
+                    differentialLight) ||
+                gWallDistanceCalibration.TryGetSideWallReferenceDifferentialLight(
+                    sensorId,
+                    differentialLight) ||
+                gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
+                    sensorId,
+                    distanceM);
+        }
+
+        bool HasAnyWallCalibrationData() noexcept
+        {
+            return HasFrontBaselineCalibration(WallSensorId::FrontLeft) ||
+                HasFrontBaselineCalibration(WallSensorId::FrontRight) ||
+                HasAnySideCalibrationData(WallSensorId::SideLeft) ||
+                HasAnySideCalibrationData(WallSensorId::SideRight);
+        }
     }
 
     StartupCalibration::StartupCalibration()
@@ -60,6 +124,11 @@ namespace MazeMap::App::Internal
     bool StartupCalibration::GetIsInMaze() const noexcept
     {
         return _isInMaze;
+    }
+
+    StartupCalibration::SensorCalibration StartupCalibration::GetSensorsCalibrated() const noexcept
+    {
+        return _sensorsCalibrated;
     }
 
     bool StartupCalibration::Active() const noexcept
@@ -80,12 +149,14 @@ namespace MazeMap::App::Internal
                 static_cast<unsigned long>(Config::kControlPeriodUs);
         const bool ok = _sensors->Begin(controlPeriodUs);
         _broughtUp = ok;
+        _sensorsCalibrated = ok ? SensorCalibration::Imu : SensorCalibration::None;
         if (ok)
         {
             if (_drive != nullptr)
             {
                 _drive->SetGyroBiasZ(_sensors->GetGyroBiasRadps());
             }
+            RefreshSensorsCalibrated();
         }
         return ok;
     }
@@ -102,43 +173,63 @@ namespace MazeMap::App::Internal
 
     void StartupCalibration::Start()
     {
-        if (!CanStart())
+        if ((_wallTouch != nullptr) && _wallTouch->Active())
         {
-            return;
+            _wallTouch->Cancel();
         }
 
         ResetState();
+        RefreshSensorsCalibrated();
+        RestoreSideReferenceStateFromCalibration();
+        if (!_broughtUp)
+        {
+            CompleteBestEffort("StartupCalibration was started without a successful BringUp");
+            return;
+        }
         if (!_isInMaze)
         {
+            _phase = Phase::ReportCompletion;
             return;
         }
+        _useFallbackWallCalibration = !HasAnyWallCalibrationData();
 
-        if (_drive == nullptr)
+        if ((_runtime == nullptr) ||
+            (_loopController == nullptr) ||
+            (_sensors == nullptr) ||
+            (_drive == nullptr) ||
+            (_driveService == nullptr) ||
+            (_wallTouch == nullptr) ||
+            (_speedVehicle == nullptr))
         {
+            CompleteBestEffort("StartupCalibration could not begin because shared runtime services were unavailable");
             return;
         }
+        if (_useFallbackWallCalibration)
+        {
+            LogIssue("StartupCalibration is falling back to live wall calibration because no saved wall-calibration dataset was available");
+        }
 
-        gWallDistanceCalibration.Clear();
         _drive->SetPose(
             StartupCellCenterCoordinateM(),
             Config::kMissionStartRearWallInsetM,
             DirectionToYawRad(MazeMap::Up));
         if (!BeginDriveHoldPhase(Phase::SouthStartHold, Config::kStartupWallCalibrationSettleMs))
         {
-            return;
+            CompleteBestEffort("StartupCalibration could not begin the initial startup settle");
         }
     }
 
     LoopController::ControlVector StartupCalibration::GetNextControls(bool& done)
     {
         done = false;
-        if (_faulted)
+        if (_phase == Phase::None)
         {
             done = true;
             return LoopController::ControlVector::Brake;
         }
-        if (_phase == Phase::None)
+        if (_phase == Phase::ReportCompletion)
         {
+            _phase = Phase::None;
             done = true;
             return LoopController::ControlVector::Brake;
         }
@@ -165,11 +256,10 @@ namespace MazeMap::App::Internal
 
             if (!ok)
             {
-                done = true;
-                return LoopController::ControlVector::Brake;
+                CompleteBestEffort("StartupCalibration could not continue the active sampling phase");
             }
 
-            done = (_phase == Phase::None);
+            UpdateDoneState(done);
             return LoopController::ControlVector::Brake;
         }
 
@@ -177,8 +267,9 @@ namespace MazeMap::App::Internal
         {
             if ((_wallTouch == nullptr) || !_wallTouch->Active())
             {
-                Fail("StartupCalibration expected an active WallTouch phase");
-                done = true;
+                LogIssue("StartupCalibration expected an active WallTouch phase and will continue with best-effort fallback");
+                AdvanceAfterWallTouchPhase();
+                UpdateDoneState(done);
                 return LoopController::ControlVector::Brake;
             }
 
@@ -190,14 +281,14 @@ namespace MazeMap::App::Internal
             }
 
             AdvanceAfterWallTouchPhase();
-            done = (_phase == Phase::None) || _faulted;
+            UpdateDoneState(done);
             return LoopController::ControlVector::Brake;
         }
 
         if (_driveService == nullptr)
         {
-            Fail("StartupCalibration expected an active Drive phase");
-            done = true;
+            CompleteBestEffort("StartupCalibration expected an active Drive phase and cannot continue");
+            UpdateDoneState(done);
             return LoopController::ControlVector::Brake;
         }
 
@@ -209,7 +300,7 @@ namespace MazeMap::App::Internal
         }
 
         AdvanceAfterDrivePhase();
-        done = (_phase == Phase::None) || _faulted;
+        UpdateDoneState(done);
         return LoopController::ControlVector::Brake;
     }
 
@@ -225,39 +316,94 @@ namespace MazeMap::App::Internal
         _travelLimits = BuildStartupTravelLimits();
     }
 
-    bool StartupCalibration::CanStart() const noexcept
-    {
-        return (_runtime != nullptr) &&
-            (_loopController != nullptr) &&
-            (_sensors != nullptr) &&
-            (_drive != nullptr) &&
-            (_driveService != nullptr) &&
-            (_wallTouch != nullptr) &&
-            (_speedVehicle != nullptr) &&
-            _broughtUp &&
-            !Active() &&
-            !_wallTouch->Active();
-    }
-
     void StartupCalibration::ResetState() noexcept
     {
-        _faulted = false;
         _phase = Phase::None;
+        _useFallbackWallCalibration = false;
         _sideReferenceDistancesM = {};
         _sideReferenceValid = {};
     }
 
-    void StartupCalibration::Fail(const char* const reason) noexcept
+    void StartupCalibration::UpdateDoneState(bool& done) noexcept
     {
-        _faulted = true;
+        if (_phase == Phase::ReportCompletion)
+        {
+            _phase = Phase::None;
+            done = true;
+            return;
+        }
+
+        done = (_phase == Phase::None);
+    }
+
+    void StartupCalibration::LogIssue(const char* const reason) noexcept
+    {
+        if ((_runtime != nullptr) && (reason != nullptr) && (reason[0] != '\0'))
+        {
+            (void)_runtime->WriteTextLogEntry(
+                kStartupCalibrationLogSource,
+                micros(),
+                "issue",
+                reason);
+        }
+    }
+
+    void StartupCalibration::CompleteBestEffort(const char* const reason) noexcept
+    {
         if (_wallTouch != nullptr)
         {
             _wallTouch->Cancel();
         }
-        _phase = Phase::None;
-        if (_runtime != nullptr)
+
+        LogIssue(reason);
+        _phase = Phase::ReportCompletion;
+    }
+
+    void StartupCalibration::RefreshSensorsCalibrated() noexcept
+    {
+        SensorCalibration calibrated = _broughtUp ? SensorCalibration::Imu : SensorCalibration::None;
+        if (HasFrontBaselineCalibration(WallSensorId::FrontLeft))
         {
-            (void)_runtime->FailActiveMode((reason != nullptr) ? reason : "StartupCalibration fault");
+            calibrated |= SensorCalibration::FrontLeft;
+        }
+        if (HasFrontBaselineCalibration(WallSensorId::FrontRight))
+        {
+            calibrated |= SensorCalibration::FrontRight;
+        }
+        if (HasFullSideCalibration(WallSensorId::SideLeft))
+        {
+            calibrated |= SensorCalibration::SideLeft;
+        }
+        if (HasFullSideCalibration(WallSensorId::SideRight))
+        {
+            calibrated |= SensorCalibration::SideRight;
+        }
+
+        _sensorsCalibrated = calibrated;
+    }
+
+    void StartupCalibration::RestoreSideReferenceStateFromCalibration() noexcept
+    {
+        float leftReferenceDistanceM = 0.0f;
+        if (gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
+                WallSensorId::SideLeft,
+                leftReferenceDistanceM) &&
+            std::isfinite(leftReferenceDistanceM) &&
+            (leftReferenceDistanceM > 0.0f))
+        {
+            _sideReferenceDistancesM[0] = leftReferenceDistanceM;
+            _sideReferenceValid[0] = true;
+        }
+
+        float rightReferenceDistanceM = 0.0f;
+        if (gWallDistanceCalibration.TryGetSideWallReferenceDistanceM(
+                WallSensorId::SideRight,
+                rightReferenceDistanceM) &&
+            std::isfinite(rightReferenceDistanceM) &&
+            (rightReferenceDistanceM > 0.0f))
+        {
+            _sideReferenceDistancesM[1] = rightReferenceDistanceM;
+            _sideReferenceValid[1] = true;
         }
     }
 
@@ -355,7 +501,7 @@ namespace MazeMap::App::Internal
 
         _wallTouch->Cancel();
         _wallTouch->SetLimits(_travelLimits);
-        _wallTouch->SetAllowPassThroughNoWall(false);
+        _wallTouch->SetAllowPassThroughNoWall(true);
         _wallTouch->Start(MazeMap::CellCoordinates(0U, 0U), wallDirection);
         if (!_wallTouch->Active())
         {
@@ -377,25 +523,34 @@ namespace MazeMap::App::Internal
                     StartupCellCenterCoordinateM(),
                     MazeMap::Up))
             {
-                Fail("StartupCalibration could not move to start-cell center");
+                LogIssue("StartupCalibration could not move to the start-cell center and will continue from the current pose");
+                if (!BeginDriveHoldPhase(Phase::CenterHold, Config::kStartupWallCalibrationSettleMs))
+                {
+                    CompleteBestEffort("StartupCalibration could not continue after the start-cell centering advisory");
+                }
             }
             return;
         case Phase::MoveToCenter:
             if (!BeginDriveHoldPhase(Phase::CenterHold, Config::kStartupWallCalibrationSettleMs))
             {
-                Fail("StartupCalibration could not settle at start-cell center");
+                LogIssue("StartupCalibration could not settle at the start-cell center and will continue without that hold");
+                if (!BeginDriveTurnPhase(Phase::RotateWest, MazeMap::Left))
+                {
+                    CompleteBestEffort("StartupCalibration could not rotate west for left-side sampling");
+                }
             }
             return;
         case Phase::CenterHold:
             if (!BeginDriveTurnPhase(Phase::RotateWest, MazeMap::Left))
             {
-                Fail("StartupCalibration could not rotate west for left-side sampling");
+                CompleteBestEffort("StartupCalibration could not rotate west for left-side sampling");
             }
             return;
         case Phase::RotateWest:
             if (!BeginDriveHoldPhase(Phase::WestHold, Config::kStartupWallCalibrationSettleMs))
             {
-                Fail("StartupCalibration could not settle before left-side sampling");
+                LogIssue("StartupCalibration could not settle before left-side sampling and will sample immediately");
+                _phase = Phase::SampleWest;
             }
             return;
         case Phase::WestHold:
@@ -404,7 +559,8 @@ namespace MazeMap::App::Internal
         case Phase::RotateEast:
             if (!BeginDriveHoldPhase(Phase::EastHold, Config::kStartupWallCalibrationSettleMs))
             {
-                Fail("StartupCalibration could not settle before right-side sampling");
+                LogIssue("StartupCalibration could not settle before right-side sampling and will sample immediately");
+                _phase = Phase::SampleEast;
             }
             return;
         case Phase::EastHold:
@@ -413,19 +569,28 @@ namespace MazeMap::App::Internal
         case Phase::RotateSouth:
             if (!BeginWallTouchPhase(Phase::SouthTouch, MazeMap::Down))
             {
-                Fail("StartupCalibration could not begin the south-wall reseat touch");
+                LogIssue("StartupCalibration could not begin the south-wall advisory touch and will try a west-wall fallback");
+                if (!BeginDriveTurnPhase(Phase::RotateWestReseat, MazeMap::Left))
+                {
+                    CompleteBestEffort("StartupCalibration could not rotate west for fallback reseat");
+                }
             }
             return;
         case Phase::RotateWestReseat:
             if (!BeginWallTouchPhase(Phase::WestTouch, MazeMap::Left))
             {
-                Fail("StartupCalibration could not begin the west-wall reseat touch");
+                LogIssue("StartupCalibration could not begin the west-wall advisory touch and will finish without pose reseat");
+                if (!BeginDriveTurnPhase(Phase::RotateNorth, MazeMap::Up))
+                {
+                    CompleteBestEffort("StartupCalibration could not rotate north for the final front-baseline capture");
+                }
             }
             return;
         case Phase::RotateNorth:
             if (!BeginDriveHoldPhase(Phase::NorthHold, Config::kStartupWallCalibrationSettleMs))
             {
-                Fail("StartupCalibration could not settle at the reseated start pose");
+                LogIssue("StartupCalibration could not settle at the reseated start pose and will sample the front baseline immediately");
+                _phase = Phase::SampleFrontBaseline;
             }
             return;
         case Phase::NorthHold:
@@ -435,7 +600,7 @@ namespace MazeMap::App::Internal
             _phase = Phase::None;
             return;
         default:
-            Fail("StartupCalibration encountered an unexpected Drive phase completion");
+            CompleteBestEffort("StartupCalibration encountered an unexpected Drive phase completion");
             return;
         }
     }
@@ -447,25 +612,30 @@ namespace MazeMap::App::Internal
         case Phase::SouthTouch:
             if (!BeginDriveTurnPhase(Phase::RotateWestReseat, MazeMap::Left))
             {
-                Fail("StartupCalibration could not rotate west after south-wall reseat");
+                LogIssue("StartupCalibration could not rotate west after the south-wall advisory touch and will try to finish without that reseat");
+                if (!BeginDriveTurnPhase(Phase::RotateNorth, MazeMap::Up))
+                {
+                    CompleteBestEffort("StartupCalibration could not rotate north after the south-wall advisory touch");
+                }
             }
             return;
         case Phase::WestTouch:
             if (!BeginDriveTurnPhase(Phase::RotateNorth, MazeMap::Up))
             {
-                Fail("StartupCalibration could not rotate north after west-wall reseat");
+                CompleteBestEffort("StartupCalibration could not rotate north after the west-wall advisory touch");
             }
             return;
         default:
-            Fail("StartupCalibration encountered an unexpected WallTouch phase completion");
+            CompleteBestEffort("StartupCalibration encountered an unexpected WallTouch phase completion");
             return;
         }
     }
 
     bool StartupCalibration::SampleWestFacingSideCalibration() noexcept
     {
-        if (_speedVehicle == nullptr)
+        if ((_speedVehicle == nullptr) || (_runtime == nullptr))
         {
+            CompleteBestEffort("StartupCalibration could not sample west-facing side calibration because runtime state was unavailable");
             return false;
         }
 
@@ -479,31 +649,34 @@ namespace MazeMap::App::Internal
             leftCapture,
             rightCapture);
 
-        float actualDistanceM = 0.0f;
-        if ((_drive == nullptr) ||
-            !TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideLeft, actualDistanceM))
+        if (_useFallbackWallCalibration)
         {
-            Fail("StartupCalibration could not store the west-facing side-wall calibration1");
-            return false;
+            float actualDistanceM = 0.0f;
+            const bool storedReference =
+                TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideLeft, actualDistanceM) &&
+                StoreSideReference(WallSensorId::SideLeft, leftCapture, actualDistanceM);
+            if (storedReference)
+            {
+                _sideReferenceDistancesM[0] = actualDistanceM;
+                _sideReferenceValid[0] = true;
+            }
+            else
+            {
+                LogIssue("StartupCalibration could not derive the west-facing left-side wall reference and will retain baseline-only coverage");
+                if (!StoreSideBaseline(WallSensorId::SideLeft, leftCapture))
+                {
+                    LogIssue("StartupCalibration could not store the west-facing left-side baseline");
+                }
+            }
         }
-        if ((_drive == nullptr) ||
-            !StoreSideReference(WallSensorId::SideLeft, leftCapture, actualDistanceM))
+        if (!StoreSideBaseline(WallSensorId::SideRight, rightCapture))
         {
-            Fail("StartupCalibration could not store the west-facing side-wall calibration2");
-            return false;
-        }
-        if ((_drive == nullptr) ||
-            !StoreSideBaseline(WallSensorId::SideRight, rightCapture))
-        {
-            Fail("StartupCalibration could not store the west-facing side-wall calibration3");
-            return false;
+            LogIssue("StartupCalibration could not store the west-facing right-side baseline");
         }
 
-        _sideReferenceDistancesM[0] = actualDistanceM;
-        _sideReferenceValid[0] = true;
         if (!BeginDriveTurnPhase(Phase::RotateEast, MazeMap::Right))
         {
-            Fail("StartupCalibration could not rotate east for right-side sampling");
+            CompleteBestEffort("StartupCalibration could not rotate east for right-side sampling");
             return false;
         }
 
@@ -512,8 +685,9 @@ namespace MazeMap::App::Internal
 
     bool StartupCalibration::SampleEastFacingSideCalibration() noexcept
     {
-        if (_speedVehicle == nullptr)
+        if ((_speedVehicle == nullptr) || (_runtime == nullptr))
         {
+            CompleteBestEffort("StartupCalibration could not sample east-facing side calibration because runtime state was unavailable");
             return false;
         }
 
@@ -527,21 +701,38 @@ namespace MazeMap::App::Internal
             leftCapture,
             rightCapture);
 
-        float actualDistanceM = 0.0f;
-        if ((_drive == nullptr) ||
-            !TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideRight, actualDistanceM) ||
-            !StoreSideReference(WallSensorId::SideRight, rightCapture, actualDistanceM) ||
-            !StoreSideBaseline(WallSensorId::SideLeft, leftCapture))
+        if (_useFallbackWallCalibration)
         {
-            Fail("StartupCalibration could not store the east-facing side-wall calibration");
-            return false;
+            float actualDistanceM = 0.0f;
+            const bool storedReference =
+                TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideRight, actualDistanceM) &&
+                StoreSideReference(WallSensorId::SideRight, rightCapture, actualDistanceM);
+            if (storedReference)
+            {
+                _sideReferenceDistancesM[1] = actualDistanceM;
+                _sideReferenceValid[1] = true;
+            }
+            else
+            {
+                LogIssue("StartupCalibration could not derive the east-facing right-side wall reference and will retain baseline-only coverage");
+                if (!StoreSideBaseline(WallSensorId::SideRight, rightCapture))
+                {
+                    LogIssue("StartupCalibration could not store the east-facing right-side baseline");
+                }
+            }
         }
-
-        _sideReferenceDistancesM[1] = actualDistanceM;
-        _sideReferenceValid[1] = true;
-        if (!BeginDriveTurnPhase(Phase::RotateSouth, MazeMap::Down))
+        if (!StoreSideBaseline(WallSensorId::SideLeft, leftCapture))
         {
-            Fail("StartupCalibration could not rotate south for the reseat touch");
+            LogIssue("StartupCalibration could not store the east-facing left-side baseline");
+        }
+        const Phase nextPhase = _useFallbackWallCalibration ? Phase::RotateSouth : Phase::RotateNorth;
+        const MazeMap::Direction nextDirection = _useFallbackWallCalibration ? MazeMap::Down : MazeMap::Up;
+        if (!BeginDriveTurnPhase(nextPhase, nextDirection))
+        {
+            CompleteBestEffort(
+                _useFallbackWallCalibration ?
+                    "StartupCalibration could not rotate south for the reseat advisory touch" :
+                    "StartupCalibration could not rotate north for final ambient-baseline capture");
             return false;
         }
 
@@ -550,8 +741,9 @@ namespace MazeMap::App::Internal
 
     bool StartupCalibration::SampleFrontBaseline() noexcept
     {
-        if (_speedVehicle == nullptr)
+        if ((_speedVehicle == nullptr) || (_runtime == nullptr))
         {
+            CompleteBestEffort("StartupCalibration could not sample the front baseline because runtime state was unavailable");
             return false;
         }
 
@@ -565,18 +757,25 @@ namespace MazeMap::App::Internal
             frontLeftCapture,
             frontRightCapture);
 
-        if (!StoreFrontBaseline(WallSensorId::FrontLeft, frontLeftCapture) ||
-            !StoreFrontBaseline(WallSensorId::FrontRight, frontRightCapture) ||
-            !_sideReferenceValid[0] ||
-            !_sideReferenceValid[1])
+        if (!StoreFrontBaseline(WallSensorId::FrontLeft, frontLeftCapture))
         {
-            Fail("StartupCalibration could not finalize the startup calibration references");
-            return false;
+            LogIssue("StartupCalibration could not store the front-left baseline");
+        }
+        if (!StoreFrontBaseline(WallSensorId::FrontRight, frontRightCapture))
+        {
+            LogIssue("StartupCalibration could not store the front-right baseline");
         }
 
-        const float expectedSideWallDistanceM =
-            0.5f * (_sideReferenceDistancesM[0] + _sideReferenceDistancesM[1]);
-        gWallDistanceCalibration.SetExpectedSideWallDistanceM(expectedSideWallDistanceM);
+        if (_sideReferenceValid[0] && _sideReferenceValid[1])
+        {
+            const float expectedSideWallDistanceM =
+                0.5f * (_sideReferenceDistancesM[0] + _sideReferenceDistancesM[1]);
+            gWallDistanceCalibration.SetExpectedSideWallDistanceM(expectedSideWallDistanceM);
+        }
+        else
+        {
+            LogIssue("StartupCalibration completed without full side-wall references and will keep the best available side-wall distance model");
+        }
         if (_drive != nullptr)
         {
             _drive->SetPose(
@@ -584,9 +783,13 @@ namespace MazeMap::App::Internal
                 StartupCellCenterCoordinateM(),
                 DirectionToYawRad(MazeMap::Up));
         }
+        else
+        {
+            LogIssue("StartupCalibration could not reseat the final startup pose because DriveBase was unavailable");
+        }
         if (!BeginDriveHoldPhase(Phase::FinalHold, Config::kStartupWallCalibrationSettleMs))
         {
-            Fail("StartupCalibration could not begin the final startup settle");
+            CompleteBestEffort("StartupCalibration could not begin the final startup settle");
             return false;
         }
 
@@ -620,6 +823,7 @@ namespace MazeMap::App::Internal
                 capture.differentialLightBand.high);
         }
 
+        RefreshSensorsCalibrated();
         return true;
     }
 
@@ -642,6 +846,7 @@ namespace MazeMap::App::Internal
                 capture.differentialLightBand.high);
         }
 
+        RefreshSensorsCalibrated();
         return true;
     }
 
@@ -663,6 +868,7 @@ namespace MazeMap::App::Internal
             sensorId,
             capture.differentialLightBand.low,
             capture.differentialLightBand.high);
+        RefreshSensorsCalibrated();
         return true;
     }
 }

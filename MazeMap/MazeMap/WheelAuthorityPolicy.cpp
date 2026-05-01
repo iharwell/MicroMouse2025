@@ -30,11 +30,6 @@ namespace MazeMap
             return value;
         }
 
-        float FiniteOrZero(float value) noexcept
-        {
-            return std::isfinite(value) ? value : 0.0f;
-        }
-
         float SideRecoveryPenalty(Side side, const RegripRecoveryState& regrip) noexcept
         {
             const float leftPenalty = regrip.leftBankInRecovery ? (0.5f + 0.5f * Clamp01(regrip.leftBankRecoveryScore)) : 0.0f;
@@ -56,8 +51,8 @@ namespace MazeMap
             (std::isfinite(geometry.effectiveTrackWidthM) && (geometry.effectiveTrackWidthM > 0.0f)) ?
             geometry.effectiveTrackWidthM :
             0.0f;
-        const float forwardSpeedMps = FiniteOrZero(state(VehicleState::kU));
-        const float yawRateRadps = FiniteOrZero(state(VehicleState::kR));
+        const float forwardSpeedMps = std::isfinite(state(VehicleState::kU)) ? state(VehicleState::kU) : 0.0f;
+        const float yawRateRadps = std::isfinite(state(VehicleState::kR)) ? state(VehicleState::kR) : 0.0f;
 
         prediction.forwardSpeedMps = forwardSpeedMps;
         prediction.yawRateRadps = yawRateRadps;

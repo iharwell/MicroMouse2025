@@ -30,11 +30,6 @@ namespace MazeMap
             return value;
         }
 
-        float FiniteOrZero(float value) noexcept
-        {
-            return std::isfinite(value) ? value : 0.0f;
-        }
-
         float PositiveOr(float value, float fallback) noexcept
         {
             return (std::isfinite(value) && (value > 0.0f)) ? value : fallback;
@@ -68,33 +63,53 @@ namespace MazeMap
                 predictInput,
                 params);
         const float leftBankPreProjectionUtilization =
-            (std::max)(0.0f, FiniteOrZero(derivatives.contactForces.LeftBankMaxPreProjectionUtilization()));
+            (std::max)(
+                0.0f,
+                std::isfinite(derivatives.contactForces.LeftBankMaxPreProjectionUtilization()) ?
+                    derivatives.contactForces.LeftBankMaxPreProjectionUtilization() :
+                    0.0f);
         const float rightBankPreProjectionUtilization =
-            (std::max)(0.0f, FiniteOrZero(derivatives.contactForces.RightBankMaxPreProjectionUtilization()));
+            (std::max)(
+                0.0f,
+                std::isfinite(derivatives.contactForces.RightBankMaxPreProjectionUtilization()) ?
+                    derivatives.contactForces.RightBankMaxPreProjectionUtilization() :
+                    0.0f);
+        const float longitudinalClosureSeverity =
+            std::isfinite(inputs.longitudinalClosureSeverity) ? inputs.longitudinalClosureSeverity : 0.0f;
+        const float differentialClosureSeverity =
+            std::isfinite(inputs.differentialClosureSeverity) ? inputs.differentialClosureSeverity : 0.0f;
+        const float lateralAccelerationSeverity =
+            std::isfinite(inputs.lateralAccelerationSeverity) ? inputs.lateralAccelerationSeverity : 0.0f;
+        const float yawConsistencySeverity =
+            std::isfinite(inputs.yawConsistencySeverity) ? inputs.yawConsistencySeverity : 0.0f;
+        const float leftBankAnomalySeverity =
+            std::isfinite(inputs.leftBankAnomalySeverity) ? inputs.leftBankAnomalySeverity : 0.0f;
+        const float rightBankAnomalySeverity =
+            std::isfinite(inputs.rightBankAnomalySeverity) ? inputs.rightBankAnomalySeverity : 0.0f;
 
         GripUtilizationSnapshot snapshot{};
         snapshot.longitudinalClosureSeverity =
             Clamp01(
                 (std::max)(
-                    FiniteOrZero(inputs.longitudinalClosureSeverity),
+                    longitudinalClosureSeverity,
                     std::fabs(derivatives.longitudinalAccelMps2) /
                         PositiveOr(params.raw.combinedAccelSustainedMps2, 1.0f)));
         snapshot.differentialClosureSeverity =
             Clamp01(
                 (std::max)(
-                    FiniteOrZero(inputs.differentialClosureSeverity),
+                    differentialClosureSeverity,
                     std::fabs(derivatives.yawAccelRadps2) /
                         PositiveOr(params.raw.combinedAccelNominalMps2, 1.0f)));
         snapshot.lateralAccelerationSeverity =
             Clamp01(
                 (std::max)(
-                    FiniteOrZero(inputs.lateralAccelerationSeverity),
+                    lateralAccelerationSeverity,
                     std::fabs(derivatives.lateralAccelMps2) /
                         PositiveOr(params.raw.combinedAccelPeakMps2, 1.0f)));
         snapshot.yawConsistencySeverity =
             Clamp01(
                 (std::max)(
-                    FiniteOrZero(inputs.yawConsistencySeverity),
+                    yawConsistencySeverity,
                     std::fabs(currentState(VehicleState::kR)) /
                         PositiveOr(params.stopExitYawRateRadps, 1.0f)));
 
@@ -104,13 +119,13 @@ namespace MazeMap
         snapshot.leftBankAnomalySeverity =
             Clamp01((std::max)(
                 (std::max)(
-                    FiniteOrZero(inputs.leftBankAnomalySeverity),
+                    leftBankAnomalySeverity,
                     PrecursorSeverity(snapshot.leftBankPreProjectionUtilization)),
                 appliedTorque.leftCurrentLimited ? 1.0f : 0.0f));
         snapshot.rightBankAnomalySeverity =
             Clamp01((std::max)(
                 (std::max)(
-                    FiniteOrZero(inputs.rightBankAnomalySeverity),
+                    rightBankAnomalySeverity,
                     PrecursorSeverity(snapshot.rightBankPreProjectionUtilization)),
                 appliedTorque.rightCurrentLimited ? 1.0f : 0.0f));
 
