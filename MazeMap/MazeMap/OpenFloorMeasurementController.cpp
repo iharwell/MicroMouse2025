@@ -507,7 +507,7 @@ namespace MazeMap::App::Internal
         row.mono_time_us = _loopController.CurrentTickStartUs();
         row.control_tick_sequence = _loopController.CurrentTickSequence();
         row.dt_us = _loopController.CurrentTickDtUs();
-        row.section_id = static_cast<std::uint32_t>(MazeMap::OpenFloorSectionId::Sec00Timing);
+        row.phase_id = static_cast<std::uint32_t>(MazeMap::OpenFloorSectionId::Sec00Timing);
         row.imu_drdy_us = sensors.imuTiming.drdyUs;
         row.imu_read_start_us = sensors.imuTiming.readStartUs;
         row.imu_read_done_us = sensors.imuTiming.readDoneUs;
@@ -535,7 +535,7 @@ namespace MazeMap::App::Internal
     }
 
     void OpenFloorMeasurementController::PopulateMainRowFromState(
-        const SampleIdentity& identity,
+        const SegmentIdentity& identity,
         const MazeMap::VehicleState& state,
         OpenFloorMainRow& row) const
     {
@@ -566,11 +566,10 @@ namespace MazeMap::App::Internal
         row.master_time_us = _loopController.CurrentTickStartUs();
         row.control_tick_sequence = _loopController.CurrentTickSequence();
         row.dt_us = _loopController.CurrentTickDtUs();
-        row.section_id = static_cast<std::uint8_t>(identity.segment.sectionId);
-        row.primitive_id = static_cast<std::uint8_t>(identity.segment.primitiveId);
         row.phase_id = static_cast<std::uint8_t>(identity.phaseId);
-        row.speed_bin = static_cast<std::uint8_t>(identity.segment.speedBin);
-        row.repeat_index = identity.segment.repeatIndex;
+        row.primitive_id = static_cast<std::uint8_t>(identity.primitiveId);
+        row.speed_bin = static_cast<std::uint8_t>(identity.speedBin);
+        row.repeat_index = identity.repeatIndex;
         row.mode_flags = commandState.modeFlags;
         row.saturation_flags = commandState.saturationFlags;
         row.ukf_mode_id = driveTelemetry.ukfModeId;
@@ -685,7 +684,6 @@ namespace MazeMap::App::Internal
         const WheelCommandSweepDefinition launchSweep{
             OpenFloorSectionId::Sec20Launch,
             OpenFloorPrimitiveId::OpenLoopLaunch,
-            OpenFloorPhaseId::LaunchPulse,
             MazeMap::kOpenFloorLaunchDriveMagnitudes.data(),
             MazeMap::kOpenFloorLaunchDriveMagnitudes.size(),
             static_cast<std::uint16_t>(MazeMap::kOpenFloorLaunchPulseMs),
@@ -820,12 +818,11 @@ namespace MazeMap::App::Internal
                     MainSegment segment{};
                     segment.executor = &kWheelCommandProfileExecutor;
                     segment.identity = SegmentIdentity(
-                        definition.sectionId,
+                        definition.phaseId,
                         definition.primitiveId,
                         OpenFloorSpeedBin::None,
                         ++repeatIndex);
                     segment.settlingHoldMs = definition.settlingHoldMs;
-                    segment.wheelCommandProfile.phaseId = definition.phaseId;
                     segment.wheelCommandProfile.durationMs = definition.durationMs;
                     segment.wheelCommandProfile.leftCommand = magnitude * sign * definition.leftScale;
                     segment.wheelCommandProfile.rightCommand = magnitude * sign * definition.rightScale;
@@ -861,7 +858,7 @@ namespace MazeMap::App::Internal
                     MainSegment segment{};
                     segment.executor = &kDrivePrimitiveExecutor;
                     segment.identity = SegmentIdentity(
-                        definition.sectionId,
+                        definition.phaseId,
                         definition.primitiveId,
                         speedBin,
                         ++repeatIndex);
@@ -902,7 +899,7 @@ namespace MazeMap::App::Internal
                     MainSegment segment{};
                     segment.executor = &kDrivePrimitiveExecutor;
                     segment.identity = SegmentIdentity(
-                        definition.sectionId,
+                        definition.phaseId,
                         definition.primitiveIds[primitiveIndex],
                         speedBin,
                         ++repeatIndex);
@@ -963,7 +960,7 @@ namespace MazeMap::App::Internal
                             kOpenFloorMeasurementSmoothCycle[entryIndex - 1U].primitiveId;
                     MainSegment segment{};
                     segment.executor = &kDrivePrimitiveExecutor;
-                    segment.identity = SegmentIdentity(definition.sectionId, primitiveId, speedBin, 1U);
+                    segment.identity = SegmentIdentity(definition.phaseId, primitiveId, speedBin, 1U);
                     segment.settlingHoldMs =
                         (isLastSpeedBin && isLastQueueEntry) ? definition.settlingHoldMs : 0U;
                     segment.drivePrimitive.maneuver.speedMps = definition.speedBinsMps[speedIndex];
@@ -996,7 +993,7 @@ namespace MazeMap::App::Internal
                     MainSegment segment{};
                     segment.executor = &kDrivePrimitiveExecutor;
                     segment.identity = SegmentIdentity(
-                        definition.sectionId,
+                        definition.phaseId,
                         ((entryIndex % 2U) == 0U) ?
                             kOpenFloorMeasurementLoopStraightPrimitive :
                             (definition.clockwise ? OpenFloorPrimitiveId::Ip90 : OpenFloorPrimitiveId::Ip90M),
@@ -1042,38 +1039,18 @@ namespace MazeMap::App::Internal
             _mainStage.estimatorFaultReason,
             sizeof(_mainStage.estimatorFaultReason),
             "Estimator fault during open-floor phase %u",
-            static_cast<unsigned>(_mainStage.activePhaseId));
+            static_cast<unsigned>(
+                (ActiveMainSegment() != nullptr) ?
+                    ActiveMainSegment()->identity.phaseId :
+                    OpenFloorSectionId::Sec00Timing));
         services.Fault(_mainStage.estimatorFaultReason);
         return true;
-    }
-
-    float OpenFloorMeasurementController::CurrentManeuverProgress(
-        const MazeMap::ManeuverCode code,
-        const float startDistanceM,
-        const float totalDistanceM,
-        const float targetYawRad,
-        const float targetMagnitudeRad) const noexcept
-    {
-        if (totalDistanceM > Config::kDistanceToleranceM)
-        {
-            const float traveledM = std::fabs(_drive.GetAverageDistanceMeters() - startDistanceM);
-            return (std::clamp)(traveledM / totalDistanceM, 0.0f, 1.0f);
-        }
-
-        if ((code == MazeMap::IP90 || code == MazeMap::IP90_M) && (targetMagnitudeRad > 0.0f))
-        {
-            const float remainingRad = std::fabs(AngleErrorRad(targetYawRad, _runtime.RuntimeState().GetOrientation()));
-            return (std::clamp)(1.0f - (remainingRad / targetMagnitudeRad), 0.0f, 1.0f);
-        }
-
-        return 1.0f;
     }
 
     void OpenFloorMeasurementController::AdvanceMainSegment() noexcept
     {
         ++_mainStage.nextSegmentIndex;
         _mainStage.activeRuntime = {};
-        _mainStage.activePhaseId = OpenFloorPhaseId::Idle;
         if (_mainStage.nextSegmentIndex >= _mainStage.planSize)
         {
             _mainStage.completionPending = true;
@@ -1191,9 +1168,8 @@ namespace MazeMap::App::Internal
         SegmentTickResult result{};
         const LoopController::ControlVector control =
             segment->executor->tick(*this, _mainStage.activeRuntime, *segment, state, services, result);
-        _mainStage.activePhaseId = result.phaseId;
         OpenFloorMainRow row{};
-        PopulateMainRowFromState(SampleIdentity{ segment->identity, result.phaseId }, state, row);
+        PopulateMainRowFromState(segment->identity, state, row);
         StagePendingMainSample(row);
 
         if (result.done)
@@ -1216,7 +1192,6 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)services;
         HoldSegmentRuntime& holdRuntime = runtime.hold;
-        result.phaseId = OpenFloorPhaseId::Hold;
 
         if (!holdRuntime.started)
         {
@@ -1262,8 +1237,6 @@ namespace MazeMap::App::Internal
             }
             return control;
         }
-
-        result.phaseId = segment.wheelCommandProfile.phaseId;
 
         if (!wheelRuntime.started)
         {
@@ -1380,51 +1353,6 @@ namespace MazeMap::App::Internal
             }
         }
 
-        switch (payload.kind)
-        {
-        case DrivePrimitiveKind::Straight:
-        {
-            const float traveledM = std::fabs(
-                controller._drive.GetAverageDistanceMeters() - driveRuntime.straight.startDistanceM);
-            const float progress = (driveRuntime.straight.totalDistanceM > 0.0f) ?
-                (std::clamp)(traveledM / driveRuntime.straight.totalDistanceM, 0.0f, 1.0f) :
-                1.0f;
-            result.phaseId = StraightPhaseForProgress(progress);
-            break;
-        }
-        case DrivePrimitiveKind::Turn:
-        {
-            const float remainingRad = std::fabs(
-                AngleErrorRad(
-                    driveRuntime.turn.targetYawRad,
-                    controller._runtime.RuntimeState().GetOrientation()));
-            const float progress = (driveRuntime.turn.targetMagnitudeRad > 0.0f) ?
-                (std::clamp)(
-                    1.0f - (remainingRad / driveRuntime.turn.targetMagnitudeRad),
-                    0.0f,
-                    1.0f) :
-                1.0f;
-            result.phaseId = TurnPhaseForProgress(progress);
-            break;
-        }
-        case DrivePrimitiveKind::Maneuver:
-        {
-            const MazeMap::ManeuverInstance& maneuver =
-                controller._mainStage.maneuvers[payload.maneuver.maneuverIndex];
-            const float progress = controller.CurrentManeuverProgress(
-                maneuver.getCode(),
-                driveRuntime.maneuver.startDistanceM,
-                driveRuntime.maneuver.totalDistanceM,
-                driveRuntime.maneuver.targetYawRad,
-                driveRuntime.maneuver.targetMagnitudeRad);
-            result.phaseId = ManeuverPhaseForProgress(maneuver.getCode(), progress);
-            break;
-        }
-        default:
-            result.phaseId = OpenFloorPhaseId::Idle;
-            break;
-        }
-
         bool done = false;
         const LoopController::ControlVector candidateControl = controller._driveService.GetNextControls(done);
         result.done = done;
@@ -1450,56 +1378,6 @@ namespace MazeMap::App::Internal
         return (speedIndex == 0U) ? OpenFloorSpeedBin::Low :
             (speedIndex == 1U) ? OpenFloorSpeedBin::Medium :
             OpenFloorSpeedBin::High;
-    }
-
-    OpenFloorPhaseId OpenFloorMeasurementController::StraightPhaseForProgress(const float progress) noexcept
-    {
-        if (progress < 0.2f)
-        {
-            return OpenFloorPhaseId::Accel;
-        }
-        if (progress > 0.85f)
-        {
-            return OpenFloorPhaseId::Brake;
-        }
-        return OpenFloorPhaseId::Cruise;
-    }
-
-    OpenFloorPhaseId OpenFloorMeasurementController::TurnPhaseForProgress(const float progress) noexcept
-    {
-        if (progress < 0.2f)
-        {
-            return OpenFloorPhaseId::Startup;
-        }
-        if (progress > 0.85f)
-        {
-            return OpenFloorPhaseId::Stop;
-        }
-        return OpenFloorPhaseId::SteadyRotation;
-    }
-
-    OpenFloorPhaseId OpenFloorMeasurementController::SmoothPhaseForProgress(const float progress) noexcept
-    {
-        if (progress < 0.2f)
-        {
-            return OpenFloorPhaseId::Entry;
-        }
-        if (progress > 0.85f)
-        {
-            return OpenFloorPhaseId::Exit;
-        }
-        return OpenFloorPhaseId::Middle;
-    }
-
-    OpenFloorPhaseId OpenFloorMeasurementController::ManeuverPhaseForProgress(
-        const MazeMap::ManeuverCode code,
-        const float progress) noexcept
-    {
-        return (code == MazeMap::IP90 || code == MazeMap::IP90_M) ?
-            TurnPhaseForProgress(progress) :
-            (code == MazeMap::S1 || code == MazeMap::S2) ?
-                StraightPhaseForProgress(progress) :
-                SmoothPhaseForProgress(progress);
     }
 
     IApplicationMode& GetOpenFloorMeasurementMode();

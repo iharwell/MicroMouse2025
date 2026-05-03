@@ -33,7 +33,7 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, mono_time_us)              \
     X(std::uint32_t, control_tick_sequence)     \
     X(std::uint32_t, dt_us)                     \
-    X(std::uint32_t, section_id)                \
+    X(std::uint32_t, phase_id)                  \
     X(std::uint32_t, control_start_us)          \
     X(std::uint32_t, control_end_us)            \
     X(std::uint32_t, pwm_latch_us)              \
@@ -78,9 +78,8 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, master_time_us)               \
     X(std::uint32_t, control_tick_sequence)        \
     X(std::uint32_t, dt_us)                        \
-    X(std::uint8_t,  section_id)                   \
-    X(std::uint8_t,  primitive_id)                 \
     X(std::uint8_t,  phase_id)                     \
+    X(std::uint8_t,  primitive_id)                 \
     X(std::uint8_t,  speed_bin)                    \
     X(std::uint16_t, repeat_index)                 \
     X(std::uint16_t, mode_flags)                   \
@@ -200,32 +199,25 @@ namespace MazeMap::App::Internal
         {
             constexpr SegmentIdentity() = default;
             constexpr SegmentIdentity(
-                OpenFloorSectionId sectionId,
+                OpenFloorSectionId phaseId,
                 OpenFloorPrimitiveId primitiveId,
                 OpenFloorSpeedBin speedBin,
                 std::uint16_t repeatIndex) noexcept
-                : sectionId(sectionId)
+                : phaseId(phaseId)
                 , primitiveId(primitiveId)
                 , speedBin(speedBin)
                 , repeatIndex(repeatIndex)
             {
             }
 
-            OpenFloorSectionId sectionId = OpenFloorSectionId::Sec00Timing;
+            OpenFloorSectionId phaseId = OpenFloorSectionId::Sec00Timing;
             OpenFloorPrimitiveId primitiveId = OpenFloorPrimitiveId::None;
             OpenFloorSpeedBin speedBin = OpenFloorSpeedBin::None;
             std::uint16_t repeatIndex = 0U;
         };
 
-        struct SampleIdentity final
-        {
-            SegmentIdentity segment{};
-            OpenFloorPhaseId phaseId = OpenFloorPhaseId::Idle;
-        };
-
         struct SegmentTickResult final
         {
-            OpenFloorPhaseId phaseId = OpenFloorPhaseId::Idle;
             bool done{};
         };
 
@@ -238,7 +230,6 @@ namespace MazeMap::App::Internal
 
         struct WheelCommandProfilePayload final
         {
-            OpenFloorPhaseId phaseId{ OpenFloorPhaseId::Idle };
             std::uint16_t durationMs{};
             float leftCommand{};
             float rightCommand{};
@@ -272,9 +263,8 @@ namespace MazeMap::App::Internal
 
         struct WheelCommandSweepDefinition final
         {
-            OpenFloorSectionId sectionId{ OpenFloorSectionId::Sec00Timing };
+            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
             OpenFloorPrimitiveId primitiveId{ OpenFloorPrimitiveId::None };
-            OpenFloorPhaseId phaseId{ OpenFloorPhaseId::Idle };
             const float* magnitudes{};
             std::size_t magnitudeCount{};
             std::uint16_t durationMs{};
@@ -287,7 +277,7 @@ namespace MazeMap::App::Internal
 
         struct StraightSweepDefinition final
         {
-            OpenFloorSectionId sectionId{ OpenFloorSectionId::Sec00Timing };
+            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
             OpenFloorPrimitiveId primitiveId{ OpenFloorPrimitiveId::None };
             const float* speedsMps{};
             std::size_t speedCount{};
@@ -299,7 +289,7 @@ namespace MazeMap::App::Internal
 
         struct TurnSweepDefinition final
         {
-            OpenFloorSectionId sectionId{ OpenFloorSectionId::Sec00Timing };
+            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
             const OpenFloorPrimitiveId* primitiveIds{};
             const float* nominalAnglesRad{};
             std::size_t primitiveCount{};
@@ -312,7 +302,7 @@ namespace MazeMap::App::Internal
         struct ManeuverQueueDefinition final
         {
             ManeuverQueueKind kind{ ManeuverQueueKind::SmoothSweep };
-            OpenFloorSectionId sectionId{ OpenFloorSectionId::Sec00Timing };
+            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
             const float* speedBinsMps{};
             std::size_t speedCount{};
             bool clockwise{};
@@ -409,7 +399,6 @@ namespace MazeMap::App::Internal
             bool logOpen{};
             bool completionPending{};
             SegmentRuntime activeRuntime{};
-            OpenFloorPhaseId activePhaseId{ OpenFloorPhaseId::Idle };
             char estimatorFaultReason[64]{};
             bool pendingSampleValid{};
             Runtime::OpenFloorMainRow pendingRow{};
@@ -463,7 +452,7 @@ namespace MazeMap::App::Internal
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorTimingRow& row) const noexcept;
         void PopulateMainRowFromState(
-            const SampleIdentity& identity,
+            const SegmentIdentity& identity,
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorMainRow& row) const;
         void ConfigureSelectorMonitor() noexcept;
@@ -483,12 +472,6 @@ namespace MazeMap::App::Internal
         bool CompileTurnSweep(const TurnSweepDefinition& definition);
         bool CompileManeuverQueue(const ManeuverQueueDefinition& definition);
         bool CheckFault(LoopController::TickServices& services, bool mainStage);
-        float CurrentManeuverProgress(
-            MazeMap::ManeuverCode code,
-            float startDistanceM,
-            float totalDistanceM,
-            float targetYawRad,
-            float targetMagnitudeRad) const noexcept;
         void AdvanceMainSegment() noexcept;
         const MainSegment* ActiveMainSegment() const noexcept;
         LoopController::PauseDisposition OnPauseGranted(const LoopController::PauseContext& pause);
@@ -502,12 +485,6 @@ namespace MazeMap::App::Internal
             LoopController::TickServices& services);
 
         static OpenFloorSpeedBin SpeedBinForIndex(std::size_t speedIndex) noexcept;
-        static OpenFloorPhaseId StraightPhaseForProgress(float progress) noexcept;
-        static OpenFloorPhaseId TurnPhaseForProgress(float progress) noexcept;
-        static OpenFloorPhaseId SmoothPhaseForProgress(float progress) noexcept;
-        static OpenFloorPhaseId ManeuverPhaseForProgress(
-            MazeMap::ManeuverCode code,
-            float progress) noexcept;
 
         SharedRobotRuntime& _runtime;
         LoopController& _loopController;

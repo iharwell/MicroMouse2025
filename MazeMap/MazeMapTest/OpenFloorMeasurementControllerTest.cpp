@@ -232,7 +232,7 @@ namespace MazeMap::App
             for (std::uint16_t index = 0U; index < mode._mainStage.planSize; ++index)
             {
                 const auto& segment = mode._mainStage.plan[index];
-                if ((segment.identity.sectionId == OpenFloorSectionId::Sec20Launch) &&
+                if ((segment.identity.phaseId == OpenFloorSectionId::Sec20Launch) &&
                     (segment.identity.primitiveId == OpenFloorPrimitiveId::OpenLoopLaunch) &&
                     (segment.wheelCommandProfile.durationMs != 0U))
                 {
@@ -250,6 +250,16 @@ namespace MazeMap::App
 
         template <typename T>
         struct HasRowValidMember<T, std::void_t<decltype(std::declval<T&>().rowValid)>> final : std::true_type
+        {
+        };
+
+        template <typename T, typename = void>
+        struct HasSectionIdMember final : std::false_type
+        {
+        };
+
+        template <typename T>
+        struct HasSectionIdMember<T, std::void_t<decltype(std::declval<T&>().section_id)>> final : std::true_type
         {
         };
 
@@ -380,7 +390,7 @@ namespace MazeMap::App
             Assert::IsTrue(timingRows.size() < DiagnosticConfig::kTimingCaptureCycles);
             for (const OpenFloorTimingRow& row : timingRows)
             {
-                Assert::IsTrue(row.section_id == static_cast<std::uint32_t>(OpenFloorSectionId::Sec00Timing));
+                Assert::IsTrue(row.phase_id == static_cast<std::uint32_t>(OpenFloorSectionId::Sec00Timing));
             }
 
             const std::string timingSidecar =
@@ -427,7 +437,7 @@ namespace MazeMap::App
             Assert::IsTrue(segment.wheelCommandProfile.durationMs == 0U);
             Assert::AreEqual(
                 static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static),
-                static_cast<std::uint8_t>(segment.identity.sectionId));
+                static_cast<std::uint8_t>(segment.identity.phaseId));
             Assert::AreEqual(
                 static_cast<std::uint8_t>(OpenFloorPrimitiveId::StaticHold),
                 static_cast<std::uint8_t>(segment.identity.primitiveId));
@@ -478,12 +488,12 @@ namespace MazeMap::App
                     }
                 }
 
-                if ((segment.identity.sectionId == OpenFloorSectionId::Sec50Smooth) &&
+                if ((segment.identity.phaseId == OpenFloorSectionId::Sec50Smooth) &&
                     (segment.settlingHoldMs == MazeMap::kOpenFloorInterPhaseHoldMs))
                 {
                     sawSmoothTailHold = true;
                 }
-                if ((segment.identity.sectionId == OpenFloorSectionId::Sec60LoopCw) &&
+                if ((segment.identity.phaseId == OpenFloorSectionId::Sec60LoopCw) &&
                     (segment.settlingHoldMs == MazeMap::kOpenFloorInterPhaseHoldMs))
                 {
                     sawClockwiseLoopTailHold = true;
@@ -513,6 +523,7 @@ namespace MazeMap::App
             const std::uint16_t firstLaunchIndex = FindFirstLaunchSegmentIndex(mode);
             Assert::IsTrue(firstLaunchIndex < mode._mainStage.planSize);
             Assert::IsTrue((firstLaunchIndex + 1U) < mode._mainStage.planSize);
+            Assert::IsFalse(HasSectionIdMember<OpenFloorMainRow>::value);
 
             const auto& launchSegment = mode._mainStage.plan[firstLaunchIndex];
             Assert::IsTrue(launchSegment.wheelCommandProfile.durationMs != 0U);
@@ -520,7 +531,7 @@ namespace MazeMap::App
             Assert::IsTrue(mode._mainStage.plan[firstLaunchIndex + 1U].hold.durationMs == 0U);
             Assert::AreEqual(
                 static_cast<std::uint8_t>(OpenFloorSectionId::Sec20Launch),
-                static_cast<std::uint8_t>(launchSegment.identity.sectionId));
+                static_cast<std::uint8_t>(launchSegment.identity.phaseId));
             Assert::AreEqual(
                 static_cast<std::uint8_t>(OpenFloorPrimitiveId::OpenLoopLaunch),
                 static_cast<std::uint8_t>(launchSegment.identity.primitiveId));
