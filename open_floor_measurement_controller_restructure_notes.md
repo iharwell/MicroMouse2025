@@ -2,449 +2,369 @@
 
 ## Purpose
 
-Capture the current implementation proposal for converging `OpenFloorMeasurementController` into a scalable, reconfigurable open-floor test-battery owner without depending on thread context.
+Capture the corrected implementation target for converging `OpenFloorMeasurementController` into a scalable, maintainable open-floor measurement battery owner without depending on thread context.
 
-This note is intended to be strong enough to hand to another agent for implementation, including an initial approved verification target.
+This note replaces the previous segment-family interpretation. It is intended to be strong enough to hand to another agent for implementation and verification.
 
 ## Scope
 
-This proposal is intentionally **internal-first**.
+This proposal remains intentionally **internal-first**.
 
-- `OpenFloorMeasurementController` remains the single authoritative owner of the open-floor measurement battery.
+- `OpenFloorMeasurementController` remains the single authoritative public owner of the open-floor measurement battery.
 - The first convergence happens **inside this controller**, not by extracting a shared framework immediately.
-- The goal is to separate **what** the battery runs from **how** it executes, while preserving the existing external logging contract.
+- The goal is to separate **stage infrastructure and sequencing** from **measurement-phase command generation**, while preserving the current timing/main split and the existing Main log format.
 
-## Immediate Ownership Decisions
+## Authoritative Ownership Decisions
 
 This handoff note assumes the implementation makes these ownership choices now rather than leaving them open:
 
 - `OpenFloorMeasurementController` remains the only public owner for this mode.
 - `TimingStage` and `MainStage` are internal controller-owned execution stages, not new public subsystem owners.
-- Logging mechanics should move into controller-owned stage/logging support inside the open-floor controller ownership boundary, not into a new shared framework.
-- Open-floor row/schema ownership should become explicit within the controller's own authoritative files rather than remaining buried as incidental large file-local implementation detail.
+- `TimingStage` owns timing-capture execution and timing-stream lifecycle only.
+- `MainStage` owns Main-battery sequencing, Main-row labeling, hold policy, row staging/flush, and infrastructure faults.
+- Each measurement phase is a private implementation class under controller ownership.
+- Logging mechanics stay inside controller-owned stage infrastructure. Do not invent a new shared logging framework here.
+- This controller does not own `logging.txt`, does not open the text logger, and does not close logs.
+
+## Correction to the Previous Direction
+
+The earlier direction was wrong because it still centered the design on:
+
+- closed-set execution families
+- central `variant`-based dispatch
+- phase-owned row identity
+- per-phase fault text
+- phase-local settle-hold policy
+
+That shape is rejected even if the types are private.
+
+The extension unit must be:
+
+- one measurement phase class
+
+not:
+
+- one central execution-family alternative
 
 ## Current Problem
 
-The current controller mixes together:
+The controller is still too easy to pull back toward a closed-set central dispatcher.
 
-- battery definition and section ordering
-- per-phase execution mechanics
-- logging/session plumbing
+That happens when:
 
-The present shape scales poorly because it duplicates:
+- every new test requires editing core controller-owned type families
+- sequencing state lives inside phase/test objects
+- row labels are treated as phase-owned runtime data
+- hold policy is embedded inside phase execution
+- infrastructure faults are interpreted by the active phase
 
-- per-phase runtime structs
-- per-phase start functions
-- per-phase tick functions
-- per-phase transition logic
-- per-phase log/fault boilerplate
+That shape is still hard to extend and still keeps too much architectural knowledge centralized in the wrong place.
 
-## Core Direction
+## Corrected Core Direction
 
 `OpenFloorMeasurementController` should become a direct owner with:
 
-- one internal compiled battery plan for the main measurement battery
-- one stable stage boundary between the direct `LoopController` callback and executable test segments
-- one stable executor interface for compiled segments
+- one stage-owned timing path
+- one stage-owned Main battery sequencer
+- one flat scheduled Main execution list
+- one narrow private contract for arbitrary Main-log-compatible measurement phases
 
 The important internal split is:
 
-- **What**: define and compile the open-floor battery into an ordered list of executable main-stage segments before execution begins.
-- **How**: run those segments through a stable stage/executor path that does not change when new phases are added.
+- **Infrastructure**: stages, sequencing, row labeling, holds, logging lifecycle, row staging/flush, and runtime fault handling
+- **Measurement phase**: define cases, start a selected case, generate commands each tick, report completion
 
 ## Stage Boundary
 
-The most important architectural decision is to place **one layer** between the direct `LoopController` callback and the executable test segments.
-
-That layer should be a **stream/stage** split, not another phase split.
-
-### The two stages
+The most important architectural decision remains the stage split:
 
 - `TimingStage`
 - `MainStage`
 
+That split is correct and should be preserved.
+
 ### TimingStage
 
-`TimingStage` is **outside the compiled segment model**.
+`TimingStage` stays outside the Main measurement battery.
 
 It exists because timing capture:
 
 - uses a different schema
 - serves a different purpose
-- has its own explicit transition into the main stream
+- has its own explicit transition into the Main stream
 
-It should be implemented as stage-owned behavior, not as a compiled segment family.
-
-### MainStage
-
-`MainStage` owns the compiled flat segment plan for the actual open-floor battery.
-
-Everything after timing capture belongs to `MainStage`.
-
-### Stable callback shape
-
-The direct `LoopController` callback should dispatch only to the active stage:
-
-```cpp
-return (this->*_activeStageTick)(state, services);
-```
-
-Within `MainStage`, execution proceeds by dispatching to the current compiled segment executor:
-
-```cpp
-return _activeSegment.executor->tick(
-    *this,
-    _activeRuntime,
-    *_activeSegment,
-    state,
-    services);
-```
-
-Adding a new battery phase should not require changing either dispatch site.
-
-## Why This Stage Boundary Matters
-
-This boundary lets the controller move **logging mechanics** off of the individual phases/segments without inventing another unstable switch-based phase machine.
-
-The stage owners can cleanly own:
-
-- stream open/setup
-- metadata writing
-- schema begin
-- row population
-- pending-row staging
-- pending-row flush
-- stage-specific fault handling boilerplate
-- the timing-to-main transition
-
-The segments then supply only:
-
-- semantic sample identity
-- command/execution behavior
-- their own local progress/runtime state
-
-## Compiled Battery Plan
-
-The main-stage battery should be compiled into a flat ordered segment list during setup.
-
-That compiled plan should expand:
-
-- repeats
-- sign alternation
-- inter-segment holds
-- section-to-section holds
-
-The runtime engine should then advance linearly through the compiled list.
-
-This removes the need for schedule-as-control-flow machinery such as:
-
-- `HasRemainingLaunchSamples()`
-- `StartNextLaunchSample()`
-- `HasRemainingStraightSamples()`
-- `StartNextStraightSample()`
-- `HasRemainingYawSamples()`
-- `StartNextYawSample()`
-- `StartNextSmoothEntry()`
-- `StartNextLoopEntry()`
-- `HoldContinuation`
-
-Those are signs that battery definition is still encoded in control flow instead of plan data.
-
-## Executor Families, Not Named Phases
-
-The correct boundary is **executor family**, not **named phase**.
-
-Bad model:
-
-- one state type for launch
-- one state type for straight
-- one state type for yaw
-- one state type for smooth
-- one state type for loop
-
-Better model:
-
-- one immutable payload shape per reusable execution family
-- one mutable runtime shape per reusable execution family
-
-This means a new phase that is "another straight test with different parameters" reuses the existing straight family instead of inventing another controller-local state type.
-
-## Recommended Main-Stage Families
-
-The current proposal supports these families cleanly:
-
-### 1. Stationary hold
-
-Used for static holds and inter-segment/inter-section holds once the controller is in `MainStage`.
-
-### 2. Wheel-command profile
-
-This should be generalized from the current launch pulse idea.
-
-It should cover open-loop wheel-command profiles such as:
-
-- symmetric launch pulse
-- symmetric launch ramp
-- anti-symmetric in-place turn launch pulse
-- anti-symmetric in-place turn ramp
-
-This family is important because likely future tests reuse open-loop wheel-space execution while changing only the profile data.
-
-### 3. Drive primitive
-
-Used for `Drive`-backed closed-loop primitives such as:
-
-- straight tests
-- in-place turn tests
-- maneuver-based segments when the `Drive` service remains the executor
-
-### 4. Curvature profile
-
-Needed for a constant-curvature circular path with changing speed over time.
-
-This is a real new family because current `Drive::StartArc(...)` does not represent caller-directed speed changes through the turn.
-
-## Logging Model
-
-The controller rewrite should move **logging mechanics** off of the segments and into the two stage owners.
-
-### What TimingStage should own
+`TimingStage` should own:
 
 - timing stream open/setup
 - timing metadata writing
 - timing schema begin
-- timing-row population from runtime state
+- timing-row population
 - timing-row staging
 - timing-row flush
-- timing fault checks
-- deciding when timing capture is complete
-- requesting the pause/handoff into main
+- timing completion detection
+- timing-to-main handoff
+- timing-stage infrastructure faults
 
-### What MainStage should own
+### MainStage
 
-- main stream open/setup
-- main metadata writing
-- main schema begin
-- main-row population from runtime state plus sample identity
-- main-row staging
-- main-row flush
-- main fault checks
-- advancing through the compiled segment list
-- final flush/end behavior
+`MainStage` owns everything after timing capture.
 
-### What stays with segment execution
+It is not an executor-family dispatcher. It is the battery sequencer and Main logging owner.
 
-The current segment/executor still has to provide the semantic identity for the sample:
+`MainStage` should own:
 
-- `section_id`
-- `primitive_id`
+- battery registration order
+- phase-case compilation into flat scheduled work
+- active phase selection
+- active case selection
+- `phase_id`, `primitive_id`, `speed_bin`, and `repeat_index` for the current Main row
+- inter-case hold policy
+- inter-phase hold policy
+- Main stream open/setup
+- Main metadata writing
+- Main schema begin
+- Main-row population from runtime state plus stage-owned active-case metadata
+- Main-row staging
+- Main-row flush
+- infrastructure faults such as selector removal, estimator faults, and log write failures
+- linearly advancing through scheduled work
+
+## Measurement Phase Contract
+
+Each Main-stage measurement phase should be one proper private class.
+
+After compilation succeeds, a measurement phase must be total during execution.
+
+That means the phase should not have:
+
+- a runtime failure channel
+- fault text
+- stop-policy ownership
+- mutable row-label sequencing state
+- hold policy ownership
+
+It should only need to do work equivalent to:
+
+- define or compile its case space
+- own any phase-local compiled artifacts it needs
+- begin a selected case
+- generate commands each tick for that selected case
+- report completion
+
+If a phase cannot justify an independent behaviorful class, it should not survive as a named type.
+
+## Scheduling Model
+
+The Main battery should be compiled by `MainStage`.
+
+That compilation should become:
+
+1. register phases in battery order
+2. ask each phase to contribute its cases
+3. let `MainStage` expand repetitions and attach row-label coordinates
+4. finalize one flat scheduled execution list
+
+At runtime, `MainStage` should:
+
+1. run either a stage-owned hold or one active phase case
+2. stamp the Main row from stage-owned active-case metadata
+3. advance linearly through scheduled work
+
+Holds are infrastructure, not measurement phases.
+
+Settle holds must not be implemented inside phase classes.
+
+## Row Labeling and Main Log Contract
+
+The Main row format is an external contract and should stay fixed.
+
+The important correction is ownership:
+
 - `phase_id`
+- `primitive_id`
 - `speed_bin`
 - `repeat_index`
 
-That identity is the stable external row-level contract for `OpenFloorMainRow`.
+belong to MainStage sequencing infrastructure, not to the measurement phase as mutable runtime state.
 
-Segments should not own:
+A measurement phase may define the available case metadata needed for those labels, but `MainStage` should own:
 
-- stream setup
-- metadata writes
-- schema begin
-- staged-row flush logic
-- timing/main transition logic
+- case ordering
+- repeat expansion
+- active-case coordinates
+- row stamping
 
-## Logging Semantics Contract
+The Main row for a tick must still mean:
 
-The implementation must preserve this meaning for each logged main row:
-
-- the command that was active during that tick
-- the phase/section/primitive/repeat/speed-bin identity associated with that active command for that tick
-- the state information captured for that tick while that command was active
+- the command active during that tick
+- the active phase/case coordinates associated with that tick
+- the state captured for that tick
 - the timing information for that same tick
 
-If those are all true, it does not matter when the row is actually written to the logger buffer.
+If delayed flush is used, that semantic meaning must remain correct.
 
-### Consequence
+## Fault Ownership
 
-The delayed-write model is acceptable, but only if the staged row still preserves the active-command/state/timing meaning above when it is finalized and written.
+Infrastructure faults belong to the stage/controller boundary, not to the measurement phase.
 
-### Stage tick contract
+Examples include:
 
-For implementation purposes, each main-stage tick should follow this semantic contract:
+- selector removal
+- estimator faults
+- log open failures
+- log write failures
+- invalid timing/main handoff state
 
-1. Start from the tick-start state that is visible to the active stage/segment.
-2. Treat the logged row for that tick as describing the command already active during that tick and the identity associated with that active command.
-3. Allow the active segment executor to choose the next command for the following tick without changing the meaning of the row being staged for the current tick.
-4. Allow the actual write/flush timing to vary, so long as the committed row still means the same active command, identity, state inputs, and timing data for that tick.
+Measurement phases should not produce human-readable fault text and should not decide stop policy.
 
-This is the behavioral contract that matters. The physical buffer-write moment is not the contract.
+If something can fail before execution, that is a compile/setup/controller concern.
 
-## Logging Contract Constraint
+If something can fail during execution, that is a stage/infrastructure concern.
 
-The main row format should be treated as a fixed external contract.
+## Terminology
 
-Do **not** assume this rewrite can add new row fields such as `segment_id`.
+Internal `section` terminology is drift and should not be used as the controller's architectural vocabulary.
 
-The design must work while keeping the current row identity contract:
+Use:
 
-- `section_id`
-- `primitive_id`
-- `phase_id`
-- `speed_bin`
-- `repeat_index`
+- `phase`
 
-Any richer run-wide description should be considered sidecar metadata, not a row-layout change.
+internally.
 
-## Future-Test Stress Check
+Only preserve legacy `section` vocabulary at an external boundary if some existing non-controller contract truly still requires it.
 
-The current proposal was checked against these likely expansions:
+Do not let internal phase identity be built by casting or aliasing `OpenFloorSectionId`.
 
-### A. Repeating smooth ramp-up of raw forward command
+## Phase-Local Compiled Artifacts
 
-Fits the `wheel-command profile` family.
+If a measurement phase needs compile-time artifacts, those artifacts belong inside that phase.
 
-No new controller architecture is required if the profile is represented as data.
+Examples:
 
-### B. Launch-parallel open-loop in-place turn tests
+- smooth maneuver queues
+- loop maneuver queues
+- any compiled maneuver storage needed only by one phase
 
-Also fits the same `wheel-command profile` family.
+Those artifacts should not be promoted into `MainStage` just because they must survive across ticks.
 
-The only change is the wheel command mapping:
+`MainStage` should know only generic scheduled work, not the internals of every phase's compiled data.
 
-- forward launch uses symmetric wheel commands
-- in-place turn launch uses anti-symmetric wheel commands
+## Rejected Shapes
 
-### C. Slowly accelerating constant-curvature circular path across radii
+The following shapes are explicitly rejected:
 
-Requires a real new executor family, `curvature profile`.
+- central execution-family `variant` dispatch
+- central `Plan` / `ExecutionState` type families
+- one `TickXxxExecution(...)` method per family
+- phase-owned row identity runtime objects
+- per-phase fault text
+- phase-local settle-hold policy
+- data-only structs that exist only to carry execution internals
+- new public wrappers, facades, helpers, managers, or compatibility shims
 
-This is acceptable and does **not** invalidate the design because it still adds:
-
-- one new reusable family
-- one new payload/runtime shape
-
-instead of another controller-local phase machine.
+Private visibility does not make those shapes acceptable.
 
 ## Effective Stop Condition
 
 This rewrite is done when all of the following are true:
 
-1. `OpenFloorMeasurementController` is the real owner, rather than a thin shell over a hidden mega-state implementation.
-2. Timing capture is stage-owned behavior outside the compiled segment model.
-3. Main-stage battery execution is driven by a compiled flat segment plan.
-4. The direct `LoopController` callback only dispatches to `TimingStage` or `MainStage`.
-5. `MainStage` dispatches to compiled segment executors without a growing phase-name switch.
-6. The current per-phase scheduling helpers and continuation graph are removed.
-7. Logging mechanics are owned by the two stages rather than individual phases/segments.
-8. The main row schema and row-level identity contract remain unchanged.
-9. The emitted rows still mean: command active during the tick, identity associated with that command for that tick, state captured for that tick, and timing for that same tick.
-10. The current battery ordering and coarse external behavior are preserved:
-    - same timing-first / main-second split
-    - same major section order
-    - same repeat numbering semantics
-    - same hold insertion semantics
-    - same timing-to-main pause/handoff semantics
-    - same tooling-facing row identity vocabulary
+1. `OpenFloorMeasurementController` is the real owner, rather than a shell over a hidden central dispatcher.
+2. `TimingStage` remains stage-owned timing behavior outside the Main battery.
+3. `MainStage` clearly owns sequencing, row labeling, holds, staging/flush, and infrastructure faults.
+4. Main-stage execution is driven by a flat scheduled work list.
+5. Measurement phases are proper private classes whose runtime behavior is only command generation plus completion.
+6. No central closed-set execution-family dispatcher remains.
+7. No per-phase fault text or runtime failure channel remains.
+8. The current timing-to-main split and handoff semantics remain correct.
+9. The Main row format and row meaning remain correct.
+10. Adding a new Main-log-compatible measurement phase requires:
+    - one new phase class
+    - one reference in the primary battery-registration location
+11. Adding that new phase does not require editing:
+    - a central `variant`
+    - a central dispatcher
+    - a row-identity type
+    - a fault-text method
+    - a family-specific execution lattice
 
-## What This Test-Bed Change Should Include
+## Migration Guidance
 
-This rewrite **should** include:
+The clean migration direction is:
 
-- replacing the current per-phase machine with the internal test-bed architecture described here
-- removing schedule-as-control-flow logic in favor of a compiled main-stage segment plan
-- moving logging/session mechanics into `TimingStage` and `MainStage`
-- keeping the implementation entirely inside the `OpenFloorMeasurementController` ownership boundary
+- keep the `TimingStage` / `MainStage` split
+- delete the segment/family architecture rather than renaming it
+- move sequencing ownership harder into `MainStage`
+- move phase-local compiled data into the corresponding phase classes
+- delete phase-owned row-label runtime state
+- delete phase fault semantics
+- move hold policy into infrastructure
 
-## What This Test-Bed Change Should Not Include
+The current compile loops are already the right ownership area for sequencing, but the wrong abstraction for execution.
 
-This rewrite **should not** include:
+Use that fact to converge toward:
+
+- stage-owned scheduling
+- phase-owned command generation
+
+not toward another closed-set central family system.
+
+## What This Rewrite Should Include
+
+This rewrite should include:
+
+- replacing the current segment/family architecture with the phase-class architecture described here
+- moving Main-row coordinates into `MainStage`
+- moving hold policy into `MainStage`
+- keeping phase-local compiled artifacts with their owning phases
+- preserving the timing/main stream split inside the controller boundary
+
+## What This Rewrite Should Not Include
+
+This rewrite should not include:
 
 - extracting a shared framework for other modes yet
-- changing the external main row layout
-- inventing a second public subsystem owner for open-floor execution
-- broad Drive redesign unrelated to making the open-floor test bed work
-- speculative support for modes or schemas not needed to prove the design inside this controller
-
-## Constraints and Caveats
-
-### 1. Internal-first only
-
-This proposal should be proven out entirely inside `OpenFloorMeasurementController` before any extraction elsewhere.
-
-### 2. No partial migration
-
-Do not leave the old per-phase controller machine and a new plan-driven machine side by side.
-
-If this rewrite happens, it should replace the current approach in one convergent change.
-
-### 3. Logging mechanics can move, but semantic sample identity cannot disappear
-
-Segments still need to supply the row identity used by tooling.
-
-### 4. The delayed-write timing model must remain correct
-
-The logger currently stages rows and patches timing fields from loop diagnostics before commit.
-
-Any logging cleanup must preserve the logging semantics contract described above.
-
-### 5. Timing/main stream handoff remains explicit
-
-The runtime uses separate schemas/files for timing and main.
-
-That transition is real and must stay correct even if the code is reorganized.
-
-### 6. Row-schema ownership is still local today
-
-The current open-floor row definitions are private to `OpenFloorMeasurementController.cpp`.
-
-As part of this rewrite, row/schema ownership should become more explicit inside the controller’s own authoritative file/header structure.
-
-### 7. Current log vocabulary may eventually become the limiting factor
-
-The execution design can scale farther than the present coarse open-floor row identity vocabulary.
-
-That is a separate observability constraint from the controller architecture itself.
+- changing the external Main row layout
+- introducing a second public subsystem owner
+- inventing a new logging owner
+- broad unrelated `Drive` redesign
+- staged compatibility architecture that leaves old and new ownership in parallel
 
 ## Verification
 
-This handoff now includes an initial approved verification target.
+This handoff includes an approved first-pass verification target.
 
 ### Required first-pass tests
 
-- `TimingStage` stays outside the compiled plan: advance through timing capture only and verify only timing-schema rows are produced, no main-plan segments are consumed, and the handoff to main occurs only when timing completes.
-- Heterogeneous compiled main segments execute in flat order: inject a short plan containing a hold, a wheel-command-profile segment, and a `Drive`-backed segment, then verify command sequence and row identities follow compiled order exactly.
-- Active-command logging semantics survive delayed flush: use a state-dependent segment, capture the command active for a tick, perturb state/diagnostics before flush, and verify the committed row still matches that active command, identity, state inputs, and timing rather than a newly produced next-tick command.
-- Main row schema stays unchanged: verify the rewritten controller opens the same main schema and emits the same field set/layout as the current `OpenFloorMainRow` contract.
-- Completion honors the intended stop condition: run a short full main plan and verify the session ends only after the last segment completes and any pending row is flushed, with no extra commands or rows afterward.
-- Timing-to-main handoff preserves both stream lifecycles: verify timing finalization, main schema startup, and correctness of the first main-row identity/timing across the transition.
-- Flattened plan preserves coarse external identity behavior: verify `section_id`, `primitive_id`, `phase_id`, `repeat_index`, and `speed_bin` advance only at the expected boundaries in a repeated multi-bin sweep.
-- Fault handling remains stage-owned: inject a fault during main execution and verify the last committed row still reflects the last valid active command/identity for its tick, followed by a clean stop or recovery transition without partial next-segment logging.
+- `OpenFloorMeasurementController_TimingFaultStopsBeforeMainStage`
+- `OpenFloorMeasurementController_TimingToMainHandoffCreatesSeparateStreamsAndCommitsFinalTimingRow`
+- `OpenFloorMeasurementController_FirstMainSegmentIdentityIsStaticHoldAndFaultDoesNotAdvancePastIt`
 
-### High-value follow-on tests
+### Required verification path
 
-- Data-defined holds replace continuation logic correctly.
-- One executor family can cover multiple future wheel-command-profile variants without new dispatch structure.
-- No rows are dropped or duplicated across delayed flush boundaries, including completion, pause, fault, and stage-switch edges.
-- A deterministic identity-trace regression for the current nominal battery preserves externally relevant section/primitive/phase/repeat structure.
-- Invalid compiled-plan shapes fail early and clearly at the compile/validate boundary.
+- before testing, verify the active binaries actually reflect the latest edits
+- do not build from scratch unless necessary to solve a specific problem
+- verify through Release-mode unit tests
+- perform a direct Teensy compile
 
-### Recommended test seams
+### High-value follow-on checks
 
-- a fake runtime logger that records schema changes and committed rows
-- a deterministic tick/diagnostics harness
-- a small plan-injection seam for tests
-- a fake or stub `Drive` path so compiled main-stage behavior can be exercised without depending on full motion execution
+- a new phase can be added as one class plus one battery-registration reference
+- no rows are dropped or duplicated across delayed flush boundaries
+- hold insertion remains infrastructure-owned and occurs at the intended boundaries
+- row-label sequencing still advances only at intended boundaries
+- phase-local compiled artifacts stay local and do not leak back into `MainStage`
 
 ## Summary
 
 The present recommendation is:
 
-1. Keep `OpenFloorMeasurementController` as the sole owner.
-2. Rewrite it around a compiled flat main-stage battery plan.
-3. Put one stable stage layer between the direct `LoopController` callback and the executable test segments.
-4. Use `TimingStage` and `MainStage` as the logging/session boundary.
-5. Keep timing outside the compiled segment model.
-6. Dispatch from `MainStage` to compiled segment executors by stable executor reference, not by a growing `switch`.
-7. Use executor-family payload/runtime shapes, not one struct per named phase.
-8. Move logging infrastructure into the two stage owners.
-9. Preserve the current main-row logging contract and active-command logging semantics.
-10. Treat this controller as the proving ground before any wider extraction.
+1. Keep `OpenFloorMeasurementController` as the sole public owner.
+2. Keep the `TimingStage` / `MainStage` split.
+3. Make `MainStage` the owner of sequencing, row labeling, holds, Main-row staging/flush, and infrastructure faults.
+4. Make each measurement phase one proper private class.
+5. Let phases compile cases, begin a selected case, tick commands, and report completion.
+6. Remove central execution-family variants and dispatch lattices.
+7. Remove phase-owned row identity and phase fault semantics.
+8. Keep timing outside the Main battery.
+9. Preserve the Main log format and row meaning.
+10. Treat arbitrary measurement-phase support as the acceptance threshold, not mere reduction of the existing mess.

@@ -5,9 +5,7 @@
 #include "..\MazeMap\CoreConfig.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\DiagnosticConfig.h"
-#define private public
 #include "..\MazeMap\OpenFloorMeasurementController.h"
-#undef private
 #include "..\MazeMap\OpenFloorMeasurementSpec.h"
 #include "..\MazeMap\SharedRobotRuntime.h"
 
@@ -89,8 +87,9 @@ namespace MazeMap::App
 
         std::uintmax_t FileSizeBytes(const char* path)
         {
-            std::error_code ignored;
-            return std::filesystem::file_size(ArtifactPath(path), ignored);
+            std::error_code error;
+            const std::uintmax_t size = std::filesystem::file_size(ArtifactPath(path), error);
+            return error ? 0U : size;
         }
 
         bool LogHasAtLeastOneRow(const char* path, const std::size_t rowBytes)
@@ -226,42 +225,6 @@ namespace MazeMap::App
 
             return message;
         }
-
-        std::uint16_t FindFirstLaunchSegmentIndex(const OpenFloorMeasurementController& mode)
-        {
-            for (std::uint16_t index = 0U; index < mode._mainStage.planSize; ++index)
-            {
-                const auto& segment = mode._mainStage.plan[index];
-                if ((segment.identity.phaseId == OpenFloorSectionId::Sec20Launch) &&
-                    (segment.identity.primitiveId == OpenFloorPrimitiveId::OpenLoopLaunch) &&
-                    (segment.wheelCommandProfile.durationMs != 0U))
-                {
-                    return index;
-                }
-            }
-
-            return mode._mainStage.planSize;
-        }
-
-        template <typename T, typename = void>
-        struct HasRowValidMember final : std::false_type
-        {
-        };
-
-        template <typename T>
-        struct HasRowValidMember<T, std::void_t<decltype(std::declval<T&>().rowValid)>> final : std::true_type
-        {
-        };
-
-        template <typename T, typename = void>
-        struct HasSectionIdMember final : std::false_type
-        {
-        };
-
-        template <typename T>
-        struct HasSectionIdMember<T, std::void_t<decltype(std::declval<T&>().section_id)>> final : std::true_type
-        {
-        };
 
         void FinishModeRun(SharedRobotRuntime& runtime, std::future<void>& runFuture);
 
@@ -400,7 +363,7 @@ namespace MazeMap::App
                 std::string::npos);
         }
 
-        TEST_METHOD(OpenFloorMeasurementController_BeginStartsTimingStreamBeforeMainStream)
+        TEST_METHOD(OpenFloorMeasurementController_TimingToMainHandoffCreatesSeparateStreamsAndCommitsFinalTimingRow)
         {
             SharedRobotRuntime runtime;
             OpenFloorMeasurementController mode(runtime);
@@ -409,48 +372,49 @@ namespace MazeMap::App
             const bool began = mode.Begin();
             const std::wstring beginFailure = BuildBeginFailureMessage(runtime);
             Assert::IsTrue(began, beginFailure.c_str());
-            Assert::IsTrue(mode._timingStage.logOpen);
-            Assert::IsFalse(mode._mainStage.logOpen);
+
+            ModeRunGuard run(runtime, mode);
+            Assert::IsTrue(WaitUntil(
+                []()
+                {
+                    return FileExists(MazeMap::kOpenFloorTimingFileName) &&
+                        LogHasAtLeastOneRow(MazeMap::kOpenFloorMainFileName, sizeof(OpenFloorMainRow));
+                },
+                std::chrono::milliseconds(5000)));
+            run.Finish();
+
             Assert::IsTrue(FileExists(MazeMap::kOpenFloorTimingFileName));
-            Assert::IsFalse(FileExists(MazeMap::kOpenFloorMainFileName));
+            Assert::IsTrue(FileExists(MazeMap::kOpenFloorMainFileName));
 
-            (void)runtime.FailActiveMode("test cleanup");
-            runtime.FinalizeSuccessfulModeExit();
-        }
+            const std::vector<OpenFloorTimingRow> timingRows =
+                ReadMmlogRows<OpenFloorTimingRow>(MazeMap::kOpenFloorTimingFileName);
+            const std::vector<OpenFloorMainRow> mainRows =
+                ReadMmlogRows<OpenFloorMainRow>(MazeMap::kOpenFloorMainFileName);
+            Assert::IsTrue(timingRows.size() == DiagnosticConfig::kTimingCaptureCycles);
+            Assert::IsTrue(!mainRows.empty());
 
-        TEST_METHOD(OpenFloorMeasurementController_FirstCompiledMainSegmentIsStaticHold)
-        {
-            SharedRobotRuntime runtime;
-            OpenFloorMeasurementController mode(runtime);
-            SetOpenFloorSelectorInstalled(true);
-            AssertOpenFloorSelectorActive(true);
-            const bool began = mode.Begin();
-            const std::wstring beginFailure = BuildBeginFailureMessage(runtime);
-            Assert::IsTrue(began, beginFailure.c_str());
+            const OpenFloorTimingRow& finalTimingRow = timingRows.back();
+            Assert::IsTrue(finalTimingRow.phase_id == static_cast<std::uint32_t>(OpenFloorSectionId::Sec00Timing));
 
-            Assert::IsTrue(mode._mainStage.planSize > 0U);
-            const auto& segment = mode._mainStage.plan[0];
+            const OpenFloorMainRow& firstMainRow = mainRows.front();
+            Assert::IsTrue(firstMainRow.phase_id == static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static));
+            Assert::IsTrue(firstMainRow.primitive_id == static_cast<std::uint8_t>(OpenFloorPrimitiveId::StaticHold));
+            Assert::IsTrue(firstMainRow.speed_bin == static_cast<std::uint8_t>(OpenFloorSpeedBin::None));
+            Assert::IsTrue(firstMainRow.repeat_index == 1U);
+
+            const std::string timingSidecar =
+                ReadAllBytes(ReplaceExtension(MazeMap::kOpenFloorTimingFileName, ".sidecar").c_str());
+            const std::string mainSidecar =
+                ReadAllBytes(ReplaceExtension(MazeMap::kOpenFloorMainFileName, ".sidecar").c_str());
             Assert::IsTrue(
-                segment.hold.durationMs ==
-                (DiagnosticConfig::kStaticHoldMs + static_cast<std::uint16_t>(MazeMap::kOpenFloorInterPhaseHoldMs)));
-            Assert::IsTrue(segment.settlingHoldMs == 0U);
-            Assert::IsTrue(segment.wheelCommandProfile.durationMs == 0U);
-            Assert::AreEqual(
-                static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static),
-                static_cast<std::uint8_t>(segment.identity.phaseId));
-            Assert::AreEqual(
-                static_cast<std::uint8_t>(OpenFloorPrimitiveId::StaticHold),
-                static_cast<std::uint8_t>(segment.identity.primitiveId));
-            Assert::AreEqual(
-                static_cast<std::uint8_t>(OpenFloorSpeedBin::None),
-                static_cast<std::uint8_t>(segment.identity.speedBin));
-            Assert::AreEqual(static_cast<std::uint16_t>(1U), segment.identity.repeatIndex);
-
-            (void)runtime.FailActiveMode("test cleanup");
-            runtime.FinalizeSuccessfulModeExit();
+                timingSidecar.find(std::string("stream_type=") + MazeMap::kOpenFloorTimingStreamType + "\n") !=
+                std::string::npos);
+            Assert::IsTrue(
+                mainSidecar.find(std::string("stream_type=") + MazeMap::kOpenFloorMainStreamType + "\n") !=
+                std::string::npos);
         }
 
-        TEST_METHOD(OpenFloorMeasurementController_CompiledPlanEmbedsSettlingHoldsInOwningSegments)
+        TEST_METHOD(OpenFloorMeasurementController_FirstMainSegmentIdentityIsStaticHoldAndFaultDoesNotAdvancePastIt)
         {
             SharedRobotRuntime runtime;
             OpenFloorMeasurementController mode(runtime);
@@ -459,86 +423,30 @@ namespace MazeMap::App
             const bool began = mode.Begin();
             const std::wstring beginFailure = BuildBeginFailureMessage(runtime);
             Assert::IsTrue(began, beginFailure.c_str());
-            Assert::IsTrue(mode._mainStage.planSize > 0U);
 
-            bool sawStandaloneHoldPastStatic = false;
-            bool sawWheelSettlingHold = false;
-            bool sawPrimitiveSettlingHold = false;
-            bool sawSmoothTailHold = false;
-            bool sawClockwiseLoopTailHold = false;
-            for (std::uint16_t index = 1U; index < mode._mainStage.planSize; ++index)
+            ModeRunGuard run(runtime, mode);
+            Assert::IsTrue(WaitUntil(
+                []()
+                {
+                    return LogHasAtLeastOneRow(MazeMap::kOpenFloorMainFileName, sizeof(OpenFloorMainRow));
+                },
+                std::chrono::milliseconds(5000)));
+
+            SetOpenFloorSelectorInstalled(false);
+            run.Finish();
+
+            Assert::IsTrue(FileExists(MazeMap::kOpenFloorMainFileName));
+            const std::vector<OpenFloorMainRow> mainRows =
+                ReadMmlogRows<OpenFloorMainRow>(MazeMap::kOpenFloorMainFileName);
+            Assert::IsTrue(!mainRows.empty());
+
+            for (const OpenFloorMainRow& row : mainRows)
             {
-                const auto& segment = mode._mainStage.plan[index];
-                if (segment.hold.durationMs != 0U)
-                {
-                    sawStandaloneHoldPastStatic = true;
-                }
-
-                if (segment.settlingHoldMs == MazeMap::kOpenFloorPostSegmentHoldMs)
-                {
-                    if (segment.wheelCommandProfile.durationMs != 0U)
-                    {
-                        sawWheelSettlingHold = true;
-                    }
-                    if ((segment.hold.durationMs == 0U) &&
-                        (segment.wheelCommandProfile.durationMs == 0U) &&
-                        (segment.drivePrimitive.kind != OpenFloorMeasurementController::DrivePrimitiveKind::Maneuver))
-                    {
-                        sawPrimitiveSettlingHold = true;
-                    }
-                }
-
-                if ((segment.identity.phaseId == OpenFloorSectionId::Sec50Smooth) &&
-                    (segment.settlingHoldMs == MazeMap::kOpenFloorInterPhaseHoldMs))
-                {
-                    sawSmoothTailHold = true;
-                }
-                if ((segment.identity.phaseId == OpenFloorSectionId::Sec60LoopCw) &&
-                    (segment.settlingHoldMs == MazeMap::kOpenFloorInterPhaseHoldMs))
-                {
-                    sawClockwiseLoopTailHold = true;
-                }
+                Assert::IsTrue(row.phase_id == static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static));
+                Assert::IsTrue(row.primitive_id == static_cast<std::uint8_t>(OpenFloorPrimitiveId::StaticHold));
+                Assert::IsTrue(row.speed_bin == static_cast<std::uint8_t>(OpenFloorSpeedBin::None));
+                Assert::IsTrue(row.repeat_index == 1U);
             }
-
-            Assert::IsFalse(sawStandaloneHoldPastStatic);
-            Assert::IsTrue(sawWheelSettlingHold);
-            Assert::IsTrue(sawPrimitiveSettlingHold);
-            Assert::IsTrue(sawSmoothTailHold);
-            Assert::IsTrue(sawClockwiseLoopTailHold);
-
-            (void)runtime.FailActiveMode("test cleanup");
-            runtime.FinalizeSuccessfulModeExit();
-        }
-
-        TEST_METHOD(OpenFloorMeasurementController_LaunchSegmentOwnsItsSettlingHoldAndNoSegmentCanSuppressLogging)
-        {
-            SharedRobotRuntime runtime;
-            OpenFloorMeasurementController mode(runtime);
-            SetOpenFloorSelectorInstalled(true);
-            AssertOpenFloorSelectorActive(true);
-            const bool began = mode.Begin();
-            const std::wstring beginFailure = BuildBeginFailureMessage(runtime);
-            Assert::IsTrue(began, beginFailure.c_str());
-
-            const std::uint16_t firstLaunchIndex = FindFirstLaunchSegmentIndex(mode);
-            Assert::IsTrue(firstLaunchIndex < mode._mainStage.planSize);
-            Assert::IsTrue((firstLaunchIndex + 1U) < mode._mainStage.planSize);
-            Assert::IsFalse(HasSectionIdMember<OpenFloorMainRow>::value);
-
-            const auto& launchSegment = mode._mainStage.plan[firstLaunchIndex];
-            Assert::IsTrue(launchSegment.wheelCommandProfile.durationMs != 0U);
-            Assert::IsTrue(launchSegment.settlingHoldMs == MazeMap::kOpenFloorPostSegmentHoldMs);
-            Assert::IsTrue(mode._mainStage.plan[firstLaunchIndex + 1U].hold.durationMs == 0U);
-            Assert::AreEqual(
-                static_cast<std::uint8_t>(OpenFloorSectionId::Sec20Launch),
-                static_cast<std::uint8_t>(launchSegment.identity.phaseId));
-            Assert::AreEqual(
-                static_cast<std::uint8_t>(OpenFloorPrimitiveId::OpenLoopLaunch),
-                static_cast<std::uint8_t>(launchSegment.identity.primitiveId));
-            Assert::IsFalse(HasRowValidMember<OpenFloorMeasurementController::SegmentTickResult>::value);
-
-            (void)runtime.FailActiveMode("test cleanup");
-            runtime.FinalizeSuccessfulModeExit();
         }
 
     private:

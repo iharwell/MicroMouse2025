@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Defines.h"
-#include "DiagnosticConfig.h"
 #include "Drive.h"
 #include "IApplicationMode.h"
 #include "LoopController.h"
@@ -13,12 +12,15 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <variant>
 
 namespace MazeMap::App
 {
     struct BootModeDescriptor;
 }
 
+class DriveBase;
 class RuntimeSensorSuite;
 
 namespace MazeMap::App::Internal
@@ -182,24 +184,23 @@ namespace MazeMap::App::Internal
             TimingToMain,
         };
 
-        enum class DrivePrimitiveKind : std::uint8_t
+        enum class BatteryPhaseId : std::uint8_t
         {
-            Straight,
-            Turn,
-            Maneuver,
+            Timing = static_cast<std::uint8_t>(OpenFloorSectionId::Sec00Timing),
+            Static = static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static),
+            Launch = static_cast<std::uint8_t>(OpenFloorSectionId::Sec20Launch),
+            Straight = static_cast<std::uint8_t>(OpenFloorSectionId::Sec30Straight),
+            Yaw = static_cast<std::uint8_t>(OpenFloorSectionId::Sec40Yaw),
+            Smooth = static_cast<std::uint8_t>(OpenFloorSectionId::Sec50Smooth),
+            LoopClockwise = static_cast<std::uint8_t>(OpenFloorSectionId::Sec60LoopCw),
+            LoopCounterClockwise = static_cast<std::uint8_t>(OpenFloorSectionId::Sec70LoopCcw),
         };
 
-        enum class ManeuverQueueKind : std::uint8_t
+        struct LoggedRowIdentity final
         {
-            SmoothSweep,
-            Loop,
-        };
-
-        struct SegmentIdentity final
-        {
-            constexpr SegmentIdentity() = default;
-            constexpr SegmentIdentity(
-                OpenFloorSectionId phaseId,
+            constexpr LoggedRowIdentity() = default;
+            constexpr LoggedRowIdentity(
+                BatteryPhaseId phaseId,
                 OpenFloorPrimitiveId primitiveId,
                 OpenFloorSpeedBin speedBin,
                 std::uint16_t repeatIndex) noexcept
@@ -210,203 +211,263 @@ namespace MazeMap::App::Internal
             {
             }
 
-            OpenFloorSectionId phaseId = OpenFloorSectionId::Sec00Timing;
+            BatteryPhaseId phaseId = BatteryPhaseId::Timing;
             OpenFloorPrimitiveId primitiveId = OpenFloorPrimitiveId::None;
             OpenFloorSpeedBin speedBin = OpenFloorSpeedBin::None;
             std::uint16_t repeatIndex = 0U;
         };
 
-        struct SegmentTickResult final
+        class CompiledSegment;
+        class MainStage;
+
+        class ActiveSegmentExecution final
         {
-            bool done{};
+        public:
+            void Reset() noexcept;
+            void Rebind(const CompiledSegment& segment) noexcept;
+
+        private:
+            friend class CompiledSegment;
+
+            struct HoldExecution final
+            {
+                bool started{};
+            };
+
+            struct WheelCommandProfileExecution final
+            {
+                bool started{};
+                bool settling{};
+                std::uint32_t deadlineMs{};
+                HoldExecution settlingHold{};
+            };
+
+            struct StraightExecution final
+            {
+                bool started{};
+                bool settling{};
+                float startDistanceM{};
+                float totalDistanceM{};
+                HoldExecution settlingHold{};
+            };
+
+            struct TurnExecution final
+            {
+                bool started{};
+                bool settling{};
+                float targetYawRad{};
+                float targetMagnitudeRad{};
+                HoldExecution settlingHold{};
+            };
+
+            struct ManeuverExecution final
+            {
+                bool started{};
+                bool settling{};
+                float startDistanceM{};
+                float totalDistanceM{};
+                float targetYawRad{};
+                float targetMagnitudeRad{};
+                HoldExecution settlingHold{};
+            };
+
+            using ExecutionState = std::variant<
+                std::monostate,
+                HoldExecution,
+                WheelCommandProfileExecution,
+                StraightExecution,
+                TurnExecution,
+                ManeuverExecution>;
+
+            ExecutionState _state{};
         };
 
-        struct MainSegment;
-
-        struct HoldSegmentPayload final
+        class CompiledSegment final
         {
-            std::uint16_t durationMs{};
-        };
+        public:
+            CompiledSegment() = default;
 
-        struct WheelCommandProfilePayload final
-        {
-            std::uint16_t durationMs{};
-            float leftCommand{};
-            float rightCommand{};
-        };
+            static CompiledSegment Hold(
+                LoggedRowIdentity identity,
+                std::uint16_t durationMs) noexcept;
+            static CompiledSegment WheelCommandProfile(
+                LoggedRowIdentity identity,
+                std::uint16_t durationMs,
+                float leftCommand,
+                float rightCommand,
+                std::uint16_t settlingHoldMs) noexcept;
+            static CompiledSegment Straight(
+                LoggedRowIdentity identity,
+                float distanceM,
+                float speedMps,
+                std::uint16_t settlingHoldMs) noexcept;
+            static CompiledSegment Turn(
+                LoggedRowIdentity identity,
+                float yawRad,
+                float maxOmegaRadps,
+                std::uint16_t settlingHoldMs) noexcept;
+            static CompiledSegment Maneuver(
+                LoggedRowIdentity identity,
+                std::uint16_t maneuverIndex,
+                float speedMps,
+                std::uint16_t settlingHoldMs) noexcept;
 
-        struct StraightDrivePrimitivePayload final
-        {
-            float distanceM{};
-            float speedMps{};
-        };
-
-        struct TurnDrivePrimitivePayload final
-        {
-            float yawRad{};
-            float maxOmegaRadps{};
-        };
-
-        struct ManeuverDrivePrimitivePayload final
-        {
-            std::uint16_t maneuverIndex{};
-            float speedMps{};
-        };
-
-        struct DrivePrimitivePayload final
-        {
-            DrivePrimitiveKind kind{ DrivePrimitiveKind::Straight };
-            StraightDrivePrimitivePayload straight{};
-            TurnDrivePrimitivePayload turn{};
-            ManeuverDrivePrimitivePayload maneuver{};
-        };
-
-        struct WheelCommandSweepDefinition final
-        {
-            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
-            OpenFloorPrimitiveId primitiveId{ OpenFloorPrimitiveId::None };
-            const float* magnitudes{};
-            std::size_t magnitudeCount{};
-            std::uint16_t durationMs{};
-            std::uint8_t repeatsPerMagnitude{};
-            float leftScale{};
-            float rightScale{};
-            bool alternateSign{};
-            std::uint16_t settlingHoldMs{};
-        };
-
-        struct StraightSweepDefinition final
-        {
-            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
-            OpenFloorPrimitiveId primitiveId{ OpenFloorPrimitiveId::None };
-            const float* speedsMps{};
-            std::size_t speedCount{};
-            float distanceM{};
-            std::uint8_t repeatsPerSpeed{};
-            bool alternateDirection{};
-            std::uint16_t settlingHoldMs{};
-        };
-
-        struct TurnSweepDefinition final
-        {
-            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
-            const OpenFloorPrimitiveId* primitiveIds{};
-            const float* nominalAnglesRad{};
-            std::size_t primitiveCount{};
-            const float* omegaBinsRadps{};
-            std::size_t omegaBinCount{};
-            std::uint8_t repeatsPerOmegaBin{};
-            std::uint16_t settlingHoldMs{};
-        };
-
-        struct ManeuverQueueDefinition final
-        {
-            ManeuverQueueKind kind{ ManeuverQueueKind::SmoothSweep };
-            OpenFloorSectionId phaseId{ OpenFloorSectionId::Sec00Timing };
-            const float* speedBinsMps{};
-            std::size_t speedCount{};
-            bool clockwise{};
-            std::uint16_t repeatCount{};
-            std::uint16_t settlingHoldMs{};
-        };
-
-        struct HoldSegmentRuntime final
-        {
-            bool started{};
-        };
-
-        struct WheelCommandProfileRuntime final
-        {
-            bool started{};
-            bool settling{};
-            std::uint32_t deadlineMs{};
-        };
-
-        struct StraightDrivePrimitiveRuntime final
-        {
-            float startDistanceM{};
-            float totalDistanceM{};
-        };
-
-        struct TurnDrivePrimitiveRuntime final
-        {
-            float targetYawRad{};
-            float targetMagnitudeRad{};
-        };
-
-        struct ManeuverDrivePrimitiveRuntime final
-        {
-            float startDistanceM{};
-            float totalDistanceM{};
-            float targetYawRad{};
-            float targetMagnitudeRad{};
-        };
-
-        struct DrivePrimitiveRuntime final
-        {
-            bool started{};
-            bool settling{};
-            StraightDrivePrimitiveRuntime straight{};
-            TurnDrivePrimitiveRuntime turn{};
-            ManeuverDrivePrimitiveRuntime maneuver{};
-        };
-
-        struct SegmentRuntime final
-        {
-            HoldSegmentRuntime hold{};
-            WheelCommandProfileRuntime wheelCommandProfile{};
-            DrivePrimitiveRuntime drivePrimitive{};
-        };
-
-        struct SegmentExecutor final
-        {
-            using TickFn = LoopController::ControlVector (*)(
+            const LoggedRowIdentity& RowIdentity() const noexcept;
+            BatteryPhaseId PhaseId() const noexcept;
+            const char* FaultReasonText() const noexcept;
+            LoopController::ControlVector TickExecution(
                 OpenFloorMeasurementController& controller,
-                SegmentRuntime& runtime,
-                const MainSegment& segment,
+                ActiveSegmentExecution& execution,
                 const MazeMap::VehicleState& state,
                 LoopController::TickServices& services,
-                SegmentTickResult& result);
+                bool& done) const;
 
-            TickFn tick{};
+        private:
+            friend class ActiveSegmentExecution;
+
+            struct HoldPlan final
+            {
+                std::uint16_t durationMs{};
+            };
+
+            struct WheelCommandProfilePlan final
+            {
+                std::uint16_t durationMs{};
+                float leftCommand{};
+                float rightCommand{};
+            };
+
+            struct StraightPlan final
+            {
+                float distanceM{};
+                float speedMps{};
+            };
+
+            struct TurnPlan final
+            {
+                float yawRad{};
+                float maxOmegaRadps{};
+            };
+
+            struct ManeuverPlan final
+            {
+                std::uint16_t maneuverIndex{};
+                float speedMps{};
+            };
+
+            using Plan = std::variant<
+                HoldPlan,
+                WheelCommandProfilePlan,
+                StraightPlan,
+                TurnPlan,
+                ManeuverPlan>;
+
+            CompiledSegment(
+                LoggedRowIdentity identity,
+                std::uint16_t settlingHoldMs,
+                const Plan& plan) noexcept;
+            LoopController::ControlVector TickHoldExecution(
+                OpenFloorMeasurementController& controller,
+                std::uint16_t durationMs,
+                ActiveSegmentExecution::HoldExecution& execution,
+                bool& done) const;
+            LoopController::ControlVector TickWheelCommandProfileExecution(
+                OpenFloorMeasurementController& controller,
+                const WheelCommandProfilePlan& plan,
+                ActiveSegmentExecution::WheelCommandProfileExecution& execution,
+                bool& done) const;
+            LoopController::ControlVector TickStraightExecution(
+                OpenFloorMeasurementController& controller,
+                LoopController::TickServices& services,
+                const StraightPlan& plan,
+                ActiveSegmentExecution::StraightExecution& execution,
+                bool& done) const;
+            LoopController::ControlVector TickTurnExecution(
+                OpenFloorMeasurementController& controller,
+                LoopController::TickServices& services,
+                const TurnPlan& plan,
+                ActiveSegmentExecution::TurnExecution& execution,
+                bool& done) const;
+            LoopController::ControlVector TickManeuverExecution(
+                OpenFloorMeasurementController& controller,
+                LoopController::TickServices& services,
+                const ManeuverPlan& plan,
+                ActiveSegmentExecution::ManeuverExecution& execution,
+                bool& done) const;
+
+            LoggedRowIdentity _rowIdentity{};
+            std::uint16_t _settlingHoldMs{};
+            Plan _plan{ HoldPlan{} };
         };
 
-        struct MainSegment final
+        class TimingStage final
         {
-            const SegmentExecutor* executor{};
-            SegmentIdentity identity{};
-            std::uint16_t settlingHoldMs{};
-            HoldSegmentPayload hold{};
-            WheelCommandProfilePayload wheelCommandProfile{};
-            DrivePrimitivePayload drivePrimitive{};
+        public:
+            void Reset() noexcept;
+            bool Begin(OpenFloorMeasurementController& controller);
+            LoopController::ControlVector Tick(
+                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
+                LoopController::TickServices& services);
+            LoopController::PauseDisposition CompleteTimingToMainHandoff(
+                OpenFloorMeasurementController& controller,
+                MainStage& mainStage,
+                const LoopController::PauseContext& pause);
+            void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
+
+        private:
+            bool FlushPending(
+                OpenFloorMeasurementController& controller,
+                const char* failureReason,
+                LoopController::TickServices* services);
+            void StageRow(const Runtime::OpenFloorTimingRow& row);
+            bool CaptureComplete() const noexcept;
+
+            std::uint16_t _tickIndex{};
+            bool _logOpen{};
+            std::optional<Runtime::OpenFloorTimingRow> _pendingRow{};
         };
 
-        struct TimingStage final
+        class MainStage final
         {
-            std::uint16_t tickIndex{};
-            bool logOpen{};
-            bool pendingSampleValid{};
-            Runtime::OpenFloorTimingRow pendingRow{};
-        };
+        public:
+            void Reset() noexcept;
+            bool CompilePlan(OpenFloorMeasurementController& controller);
+            bool Begin(OpenFloorMeasurementController& controller);
+            LoopController::ControlVector Tick(
+                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
+                LoopController::TickServices& services);
+            void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
+            bool AppendSegment(const CompiledSegment& segment);
+            bool StoreCompiledManeuver(
+                const MazeMap::ManeuverInstance& maneuver,
+                std::uint16_t& maneuverIndex);
+            const MazeMap::ManeuverInstance* CompiledManeuverAt(std::uint16_t maneuverIndex) const noexcept;
 
-        struct MainStage final
-        {
-            std::array<MainSegment, kMainSegmentCapacity> plan{};
-            std::array<MazeMap::ManeuverInstance, kCompiledManeuverCapacity> maneuvers{};
-            std::uint16_t planSize{};
-            std::uint16_t maneuverCount{};
-            std::uint16_t nextSegmentIndex{};
-            bool logOpen{};
-            bool completionPending{};
-            SegmentRuntime activeRuntime{};
-            char estimatorFaultReason[64]{};
-            bool pendingSampleValid{};
-            Runtime::OpenFloorMainRow pendingRow{};
-        };
+        private:
+            bool FlushPending(
+                OpenFloorMeasurementController& controller,
+                LoopController::TickServices* services,
+                const char* failureReason);
+            void StageRow(const Runtime::OpenFloorMainRow& row);
+            bool CheckFault(
+                OpenFloorMeasurementController& controller,
+                LoopController::TickServices& services);
+            void Advance() noexcept;
+            const CompiledSegment* ActiveSegment() const noexcept;
 
-        static const SegmentExecutor kHoldSegmentExecutor;
-        static const SegmentExecutor kWheelCommandProfileExecutor;
-        static const SegmentExecutor kDrivePrimitiveExecutor;
+            std::array<CompiledSegment, kMainSegmentCapacity> _plan{};
+            std::array<MazeMap::ManeuverInstance, kCompiledManeuverCapacity> _maneuvers{};
+            std::uint16_t _planSize{};
+            std::uint16_t _maneuverCount{};
+            std::uint16_t _nextSegmentIndex{};
+            bool _logOpen{};
+            bool _completionPending{};
+            ActiveSegmentExecution _activeExecution{};
+            char _estimatorFaultReason[64]{};
+            std::optional<Runtime::OpenFloorMainRow> _pendingRow{};
+        };
 
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
         static LoopController::PauseDisposition PauseThunk(
@@ -417,63 +478,19 @@ namespace MazeMap::App::Internal
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController::TickServices& services);
-        static LoopController::ControlVector ExecuteHoldSegment(
-            OpenFloorMeasurementController& controller,
-            SegmentRuntime& runtime,
-            const MainSegment& segment,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services,
-            SegmentTickResult& result);
-        static LoopController::ControlVector ExecuteWheelCommandProfileSegment(
-            OpenFloorMeasurementController& controller,
-            SegmentRuntime& runtime,
-            const MainSegment& segment,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services,
-            SegmentTickResult& result);
-        static LoopController::ControlVector ExecuteDrivePrimitiveSegment(
-            OpenFloorMeasurementController& controller,
-            SegmentRuntime& runtime,
-            const MainSegment& segment,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services,
-            SegmentTickResult& result);
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
         void ResetState() noexcept;
-        bool BeginTimingLog();
-        void StagePendingTimingSample(const Runtime::OpenFloorTimingRow& row) noexcept;
-        bool BeginMainLog();
-        bool CommitPendingMainSample(
-            LoopController::TickServices& services,
-            const char* failureReason);
-        void StagePendingMainSample(const Runtime::OpenFloorMainRow& row) noexcept;
         void PopulateTimingRowFromState(
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorTimingRow& row) const noexcept;
         void PopulateMainRowFromState(
-            const SegmentIdentity& identity,
+            const LoggedRowIdentity& identity,
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorMainRow& row) const;
         void ConfigureSelectorMonitor() noexcept;
         void ReleaseSelectorMonitor() noexcept;
         bool SelectorRemoved() const noexcept;
-        bool CompileMainPlan();
-        bool ResetMainPlan() noexcept;
-        bool AppendSegment(const MainSegment& segment);
-        bool AppendCompiledManeuverSegment(
-            MainSegment segment,
-            const MazeMap::ManeuverInstance& maneuver);
-        bool StoreCompiledManeuver(
-            const MazeMap::ManeuverInstance& maneuver,
-            std::uint16_t& maneuverIndex);
-        bool CompileWheelCommandSweep(const WheelCommandSweepDefinition& definition);
-        bool CompileStraightSweep(const StraightSweepDefinition& definition);
-        bool CompileTurnSweep(const TurnSweepDefinition& definition);
-        bool CompileManeuverQueue(const ManeuverQueueDefinition& definition);
-        bool CheckFault(LoopController::TickServices& services, bool mainStage);
-        void AdvanceMainSegment() noexcept;
-        const MainSegment* ActiveMainSegment() const noexcept;
         LoopController::PauseDisposition OnPauseGranted(const LoopController::PauseContext& pause);
         LoopController::ControlVector TimingStageTick(
             std::uint32_t loopEndTimeUs,
