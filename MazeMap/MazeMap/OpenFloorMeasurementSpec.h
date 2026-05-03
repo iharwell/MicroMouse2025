@@ -81,24 +81,6 @@ namespace MazeMap
         LoggerWriteFailure,
     };
 
-    struct OpenFloorSectionDefinition
-    {
-        OpenFloorSectionId id;
-        const char* name;
-        OpenFloorMarkerId startMarker;
-    };
-
-    inline constexpr std::array<OpenFloorSectionDefinition, 8U> kOpenFloorSections = {
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec00Timing, "SEC_00_TIMING", OpenFloorMarkerId::C },
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec10Static, "SEC_10_STATIC", OpenFloorMarkerId::C },
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec20Launch, "SEC_20_LAUNCH", OpenFloorMarkerId::C },
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec30Straight, "SEC_30_STRAIGHT", OpenFloorMarkerId::N },
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec40Yaw, "SEC_40_YAW", OpenFloorMarkerId::C },
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec50Smooth, "SEC_50_SMOOTH", OpenFloorMarkerId::C },
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec60LoopCw, "SEC_60_LOOP_CW", OpenFloorMarkerId::CW },
-        OpenFloorSectionDefinition{ OpenFloorSectionId::Sec70LoopCcw, "SEC_70_LOOP_CCW", OpenFloorMarkerId::CCW },
-    };
-
     inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdNone = 0U;
     inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdLow = 1U;
     inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdMedium = 2U;
@@ -296,42 +278,6 @@ namespace MazeMap
         return (longitudinalErrorM >= 0.0f) ? outsideAbsM : -outsideAbsM;
     }
 
-    inline const OpenFloorSectionDefinition& GetOpenFloorSection(OpenFloorSectionId id)
-    {
-        for (const OpenFloorSectionDefinition& section : kOpenFloorSections)
-        {
-            if (section.id == id)
-            {
-                return section;
-            }
-        }
-
-        return kOpenFloorSections[0];
-    }
-
-    inline const char* OpenFloorSectionName(OpenFloorSectionId id)
-    {
-        return GetOpenFloorSection(id).name;
-    }
-
-    inline const char* OpenFloorMarkerName(OpenFloorMarkerId id)
-    {
-        switch (id)
-        {
-        case OpenFloorMarkerId::N:
-            return "N";
-        case OpenFloorMarkerId::S:
-            return "S";
-        case OpenFloorMarkerId::CW:
-            return "CW";
-        case OpenFloorMarkerId::CCW:
-            return "CCW";
-        case OpenFloorMarkerId::C:
-        default:
-            return "C";
-        }
-    }
-
     inline OpenFloorPrimitiveFamily OpenFloorPrimitiveFamilyForManeuverCode(ManeuverCode code) noexcept
     {
         const ManeuverCode baseCode = static_cast<ManeuverCode>(code & INVERTED_MIRRORED_MANEUVER_FLAG);
@@ -370,30 +316,6 @@ namespace MazeMap
             return OpenFloorPrimitiveFamily::SmoothTurn;
         default:
             return OpenFloorPrimitiveFamily::None;
-        }
-    }
-
-    inline const char* OpenFloorPrimitiveFamilyName(OpenFloorPrimitiveFamily family)
-    {
-        switch (family)
-        {
-        case OpenFloorPrimitiveFamily::Timing:
-            return "TIMING";
-        case OpenFloorPrimitiveFamily::StaticHold:
-            return "STATIC_HOLD";
-        case OpenFloorPrimitiveFamily::Launch:
-            return "LAUNCH";
-        case OpenFloorPrimitiveFamily::Straight:
-            return "STRAIGHT";
-        case OpenFloorPrimitiveFamily::InPlaceTurn:
-            return "IN_PLACE_TURN";
-        case OpenFloorPrimitiveFamily::SmoothTurn:
-            return "SMOOTH_TURN";
-        case OpenFloorPrimitiveFamily::Recovery:
-            return "RECOVERY";
-        case OpenFloorPrimitiveFamily::None:
-        default:
-            return "NONE";
         }
     }
 

@@ -804,6 +804,7 @@ namespace MazeMap::App::Internal
         case PauseDisposition::Action::StopByRuntime:
             if (_runtime != nullptr)
             {
+                // P0: If the mode wants to fail, it will call this method directly. LoopController may only call it if there's an internal failure of this class's logic.
                 (void)_runtime->FailActiveMode(disposition.stopReason);
             }
             result.status = SessionResult::Status::StoppedByRuntime;

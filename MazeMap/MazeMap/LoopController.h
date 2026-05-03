@@ -47,6 +47,7 @@ namespace MazeMap::App::Internal
             SensorWorkPlan workPlan{};
         };
 
+		// P0: If the loop method returns, the loop is complete. Period. The fault system can and should eat all execution post-fault inside of SharedRobotRuntime.
         struct SessionResult final
         {
             enum class Status : std::uint8_t
@@ -90,13 +91,16 @@ namespace MazeMap::App::Internal
             std::uint8_t flags{};
         };
 
+		// P0: This is a very thin struct, and the callback is guaranteed to be non-null when the reason is provided. Also, LoopController shouldn't be logging this shit internally.
         struct PauseContext final
         {
             const char* reason{};
         };
 
+        // P0: This is a cluster of things that encourage abuse of the system. Users of it should be restructured to match the contract of the class.
         struct PauseDisposition final
         {
+            // P0: The only item in this set that is valid is "Resume." There's no point to the type.
             enum class Action : std::uint8_t
             {
                 Resume,
@@ -104,11 +108,15 @@ namespace MazeMap::App::Internal
                 StopByRuntime
             } action{ Action::Resume };
 
+            // P0: The only valid value for this is false, so the entire field is pointless and encourages breaking the system.
             bool resetClockOnResume{ true };
             const char* stopReason{};
 
+            // P0: This is the only valid return value, so the whole struct is pointless.
             static PauseDisposition Resume() noexcept;
+            // P0: If you want to stop the loop, you call EndSession.
             static PauseDisposition Complete() noexcept;
+            // P0: This is only valid coming from SharedRobotRuntime. All other calls should die, and the mechanism needs to move to a private/friend barrier to prevent abuse.
             static PauseDisposition StopByRuntime(const char* reason) noexcept;
         };
 
@@ -124,14 +132,21 @@ namespace MazeMap::App::Internal
             void* context,
             const PauseContext& pause);
 
+		// P0: The only valid item in this struct is the callback, and the only valid callback is one that returns "Resume" with no clock reset. This struct encourages abuse of the system by making it look like you are allowed to do more than that.
         struct PauseRequest final
         {
             PauseCallback onPauseGranted{};
+            // P1: This encourages callers to store strings specifically for this method, and adds a required logging layer for pauses. This is counterproductive bloat.
             const char* reason{};
+            // P0: LoopController only pauses once fully settled, and the callback is not allowed to issue motion commands. This implies otherwise.
             float maxAbsLinearSpeed{ -1.0f };
+            // P0: LoopController only pauses once fully settled, and the callback is not allowed to issue motion commands. This implies otherwise.
             float maxAbsAngularSpeed{ -1.0f };
+            // P1: This is pointless, as the stop policy is owned here.
             std::uint8_t consecutiveSettledTicks{};
+            // P0: Flushing is not controlled by callers.
             bool flushLogsBeforeGrant{ true };
+            // P0: LoopController is not allowed to reset the clock ever.
             bool resetClockOnResume{ true };
         };
 
@@ -141,15 +156,21 @@ namespace MazeMap::App::Internal
             void* context{};
         };
 
+        // P0: This class has no reason to exist, as all contents would be better as LoopController methods.
         class TickServices final
         {
         public:
+            // P1: This encourages division of fault ownership.
             void Fault(const char* reason) noexcept;
             // Pause is the only sanctioned way to leave strict periodic cadence for non-periodic
             // work. Do not replace it with caller-driven "tick once, then return to me" control.
+			// P0: Should be a method of LoopController, not a nested class.
             void RequestPause(const PauseRequest& request) noexcept;
+            // P0: Should be a method of LoopController, not a nested class.
             void RequestEndLoop() noexcept;
+            // P1: This should be a method of LoopController, not a nested class.
             void SetNextModeWorkCallbacks(const ModeCallbacks& callbacks) noexcept;
+            // P0: Copying things by value?
             void SetNextModeWorkCallback(ModeWorkCallback callback) noexcept;
 
         private:

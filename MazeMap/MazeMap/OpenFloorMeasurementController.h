@@ -210,13 +210,6 @@ namespace MazeMap::App::Internal
             LoopCounterClockwise = 7U,
         };
 
-        enum class PhaseExecutionState : std::uint8_t
-        {
-            Motion,
-            PendingHold,
-            Hold,
-        };
-
         class MainRowLabel final
         {
         public:
@@ -384,7 +377,7 @@ namespace MazeMap::App::Internal
             float _activeLeftCommand{};
             float _activeRightCommand{};
             std::uint32_t _deadlineMs{};
-            PhaseExecutionState _executionState{ PhaseExecutionState::Motion };
+            bool _holdActive{};
         };
 
         class StraightMeasurementPhase final : public MainMeasurementPhase
@@ -417,8 +410,7 @@ namespace MazeMap::App::Internal
                 bool& done) override;
 
         private:
-            float _activeSpeedMps{};
-            PhaseExecutionState _executionState{ PhaseExecutionState::Motion };
+            bool _holdActive{};
         };
 
         class YawMeasurementPhase final : public MainMeasurementPhase
@@ -451,9 +443,7 @@ namespace MazeMap::App::Internal
                 bool& done) override;
 
         private:
-            float _activeYawRad{};
-            float _activeMaxOmegaRadps{};
-            PhaseExecutionState _executionState{ PhaseExecutionState::Motion };
+            bool _holdActive{};
         };
 
         class SmoothMeasurementPhase final : public MainMeasurementPhase
@@ -508,7 +498,7 @@ namespace MazeMap::App::Internal
             std::array<float, kSmoothPhaseSlotCapacity> _speedLimitsMps{};
             std::array<std::uint8_t, kOpenFloorSmoothSpeedBinsMps.size()> _primitiveCounts{};
             std::uint16_t _activePostSlotHoldMs{};
-            PhaseExecutionState _executionState{ PhaseExecutionState::Motion };
+            bool _holdActive{};
         };
 
         class LoopMeasurementPhase final : public MainMeasurementPhase
@@ -549,7 +539,7 @@ namespace MazeMap::App::Internal
             bool _clockwise{};
             std::array<MazeMap::ManeuverInstance, kLoopPhasePrimitiveCount> _maneuvers{};
             std::uint16_t _activePostSlotHoldMs{};
-            PhaseExecutionState _executionState{ PhaseExecutionState::Motion };
+            bool _holdActive{};
         };
 
         class TimingStage final

@@ -219,8 +219,7 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)services;
 
-        const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
-        return done ? StopControlVector() : control;
+        return controller._driveService.GetNextControls(done);
     }
 
     const char* OpenFloorMeasurementController::LaunchMeasurementPhase::Name() const noexcept
@@ -239,7 +238,7 @@ namespace MazeMap::App::Internal
         _activeLeftCommand = 0.0f;
         _activeRightCommand = 0.0f;
         _deadlineMs = 0U;
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     bool OpenFloorMeasurementController::LaunchMeasurementPhase::Prepare(
@@ -309,7 +308,7 @@ namespace MazeMap::App::Internal
         _activeLeftCommand = magnitude * sign;
         _activeRightCommand = magnitude * sign;
         _deadlineMs = millis() + static_cast<std::uint32_t>(MazeMap::kOpenFloorLaunchPulseMs);
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::LaunchMeasurementPhase::TickActiveSlot(
@@ -321,32 +320,22 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)services;
 
-        switch (_executionState)
+        if (!_holdActive)
         {
-        case PhaseExecutionState::Motion:
             if (static_cast<long>(_deadlineMs - millis()) > 0)
             {
                 done = false;
                 return LoopController::ControlVector::RawMotorPwm(_activeLeftCommand, _activeRightCommand);
             }
 
-            _executionState = PhaseExecutionState::PendingHold;
-            done = false;
-            return StopControlVector();
-
-        case PhaseExecutionState::PendingHold:
             controller._driveService.SetLimits(BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f));
             controller._driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             controller._driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs, false);
-            _executionState = PhaseExecutionState::Hold;
-            done = false;
-            return StopControlVector();
-
-        case PhaseExecutionState::Hold:
-        default:
-            const LoopController::ControlVector holdControl = controller._driveService.GetNextControls(done);
-            return done ? StopControlVector() : holdControl;
+            _holdActive = true;
         }
+
+        const LoopController::ControlVector holdControl = controller._driveService.GetNextControls(done);
+        return holdControl;
     }
 
     const char* OpenFloorMeasurementController::StraightMeasurementPhase::Name() const noexcept
@@ -362,8 +351,7 @@ namespace MazeMap::App::Internal
 
     void OpenFloorMeasurementController::StraightMeasurementPhase::Reset() noexcept
     {
-        _activeSpeedMps = 0.0f;
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     bool OpenFloorMeasurementController::StraightMeasurementPhase::Prepare(
@@ -424,16 +412,16 @@ namespace MazeMap::App::Internal
 
         const float speedMagnitudeMps = MazeMap::kOpenFloorStraightSpeedBinsMps[speedBinIndex];
         const float direction = ((repeatIndex % 2U) == 0U) ? 1.0f : -1.0f;
-        _activeSpeedMps = direction * speedMagnitudeMps;
+        const float activeSpeedMps = direction * speedMagnitudeMps;
 
         controller._driveService.SetLimits(
-            BuildOpenFloorMeasurementLimits(controller._vehicle, std::fabs(_activeSpeedMps)));
+            BuildOpenFloorMeasurementLimits(controller._vehicle, std::fabs(activeSpeedMps)));
         controller._driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
         controller._driveService.StartStraight(
             MazeMap::OpenFloorStrEquivalentDistanceMeters(4U),
-            _activeSpeedMps,
+            activeSpeedMps,
             0.0f);
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::StraightMeasurementPhase::TickActiveSlot(
@@ -445,34 +433,28 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)services;
 
-        switch (_executionState)
+        if (_holdActive)
         {
-        case PhaseExecutionState::Motion:
-        {
-            const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
-            if (!done)
-            {
-                return control;
-            }
-
-            _executionState = PhaseExecutionState::PendingHold;
-            done = false;
-            return StopControlVector();
+            return controller._driveService.GetNextControls(done);
         }
 
-        case PhaseExecutionState::PendingHold:
+        if (controller._driveService.IsEffectivelyComplete())
+        {
+            // The straight primitive finished on the previous tick; arm the follow-up hold now so
+            // its first proposal is generated on the same tick as the StartHold call.
             controller._driveService.SetLimits(BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f));
             controller._driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             controller._driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs, false);
-            _executionState = PhaseExecutionState::Hold;
-            done = false;
-            return StopControlVector();
-
-        case PhaseExecutionState::Hold:
-        default:
-            const LoopController::ControlVector holdControl = controller._driveService.GetNextControls(done);
-            return done ? StopControlVector() : holdControl;
+            _holdActive = true;
+            return controller._driveService.GetNextControls(done);
         }
+
+        const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
+        if (done)
+        {
+            done = false;
+        }
+        return control;
     }
 
     const char* OpenFloorMeasurementController::YawMeasurementPhase::Name() const noexcept
@@ -488,9 +470,7 @@ namespace MazeMap::App::Internal
 
     void OpenFloorMeasurementController::YawMeasurementPhase::Reset() noexcept
     {
-        _activeYawRad = 0.0f;
-        _activeMaxOmegaRadps = 0.0f;
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     bool OpenFloorMeasurementController::YawMeasurementPhase::Prepare(
@@ -547,15 +527,15 @@ namespace MazeMap::App::Internal
     {
         (void)repeatIndex;
 
-        _activeYawRad = MazeMap::kOpenFloorYawNominalAnglesRad[primitiveIndex];
-        _activeMaxOmegaRadps = MazeMap::kOpenFloorYawOmegaBinsRadps[speedBinIndex];
+        const float activeYawRad = MazeMap::kOpenFloorYawNominalAnglesRad[primitiveIndex];
+        const float activeMaxOmegaRadps = MazeMap::kOpenFloorYawOmegaBinsRadps[speedBinIndex];
 
         MotionLimits limits = BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f);
-        limits.maxAngularSpeedRadps = _activeMaxOmegaRadps;
+        limits.maxAngularSpeedRadps = activeMaxOmegaRadps;
         controller._driveService.SetLimits(limits);
         controller._driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-        controller._driveService.StartTurn(_activeYawRad);
-        _executionState = PhaseExecutionState::Motion;
+        controller._driveService.StartTurn(activeYawRad);
+        _holdActive = false;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::YawMeasurementPhase::TickActiveSlot(
@@ -567,34 +547,26 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)services;
 
-        switch (_executionState)
+        if (_holdActive)
         {
-        case PhaseExecutionState::Motion:
-        {
-            const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
-            if (!done)
-            {
-                return control;
-            }
-
-            _executionState = PhaseExecutionState::PendingHold;
-            done = false;
-            return StopControlVector();
+            return controller._driveService.GetNextControls(done);
         }
 
-        case PhaseExecutionState::PendingHold:
+        if (controller._driveService.IsEffectivelyComplete())
+        {
             controller._driveService.SetLimits(BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f));
             controller._driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             controller._driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs, false);
-            _executionState = PhaseExecutionState::Hold;
-            done = false;
-            return StopControlVector();
-
-        case PhaseExecutionState::Hold:
-        default:
-            const LoopController::ControlVector holdControl = controller._driveService.GetNextControls(done);
-            return done ? StopControlVector() : holdControl;
+            _holdActive = true;
+            return controller._driveService.GetNextControls(done);
         }
+
+        const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
+        if (done)
+        {
+            done = false;
+        }
+        return control;
     }
 
     const char* OpenFloorMeasurementController::SmoothMeasurementPhase::Name() const noexcept
@@ -613,7 +585,7 @@ namespace MazeMap::App::Internal
         _speedLimitsMps.fill(0.0f);
         _primitiveCounts.fill(0U);
         _activePostSlotHoldMs = 0U;
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     bool OpenFloorMeasurementController::SmoothMeasurementPhase::Prepare(
@@ -728,7 +700,7 @@ namespace MazeMap::App::Internal
         _activePostSlotHoldMs = IsLastActiveSlot(primitiveIndex, speedBinIndex) ?
             static_cast<std::uint16_t>(MazeMap::kOpenFloorInterPhaseHoldMs) :
             0U;
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::SmoothMeasurementPhase::TickActiveSlot(
@@ -740,38 +712,26 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)services;
 
-        switch (_executionState)
+        if (_holdActive)
         {
-        case PhaseExecutionState::Motion:
-        {
-            const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
-            if (!done)
-            {
-                return control;
-            }
-            if (_activePostSlotHoldMs == 0U)
-            {
-                return StopControlVector();
-            }
-
-            _executionState = PhaseExecutionState::PendingHold;
-            done = false;
-            return StopControlVector();
+            return controller._driveService.GetNextControls(done);
         }
 
-        case PhaseExecutionState::PendingHold:
+        if ((_activePostSlotHoldMs > 0U) && controller._driveService.IsEffectivelyComplete())
+        {
             controller._driveService.SetLimits(BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f));
             controller._driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             controller._driveService.StartHold(_activePostSlotHoldMs, false);
-            _executionState = PhaseExecutionState::Hold;
-            done = false;
-            return StopControlVector();
-
-        case PhaseExecutionState::Hold:
-        default:
-            const LoopController::ControlVector holdControl = controller._driveService.GetNextControls(done);
-            return done ? StopControlVector() : holdControl;
+            _holdActive = true;
+            return controller._driveService.GetNextControls(done);
         }
+
+        const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
+        if (done && (_activePostSlotHoldMs > 0U))
+        {
+            done = false;
+        }
+        return control;
     }
 
     bool OpenFloorMeasurementController::SmoothMeasurementPhase::IsLastActiveSlot(
@@ -857,7 +817,7 @@ namespace MazeMap::App::Internal
     void OpenFloorMeasurementController::LoopMeasurementPhase::Reset() noexcept
     {
         _activePostSlotHoldMs = 0U;
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     bool OpenFloorMeasurementController::LoopMeasurementPhase::Prepare(
@@ -942,7 +902,7 @@ namespace MazeMap::App::Internal
                 ((repeatIndex + 1U) == static_cast<std::uint16_t>(DiagnosticConfig::kLoopRepeats))) ?
             static_cast<std::uint16_t>(MazeMap::kOpenFloorInterPhaseHoldMs) :
             0U;
-        _executionState = PhaseExecutionState::Motion;
+        _holdActive = false;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::LoopMeasurementPhase::TickActiveSlot(
@@ -954,38 +914,26 @@ namespace MazeMap::App::Internal
         (void)state;
         (void)services;
 
-        switch (_executionState)
+        if (_holdActive)
         {
-        case PhaseExecutionState::Motion:
-        {
-            const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
-            if (!done)
-            {
-                return control;
-            }
-            if (_activePostSlotHoldMs == 0U)
-            {
-                return StopControlVector();
-            }
-
-            _executionState = PhaseExecutionState::PendingHold;
-            done = false;
-            return StopControlVector();
+            return controller._driveService.GetNextControls(done);
         }
 
-        case PhaseExecutionState::PendingHold:
+        if ((_activePostSlotHoldMs > 0U) && controller._driveService.IsEffectivelyComplete())
+        {
             controller._driveService.SetLimits(BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f));
             controller._driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             controller._driveService.StartHold(_activePostSlotHoldMs, false);
-            _executionState = PhaseExecutionState::Hold;
-            done = false;
-            return StopControlVector();
-
-        case PhaseExecutionState::Hold:
-        default:
-            const LoopController::ControlVector holdControl = controller._driveService.GetNextControls(done);
-            return done ? StopControlVector() : holdControl;
+            _holdActive = true;
+            return controller._driveService.GetNextControls(done);
         }
+
+        const LoopController::ControlVector control = controller._driveService.GetNextControls(done);
+        if (done && (_activePostSlotHoldMs > 0U))
+        {
+            done = false;
+        }
+        return control;
     }
 
     bool OpenFloorMeasurementController::LoopMeasurementPhase::BuildQueue(
@@ -1295,7 +1243,7 @@ namespace MazeMap::App::Internal
         {
             _slotStarted = false;
             _completionPending = !MoveToNextActiveSlot();
-            return StopControlVector();
+            return control;
         }
 
         return control;
