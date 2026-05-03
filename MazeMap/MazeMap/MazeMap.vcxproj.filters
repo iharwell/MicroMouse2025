@@ -479,6 +479,9 @@
     <ClCompile Include="CompactPath.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Defines.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Direction.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

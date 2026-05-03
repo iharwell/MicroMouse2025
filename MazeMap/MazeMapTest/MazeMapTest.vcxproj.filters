@@ -98,6 +98,9 @@
     <ClCompile Include="OpenFloorMeasurementSpecTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="OpenFloorMeasurementControllerTest.cpp">
+      <Filter>Source Files\App</Filter>
+    </ClCompile>
     <ClCompile Include="PathFinderTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

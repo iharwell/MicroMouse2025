@@ -313,6 +313,7 @@
     <ClCompile Include="Cell.cpp" />
     <ClCompile Include="CellCoordinates.cpp" />
     <ClCompile Include="CompactPath.cpp" />
+    <ClCompile Include="Defines.cpp" />
     <ClCompile Include="Direction.cpp" />
     <ClCompile Include="DirectionalLocation.cpp" />
     <ClCompile Include="DirectionalPathFinder.cpp" />

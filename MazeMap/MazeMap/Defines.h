@@ -75,6 +75,18 @@ inline void sin_cosf(float theta, float& sin, float& cos)
 #include <thread>
 #include <new>
 
+#if defined(_MSC_VER)
+#ifdef MAZEMAP_EXPORTS
+#define EXPORT __declspec(dllexport)
+#else
+#define EXPORT __declspec(dllimport)
+#endif
+#define IMPORT __declspec(dllimport)
+#else
+#define EXPORT
+#define IMPORT
+#endif
+
 inline void sin_cosf(float theta, float& sin, float& cos)
 {
     sin = std::sinf(theta);
@@ -269,17 +281,12 @@ namespace MazeMap::arduino_stub_detail
         bool hasInputOverride = false;
     };
 
-    inline auto& host_pin_states()
-    {
-        static std::array<HostDigitalPinState, kHostDigitalPinCapacity> states{};
-        return states;
-    }
+    using HostDigitalPinStates = std::array<HostDigitalPinState, kHostDigitalPinCapacity>;
+    using HostDigitalPinShorts =
+        std::array<std::array<bool, kHostDigitalPinCapacity>, kHostDigitalPinCapacity>;
 
-    inline auto& host_pin_shorts()
-    {
-        static std::array<std::array<bool, kHostDigitalPinCapacity>, kHostDigitalPinCapacity> shorts{};
-        return shorts;
-    }
+    EXPORT HostDigitalPinStates& host_pin_states() noexcept;
+    EXPORT HostDigitalPinShorts& host_pin_shorts() noexcept;
 
     inline bool is_valid_host_pin(uint8_t pin)
     {
@@ -1134,18 +1141,6 @@ inline void init() {}
 inline void initVariant() {}
 #ifndef _MSC_VER
 inline int atexit(void (*)()) { return 0; }
-#endif
-
-#if defined(_MSC_VER)
-#ifdef MAZEMAP_EXPORTS
-#define EXPORT __declspec(dllexport)
-#else
-#define EXPORT __declspec(dllimport)
-#endif
-#define IMPORT __declspec(dllimport)
-#else
-#define EXPORT
-#define IMPORT
 #endif
 
 #endif
