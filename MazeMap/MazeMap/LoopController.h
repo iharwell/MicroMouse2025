@@ -247,7 +247,9 @@ namespace MazeMap::App::Internal
         static constexpr std::uint8_t kTimingFlagRuntimeStopPending = 1U << 2;
 
         static std::uint16_t RelativeTickUs(std::uint32_t tickStartUs, std::uint32_t timestampUs) noexcept;
+        // P0: Belongs in the PWM sink.
         static bool IsBrakeMotorPwmCommand(const ControlVector& command) noexcept;
+        // P0: Belongs in the PWM sink.
         static bool IsZeroMotorPwmCommand(const ControlVector& command) noexcept;
         static bool IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
@@ -255,6 +257,7 @@ namespace MazeMap::App::Internal
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
+        // P1: This seems unnecessary. Just use the getter.
         const TimingDiagnostics* CurrentTimingForReaders() const noexcept;
         void ResetLatchedRequests() noexcept;
         bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
@@ -264,12 +267,14 @@ namespace MazeMap::App::Internal
             std::uint32_t tickStartUs,
             std::uint32_t dtUs) noexcept;
         TimingDiagnostics& WorkingTiming() noexcept;
+        // P1: This seems unnecessary. Just use the getter.
         const TimingDiagnostics& PublishedTiming() const noexcept;
         void PublishWorkingTiming() noexcept;
         void RecordModeReturnTiming() noexcept;
         void RecordPostServiceTiming() noexcept;
         void FinalizeTiming() noexcept;
         bool ServiceRuntimeLogsNormal() noexcept;
+        // P0: This is the responsibility of FailActiveMode.
         void ServiceRuntimeLogsForFaultPath() noexcept;
         std::uint32_t ComputeRemainingSlackUs(std::uint32_t absoluteDeadlineUs) const noexcept;
         bool ShouldTreatAppliedControlAsStationary() const noexcept;
