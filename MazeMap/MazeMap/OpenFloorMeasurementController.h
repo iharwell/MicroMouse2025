@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Defines.h"
+#include "DiagnosticConfig.h"
 #include "Drive.h"
 #include "IApplicationMode.h"
 #include "LoopController.h"
@@ -13,7 +14,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <variant>
 
 namespace MazeMap::App
 {
@@ -22,6 +22,11 @@ namespace MazeMap::App
 
 class DriveBase;
 class RuntimeSensorSuite;
+
+namespace MazeMap
+{
+    class ManeuverQueue;
+}
 
 namespace MazeMap::App::Internal
 {
@@ -170,8 +175,19 @@ namespace MazeMap::App::Internal
         void Run() override;
 
     private:
-        static constexpr std::size_t kMainSegmentCapacity = 320U;
-        static constexpr std::size_t kCompiledManeuverCapacity = 170U;
+        static constexpr std::size_t kMainScheduledWorkCapacity = 320U;
+        static constexpr std::size_t kRepeatedSequenceScratchCapacity = 96U;
+        static constexpr std::size_t kLaunchPhaseCaseCapacity =
+            kOpenFloorLaunchDriveMagnitudeCount * kOpenFloorLaunchRepeatsPerMagnitude * 2U;
+        static constexpr std::size_t kStraightPhaseCaseCapacity =
+            kOpenFloorStraightSpeedBinsMps.size() * kOpenFloorStraightRepeatsPerSpeed * 2U;
+        static constexpr std::size_t kYawPhaseCaseCapacity =
+            kOpenFloorYawOmegaBinsRadps.size() *
+            DiagnosticConfig::kYawRepeatsPerPrimitiveSpeed *
+            kOpenFloorYawPrimitiveIds.size();
+        static constexpr std::size_t kSmoothPhaseCaseCapacity =
+            (kOpenFloorSmoothSpeedBinsMps.size() * 27U) + 1U;
+        static constexpr std::size_t kLoopPhaseCaseCapacity = 8U;
 
         using StageTick = LoopController::ControlVector (OpenFloorMeasurementController::*)(
             std::uint32_t loopEndTimeUs,
@@ -184,220 +200,206 @@ namespace MazeMap::App::Internal
             TimingToMain,
         };
 
-        enum class BatteryPhaseId : std::uint8_t
+        enum class MeasurementPhaseId : std::uint8_t
         {
-            Timing = static_cast<std::uint8_t>(OpenFloorSectionId::Sec00Timing),
-            Static = static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static),
-            Launch = static_cast<std::uint8_t>(OpenFloorSectionId::Sec20Launch),
-            Straight = static_cast<std::uint8_t>(OpenFloorSectionId::Sec30Straight),
-            Yaw = static_cast<std::uint8_t>(OpenFloorSectionId::Sec40Yaw),
-            Smooth = static_cast<std::uint8_t>(OpenFloorSectionId::Sec50Smooth),
-            LoopClockwise = static_cast<std::uint8_t>(OpenFloorSectionId::Sec60LoopCw),
-            LoopCounterClockwise = static_cast<std::uint8_t>(OpenFloorSectionId::Sec70LoopCcw),
+            Timing = 0U,
+            Static = 1U,
+            Launch = 2U,
+            Straight = 3U,
+            Yaw = 4U,
+            Smooth = 5U,
+            LoopClockwise = 6U,
+            LoopCounterClockwise = 7U,
         };
 
-        struct LoggedRowIdentity final
+        class MainRowLabel final
         {
-            constexpr LoggedRowIdentity() = default;
-            constexpr LoggedRowIdentity(
-                BatteryPhaseId phaseId,
+        public:
+            constexpr MainRowLabel() = default;
+            constexpr MainRowLabel(
+                MeasurementPhaseId phaseId,
                 OpenFloorPrimitiveId primitiveId,
                 OpenFloorSpeedBin speedBin,
                 std::uint16_t repeatIndex) noexcept
-                : phaseId(phaseId)
-                , primitiveId(primitiveId)
-                , speedBin(speedBin)
-                , repeatIndex(repeatIndex)
+                : _phaseId(phaseId)
+                , _primitiveId(primitiveId)
+                , _speedBin(speedBin)
+                , _repeatIndex(repeatIndex)
             {
             }
 
-            BatteryPhaseId phaseId = BatteryPhaseId::Timing;
-            OpenFloorPrimitiveId primitiveId = OpenFloorPrimitiveId::None;
-            OpenFloorSpeedBin speedBin = OpenFloorSpeedBin::None;
-            std::uint16_t repeatIndex = 0U;
+            constexpr MeasurementPhaseId PhaseId() const noexcept
+            {
+                return _phaseId;
+            }
+
+            constexpr OpenFloorPrimitiveId PrimitiveId() const noexcept
+            {
+                return _primitiveId;
+            }
+
+            constexpr OpenFloorSpeedBin SpeedBin() const noexcept
+            {
+                return _speedBin;
+            }
+
+            constexpr std::uint16_t RepeatIndex() const noexcept
+            {
+                return _repeatIndex;
+            }
+
+            constexpr MainRowLabel WithRepeatIndex(const std::uint16_t repeatIndex) const noexcept
+            {
+                return MainRowLabel(_phaseId, _primitiveId, _speedBin, repeatIndex);
+            }
+
+        private:
+            MeasurementPhaseId _phaseId{ MeasurementPhaseId::Timing };
+            OpenFloorPrimitiveId _primitiveId{ OpenFloorPrimitiveId::None };
+            OpenFloorSpeedBin _speedBin{ OpenFloorSpeedBin::None };
+            std::uint16_t _repeatIndex{};
         };
 
-        class CompiledSegment;
         class MainStage;
 
-        class ActiveSegmentExecution final
+        class MainMeasurementPhase
         {
         public:
-            void Reset() noexcept;
-            void Rebind(const CompiledSegment& segment) noexcept;
+            virtual ~MainMeasurementPhase() = default;
 
-        private:
-            friend class CompiledSegment;
-
-            struct HoldExecution final
-            {
-                bool started{};
-            };
-
-            struct WheelCommandProfileExecution final
-            {
-                bool started{};
-                bool settling{};
-                std::uint32_t deadlineMs{};
-                HoldExecution settlingHold{};
-            };
-
-            struct StraightExecution final
-            {
-                bool started{};
-                bool settling{};
-                float startDistanceM{};
-                float totalDistanceM{};
-                HoldExecution settlingHold{};
-            };
-
-            struct TurnExecution final
-            {
-                bool started{};
-                bool settling{};
-                float targetYawRad{};
-                float targetMagnitudeRad{};
-                HoldExecution settlingHold{};
-            };
-
-            struct ManeuverExecution final
-            {
-                bool started{};
-                bool settling{};
-                float startDistanceM{};
-                float totalDistanceM{};
-                float targetYawRad{};
-                float targetMagnitudeRad{};
-                HoldExecution settlingHold{};
-            };
-
-            using ExecutionState = std::variant<
-                std::monostate,
-                HoldExecution,
-                WheelCommandProfileExecution,
-                StraightExecution,
-                TurnExecution,
-                ManeuverExecution>;
-
-            ExecutionState _state{};
-        };
-
-        class CompiledSegment final
-        {
-        public:
-            CompiledSegment() = default;
-
-            static CompiledSegment Hold(
-                LoggedRowIdentity identity,
-                std::uint16_t durationMs) noexcept;
-            static CompiledSegment WheelCommandProfile(
-                LoggedRowIdentity identity,
-                std::uint16_t durationMs,
-                float leftCommand,
-                float rightCommand,
-                std::uint16_t settlingHoldMs) noexcept;
-            static CompiledSegment Straight(
-                LoggedRowIdentity identity,
-                float distanceM,
-                float speedMps,
-                std::uint16_t settlingHoldMs) noexcept;
-            static CompiledSegment Turn(
-                LoggedRowIdentity identity,
-                float yawRad,
-                float maxOmegaRadps,
-                std::uint16_t settlingHoldMs) noexcept;
-            static CompiledSegment Maneuver(
-                LoggedRowIdentity identity,
-                std::uint16_t maneuverIndex,
-                float speedMps,
-                std::uint16_t settlingHoldMs) noexcept;
-
-            const LoggedRowIdentity& RowIdentity() const noexcept;
-            BatteryPhaseId PhaseId() const noexcept;
-            const char* FaultReasonText() const noexcept;
-            LoopController::ControlVector TickExecution(
+            virtual MeasurementPhaseId PhaseId() const noexcept = 0;
+            virtual void Reset() noexcept = 0;
+            virtual bool Compile(OpenFloorMeasurementController& controller, MainStage& stage) = 0;
+            virtual void BeginCase(OpenFloorMeasurementController& controller, std::uint16_t caseIndex) = 0;
+            virtual LoopController::ControlVector TickCase(
                 OpenFloorMeasurementController& controller,
-                ActiveSegmentExecution& execution,
                 const MazeMap::VehicleState& state,
                 LoopController::TickServices& services,
-                bool& done) const;
+                bool& done) = 0;
+        };
+
+        class StaticMeasurementPhase final : public MainMeasurementPhase
+        {
+        public:
+            MeasurementPhaseId PhaseId() const noexcept override;
+            void Reset() noexcept override;
+            bool Compile(OpenFloorMeasurementController& controller, MainStage& stage) override;
+            void BeginCase(OpenFloorMeasurementController& controller, std::uint16_t caseIndex) override;
+            LoopController::ControlVector TickCase(
+                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
+                LoopController::TickServices& services,
+                bool& done) override;
+        };
+
+        class LaunchMeasurementPhase final : public MainMeasurementPhase
+        {
+        public:
+            MeasurementPhaseId PhaseId() const noexcept override;
+            void Reset() noexcept override;
+            bool Compile(OpenFloorMeasurementController& controller, MainStage& stage) override;
+            void BeginCase(OpenFloorMeasurementController& controller, std::uint16_t caseIndex) override;
+            LoopController::ControlVector TickCase(
+                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
+                LoopController::TickServices& services,
+                bool& done) override;
 
         private:
-            friend class ActiveSegmentExecution;
+            std::array<float, kLaunchPhaseCaseCapacity> _leftCommands{};
+            std::array<float, kLaunchPhaseCaseCapacity> _rightCommands{};
+            std::uint16_t _caseCount{};
+            float _activeLeftCommand{};
+            float _activeRightCommand{};
+            std::uint32_t _deadlineMs{};
+        };
 
-            struct HoldPlan final
-            {
-                std::uint16_t durationMs{};
-            };
-
-            struct WheelCommandProfilePlan final
-            {
-                std::uint16_t durationMs{};
-                float leftCommand{};
-                float rightCommand{};
-            };
-
-            struct StraightPlan final
-            {
-                float distanceM{};
-                float speedMps{};
-            };
-
-            struct TurnPlan final
-            {
-                float yawRad{};
-                float maxOmegaRadps{};
-            };
-
-            struct ManeuverPlan final
-            {
-                std::uint16_t maneuverIndex{};
-                float speedMps{};
-            };
-
-            using Plan = std::variant<
-                HoldPlan,
-                WheelCommandProfilePlan,
-                StraightPlan,
-                TurnPlan,
-                ManeuverPlan>;
-
-            CompiledSegment(
-                LoggedRowIdentity identity,
-                std::uint16_t settlingHoldMs,
-                const Plan& plan) noexcept;
-            LoopController::ControlVector TickHoldExecution(
+        class StraightMeasurementPhase final : public MainMeasurementPhase
+        {
+        public:
+            MeasurementPhaseId PhaseId() const noexcept override;
+            void Reset() noexcept override;
+            bool Compile(OpenFloorMeasurementController& controller, MainStage& stage) override;
+            void BeginCase(OpenFloorMeasurementController& controller, std::uint16_t caseIndex) override;
+            LoopController::ControlVector TickCase(
                 OpenFloorMeasurementController& controller,
-                std::uint16_t durationMs,
-                ActiveSegmentExecution::HoldExecution& execution,
-                bool& done) const;
-            LoopController::ControlVector TickWheelCommandProfileExecution(
-                OpenFloorMeasurementController& controller,
-                const WheelCommandProfilePlan& plan,
-                ActiveSegmentExecution::WheelCommandProfileExecution& execution,
-                bool& done) const;
-            LoopController::ControlVector TickStraightExecution(
-                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
                 LoopController::TickServices& services,
-                const StraightPlan& plan,
-                ActiveSegmentExecution::StraightExecution& execution,
-                bool& done) const;
-            LoopController::ControlVector TickTurnExecution(
-                OpenFloorMeasurementController& controller,
-                LoopController::TickServices& services,
-                const TurnPlan& plan,
-                ActiveSegmentExecution::TurnExecution& execution,
-                bool& done) const;
-            LoopController::ControlVector TickManeuverExecution(
-                OpenFloorMeasurementController& controller,
-                LoopController::TickServices& services,
-                const ManeuverPlan& plan,
-                ActiveSegmentExecution::ManeuverExecution& execution,
-                bool& done) const;
+                bool& done) override;
 
-            LoggedRowIdentity _rowIdentity{};
-            std::uint16_t _settlingHoldMs{};
-            Plan _plan{ HoldPlan{} };
+        private:
+            std::array<float, kStraightPhaseCaseCapacity> _speedsMps{};
+            std::uint16_t _caseCount{};
+        };
+
+        class YawMeasurementPhase final : public MainMeasurementPhase
+        {
+        public:
+            MeasurementPhaseId PhaseId() const noexcept override;
+            void Reset() noexcept override;
+            bool Compile(OpenFloorMeasurementController& controller, MainStage& stage) override;
+            void BeginCase(OpenFloorMeasurementController& controller, std::uint16_t caseIndex) override;
+            LoopController::ControlVector TickCase(
+                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
+                LoopController::TickServices& services,
+                bool& done) override;
+
+        private:
+            std::array<float, kYawPhaseCaseCapacity> _yawRad{};
+            std::array<float, kYawPhaseCaseCapacity> _maxOmegaRadps{};
+            std::uint16_t _caseCount{};
+        };
+
+        class SmoothMeasurementPhase final : public MainMeasurementPhase
+        {
+        public:
+            MeasurementPhaseId PhaseId() const noexcept override;
+            void Reset() noexcept override;
+            bool Compile(OpenFloorMeasurementController& controller, MainStage& stage) override;
+            void BeginCase(OpenFloorMeasurementController& controller, std::uint16_t caseIndex) override;
+            LoopController::ControlVector TickCase(
+                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
+                LoopController::TickServices& services,
+                bool& done) override;
+
+        private:
+            bool BuildQueue(
+                MazeMap::Vehicle& vehicle,
+                std::uint8_t speedIndex,
+                float cruiseSpeedMps,
+                float initialEntrySpeedMps,
+                MazeMap::ManeuverQueue& queue,
+                float& exitBoundarySpeedMps) const;
+
+            std::array<MazeMap::ManeuverInstance, kSmoothPhaseCaseCapacity> _maneuvers{};
+            std::array<float, kSmoothPhaseCaseCapacity> _speedLimitsMps{};
+            std::uint16_t _caseCount{};
+        };
+
+        class LoopMeasurementPhase final : public MainMeasurementPhase
+        {
+        public:
+            LoopMeasurementPhase(MeasurementPhaseId phaseId, bool clockwise) noexcept;
+
+            MeasurementPhaseId PhaseId() const noexcept override;
+            void Reset() noexcept override;
+            bool Compile(OpenFloorMeasurementController& controller, MainStage& stage) override;
+            void BeginCase(OpenFloorMeasurementController& controller, std::uint16_t caseIndex) override;
+            LoopController::ControlVector TickCase(
+                OpenFloorMeasurementController& controller,
+                const MazeMap::VehicleState& state,
+                LoopController::TickServices& services,
+                bool& done) override;
+
+        private:
+            bool BuildQueue(MazeMap::Vehicle& vehicle, MazeMap::ManeuverQueue& queue) const;
+
+            MeasurementPhaseId _phaseId;
+            bool _clockwise{};
+            std::array<MazeMap::ManeuverInstance, kLoopPhaseCaseCapacity> _maneuvers{};
+            std::uint16_t _caseCount{};
         };
 
         class TimingStage final
@@ -439,13 +441,74 @@ namespace MazeMap::App::Internal
                 const MazeMap::VehicleState& state,
                 LoopController::TickServices& services);
             void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
-            bool AppendSegment(const CompiledSegment& segment);
-            bool StoreCompiledManeuver(
-                const MazeMap::ManeuverInstance& maneuver,
-                std::uint16_t& maneuverIndex);
-            const MazeMap::ManeuverInstance* CompiledManeuverAt(std::uint16_t maneuverIndex) const noexcept;
+
+            bool RegisterUnrepeatedCase(
+                MainMeasurementPhase& phase,
+                std::uint16_t caseIndex,
+                OpenFloorPrimitiveId primitiveId,
+                OpenFloorSpeedBin speedBin);
+            bool RegisterSequentialCase(
+                MainMeasurementPhase& phase,
+                std::uint16_t caseIndex,
+                OpenFloorPrimitiveId primitiveId,
+                OpenFloorSpeedBin speedBin);
+            bool BeginRepeatedSequence(std::uint16_t repeatCount) noexcept;
+            bool RegisterRepeatedSequenceCase(
+                MainMeasurementPhase& phase,
+                std::uint16_t caseIndex,
+                OpenFloorPrimitiveId primitiveId,
+                OpenFloorSpeedBin speedBin);
+            bool EndRepeatedSequence();
 
         private:
+            class ScheduledWork final
+            {
+            public:
+                static ScheduledWork PhaseCase(
+                    MainMeasurementPhase& phase,
+                    std::uint16_t caseIndex,
+                    const MainRowLabel& labels) noexcept;
+                static ScheduledWork Hold(
+                    MainMeasurementPhase& phase,
+                    std::uint16_t caseIndex,
+                    const MainRowLabel& labels,
+                    std::uint16_t durationMs) noexcept;
+
+                bool IsHold() const noexcept;
+                MainMeasurementPhase& Phase() const noexcept;
+                std::uint16_t CaseIndex() const noexcept;
+                const MainRowLabel& Labels() const noexcept;
+                std::uint16_t HoldDurationMs() const noexcept;
+
+            private:
+                enum class Kind : std::uint8_t
+                {
+                    PhaseCase,
+                    Hold,
+                };
+
+                Kind _kind{ Kind::PhaseCase };
+                MainMeasurementPhase* _phase{};
+                MainRowLabel _labels{};
+                std::uint16_t _caseIndex{};
+                std::uint16_t _holdDurationMs{};
+            };
+
+            bool CompilePhase(
+                OpenFloorMeasurementController& controller,
+                MainMeasurementPhase& phase,
+                std::uint16_t interCaseHoldMs,
+                std::uint16_t interPhaseHoldMs);
+            void ClearCompileState() noexcept;
+            bool AppendScheduledCase(
+                MainMeasurementPhase& phase,
+                std::uint16_t caseIndex,
+                const MainRowLabel& labels);
+            bool AppendHold(
+                MainMeasurementPhase& phase,
+                std::uint16_t caseIndex,
+                const MainRowLabel& labels,
+                std::uint16_t durationMs);
             bool FlushPending(
                 OpenFloorMeasurementController& controller,
                 LoopController::TickServices* services,
@@ -455,18 +518,42 @@ namespace MazeMap::App::Internal
                 OpenFloorMeasurementController& controller,
                 LoopController::TickServices& services);
             void Advance() noexcept;
-            const CompiledSegment* ActiveSegment() const noexcept;
+            const ScheduledWork* ActiveWork() const noexcept;
 
-            std::array<CompiledSegment, kMainSegmentCapacity> _plan{};
-            std::array<MazeMap::ManeuverInstance, kCompiledManeuverCapacity> _maneuvers{};
-            std::uint16_t _planSize{};
-            std::uint16_t _maneuverCount{};
-            std::uint16_t _nextSegmentIndex{};
+            std::array<ScheduledWork, kMainScheduledWorkCapacity> _scheduledWork{};
+            std::uint16_t _scheduledWorkCount{};
+            std::uint16_t _nextWorkIndex{};
             bool _logOpen{};
             bool _completionPending{};
-            ActiveSegmentExecution _activeExecution{};
-            char _estimatorFaultReason[64]{};
+            bool _activeWorkStarted{};
+            MainMeasurementPhase* _activePhase{};
+            std::uint16_t _activeCaseIndex{};
+            MainRowLabel _activeLabels{};
             std::optional<Runtime::OpenFloorMainRow> _pendingRow{};
+
+            MainMeasurementPhase* _compilingPhase{};
+            std::uint16_t _compilingInterCaseHoldMs{};
+            std::uint16_t _compilingInterPhaseHoldMs{};
+            std::uint16_t _compilingSequentialRepeatIndex{};
+            bool _compilingPhaseHasCases{};
+            MainMeasurementPhase* _lastCompiledPhase{};
+            std::uint16_t _lastCompiledCaseIndex{};
+            MainRowLabel _lastCompiledLabels{};
+            bool _sequenceActive{};
+            std::uint16_t _sequenceRepeatCount{};
+            std::uint16_t _sequenceSize{};
+            std::array<ScheduledWork, kRepeatedSequenceScratchCapacity> _sequenceScratch{};
+
+            StaticMeasurementPhase _staticPhase{};
+            LaunchMeasurementPhase _launchPhase{};
+            StraightMeasurementPhase _straightPhase{};
+            YawMeasurementPhase _yawPhase{};
+            SmoothMeasurementPhase _smoothPhase{};
+            LoopMeasurementPhase _clockwiseLoopPhase{ MeasurementPhaseId::LoopClockwise, true };
+            LoopMeasurementPhase _counterClockwiseLoopPhase{
+                MeasurementPhaseId::LoopCounterClockwise,
+                false,
+            };
         };
 
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
@@ -485,7 +572,7 @@ namespace MazeMap::App::Internal
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorTimingRow& row) const noexcept;
         void PopulateMainRowFromState(
-            const LoggedRowIdentity& identity,
+            const MainRowLabel& labels,
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorMainRow& row) const;
         void ConfigureSelectorMonitor() noexcept;
