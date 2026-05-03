@@ -398,8 +398,8 @@ namespace MazeMap::App
 
             const OpenFloorMainRow& firstMainRow = mainRows.front();
             Assert::IsTrue(firstMainRow.phase_id == static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static));
-            Assert::IsTrue(firstMainRow.primitive_id == static_cast<std::uint8_t>(OpenFloorPrimitiveId::StaticHold));
-            Assert::IsTrue(firstMainRow.speed_bin == static_cast<std::uint8_t>(OpenFloorSpeedBin::None));
+            Assert::IsTrue(firstMainRow.primitive_id == static_cast<std::uint8_t>(MazeMap::MC_NONE));
+            Assert::IsTrue(firstMainRow.speed_bin == MazeMap::kOpenFloorSpeedBinLogIdNone);
             Assert::IsTrue(firstMainRow.repeat_index == 1U);
 
             const std::string timingSidecar =
@@ -414,7 +414,7 @@ namespace MazeMap::App
                 std::string::npos);
         }
 
-        TEST_METHOD(OpenFloorMeasurementController_FirstMainSegmentIdentityIsStaticHoldAndFaultDoesNotAdvancePastIt)
+        TEST_METHOD(OpenFloorMeasurementController_FirstMainPhaseIdentityIsStaticHoldAndFaultDoesNotAdvancePastIt)
         {
             SharedRobotRuntime runtime;
             OpenFloorMeasurementController mode(runtime);
@@ -443,8 +443,8 @@ namespace MazeMap::App
             for (const OpenFloorMainRow& row : mainRows)
             {
                 Assert::IsTrue(row.phase_id == static_cast<std::uint8_t>(OpenFloorSectionId::Sec10Static));
-                Assert::IsTrue(row.primitive_id == static_cast<std::uint8_t>(OpenFloorPrimitiveId::StaticHold));
-                Assert::IsTrue(row.speed_bin == static_cast<std::uint8_t>(OpenFloorSpeedBin::None));
+                Assert::IsTrue(row.primitive_id == static_cast<std::uint8_t>(MazeMap::MC_NONE));
+                Assert::IsTrue(row.speed_bin == MazeMap::kOpenFloorSpeedBinLogIdNone);
                 Assert::IsTrue(row.repeat_index == 1U);
             }
         }

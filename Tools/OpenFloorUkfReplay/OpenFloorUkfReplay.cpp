@@ -1,4 +1,5 @@
 #include "..\..\MazeMap\MazeMap\Estimator.h"
+#include "..\..\MazeMap\MazeMap\MazeMapRuntimeCore.h"
 #include "..\..\MazeMap\MazeMap\OpenFloorMeasurementSpec.h"
 #include "..\..\MazeMap\MazeMap\PlantModel.h"
 
@@ -824,10 +825,6 @@ namespace
     MazeMap::SrUkfCore::StateVector BuildKnownStationaryOpenFloorInitialState() noexcept
     {
         MazeMap::SrUkfCore::StateVector state = MazeMap::SrUkfCore::StateVector::Zero();
-        state(MazeMap::VehicleState::kPx) = MazeMap::OpenFloorMarkerXMeters(MazeMap::OpenFloorMarkerId::C);
-        state(MazeMap::VehicleState::kPy) = MazeMap::OpenFloorMarkerYMeters(MazeMap::OpenFloorMarkerId::C);
-        state(MazeMap::VehicleState::kPsi) =
-            DirectionToYawRad(MazeMap::GetOpenFloorMarker(MazeMap::OpenFloorMarkerId::C).heading);
         MazeMap::VehicleState::NormalizeStateVector(state);
         return state;
     }
@@ -1226,31 +1223,21 @@ namespace
         switch (phaseId)
         {
         case 0U:
-            return "idle";
+            return "timing";
         case 1U:
-            return "hold";
+            return "static";
         case 2U:
-            return "launch_pulse";
+            return "launch";
         case 3U:
-            return "recovery";
+            return "straight";
         case 4U:
-            return "accel";
+            return "yaw";
         case 5U:
-            return "cruise";
+            return "smooth";
         case 6U:
-            return "brake";
+            return "loop_cw";
         case 7U:
-            return "startup";
-        case 8U:
-            return "steady_rotation";
-        case 9U:
-            return "stop";
-        case 10U:
-            return "entry";
-        case 11U:
-            return "middle";
-        case 12U:
-            return "exit";
+            return "loop_ccw";
         default:
             return "phase_unknown_" + std::to_string(static_cast<unsigned>(phaseId));
         }
@@ -1258,43 +1245,14 @@ namespace
 
     std::string PrimitiveName(std::uint8_t primitiveId)
     {
-        switch (primitiveId)
+        if (primitiveId == static_cast<std::uint8_t>(MazeMap::MC_NONE))
         {
-        case 0U:
             return "NONE";
-        case 1U:
-            return "TIMING_NO_MOTION";
-        case 2U:
-            return "STATIC_HOLD";
-        case 3U:
-            return "OPEN_LOOP_LAUNCH";
-        case 4U:
-            return "STR2";
-        case 5U:
-            return "STR4";
-        case 6U:
-            return "IP90";
-        case 7U:
-            return "IP90_M";
-        case 8U:
-            return "IP180";
-        case 9U:
-            return "S45SS";
-        case 10U:
-            return "S45SS_M";
-        case 11U:
-            return "S90SS";
-        case 12U:
-            return "S90SS_M";
-        case 13U:
-            return "S135SS";
-        case 14U:
-            return "S135SS_M";
-        case 15U:
-            return "RECOVERY";
-        default:
-            return "PRIM_UNKNOWN_" + std::to_string(static_cast<unsigned>(primitiveId));
         }
+
+        char codeName[24] = {};
+        FormatManeuverCodeName(static_cast<MazeMap::ManeuverCode>(primitiveId), codeName, sizeof(codeName));
+        return codeName;
     }
 
     const std::vector<std::string>& DefaultSampleMetricSelection()

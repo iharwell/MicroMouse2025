@@ -49,11 +49,11 @@ namespace MazeMap
 
         TEST_METHOD(YawRepeatNominalAnglesCancelToZeroHeading)
         {
-            Assert::AreEqual(static_cast<size_t>(4U), MazeMap::kOpenFloorYawPrimitiveIds.size());
-            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip90), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[0U]));
-            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip90M), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[1U]));
-            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip180), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[2U]));
-            Assert::AreEqual(static_cast<int>(MazeMap::OpenFloorPrimitiveId::Ip180M), static_cast<int>(MazeMap::kOpenFloorYawPrimitiveIds[3U]));
+            Assert::AreEqual(static_cast<size_t>(4U), MazeMap::kOpenFloorYawManeuverCodes.size());
+            Assert::AreEqual(static_cast<int>(MazeMap::IP90), static_cast<int>(MazeMap::kOpenFloorYawManeuverCodes[0U]));
+            Assert::AreEqual(static_cast<int>(MazeMap::IP90_M), static_cast<int>(MazeMap::kOpenFloorYawManeuverCodes[1U]));
+            Assert::AreEqual(static_cast<int>(MazeMap::IP180), static_cast<int>(MazeMap::kOpenFloorYawManeuverCodes[2U]));
+            Assert::AreEqual(static_cast<int>(MazeMap::IP180_M), static_cast<int>(MazeMap::kOpenFloorYawManeuverCodes[3U]));
 
             float netAngleRad = 0.0f;
             for (const float angleRad : MazeMap::kOpenFloorYawNominalAnglesRad)

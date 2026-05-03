@@ -2,8 +2,11 @@
 
 #include "MazeMapRuntimeCore.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 
 namespace MazeMap
 {
@@ -19,7 +22,7 @@ namespace MazeMap
     inline constexpr const char* kOpenFloorTimingFileName = "open_floor_timing.mmlog";
     inline constexpr const char* kOpenFloorMainFileName = "open_floor_main.mmlog";
 
-    enum class OpenFloorSectionId : uint8_t
+    enum class OpenFloorSectionId : std::uint8_t
     {
         Sec00Timing = 0U,
         Sec10Static,
@@ -31,7 +34,7 @@ namespace MazeMap
         Sec70LoopCcw,
     };
 
-    enum class OpenFloorMarkerId : uint8_t
+    enum class OpenFloorMarkerId : std::uint8_t
     {
         C = 0U,
         N,
@@ -40,7 +43,7 @@ namespace MazeMap
         CCW,
     };
 
-    enum class OpenFloorPrimitiveFamily : uint8_t
+    enum class OpenFloorPrimitiveFamily : std::uint8_t
     {
         None = 0U,
         Timing,
@@ -52,88 +55,7 @@ namespace MazeMap
         Recovery,
     };
 
-    enum class OpenFloorPrimitiveId : uint8_t
-    {
-        None = 0U,
-        TimingNoMotion,
-        StaticHold,
-        OpenLoopLaunch,
-        Str1,
-        Str2,
-        Str4,
-        Ip90,
-        Ip90M,
-        Ip180,
-        S45sd,
-        S45sdM,
-        S45ss,
-        S45ssM,
-        S45ls,
-        S45lsM,
-        S45ld,
-        S45ldM,
-        S90sd,
-        S90sdM,
-        S90ss,
-        S90ssM,
-        S90ls,
-        S90lsM,
-        S135sd,
-        S135sdM,
-        S135ss,
-        S135ssM,
-        S135ls,
-        S135lsM,
-        S135ld,
-        S135ldM,
-        S180ss,
-        S180ssM,
-        S180ls,
-        S180lsM,
-        Recovery,
-        Ip180M,
-    };
-
-    enum class OpenFloorDirectionId : uint8_t
-    {
-        None = 0U,
-        Positive,
-        Negative,
-        Northbound,
-        Southbound,
-        Clockwise,
-        CounterClockwise,
-        Flip,
-        Left,
-        Right,
-    };
-
-    enum class OpenFloorSpeedBin : uint8_t
-    {
-        None = 0U,
-        Low,
-        Medium,
-        High,
-    };
-
-    enum class OpenFloorPhaseId : uint8_t
-    {
-        Idle = 0U,
-        Hold,
-        LaunchPulse,
-        Recovery,
-        Accel,
-        Cruise,
-        Brake,
-        Startup,
-        SteadyRotation,
-        Stop,
-        Entry,
-        Middle,
-        Exit,
-    };
-
-    enum class OpenFloorFaultCode : uint8_t
+    enum class OpenFloorFaultCode : std::uint8_t
     {
         None = 0U,
         HardwareSetupFailed,
@@ -159,36 +81,11 @@ namespace MazeMap
         LoggerWriteFailure,
     };
 
-    struct OpenFloorMarkerPose
-    {
-        OpenFloorMarkerId id;
-        const char* name;
-        float xHalfSteps;
-        float yHalfSteps;
-        Direction heading;
-    };
-
     struct OpenFloorSectionDefinition
     {
         OpenFloorSectionId id;
         const char* name;
         OpenFloorMarkerId startMarker;
-    };
-
-    struct OpenFloorPrimitiveDefinition
-    {
-        OpenFloorPrimitiveId id;
-        const char* name;
-        OpenFloorPrimitiveFamily family;
-        bool mirrored;
-    };
-
-    inline constexpr std::array<OpenFloorMarkerPose, 5U> kOpenFloorMarkers = {
-        OpenFloorMarkerPose{ OpenFloorMarkerId::C, "C", 2.5f, 2.5f, Up },
-        OpenFloorMarkerPose{ OpenFloorMarkerId::N, "N", 2.5f, 0.5f, Up },
-        OpenFloorMarkerPose{ OpenFloorMarkerId::S, "S", 2.5f, 4.5f, Down },
-        OpenFloorMarkerPose{ OpenFloorMarkerId::CW, "CW", 1.5f, 1.5f, Up },
-        OpenFloorMarkerPose{ OpenFloorMarkerId::CCW, "CCW", 3.5f, 1.5f, Up },
     };
 
     inline constexpr std::array<OpenFloorSectionDefinition, 8U> kOpenFloorSections = {
@@ -202,130 +99,26 @@ namespace MazeMap
         OpenFloorSectionDefinition{ OpenFloorSectionId::Sec70LoopCcw, "SEC_70_LOOP_CCW", OpenFloorMarkerId::CCW },
     };
 
-    inline constexpr std::array<OpenFloorPrimitiveDefinition, 38U> kOpenFloorPrimitives = {
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::None, "NONE", OpenFloorPrimitiveFamily::None, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::TimingNoMotion, "TIMING_NO_MOTION", OpenFloorPrimitiveFamily::Timing, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::StaticHold, "STATIC_HOLD", OpenFloorPrimitiveFamily::StaticHold, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::OpenLoopLaunch, "OPEN_LOOP_LAUNCH", OpenFloorPrimitiveFamily::Launch, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Str1, "STR1", OpenFloorPrimitiveFamily::Straight, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Str2, "STR2", OpenFloorPrimitiveFamily::Straight, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Str4, "STR4", OpenFloorPrimitiveFamily::Straight, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Ip90, "IP90", OpenFloorPrimitiveFamily::InPlaceTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Ip90M, "IP90_M", OpenFloorPrimitiveFamily::InPlaceTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Ip180, "IP180", OpenFloorPrimitiveFamily::InPlaceTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45sd, "S45SD", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45sdM, "S45SD_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45ss, "S45SS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45ssM, "S45SS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45ls, "S45LS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45lsM, "S45LS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45ld, "S45LD", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S45ldM, "S45LD_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S90sd, "S90SD", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S90sdM, "S90SD_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S90ss, "S90SS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S90ssM, "S90SS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S90ls, "S90LS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S90lsM, "S90LS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135sd, "S135SD", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135sdM, "S135SD_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135ss, "S135SS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135ssM, "S135SS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135ls, "S135LS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135lsM, "S135LS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135ld, "S135LD", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S135ldM, "S135LD_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S180ss, "S180SS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S180ssM, "S180SS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S180ls, "S180LS", OpenFloorPrimitiveFamily::SmoothTurn, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::S180lsM, "S180LS_M", OpenFloorPrimitiveFamily::SmoothTurn, true },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Recovery, "RECOVERY", OpenFloorPrimitiveFamily::Recovery, false },
-        OpenFloorPrimitiveDefinition{ OpenFloorPrimitiveId::Ip180M, "IP180_M", OpenFloorPrimitiveFamily::InPlaceTurn, true },
-    };
+    inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdNone = 0U;
+    inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdLow = 1U;
+    inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdMedium = 2U;
+    inline constexpr std::uint8_t kOpenFloorSpeedBinLogIdHigh = 3U;
 
-    inline constexpr std::array<const char*, 58U> kOpenFloorDeferredPrimitiveIds = {
-        "S3",
-        "S5",
-        "S6",
-        "S7",
-        "S8",
-        "S9",
-        "S10",
-        "S11",
-        "S12",
-        "S13",
-        "S14",
-        "S15",
-        "S16",
-        "S17",
-        "S18",
-        "S19",
-        "S20",
-        "S21",
-        "S22",
-        "S23",
-        "S24",
-        "S25",
-        "S26",
-        "S27",
-        "S28",
-        "S29",
-        "S30",
-        "S31",
-        "IP45",
-        "IP45_M",
-        "IP135",
-        "IP135_M",
-        "S45SD",
-        "S45SD_M",
-        "S45LS",
-        "S45LS_M",
-        "S45LD",
-        "S45LD_M",
-        "S90SD",
-        "S90SD_M",
-        "S90LS",
-        "S90LS_M",
-        "S90LD",
-        "S90LD_M",
-        "S135SD",
-        "S135SD_M",
-        "S135LS",
-        "S135LS_M",
-        "S135LD",
-        "S135LD_M",
-        "S180SS",
-        "S180SS_M",
-        "S180LS",
-        "S180LS_M",
-        "S90ELD",
-        "S90ELD_M",
-        "S180ELS",
-        "S180ELS_M",
-    };
-
-    inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { 0.1f, 0.30f, 0.55f };
-    inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { 9.0f, 18.0f, 27.0f };
-    // Keep each yaw repeat nominally balanced so the section returns to its starting heading every cycle.
-    inline constexpr std::array<OpenFloorPrimitiveId, 4U> kOpenFloorYawPrimitiveIds = {
-        OpenFloorPrimitiveId::Ip90,
-        OpenFloorPrimitiveId::Ip90M,
-        OpenFloorPrimitiveId::Ip180,
-        OpenFloorPrimitiveId::Ip180M,
-    };
-    inline constexpr std::array<OpenFloorDirectionId, 4U> kOpenFloorYawDirectionIds = {
-        OpenFloorDirectionId::Clockwise,
-        OpenFloorDirectionId::CounterClockwise,
-        OpenFloorDirectionId::Clockwise,
-        OpenFloorDirectionId::CounterClockwise,
-    };
-    inline constexpr std::array<float, 4U> kOpenFloorYawNominalAnglesRad = {
+    inline constexpr std::array<float, 3U> kOpenFloorStraightSpeedBinsMps = { { 0.1f, 0.30f, 0.55f } };
+    inline constexpr std::array<float, 3U> kOpenFloorYawOmegaBinsRadps = { { 9.0f, 18.0f, 27.0f } };
+    inline constexpr std::array<ManeuverCode, 4U> kOpenFloorYawManeuverCodes = { {
+        IP90,
+        IP90_M,
+        IP180,
+        IP180_M,
+    } };
+    inline constexpr std::array<float, 4U> kOpenFloorYawNominalAnglesRad = { {
         HALF_PI_F,
         -HALF_PI_F,
         PI_F,
         -PI_F,
-    };
-    inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { 0.4f, 0.45f, 0.45f };
+    } };
+    inline constexpr std::array<float, 3U> kOpenFloorSmoothSpeedBinsMps = { { 0.4f, 0.45f, 0.45f } };
     inline constexpr std::uint8_t kOpenFloorLaunchRepeatsPerMagnitude = 3U;
     inline constexpr std::uint8_t kOpenFloorStraightRepeatsPerSpeed = 3U;
     inline constexpr unsigned long kOpenFloorLaunchPulseMs = 250UL;
@@ -378,12 +171,37 @@ namespace MazeMap
     inline constexpr auto kOpenFloorLaunchDriveMagnitudes =
         BuildOpenFloorLaunchDriveMagnitudes<kOpenFloorLaunchDriveMagnitudeCount>();
 
+    inline constexpr std::uint8_t OpenFloorSpeedBinLogIdForIndex(const std::size_t speedIndex) noexcept
+    {
+        return (speedIndex == 0U) ? kOpenFloorSpeedBinLogIdLow :
+            (speedIndex == 1U) ? kOpenFloorSpeedBinLogIdMedium :
+            kOpenFloorSpeedBinLogIdHigh;
+    }
+
+    inline std::uint8_t OpenFloorSpeedBinLogIdForMagnitudeMps(const float speedMps) noexcept
+    {
+        const float magnitudeMps = std::fabs(speedMps);
+        if (!(std::isfinite(magnitudeMps) && (magnitudeMps >= kOpenFloorStraightSpeedBinsMps[0U])))
+        {
+            return kOpenFloorSpeedBinLogIdNone;
+        }
+        if (magnitudeMps < kOpenFloorStraightSpeedBinsMps[1U])
+        {
+            return kOpenFloorSpeedBinLogIdLow;
+        }
+        if (magnitudeMps < kOpenFloorStraightSpeedBinsMps[2U])
+        {
+            return kOpenFloorSpeedBinLogIdMedium;
+        }
+        return kOpenFloorSpeedBinLogIdHigh;
+    }
+
     inline constexpr float OpenFloorHalfStepMeters() noexcept
     {
         return Maze::GetCellDimension() * 0.5f;
     }
 
-    inline constexpr float OpenFloorStrEquivalentDistanceMeters(uint8_t halfSteps) noexcept
+    inline constexpr float OpenFloorStrEquivalentDistanceMeters(std::uint8_t halfSteps) noexcept
     {
         return Maze::GetCellDimension() * 0.5f * static_cast<float>(halfSteps);
     }
@@ -478,19 +296,6 @@ namespace MazeMap
         return (longitudinalErrorM >= 0.0f) ? outsideAbsM : -outsideAbsM;
     }
 
-    inline const OpenFloorMarkerPose& GetOpenFloorMarker(OpenFloorMarkerId id)
-    {
-        for (const OpenFloorMarkerPose& marker : kOpenFloorMarkers)
-        {
-            if (marker.id == id)
-            {
-                return marker;
-            }
-        }
-
-        return kOpenFloorMarkers[0];
-    }
-
     inline const OpenFloorSectionDefinition& GetOpenFloorSection(OpenFloorSectionId id)
     {
         for (const OpenFloorSectionDefinition& section : kOpenFloorSections)
@@ -511,35 +316,61 @@ namespace MazeMap
 
     inline const char* OpenFloorMarkerName(OpenFloorMarkerId id)
     {
-        return GetOpenFloorMarker(id).name;
+        switch (id)
+        {
+        case OpenFloorMarkerId::N:
+            return "N";
+        case OpenFloorMarkerId::S:
+            return "S";
+        case OpenFloorMarkerId::CW:
+            return "CW";
+        case OpenFloorMarkerId::CCW:
+            return "CCW";
+        case OpenFloorMarkerId::C:
+        default:
+            return "C";
+        }
     }
 
-    inline const OpenFloorPrimitiveDefinition& GetOpenFloorPrimitive(OpenFloorPrimitiveId id)
+    inline OpenFloorPrimitiveFamily OpenFloorPrimitiveFamilyForManeuverCode(ManeuverCode code) noexcept
     {
-        for (const OpenFloorPrimitiveDefinition& primitive : kOpenFloorPrimitives)
+        const ManeuverCode baseCode = static_cast<ManeuverCode>(code & INVERTED_MIRRORED_MANEUVER_FLAG);
+        if (baseCode == MC_NONE)
         {
-            if (primitive.id == id)
-            {
-                return primitive;
-            }
+            return OpenFloorPrimitiveFamily::None;
+        }
+        if (IsStraightCode(baseCode))
+        {
+            return OpenFloorPrimitiveFamily::Straight;
         }
 
-        return kOpenFloorPrimitives[0];
-    }
-
-    inline const char* OpenFloorPrimitiveName(OpenFloorPrimitiveId id)
-    {
-        return GetOpenFloorPrimitive(id).name;
-    }
-
-    inline OpenFloorPrimitiveFamily OpenFloorPrimitiveFamilyForId(OpenFloorPrimitiveId id)
-    {
-        return GetOpenFloorPrimitive(id).family;
-    }
-
-    inline bool OpenFloorPrimitiveIsMirrored(OpenFloorPrimitiveId id)
-    {
-        return GetOpenFloorPrimitive(id).mirrored;
+        switch (baseCode)
+        {
+        case IP45:
+        case IP90:
+        case IP135:
+        case IP180:
+            return OpenFloorPrimitiveFamily::InPlaceTurn;
+        case S45SS:
+        case S45SD:
+        case S45LS:
+        case S45LD:
+        case S90SS:
+        case S90SD:
+        case S90LS:
+        case S90LD:
+        case S135SS:
+        case S135SD:
+        case S135LS:
+        case S135LD:
+        case S180SS:
+        case S180LS:
+        case S90ELD:
+        case S180ELS:
+            return OpenFloorPrimitiveFamily::SmoothTurn;
+        default:
+            return OpenFloorPrimitiveFamily::None;
+        }
     }
 
     inline const char* OpenFloorPrimitiveFamilyName(OpenFloorPrimitiveFamily family)
@@ -563,84 +394,6 @@ namespace MazeMap
         case OpenFloorPrimitiveFamily::None:
         default:
             return "NONE";
-        }
-    }
-
-    inline const char* OpenFloorDirectionName(OpenFloorDirectionId direction)
-    {
-        switch (direction)
-        {
-        case OpenFloorDirectionId::Positive:
-            return "POSITIVE";
-        case OpenFloorDirectionId::Negative:
-            return "NEGATIVE";
-        case OpenFloorDirectionId::Northbound:
-            return "NORTHBOUND";
-        case OpenFloorDirectionId::Southbound:
-            return "SOUTHBOUND";
-        case OpenFloorDirectionId::Clockwise:
-            return "CLOCKWISE";
-        case OpenFloorDirectionId::CounterClockwise:
-            return "COUNTERCLOCKWISE";
-        case OpenFloorDirectionId::Flip:
-            return "FLIP";
-        case OpenFloorDirectionId::Left:
-            return "LEFT";
-        case OpenFloorDirectionId::Right:
-            return "RIGHT";
-        case OpenFloorDirectionId::None:
-        default:
-            return "NONE";
-        }
-    }
-
-    inline const char* OpenFloorSpeedBinName(OpenFloorSpeedBin bin)
-    {
-        switch (bin)
-        {
-        case OpenFloorSpeedBin::Low:
-            return "LOW";
-        case OpenFloorSpeedBin::Medium:
-            return "MED";
-        case OpenFloorSpeedBin::High:
-            return "HIGH";
-        case OpenFloorSpeedBin::None:
-        default:
-            return "NONE";
-        }
-    }
-
-    inline const char* OpenFloorPhaseName(OpenFloorPhaseId phase)
-    {
-        switch (phase)
-        {
-        case OpenFloorPhaseId::Hold:
-            return "hold";
-        case OpenFloorPhaseId::LaunchPulse:
-            return "launch_pulse";
-        case OpenFloorPhaseId::Recovery:
-            return "recovery";
-        case OpenFloorPhaseId::Accel:
-            return "accel";
-        case OpenFloorPhaseId::Cruise:
-            return "cruise";
-        case OpenFloorPhaseId::Brake:
-            return "brake";
-        case OpenFloorPhaseId::Startup:
-            return "startup";
-        case OpenFloorPhaseId::SteadyRotation:
-            return "steady_rotation";
-        case OpenFloorPhaseId::Stop:
-            return "stop";
-        case OpenFloorPhaseId::Entry:
-            return "entry";
-        case OpenFloorPhaseId::Middle:
-            return "middle";
-        case OpenFloorPhaseId::Exit:
-            return "exit";
-        case OpenFloorPhaseId::Idle:
-        default:
-            return "idle";
         }
     }
 
@@ -694,16 +447,6 @@ namespace MazeMap
         default:
             return "NONE";
         }
-    }
-
-    inline float OpenFloorMarkerXMeters(OpenFloorMarkerId id)
-    {
-        return GetOpenFloorMarker(id).xHalfSteps * OpenFloorHalfStepMeters();
-    }
-
-    inline float OpenFloorMarkerYMeters(OpenFloorMarkerId id)
-    {
-        return GetOpenFloorMarker(id).yHalfSteps * OpenFloorHalfStepMeters();
     }
 
     inline float OpenFloorMetersToHalfSteps(float meters)

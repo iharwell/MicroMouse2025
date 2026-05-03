@@ -614,8 +614,18 @@ function Invoke-External {
     $stderrPath = [System.IO.Path]::GetTempFileName()
 
     try {
-        & $FilePath @Arguments 1> $stdoutPath 2> $stderrPath
-        $exitCode = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            # Windows PowerShell 5.1 can surface native stderr as error records
+            # even when the process exits successfully. Judge native tools by
+            # their exit code and captured stderr instead of terminating here.
+            $ErrorActionPreference = 'Continue'
+            & $FilePath @Arguments 1> $stdoutPath 2> $stderrPath
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         Append-FileToLog -Path $stdoutPath
         Append-FileToLog -Path $stderrPath
         if ($exitCode -ne 0) {

@@ -50,6 +50,8 @@ namespace
     constexpr std::uint16_t kOpenFloorMeasurementFlagFrontRightObsValid = 1u << 8;
     constexpr std::uint16_t kOpenFloorMeasurementFlagLeftObsValid = 1u << 9;
     constexpr std::uint16_t kOpenFloorMeasurementFlagRightObsValid = 1u << 10;
+    constexpr std::uint8_t kShowcasingDonutDirectionLogIdNone = 0U;
+    constexpr std::uint8_t kShowcasingDonutDirectionLogIdClockwise = 1U;
 
     MotionLimits BuildShowcasingDonutLimits(const MazeMap::Vehicle& vehicle) noexcept
     {
@@ -559,7 +561,7 @@ namespace MazeMap::App::Internal
         row.section_id = labels.sectionId;
         row.primitive_id = labels.primitiveId;
         row.primitive_family = static_cast<std::uint8_t>(
-            MazeMap::OpenFloorPrimitiveFamilyForId(static_cast<MazeMap::OpenFloorPrimitiveId>(labels.primitiveId)));
+            MazeMap::OpenFloorPrimitiveFamilyForManeuverCode(static_cast<MazeMap::ManeuverCode>(labels.primitiveId)));
         row.direction_id = labels.directionId;
         row.phase_id = labels.phaseId;
         row.speed_bin = labels.speedBin;
@@ -665,9 +667,9 @@ namespace MazeMap::App::Internal
         {
         case Phase::DonutSweep:
             labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec60LoopCw);
-            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::None);
-            labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::Clockwise);
-            labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Accel);
+            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::MC_NONE);
+            labels.directionId = kShowcasingDonutDirectionLogIdClockwise;
+            labels.phaseId = static_cast<std::uint8_t>(Phase::DonutSweep);
             labels.speedBin = SpeedBinForSpeed(_commandedSpeedMps);
             labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::CW);
             labels.progressNorm =
@@ -682,10 +684,10 @@ namespace MazeMap::App::Internal
 
         case Phase::FlashyMoves:
             labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec40Yaw);
-            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::Ip180);
-            labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::Clockwise);
-            labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::SteadyRotation);
-            labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::IP180);
+            labels.directionId = kShowcasingDonutDirectionLogIdClockwise;
+            labels.phaseId = static_cast<std::uint8_t>(Phase::FlashyMoves);
+            labels.speedBin = MazeMap::kOpenFloorSpeedBinLogIdNone;
             labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm =
                 (kShowcasingDonutFlashTurnCount > 0U) ?
@@ -698,10 +700,10 @@ namespace MazeMap::App::Internal
 
         case Phase::Complete:
             labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec10Static);
-            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::StaticHold);
-            labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
-            labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Stop);
-            labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::MC_NONE);
+            labels.directionId = kShowcasingDonutDirectionLogIdNone;
+            labels.phaseId = static_cast<std::uint8_t>(Phase::Complete);
+            labels.speedBin = MazeMap::kOpenFloorSpeedBinLogIdNone;
             labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm = (_phase == Phase::Complete) ? 1.0f : 0.0f;
             break;
@@ -709,10 +711,10 @@ namespace MazeMap::App::Internal
         case Phase::Idle:
         default:
             labels.sectionId = static_cast<std::uint8_t>(MazeMap::OpenFloorSectionId::Sec10Static);
-            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::OpenFloorPrimitiveId::StaticHold);
-            labels.directionId = static_cast<std::uint8_t>(MazeMap::OpenFloorDirectionId::None);
-            labels.phaseId = static_cast<std::uint8_t>(MazeMap::OpenFloorPhaseId::Idle);
-            labels.speedBin = static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
+            labels.primitiveId = static_cast<std::uint8_t>(MazeMap::MC_NONE);
+            labels.directionId = kShowcasingDonutDirectionLogIdNone;
+            labels.phaseId = static_cast<std::uint8_t>(Phase::Idle);
+            labels.speedBin = MazeMap::kOpenFloorSpeedBinLogIdNone;
             labels.startMarkerId = static_cast<std::uint8_t>(MazeMap::OpenFloorMarkerId::C);
             labels.progressNorm = 0.0f;
             break;
@@ -723,20 +725,7 @@ namespace MazeMap::App::Internal
 
     std::uint8_t ShowcasingDonutController::SpeedBinForSpeed(const float speedMps) const noexcept
     {
-        const float magnitudeMps = std::fabs(speedMps);
-        if (!(std::isfinite(magnitudeMps) && (magnitudeMps >= MazeMap::kOpenFloorStraightSpeedBinsMps[0])))
-        {
-            return static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::None);
-        }
-        if (magnitudeMps < MazeMap::kOpenFloorStraightSpeedBinsMps[1])
-        {
-            return static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::Low);
-        }
-        if (magnitudeMps < MazeMap::kOpenFloorStraightSpeedBinsMps[2])
-        {
-            return static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::Medium);
-        }
-        return static_cast<std::uint8_t>(MazeMap::OpenFloorSpeedBin::High);
+        return MazeMap::OpenFloorSpeedBinLogIdForMagnitudeMps(speedMps);
     }
 
     float ShowcasingDonutController::EncoderAverageSpeedMps(const MazeMap::VehicleState& state) const noexcept
