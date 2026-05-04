@@ -131,16 +131,16 @@ namespace MazeMap::App::Internal
     {
     }
 
-    bool ShowcasingDonutController::Begin()
+    void ShowcasingDonutController::SetupMode()
     {
         ResetState();
         if (!_runtime.RegisterModeFaultHandler(&ShowcasingDonutController::TeardownOnRuntimeFault, this, kShowcasingDonutStableId))
         {
-            return false;
+            _runtime.FailActiveMode("Showcasing donut fault handler registration failed");
         }
         if (!SetupHardware())
         {
-            return _runtime.FailActiveMode("Showcasing donut hardware setup failed");
+            _runtime.FailActiveMode("Showcasing donut hardware setup failed");
         }
 
         (void)BootUtilityModeFramework::ResetStartupTrace("mode:showcasing_donut");
@@ -149,38 +149,27 @@ namespace MazeMap::App::Internal
 
         if (!_drive.Begin())
         {
-            return _runtime.FailActiveMode("Showcasing donut drive base init failed");
+            _runtime.FailActiveMode("Showcasing donut drive base init failed");
         }
         _drive.UseNominalWheelControlProfile();
 
         ConfigureSelectorMonitor();
         if (!_selectorMonitorArmed)
         {
-            return _runtime.FailActiveMode("Showcasing donut selector pins unavailable");
+            _runtime.FailActiveMode("Showcasing donut selector pins unavailable");
         }
         if (SelectorRemoved())
         {
-            return _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
+            _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
         }
 
         if (!BeginMainLog())
         {
-            return _runtime.FailActiveMode("Showcasing donut main log setup failed");
+            _runtime.FailActiveMode("Showcasing donut main log setup failed");
         }
-
-        return true;
-    }
-
-    void ShowcasingDonutController::Run()
-    {
         if (!BeginDonutSweep())
         {
-            (void)_runtime.FailActiveMode("Showcasing donut sweep could not start");
-            ReleaseSelectorMonitor();
-            _drive.Brake();
-            _drive.UseNominalWheelControlProfile();
-            SetMissionLevelFanEnabled(false);
-            return;
+            _runtime.FailActiveMode("Showcasing donut sweep could not start");
         }
 
         _phase = Phase::DonutSweep;
@@ -192,39 +181,7 @@ namespace MazeMap::App::Internal
             kShowcasingDonutSpeedRampMps2,
             kShowcasingDonutSpeedCapMps,
             kShowcasingDonutCenterRadiusLimitM);
-
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &ShowcasingDonutController::ModeWorkThunk;
-        callbacks.context = this;
-
-        bool completed = false;
-        if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-        {
-            (void)_runtime.FailActiveMode("Showcasing donut loop session start failed");
-        }
-        else
-        {
-            const LoopController::SessionResult result = _loopController.Run();
-            completed = (result.status == LoopController::SessionResult::Status::Completed);
-            _loopController.EndSession();
-        }
-
-        ReleaseSelectorMonitor();
-        _drive.Brake();
-        _drive.UseNominalWheelControlProfile();
-        SetMissionLevelFanEnabled(false);
-
-        if (completed)
-        {
-            (void)_runtime.AppendTextLogFormatted(
-                "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",
-                EndReasonText(_endReason),
-                _logFileName,
-                _peakCommandedSpeedMps,
-                _peakEncoderSpeedMps,
-                _peakYawRateRadps,
-                _peakPlanarAccelMps2);
-        }
+        _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
     void ShowcasingDonutController::TeardownOnRuntimeFault(void* context, const char* reason) noexcept
@@ -241,22 +198,6 @@ namespace MazeMap::App::Internal
         self->_drive.Brake();
         self->_drive.UseNominalWheelControlProfile();
         SetMissionLevelFanEnabled(false);
-    }
-
-    LoopController::ControlVector ShowcasingDonutController::ModeWorkThunk(
-        void* context,
-        std::uint32_t loopEndTimeUs,
-        const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
-    {
-        auto* const self = static_cast<ShowcasingDonutController*>(context);
-        if (self == nullptr)
-        {
-            services.Fault("Showcasing donut callback context was not installed");
-            return LoopController::ControlVector::Brake;
-        }
-
-        return self->RunTick(loopEndTimeUs, state, services);
     }
 
     LoopController::SessionOptions ShowcasingDonutController::BuildLoopOptions() const noexcept
@@ -749,7 +690,7 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector ShowcasingDonutController::RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
 
@@ -758,13 +699,13 @@ namespace MazeMap::App::Internal
         if (SelectorRemoved())
         {
             (void)LogCurrentSample(CurrentLabels(), state, true);
-            services.Fault(kShowcasingDonutSelectorRemovedReason);
+            _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
             return LoopController::ControlVector::Brake;
         }
 
         if (_mainLogOpen && !LogCurrentSample(CurrentLabels(), state, false))
         {
-            services.Fault("Showcasing donut main log write failed");
+            _runtime.FailActiveMode("Showcasing donut main log write failed");
             return LoopController::ControlVector::Brake;
         }
 
@@ -806,7 +747,7 @@ namespace MazeMap::App::Internal
 
             if (!BeginFlashTurn(kShowcasingDonutFlashTurnAngleRad))
             {
-                services.Fault("Showcasing donut flashy turn could not start");
+                _runtime.FailActiveMode("Showcasing donut flashy turn could not start");
                 return LoopController::ControlVector::Brake;
             }
 
@@ -815,12 +756,25 @@ namespace MazeMap::App::Internal
         }
 
         case Phase::Complete:
-            services.RequestEndLoop();
+            ReleaseSelectorMonitor();
+            _drive.Brake();
+            _drive.UseNominalWheelControlProfile();
+            SetMissionLevelFanEnabled(false);
+            (void)_runtime.AppendTextLogFormatted(
+                "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",
+                EndReasonText(_endReason),
+                _logFileName,
+                _peakCommandedSpeedMps,
+                _peakEncoderSpeedMps,
+                _peakYawRateRadps,
+                _peakPlanarAccelMps2);
+            _phase = Phase::Idle;
+            loopController.HaltExecutionEndProgram();
             return LoopController::ControlVector::Brake;
 
         case Phase::Idle:
         default:
-            services.Fault("Showcasing donut phase was not initialized");
+            _runtime.FailActiveMode("Showcasing donut phase was not initialized");
             return LoopController::ControlVector::Brake;
         }
     }

@@ -171,8 +171,11 @@ namespace MazeMap::App::Internal
         OpenFloorMeasurementController(OpenFloorMeasurementController&&) = delete;
         OpenFloorMeasurementController& operator=(OpenFloorMeasurementController&&) = delete;
 
-        bool Begin() override;
-        void Run() override;
+        void SetupMode() override;
+        LoopController::ControlVector RunTick(
+            std::uint32_t loopEndTimeUs,
+            const MazeMap::VehicleState& state,
+            LoopController& loopController) override;
 
     private:
         static constexpr std::size_t kLaunchPhaseSlotCount =
@@ -190,9 +193,9 @@ namespace MazeMap::App::Internal
         using StageTick = LoopController::ControlVector (OpenFloorMeasurementController::*)(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
 
-        enum class PauseAction : std::uint8_t
+        enum class SessionBoundaryAction : std::uint8_t
         {
             None,
             TimingToMain,
@@ -310,7 +313,7 @@ namespace MazeMap::App::Internal
             virtual LoopController::ControlVector TickActiveSlot(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services,
+                LoopController& loopController,
                 bool& done) = 0;
         };
 
@@ -340,7 +343,7 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector TickActiveSlot(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services,
+                LoopController& loopController,
                 bool& done) override;
         };
 
@@ -370,7 +373,7 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector TickActiveSlot(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services,
+                LoopController& loopController,
                 bool& done) override;
 
         private:
@@ -406,7 +409,7 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector TickActiveSlot(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services,
+                LoopController& loopController,
                 bool& done) override;
 
         private:
@@ -439,7 +442,7 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector TickActiveSlot(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services,
+                LoopController& loopController,
                 bool& done) override;
 
         private:
@@ -472,7 +475,7 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector TickActiveSlot(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services,
+                LoopController& loopController,
                 bool& done) override;
 
         private:
@@ -529,7 +532,7 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector TickActiveSlot(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services,
+                LoopController& loopController,
                 bool& done) override;
 
         private:
@@ -550,24 +553,23 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services);
-            LoopController::PauseDisposition CompleteTimingToMainHandoff(
+                LoopController& loopController);
+            void CompleteTimingToMainSessionTransition(
                 OpenFloorMeasurementController& controller,
                 MainStage& mainStage,
-                const LoopController::PauseContext& pause);
+                LoopController& loopController);
             void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
 
         private:
-            bool FlushPending(
+            bool WriteBufferedRow(
                 OpenFloorMeasurementController& controller,
-                const char* failureReason,
-                LoopController::TickServices* services);
-            void StageRow(const Runtime::OpenFloorTimingRow& row);
+                const char* failureReason);
+            void BufferRow(const Runtime::OpenFloorTimingRow& row);
             bool CaptureComplete() const noexcept;
 
             std::uint16_t _tickIndex{};
             bool _logOpen{};
-            std::optional<Runtime::OpenFloorTimingRow> _pendingRow{};
+            std::optional<Runtime::OpenFloorTimingRow> _bufferedRow{};
         };
 
         class MainStage final
@@ -579,7 +581,7 @@ namespace MazeMap::App::Internal
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
-                LoopController::TickServices& services);
+                LoopController& loopController);
             void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
 
         private:
@@ -590,14 +592,11 @@ namespace MazeMap::App::Internal
             bool SeekActiveSlotFromCurrent() noexcept;
             bool AdvanceCursorOneStep() noexcept;
             MainRowLabel BuildActiveLabels() const noexcept;
-            bool FlushPending(
+            bool WriteBufferedRow(
                 OpenFloorMeasurementController& controller,
-                LoopController::TickServices* services,
                 const char* failureReason);
-            void StageRow(const Runtime::OpenFloorMainRow& row);
-            bool CheckFault(
-                OpenFloorMeasurementController& controller,
-                LoopController::TickServices& services);
+            void BufferRow(const Runtime::OpenFloorMainRow& row);
+            bool CheckFault(OpenFloorMeasurementController& controller);
 
             StaticMeasurementPhase _staticPhase{};
             LaunchMeasurementPhase _launchPhase{};
@@ -626,18 +625,11 @@ namespace MazeMap::App::Internal
             bool _completionPending{};
             bool _slotStarted{};
             MainRowLabel _activeLabels{};
-            std::optional<Runtime::OpenFloorMainRow> _pendingRow{};
+            std::optional<Runtime::OpenFloorMainRow> _bufferedRow{};
         };
 
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
-        static LoopController::PauseDisposition PauseThunk(
-            void* context,
-            const LoopController::PauseContext& pause);
-        static LoopController::ControlVector ModeWorkThunk(
-            void* context,
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+        static void TimingToMainEndSessionThunk(void* context, LoopController& loopController);
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
         void ResetState() noexcept;
@@ -651,15 +643,16 @@ namespace MazeMap::App::Internal
         void ConfigureSelectorMonitor() noexcept;
         void ReleaseSelectorMonitor() noexcept;
         bool SelectorRemoved() const noexcept;
-        LoopController::PauseDisposition OnPauseGranted(const LoopController::PauseContext& pause);
+        void CompleteTimingToMainEndSession(LoopController& loopController);
+        void FinalizeSuccessfulRun() noexcept;
         LoopController::ControlVector TimingStageTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
         LoopController::ControlVector MainStageTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
 
         static std::uint8_t SpeedBinForIndex(std::size_t speedIndex) noexcept;
 
@@ -674,7 +667,7 @@ namespace MazeMap::App::Internal
         std::uint8_t _selectorDrivePin{};
         std::uint8_t _selectorSensePin{};
         bool _selectorMonitorArmed{};
-        PauseAction _pauseAction{ PauseAction::None };
+        SessionBoundaryAction _sessionBoundaryAction{ SessionBoundaryAction::None };
         TimingStage _timingStage{};
         MainStage _mainStage{};
     };

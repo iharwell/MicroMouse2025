@@ -20,8 +20,11 @@ namespace MazeMap::App::Internal
     public:
         explicit WallSensorLedCalibrationController(SharedRobotRuntime& runtime);
 
-        bool Begin() override;
-        void Run() override;
+        void SetupMode() override;
+        LoopController::ControlVector RunTick(
+            std::uint32_t loopEndTimeUs,
+            const MazeMap::VehicleState& state,
+            LoopController& loopController) override;
 
     private:
         enum class LedCalibrationPhase : std::uint8_t
@@ -31,28 +34,22 @@ namespace MazeMap::App::Internal
             Complete
         };
 
-        static LoopController::ControlVector ModeWorkThunk(
-            void* context,
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
-        static LoopController::PauseDisposition PauseThunk(
-            void* context,
-            const LoopController::PauseContext& pause);
+        static void PauseThunk(void* context, LoopController& loopController);
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
         static void SetFrontLeds(bool enabled);
         static void SetSideLeds(bool enabled);
         static void SetAllLeds(bool enabled);
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
-        LoopController::ControlVector OnModeWork(LoopController::TickServices& services);
-        LoopController::PauseDisposition OnPauseGranted(const LoopController::PauseContext& pause);
+        LoopController::ControlVector OnModeWork(LoopController& loopController);
+        void OnPauseGranted(LoopController& loopController);
         void ToggleActiveLeds();
         void PrintFrequency(const char* label, std::uint32_t halfPeriodUs);
         std::uint32_t ActiveHalfPeriodUs() const noexcept;
         void RunCalibrationLoop();
         void AdvancePhase();
         void ResetState() noexcept;
+        void FinalizeSuccessfulRun() noexcept;
         void CleanupHardware() noexcept;
         void CleanupOnRuntimeFault(const char* reason) noexcept;
 

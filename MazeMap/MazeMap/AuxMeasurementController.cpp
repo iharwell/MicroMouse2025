@@ -110,16 +110,16 @@ public:
         _logFileName[0] = '\0';
     }
 
-    bool Begin() override
+    void SetupMode() override
     {
         ResetState();
         if (!_runtime.RegisterModeFaultHandler(&AuxMeasurementController::TeardownOnRuntimeFault, this, kAuxMeasurementStableId))
         {
-            return false;
+            _runtime.FailActiveMode("Auxiliary measurement fault handler registration failed");
         }
         if (!SetupHardware())
         {
-            return _runtime.FailActiveMode("Auxiliary measurement hardware setup failed");
+            _runtime.FailActiveMode("Auxiliary measurement hardware setup failed");
         }
 
         (void)ResetStartupTrace("mode:aux_measurement");
@@ -130,7 +130,7 @@ public:
 
         if (!_drive.Begin())
         {
-            return _runtime.FailActiveMode("Auxiliary measurement drive base init failed");
+            _runtime.FailActiveMode("Auxiliary measurement drive base init failed");
         }
 
         if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
@@ -147,20 +147,11 @@ public:
 
         if (!_startupCalibration.BringUp())
         {
-            return _runtime.FailActiveMode("Auxiliary measurement startup bring-up failed");
+            _runtime.FailActiveMode("Auxiliary measurement startup bring-up failed");
         }
         if (!BeginLog())
         {
-            return _runtime.FailActiveMode("Auxiliary measurement log open failed");
-        }
-        return true;
-    }
-
-    void Run() override
-    {
-        if (_runtimeFaulted)
-        {
-            return;
+            _runtime.FailActiveMode("Auxiliary measurement log open failed");
         }
 
         if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
@@ -171,50 +162,10 @@ public:
         {
             _phase = Phase::LaunchStartupCalibration;
         }
-
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &AuxMeasurementController::ModeWorkThunk;
-        callbacks.context = this;
-        if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-        {
-            (void)_runtime.FailActiveMode("Auxiliary measurement loop session start failed");
-        }
-        else
-        {
-            const LoopController::SessionResult result = _loopController.Run();
-            const bool completed =
-                !_runtimeFaulted &&
-                (result.status == LoopController::SessionResult::Status::Completed);
-            _loopController.EndSession();
-            if (completed)
-            {
-                (void)_runtime.AppendTextLogFormatted("Auxiliary measurement complete, log saved to %s", _logFileName);
-            }
-        }
-
-        _startupCalibration.Cancel();
-        _drive.Brake();
-        _drive.UseNominalWheelControlProfile();
-        SetFanEnabled(false);
-        (void)_runtime.CloseUtilityDataLog();
+        _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
 private:
-    static LoopController::ControlVector ModeWorkThunk(
-        void* context,
-        std::uint32_t loopEndTimeUs,
-        const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
-    {
-        auto* const self = static_cast<AuxMeasurementController*>(context);
-        if (self == nullptr)
-        {
-            services.Fault("Auxiliary measurement callback context was not installed");
-            return LoopController::ControlVector::Brake;
-        }
-        return self->RunTick(loopEndTimeUs, state, services);
-    }
-
     static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
     {
         auto* const self = static_cast<AuxMeasurementController*>(context);
@@ -325,9 +276,20 @@ private:
         SetMissionLevelFanEnabled(enabled);
     }
 
-    LoopController::ControlVector PollDriveHold(const Phase nextPhase, const char* inactiveReason, LoopController::TickServices& services)
+    LoopController::ControlVector FinishMode(LoopController& loopController)
     {
-        (void)inactiveReason;
+        (void)_runtime.AppendTextLogFormatted("Auxiliary measurement complete, log saved to %s", _logFileName);
+        _startupCalibration.Cancel();
+        _drive.Brake();
+        _drive.UseNominalWheelControlProfile();
+        SetFanEnabled(false);
+        _phase = Phase::Idle;
+        loopController.HaltExecutionEndProgram();
+        return LoopController::ControlVector::Brake;
+    }
+
+    LoopController::ControlVector PollDriveHold(const Phase nextPhase)
+    {
         bool done = false;
         const LoopController::ControlVector control = _driveService.GetNextControls(done);
         if (!done)
@@ -339,7 +301,9 @@ private:
         return LoopController::ControlVector::Brake;
     }
 
-    LoopController::ControlVector RunTurningTractionSweep(const MazeMap::VehicleState& state, LoopController::TickServices& services)
+    LoopController::ControlVector RunTurningTractionSweep(
+        const MazeMap::VehicleState& state,
+        LoopController& loopController)
     {
         (void)state;
         const unsigned long nowMs = millis();
@@ -353,8 +317,7 @@ private:
         {
             (void)WriteEvent("summary", "Turning traction sweep finished; analyze the logged run offline.");
             _phase = Phase::Complete;
-            services.RequestEndLoop();
-            return LoopController::ControlVector::Brake;
+            return FinishMode(loopController);
         }
 
         _turningTractionCommandedSpeedMps +=
@@ -379,12 +342,12 @@ private:
     LoopController::ControlVector RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController) override
     {
         (void)loopEndTimeUs;
         if (!LogSample(state))
         {
-            services.Fault("Failed to write auxiliary measurement sample");
+            _runtime.FailActiveMode("Failed to write auxiliary measurement sample");
             return LoopController::ControlVector::Brake;
         }
 
@@ -393,13 +356,13 @@ private:
         case Phase::LaunchStartupCalibration:
             if (!BeginPhase("startup_calibration"))
             {
-                services.Fault("Failed to log auxiliary startup calibration phase");
+                _runtime.FailActiveMode("Failed to log auxiliary startup calibration phase");
                 return LoopController::ControlVector::Brake;
             }
             _startupCalibration.Start();
             if (!_startupCalibration.Active())
             {
-                services.Fault("Auxiliary measurement startup calibration could not start");
+                _runtime.FailActiveMode("Auxiliary measurement startup calibration could not start");
             }
             else
             {
@@ -420,7 +383,7 @@ private:
         }
 
         case Phase::LaunchBaselineHold:
-            if (!BeginPhase("fan_off_baseline")) { services.Fault("Failed to log auxiliary baseline phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_off_baseline")) { _runtime.FailActiveMode("Failed to log auxiliary baseline phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(false);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
@@ -429,10 +392,10 @@ private:
             return LoopController::ControlVector::Brake;
 
         case Phase::RunBaselineHold:
-            return PollDriveHold(Phase::LaunchFanOnHold, "Auxiliary baseline Drive hold was not active", services);
+            return PollDriveHold(Phase::LaunchFanOnHold);
 
         case Phase::LaunchFanOnHold:
-            if (!BeginPhase("fan_on_hold")) { services.Fault("Failed to log auxiliary fan-on phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_on_hold")) { _runtime.FailActiveMode("Failed to log auxiliary fan-on phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(true);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
@@ -441,10 +404,10 @@ private:
             return LoopController::ControlVector::Brake;
 
         case Phase::RunFanOnHold:
-            return PollDriveHold(Phase::LaunchRecoveryHold, "Auxiliary fan-on Drive hold was not active", services);
+            return PollDriveHold(Phase::LaunchRecoveryHold);
 
         case Phase::LaunchRecoveryHold:
-            if (!BeginPhase("fan_off_recovery")) { services.Fault("Failed to log auxiliary recovery phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_off_recovery")) { _runtime.FailActiveMode("Failed to log auxiliary recovery phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(false);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
@@ -453,10 +416,10 @@ private:
             return LoopController::ControlVector::Brake;
 
         case Phase::RunRecoveryHold:
-            return PollDriveHold(Phase::Complete, "Auxiliary recovery Drive hold was not active", services);
+            return PollDriveHold(Phase::Complete);
 
         case Phase::LaunchStartupHold:
-            if (!BeginPhase("startup_settle")) { services.Fault("Failed to log auxiliary startup phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("startup_settle")) { _runtime.FailActiveMode("Failed to log auxiliary startup phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(false);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
@@ -465,10 +428,10 @@ private:
             return LoopController::ControlVector::Brake;
 
         case Phase::RunStartupHold:
-            return PollDriveHold(Phase::LaunchFanSpinupHold, "Auxiliary startup Drive hold was not active", services);
+            return PollDriveHold(Phase::LaunchFanSpinupHold);
 
         case Phase::LaunchFanSpinupHold:
-            if (!BeginPhase("fan_spinup")) { services.Fault("Failed to log auxiliary fan-spinup phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_spinup")) { _runtime.FailActiveMode("Failed to log auxiliary fan-spinup phase"); return LoopController::ControlVector::Brake; }
             SetFanEnabled(true);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
@@ -478,12 +441,12 @@ private:
 
         case Phase::RunFanSpinupHold:
         {
-            const LoopController::ControlVector control = PollDriveHold(Phase::TurningTractionSweep, "Auxiliary fan-spinup Drive hold was not active", services);
+            const LoopController::ControlVector control = PollDriveHold(Phase::TurningTractionSweep);
             if (_phase == Phase::TurningTractionSweep)
             {
                 if (!BeginPhase("turning_traction_sweep"))
                 {
-                    services.Fault("Failed to log turning traction sweep phase");
+                    _runtime.FailActiveMode("Failed to log turning traction sweep phase");
                     return LoopController::ControlVector::Brake;
                 }
                 ResetTurningTractionState();
@@ -497,15 +460,14 @@ private:
         }
 
         case Phase::TurningTractionSweep:
-            return RunTurningTractionSweep(state, services);
+            return RunTurningTractionSweep(state, loopController);
 
         case Phase::Complete:
-            services.RequestEndLoop();
-            return LoopController::ControlVector::Brake;
+            return FinishMode(loopController);
 
         case Phase::Idle:
         default:
-            services.Fault("Auxiliary measurement phase was not initialized");
+            _runtime.FailActiveMode("Auxiliary measurement phase was not initialized");
             return LoopController::ControlVector::Brake;
         }
     }

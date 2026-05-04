@@ -139,8 +139,11 @@ namespace MazeMap::App::Internal
         ShowcasingDonutController(ShowcasingDonutController&&) = delete;
         ShowcasingDonutController& operator=(ShowcasingDonutController&&) = delete;
 
-        bool Begin() override;
-        void Run() override;
+        void SetupMode() override;
+        LoopController::ControlVector RunTick(
+            std::uint32_t loopEndTimeUs,
+            const MazeMap::VehicleState& state,
+            LoopController& loopController) override;
 
     private:
         enum class Phase : std::uint8_t
@@ -180,17 +183,6 @@ namespace MazeMap::App::Internal
         static constexpr std::size_t kLogFileNameCapacity = 96U;
 
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
-        static LoopController::ControlVector ModeWorkThunk(
-            void* context,
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
-
-        LoopController::ControlVector RunTick(
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
-
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
         void ResetState() noexcept;
         bool BeginMainLog();

@@ -25,7 +25,7 @@ namespace MazeMap::App::Internal
     {
     }
 
-    bool WallSensorLedCalibrationController::Begin()
+    void WallSensorLedCalibrationController::SetupMode()
     {
         ResetState();
         if (!_runtime.RegisterModeFaultHandler(
@@ -33,19 +33,19 @@ namespace MazeMap::App::Internal
                 this,
                 kWallSensorLedCalibrationStableId))
         {
-            return false;
+            _runtime.FailActiveMode("Wall sensor LED calibration fault handler registration failed");
         }
 
         if (!SetupHardware())
         {
-            return _runtime.FailActiveMode("Wall sensor LED calibration hardware setup failed");
+            _runtime.FailActiveMode("Wall sensor LED calibration hardware setup failed");
         }
 
         const MazeMap::App::BootModeRegistryEntry* const entry =
             MazeMap::App::FindBootModeRegistryEntry(MazeMap::App::BootModeId::WallSensorLedCalibration);
         if ((entry == nullptr) || (entry->selector.kind != MazeMap::App::BootModeSelectorKind::PinPair))
         {
-            return _runtime.FailActiveMode("Wall sensor LED calibration selector pins unavailable");
+            _runtime.FailActiveMode("Wall sensor LED calibration selector pins unavailable");
         }
 
         _monitorDrivePin = entry->selector.pinA;
@@ -69,64 +69,31 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Front calibration active; side LEDs held off");
         PrintFrequency("Front LED square wave (Hz): ", WallSensorLedCalibrationHalfPeriodUs(WallSensorId::FrontLeft));
         (void)_runtime.AppendTextLogLine("Remove selector jumper to switch to side calibration");
-        return true;
+        _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
-    void WallSensorLedCalibrationController::Run()
-    {
-        bool completed = false;
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &WallSensorLedCalibrationController::ModeWorkThunk;
-        callbacks.context = this;
-        if (_loopController.BeginSession(BuildLoopOptions(), callbacks))
-        {
-            const LoopController::SessionResult result = _loopController.Run();
-            completed =
-                (result.status == LoopController::SessionResult::Status::Completed) &&
-                !_runtimeFaulted &&
-                (_phase == LedCalibrationPhase::Complete);
-            _loopController.EndSession();
-        }
-        else
-        {
-            (void)_runtime.FailActiveMode("Wall sensor LED calibration loop session start failed");
-        }
-
-        CleanupHardware();
-        if (completed)
-        {
-            (void)_runtime.AppendTextLogLine("Wall sensor LED calibration complete");
-        }
-    }
-
-    LoopController::ControlVector WallSensorLedCalibrationController::ModeWorkThunk(
-        void* context,
+    LoopController::ControlVector WallSensorLedCalibrationController::RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         (void)state;
+        return OnModeWork(loopController);
+    }
 
+    void WallSensorLedCalibrationController::PauseThunk(
+        void* context,
+        LoopController& loopController)
+    {
         auto* const self = static_cast<WallSensorLedCalibrationController*>(context);
         if (self == nullptr)
         {
-            services.Fault("Wall sensor LED calibration context was not installed");
-            return LoopController::ControlVector::Brake;
+            GetSharedRobotRuntime().FailActiveMode(
+                "Wall sensor LED calibration pause callback context was null");
         }
 
-        return self->OnModeWork(services);
-    }
-
-    LoopController::PauseDisposition WallSensorLedCalibrationController::PauseThunk(
-        void* context,
-        const LoopController::PauseContext& pause)
-    {
-        auto* const self = static_cast<WallSensorLedCalibrationController*>(context);
-        return (self != nullptr) ?
-            self->OnPauseGranted(pause) :
-            LoopController::PauseDisposition::StopByRuntime(
-                "Wall sensor LED calibration pause callback context was null");
+        self->OnPauseGranted(loopController);
     }
 
     void WallSensorLedCalibrationController::TeardownOnRuntimeFault(void* context, const char* reason) noexcept
@@ -152,38 +119,34 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector WallSensorLedCalibrationController::OnModeWork(
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         if (_pauseRequested)
         {
-            services.Fault("Wall sensor LED calibration unexpectedly resumed after pause request");
+            _runtime.FailActiveMode(
+                "Wall sensor LED calibration unexpectedly resumed after pause request");
             return LoopController::ControlVector::Brake;
         }
 
         _pauseRequested = true;
-        LoopController::PauseRequest request{};
-        request.onPauseGranted = &WallSensorLedCalibrationController::PauseThunk;
-        request.reason = "wall_sensor_led_calibration";
-        request.flushLogsBeforeGrant = true;
-        request.resetClockOnResume = false;
-        services.RequestPause(request);
+        loopController.RequestPause(&WallSensorLedCalibrationController::PauseThunk, this);
         return LoopController::ControlVector::Brake;
     }
 
-    LoopController::PauseDisposition WallSensorLedCalibrationController::OnPauseGranted(
-        const LoopController::PauseContext& pause)
+    void WallSensorLedCalibrationController::OnPauseGranted(
+        LoopController& loopController)
     {
-        (void)pause;
         RunCalibrationLoop();
         if (_runtimeFaulted)
         {
-            return LoopController::PauseDisposition::StopByRuntime(
+            _runtime.FailActiveMode(
                 (_runtimeFaultReason != nullptr) ?
                     _runtimeFaultReason :
                     "Wall sensor LED calibration paused execution faulted");
         }
 
-        return LoopController::PauseDisposition::Complete();
+        FinalizeSuccessfulRun();
+        loopController.HaltExecutionEndProgram();
     }
 
     void WallSensorLedCalibrationController::SetFrontLeds(const bool enabled)
@@ -321,6 +284,13 @@ namespace MazeMap::App::Internal
         _runtimeFaulted = false;
         _pauseRequested = false;
         _runtimeFaultReason = nullptr;
+    }
+
+    void WallSensorLedCalibrationController::FinalizeSuccessfulRun() noexcept
+    {
+        _phase = LedCalibrationPhase::Complete;
+        CleanupHardware();
+        (void)_runtime.AppendTextLogLine("Wall sensor LED calibration complete");
     }
 
     void WallSensorLedCalibrationController::CleanupHardware() noexcept

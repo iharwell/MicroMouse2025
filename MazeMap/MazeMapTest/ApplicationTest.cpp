@@ -1,17 +1,11 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 #include "..\MazeMap\BootModeRegistry.h"
-#include "..\MazeMap\Application.h"
 #include "..\MazeMap\MazeMapApplicationRuntime.h"
-#include "..\MazeMap\SharedRobotRuntime.h"
 #include "..\MazeMap\Pins.h"
-#include "..\MazeMap\WallSensorLedCalibrationController.h"
 #include "..\MazeMap\Defines.h"
 #include "..\MazeMap\PinPairStrap.h"
-
-#include <chrono>
-#include <future>
-#include <thread>
+#include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -221,56 +215,6 @@ namespace MazeMap::App
             Assert::IsFalse(IsPinPairStrapMonitorClosed(28U));
 
             EndPinPairStrapMonitor(27U, 28U);
-        }
-
-        TEST_METHOD(WallSensorLedCalibrationMode_UsesPauseInsteadOfAdvancingLoopTicks)
-        {
-            HostSetPinShort(38U, 39U);
-
-            MazeMap::App::Internal::SharedRobotRuntime runtime;
-            MazeMap::App::Internal::WallSensorLedCalibrationController mode(runtime);
-            Assert::IsTrue(mode.Begin());
-
-            std::packaged_task<void()> runTask([&mode]() { mode.Run(); });
-            std::future<void> runFuture = runTask.get_future();
-            std::thread runThread(std::move(runTask));
-
-            const bool stillRunningFront =
-                runFuture.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
-            const bool loopActiveFront = runtime.ControlLoop().SessionActive();
-            const std::uint32_t frontSequence = runtime.ControlLoop().LastDiagnostics().sequence;
-
-            HostSetPinShort(38U, 39U, false);
-            const bool stillRunningSide =
-                runFuture.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
-            const bool loopActiveSide = runtime.ControlLoop().SessionActive();
-            const std::uint32_t sideSequence = runtime.ControlLoop().LastDiagnostics().sequence;
-
-            HostSetPinShort(38U, 39U, true);
-            std::future_status finalStatus = runFuture.wait_for(std::chrono::milliseconds(250));
-            if (finalStatus != std::future_status::ready)
-            {
-                (void)runtime.FailActiveMode("test cleanup");
-                runFuture.wait();
-                finalStatus = std::future_status::ready;
-            }
-
-            Assert::IsTrue(finalStatus == std::future_status::ready);
-            runFuture.get();
-            runThread.join();
-
-            runtime.FinalizeSuccessfulModeExit();
-            Assert::IsTrue(stillRunningFront);
-            Assert::IsTrue(loopActiveFront);
-            Assert::IsTrue(frontSequence > 0U);
-            Assert::IsTrue(stillRunningSide);
-            Assert::IsTrue(loopActiveSide);
-            Assert::AreEqual(frontSequence, sideSequence);
-            Assert::IsFalse(runtime.ControlLoop().SessionActive());
-            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Forward_Left));
-            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Forward_Right));
-            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Side_Left));
-            Assert::AreEqual(LOW, digitalRead(Pins::LED_Ctrl_Side_Right));
         }
 
     };

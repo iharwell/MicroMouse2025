@@ -130,17 +130,17 @@ namespace MazeMap::App::Internal
         {
         }
 
-        bool Begin() override
+        void SetupMode() override
         {
             ResetState();
             if (!_runtime.RegisterModeFaultHandler(&ManeuverFileTestMode::TeardownOnRuntimeFault, this, kManeuverFileTestStableId))
             {
-                return false;
+                _runtime.FailActiveMode("Maneuver file test fault handler registration failed");
             }
 
             if (!SetupHardware())
             {
-                return _runtime.FailActiveMode("Maneuver file test hardware setup failed");
+                _runtime.FailActiveMode("Maneuver file test hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:maneuver_file_test");
@@ -150,7 +150,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return _runtime.FailActiveMode("Maneuver file test drive base init failed");
+                _runtime.FailActiveMode("Maneuver file test drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -158,113 +158,25 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(true);
             if (!_startupCalibration.BringUp())
             {
-                return _runtime.FailActiveMode("Maneuver file test startup bring-up failed");
+                _runtime.FailActiveMode("Maneuver file test startup bring-up failed");
             }
 
             if (!LoadManeuverQueueFromSd(_runtime, _speedVehicle, _queue))
             {
-                return _runtime.FailActiveMode("Maneuver file test could not load test.txt");
+                _runtime.FailActiveMode("Maneuver file test could not load test.txt");
             }
 
             (void)_runtime.AppendTextLogFormatted(
                 "Loaded maneuver test queue with %u maneuvers",
                 static_cast<unsigned>(_queue.size()));
-            return true;
-        }
-
-        void Run() override
-        {
             _phase = Phase::LaunchStartupCalibration;
-
-            LoopController::ModeCallbacks callbacks{};
-            callbacks.onModeWork = &ManeuverFileTestMode::ModeWorkThunk;
-            callbacks.context = this;
-            if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-            {
-                (void)_runtime.FailActiveMode("Maneuver file test loop session start failed");
-            }
-            else
-            {
-                const LoopController::SessionResult result = _loopController.Run();
-                const bool completed =
-                    (result.status == LoopController::SessionResult::Status::Completed);
-                _loopController.EndSession();
-
-                if (completed)
-                {
-                    (void)_runtime.AppendTextLogLine("Maneuver file test complete");
-                }
-            }
-
-            _startupCalibration.Cancel();
-            _drive.Brake();
-            _drive.UseNominalWheelControlProfile();
-        }
-
-    private:
-        enum class Phase : std::uint8_t
-        {
-            Idle,
-            LaunchStartupCalibration,
-            RunStartupCalibration,
-            LaunchPostStartupHold,
-            RunPostStartupHold,
-            LaunchQueueEntry,
-            RunQueueEntry,
-            LaunchCompletionHold,
-            RunCompletionHold,
-            Complete
-        };
-
-        static LoopController::ControlVector ModeWorkThunk(
-            void* context,
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
-        {
-            auto* const self = static_cast<ManeuverFileTestMode*>(context);
-            if (self == nullptr)
-            {
-                services.Fault("Maneuver file test callback context was not installed");
-                return LoopController::ControlVector::Brake;
-            }
-
-            return self->RunTick(loopEndTimeUs, state, services);
-        }
-
-        LoopController::SessionOptions BuildLoopOptions() const noexcept
-        {
-            LoopController::SessionOptions options{};
-            options.controlPeriodUs = Config::kControlPeriodUs;
-            return options;
-        }
-
-        void ResetState() noexcept
-        {
-            _queue.clear();
-            _queueActiveIndex = 0U;
-            _phase = Phase::Idle;
-            _startupCalibration.Cancel();
-        }
-
-        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
-        {
-            (void)reason;
-            if (context == nullptr)
-            {
-                return;
-            }
-
-            auto* const self = static_cast<ManeuverFileTestMode*>(context);
-            self->_startupCalibration.Cancel();
-            self->_drive.Brake();
-            self->_drive.UseNominalWheelControlProfile();
+            _loopController.StageNextSessionState(BuildLoopOptions());
         }
 
         LoopController::ControlVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
+            LoopController& loopController) override
         {
             (void)loopEndTimeUs;
             (void)state;
@@ -275,7 +187,7 @@ namespace MazeMap::App::Internal
                 _startupCalibration.Start();
                 if (!_startupCalibration.Active())
                 {
-                    services.Fault("Maneuver file test startup calibration could not start");
+                    _runtime.FailActiveMode("Maneuver file test startup calibration could not start");
                 }
                 else
                 {
@@ -351,7 +263,7 @@ namespace MazeMap::App::Internal
 
                 if (_queueActiveIndex >= _queue.size())
                 {
-                    services.Fault("Maneuver file test queue entry completion index was invalid");
+                    _runtime.FailActiveMode("Maneuver file test queue entry completion index was invalid");
                 }
                 else
                 {
@@ -400,14 +312,63 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::Complete:
-                services.RequestEndLoop();
+                (void)_runtime.AppendTextLogLine("Maneuver file test complete");
+                _startupCalibration.Cancel();
+                _drive.Brake();
+                _drive.UseNominalWheelControlProfile();
+                _phase = Phase::Idle;
+                loopController.HaltExecutionEndProgram();
                 return LoopController::ControlVector::Brake;
 
             case Phase::Idle:
             default:
-                services.Fault("Maneuver file test phase was not initialized");
+                _runtime.FailActiveMode("Maneuver file test phase was not initialized");
                 return LoopController::ControlVector::Brake;
             }
+        }
+
+    private:
+        enum class Phase : std::uint8_t
+        {
+            Idle,
+            LaunchStartupCalibration,
+            RunStartupCalibration,
+            LaunchPostStartupHold,
+            RunPostStartupHold,
+            LaunchQueueEntry,
+            RunQueueEntry,
+            LaunchCompletionHold,
+            RunCompletionHold,
+            Complete
+        };
+
+        LoopController::SessionOptions BuildLoopOptions() const noexcept
+        {
+            LoopController::SessionOptions options{};
+            options.controlPeriodUs = Config::kControlPeriodUs;
+            return options;
+        }
+
+        void ResetState() noexcept
+        {
+            _queue.clear();
+            _queueActiveIndex = 0U;
+            _phase = Phase::Idle;
+            _startupCalibration.Cancel();
+        }
+
+        static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
+        {
+            (void)reason;
+            if (context == nullptr)
+            {
+                return;
+            }
+
+            auto* const self = static_cast<ManeuverFileTestMode*>(context);
+            self->_startupCalibration.Cancel();
+            self->_drive.Brake();
+            self->_drive.UseNominalWheelControlProfile();
         }
 
         SharedRobotRuntime& _runtime;

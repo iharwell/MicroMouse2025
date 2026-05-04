@@ -213,11 +213,11 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::StaticMeasurementPhase::TickActiveSlot(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services,
+        LoopController& loopController,
         bool& done)
     {
         (void)state;
-        (void)services;
+        (void)loopController;
 
         return controller._driveService.GetNextControls(done);
     }
@@ -314,11 +314,11 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::LaunchMeasurementPhase::TickActiveSlot(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services,
+        LoopController& loopController,
         bool& done)
     {
         (void)state;
-        (void)services;
+        (void)loopController;
 
         if (!_holdActive)
         {
@@ -427,11 +427,11 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::StraightMeasurementPhase::TickActiveSlot(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services,
+        LoopController& loopController,
         bool& done)
     {
         (void)state;
-        (void)services;
+        (void)loopController;
 
         if (_holdActive)
         {
@@ -541,11 +541,11 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::YawMeasurementPhase::TickActiveSlot(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services,
+        LoopController& loopController,
         bool& done)
     {
         (void)state;
-        (void)services;
+        (void)loopController;
 
         if (_holdActive)
         {
@@ -706,11 +706,11 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::SmoothMeasurementPhase::TickActiveSlot(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services,
+        LoopController& loopController,
         bool& done)
     {
         (void)state;
-        (void)services;
+        (void)loopController;
 
         if (_holdActive)
         {
@@ -908,11 +908,11 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::LoopMeasurementPhase::TickActiveSlot(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services,
+        LoopController& loopController,
         bool& done)
     {
         (void)state;
-        (void)services;
+        (void)loopController;
 
         if (_holdActive)
         {
@@ -972,7 +972,7 @@ namespace MazeMap::App::Internal
     {
         _tickIndex = 0U;
         _logOpen = false;
-        _pendingRow.reset();
+        _bufferedRow.reset();
     }
 
     bool OpenFloorMeasurementController::TimingStage::Begin(OpenFloorMeasurementController& controller)
@@ -1006,73 +1006,66 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::TimingStage::Tick(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         const LoopController::ControlVector stopControl = LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f);
-        if (!FlushPending(controller, "Open-floor measurement timing log write failed", &services))
+        if (!WriteBufferedRow(controller, "Open-floor measurement timing log write failed"))
         {
+            controller._runtime.FailActiveMode("Open-floor measurement timing log write failed");
             return stopControl;
         }
         if (controller.SelectorRemoved())
         {
-            services.Fault(kOpenFloorMeasurementSelectorRemovedReason);
+            controller._runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
             return stopControl;
         }
         if (controller._runtime.Estimator().HasFault())
         {
-            services.Fault("Estimator fault during timing capture");
+            controller._runtime.FailActiveMode("Estimator fault during timing capture");
             return stopControl;
         }
 
         Runtime::OpenFloorTimingRow row{};
         controller.PopulateTimingRowFromState(state, row);
-        StageRow(row);
+        BufferRow(row);
         ++_tickIndex;
         if (CaptureComplete())
         {
-            controller._pauseAction = PauseAction::TimingToMain;
-
-            LoopController::PauseRequest request{};
-            request.onPauseGranted = &OpenFloorMeasurementController::PauseThunk;
-            request.reason = "open_floor_timing_to_main";
-            request.flushLogsBeforeGrant = true;
-            request.resetClockOnResume = true;
-            services.RequestPause(request);
+            controller._sessionBoundaryAction = SessionBoundaryAction::TimingToMain;
+            loopController.RequestEndSession(
+                &OpenFloorMeasurementController::TimingToMainEndSessionThunk,
+                &controller);
         }
 
         return stopControl;
     }
 
-    LoopController::PauseDisposition OpenFloorMeasurementController::TimingStage::CompleteTimingToMainHandoff(
+    void OpenFloorMeasurementController::TimingStage::CompleteTimingToMainSessionTransition(
         OpenFloorMeasurementController& controller,
         MainStage& mainStage,
-        const LoopController::PauseContext& pause)
+        LoopController& loopController)
     {
-        (void)pause;
-        if (controller._pauseAction != PauseAction::TimingToMain)
+        if (controller._sessionBoundaryAction != SessionBoundaryAction::TimingToMain)
         {
-            return LoopController::PauseDisposition::StopByRuntime(
-                "Open-floor measurement pause granted without a pending timing transition");
+            controller._runtime.FailActiveMode(
+                "Open-floor measurement end-session callback ran without a pending timing transition");
         }
-        if (!FlushPending(
-                controller,
-                "Open-floor measurement timing log write failed during timing transition",
-                nullptr))
+        if (!WriteBufferedRow(controller, "Open-floor measurement timing log write failed during timing transition"))
         {
-            return LoopController::PauseDisposition::StopByRuntime(
+            controller._runtime.FailActiveMode(
                 "Open-floor measurement timing log write failed during timing transition");
         }
 
         _logOpen = false;
         if (!mainStage.Begin(controller))
         {
-            return LoopController::PauseDisposition::StopByRuntime(
+            controller._runtime.FailActiveMode(
                 "Open-floor measurement main log setup failed after timing capture");
         }
 
         controller._activeStageTick = &OpenFloorMeasurementController::MainStageTick;
-        controller._pauseAction = PauseAction::None;
-        return LoopController::PauseDisposition::Resume();
+        controller._sessionBoundaryAction = SessionBoundaryAction::None;
+        loopController.StageNextSessionState(controller.BuildLoopOptions());
     }
 
     void OpenFloorMeasurementController::TimingStage::FinalizeCompletedRun(
@@ -1080,39 +1073,35 @@ namespace MazeMap::App::Internal
     {
         if (_logOpen)
         {
-            (void)FlushPending(controller, "Open-floor measurement timing log write failed", nullptr);
+            (void)WriteBufferedRow(controller, "Open-floor measurement timing log write failed");
             _logOpen = false;
         }
     }
 
-    bool OpenFloorMeasurementController::TimingStage::FlushPending(
+    bool OpenFloorMeasurementController::TimingStage::WriteBufferedRow(
         OpenFloorMeasurementController& controller,
-        const char* failureReason,
-        LoopController::TickServices* const services)
+        const char* const failureReason)
     {
-        if (!_pendingRow.has_value())
+        if (!_bufferedRow.has_value())
         {
             return true;
         }
 
-        Runtime::OpenFloorTimingRow& row = *_pendingRow;
+        Runtime::OpenFloorTimingRow& row = *_bufferedRow;
         ApplyControlTimingToTimingRow(controller._loopController.LastDiagnostics().controlTiming, row);
         if (!controller._runtime.LogUtilityDataRow(row))
         {
-            if ((services != nullptr) && (failureReason != nullptr))
-            {
-                services->Fault(failureReason);
-            }
+            (void)failureReason;
             return false;
         }
 
-        _pendingRow.reset();
+        _bufferedRow.reset();
         return true;
     }
 
-    void OpenFloorMeasurementController::TimingStage::StageRow(const Runtime::OpenFloorTimingRow& row)
+    void OpenFloorMeasurementController::TimingStage::BufferRow(const Runtime::OpenFloorTimingRow& row)
     {
-        _pendingRow = row;
+        _bufferedRow = row;
     }
 
     bool OpenFloorMeasurementController::TimingStage::CaptureComplete() const noexcept
@@ -1127,7 +1116,7 @@ namespace MazeMap::App::Internal
         _completionPending = false;
         _slotStarted = false;
         _activeLabels = MainRowLabel{};
-        _pendingRow.reset();
+        _bufferedRow.reset();
 
         for (MainMeasurementPhase* const phase : _phases)
         {
@@ -1163,7 +1152,7 @@ namespace MazeMap::App::Internal
         _completionPending = false;
         _slotStarted = false;
         _activeLabels = MainRowLabel{};
-        _pendingRow.reset();
+        _bufferedRow.reset();
         if (!MoveToFirstActiveSlot())
         {
             _completionPending = true;
@@ -1203,19 +1192,21 @@ namespace MazeMap::App::Internal
     LoopController::ControlVector OpenFloorMeasurementController::MainStage::Tick(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
-        if (!FlushPending(controller, &services, "Open-floor measurement main log write failed"))
+        if (!WriteBufferedRow(controller, "Open-floor measurement main log write failed"))
         {
+            controller._runtime.FailActiveMode("Open-floor measurement main log write failed");
             return StopControlVector();
         }
 
         if (_completionPending)
         {
-            services.RequestEndLoop();
+            controller.FinalizeSuccessfulRun();
+            loopController.HaltExecutionEndProgram();
             return StopControlVector();
         }
-        if (CheckFault(controller, services))
+        if (CheckFault(controller))
         {
             return StopControlVector();
         }
@@ -1233,11 +1224,11 @@ namespace MazeMap::App::Internal
 
         bool done = false;
         const LoopController::ControlVector control =
-            ActivePhase().TickActiveSlot(controller, state, services, done);
+            ActivePhase().TickActiveSlot(controller, state, loopController, done);
 
         Runtime::OpenFloorMainRow row{};
         controller.PopulateMainRowFromState(_activeLabels, state, row);
-        StageRow(row);
+        BufferRow(row);
 
         if (done)
         {
@@ -1254,7 +1245,7 @@ namespace MazeMap::App::Internal
     {
         if (_logOpen)
         {
-            (void)FlushPending(controller, nullptr, "Open-floor measurement main log write failed");
+            (void)WriteBufferedRow(controller, "Open-floor measurement main log write failed");
             _logOpen = false;
         }
     }
@@ -1350,43 +1341,38 @@ namespace MazeMap::App::Internal
             static_cast<std::uint16_t>(_activeRepeatIndex + 1U));
     }
 
-    bool OpenFloorMeasurementController::MainStage::FlushPending(
+    bool OpenFloorMeasurementController::MainStage::WriteBufferedRow(
         OpenFloorMeasurementController& controller,
-        LoopController::TickServices* const services,
         const char* const failureReason)
     {
-        if (!_pendingRow.has_value())
+        if (!_bufferedRow.has_value())
         {
             return true;
         }
 
-        Runtime::OpenFloorMainRow& row = *_pendingRow;
+        Runtime::OpenFloorMainRow& row = *_bufferedRow;
         row.encoder_timestamp_us = controller._loopController.LastDiagnostics().controlTiming.encoderReadDoneUs;
         if (!controller._runtime.LogUtilityDataRow(row))
         {
-            if ((services != nullptr) && (failureReason != nullptr))
-            {
-                services->Fault(failureReason);
-            }
+            (void)failureReason;
             return false;
         }
 
-        _pendingRow.reset();
+        _bufferedRow.reset();
         return true;
     }
 
-    void OpenFloorMeasurementController::MainStage::StageRow(const Runtime::OpenFloorMainRow& row)
+    void OpenFloorMeasurementController::MainStage::BufferRow(const Runtime::OpenFloorMainRow& row)
     {
-        _pendingRow = row;
+        _bufferedRow = row;
     }
 
     bool OpenFloorMeasurementController::MainStage::CheckFault(
-        OpenFloorMeasurementController& controller,
-        LoopController::TickServices& services)
+        OpenFloorMeasurementController& controller)
     {
         if (controller.SelectorRemoved())
         {
-            services.Fault(kOpenFloorMeasurementSelectorRemovedReason);
+            controller._runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
             return true;
         }
         if (!controller._runtime.Estimator().HasFault())
@@ -1394,11 +1380,11 @@ namespace MazeMap::App::Internal
             return false;
         }
 
-        services.Fault("Estimator fault during open-floor main stage");
+        controller._runtime.FailActiveMode("Estimator fault during open-floor main stage");
         return true;
     }
 
-    bool OpenFloorMeasurementController::Begin()
+    void OpenFloorMeasurementController::SetupMode()
     {
         ResetState();
         if (!_runtime.RegisterModeFaultHandler(
@@ -1406,11 +1392,11 @@ namespace MazeMap::App::Internal
                 this,
                 kOpenFloorMeasurementStableId))
         {
-            return false;
+            _runtime.FailActiveMode("Open-floor measurement fault handler registration failed");
         }
         if (!SetupHardware())
         {
-            return _runtime.FailActiveMode("Open-floor measurement hardware setup failed");
+            _runtime.FailActiveMode("Open-floor measurement hardware setup failed");
         }
 
         (void)BootUtilityModeFramework::ResetStartupTrace("mode:open_floor_measurement");
@@ -1420,7 +1406,7 @@ namespace MazeMap::App::Internal
 
         if (!_drive.Begin())
         {
-            return _runtime.FailActiveMode("Open-floor measurement drive base init failed");
+            _runtime.FailActiveMode("Open-floor measurement drive base init failed");
         }
         _drive.UseNominalWheelControlProfile();
 
@@ -1428,58 +1414,26 @@ namespace MazeMap::App::Internal
         _startupCalibration.SetIsInMaze(false);
         if (!_startupCalibration.BringUp())
         {
-            return _runtime.FailActiveMode("Open-floor measurement startup bring-up failed");
+            _runtime.FailActiveMode("Open-floor measurement startup bring-up failed");
         }
         SetMissionLevelFanEnabled(true);
 
         ConfigureSelectorMonitor();
         if (SelectorRemoved())
         {
-            return _runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
+            _runtime.FailActiveMode(kOpenFloorMeasurementSelectorRemovedReason);
         }
 
         if (!_mainStage.PreparePhases(*this))
         {
-            return _runtime.FailActiveMode("Open-floor measurement phase preparation failed");
+            _runtime.FailActiveMode("Open-floor measurement phase preparation failed");
         }
         if (!_timingStage.Begin(*this))
         {
-            return _runtime.FailActiveMode("Open-floor measurement timing log setup failed");
+            _runtime.FailActiveMode("Open-floor measurement timing log setup failed");
         }
 
-        return true;
-    }
-
-    void OpenFloorMeasurementController::Run()
-    {
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &OpenFloorMeasurementController::ModeWorkThunk;
-        callbacks.context = this;
-
-        bool completed = false;
-        if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-        {
-            (void)_runtime.FailActiveMode("Open-floor measurement loop session start failed");
-        }
-        else
-        {
-            const LoopController::SessionResult result = _loopController.Run();
-            completed = (result.status == LoopController::SessionResult::Status::Completed);
-            _loopController.EndSession();
-        }
-
-        if (completed)
-        {
-            _mainStage.FinalizeCompletedRun(*this);
-            _timingStage.FinalizeCompletedRun(*this);
-        }
-
-        ReleaseSelectorMonitor();
-
-        if (completed)
-        {
-            (void)_runtime.AppendTextLogLine("Open-floor measurement complete");
-        }
+        _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
     void OpenFloorMeasurementController::TeardownOnRuntimeFault(void* context, const char* reason) noexcept
@@ -1494,31 +1448,26 @@ namespace MazeMap::App::Internal
         self->ReleaseSelectorMonitor();
     }
 
-    LoopController::PauseDisposition OpenFloorMeasurementController::PauseThunk(
+    void OpenFloorMeasurementController::TimingToMainEndSessionThunk(
         void* context,
-        const LoopController::PauseContext& pause)
-    {
-        auto* const self = static_cast<OpenFloorMeasurementController*>(context);
-        return (self != nullptr) ?
-            self->OnPauseGranted(pause) :
-            LoopController::PauseDisposition::StopByRuntime(
-                "Open-floor measurement pause callback context was null");
-    }
-
-    LoopController::ControlVector OpenFloorMeasurementController::ModeWorkThunk(
-        void* context,
-        const std::uint32_t loopEndTimeUs,
-        const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         auto* const self = static_cast<OpenFloorMeasurementController*>(context);
         if (self == nullptr)
         {
-            services.Fault("Open-floor measurement callback context was not installed");
-            return LoopController::ControlVector::Brake;
+            GetSharedRobotRuntime().FailActiveMode(
+                "Open-floor measurement end-session callback context was null");
         }
 
-        return (self->*self->_activeStageTick)(loopEndTimeUs, state, services);
+        self->CompleteTimingToMainEndSession(loopController);
+    }
+
+    LoopController::ControlVector OpenFloorMeasurementController::RunTick(
+        const std::uint32_t loopEndTimeUs,
+        const MazeMap::VehicleState& state,
+        LoopController& loopController)
+    {
+        return (this->*_activeStageTick)(loopEndTimeUs, state, loopController);
     }
 
     LoopController::SessionOptions OpenFloorMeasurementController::BuildLoopOptions() const noexcept
@@ -1534,7 +1483,7 @@ namespace MazeMap::App::Internal
         _startupCalibration.Cancel();
         ReleaseSelectorMonitor();
         _activeStageTick = &OpenFloorMeasurementController::TimingStageTick;
-        _pauseAction = PauseAction::None;
+        _sessionBoundaryAction = SessionBoundaryAction::None;
         _timingStage.Reset();
         _mainStage.Reset();
     }
@@ -1706,28 +1655,36 @@ namespace MazeMap::App::Internal
         return _selectorMonitorArmed && !IsPinPairStrapMonitorClosed(_selectorSensePin);
     }
 
-    LoopController::PauseDisposition OpenFloorMeasurementController::OnPauseGranted(
-        const LoopController::PauseContext& pause)
+    void OpenFloorMeasurementController::CompleteTimingToMainEndSession(
+        LoopController& loopController)
     {
-        return _timingStage.CompleteTimingToMainHandoff(*this, _mainStage, pause);
+        _timingStage.CompleteTimingToMainSessionTransition(*this, _mainStage, loopController);
+    }
+
+    void OpenFloorMeasurementController::FinalizeSuccessfulRun() noexcept
+    {
+        _mainStage.FinalizeCompletedRun(*this);
+        _timingStage.FinalizeCompletedRun(*this);
+        ReleaseSelectorMonitor();
+        (void)_runtime.AppendTextLogLine("Open-floor measurement complete");
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::TimingStageTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
-        return _timingStage.Tick(*this, state, services);
+        return _timingStage.Tick(*this, state, loopController);
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::MainStageTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
-        return _mainStage.Tick(*this, state, services);
+        return _mainStage.Tick(*this, state, loopController);
     }
 
     std::uint8_t OpenFloorMeasurementController::SpeedBinForIndex(const std::size_t speedIndex) noexcept

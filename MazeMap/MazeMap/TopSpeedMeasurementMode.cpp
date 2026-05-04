@@ -51,17 +51,17 @@ namespace MazeMap::App::Internal
         {
         }
 
-        bool Begin() override
+        void SetupMode() override
         {
             ResetState();
             if (!_runtime.RegisterModeFaultHandler(&TopSpeedMeasurementMode::TeardownOnRuntimeFault, this, kTopSpeedMeasurementStableId))
             {
-                return false;
+                _runtime.FailActiveMode("Top speed measurement fault handler registration failed");
             }
 
             if (!SetupHardware())
             {
-                return _runtime.FailActiveMode("Top speed measurement hardware setup failed");
+                _runtime.FailActiveMode("Top speed measurement hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:top_speed_measurement");
@@ -70,7 +70,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return _runtime.FailActiveMode("Top speed measurement drive base init failed");
+                _runtime.FailActiveMode("Top speed measurement drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -78,53 +78,18 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(false);
             if (!_startupCalibration.BringUp())
             {
-                return _runtime.FailActiveMode("Top speed measurement startup bring-up failed");
+                _runtime.FailActiveMode("Top speed measurement startup bring-up failed");
             }
 
             ConfigureSelectorMonitor();
             if (SelectorRemoved())
             {
-                return _runtime.FailActiveMode(kTopSpeedMeasurementSelectorRemovedReason);
+                _runtime.FailActiveMode(kTopSpeedMeasurementSelectorRemovedReason);
             }
 
             _batteryVoltageStart = ReadBatteryVoltage();
-            return true;
-        }
-
-        void Run() override
-        {
             _phase = Phase::LaunchPrelaunchHold;
-
-            LoopController::ModeCallbacks callbacks{};
-            callbacks.onModeWork = &TopSpeedMeasurementMode::ModeWorkThunk;
-            callbacks.context = this;
-            if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-            {
-                (void)_runtime.FailActiveMode("Top speed measurement loop session start failed");
-            }
-            else
-            {
-                const LoopController::SessionResult result = _loopController.Run();
-                const bool completed =
-                    (result.status == LoopController::SessionResult::Status::Completed);
-                const std::uint32_t completedTicks = result.tickCount;
-                _loopController.EndSession();
-
-                if (completed)
-                {
-                    (void)_runtime.AppendTextLogFormatted(
-                        "Top speed complete: ticks=%lu peak_speed_mps=%.3f peak_planar_accel_mps2=%.3f vbat0=%.3f",
-                        static_cast<unsigned long>(completedTicks),
-                        _peakMeasuredSpeedMps,
-                        _peakPlanarAccelMps2,
-                        _batteryVoltageStart);
-                }
-            }
-
-            ReleaseSelectorMonitor();
-            _startupCalibration.Cancel();
-            _drive.Brake();
-            _drive.UseNominalWheelControlProfile();
+            _loopController.StageNextSessionState(BuildLoopOptions());
         }
 
     private:
@@ -154,22 +119,6 @@ namespace MazeMap::App::Internal
             self->_startupCalibration.Cancel();
             self->_drive.Brake();
             self->_drive.UseNominalWheelControlProfile();
-        }
-
-        static LoopController::ControlVector ModeWorkThunk(
-            void* context,
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
-        {
-            auto* const self = static_cast<TopSpeedMeasurementMode*>(context);
-            if (self == nullptr)
-            {
-                services.Fault("Top speed measurement callback context was not installed");
-                return LoopController::ControlVector::Brake;
-            }
-
-            return self->RunTick(loopEndTimeUs, state, services);
         }
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept
@@ -280,13 +229,13 @@ namespace MazeMap::App::Internal
         LoopController::ControlVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
+            LoopController& loopController) override
         {
             (void)loopEndTimeUs;
 
             if (SelectorRemoved())
             {
-                services.Fault(kTopSpeedMeasurementSelectorRemovedReason);
+                _runtime.FailActiveMode(kTopSpeedMeasurementSelectorRemovedReason);
                 return LoopController::ControlVector::Brake;
             }
 
@@ -297,7 +246,7 @@ namespace MazeMap::App::Internal
             case Phase::LaunchPrelaunchHold:
                 if (!StartHold(kTopSpeedMeasurementPrelaunchHoldMs))
                 {
-                    services.Fault("Top speed measurement prelaunch hold could not start");
+                    _runtime.FailActiveMode("Top speed measurement prelaunch hold could not start");
                 }
                 else
                 {
@@ -311,7 +260,7 @@ namespace MazeMap::App::Internal
             case Phase::LaunchStraight:
                 if (!StartStraightRun())
                 {
-                    services.Fault("Top speed measurement straight run could not start");
+                    _runtime.FailActiveMode("Top speed measurement straight run could not start");
                 }
                 else
                 {
@@ -325,7 +274,7 @@ namespace MazeMap::App::Internal
             case Phase::LaunchCompletionHold:
                 if (!StartHold(kTopSpeedMeasurementCompletionHoldMs))
                 {
-                    services.Fault("Top speed measurement completion hold could not start");
+                    _runtime.FailActiveMode("Top speed measurement completion hold could not start");
                 }
                 else
                 {
@@ -337,12 +286,23 @@ namespace MazeMap::App::Internal
                 return PollDrive(Phase::Complete);
 
             case Phase::Complete:
-                services.RequestEndLoop();
+                (void)_runtime.AppendTextLogFormatted(
+                    "Top speed complete: ticks=%lu peak_speed_mps=%.3f peak_planar_accel_mps2=%.3f vbat0=%.3f",
+                    static_cast<unsigned long>(_loopController.CurrentTickSequence()),
+                    _peakMeasuredSpeedMps,
+                    _peakPlanarAccelMps2,
+                    _batteryVoltageStart);
+                ReleaseSelectorMonitor();
+                _startupCalibration.Cancel();
+                _drive.Brake();
+                _drive.UseNominalWheelControlProfile();
+                _phase = Phase::Idle;
+                loopController.HaltExecutionEndProgram();
                 return LoopController::ControlVector::Brake;
 
             case Phase::Idle:
             default:
-                services.Fault("Top speed measurement phase was not initialized");
+                _runtime.FailActiveMode("Top speed measurement phase was not initialized");
                 return LoopController::ControlVector::Brake;
             }
         }

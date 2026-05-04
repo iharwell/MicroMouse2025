@@ -138,16 +138,12 @@ namespace MazeMap::App::Internal
 
     bool StartupCalibration::BringUp()
     {
-        if ((_sensors == nullptr) || (_loopController == nullptr) || Active())
+        if ((_sensors == nullptr) || Active())
         {
             return false;
         }
 
-        const unsigned long controlPeriodUs =
-            (_loopController->_options.controlPeriodUs > 0U) ?
-                static_cast<unsigned long>(_loopController->_options.controlPeriodUs) :
-                static_cast<unsigned long>(Config::kControlPeriodUs);
-        const bool ok = _sensors->Begin(controlPeriodUs);
+        const bool ok = _sensors->Begin(Config::kControlPeriodUs);
         _broughtUp = ok;
         _sensorsCalibrated = ok ? SensorCalibration::Imu : SensorCalibration::None;
         if (ok)
@@ -194,7 +190,6 @@ namespace MazeMap::App::Internal
         _useFallbackWallCalibration = !HasAnyWallCalibrationData();
 
         if ((_runtime == nullptr) ||
-            (_loopController == nullptr) ||
             (_sensors == nullptr) ||
             (_drive == nullptr) ||
             (_driveService == nullptr) ||
@@ -307,7 +302,6 @@ namespace MazeMap::App::Internal
     void StartupCalibration::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
-        _loopController = &runtime.ControlLoop();
         _sensors = &runtime.Sensors();
         _drive = &runtime.Drive();
         _driveService = &runtime.DriveService();

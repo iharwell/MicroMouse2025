@@ -5,6 +5,7 @@
 #include "DiagonalWallCentering.h"
 #include "EncoderStallPolicy.h"
 #include "FanRampProfile.h"
+#include "HardwareConfig.h"
 #include "ImuCalibrationPolicy.h"
 #include "Maze.h"
 #include "MissionStartPolicy.h"
@@ -38,20 +39,8 @@ namespace MazeMap::Pins
 }
 #endif
 
-#if !defined(ARDUINO_TEENSY41) && !defined(MAZEMAP_HARDWARE_CONFIG_NAMESPACE_AVAILABLE)
-namespace MazeMap::HardwareConfig
-{
-    constexpr uint32_t kFrontWallSensorSwitchSettleTime_us = 60U;
-    constexpr uint32_t kSideWallSensorSwitchSettleTime_us = 30U;
-}
-#endif
-
 #if !defined(MAZEMAP_PINS_NAMESPACE_AVAILABLE)
 namespace Pins = MazeMap::Pins;
-#endif
-
-#if !defined(MAZEMAP_HARDWARE_CONFIG_NAMESPACE_AVAILABLE)
-namespace HardwareConfig = MazeMap::HardwareConfig;
 #endif
 
 #if !defined(ARDUINO_TEENSY41)

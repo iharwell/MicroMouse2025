@@ -43,17 +43,17 @@ namespace MazeMap::App::Internal
         {
         }
 
-        bool Begin() override
+        void SetupMode() override
         {
             ResetState();
             if (!_runtime.RegisterModeFaultHandler(&CorridorRepeatabilityMode::TeardownOnRuntimeFault, this, kCorridorStableId))
             {
-                return false;
+                _runtime.FailActiveMode("Corridor repeatability fault handler registration failed");
             }
 
             if (!SetupHardware())
             {
-                return _runtime.FailActiveMode("Corridor repeatability hardware setup failed");
+                _runtime.FailActiveMode("Corridor repeatability hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:corridor_repeatability");
@@ -62,7 +62,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return _runtime.FailActiveMode("Corridor repeatability drive base init failed");
+                _runtime.FailActiveMode("Corridor repeatability drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -70,40 +70,11 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(true);
             if (!_startupCalibration.BringUp())
             {
-                return _runtime.FailActiveMode("Corridor repeatability startup bring-up failed");
+                _runtime.FailActiveMode("Corridor repeatability startup bring-up failed");
             }
 
-            return true;
-        }
-
-        void Run() override
-        {
             _phase = Phase::LaunchStartupCalibration;
-
-            LoopController::ModeCallbacks callbacks{};
-            callbacks.onModeWork = &CorridorRepeatabilityMode::ModeWorkThunk;
-            callbacks.context = this;
-            if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-            {
-                (void)_runtime.FailActiveMode("Corridor repeatability loop session start failed");
-            }
-            else
-            {
-                const LoopController::SessionResult result = _loopController.Run();
-                const bool completed =
-                    (result.status == LoopController::SessionResult::Status::Completed);
-                _loopController.EndSession();
-
-                if (completed)
-                {
-                    (void)_runtime.AppendTextLogLine("Corridor repeatability complete");
-                }
-            }
-
-            _wallTouch.Cancel();
-            _startupCalibration.Cancel();
-            _drive.Brake();
-            _drive.UseNominalWheelControlProfile();
+            _loopController.StageNextSessionState(BuildLoopOptions());
         }
 
     private:
@@ -144,22 +115,6 @@ namespace MazeMap::App::Internal
             self->_drive.UseNominalWheelControlProfile();
         }
 
-        static LoopController::ControlVector ModeWorkThunk(
-            void* context,
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
-        {
-            auto* const self = static_cast<CorridorRepeatabilityMode*>(context);
-            if (self == nullptr)
-            {
-                services.Fault("Corridor repeatability callback context was not installed");
-                return LoopController::ControlVector::Brake;
-            }
-
-            return self->RunTick(loopEndTimeUs, state, services);
-        }
-
         LoopController::SessionOptions BuildLoopOptions() const noexcept
         {
             LoopController::SessionOptions options{};
@@ -197,7 +152,7 @@ namespace MazeMap::App::Internal
         LoopController::ControlVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
+            LoopController& loopController) override
         {
             (void)loopEndTimeUs;
             (void)state;
@@ -208,7 +163,7 @@ namespace MazeMap::App::Internal
                 _startupCalibration.Start();
                 if (!_startupCalibration.Active())
                 {
-                    services.Fault("Corridor repeatability startup calibration could not start");
+                    _runtime.FailActiveMode("Corridor repeatability startup calibration could not start");
                 }
                 else
                 {
@@ -295,7 +250,7 @@ namespace MazeMap::App::Internal
                     MazeMap::Up);
                 if (!_wallTouch.Active())
                 {
-                    services.Fault("Corridor repeatability wall touch could not start");
+                    _runtime.FailActiveMode("Corridor repeatability wall touch could not start");
                 }
                 else
                 {
@@ -403,12 +358,18 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
 
             case Phase::Complete:
-                services.RequestEndLoop();
+                (void)_runtime.AppendTextLogLine("Corridor repeatability complete");
+                _wallTouch.Cancel();
+                _startupCalibration.Cancel();
+                _drive.Brake();
+                _drive.UseNominalWheelControlProfile();
+                _phase = Phase::Idle;
+                loopController.HaltExecutionEndProgram();
                 return LoopController::ControlVector::Brake;
 
             case Phase::Idle:
             default:
-                services.Fault("Corridor repeatability phase was not initialized");
+                _runtime.FailActiveMode("Corridor repeatability phase was not initialized");
                 return LoopController::ControlVector::Brake;
             }
         }

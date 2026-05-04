@@ -44,17 +44,17 @@ namespace MazeMap::App::Internal
         {
         }
 
-        bool Begin() override
+        void SetupMode() override
         {
             ResetState();
             if (!_runtime.RegisterModeFaultHandler(&PositionAccuracyAuditMode::TeardownOnRuntimeFault, this, kPositionAuditStableId))
             {
-                return false;
+                _runtime.FailActiveMode("Position accuracy audit fault handler registration failed");
             }
 
             if (!SetupHardware())
             {
-                return _runtime.FailActiveMode("Position accuracy audit hardware setup failed");
+                _runtime.FailActiveMode("Position accuracy audit hardware setup failed");
             }
 
             (void)BootUtilityModeFramework::ResetStartupTrace("mode:position_accuracy_audit");
@@ -64,7 +64,7 @@ namespace MazeMap::App::Internal
 
             if (!_drive.Begin())
             {
-                return _runtime.FailActiveMode("Position accuracy audit drive base init failed");
+                _runtime.FailActiveMode("Position accuracy audit drive base init failed");
             }
             _drive.UseNominalWheelControlProfile();
 
@@ -72,40 +72,11 @@ namespace MazeMap::App::Internal
             _startupCalibration.SetIsInMaze(true);
             if (!_startupCalibration.BringUp())
             {
-                return _runtime.FailActiveMode("Position accuracy audit startup bring-up failed");
+                _runtime.FailActiveMode("Position accuracy audit startup bring-up failed");
             }
 
-            return true;
-        }
-
-        void Run() override
-        {
             _phase = Phase::LaunchStartupCalibration;
-
-            LoopController::ModeCallbacks callbacks{};
-            callbacks.onModeWork = &PositionAccuracyAuditMode::ModeWorkThunk;
-            callbacks.context = this;
-            if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-            {
-                (void)_runtime.FailActiveMode("Position accuracy audit loop session start failed");
-            }
-            else
-            {
-                const LoopController::SessionResult result = _loopController.Run();
-                const bool completed =
-                    (result.status == LoopController::SessionResult::Status::Completed);
-                _loopController.EndSession();
-
-                if (completed)
-                {
-                    (void)_runtime.AppendTextLogLine("Position accuracy audit complete");
-                }
-            }
-
-            _wallTouch.Cancel();
-            _startupCalibration.Cancel();
-            _drive.Brake();
-            _drive.UseNominalWheelControlProfile();
+            _loopController.StageNextSessionState(BuildLoopOptions());
         }
 
     private:
@@ -144,22 +115,6 @@ namespace MazeMap::App::Internal
             self->_startupCalibration.Cancel();
             self->_drive.Brake();
             self->_drive.UseNominalWheelControlProfile();
-        }
-
-        static LoopController::ControlVector ModeWorkThunk(
-            void* context,
-            std::uint32_t loopEndTimeUs,
-            const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
-        {
-            auto* const self = static_cast<PositionAccuracyAuditMode*>(context);
-            if (self == nullptr)
-            {
-                services.Fault("Position accuracy audit callback context was not installed");
-                return LoopController::ControlVector::Brake;
-            }
-
-            return self->RunTick(loopEndTimeUs, state, services);
         }
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept
@@ -278,7 +233,7 @@ namespace MazeMap::App::Internal
         LoopController::ControlVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services)
+            LoopController& loopController) override
         {
             (void)loopEndTimeUs;
             (void)state;
@@ -289,7 +244,7 @@ namespace MazeMap::App::Internal
                 _startupCalibration.Start();
                 if (!_startupCalibration.Active())
                 {
-                    services.Fault("Position accuracy audit startup calibration could not start");
+                    _runtime.FailActiveMode("Position accuracy audit startup calibration could not start");
                 }
                 else
                 {
@@ -303,7 +258,7 @@ namespace MazeMap::App::Internal
             case Phase::LaunchStartHold:
                 if (!StartDriveHold(AuxMeasurementConfig::kPositionAuditStartSettleMs))
                 {
-                    services.Fault("Position accuracy audit start hold could not start");
+                    _runtime.FailActiveMode("Position accuracy audit start hold could not start");
                 }
                 else
                 {
@@ -321,7 +276,7 @@ namespace MazeMap::App::Internal
                         DirectionToUnitVector(MazeMap::Up),
                         FarCellCenter()))
                 {
-                    services.Fault("Position accuracy audit outbound drive could not start");
+                    _runtime.FailActiveMode("Position accuracy audit outbound drive could not start");
                 }
                 else
                 {
@@ -335,7 +290,7 @@ namespace MazeMap::App::Internal
             case Phase::LaunchFarTouch:
                 if (!StartWallTouch())
                 {
-                    services.Fault("Position accuracy audit wall touch could not start");
+                    _runtime.FailActiveMode("Position accuracy audit wall touch could not start");
                 }
                 else
                 {
@@ -349,7 +304,7 @@ namespace MazeMap::App::Internal
             case Phase::LaunchTurnHome:
                 if (!StartTurnAround())
                 {
-                    services.Fault("Position accuracy audit turn-home could not start");
+                    _runtime.FailActiveMode("Position accuracy audit turn-home could not start");
                 }
                 else
                 {
@@ -367,7 +322,7 @@ namespace MazeMap::App::Internal
                         DirectionToUnitVector(MazeMap::Down),
                         StartCellCenter()))
                 {
-                    services.Fault("Position accuracy audit return drive could not start");
+                    _runtime.FailActiveMode("Position accuracy audit return drive could not start");
                 }
                 else
                 {
@@ -381,7 +336,7 @@ namespace MazeMap::App::Internal
             case Phase::LaunchFaceNorth:
                 if (!StartTurnAround())
                 {
-                    services.Fault("Position accuracy audit face-north turn could not start");
+                    _runtime.FailActiveMode("Position accuracy audit face-north turn could not start");
                 }
                 else
                 {
@@ -401,12 +356,18 @@ namespace MazeMap::App::Internal
                 return LoopController::ControlVector::Brake;
 
             case Phase::Complete:
-                services.RequestEndLoop();
+                (void)_runtime.AppendTextLogLine("Position accuracy audit complete");
+                _wallTouch.Cancel();
+                _startupCalibration.Cancel();
+                _drive.Brake();
+                _drive.UseNominalWheelControlProfile();
+                _phase = Phase::Idle;
+                loopController.HaltExecutionEndProgram();
                 return LoopController::ControlVector::Brake;
 
             case Phase::Idle:
             default:
-                services.Fault("Position accuracy audit phase was not initialized");
+                _runtime.FailActiveMode("Position accuracy audit phase was not initialized");
                 return LoopController::ControlVector::Brake;
             }
         }

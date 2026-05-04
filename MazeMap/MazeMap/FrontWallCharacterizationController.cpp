@@ -54,17 +54,17 @@ public:
     {
     }
 
-    bool Begin() override
+    void SetupMode() override
     {
         ResetState();
         if (!_runtime.RegisterModeFaultHandler(&FrontWallCharacterizationController::TeardownOnRuntimeFault, this, "front_wall_characterization"))
         {
-            return false;
+            _runtime.FailActiveMode("Front wall characterization fault handler registration failed");
         }
 
         if (!SetupHardware())
         {
-            return _runtime.FailActiveMode("Hardware setup failed");
+            _runtime.FailActiveMode("Hardware setup failed");
         }
         (void)ResetStartupTrace("mode:front_wall_characterization");
         (void)_runtime.AppendTextLogLine("Front wall characterization mode");
@@ -103,44 +103,15 @@ public:
 
         if (!driveOk)
         {
-            return _runtime.FailActiveMode("Drive initialization failed");
+            _runtime.FailActiveMode("Drive initialization failed");
         }
         if (!sensorsOk)
         {
-            return _runtime.FailActiveMode("Sensor initialization failed");
+            _runtime.FailActiveMode("Sensor initialization failed");
         }
 
-        return true;
-    }
-
-    void Run() override
-    {
         _phase = Phase::LaunchStartupSettle;
-
-        bool ok = false;
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &FrontWallCharacterizationController::ModeWorkThunk;
-        callbacks.context = this;
-        if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-        {
-            ok = _runtime.FailActiveMode("Front wall characterization loop session start failed");
-        }
-        else
-        {
-            const LoopController::SessionResult result = _loopController.Run();
-            ok = (result.status == LoopController::SessionResult::Status::Completed);
-            _loopController.EndSession();
-        }
-
-        _startupCalibration.Cancel();
-        _drive.Brake();
-        _phase = Phase::Idle;
-        _pauseAction = PauseAction::None;
-        SetMissionLevelFanEnabled(false);
-        if (ok)
-        {
-            (void)_runtime.AppendTextLogLine("Front wall characterization complete and persisted.");
-        }
+        _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
 private:
@@ -162,22 +133,6 @@ private:
         PersistAndExport
     };
 
-    static LoopController::ControlVector ModeWorkThunk(
-        void* context,
-        std::uint32_t loopEndTimeUs,
-        const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
-    {
-        auto* const self = static_cast<FrontWallCharacterizationController*>(context);
-        if (self == nullptr)
-        {
-            services.Fault("Front wall characterization callback context was null");
-            return LoopController::ControlVector::Brake;
-        }
-
-        return self->RunTick(loopEndTimeUs, state, services);
-    }
-
     static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept
     {
         (void)reason;
@@ -192,6 +147,16 @@ private:
         self->_startupCalibration.Cancel();
         self->_drive.Brake();
         SetMissionLevelFanEnabled(false);
+    }
+
+    void FinalizeSuccessfulRun() noexcept
+    {
+        _startupCalibration.Cancel();
+        _drive.Brake();
+        _phase = Phase::Idle;
+        _pauseAction = PauseAction::None;
+        SetMissionLevelFanEnabled(false);
+        (void)_runtime.AppendTextLogLine("Front wall characterization complete and persisted.");
     }
 
     SharedRobotRuntime& _runtime;
@@ -214,18 +179,18 @@ private:
     bool _captureElapsedBudgetLogged = false;
     bool _captureStarted = false;
 
-    static LoopController::PauseDisposition PauseThunk(
+    static void PauseThunk(
         void* context,
-        const LoopController::PauseContext& pause)
+        LoopController& loopController)
     {
         auto* const self = static_cast<FrontWallCharacterizationController*>(context);
         if (self == nullptr)
         {
-            return LoopController::PauseDisposition::StopByRuntime(
+            GetSharedRobotRuntime().FailActiveMode(
                 "Front wall characterization pause callback context was null");
         }
 
-        return self->OnPauseGranted(pause);
+        self->OnPauseGranted(loopController);
     }
 
     LoopController::SessionOptions BuildLoopOptions() const
@@ -289,13 +254,13 @@ private:
         return true;
     }
 
-    LoopController::PauseDisposition OnPauseGranted(const LoopController::PauseContext& pause)
+    void OnPauseGranted(LoopController& loopController)
     {
-        (void)pause;
+        (void)loopController;
 
         if (_pauseAction != PauseAction::PersistAndExport)
         {
-            return LoopController::PauseDisposition::StopByRuntime(
+            _runtime.FailActiveMode(
                 "Front wall characterization pause granted without a pending action");
         }
 
@@ -305,8 +270,7 @@ private:
         MazeMap::FrontWallCharacterizationStorage storage = _captureStorage;
         if (storage.sampleCount < 4U)
         {
-            return LoopController::PauseDisposition::StopByRuntime(
-                "Front wall characterization captured too few samples");
+            _runtime.FailActiveMode("Front wall characterization captured too few samples");
         }
 
         MazeMap::FinalizeFrontWallCharacterizationStorage(storage);
@@ -328,19 +292,15 @@ private:
 
         if (!PersistCurve(storage) || !ExportCurveToSd(storage))
         {
-            return LoopController::PauseDisposition::StopByRuntime(
-                "Front wall characterization persist/export failed");
+            _runtime.FailActiveMode("Front wall characterization persist/export failed");
         }
 
         _captureStorage = storage;
         _phase = Phase::LaunchPostCaptureSettle;
-        return LoopController::PauseDisposition::Resume();
     }
 
     LoopController::ControlVector PollDrivePhase(
-        const Phase nextPhase,
-        const char* inactiveReason,
-        LoopController::TickServices& services)
+        const Phase nextPhase)
     {
         bool done = false;
         const LoopController::ControlVector control = _driveService.GetNextControls(done);
@@ -356,7 +316,7 @@ private:
     LoopController::ControlVector RunTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController) override
     {
         (void)loopEndTimeUs;
         switch (_phase)
@@ -364,7 +324,7 @@ private:
         case Phase::LaunchStartupSettle:
             if (!StartHoldPhase("startup_settle", FrontWallCharacterizationConfig::kStartupSettleMs))
             {
-                services.Fault("Front wall characterization startup settle could not start");
+                _runtime.FailActiveMode("Front wall characterization startup settle could not start");
             }
             else
             {
@@ -373,18 +333,15 @@ private:
             return LoopController::ControlVector::Brake;
 
         case Phase::RunStartupSettle:
-            return PollDrivePhase(
-                Phase::Capture,
-                "Front wall characterization startup settle was not active",
-                services);
+            return PollDrivePhase(Phase::Capture);
 
         case Phase::Capture:
-            return CaptureCurveTick(loopEndTimeUs, state, services);
+            return CaptureCurveTick(loopEndTimeUs, state, loopController);
 
         case Phase::LaunchPostCaptureSettle:
             if (!StartHoldPhase("post_capture_settle", FrontWallCharacterizationConfig::kPostCaptureSettleMs))
             {
-                services.Fault("Front wall characterization post-capture settle could not start");
+                _runtime.FailActiveMode("Front wall characterization post-capture settle could not start");
             }
             else
             {
@@ -402,7 +359,8 @@ private:
             }
 
             _phase = Phase::Complete;
-            services.RequestEndLoop();
+            FinalizeSuccessfulRun();
+            loopController.HaltExecutionEndProgram();
             return LoopController::ControlVector::Brake;
         }
 
@@ -411,7 +369,7 @@ private:
 
         case Phase::Idle:
         default:
-            services.Fault("Front wall characterization phase was not initialized");
+            _runtime.FailActiveMode("Front wall characterization phase was not initialized");
             return LoopController::ControlVector::Brake;
         }
     }
@@ -419,20 +377,15 @@ private:
     LoopController::ControlVector CaptureCurveTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
-        auto requestPersistPause = [this, &services](const float traveledDistanceM, const char* reason)
+        auto requestPersistPause = [this, &loopController](const float traveledDistanceM, const char* reason)
         {
             _captureCompletionReason = reason;
             _captureStorage.terminalDistanceM = traveledDistanceM;
             _pauseAction = PauseAction::PersistAndExport;
-            LoopController::PauseRequest request{};
-            request.onPauseGranted = &FrontWallCharacterizationController::PauseThunk;
-            request.reason = reason;
-            request.flushLogsBeforeGrant = true;
-            request.resetClockOnResume = true;
-            services.RequestPause(request);
+            loopController.RequestPause(&FrontWallCharacterizationController::PauseThunk, this);
             return LoopController::ControlVector::Brake;
         };
 
@@ -441,7 +394,7 @@ private:
         {
             if (!StartCaptureCurvePhase())
             {
-                services.Fault("Front wall characterization capture phase start failed");
+                _runtime.FailActiveMode("Front wall characterization capture phase start failed");
                 return LoopController::ControlVector::Brake;
             }
 
@@ -547,13 +500,15 @@ private:
     {
         if (!WritePersistedFrontWallCharacterization(storage))
         {
-            return _runtime.FailActiveMode("Failed to persist front wall characterization");
+            _runtime.FailActiveMode("Failed to persist front wall characterization");
+            return false;
         }
 
         MazeMap::FrontWallCharacterizationStorage verify{};
         if (!TryReadPersistedFrontWallCharacterization(verify))
         {
-            return _runtime.FailActiveMode("Failed to verify persisted front wall characterization");
+            _runtime.FailActiveMode("Failed to verify persisted front wall characterization");
+            return false;
         }
 
         char line[160] = {};
@@ -572,7 +527,8 @@ private:
     {
         if (!MazeMap::IsValidFrontWallCharacterizationStorage(storage))
         {
-            return _runtime.FailActiveMode("Invalid front wall characterization cannot be exported");
+            _runtime.FailActiveMode("Invalid front wall characterization cannot be exported");
+            return false;
         }
 
         char fileName[32] = {};
@@ -583,22 +539,56 @@ private:
                 "fwc%03u.mmlog",
                 "front_wall_characterization.mmlog"))
         {
-            return _runtime.FailActiveMode("Front wall characterization log name unavailable");
+            _runtime.FailActiveMode("Front wall characterization log name unavailable");
+            return false;
         }
 
-        if (!_runtime.WriteUtilityDataLogMetadata("mode", "front_wall_characterization")) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("samples", static_cast<unsigned long>(storage.sampleCount))) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("distance_step_m", storage.distanceStepM, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("reverse_speed_mps", storage.commandedReverseSpeedMps, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("zero_threshold_differential_light", storage.zeroThresholdDifferentialLight, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadataFloat("terminal_distance_m", storage.terminalDistanceM, 6)) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
-        if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return _runtime.FailActiveMode("Front wall characterization log metadata failed");
+        if (!_runtime.WriteUtilityDataLogMetadata("mode", "front_wall_characterization"))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
+        if (!_runtime.WriteUtilityDataLogMetadataUnsigned("samples", static_cast<unsigned long>(storage.sampleCount)))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("distance_step_m", storage.distanceStepM, 6))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("reverse_speed_mps", storage.commandedReverseSpeedMps, 6))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("zero_threshold_differential_light", storage.zeroThresholdDifferentialLight, 6))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
+        if (!_runtime.WriteUtilityDataLogMetadataFloat("terminal_distance_m", storage.terminalDistanceM, 6))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
+        if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g"))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
+        if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little"))
+        {
+            _runtime.FailActiveMode("Front wall characterization log metadata failed");
+            return false;
+        }
 
         _logRow = {};
         if (!_runtime.BeginUtilityDataLogSchema(_logRow))
         {
-            return _runtime.FailActiveMode("Front wall characterization log open failed");
+            _runtime.FailActiveMode("Front wall characterization log open failed");
+            return false;
         }
 
         for (uint16_t index = 0U; index < storage.sampleCount; ++index)
@@ -614,13 +604,15 @@ private:
             _logRow.front_right_delta = storage.frontRightDifferentialLight[index];
             if (!_runtime.LogUtilityDataRow(_logRow))
             {
-                return _runtime.FailActiveMode("Front wall characterization log write failed");
+                _runtime.FailActiveMode("Front wall characterization log write failed");
+                return false;
             }
         }
 
         if (!_runtime.CloseUtilityDataLog())
         {
-            return _runtime.FailActiveMode("Front wall characterization log write failed");
+            _runtime.FailActiveMode("Front wall characterization log write failed");
+            return false;
         }
 
         char line[224] = {};

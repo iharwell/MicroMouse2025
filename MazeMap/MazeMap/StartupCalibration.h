@@ -137,7 +137,6 @@ namespace MazeMap::App::Internal
             const WallSensorCalibrationCapture& capture) noexcept;
 
         SharedRobotRuntime* _runtime{};
-        LoopController* _loopController{};
         RuntimeSensorSuite* _sensors{};
         DriveBase* _drive{};
         Drive* _driveService{};

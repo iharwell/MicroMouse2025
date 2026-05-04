@@ -93,7 +93,6 @@ namespace MazeMap::App::Internal
         LoopController::ControlVector ReturnToPreferredControls(bool& done);
 
         SharedRobotRuntime* _runtime{};
-        LoopController* _loopController{};
         DriveBase* _drive{};
         Drive* _driveService{};
         MotionLimits _limits{};

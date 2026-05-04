@@ -5,6 +5,7 @@
 #include "DriveBase.h"
 #include "HardwareConfig.h"
 #include "IApplicationMode.h"
+#include "MazeMapRuntimeSignalHelpers.h"
 #include "SharedRobotRuntime.h"
 #include "RuntimeSensorSuite.h"
 #include "Vehicle.h"
@@ -22,6 +23,7 @@ namespace MazeMap::App::Internal
         constexpr float kPauseLinearThresholdMps = 0.01f;
         constexpr float kPauseAngularThresholdRadps = 0.05f;
         constexpr std::uint8_t kPauseSettledTicks = 2U;
+        constexpr float kNoImuObservation = std::numeric_limits<float>::quiet_NaN();
 
         bool SetMotorPwmThunk(void* const context, const float leftMotorPwm, const float rightMotorPwm) noexcept
         {
@@ -44,6 +46,157 @@ namespace MazeMap::App::Internal
                     delayMicroseconds(5U);
                 }
             }
+        }
+
+        bool WallMaskIncludes(
+            const LoopController::WallMask workMask,
+            const LoopController::WallMask includedMask) noexcept
+        {
+            return
+                (static_cast<std::uint8_t>(workMask) & static_cast<std::uint8_t>(includedMask)) ==
+                static_cast<std::uint8_t>(includedMask);
+        }
+
+        bool WorkPlanRequestsWallSensors(const LoopController::SensorWorkPlan& workPlan) noexcept
+        {
+            return workPlan.wallMask != LoopController::WallMask::None;
+        }
+
+        void ClearFrontWallSnapshot(SensorSnapshot& snapshot) noexcept
+        {
+            snapshot.frontLeftDistanceM = 0.0f;
+            snapshot.frontRightDistanceM = 0.0f;
+            snapshot.frontLeftDifferentialLight = 0.0f;
+            snapshot.frontRightDifferentialLight = 0.0f;
+            snapshot.frontSkewM = 0.0f;
+            snapshot.frontWall = false;
+            snapshot.frontLeftWall = false;
+            snapshot.frontRightWall = false;
+            snapshot.frontWallObservationValid = false;
+            snapshot.frontWallUsesFallbackDetection = false;
+            snapshot.frontWallUsesCharacterizationDetection = false;
+            snapshot.frontLeft = WallSensorTelemetry{};
+            snapshot.frontRight = WallSensorTelemetry{};
+            snapshot.frontTiming = OpticalObservationTiming{};
+        }
+
+        void ClearLeftWallSnapshot(SensorSnapshot& snapshot) noexcept
+        {
+            snapshot.sideLeftDistanceM = 0.0f;
+            snapshot.sideLeftDifferentialLight = 0.0f;
+            snapshot.leftWall = false;
+            snapshot.leftDistanceValidForControl = false;
+            snapshot.leftWallObservation = false;
+            snapshot.leftWallObservationWindowValid = false;
+            snapshot.leftTransitionDetected = false;
+            snapshot.sideLeft = WallSensorTelemetry{};
+            snapshot.leftTiming = OpticalObservationTiming{};
+        }
+
+        void ClearRightWallSnapshot(SensorSnapshot& snapshot) noexcept
+        {
+            snapshot.sideRightDistanceM = 0.0f;
+            snapshot.sideRightDifferentialLight = 0.0f;
+            snapshot.rightWall = false;
+            snapshot.rightDistanceValidForControl = false;
+            snapshot.rightWallObservation = false;
+            snapshot.rightWallObservationWindowValid = false;
+            snapshot.rightTransitionDetected = false;
+            snapshot.sideRight = WallSensorTelemetry{};
+            snapshot.rightTiming = OpticalObservationTiming{};
+        }
+
+        void ClearImuSnapshot(SensorSnapshot& snapshot) noexcept
+        {
+            snapshot.accelBodyXMps2 = 0.0f;
+            snapshot.accelBodyYMps2 = 0.0f;
+            snapshot.planarAccelMps2 = 0.0f;
+            snapshot.gyroRawRadps = kNoImuObservation;
+            snapshot.gyroBiasRadps = kNoImuObservation;
+            snapshot.gyroRadps = kNoImuObservation;
+            snapshot.accelBiasValid = false;
+            snapshot.imuFrontRight = ImuTelemetry{};
+            snapshot.imuBackLeft = ImuTelemetry{};
+            snapshot.imuTiming = ImuObservationTiming{};
+        }
+
+        void ApplySensorWorkPlanToSnapshot(
+            const LoopController::SensorWorkPlan& workPlan,
+            SensorSnapshot& snapshot,
+            const float expectedSideWallDistanceM) noexcept
+        {
+            if (!workPlan.readImuBundle)
+            {
+                ClearImuSnapshot(snapshot);
+            }
+
+            if (!WallMaskIncludes(workPlan.wallMask, LoopController::WallMask::Front))
+            {
+                ClearFrontWallSnapshot(snapshot);
+            }
+
+            if (!WallMaskIncludes(workPlan.wallMask, LoopController::WallMask::Left))
+            {
+                ClearLeftWallSnapshot(snapshot);
+            }
+
+            if (!WallMaskIncludes(workPlan.wallMask, LoopController::WallMask::Right))
+            {
+                ClearRightWallSnapshot(snapshot);
+            }
+
+            snapshot.corridorErrorM = MazeMap::App::Internal::Runtime::ComputeCorridorError(
+                snapshot.sideLeftDistanceM,
+                snapshot.sideRightDistanceM,
+                snapshot.leftDistanceValidForControl,
+                snapshot.rightDistanceValidForControl,
+                expectedSideWallDistanceM);
+        }
+
+        MazeMap::WallObs BuildFrontWallObservation(
+            const float distanceM,
+            const bool valid,
+            const bool useFallbackDetection,
+            const bool useCharacterizationDetection,
+            const float maxRangeM) noexcept
+        {
+            MazeMap::WallObs observation{};
+            if (!valid || !std::isfinite(distanceM) || (distanceM <= 0.0f))
+            {
+                return observation;
+            }
+
+            observation.valid = true;
+            observation.rho = (std::clamp)(distanceM, 0.01f, maxRangeM);
+            observation.confidence =
+                useCharacterizationDetection ? 0.90f :
+                (useFallbackDetection ? 0.60f : 0.80f);
+            observation.cls = MazeMap::ObsClass::WallLike;
+            return observation;
+        }
+
+        MazeMap::WallObs BuildSideWallObservation(
+            const bool distanceValidForControl,
+            const bool transitionDetected,
+            const bool wallObservation,
+            const float sideDistanceM,
+            const float maxRangeM) noexcept
+        {
+            MazeMap::WallObs observation{};
+            if (!distanceValidForControl ||
+                transitionDetected ||
+                !wallObservation ||
+                !std::isfinite(sideDistanceM) ||
+                (sideDistanceM <= 0.0f))
+            {
+                return observation;
+            }
+
+            observation.valid = true;
+            observation.rho = (std::clamp)(sideDistanceM, 0.01f, maxRangeM);
+            observation.confidence = 0.80f;
+            observation.cls = MazeMap::ObsClass::WallLike;
+            return observation;
         }
     }
 
@@ -234,17 +387,6 @@ namespace MazeMap::App::Internal
             (std::fabs(command.rightMotorPwm) <= kZeroMotorPwmThreshold);
     }
 
-    bool LoopController::IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept
-    {
-        return (workPlan.wallMask == WallMask::All) &&
-            workPlan.readEncoders &&
-            workPlan.readImuBundle &&
-            workPlan.useEncoderUpdate &&
-            workPlan.useGyroUpdate &&
-            workPlan.useAccelUpdate &&
-            workPlan.useWallUpdates;
-    }
-
     std::uint32_t LoopController::ReadCycleCounter() noexcept
     {
 #if defined(ARDUINO_TEENSY41)
@@ -256,7 +398,7 @@ namespace MazeMap::App::Internal
 
     void LoopController::RunSessionStartWallSensorAdcProbe() noexcept
     {
-        if (_runtime == nullptr)
+        if ((_runtime == nullptr) || !_sessionStartWallSensorAdcProbePending)
         {
             return;
         }
@@ -327,15 +469,14 @@ namespace MazeMap::App::Internal
             _runtime->FailActiveMode("LoopController staged session state is invalid");
         }
 
-        _sessionStartWallSensorAdcProbePending = true;
-        RunSessionStartWallSensorAdcProbe();
         _options = _stagedNextSessionOptions;
         _stagedNextSessionOptions = SessionOptions{};
         _stagedNextSessionValid = false;
+        _sessionStartWallSensorAdcProbePending = WorkPlanRequestsWallSensors(_options.workPlan);
+        RunSessionStartWallSensorAdcProbe();
         _activeModeWorkCallback = &RunApplicationModeTick;
         _activeModeWorkContext = _boundMode;
         _sessionActive = true;
-        _resumePending = false;
         _publishedTimingValid = false;
         _tickCount = 0U;
         const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
@@ -378,11 +519,6 @@ namespace MazeMap::App::Internal
             TimingDiagnostics& timing = WorkingTiming();
             timing.controlTiming.controlStartUs = tickStartUs;
             timing.controlTiming.cycleCounterStart = ReadCycleCounter();
-            if (_resumePending)
-            {
-                timing.flags |= kTimingFlagResumedFromPause;
-                _resumePending = false;
-            }
 
             const std::uint32_t loopEndTimeUs = _nextSyncTargetUs;
             const ControlVector brakeControl = ControlVector::Brake;
@@ -597,7 +733,29 @@ namespace MazeMap::App::Internal
 
     bool LoopController::SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept
     {
-        return IsFullSensorWorkPlan(workPlan);
+        const std::uint8_t maskBits = static_cast<std::uint8_t>(workPlan.wallMask);
+        const std::uint8_t allowedMaskBits = static_cast<std::uint8_t>(WallMask::All);
+        if ((maskBits & static_cast<std::uint8_t>(~allowedMaskBits)) != 0U)
+        {
+            return false;
+        }
+
+        if (workPlan.useEncoderUpdate && !workPlan.readEncoders)
+        {
+            return false;
+        }
+
+        if ((workPlan.useGyroUpdate || workPlan.useAccelUpdate) && !workPlan.readImuBundle)
+        {
+            return false;
+        }
+
+        if (workPlan.useWallUpdates && !WorkPlanRequestsWallSensors(workPlan))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     const LoopController::TimingDiagnostics* LoopController::CurrentTimingForReaders() const noexcept
@@ -645,95 +803,161 @@ namespace MazeMap::App::Internal
 
         TimingDiagnostics& timing = WorkingTiming();
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
-        MazeMap::Maze* const map = _options.workPlan.useWallUpdates ? &_runtime->Maze() : nullptr;
         timing.controlTiming.encoderLatchUs = static_cast<std::uint32_t>(micros());
-        class CaptureContext final
-        {
-        public:
-            CaptureContext(
-                SharedRobotRuntime* runtime,
-                TimingDiagnostics* timing,
-                MazeMap::Maze* map,
-                float dtSeconds) noexcept
-                : _runtime(runtime)
-                , _timing(timing)
-                , _map(map)
-                , _dtSeconds(dtSeconds)
-            {
-            }
-
-            SharedRobotRuntime& Runtime() const noexcept
-            {
-                return *_runtime;
-            }
-
-            TimingDiagnostics& Timing() const noexcept
-            {
-                return *_timing;
-            }
-
-            MazeMap::Maze* Map() const noexcept
-            {
-                return _map;
-            }
-
-            float DtSeconds() const noexcept
-            {
-                return _dtSeconds;
-            }
-
-        private:
-            SharedRobotRuntime* _runtime{};
-            TimingDiagnostics* _timing{};
-            MazeMap::Maze* _map{};
-            float _dtSeconds{};
-        } captureContext{ _runtime, &timing, map, dtSeconds };
-
-        const RuntimeSensorSuite::CaptureHandler callback =
-            [](void* rawContext, SensorSnapshot& captureSnapshot, RuntimeSensorSuite::CaptureServices& services) noexcept
-            {
-                auto& context = *static_cast<CaptureContext*>(rawContext);
-                context.Timing().controlTiming.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
-                DriveBase& drive = context.Runtime().Drive();
-                drive.RecordMeasurementInputs(captureSnapshot);
-                const MazeMap::ControlInput control = drive.CurrentControlInput();
-                const MazeMap::VehicleState::DriveCommandState driveCommandState =
-                    drive.BuildDriveCommandState(control);
-                const MazeMap::EncoderObs encoderObservation = drive.ConsumeEncoderObservation(context.DtSeconds());
-                (void)context.Runtime().Estimator().UpdateRuntimeState(
-                    context.DtSeconds(),
-                    control,
-                    drive.GetLastLinearCommandMps(),
-                    drive.GetLastAngularCommandRadps(),
-                    drive.GetLastSaturationFlags(),
-                    drive.GetLastLeftLaunchAssistFloor(),
-                    drive.GetLastRightLaunchAssistFloor(),
-                    encoderObservation,
-                    captureSnapshot,
-                    context.Map(),
-                    &context.Timing().controlTiming,
-                    [&context, &services]() noexcept
-                    {
-                        (void)context.Runtime().ServiceUtilityDataLog();
-                        (void)services.ServiceWallRead();
-                    },
-                    [&context, &services]() noexcept
-                    {
-                        (void)context.Runtime().ServiceUtilityDataLog();
-                        services.CaptureImu();
-                    });
-                context.Runtime().RuntimeState().SetDriveCommandState(driveCommandState);
-            };
-
         SensorSnapshot snapshot{};
-        _runtime->Sensors().Capture(
-            stationaryHint,
-            _runtime->RuntimeState(),
-            snapshot,
-            callback,
-            &captureContext);
+        if (WorkPlanRequestsWallSensors(_options.workPlan) || _options.workPlan.readImuBundle)
+        {
+            _runtime->Sensors().Capture(
+                stationaryHint,
+                _runtime->RuntimeState(),
+                snapshot);
+        }
 
-        _runtime->RuntimeState().SetTimestampUs(tickStartUs);
+        ApplySensorWorkPlanToSnapshot(
+            _options.workPlan,
+            snapshot,
+            MazeMap::Config::kExpectedSideWallDistanceM);
+
+        DriveBase& drive = _runtime->Drive();
+        drive.RecordMeasurementInputs(snapshot);
+        const MazeMap::ControlInput control = drive.CurrentControlInput();
+        const MazeMap::VehicleState::DriveCommandState driveCommandState =
+            drive.BuildDriveCommandState(control);
+        const MazeMap::EncoderObs encoderObservation = drive.ConsumeEncoderObservation(dtSeconds);
+        timing.controlTiming.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
+
+        MazeMap::Estimator& estimator = _runtime->Estimator();
+        MazeMap::VehicleState& runtimeState = _runtime->RuntimeState();
+        runtimeState.SetControlInput(control);
+        runtimeState.SetSensorSnapshot(snapshot);
+        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
+        }
+
+        if (estimator.HasFault())
+        {
+            return false;
+        }
+
+        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            timing.controlTiming.ukfPredictStartUs = static_cast<std::uint32_t>(micros());
+            if (!estimator.predict(dtSeconds, control))
+            {
+                timing.controlTiming.ukfPredictEndUs = static_cast<std::uint32_t>(micros());
+                timing.controlTiming.ukfPredictDurationUs =
+                    timing.controlTiming.ukfPredictEndUs - timing.controlTiming.ukfPredictStartUs;
+                timing.controlTiming.ukfUpdateStartUs = timing.controlTiming.ukfPredictEndUs;
+                timing.controlTiming.ukfUpdateEndUs = timing.controlTiming.ukfPredictEndUs;
+                timing.controlTiming.ukfUpdateDurationUs = 0U;
+                timing.controlTiming.ukfTotalDurationUs = timing.controlTiming.ukfPredictDurationUs;
+                return false;
+            }
+
+            timing.controlTiming.ukfPredictEndUs = static_cast<std::uint32_t>(micros());
+            timing.controlTiming.ukfPredictDurationUs =
+                timing.controlTiming.ukfPredictEndUs - timing.controlTiming.ukfPredictStartUs;
+        }
+        else
+        {
+            timing.controlTiming.ukfPredictStartUs = static_cast<std::uint32_t>(micros());
+            timing.controlTiming.ukfPredictEndUs = timing.controlTiming.ukfPredictStartUs;
+            timing.controlTiming.ukfPredictDurationUs = 0U;
+        }
+
+        timing.controlTiming.ukfUpdateStartUs = static_cast<std::uint32_t>(micros());
+
+        if (_options.workPlan.readEncoders && _options.workPlan.useEncoderUpdate)
+        {
+            const bool updateYawFromEncoder =
+                !_options.workPlan.readImuBundle ||
+                !_options.workPlan.useGyroUpdate ||
+                !std::isfinite(snapshot.gyroRawRadps);
+            (void)estimator.updateEncoderPair(encoderObservation, dtSeconds, updateYawFromEncoder);
+        }
+
+        if (_options.workPlan.readImuBundle &&
+            _options.workPlan.useGyroUpdate &&
+            std::isfinite(snapshot.gyroRawRadps))
+        {
+            const MazeMap::MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
+            if (!yawUpdate.accepted)
+            {
+                timing.controlTiming.ukfUpdateEndUs = static_cast<std::uint32_t>(micros());
+                timing.controlTiming.ukfUpdateDurationUs =
+                    timing.controlTiming.ukfUpdateEndUs - timing.controlTiming.ukfUpdateStartUs;
+                timing.controlTiming.ukfTotalDurationUs =
+                    timing.controlTiming.ukfPredictDurationUs + timing.controlTiming.ukfUpdateDurationUs;
+                return false;
+            }
+        }
+
+        if (_options.workPlan.readImuBundle && _options.workPlan.useAccelUpdate)
+        {
+            MazeMap::ImuAccelObs accelObservation{};
+            accelObservation.valid =
+                snapshot.accelBiasValid &&
+                std::isfinite(snapshot.accelBodyXMps2) &&
+                std::isfinite(snapshot.accelBodyYMps2);
+            accelObservation.accelBodyXMps2 = snapshot.accelBodyXMps2;
+            accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
+            (void)estimator.updatePlanarAccel(accelObservation);
+        }
+
+        if (_options.workPlan.useWallUpdates)
+        {
+            MazeMap::Maze& maze = _runtime->Maze();
+            if (WallMaskIncludes(_options.workPlan.wallMask, WallMask::Front))
+            {
+                const MazeMap::WallObs frontLeftObservation = BuildFrontWallObservation(
+                    snapshot.frontLeftDistanceM,
+                    snapshot.frontWallObservationValid && snapshot.frontWall,
+                    snapshot.frontWallUsesFallbackDetection,
+                    snapshot.frontWallUsesCharacterizationDetection,
+                    estimator.ukf().params().noHitRangeM);
+                const MazeMap::WallObs frontRightObservation = BuildFrontWallObservation(
+                    snapshot.frontRightDistanceM,
+                    snapshot.frontWallObservationValid && snapshot.frontWall,
+                    snapshot.frontWallUsesFallbackDetection,
+                    snapshot.frontWallUsesCharacterizationDetection,
+                    estimator.ukf().params().noHitRangeM);
+                (void)estimator.updateFrontPair(frontLeftObservation, frontRightObservation, maze, true);
+            }
+
+            if (WallMaskIncludes(_options.workPlan.wallMask, WallMask::Left))
+            {
+                const MazeMap::WallObs leftObservation = BuildSideWallObservation(
+                    snapshot.leftDistanceValidForControl,
+                    snapshot.leftTransitionDetected,
+                    snapshot.leftWallObservation,
+                    snapshot.sideLeftDistanceM,
+                    estimator.ukf().params().noHitRangeM);
+                (void)estimator.updateSideSensor(MazeMap::Side::Left, leftObservation, maze, true);
+            }
+
+            if (WallMaskIncludes(_options.workPlan.wallMask, WallMask::Right))
+            {
+                const MazeMap::WallObs rightObservation = BuildSideWallObservation(
+                    snapshot.rightDistanceValidForControl,
+                    snapshot.rightTransitionDetected,
+                    snapshot.rightWallObservation,
+                    snapshot.sideRightDistanceM,
+                    estimator.ukf().params().noHitRangeM);
+                (void)estimator.updateSideSensor(MazeMap::Side::Right, rightObservation, maze, true);
+            }
+        }
+
+        timing.controlTiming.ukfUpdateEndUs = static_cast<std::uint32_t>(micros());
+        timing.controlTiming.ukfUpdateDurationUs =
+            timing.controlTiming.ukfUpdateEndUs - timing.controlTiming.ukfUpdateStartUs;
+        timing.controlTiming.ukfTotalDurationUs =
+            timing.controlTiming.ukfPredictDurationUs + timing.controlTiming.ukfUpdateDurationUs;
+
+        runtimeState.SetStateVector(estimator.ukf().state());
+        runtimeState.SetCovariance(estimator.ukf().covariance());
+        runtimeState.SetDriveCommandState(driveCommandState);
+        runtimeState.SetTimestampUs(tickStartUs);
         timing.frontTiming = snapshot.frontTiming;
         timing.leftTiming = snapshot.leftTiming;
         timing.rightTiming = snapshot.rightTiming;
@@ -866,7 +1090,6 @@ namespace MazeMap::App::Internal
 
         _queuedControl = ControlVector::Brake;
         _appliedControl = ControlVector::Brake;
-        _resumePending = true;
         const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
         _lastTickStartUs = nowUs - _options.controlPeriodUs;
         _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
@@ -999,7 +1222,6 @@ namespace MazeMap::App::Internal
         _activeModeWorkCallback = nullptr;
         _activeModeWorkContext = nullptr;
         _sessionActive = false;
-        _resumePending = false;
         _publishedTimingValid = false;
         _tickCount = 0U;
         _lastTickStartUs = 0U;

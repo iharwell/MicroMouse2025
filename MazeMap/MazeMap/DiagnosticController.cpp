@@ -44,6 +44,8 @@ namespace
 
 class DiagnosticController : public IApplicationMode
 {
+    using LoopController = MazeMap::App::Internal::LoopController;
+
 public:
     explicit DiagnosticController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
@@ -62,92 +64,161 @@ public:
         _logFileName[0] = '\0';
     }
 
-    bool Begin() override
+    void SetupMode() override
     {
+        ResetModeState();
+
         if (!_runtime.RegisterModeFaultHandler(&DiagnosticController::HandleRuntimeFault, this, "diagnostic"))
         {
-            return false;
+            _runtime.FailActiveMode("Diagnostic fault handler registration failed");
         }
 
         if (!SetupHardware())
         {
-            return _runtime.FailActiveMode("Hardware setup failed");
+            _runtime.FailActiveMode("Hardware setup failed");
         }
         ResetStartupTrace("mode:primary_diagnostic");
         (void)_runtime.AppendTextLogLine("Micromouse diagnostic setup");
         if (!_drive.Begin())
         {
-            return _runtime.FailActiveMode("Drive base init failed");
+            _runtime.FailActiveMode("Drive base init failed");
         }
         _drive.SetWheelControlProfile(BuildDiagnosticWheelControlProfile());
         SetMissionLevelFanEnabled(true);
         gWallDistanceCalibration.Clear();
         if (!_sensors.Begin(DiagnosticConfig::kControlPeriodUs))
         {
-            return _runtime.FailActiveMode("Diagnostic sensor init failed");
+            _runtime.FailActiveMode("Diagnostic sensor init failed");
         }
         if (!BeginLog())
         {
-            return _runtime.FailActiveMode("Diagnostic log open failed");
+            _runtime.FailActiveMode("Diagnostic log open failed");
         }
 
         _drive.SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
         _startX = _runtime.RuntimeState().GetPositionX();
         _startY = _runtime.RuntimeState().GetPositionY();
 
-        return true;
+        if (!StartScenarioStep(ScenarioStep::StartupSettle))
+        {
+            _runtime.FailActiveMode("Diagnostic scenario initialization failed");
+        }
+
+        _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
-    void Run() override
+    LoopController::ControlVector RunTick(
+        const std::uint32_t loopEndTimeUs,
+        const MazeMap::VehicleState& state,
+        LoopController& loopController) override
     {
-        if (_faulted)
+        if (_phaseFn == nullptr)
         {
-            _loopController.EndSession();
-            return;
+            _runtime.FailActiveMode("Diagnostic phase callback was not installed");
+            return LoopController::ControlVector::Brake;
         }
 
-        bool ok = StartScenarioStep(ScenarioStep::StartupSettle);
-        if (ok)
+        if (_runtime.Estimator().HasFault())
         {
-            LoopController::ModeCallbacks callbacks{};
-            callbacks.onModeWork = &DiagnosticController::ModeWorkThunk;
-            callbacks.context = this;
-            if (!_loopController.BeginSession(BuildLoopOptions(), callbacks))
-            {
-                _phaseFn = nullptr;
-                ok = _runtime.FailActiveMode("Diagnostic loop session start failed");
-            }
-            else
-            {
-                const LoopController::SessionResult result = _loopController.Run();
-                _phaseFn = nullptr;
-                ok = (result.status == LoopController::SessionResult::Status::Completed) && !_faulted;
-            }
-        }
-        else
-        {
-            _phaseFn = nullptr;
+            _runtime.FailActiveMode(_runtime.Estimator().FaultReason());
+            return LoopController::ControlVector::Brake;
         }
 
-        _drive.Brake();
-        _drive.UseNominalWheelControlProfile();
-
-        if (ok)
+        if (!IsWithinBoundary(state))
         {
-            (void)_runtime.AppendTextLogFormatted("Diagnostic complete, log saved to %s", GetLogFileName());
-            (void)_runtime.AppendTextLogLine("Use the # event,summary lines in the log header to map phases to tunables.");
+            _runtime.FailActiveMode("Diagnostic boundary exceeded");
+            return LoopController::ControlVector::Brake;
         }
 
-        CloseLog();
-        SetMissionLevelFanEnabled(false);
+        const SensorSnapshot& snapshot = state.GetSensorSnapshot();
+        const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
+        const MazeMap::VehicleState::DriveCommandState& commandState = state.GetDriveCommandState();
+        const MazeMap::DriveCommandPair appliedDriveCommand = state.GetAppliedDriveCommand();
+        _logRow = {};
+        _logRow.sample = static_cast<std::uint32_t>(_sampleCount);
+        _logRow.phase_id = static_cast<std::uint32_t>(_phaseId);
+        _logRow.t_us = _loopController.CurrentTickStartUs();
+        _logRow.dt_us = _loopController.CurrentTickDtUs();
+        _logRow.stationary =
+            (_phaseFn == &DiagnosticController::HoldPhaseTick && _holdStationary) ? 1U : 0U;
+        _logRow.pose_x_m = state.GetPositionX();
+        _logRow.pose_y_m = state.GetPositionY();
+        _logRow.yaw_rad = state.GetOrientation();
+        _logRow.linear_speed_mps = state.GetVelocity();
+        _logRow.angular_speed_radps = state.GetRotationalVelocity();
+        // LoopController refreshes runtime state before calling the mode callback, so these
+        // command fields match the sampled state for this log row.
+        _logRow.cmd_linear_mps = commandState.commandedLinearSpeedMps;
+        _logRow.cmd_angular_radps = commandState.commandedAngularSpeedRadps;
+        _logRow.left_drive_cmd = appliedDriveCommand.left;
+        _logRow.right_drive_cmd = appliedDriveCommand.right;
+        _logRow.left_encoder_count = driveTelemetry.leftEncoderCount;
+        _logRow.right_encoder_count = driveTelemetry.rightEncoderCount;
+        _logRow.left_distance_m = driveTelemetry.leftDistanceM;
+        _logRow.right_distance_m = driveTelemetry.rightDistanceM;
+        _logRow.left_velocity_mps = driveTelemetry.leftVelocityMps;
+        _logRow.right_velocity_mps = driveTelemetry.rightVelocityMps;
+        _logRow.imu_fr_status = snapshot.imuFrontRight.status;
+        _logRow.imu_fr_gyro_x = snapshot.imuFrontRight.gyroX;
+        _logRow.imu_fr_gyro_y = snapshot.imuFrontRight.gyroY;
+        _logRow.imu_fr_gyro_z = snapshot.imuFrontRight.gyroZ;
+        _logRow.imu_fr_accel_x = snapshot.imuFrontRight.accelX;
+        _logRow.imu_fr_accel_y = snapshot.imuFrontRight.accelY;
+        _logRow.imu_fr_accel_z = snapshot.imuFrontRight.accelZ;
+        _logRow.imu_fr_temp = snapshot.imuFrontRight.temp;
+        _logRow.imu_fr_int = snapshot.imuFrontRight.interruptHigh ? 1U : 0U;
+        _logRow.imu_bl_status = snapshot.imuBackLeft.status;
+        _logRow.imu_bl_gyro_x = snapshot.imuBackLeft.gyroX;
+        _logRow.imu_bl_gyro_y = snapshot.imuBackLeft.gyroY;
+        _logRow.imu_bl_gyro_z = snapshot.imuBackLeft.gyroZ;
+        _logRow.imu_bl_accel_x = snapshot.imuBackLeft.accelX;
+        _logRow.imu_bl_accel_y = snapshot.imuBackLeft.accelY;
+        _logRow.imu_bl_accel_z = snapshot.imuBackLeft.accelZ;
+        _logRow.imu_bl_temp = snapshot.imuBackLeft.temp;
+        _logRow.imu_bl_int = snapshot.imuBackLeft.interruptHigh ? 1U : 0U;
+        _logRow.ws_fl_ambient = snapshot.frontLeft.ambientLight;
+        _logRow.ws_fl_lit = snapshot.frontLeft.litLight;
+        _logRow.ws_fl_delta = snapshot.frontLeft.differentialLight;
+        _logRow.ws_fl_raw_distance_m = snapshot.frontLeft.rawDistanceM;
+        _logRow.ws_fl_distance_m = snapshot.frontLeft.distanceM;
+        _logRow.ws_fr_ambient = snapshot.frontRight.ambientLight;
+        _logRow.ws_fr_lit = snapshot.frontRight.litLight;
+        _logRow.ws_fr_delta = snapshot.frontRight.differentialLight;
+        _logRow.ws_fr_raw_distance_m = snapshot.frontRight.rawDistanceM;
+        _logRow.ws_fr_distance_m = snapshot.frontRight.distanceM;
+        _logRow.ws_sl_ambient = snapshot.sideLeft.ambientLight;
+        _logRow.ws_sl_lit = snapshot.sideLeft.litLight;
+        _logRow.ws_sl_delta = snapshot.sideLeft.differentialLight;
+        _logRow.ws_sl_raw_distance_m = snapshot.sideLeft.rawDistanceM;
+        _logRow.ws_sl_distance_m = snapshot.sideLeft.distanceM;
+        _logRow.ws_sr_ambient = snapshot.sideRight.ambientLight;
+        _logRow.ws_sr_lit = snapshot.sideRight.litLight;
+        _logRow.ws_sr_delta = snapshot.sideRight.differentialLight;
+        _logRow.ws_sr_raw_distance_m = snapshot.sideRight.rawDistanceM;
+        _logRow.ws_sr_distance_m = snapshot.sideRight.distanceM;
+        _logRow.front_wall = snapshot.frontWall ? 1U : 0U;
+        _logRow.left_wall = snapshot.leftWall ? 1U : 0U;
+        _logRow.right_wall = snapshot.rightWall ? 1U : 0U;
+        _logRow.corridor_error_m = snapshot.corridorErrorM;
+        _logRow.front_skew_m = snapshot.frontSkewM;
+        _logRow.gyro_bias_radps = snapshot.gyroBiasRadps;
+        _logRow.gyro_raw_radps = snapshot.gyroRawRadps;
+        _logRow.gyro_radps = snapshot.gyroRadps;
+        if (!_runtime.LogUtilityDataRow(_logRow))
+        {
+            _runtime.FailActiveMode("Failed to write diagnostic sample");
+            return LoopController::ControlVector::Brake;
+        }
+        ++_sampleCount;
+
+        return (this->*_phaseFn)(loopEndTimeUs, state, loopController);
     }
 
 private:
-    using LoopController = MazeMap::App::Internal::LoopController;
     using PhaseFn = LoopController::ControlVector (DiagnosticController::*)(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services);
+        LoopController& loopController);
 
     enum class ScenarioStep : std::uint8_t
     {
@@ -363,6 +434,7 @@ private:
     float _squareSequenceStartYawRad{};
 
     float _pendingReturnDistanceM;
+    bool _cleanupComplete{};
 
     LoopController::SessionOptions BuildLoopOptions() const
     {
@@ -371,123 +443,14 @@ private:
         return options;
     }
 
-    static LoopController::ControlVector ModeWorkThunk(
-        void* context,
-        std::uint32_t loopEndTimeUs,
-        const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
-    {
-        auto* const self = static_cast<DiagnosticController*>(context);
-        if ((self == nullptr) || (self->_phaseFn == nullptr))
-        {
-            services.Fault("Diagnostic phase callback was not installed");
-            return LoopController::ControlVector::Brake;
-        }
-
-        if (self->_runtime.Estimator().HasFault())
-        {
-            services.Fault(self->_runtime.Estimator().FaultReason());
-            return LoopController::ControlVector::Brake;
-        }
-
-        if (!self->IsWithinBoundary(state))
-        {
-            services.Fault("Diagnostic boundary exceeded");
-            return LoopController::ControlVector::Brake;
-        }
-
-        const SensorSnapshot& snapshot = state.GetSensorSnapshot();
-        const DriveTelemetry driveTelemetry = self->_drive.GetTelemetry();
-        const MazeMap::VehicleState::DriveCommandState& commandState = state.GetDriveCommandState();
-        const MazeMap::DriveCommandPair appliedDriveCommand = state.GetAppliedDriveCommand();
-        self->_logRow = {};
-        self->_logRow.sample = static_cast<std::uint32_t>(self->_sampleCount);
-        self->_logRow.phase_id = static_cast<std::uint32_t>(self->_phaseId);
-        self->_logRow.t_us = self->_loopController.CurrentTickStartUs();
-        self->_logRow.dt_us = self->_loopController.CurrentTickDtUs();
-        self->_logRow.stationary =
-            (self->_phaseFn == &DiagnosticController::HoldPhaseTick && self->_holdStationary) ? 1U : 0U;
-        self->_logRow.pose_x_m = state.GetPositionX();
-        self->_logRow.pose_y_m = state.GetPositionY();
-        self->_logRow.yaw_rad = state.GetOrientation();
-        self->_logRow.linear_speed_mps = state.GetVelocity();
-        self->_logRow.angular_speed_radps = state.GetRotationalVelocity();
-        // LoopController refreshes runtime state before calling the mode callback, so these
-        // command fields match the sampled state for this log row.
-        self->_logRow.cmd_linear_mps = commandState.commandedLinearSpeedMps;
-        self->_logRow.cmd_angular_radps = commandState.commandedAngularSpeedRadps;
-        self->_logRow.left_drive_cmd = appliedDriveCommand.left;
-        self->_logRow.right_drive_cmd = appliedDriveCommand.right;
-        self->_logRow.left_encoder_count = driveTelemetry.leftEncoderCount;
-        self->_logRow.right_encoder_count = driveTelemetry.rightEncoderCount;
-        self->_logRow.left_distance_m = driveTelemetry.leftDistanceM;
-        self->_logRow.right_distance_m = driveTelemetry.rightDistanceM;
-        self->_logRow.left_velocity_mps = driveTelemetry.leftVelocityMps;
-        self->_logRow.right_velocity_mps = driveTelemetry.rightVelocityMps;
-        self->_logRow.imu_fr_status = snapshot.imuFrontRight.status;
-        self->_logRow.imu_fr_gyro_x = snapshot.imuFrontRight.gyroX;
-        self->_logRow.imu_fr_gyro_y = snapshot.imuFrontRight.gyroY;
-        self->_logRow.imu_fr_gyro_z = snapshot.imuFrontRight.gyroZ;
-        self->_logRow.imu_fr_accel_x = snapshot.imuFrontRight.accelX;
-        self->_logRow.imu_fr_accel_y = snapshot.imuFrontRight.accelY;
-        self->_logRow.imu_fr_accel_z = snapshot.imuFrontRight.accelZ;
-        self->_logRow.imu_fr_temp = snapshot.imuFrontRight.temp;
-        self->_logRow.imu_fr_int = snapshot.imuFrontRight.interruptHigh ? 1U : 0U;
-        self->_logRow.imu_bl_status = snapshot.imuBackLeft.status;
-        self->_logRow.imu_bl_gyro_x = snapshot.imuBackLeft.gyroX;
-        self->_logRow.imu_bl_gyro_y = snapshot.imuBackLeft.gyroY;
-        self->_logRow.imu_bl_gyro_z = snapshot.imuBackLeft.gyroZ;
-        self->_logRow.imu_bl_accel_x = snapshot.imuBackLeft.accelX;
-        self->_logRow.imu_bl_accel_y = snapshot.imuBackLeft.accelY;
-        self->_logRow.imu_bl_accel_z = snapshot.imuBackLeft.accelZ;
-        self->_logRow.imu_bl_temp = snapshot.imuBackLeft.temp;
-        self->_logRow.imu_bl_int = snapshot.imuBackLeft.interruptHigh ? 1U : 0U;
-        self->_logRow.ws_fl_ambient = snapshot.frontLeft.ambientLight;
-        self->_logRow.ws_fl_lit = snapshot.frontLeft.litLight;
-        self->_logRow.ws_fl_delta = snapshot.frontLeft.differentialLight;
-        self->_logRow.ws_fl_raw_distance_m = snapshot.frontLeft.rawDistanceM;
-        self->_logRow.ws_fl_distance_m = snapshot.frontLeft.distanceM;
-        self->_logRow.ws_fr_ambient = snapshot.frontRight.ambientLight;
-        self->_logRow.ws_fr_lit = snapshot.frontRight.litLight;
-        self->_logRow.ws_fr_delta = snapshot.frontRight.differentialLight;
-        self->_logRow.ws_fr_raw_distance_m = snapshot.frontRight.rawDistanceM;
-        self->_logRow.ws_fr_distance_m = snapshot.frontRight.distanceM;
-        self->_logRow.ws_sl_ambient = snapshot.sideLeft.ambientLight;
-        self->_logRow.ws_sl_lit = snapshot.sideLeft.litLight;
-        self->_logRow.ws_sl_delta = snapshot.sideLeft.differentialLight;
-        self->_logRow.ws_sl_raw_distance_m = snapshot.sideLeft.rawDistanceM;
-        self->_logRow.ws_sl_distance_m = snapshot.sideLeft.distanceM;
-        self->_logRow.ws_sr_ambient = snapshot.sideRight.ambientLight;
-        self->_logRow.ws_sr_lit = snapshot.sideRight.litLight;
-        self->_logRow.ws_sr_delta = snapshot.sideRight.differentialLight;
-        self->_logRow.ws_sr_raw_distance_m = snapshot.sideRight.rawDistanceM;
-        self->_logRow.ws_sr_distance_m = snapshot.sideRight.distanceM;
-        self->_logRow.front_wall = snapshot.frontWall ? 1U : 0U;
-        self->_logRow.left_wall = snapshot.leftWall ? 1U : 0U;
-        self->_logRow.right_wall = snapshot.rightWall ? 1U : 0U;
-        self->_logRow.corridor_error_m = snapshot.corridorErrorM;
-        self->_logRow.front_skew_m = snapshot.frontSkewM;
-        self->_logRow.gyro_bias_radps = snapshot.gyroBiasRadps;
-        self->_logRow.gyro_raw_radps = snapshot.gyroRawRadps;
-        self->_logRow.gyro_radps = snapshot.gyroRadps;
-        if (!self->_runtime.LogUtilityDataRow(self->_logRow))
-        {
-            services.Fault("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
-        ++self->_sampleCount;
-
-        return (self->*self->_phaseFn)(loopEndTimeUs, state, services);
-    }
-
     bool AdvanceToNextStep(
         const ScenarioStep nextStep,
-        LoopController::TickServices& services,
+        LoopController& loopController,
         const char* const failureMessage)
     {
         if (nextStep == ScenarioStep::Complete)
         {
-            services.RequestEndLoop();
+            CompleteMode(loopController);
             return true;
         }
 
@@ -496,8 +459,39 @@ private:
             return true;
         }
 
-        services.Fault(failureMessage);
+        _runtime.FailActiveMode(failureMessage);
         return false;
+    }
+
+    void ResetModeState() noexcept
+    {
+        _phaseFn = nullptr;
+        _faulted = false;
+        _cleanupComplete = false;
+        _pendingReturnDistanceM = 0.0f;
+    }
+
+    void CleanupMode() noexcept
+    {
+        if (_cleanupComplete)
+        {
+            return;
+        }
+
+        _phaseFn = nullptr;
+        _drive.Brake();
+        _drive.UseNominalWheelControlProfile();
+        CloseLog();
+        SetMissionLevelFanEnabled(false);
+        _cleanupComplete = true;
+    }
+
+    void CompleteMode(LoopController& loopController) noexcept
+    {
+        (void)_runtime.AppendTextLogFormatted("Diagnostic complete, log saved to %s", GetLogFileName());
+        (void)_runtime.AppendTextLogLine("Use the # event,summary lines in the log header to map phases to tunables.");
+        CleanupMode();
+        loopController.HaltExecutionEndProgram();
     }
 
     bool StartHoldPhase(
@@ -600,7 +594,8 @@ private:
             _kickoffPhaseState.travelLimited ? 1U : 0U);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return _runtime.FailActiveMode("Failed to format kickoff characterization result");
+            _runtime.FailActiveMode("Failed to format kickoff characterization result");
+            return false;
         }
         if (!WriteEventOrFail("kickoff_result", message, "Failed to write kickoff characterization result"))
         {
@@ -689,7 +684,8 @@ private:
             _forwardPhaseState.travelLimited ? 1U : 0U);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return _runtime.FailActiveMode("Failed to format forward characterization result");
+            _runtime.FailActiveMode("Failed to format forward characterization result");
+            return false;
         }
         if (!WriteEventOrFail("forward_result", message, "Failed to write forward characterization result"))
         {
@@ -737,7 +733,8 @@ private:
     {
         if (distanceM <= 0.0f)
         {
-            return _runtime.FailActiveMode("Diagnostic arc distance must be positive");
+            _runtime.FailActiveMode("Diagnostic arc distance must be positive");
+            return false;
         }
         if (!StartPhase(phaseName))
         {
@@ -1316,7 +1313,8 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return _runtime.FailActiveMode("Failed to format straight diagnostic result");
+            _runtime.FailActiveMode("Failed to format straight diagnostic result");
+            return false;
         }
         return WriteEventOrFail("straight_result", message, "Failed to write straight diagnostic result");
     }
@@ -1342,7 +1340,8 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return _runtime.FailActiveMode("Failed to format turn diagnostic result");
+            _runtime.FailActiveMode("Failed to format turn diagnostic result");
+            return false;
         }
         return WriteEventOrFail("turn_result", message, "Failed to write turn diagnostic result");
     }
@@ -1372,7 +1371,8 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return _runtime.FailActiveMode("Failed to format arc diagnostic result");
+            _runtime.FailActiveMode("Failed to format arc diagnostic result");
+            return false;
         }
         return WriteEventOrFail("arc_result", message, "Failed to write arc diagnostic result");
     }
@@ -1416,7 +1416,8 @@ private:
             metrics.peakPlanarAccelMps2);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return _runtime.FailActiveMode("Failed to format circle diagnostic result");
+            _runtime.FailActiveMode("Failed to format circle diagnostic result");
+            return false;
         }
         return WriteEventOrFail("circle_result", message, "Failed to write circle diagnostic result");
     }
@@ -1444,7 +1445,8 @@ private:
             finalYawErrorDeg);
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {
-            return _runtime.FailActiveMode("Failed to format diagnostic closure result");
+            _runtime.FailActiveMode("Failed to format diagnostic closure result");
+            return false;
         }
         return WriteEventOrFail(type, message, failMessage);
     }
@@ -1490,13 +1492,15 @@ private:
             return true;
         }
 
-        return _runtime.FailActiveMode(failMessage);
+        _runtime.FailActiveMode(failMessage);
+        return false;
     }
 
     void OnRuntimeFault(const char* message) noexcept
     {
         _faulted = true;
         (void)WriteLogEvent("fault", message);
+        CleanupMode();
     }
 
     bool StartPhase(const char* name)
@@ -1506,7 +1510,8 @@ private:
         {
             return true;
         }
-        return _runtime.FailActiveMode("Failed to write diagnostic phase marker");
+        _runtime.FailActiveMode("Failed to write diagnostic phase marker");
+        return false;
     }
 
     bool IsWithinBoundary(const MazeMap::VehicleState& state) const
@@ -1518,7 +1523,7 @@ private:
     LoopController::ControlVector HoldPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         (void)state;
@@ -1526,7 +1531,7 @@ private:
         {
             (void)AdvanceToNextStep(
                 _holdNextStep,
-                services,
+                loopController,
                 "Failed to advance diagnostic hold phase");
         }
 
@@ -1536,7 +1541,7 @@ private:
     LoopController::ControlVector StraightPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         const MotionLimits limits = DiagnosticLimits(_straightPhaseState.cruiseSpeedMps);
@@ -1565,12 +1570,12 @@ private:
                 _straightPhaseState.maxHeadingErrorRad,
                 state))
             {
-                services.Fault("Failed to write straight diagnostic result");
+                _runtime.FailActiveMode("Failed to write straight diagnostic result");
                 return LoopController::ControlVector::Brake;
             }
             (void)AdvanceToNextStep(
                 _straightPhaseState.nextStep,
-                services,
+                loopController,
                 "Failed to advance diagnostic straight phase");
             return LoopController::ControlVector::Brake;
         }
@@ -1580,12 +1585,12 @@ private:
                 remainingM,
                 millis()))
         {
-            services.Fault("Straight diagnostic encoder progress stalled");
+            _runtime.FailActiveMode("Straight diagnostic encoder progress stalled");
             return LoopController::ControlVector::Brake;
         }
         if (static_cast<long>(_straightPhaseState.timeoutMs - millis()) <= 0)
         {
-            services.Fault("Straight diagnostic phase timed out");
+            _runtime.FailActiveMode("Straight diagnostic phase timed out");
             return LoopController::ControlVector::Brake;
         }
 
@@ -1616,9 +1621,10 @@ private:
     LoopController::ControlVector KickoffCharacterizationTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
+        (void)loopController;
         const unsigned long nowMs = millis();
         const float traveledDistanceM =
             std::fabs(_drive.GetAverageDistanceMeters() - _kickoffPhaseState.startDistanceM);
@@ -1651,7 +1657,7 @@ private:
         {
             if (!FinishKickoffCharacterizationSample())
             {
-                services.Fault("Failed to complete kickoff characterization sample");
+                _runtime.FailActiveMode("Failed to complete kickoff characterization sample");
             }
             return LoopController::ControlVector::Brake;
         }
@@ -1663,7 +1669,7 @@ private:
         {
             if (!FinishKickoffCharacterizationSample())
             {
-                services.Fault("Failed to complete kickoff characterization sample");
+                _runtime.FailActiveMode("Failed to complete kickoff characterization sample");
             }
             return LoopController::ControlVector::Brake;
         }
@@ -1674,9 +1680,10 @@ private:
     LoopController::ControlVector ForwardCharacterizationTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
+        (void)loopController;
         const unsigned long nowMs = millis();
         const float traveledDistanceM =
             std::fabs(_drive.GetAverageDistanceMeters() - _forwardPhaseState.startDistanceM);
@@ -1731,7 +1738,7 @@ private:
         {
             if (!FinishForwardCharacterizationSample())
             {
-                services.Fault("Failed to complete forward characterization sample");
+                _runtime.FailActiveMode("Failed to complete forward characterization sample");
             }
             return LoopController::ControlVector::Brake;
         }
@@ -1743,7 +1750,7 @@ private:
         {
             if (!FinishForwardCharacterizationSample())
             {
-                services.Fault("Failed to complete forward characterization sample");
+                _runtime.FailActiveMode("Failed to complete forward characterization sample");
             }
             return LoopController::ControlVector::Brake;
         }
@@ -1754,7 +1761,7 @@ private:
     LoopController::ControlVector TurnPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         const float errorRad = AngleErrorRad(_turnPhaseState.targetYawRad, state.GetOrientation());
@@ -1775,7 +1782,7 @@ private:
                     _turnPhaseState.targetYawRad,
                     state))
             {
-                services.Fault("Failed to write turn diagnostic result");
+                _runtime.FailActiveMode("Failed to write turn diagnostic result");
                 return LoopController::ControlVector::Brake;
             }
             if (_turnPhaseState.nextStep == ScenarioStep::RecoverySettle)
@@ -1792,18 +1799,18 @@ private:
                     state,
                     "Failed to write square diagnostic result"))
             {
-                services.Fault("Failed to write square diagnostic result");
+                _runtime.FailActiveMode("Failed to write square diagnostic result");
                 return LoopController::ControlVector::Brake;
             }
             (void)AdvanceToNextStep(
                 _turnPhaseState.nextStep,
-                services,
+                loopController,
                 "Failed to advance diagnostic turn phase");
             return LoopController::ControlVector::Brake;
         }
         if (static_cast<long>(_turnPhaseState.timeoutMs - millis()) <= 0)
         {
-            services.Fault("Turn diagnostic phase timed out");
+            _runtime.FailActiveMode("Turn diagnostic phase timed out");
             return LoopController::ControlVector::Brake;
         }
 
@@ -1813,7 +1820,7 @@ private:
     LoopController::ControlVector ArcPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         _arcPhaseState.traveledM = std::fabs(_drive.GetAverageDistanceMeters() - _arcPhaseState.startDistanceM);
@@ -1846,7 +1853,7 @@ private:
                     _arcPhaseState.metrics,
                     state))
             {
-                services.Fault("Failed to write arc diagnostic result");
+                _runtime.FailActiveMode("Failed to write arc diagnostic result");
                 return LoopController::ControlVector::Brake;
             }
             if (_arcPhaseState.writeCircleSummary)
@@ -1857,7 +1864,7 @@ private:
                         _circleSequenceStartTelemetry,
                         _circleSequenceTotalMetrics))
                 {
-                    services.Fault("Failed to write circle diagnostic result");
+                    _runtime.FailActiveMode("Failed to write circle diagnostic result");
                     return LoopController::ControlVector::Brake;
                 }
                 if (!WriteClosureResult(
@@ -1869,13 +1876,13 @@ private:
                         state,
                         "Failed to write arc circle diagnostic result"))
                 {
-                    services.Fault("Failed to write arc circle diagnostic result");
+                    _runtime.FailActiveMode("Failed to write arc circle diagnostic result");
                     return LoopController::ControlVector::Brake;
                 }
             }
             (void)AdvanceToNextStep(
                 _arcPhaseState.nextStep,
-                services,
+                loopController,
                 "Failed to advance diagnostic arc phase");
             return LoopController::ControlVector::Brake;
         }
@@ -1885,12 +1892,12 @@ private:
                 remainingM,
                 millis()))
         {
-            services.Fault("Arc diagnostic encoder progress stalled");
+            _runtime.FailActiveMode("Arc diagnostic encoder progress stalled");
             return LoopController::ControlVector::Brake;
         }
         if (static_cast<long>(_arcPhaseState.timeoutMs - millis()) <= 0)
         {
-            services.Fault("Arc diagnostic phase timed out");
+            _runtime.FailActiveMode("Arc diagnostic phase timed out");
             return LoopController::ControlVector::Brake;
         }
 

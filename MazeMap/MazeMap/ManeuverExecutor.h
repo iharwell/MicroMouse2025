@@ -30,15 +30,9 @@ namespace MazeMap::App::Internal
             const MotionLimits& limits,
             bool snapToExpectedLocation,
             MazeMap::DirectionalLocation& currentLocation,
-            const LoopController::ModeCallbacks& returnCallbacks,
-            LoopController::TickServices& services);
-        bool SEND_IT(
-            MazeMap::ManeuverQueue& queue,
-            const MotionLimits& limits,
-            bool snapToExpectedLocation,
-            MazeMap::DirectionalLocation& currentLocation,
-            const LoopController::ModeCallbacks& returnCallbacks,
-            LoopController::ModeCallbacks& initialCallbacks);
+            LoopController::ModeWorkCallback continuationCallback,
+            void* continuationContext,
+            LoopController& loopController);
 
         void CancelActivePhase() noexcept;
 
@@ -49,7 +43,13 @@ namespace MazeMap::App::Internal
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
+
+        struct Continuation final
+        {
+            LoopController::ModeWorkCallback callback{};
+            void* context{};
+        };
 
         struct DelegatedDriveRoutineState final
         {
@@ -71,53 +71,52 @@ namespace MazeMap::App::Internal
             void* context,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
 
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
 
+        [[noreturn]] void FailInvariant(const char* reason) const noexcept;
         bool CanBeginPhase() const noexcept;
         bool BeginPhase(
             void* activeState,
-            ActivePhaseTickFn activePhaseTick) noexcept;
-        bool BuildRoutineCallbacks(LoopController::ModeCallbacks& callbacks) const noexcept;
-        bool InstallRoutineCallbacks(
-            const LoopController::ModeCallbacks& returnCallbacks,
-            LoopController::TickServices& services);
+            ActivePhaseTickFn activePhaseTick,
+            LoopController::ModeWorkCallback continuationCallback,
+            void* continuationContext) noexcept;
+        bool InstallRoutineCallback(LoopController& loopController) noexcept;
         void ActivatePhase(void* activeState, ActivePhaseTickFn activePhaseTick) noexcept;
         void ResetActiveRoutine() noexcept;
 
         LoopController::ControlVector ReturnToContinuation(
-            LoopController::TickServices& services) noexcept;
+            LoopController& loopController) noexcept;
         LoopController::ControlVector CompleteCurrentPhase(
             void* nextState,
             ActivePhaseTickFn nextPhaseTick,
-            LoopController::TickServices& services) noexcept;
+            LoopController& loopController) noexcept;
         LoopController::ControlVector FaultPhase(
-            LoopController::TickServices& services,
             const char* reason) noexcept;
 
         LoopController::ControlVector DelegatedDriveRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
         LoopController::ControlVector QueueDispatchRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
         LoopController::ControlVector QueueAdvanceRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            LoopController::TickServices& services);
+            LoopController& loopController);
 
         SharedRobotRuntime* _runtime{};
         DriveBase* _drive{};
         Drive* _driveService{};
         void* _activeState{};
         ActivePhaseTickFn _activePhaseTick{};
-        LoopController::ModeCallbacks _returnCallbacks{};
+        Continuation _continuation{};
         DelegatedDriveRoutineState _delegatedDriveState{};
         QueueRoutineState _queueState{};
     };

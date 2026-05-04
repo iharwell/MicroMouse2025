@@ -54,12 +54,11 @@ namespace MazeMap::App::Internal
     class EXPORT LoopController final
     {
     public:
-        // Selects which wall-sensor groups the per-session work plan conceptually enables.
+        // Selects which wall-sensor groups participate in one session's sensor work.
         //
-        // The current foundation implementation accepts only WallMask::All because sensing remains
-        // wound into the loop in its present full-capture form. The narrower values remain part of
-        // the SessionOptions vocabulary because the public contract is session-oriented even though
-        // downstream migration work has not yet introduced partial-plan destinations.
+        // SensorWorkPlan uses this as the authoritative wall-sensor opt-out surface. Modes stage
+        // the exact wall groups they want for the session, and LoopController filters wall-sensor
+        // capture/output behavior from this mask instead of from separate special-case flags.
         enum class WallMask : std::uint8_t
         {
             None = 0x00,  // No wall-sensor groups selected.
@@ -71,9 +70,10 @@ namespace MazeMap::App::Internal
 
         // Per-session sensing/update plan consumed by StageNextSessionState(...).
         //
-        // These fields describe the conceptual sensor/update responsibilities for one session.
-        // Today, the implementation accepts only the fully enabled plan. Unsupported partial plans
-        // are rejected as contract-invalid session state rather than silently widened.
+        // This is the authoritative session-local sensor opt-out contract. Modes describe one
+        // homogeneous plan here, and LoopController derives capture participation, estimator input
+        // participation, and wall-update participation from this one plan rather than from
+        // separate ad hoc sensor-usage flags.
         struct SensorWorkPlan final
         {
             WallMask wallMask{ WallMask::All }; // Wall-sensor groups to include in the session work.
@@ -138,7 +138,6 @@ namespace MazeMap::App::Internal
             std::uint16_t tModeReturnUs{};         // Tick-relative active-callback return time.
             std::uint16_t tPostServiceDoneUs{};    // Tick-relative post-callback service completion.
             std::uint16_t overrunUs{};             // Positive overrun beyond the scheduled deadline.
-            std::uint8_t flags{};                  // Published bitfield; currently only resumed-from-pause.
         };
 
         // Explicit in-session callback transfer target.
@@ -352,8 +351,6 @@ namespace MazeMap::App::Internal
             }
         };
 
-        static constexpr std::uint8_t kTimingFlagResumedFromPause = 1U << 0;
-
         static ControlVector RunApplicationModeTick(
             void* context,
             std::uint32_t loopEndTimeUs,
@@ -362,7 +359,6 @@ namespace MazeMap::App::Internal
         static std::uint16_t RelativeTickUs(std::uint32_t tickStartUs, std::uint32_t timestampUs) noexcept;
         static bool IsBrakeMotorPwmCommand(const ControlVector& command) noexcept;
         static bool IsZeroMotorPwmCommand(const ControlVector& command) noexcept;
-        static bool IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
 
         void RunSessionStartWallSensorAdcProbe() noexcept;
@@ -403,7 +399,6 @@ namespace MazeMap::App::Internal
         ModeWorkCallback _activeModeWorkCallback{}; // Current strict-cadence tick owner.
         void* _activeModeWorkContext{};    // Explicit context paired with _activeModeWorkCallback.
         bool _sessionActive{};             // Whether Run() currently owns an active session lifecycle.
-        bool _resumePending{};             // Whether the next published tick should note resumed-from-pause.
         bool _publishedTimingValid{};      // Whether a completed-tick timing snapshot is published.
         std::uint32_t _tickCount{};        // One-based active-session tick sequence.
         std::uint32_t _lastTickStartUs{};  // Previous tick-start timestamp.

@@ -11,16 +11,22 @@ namespace MazeMap::App::Internal
         void* context,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         auto* const self = static_cast<ManeuverExecutor*>(context);
         if ((self == nullptr) || (self->_activeState == nullptr) || (self->_activePhaseTick == nullptr))
         {
-            services.Fault("ManeuverExecutor callback dispatch was not initialized");
-            return LoopController::ControlVector::Brake;
+            if ((self != nullptr) && (self->_runtime != nullptr))
+            {
+                self->_runtime->FailActiveMode("ManeuverExecutor callback dispatch was not initialized");
+            }
+
+            while (true)
+            {
+            }
         }
 
-        return (self->*self->_activePhaseTick)(self->_activeState, loopEndTimeUs, state, services);
+        return (self->*self->_activePhaseTick)(self->_activeState, loopEndTimeUs, state, loopController);
     }
 
     void ManeuverExecutor::AttachRuntime(SharedRobotRuntime& runtime) noexcept
@@ -28,6 +34,18 @@ namespace MazeMap::App::Internal
         _runtime = &runtime;
         _drive = &runtime.Drive();
         _driveService = &runtime.DriveService();
+    }
+
+    [[noreturn]] void ManeuverExecutor::FailInvariant(const char* const reason) const noexcept
+    {
+        if (_runtime != nullptr)
+        {
+            _runtime->FailActiveMode(reason);
+        }
+
+        while (true)
+        {
+        }
     }
 
     bool ManeuverExecutor::Active() const noexcept
@@ -51,49 +69,36 @@ namespace MazeMap::App::Internal
 
     bool ManeuverExecutor::BeginPhase(
         void* const activeState,
-        const ActivePhaseTickFn activePhaseTick) noexcept
+        const ActivePhaseTickFn activePhaseTick,
+        const LoopController::ModeWorkCallback continuationCallback,
+        void* const continuationContext) noexcept
     {
         if (!CanBeginPhase() || (activeState == nullptr) || (activePhaseTick == nullptr))
         {
             return false;
         }
 
-        _returnCallbacks = LoopController::ModeCallbacks{};
+        if (continuationCallback == nullptr)
+        {
+            FailInvariant("ManeuverExecutor continuation was not installed");
+        }
+
+        _continuation = Continuation{};
+        _continuation.callback = continuationCallback;
+        _continuation.context = continuationContext;
         ActivatePhase(activeState, activePhaseTick);
         return true;
     }
 
-    bool ManeuverExecutor::BuildRoutineCallbacks(LoopController::ModeCallbacks& callbacks) const noexcept
+    bool ManeuverExecutor::InstallRoutineCallback(LoopController& loopController) noexcept
     {
-        if ((_activeState == nullptr) || (_activePhaseTick == nullptr))
-        {
-            callbacks = {};
-            return false;
-        }
-
-        callbacks = {};
-        callbacks.onModeWork = &ManeuverExecutor::ActiveRoutineThunk;
-        callbacks.context = const_cast<ManeuverExecutor*>(this);
-        return true;
-    }
-
-    bool ManeuverExecutor::InstallRoutineCallbacks(
-        const LoopController::ModeCallbacks& returnCallbacks,
-        LoopController::TickServices& services)
-    {
-        if ((returnCallbacks.onModeWork == nullptr) ||
-            (_activeState == nullptr) ||
-            (_activePhaseTick == nullptr))
+        if ((_activeState == nullptr) || (_activePhaseTick == nullptr) || (_continuation.callback == nullptr))
         {
             ResetActiveRoutine();
             return false;
         }
 
-        LoopController::ModeCallbacks callbacks{};
-        callbacks.onModeWork = &ManeuverExecutor::ActiveRoutineThunk;
-        callbacks.context = this;
-        services.SetNextModeWorkCallbacks(callbacks);
-        _returnCallbacks = returnCallbacks;
+        loopController.SetNextModeWorkCallback(&ManeuverExecutor::ActiveRoutineThunk, this);
         return true;
     }
 
@@ -109,31 +114,29 @@ namespace MazeMap::App::Internal
     {
         _activeState = nullptr;
         _activePhaseTick = nullptr;
-        _returnCallbacks = LoopController::ModeCallbacks{};
+        _continuation = Continuation{};
         _delegatedDriveState = DelegatedDriveRoutineState{};
         _queueState = QueueRoutineState{};
     }
 
     LoopController::ControlVector ManeuverExecutor::ReturnToContinuation(
-        LoopController::TickServices& services) noexcept
+        LoopController& loopController) noexcept
     {
-        const LoopController::ModeCallbacks callbacks = _returnCallbacks;
+        const Continuation continuation = _continuation;
         ResetActiveRoutine();
-        if (callbacks.onModeWork != nullptr)
+        if (continuation.callback == nullptr)
         {
-            services.SetNextModeWorkCallbacks(callbacks);
+            FailInvariant("ManeuverExecutor continuation was not installed");
         }
-        else
-        {
-            services.RequestEndLoop();
-        }
+
+        loopController.SetNextModeWorkCallback(continuation.callback, continuation.context);
         return LoopController::ControlVector::Brake;
     }
 
     LoopController::ControlVector ManeuverExecutor::CompleteCurrentPhase(
         void* const nextState,
         const ActivePhaseTickFn nextPhaseTick,
-        LoopController::TickServices& services) noexcept
+        LoopController& loopController) noexcept
     {
         if ((nextState != nullptr) && (nextPhaseTick != nullptr))
         {
@@ -141,15 +144,14 @@ namespace MazeMap::App::Internal
             return LoopController::ControlVector::Brake;
         }
 
-        return ReturnToContinuation(services);
+        return ReturnToContinuation(loopController);
     }
 
     LoopController::ControlVector ManeuverExecutor::FaultPhase(
-        LoopController::TickServices& services,
         const char* const reason) noexcept
     {
         ResetActiveRoutine();
-        services.Fault(reason);
+        FailInvariant(reason);
         return LoopController::ControlVector::Brake;
     }
 
@@ -158,17 +160,18 @@ namespace MazeMap::App::Internal
         const MotionLimits& limits,
         const bool snapToExpectedLocation,
         MazeMap::DirectionalLocation& currentLocation,
-        const LoopController::ModeCallbacks& returnCallbacks,
-        LoopController::TickServices& services)
+        const LoopController::ModeWorkCallback continuationCallback,
+        void* const continuationContext,
+        LoopController& loopController)
     {
-        if (returnCallbacks.onModeWork == nullptr)
+        if (continuationCallback == nullptr)
         {
-            return false;
+            FailInvariant("ManeuverExecutor continuation was not installed");
         }
 
         if (queue.empty())
         {
-            services.SetNextModeWorkCallbacks(returnCallbacks);
+            loopController.SetNextModeWorkCallback(continuationCallback, continuationContext);
             return true;
         }
 
@@ -179,53 +182,19 @@ namespace MazeMap::App::Internal
         _queueState.limits = limits;
         _queueState.snapToExpectedLocation = snapToExpectedLocation;
         return
-            BeginPhase(&_queueState, &ManeuverExecutor::QueueDispatchRoutineTick) &&
-            InstallRoutineCallbacks(returnCallbacks, services);
-    }
-
-    bool ManeuverExecutor::SEND_IT(
-        MazeMap::ManeuverQueue& queue,
-        const MotionLimits& limits,
-        const bool snapToExpectedLocation,
-        MazeMap::DirectionalLocation& currentLocation,
-        const LoopController::ModeCallbacks& returnCallbacks,
-        LoopController::ModeCallbacks& initialCallbacks)
-    {
-        initialCallbacks = {};
-        if (returnCallbacks.onModeWork == nullptr)
-        {
-            return false;
-        }
-
-        if (queue.empty())
-        {
-            initialCallbacks = returnCallbacks;
-            return true;
-        }
-
-        currentLocation = queue.front().getStart();
-        _queueState = QueueRoutineState{};
-        _queueState.queue = &queue;
-        _queueState.currentLocation = &currentLocation;
-        _queueState.limits = limits;
-        _queueState.snapToExpectedLocation = snapToExpectedLocation;
-        if (!BeginPhase(&_queueState, &ManeuverExecutor::QueueDispatchRoutineTick) ||
-            !BuildRoutineCallbacks(initialCallbacks))
-        {
-            ResetActiveRoutine();
-            initialCallbacks = {};
-            return false;
-        }
-
-        _returnCallbacks = returnCallbacks;
-        return true;
+            BeginPhase(
+                &_queueState,
+                &ManeuverExecutor::QueueDispatchRoutineTick,
+                continuationCallback,
+                continuationContext) &&
+            InstallRoutineCallback(loopController);
     }
 
     LoopController::ControlVector ManeuverExecutor::DelegatedDriveRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         (void)state;
@@ -233,7 +202,7 @@ namespace MazeMap::App::Internal
         auto& delegated = *static_cast<DelegatedDriveRoutineState*>(rawState);
         if (_driveService == nullptr)
         {
-            return FaultPhase(services, "Queued maneuver Drive service was unavailable");
+            return FaultPhase("Queued maneuver Drive service was unavailable");
         }
 
         bool done = false;
@@ -243,14 +212,14 @@ namespace MazeMap::App::Internal
             return control;
         }
 
-        return CompleteCurrentPhase(delegated.nextState, delegated.nextPhaseTick, services);
+        return CompleteCurrentPhase(delegated.nextState, delegated.nextPhaseTick, loopController);
     }
 
     LoopController::ControlVector ManeuverExecutor::QueueDispatchRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         (void)state;
@@ -258,11 +227,11 @@ namespace MazeMap::App::Internal
         auto& queueState = *static_cast<QueueRoutineState*>(rawState);
         if ((queueState.queue == nullptr) || (queueState.currentLocation == nullptr))
         {
-            return FaultPhase(services, "Queued maneuver routine state was invalid");
+            return FaultPhase("Queued maneuver routine state was invalid");
         }
         if (queueState.nextIndex >= queueState.queue->size())
         {
-            return ReturnToContinuation(services);
+            return ReturnToContinuation(loopController);
         }
 
         queueState.activeIndex = queueState.nextIndex;
@@ -270,7 +239,7 @@ namespace MazeMap::App::Internal
         *queueState.currentLocation = entry.getStart();
         if (entry.getCode() == MazeMap::MC_NONE)
         {
-            return FaultPhase(services, "Queued maneuver entry was invalid");
+            return FaultPhase("Queued maneuver entry was invalid");
         }
 
         // Temporary bridge: ManeuverExecutor now delegates queued maneuver execution to Drive so
@@ -286,14 +255,14 @@ namespace MazeMap::App::Internal
         return CompleteCurrentPhase(
             &_delegatedDriveState,
             &ManeuverExecutor::DelegatedDriveRoutineTick,
-            services);
+            loopController);
     }
 
     LoopController::ControlVector ManeuverExecutor::QueueAdvanceRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
-        LoopController::TickServices& services)
+        LoopController& loopController)
     {
         (void)loopEndTimeUs;
         (void)state;
@@ -303,7 +272,7 @@ namespace MazeMap::App::Internal
             (queueState.currentLocation == nullptr) ||
             (queueState.activeIndex >= queueState.queue->size()))
         {
-            return FaultPhase(services, "Queued maneuver advance state was invalid");
+            return FaultPhase("Queued maneuver advance state was invalid");
         }
 
         const MazeMap::ManeuverInstance& entry = (*queueState.queue)[queueState.activeIndex];
@@ -317,9 +286,9 @@ namespace MazeMap::App::Internal
         queueState.nextIndex = static_cast<std::uint16_t>(queueState.activeIndex + 1U);
         if (queueState.nextIndex >= queueState.queue->size())
         {
-            return ReturnToContinuation(services);
+            return ReturnToContinuation(loopController);
         }
 
-        return CompleteCurrentPhase(&queueState, &ManeuverExecutor::QueueDispatchRoutineTick, services);
+        return CompleteCurrentPhase(&queueState, &ManeuverExecutor::QueueDispatchRoutineTick, loopController);
     }
 }
