@@ -196,12 +196,6 @@ namespace MazeMap::App::Internal
             const MazeMap::VehicleState& state,
             LoopController& loopController);
 
-        enum class SessionBoundaryAction : std::uint8_t
-        {
-            None,
-            TimingToMain,
-        };
-
         enum class MeasurementPhaseId : std::uint8_t
         {
             Timing = 0U,
@@ -430,17 +424,11 @@ namespace MazeMap::App::Internal
         class TimingStage final
         {
         public:
-            void Reset() noexcept;
-            bool Begin(OpenFloorMeasurementController& controller);
+            bool OpenTimingLog(OpenFloorMeasurementController& controller);
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
                 LoopController& loopController);
-            void CompleteTimingToMainSessionTransition(
-                OpenFloorMeasurementController& controller,
-                MainStage& mainStage,
-                LoopController& loopController);
-            void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
 
         private:
             bool WriteBufferedRow(
@@ -450,7 +438,6 @@ namespace MazeMap::App::Internal
             bool CaptureComplete() const noexcept;
 
             std::uint16_t _tickIndex{};
-            bool _logOpen{};
             std::optional<Runtime::OpenFloorTimingRow> _bufferedRow{};
         };
 
@@ -459,17 +446,15 @@ namespace MazeMap::App::Internal
         public:
             MainStage(MainMeasurementRegime* const* regimes, std::size_t regimeCount) noexcept;
 
-            void Reset() noexcept;
-            bool Begin(OpenFloorMeasurementController& controller);
+            bool OpenMainLog(OpenFloorMeasurementController& controller);
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
                 LoopController& loopController);
-            void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
 
         private:
             MainMeasurementRegime& ActiveRegime() const noexcept;
-            void ResetIndices() noexcept;
+            //void InitializeMeasurementIndices() noexcept;
             bool AdvanceIndices() noexcept;
             bool WriteBufferedRow(
                 OpenFloorMeasurementController& controller,
@@ -483,16 +468,13 @@ namespace MazeMap::App::Internal
             std::uint16_t _activePrimitiveIndex{};
             std::uint8_t _activeSpeedIndex{};
             std::uint16_t _activeRepeatIndex{};
-            bool _logOpen{};
             bool _completionPending{};
             std::optional<Runtime::OpenFloorMainRow> _bufferedRow{};
         };
 
         static void TeardownOnRuntimeFault(void* context, const char* reason) noexcept;
-        static void TimingToMainEndSessionThunk(void* context, LoopController& loopController);
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
-        void ResetState() noexcept;
         void PopulateTimingRowFromState(
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorTimingRow& row) const noexcept;
@@ -506,7 +488,6 @@ namespace MazeMap::App::Internal
         void ConfigureSelectorMonitor() noexcept;
         void ReleaseSelectorMonitor() noexcept;
         bool SelectorRemoved() const noexcept;
-        void CompleteTimingToMainEndSession(LoopController& loopController);
         void FinalizeSuccessfulRun() noexcept;
         LoopController::ControlVector TimingStageTick(
             std::uint32_t loopEndTimeUs,
@@ -536,7 +517,6 @@ namespace MazeMap::App::Internal
         std::uint8_t _selectorDrivePin{};
         std::uint8_t _selectorSensePin{};
         bool _selectorMonitorArmed{};
-        SessionBoundaryAction _sessionBoundaryAction{ SessionBoundaryAction::None };
         TimingStage _timingStage{};
         MainStage _mainStage;
         float _sessionStartPointX{ std::numeric_limits<float>::quiet_NaN() };

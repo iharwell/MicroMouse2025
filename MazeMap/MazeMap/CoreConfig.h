@@ -15,12 +15,12 @@ namespace MazeMap::Config
 
     // [Low] Maze cell size in meters. This is derived from the maze model and normally should not be edited here;
     // only change it if the robot is being adapted to a different maze standard.
-    const float kCellSizeM = MazeMap::Maze::GetCellDimension();
+    constexpr float kCellSizeM = MazeMap::Maze::GetCellDimension();
     // [Low] Physical wall thickness for the maze standard. Each neighboring cell contributes half of this thickness to
     // the occupied wall, so the open span inside one cell is smaller than the cell pitch.
     constexpr float kMazeWallThicknessM = 0.012f;
     // [Low] Clear open span inside one cell after subtracting the 12 mm shared wall thickness from the 180 mm pitch.
-    const float kCellClearSpanM = kCellSizeM - kMazeWallThicknessM;
+    constexpr float kCellClearSpanM = kCellSizeM - kMazeWallThicknessM;
     // [High] Vehicle is the sole authority for the robot's physical dimensions. Track width and its wear-bounded
     // envelope are sourced from the shared vehicle model rather than duplicated here.
     constexpr float kTrackWidthPhysicalMinM = MazeMap::Vehicle::GetPhysicalModel().trackWidthPhysicalMinM;
@@ -251,7 +251,7 @@ namespace MazeMap::Config
     // [Medium] Active-high vacuum-fan duty during each racing run, including the finish hold before returning to
     // start. Raise only if additional downforce is worth the power draw and thermal cost; lower if traction is already
     // sufficient or the fan system runs too hot.
-    constexpr float kRacingFanDutyCycle = 0.80f;
+    constexpr float kRacingFanDutyCycle = 1.0f;
     // [Medium] Soft-start time for the vacuum fan in diagnostic and racing modes. Increase if the drivetrain or power
     // rail reacts poorly to a full-step fan start; decrease if you need full downforce sooner.
     constexpr uint16_t kRacingFanRampMs = 2000U;
