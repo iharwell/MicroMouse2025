@@ -124,8 +124,11 @@ namespace MazeMap::App::Internal
         LoopController::SessionOptions BuildLoopOptions() const noexcept
         {
             LoopController::SessionOptions options{};
+            const auto& runtimeState = _runtime.RuntimeState();
             options.controlPeriodUs = DiagnosticConfig::kControlPeriodUs;
             options.workPlan.useWallUpdates = false;
+            options.SessionStartPointX = runtimeState.GetPositionX();
+            options.SessionStartPointY = runtimeState.GetPositionY();
             return options;
         }
 

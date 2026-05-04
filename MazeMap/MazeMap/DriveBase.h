@@ -154,6 +154,23 @@ public:
         (void)_estimator.SetGyroBiasZ(gyroBiasRadps);
     }
 
+    bool RestoreSessionStartPhysicalState(float xMeters, float yMeters, float yawRad) noexcept
+    {
+        (void)ConsumeEncoderObservation(0.0f);
+        (void)ConsumeEncoderObservation(0.0f);
+        ResetEncoderTracking();
+        _lastGyroRawRadps = 0.0f;
+        _lastImuYawRateRadps = 0.0f;
+        _lastImuAccelBodyXMps2 = 0.0f;
+        _lastImuAccelBodyYMps2 = 0.0f;
+        _lastImuYawRateValid = false;
+        _lastImuAccelValid = false;
+        const bool restored = _estimator.ResetForSessionTransition(xMeters, yMeters, yawRad);
+        ResetControllers();
+        Brake();
+        return restored;
+    }
+
     void RecordMeasurementInputs(const SensorSnapshot& snapshot) noexcept
     {
         _lastGyroRawRadps = snapshot.gyroRawRadps;

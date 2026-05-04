@@ -120,7 +120,10 @@ namespace MazeMap::App::Internal
         LoopController::SessionOptions BuildLoopOptions() const noexcept
         {
             LoopController::SessionOptions options{};
+            const auto& runtimeState = _runtime.RuntimeState();
             options.controlPeriodUs = AuxMeasurementConfig::kControlPeriodUs;
+            options.SessionStartPointX = runtimeState.GetPositionX();
+            options.SessionStartPointY = runtimeState.GetPositionY();
             return options;
         }
 

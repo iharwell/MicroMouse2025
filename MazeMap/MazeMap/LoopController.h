@@ -5,6 +5,7 @@
 #include "SensorSnapshot.h"
 
 #include <cstdint>
+#include <limits>
 
 namespace MazeMap::App
 {
@@ -95,6 +96,8 @@ namespace MazeMap::App::Internal
         {
             std::uint32_t controlPeriodUs{}; // Strict period between synchronized tick boundaries.
             SensorWorkPlan workPlan{};       // Fixed sensing/update plan for that session.
+            float SessionStartPointX{ std::numeric_limits<float>::quiet_NaN() }; // Required X position for the reset physical start state of that session.
+            float SessionStartPointY{ std::numeric_limits<float>::quiet_NaN() }; // Required Y position for the reset physical start state of that session.
         };
 
         // Sequence number of the first RunTick-eligible tick in every session.
@@ -370,6 +373,7 @@ namespace MazeMap::App::Internal
         void BindApplicationMode(IApplicationMode& mode) noexcept;
         void Run();
         void StartSessionFromStagedState() noexcept;
+        void RestoreSessionStartPhysicalState() noexcept;
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
         const TimingDiagnostics* CurrentTimingForReaders() const noexcept;
@@ -397,6 +401,7 @@ namespace MazeMap::App::Internal
 
         SharedRobotRuntime* _runtime{};    // Runtime owner for actuation, sensing, logs, and state.
         IApplicationMode* _boundMode{};    // Bound top-level mode whose RunTick(...) starts each session.
+        float _modeStartYawRad{ std::numeric_limits<float>::quiet_NaN() }; // Captured start-of-mode yaw reused for successor session resets.
         SessionOptions _options{};         // Active session configuration.
         SessionOptions _stagedNextSessionOptions{}; // Successor-session configuration awaiting start.
         bool _stagedNextSessionValid{};    // Whether _stagedNextSessionOptions is presently valid.

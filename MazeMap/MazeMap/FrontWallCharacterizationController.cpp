@@ -196,7 +196,10 @@ private:
     LoopController::SessionOptions BuildLoopOptions() const
     {
         LoopController::SessionOptions options{};
+        const auto& runtimeState = _runtime.RuntimeState();
         options.controlPeriodUs = FrontWallCharacterizationConfig::kControlPeriodUs;
+        options.SessionStartPointX = runtimeState.GetPositionX();
+        options.SessionStartPointY = runtimeState.GetPositionY();
         return options;
     }
 

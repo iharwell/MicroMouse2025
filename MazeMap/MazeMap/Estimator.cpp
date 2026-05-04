@@ -185,6 +185,37 @@ namespace MazeMap
         return reset(state, BuildInitialCovariance());
     }
 
+    bool Estimator::ResetForSessionTransition(float xMeters, float yMeters, float yawRad) noexcept
+    {
+        VehicleState::StateVector state = VehicleState::StateVector::Zero();
+        state(VehicleState::kPx) = std::isfinite(xMeters) ? xMeters : 0.0f;
+        state(VehicleState::kPy) = std::isfinite(yMeters) ? yMeters : 0.0f;
+        state(VehicleState::kPsi) = WrapAngleRad(yawRad);
+        const VehicleState::StateVector currentState = _core.state();
+        float preservedGyroBiasRadps = currentState(VehicleState::kBgz);
+        if (!std::isfinite(preservedGyroBiasRadps))
+        {
+            preservedGyroBiasRadps = _core.gyroBiasAnchorRadps();
+        }
+        if (!std::isfinite(preservedGyroBiasRadps))
+        {
+            preservedGyroBiasRadps = _runtimeState->GetGyroBiasZ();
+        }
+        state(VehicleState::kBgz) = std::isfinite(preservedGyroBiasRadps) ? preservedGyroBiasRadps : 0.0f;
+
+        ClearFault();
+        const bool ok = _core.reset(state, BuildInitialCovariance());
+        if (!ok)
+        {
+            TriggerFault("session_transition_reset_failed");
+            return false;
+        }
+
+        SyncRuntimeState();
+        ResetRuntimeMetadata();
+        return true;
+    }
+
     bool Estimator::SetStateCoordinate(int stateIndex, float coordinateM) noexcept
     {
         VehicleState::StateVector state = _core.state();
@@ -273,6 +304,15 @@ namespace MazeMap
         {
             _runtimeState->SetTime(_runtimeState->GetTime() + dtSeconds);
         }
+    }
+
+    void Estimator::ResetRuntimeMetadata() noexcept
+    {
+        _runtimeState->SetTime(0.0f);
+        _runtimeState->SetTimestampUs(0U);
+        _runtimeState->SetControlInput(ControlInput{});
+        _runtimeState->SetDriveCommandState(VehicleState::DriveCommandState{});
+        _runtimeState->SetSensorSnapshot(SensorSnapshot{});
     }
 
     void Estimator::SyncRuntimeState() noexcept

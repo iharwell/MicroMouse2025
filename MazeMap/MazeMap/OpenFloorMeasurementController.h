@@ -13,6 +13,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 namespace MazeMap::App
@@ -538,6 +539,8 @@ namespace MazeMap::App::Internal
         SessionBoundaryAction _sessionBoundaryAction{ SessionBoundaryAction::None };
         TimingStage _timingStage{};
         MainStage _mainStage;
+        float _sessionStartPointX{ std::numeric_limits<float>::quiet_NaN() };
+        float _sessionStartPointY{ std::numeric_limits<float>::quiet_NaN() };
     };
 
     IApplicationMode& GetOpenFloorMeasurementMode();

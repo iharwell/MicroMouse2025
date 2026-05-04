@@ -107,6 +107,7 @@ namespace MazeMap::App::Internal
     LoopController::SessionOptions WallSensorLedCalibrationController::BuildLoopOptions() const noexcept
     {
         LoopController::SessionOptions options{};
+        const auto& runtimeState = _runtime.RuntimeState();
         options.controlPeriodUs = Config::kControlPeriodUs;
         options.workPlan.wallMask = LoopController::WallMask::None;
         options.workPlan.readEncoders = false;
@@ -115,6 +116,8 @@ namespace MazeMap::App::Internal
         options.workPlan.useGyroUpdate = false;
         options.workPlan.useAccelUpdate = false;
         options.workPlan.useWallUpdates = false;
+        options.SessionStartPointX = runtimeState.GetPositionX();
+        options.SessionStartPointY = runtimeState.GetPositionY();
         return options;
     }
 

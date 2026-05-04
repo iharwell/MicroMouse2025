@@ -7,7 +7,6 @@
 #include "IApplicationMode.h"
 #include "MazeMapRuntimeSignalHelpers.h"
 #include "SharedRobotRuntime.h"
-#include "RuntimeSensorSuite.h"
 #include "Vehicle.h"
 
 #include <algorithm>
@@ -472,6 +471,11 @@ namespace MazeMap::App::Internal
         _options = _stagedNextSessionOptions;
         _stagedNextSessionOptions = SessionOptions{};
         _stagedNextSessionValid = false;
+        if (!std::isfinite(_modeStartYawRad))
+        {
+            _modeStartYawRad = _runtime->RuntimeState().GetOrientation();
+        }
+        RestoreSessionStartPhysicalState();
         _sessionStartWallSensorAdcProbePending = WorkPlanRequestsWallSensors(_options.workPlan);
         RunSessionStartWallSensorAdcProbe();
         _activeModeWorkCallback = &RunApplicationModeTick;
@@ -489,6 +493,31 @@ namespace MazeMap::App::Internal
         _timingBuffers[0] = TimingDiagnostics{};
         _timingBuffers[1] = TimingDiagnostics{};
         ClearPendingRequests();
+    }
+
+    void LoopController::RestoreSessionStartPhysicalState() noexcept
+    {
+        if (_runtime == nullptr)
+        {
+            while (true)
+            {
+            }
+        }
+
+        if (!std::isfinite(_modeStartYawRad))
+        {
+            _runtime->FailActiveMode("LoopController session-start yaw was unavailable");
+        }
+
+        if (!_runtime->Drive().RestoreSessionStartPhysicalState(
+                _options.SessionStartPointX,
+                _options.SessionStartPointY,
+                _modeStartYawRad))
+        {
+            _runtime->FailActiveMode("LoopController failed to restore the staged session-start physical state");
+        }
+
+        _runtime->DriveService().StartHold(0U, false);
     }
 
     void LoopController::Run()
@@ -728,7 +757,11 @@ namespace MazeMap::App::Internal
 
     bool LoopController::ValidateSessionOptions(const SessionOptions& options) const noexcept
     {
-        return (options.controlPeriodUs > 0U) && SupportsSensorWorkPlan(options.workPlan);
+        return
+            (options.controlPeriodUs > 0U) &&
+            std::isfinite(options.SessionStartPointX) &&
+            std::isfinite(options.SessionStartPointY) &&
+            SupportsSensorWorkPlan(options.workPlan);
     }
 
     bool LoopController::SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept
@@ -1219,6 +1252,7 @@ namespace MazeMap::App::Internal
     void LoopController::ResetExecutionState() noexcept
     {
         _options = SessionOptions{};
+        _modeStartYawRad = std::numeric_limits<float>::quiet_NaN();
         _activeModeWorkCallback = nullptr;
         _activeModeWorkContext = nullptr;
         _sessionActive = false;

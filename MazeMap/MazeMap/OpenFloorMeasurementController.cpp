@@ -1393,6 +1393,9 @@ namespace MazeMap::App::Internal
             _runtime.FailActiveMode("Open-floor measurement timing log setup failed");
         }
 
+        const auto& runtimeState = _runtime.RuntimeState();
+        _sessionStartPointX = runtimeState.GetPositionX();
+        _sessionStartPointY = runtimeState.GetPositionY();
         _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
@@ -1435,6 +1438,8 @@ namespace MazeMap::App::Internal
         LoopController::SessionOptions options{};
         options.controlPeriodUs = DiagnosticConfig::kControlPeriodUs;
         options.workPlan.useWallUpdates = false;
+        options.SessionStartPointX = _sessionStartPointX;
+        options.SessionStartPointY = _sessionStartPointY;
         return options;
     }
 
@@ -1446,6 +1451,8 @@ namespace MazeMap::App::Internal
         _sessionBoundaryAction = SessionBoundaryAction::None;
         _timingStage.Reset();
         _mainStage.Reset();
+        _sessionStartPointX = std::numeric_limits<float>::quiet_NaN();
+        _sessionStartPointY = std::numeric_limits<float>::quiet_NaN();
     }
 
     void OpenFloorMeasurementController::PopulateTimingRowFromState(

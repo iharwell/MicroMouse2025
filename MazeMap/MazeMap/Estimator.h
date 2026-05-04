@@ -40,6 +40,7 @@ namespace MazeMap
         void ClearFault() noexcept;
 
         bool ResetPose(float xMeters, float yMeters, float yawRad) noexcept;
+        bool ResetForSessionTransition(float xMeters, float yMeters, float yawRad) noexcept;
         bool SetStateCoordinate(int stateIndex, float coordinateM) noexcept;
         bool SetGyroBiasZ(float gyroBiasRadps) noexcept;
         void ProjectMeasuredKinematics(
@@ -335,6 +336,7 @@ namespace MazeMap
             const ControlInput& control,
             const SensorSnapshot& snapshot,
             float dtSeconds) noexcept;
+        void ResetRuntimeMetadata() noexcept;
         void SyncRuntimeState() noexcept;
         void TriggerFault(const char* reason) noexcept;
 
