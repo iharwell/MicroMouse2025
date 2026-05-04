@@ -35,6 +35,11 @@ The current class also muddles three different lifecycle concepts:
   - `StageNextSessionState(...)`
   - a clearly terminal whole-program end request, conceptually closer to `HaltExecutionEndProgram` than the current `RequestEndLoop()`
 - Treat returning from `Run()` as whole-program termination inside infrastructure, not as ordinary consumer control flow.
+- Treat the initial active callback as infrastructure-owned hookup:
+  - infrastructure binds `IApplicationMode::RunTick(...)`
+  - the initial callback context is the mode object
+  - modes do not supply their own startup callback/context pair
+- Enforce the terminal `Run()` boundary as infrastructure-only, ideally through a narrow private/friend contract rather than convention alone.
 
 ## Why minimal edits are toxic
 
@@ -46,3 +51,4 @@ If the same behaviors survive behind wrappers, helper objects, or renamed method
 - Pause-heavy modes are the highest-risk migration sites.
 - Session-handoff users need explicit `RequestEndSession` / `StageNextSessionState` design instead of pause abuse.
 - Shared routine owners need explicit callback-transfer cleanup once implicit context carry-forward is gone.
+- Startup code and mode interfaces must be rewritten together so the new `SetupMode()` / `RunTick(...)` contract becomes the only supported startup path.

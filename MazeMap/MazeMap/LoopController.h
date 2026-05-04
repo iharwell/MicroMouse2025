@@ -6,221 +6,331 @@
 
 #include <cstdint>
 
+namespace MazeMap::App
+{
+    class Application;
+}
+
 namespace MazeMap::App::Internal
 {
-    class Drive;
+    class IApplicationMode;
     class SharedRobotRuntime;
-    class StartupCalibration;
-    class WallTouch;
 
-    // LoopController owns one uninterrupted fixed-period control session. Its sole job is to lock
-    // cadence, command-application timing, sensing/update timing, and the final sync wait into one
-    // authoritative owner. Do not add public per-tick stepping APIs here. A public RunOneTick /
-    // Step / Advance surface would hand cadence ownership back to callers and reduce this class to
-    // a bad timer wrapper that can only imitate a real control-loop authority poorly.
+    // Strict-cadence, total owner of one active loop-backed application session.
+    //
+    // Layering contract:
+    // LoopController owns the fixed-period schedule, tick timing publication, command-application
+    // timing, sensing cadence, active callback dispatch, and the explicit lifecycle boundaries that
+    // may leave strict cadence temporarily. It does not select the top-level mode, own boot-mode
+    // discovery, or decide what the active callback means semantically.
+    //
+    // Startup and session-start contract:
+    // - Infrastructure resolves the active IApplicationMode object.
+    // - SetupMode() must stage the initial SessionOptions through StageNextSessionState(...).
+    // - Infrastructure privately binds the mode object and enters Run().
+    // - Every session start, including successor-session restarts, installs
+    //   IApplicationMode::RunTick(...) with the bound mode object as the callback context.
+    // - Modes do not choose their own initial callback/context pair.
+    //
+    // Callback ownership model:
+    // - Exactly one active callback owns each in-session tick.
+    // - SetNextModeWorkCallback(...) explicitly transfers ownership of the next in-session tick.
+    // - RequestPause(...) and RequestEndSession(...) do not continue inside strict cadence.
+    //   LoopController brakes, settles, and then invokes the corresponding callback boundary.
+    // - HaltExecutionEndProgram() is the only non-fault path that causes Run() to return.
+    //
+    // Public state model:
+    // - StageNextSessionState(...) stages only the SessionOptions that the next session start will
+    //   consume. A later call replaces the previously staged options.
+    // - RequestPause(...) preserves continuity. Its callback runs after brake settlement and may
+    //   then resume the current session, request end-session, request terminal halt, or transfer
+    //   in-session callback ownership for the next resumed tick.
+    // - RequestEndSession(...) intentionally breaks continuity. Its callback runs after brake
+    //   settlement, must stage the successor session or request HaltExecutionEndProgram(), and may
+    //   not request nested boundary work that belongs only to an active session tick.
+    //
+    // No public single-tick stepping API is allowed here. Exposing a caller-owned tick boundary
+    // would split cadence ownership and invalidate LoopController's reason for existing.
     class EXPORT LoopController final
     {
     public:
+        // Selects which wall-sensor groups the per-session work plan conceptually enables.
+        //
+        // The current foundation implementation accepts only WallMask::All because sensing remains
+        // wound into the loop in its present full-capture form. The narrower values remain part of
+        // the SessionOptions vocabulary because the public contract is session-oriented even though
+        // downstream migration work has not yet introduced partial-plan destinations.
         enum class WallMask : std::uint8_t
         {
-            None = 0x00,
-            Front = 0x01,
-            Left = 0x02,
-            Right = 0x04,
-            All = 0x07
+            None = 0x00,  // No wall-sensor groups selected.
+            Front = 0x01, // Front wall-sensor group selected.
+            Left = 0x02,  // Left wall-sensor group selected.
+            Right = 0x04, // Right wall-sensor group selected.
+            All = 0x07    // All wall-sensor groups selected.
         };
 
+        // Per-session sensing/update plan consumed by StageNextSessionState(...).
+        //
+        // These fields describe the conceptual sensor/update responsibilities for one session.
+        // Today, the implementation accepts only the fully enabled plan. Unsupported partial plans
+        // are rejected as contract-invalid session state rather than silently widened.
         struct SensorWorkPlan final
         {
-            WallMask wallMask{ WallMask::All };
-            bool readEncoders{ true };
-            bool readImuBundle{ true };
-            bool useEncoderUpdate{ true };
-            bool useGyroUpdate{ true };
-            bool useAccelUpdate{ true };
-            bool useWallUpdates{ true };
+            WallMask wallMask{ WallMask::All }; // Wall-sensor groups to include in the session work.
+            bool readEncoders{ true };         // Whether encoder capture is part of the session work.
+            bool readImuBundle{ true };        // Whether IMU bundle capture is part of the session work.
+            bool useEncoderUpdate{ true };     // Whether estimator encoder updates are enabled.
+            bool useGyroUpdate{ true };        // Whether estimator gyro updates are enabled.
+            bool useAccelUpdate{ true };       // Whether estimator accel updates are enabled.
+            bool useWallUpdates{ true };       // Whether maze/wall observation updates are enabled.
         };
 
+        // Fixed startup state for one session.
+        //
+        // SessionOptions does not choose the initial callback or callback context; infrastructure
+        // always supplies IApplicationMode::RunTick(...) plus the bound mode object for that.
         struct SessionOptions final
         {
-            std::uint32_t controlPeriodUs{};
-            SensorWorkPlan workPlan{};
+            std::uint32_t controlPeriodUs{}; // Strict period between synchronized tick boundaries.
+            SensorWorkPlan workPlan{};       // Fixed sensing/update plan for that session.
         };
 
-		// P0: If the loop method returns, the loop is complete. Period. The fault system can and should eat all execution post-fault inside of SharedRobotRuntime.
-        struct SessionResult final
-        {
-            enum class Status : std::uint8_t
-            {
-                Completed,
-                StoppedByRuntime
-            } status{ Status::Completed };
-
-            std::uint32_t tickCount{};
-        };
-
-        // The mode callback is eligible on the first control tick; any longer startup wait
-        // belongs in the mode callback rather than in LoopController dispatch.
+        // Sequence number of the first RunTick-eligible tick in every session.
+        //
+        // Session-local tick numbering restarts at this value whenever a new session begins.
         static constexpr std::uint32_t kInitialModeCallbackTick = 1U;
 
+        // Command proposal applied by LoopController at the start of the next tick.
+        //
+        // `Brake` uses the established non-finite PWM vocabulary that the runtime actuation hookup
+        // interprets as brake rather than as raw motor drive.
         struct EXPORT ControlVector final
         {
-            float leftMotorPwm{};
-            float rightMotorPwm{};
+            float leftMotorPwm{};  // Left raw motor-PWM request for the next tick.
+            float rightMotorPwm{}; // Right raw motor-PWM request for the next tick.
 
+            // Canonical brake command vocabulary. The runtime actuation hook interprets this as
+            // brake rather than as finite raw PWM drive.
             static const ControlVector Brake;
+
+            // `RawMotorPwm(leftMotorPwm, rightMotorPwm)`:
+            // Builds one explicit raw-PWM command proposal without any additional interpretation.
             static ControlVector RawMotorPwm(
                 float leftMotorPwm,
                 float rightMotorPwm) noexcept;
         };
 
+        // Published timing snapshot for one completed tick.
+        //
+        // These timestamps and durations are observation output only. They do not give callers a
+        // public cadence-control plane back into LoopController.
         struct TimingDiagnostics final
         {
-            std::uint32_t sequence{};
-            std::uint32_t tickStartUs{};
-            std::uint32_t dtUs{};
-            ControlCycleTiming controlTiming{};
-            OpticalObservationTiming frontTiming{};
-            OpticalObservationTiming leftTiming{};
-            OpticalObservationTiming rightTiming{};
-            ImuObservationTiming imuTiming{};
-            std::uint16_t tActuationAppliedUs{};
-            std::uint16_t tModeReturnUs{};
-            std::uint16_t tPostServiceDoneUs{};
-            std::uint16_t overrunUs{};
-            std::uint8_t flags{};
+            std::uint32_t sequence{};              // One-based session-local tick sequence.
+            std::uint32_t tickStartUs{};           // Absolute tick-start timestamp.
+            std::uint32_t dtUs{};                  // Elapsed time since the previous tick start.
+            ControlCycleTiming controlTiming{};    // Detailed control/estimator timing bundle.
+            OpticalObservationTiming frontTiming{}; // Front wall-sensor observation timing.
+            OpticalObservationTiming leftTiming{};  // Left wall-sensor observation timing.
+            OpticalObservationTiming rightTiming{}; // Right wall-sensor observation timing.
+            ImuObservationTiming imuTiming{};      // IMU observation timing bundle.
+            std::uint16_t tActuationAppliedUs{};   // Tick-relative actuation-apply completion.
+            std::uint16_t tModeReturnUs{};         // Tick-relative active-callback return time.
+            std::uint16_t tPostServiceDoneUs{};    // Tick-relative post-callback service completion.
+            std::uint16_t overrunUs{};             // Positive overrun beyond the scheduled deadline.
+            std::uint8_t flags{};                  // Published bitfield; currently only resumed-from-pause.
         };
 
-		// P0: This is a very thin struct, and the callback is guaranteed to be non-null when the reason is provided. Also, LoopController shouldn't be logging this shit internally.
-        struct PauseContext final
-        {
-            const char* reason{};
-        };
-
-        // P0: This is a cluster of things that encourage abuse of the system. Users of it should be restructured to match the contract of the class.
-        struct PauseDisposition final
-        {
-            // P0: The only item in this set that is valid is "Resume." There's no point to the type.
-            enum class Action : std::uint8_t
-            {
-                Resume,
-                Complete,
-                StopByRuntime
-            } action{ Action::Resume };
-
-            // P0: The only valid value for this is false, so the entire field is pointless and encourages breaking the system.
-            bool resetClockOnResume{ true };
-            const char* stopReason{};
-
-            // P0: This is the only valid return value, so the whole struct is pointless.
-            static PauseDisposition Resume() noexcept;
-            // P0: If you want to stop the loop, you call EndSession.
-            static PauseDisposition Complete() noexcept;
-            // P0: This is only valid coming from SharedRobotRuntime. All other calls should die, and the mechanism needs to move to a private/friend barrier to prevent abuse.
-            static PauseDisposition StopByRuntime(const char* reason) noexcept;
-        };
-
-        class TickServices;
-
+        // Explicit in-session callback transfer target.
+        //
+        // The callback receives:
+        // - the caller-owned context pointer explicitly supplied with SetNextModeWorkCallback(...),
+        // - the absolute end time for the current tick,
+        // - the authoritative runtime-state snapshot for the current tick, and
+        // - direct access to LoopController's lifecycle/control methods.
+        //
+        // Returning from this callback completes only the current tick. It does not imply pause,
+        // end-session, or terminal halt unless one of those boundaries was requested explicitly.
         using ModeWorkCallback = ControlVector (*)(
             void* context,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
-            TickServices& services);
+            LoopController& loopController);
 
-        using PauseCallback = PauseDisposition (*)(
-            void* context,
-            const PauseContext& pause);
+        // Continuity-preserving pause boundary callback.
+        //
+        // This callback runs only after LoopController has braked and observed brake settlement.
+        // The session remains the same session after the callback returns unless the callback
+        // explicitly requests end-session or terminal halt.
+        using PauseCallback = void (*)(void* context, LoopController& loopController);
 
-		// P0: The only valid item in this struct is the callback, and the only valid callback is one that returns "Resume" with no clock reset. This struct encourages abuse of the system by making it look like you are allowed to do more than that.
-        struct PauseRequest final
-        {
-            PauseCallback onPauseGranted{};
-            // P1: This encourages callers to store strings specifically for this method, and adds a required logging layer for pauses. This is counterproductive bloat.
-            const char* reason{};
-            // P0: LoopController only pauses once fully settled, and the callback is not allowed to issue motion commands. This implies otherwise.
-            float maxAbsLinearSpeed{ -1.0f };
-            // P0: LoopController only pauses once fully settled, and the callback is not allowed to issue motion commands. This implies otherwise.
-            float maxAbsAngularSpeed{ -1.0f };
-            // P1: This is pointless, as the stop policy is owned here.
-            std::uint8_t consecutiveSettledTicks{};
-            // P0: Flushing is not controlled by callers.
-            bool flushLogsBeforeGrant{ true };
-            // P0: LoopController is not allowed to reset the clock ever.
-            bool resetClockOnResume{ true };
-        };
+        // Continuity-breaking end-session boundary callback.
+        //
+        // This callback runs only after LoopController has braked and observed brake settlement.
+        // It is the only supported boundary for staging the successor SessionOptions. The callback
+        // must either:
+        // - call StageNextSessionState(...), or
+        // - call HaltExecutionEndProgram().
+        //
+        // Nested pause requests, nested end-session requests, and in-session callback-transfer
+        // requests from this boundary are contract violations and fault the active mode.
+        using EndSessionCallback = void (*)(void* context, LoopController& loopController);
 
-        struct ModeCallbacks final
-        {
-            ModeWorkCallback onModeWork{};
-            void* context{};
-        };
-
-        // P0: This class has no reason to exist, as all contents would be better as LoopController methods.
-        class TickServices final
-        {
-        public:
-            // P1: This encourages division of fault ownership.
-            void Fault(const char* reason) noexcept;
-            // Pause is the only sanctioned way to leave strict periodic cadence for non-periodic
-            // work. Do not replace it with caller-driven "tick once, then return to me" control.
-			// P0: Should be a method of LoopController, not a nested class.
-            void RequestPause(const PauseRequest& request) noexcept;
-            // P0: Should be a method of LoopController, not a nested class.
-            void RequestEndLoop() noexcept;
-            // P1: This should be a method of LoopController, not a nested class.
-            void SetNextModeWorkCallbacks(const ModeCallbacks& callbacks) noexcept;
-            // P0: Copying things by value?
-            void SetNextModeWorkCallback(ModeWorkCallback callback) noexcept;
-
-        private:
-            friend class LoopController;
-            explicit TickServices(LoopController& owner) noexcept;
-
-            LoopController* _owner{};
-        };
-
+        // Constructs an unattached LoopController in its inert pre-runtime, pre-mode-bound state.
+        //
+        // SharedRobotRuntime later attaches the runtime, and application infrastructure later
+        // binds the top-level mode before entering Run().
         LoopController() = default;
 
-        // The public contract is intentionally session-scoped. Callers configure one loop session,
-        // hand LoopController the mode callback, and let Run() own the cadence until the session
-        // ends or pauses explicitly. Do not add public single-tick entry points here: any API that
-        // returns control after an individual tick fundamentally breaks LoopController's sole
-        // responsibility by making cadence caller-owned again.
-        bool BeginSession(const SessionOptions& options, const ModeCallbacks& callbacks);
-        SessionResult Run();
-        void EndSession();
+        // `StageNextSessionState(options)`:
+        // Installs the SessionOptions that the next session start will consume.
+        //
+        // Parameters:
+        // `options`:
+        // Strict-cadence period and sensing/update plan for the next session start.
+        //
+        // Behavior:
+        // - SetupMode() must call this before infrastructure-owned Run() is entered.
+        // - A later call replaces any previously staged successor-session state.
+        // - After RequestEndSession(...), the end-session callback must call this before it
+        //   returns unless it instead requests HaltExecutionEndProgram().
+        // - Invalid SessionOptions are a terminal contract violation and fault the active mode.
+        void StageNextSessionState(const SessionOptions& options) noexcept;
 
+        // `RequestPause(callback, context)`:
+        // Requests the continuity-preserving pause boundary.
+        //
+        // Parameters:
+        // `callback`:
+        // Callback invoked after brake settlement and outside the strict fixed-period tick.
+        //
+        // `context`:
+        // Caller-owned context pointer passed back to `callback`.
+        //
+        // Behavior:
+        // - The current tick still completes first.
+        // - LoopController then brakes, waits for brake settlement, and invokes `callback`.
+        // - On return, the same session resumes unless `callback` explicitly requested
+        //   end-session or terminal halt.
+        // - A null callback is a terminal contract violation.
+        void RequestPause(PauseCallback callback, void* context) noexcept;
+
+        // `RequestEndSession(callback, context)`:
+        // Requests the continuity-breaking end-session boundary.
+        //
+        // Parameters:
+        // `callback`:
+        // Callback invoked after brake settlement and before the successor session begins.
+        //
+        // `context`:
+        // Caller-owned context pointer passed back to `callback`.
+        //
+        // Behavior:
+        // - The current tick still completes first.
+        // - LoopController then brakes, waits for brake settlement, clears any previously staged
+        //   successor-session state, and invokes `callback`.
+        // - `callback` must stage the next SessionOptions or request HaltExecutionEndProgram().
+        // - Once `callback` returns, LoopController either starts the next session immediately or
+        //   returns from Run() if terminal halt was requested.
+        // - Every successor session restarts with IApplicationMode::RunTick(...) and the bound
+        //   mode object as context.
+        // - A null callback is a terminal contract violation.
+        void RequestEndSession(EndSessionCallback callback, void* context) noexcept;
+
+        // `HaltExecutionEndProgram()`:
+        // Requests terminal whole-program execution end.
+        //
+        // Behavior:
+        // - When called from an in-session tick callback, the current tick still completes first.
+        // - When called from pause or end-session boundary work, Run() returns after that boundary
+        //   finishes and braking is confirmed.
+        // - Run() returns only for this outcome; ordinary top-level completion is terminal at the
+        //   infrastructure boundary, not an end-session path.
+        void HaltExecutionEndProgram() noexcept;
+
+        // `SetNextModeWorkCallback(callback, context)`:
+        // Explicitly transfers ownership of the next in-session tick.
+        //
+        // Parameters:
+        // `callback`:
+        // Callback that should own the next strict-cadence session tick.
+        //
+        // `context`:
+        // Caller-owned context pointer passed back to `callback`.
+        //
+        // Behavior:
+        // - The callback/context pair is always explicit; LoopController never carries callback
+        //   context forward implicitly.
+        // - The transfer is ignored if a higher-priority lifecycle boundary for the current tick
+        //   wins first, such as pause, end-session, terminal halt, or fault.
+        // - A null callback is a terminal contract violation.
+        void SetNextModeWorkCallback(ModeWorkCallback callback, void* context) noexcept;
+
+        // `SessionActive()`:
+        // Returns whether Run() currently owns an active session lifecycle.
+        //
+        // Return value:
+        // `true` while LoopController is inside an active session. `false` before Run(),
+        // between terminal return and destruction, or after a terminal fault path has taken over.
         bool SessionActive() const noexcept;
+
+        // `LastDiagnostics()`:
+        // Returns the most recently published completed-tick timing snapshot.
+        //
+        // This is read-only observation output and does not expose cadence-control authority.
+        //
+        // Return value:
+        // The last completed-tick timing snapshot. Before the first completed tick, the returned
+        // object still exists but its fields remain at their zero-initialized defaults.
         const TimingDiagnostics& LastDiagnostics() const noexcept;
+
+        // `LastAppliedCommand()`:
+        // Returns the command most recently applied at tick start.
+        //
+        // Return value:
+        // The command LoopController most recently handed to the runtime actuation hook at a
+        // tick boundary.
         const ControlVector& LastAppliedCommand() const noexcept;
+
+        // `CurrentTickSequence()`:
+        // Returns the current published or in-progress session-local tick sequence number.
+        //
+        // Returns `0` before any tick timing is available.
+        //
+        // Return value:
+        // The current session-local tick sequence number, or `0` before the first session tick.
         std::uint32_t CurrentTickSequence() const noexcept;
+
+        // `CurrentTickStartUs()`:
+        // Returns the current published or in-progress absolute tick-start timestamp.
+        //
+        // Returns `0` before any tick timing is available.
+        //
+        // Return value:
+        // The absolute tick-start timestamp in microseconds, or `0` before timing is available.
         std::uint32_t CurrentTickStartUs() const noexcept;
+
+        // `CurrentTickDtUs()`:
+        // Returns the current published or in-progress tick delta in microseconds.
+        //
+        // Returns `0` before any tick timing is available.
+        //
+        // Return value:
+        // The current tick delta in microseconds, or `0` before timing is available.
         std::uint32_t CurrentTickDtUs() const noexcept;
+
+        // `CurrentTickDtSeconds()`:
+        // Returns the current published or in-progress tick delta in seconds.
+        //
+        // Returns `0.0f` before any tick timing is available.
+        //
+        // Return value:
+        // The current tick delta in seconds, or `0.0f` before timing is available.
         float CurrentTickDtSeconds() const noexcept;
 
     private:
-        friend class Drive;
+        friend class ::MazeMap::App::Application;
         friend class SharedRobotRuntime;
-        friend class StartupCalibration;
-        friend class WallTouch;
-
-        enum class DeferredTerminalOutcome : std::uint8_t
-        {
-            None,
-            Complete,
-            RuntimeStop
-        };
-
-        struct LatchedRequests final
-        {
-            const char* runtimeStopReason{};
-            bool endRequested{};
-            bool pauseRequested{};
-            PauseRequest pauseRequest{};
-            bool nextModeWorkRequested{};
-            ModeCallbacks nextModeWork{};
-        };
 
         struct MotorPwmSink final
         {
@@ -243,23 +353,27 @@ namespace MazeMap::App::Internal
         };
 
         static constexpr std::uint8_t kTimingFlagResumedFromPause = 1U << 0;
-        static constexpr std::uint8_t kTimingFlagPausePending = 1U << 1;
-        static constexpr std::uint8_t kTimingFlagRuntimeStopPending = 1U << 2;
 
+        static ControlVector RunApplicationModeTick(
+            void* context,
+            std::uint32_t loopEndTimeUs,
+            const MazeMap::VehicleState& state,
+            LoopController& loopController);
         static std::uint16_t RelativeTickUs(std::uint32_t tickStartUs, std::uint32_t timestampUs) noexcept;
-        // P0: Belongs in the PWM sink.
         static bool IsBrakeMotorPwmCommand(const ControlVector& command) noexcept;
-        // P0: Belongs in the PWM sink.
         static bool IsZeroMotorPwmCommand(const ControlVector& command) noexcept;
         static bool IsFullSensorWorkPlan(const SensorWorkPlan& workPlan) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
+
         void RunSessionStartWallSensorAdcProbe() noexcept;
         void AttachRuntime(SharedRobotRuntime& runtime) noexcept;
+        void BindApplicationMode(IApplicationMode& mode) noexcept;
+        void Run();
+        void StartSessionFromStagedState() noexcept;
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
-        // P1: This seems unnecessary. Just use the getter.
         const TimingDiagnostics* CurrentTimingForReaders() const noexcept;
-        void ResetLatchedRequests() noexcept;
+        void ClearPendingRequests() noexcept;
         bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
         bool CaptureTickState(float dtSeconds, std::uint32_t tickStartUs);
         void ResetWorkingTiming(
@@ -267,43 +381,46 @@ namespace MazeMap::App::Internal
             std::uint32_t tickStartUs,
             std::uint32_t dtUs) noexcept;
         TimingDiagnostics& WorkingTiming() noexcept;
-        // P1: This seems unnecessary. Just use the getter.
         const TimingDiagnostics& PublishedTiming() const noexcept;
         void PublishWorkingTiming() noexcept;
         void RecordModeReturnTiming() noexcept;
         void RecordPostServiceTiming() noexcept;
         void FinalizeTiming() noexcept;
         bool ServiceRuntimeLogsNormal() noexcept;
-        // P0: This is the responsibility of FailActiveMode.
         void ServiceRuntimeLogsForFaultPath() noexcept;
         std::uint32_t ComputeRemainingSlackUs(std::uint32_t absoluteDeadlineUs) const noexcept;
         bool ShouldTreatAppliedControlAsStationary() const noexcept;
-        bool ResolvePauseRequest(SessionResult& result);
-        bool WaitForPauseSettlement(const PauseRequest& request);
-        void ResetSessionState() noexcept;
+        void ResolvePauseRequest();
+        void ResolveEndSessionRequest();
+        void WaitForBrakeSettlement();
+        void ResetExecutionState() noexcept;
 
-        SharedRobotRuntime* _runtime{};
-        SessionOptions _options{};
-        ModeCallbacks _callbacks{};
-        ModeWorkCallback _activeModeWorkCallback{};
-        void* _activeModeWorkContext{};
-        bool _sessionBegun{};
-        bool _sessionActive{};
-        bool _resumePending{};
-        bool _publishedTimingValid{};
-        std::uint32_t _tickCount{};
-        std::uint32_t _lastTickStartUs{};
-        std::uint32_t _nextSyncTargetUs{};
-        ControlVector _queuedControl{};
-        ControlVector _appliedControl{};
-        MotorPwmSink _motorPwmSink{};
-        bool _sessionStartWallSensorAdcProbePending{};
-        TimingDiagnostics _timingBuffers[2]{};
-        std::uint8_t _publishedTimingIndex{ 0U };
-        std::uint8_t _workingTimingIndex{ 1U };
-        LatchedRequests _requests{};
-        DeferredTerminalOutcome _deferredTerminalOutcome{ DeferredTerminalOutcome::None };
-        const char* _deferredTerminalReason{};
-        PauseContext _pauseContextScratch{};
+        SharedRobotRuntime* _runtime{};    // Runtime owner for actuation, sensing, logs, and state.
+        IApplicationMode* _boundMode{};    // Bound top-level mode whose RunTick(...) starts each session.
+        SessionOptions _options{};         // Active session configuration.
+        SessionOptions _stagedNextSessionOptions{}; // Successor-session configuration awaiting start.
+        bool _stagedNextSessionValid{};    // Whether _stagedNextSessionOptions is presently valid.
+        ModeWorkCallback _activeModeWorkCallback{}; // Current strict-cadence tick owner.
+        void* _activeModeWorkContext{};    // Explicit context paired with _activeModeWorkCallback.
+        bool _sessionActive{};             // Whether Run() currently owns an active session lifecycle.
+        bool _resumePending{};             // Whether the next published tick should note resumed-from-pause.
+        bool _publishedTimingValid{};      // Whether a completed-tick timing snapshot is published.
+        std::uint32_t _tickCount{};        // One-based active-session tick sequence.
+        std::uint32_t _lastTickStartUs{};  // Previous tick-start timestamp.
+        std::uint32_t _nextSyncTargetUs{}; // Absolute deadline for the current/next synchronized tick.
+        ControlVector _queuedControl{};    // Command to apply at the start of the next tick.
+        ControlVector _appliedControl{};   // Command applied at the start of the current tick.
+        MotorPwmSink _motorPwmSink{};      // Runtime-owned raw motor-PWM application hook.
+        bool _sessionStartWallSensorAdcProbePending{}; // Deferred session-start ADC probe request.
+        TimingDiagnostics _timingBuffers[2]{}; // Double-buffered published/working timing storage.
+        std::uint8_t _publishedTimingIndex{ 0U }; // Index of the published completed-tick timing buffer.
+        std::uint8_t _workingTimingIndex{ 1U };   // Index of the mutable working timing buffer.
+        PauseCallback _pendingPauseCallback{};     // Pending continuity-preserving boundary callback.
+        void* _pendingPauseContext{};              // Context paired with _pendingPauseCallback.
+        EndSessionCallback _pendingEndSessionCallback{}; // Pending continuity-breaking boundary callback.
+        void* _pendingEndSessionContext{};               // Context paired with _pendingEndSessionCallback.
+        bool _programHaltRequested{};              // Pending terminal return-from-Run request.
+        ModeWorkCallback _stagedModeWorkCallback{}; // Explicit transfer target for the next in-session tick.
+        void* _stagedModeWorkContext{};             // Context paired with _stagedModeWorkCallback.
     };
 }

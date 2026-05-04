@@ -879,11 +879,13 @@ namespace MazeMap::App::Internal
         return true;
     }
 
-    bool SharedRobotRuntime::FailActiveMode(const char* reason) noexcept
+    [[noreturn]] void SharedRobotRuntime::FailActiveMode(const char* reason) noexcept
     {
         if (modeFaulted)
         {
-            return false;
+            while (true)
+            {
+            }
         }
 
         modeFaulted = true;
@@ -903,7 +905,9 @@ namespace MazeMap::App::Internal
 
         CloseRuntimeLogsForFault();
         StartRuntimeFaultIndicatorBlink();
-        return false;
+        while (true)
+        {
+        }
     }
 
     void SharedRobotRuntime::FinalizeSuccessfulModeExit() noexcept

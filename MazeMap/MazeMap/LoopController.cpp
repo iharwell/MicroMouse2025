@@ -4,6 +4,7 @@
 #include "Defines.h"
 #include "DriveBase.h"
 #include "HardwareConfig.h"
+#include "IApplicationMode.h"
 #include "SharedRobotRuntime.h"
 #include "RuntimeSensorSuite.h"
 #include "Vehicle.h"
@@ -18,9 +19,9 @@ namespace MazeMap::App::Internal
     {
         constexpr float kZeroMotorPwmThreshold = 1.0e-4f;
         constexpr std::uint16_t kTickTimingSaturatedUs = 0xFFFFU;
-        constexpr float kDefaultPauseLinearThresholdMps = 0.01f;
-        constexpr float kDefaultPauseAngularThresholdRadps = 0.05f;
-        constexpr std::uint8_t kDefaultPauseSettledTicks = 2U;
+        constexpr float kPauseLinearThresholdMps = 0.01f;
+        constexpr float kPauseAngularThresholdRadps = 0.05f;
+        constexpr std::uint8_t kPauseSettledTicks = 2U;
 
         bool SetMotorPwmThunk(void* const context, const float leftMotorPwm, const float rightMotorPwm) noexcept
         {
@@ -32,9 +33,6 @@ namespace MazeMap::App::Internal
             return static_cast<SharedRobotRuntime*>(context)->SetMotorPWM(leftMotorPwm, rightMotorPwm);
         }
 
-        // LoopController intentionally owns the one normal cadence wait. If callers ever regain a
-        // public per-tick boundary, schedule ownership fragments immediately and this class stops
-        // being the strict timing authority it exists to be.
         inline void WaitUntilUs(const std::uint32_t absoluteDeadlineUs) noexcept
         {
             while (static_cast<std::int32_t>(absoluteDeadlineUs - static_cast<std::uint32_t>(micros())) > 0)
@@ -64,335 +62,102 @@ namespace MazeMap::App::Internal
         return control;
     }
 
-    LoopController::PauseDisposition LoopController::PauseDisposition::Resume() noexcept
+    void LoopController::StageNextSessionState(const SessionOptions& options) noexcept
     {
-        return PauseDisposition{};
-    }
-
-    LoopController::PauseDisposition LoopController::PauseDisposition::Complete() noexcept
-    {
-        PauseDisposition result{};
-        result.action = Action::Complete;
-        return result;
-    }
-
-    LoopController::PauseDisposition LoopController::PauseDisposition::StopByRuntime(const char* reason) noexcept
-    {
-        PauseDisposition result{};
-        result.action = Action::StopByRuntime;
-        result.stopReason = reason;
-        return result;
-    }
-
-    LoopController::TickServices::TickServices(LoopController& owner) noexcept
-        : _owner(&owner)
-    {
-    }
-
-    void LoopController::TickServices::Fault(const char* reason) noexcept
-    {
-        if ((_owner != nullptr) && (_owner->_requests.runtimeStopReason == nullptr))
+        if (!ValidateSessionOptions(options))
         {
-            _owner->_requests.runtimeStopReason = reason;
+            if (_runtime != nullptr)
+            {
+                _runtime->FailActiveMode("LoopController staged session state is invalid");
+            }
+            while (true)
+            {
+            }
         }
+
+        _stagedNextSessionOptions = options;
+        _stagedNextSessionValid = true;
     }
 
-    void LoopController::TickServices::RequestPause(const PauseRequest& request) noexcept
+    void LoopController::RequestPause(const PauseCallback callback, void* const context) noexcept
     {
-        if (_owner == nullptr)
+        if (!_sessionActive)
         {
             return;
         }
 
-        if (request.onPauseGranted == nullptr)
+        if (callback == nullptr)
         {
-            if (_owner->_requests.runtimeStopReason == nullptr)
+            if (_runtime != nullptr)
             {
-                _owner->_requests.runtimeStopReason = "LoopController pause request missing callback";
+                _runtime->FailActiveMode("LoopController pause request missing callback");
+            }
+            while (true)
+            {
             }
             return;
         }
 
-        _owner->_requests.pauseRequested = true;
-        _owner->_requests.pauseRequest = request;
+        _pendingPauseCallback = callback;
+        _pendingPauseContext = context;
     }
 
-    void LoopController::TickServices::RequestEndLoop() noexcept
+    void LoopController::RequestEndSession(
+        const EndSessionCallback callback,
+        void* const context) noexcept
     {
-        if (_owner != nullptr)
-        {
-            _owner->_requests.endRequested = true;
-        }
-    }
-
-    void LoopController::TickServices::SetNextModeWorkCallbacks(const ModeCallbacks& callbacks) noexcept
-    {
-        if ((_owner != nullptr) && (callbacks.onModeWork != nullptr))
-        {
-            _owner->_requests.nextModeWorkRequested = true;
-            _owner->_requests.nextModeWork = callbacks;
-        }
-    }
-
-    void LoopController::TickServices::SetNextModeWorkCallback(const ModeWorkCallback callback) noexcept
-    {
-        ModeCallbacks callbacks{};
-        callbacks.onModeWork = callback;
-        callbacks.context = (_owner != nullptr) ? _owner->_activeModeWorkContext : nullptr;
-        SetNextModeWorkCallbacks(callbacks);
-    }
-
-    bool LoopController::BeginSession(const SessionOptions& options, const ModeCallbacks& callbacks)
-    {
-        // Session startup arms one continuous cadence owner. There is intentionally no "prime one
-        // tick" or "manually advance" companion API because yielding the schedule back to callers
-        // between ticks would fundamentally undercut LoopController's reason for existing.
-        if ((_runtime == nullptr) ||
-            !_motorPwmSink ||
-            _sessionActive ||
-            _sessionBegun ||
-            (callbacks.onModeWork == nullptr) ||
-            !ValidateSessionOptions(options))
-        {
-            return false;
-        }
-
-        _sessionStartWallSensorAdcProbePending = true;
-        RunSessionStartWallSensorAdcProbe();
-
-        _options = options;
-        _callbacks = callbacks;
-        _activeModeWorkCallback = callbacks.onModeWork;
-        _activeModeWorkContext = callbacks.context;
-        _sessionBegun = true;
-        _sessionActive = true;
-        _resumePending = false;
-        _publishedTimingValid = false;
-        _tickCount = 0U;
-        const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
-        _lastTickStartUs = nowUs - _options.controlPeriodUs;
-        _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
-        _queuedControl = ControlVector::Brake;
-        _appliedControl = ControlVector::Brake;
-        _publishedTimingIndex = 0U;
-        _workingTimingIndex = 1U;
-        _timingBuffers[0] = TimingDiagnostics{};
-        _timingBuffers[1] = TimingDiagnostics{};
-        _pauseContextScratch = PauseContext{};
-        _deferredTerminalOutcome = DeferredTerminalOutcome::None;
-        _deferredTerminalReason = nullptr;
-        ResetLatchedRequests();
-        return true;
-    }
-
-    LoopController::SessionResult LoopController::Run()
-    {
-        // Run() owns the full active cadence. If this class ever exposes a public single-tick
-        // function, callers would be forced to reassemble cadence discipline around it and the
-        // result would only be a worse version of what this loop already does correctly.
-        SessionResult result{};
-        result.tickCount = _tickCount;
-
-        if (!_sessionActive || (_runtime == nullptr) || !_motorPwmSink || (_activeModeWorkCallback == nullptr))
-        {
-            result.status = SessionResult::Status::StoppedByRuntime;
-            return result;
-        }
-
-        while (_sessionActive)
-        {
-            // Keep the entire tick private to this loop. Command application, sensing, mode work,
-            // post-work service, and the sync wait all stay under one owner specifically so no
-            // caller can wedge its own "just one tick" orchestration into the cadence path.
-            if (_deferredTerminalOutcome != DeferredTerminalOutcome::None)
-            {
-                const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
-                const std::uint32_t dtUs = nowUs - _lastTickStartUs;
-                _lastTickStartUs = nowUs;
-                (void)dtUs;
-                _appliedControl = ControlVector::Brake;
-                _queuedControl = _appliedControl;
-                (void)ApplyControlAtTickStart(_appliedControl);
-
-                result.tickCount = _tickCount;
-                if (_deferredTerminalOutcome == DeferredTerminalOutcome::Complete)
-                {
-                    result.status = SessionResult::Status::Completed;
-                }
-                else
-                {
-                    if (_runtime != nullptr)
-                    {
-                        (void)_runtime->FailActiveMode(_deferredTerminalReason);
-                    }
-                    result.status = SessionResult::Status::StoppedByRuntime;
-                }
-
-                ResetSessionState();
-                return result;
-            }
-
-            const std::uint32_t tickStartUs = static_cast<std::uint32_t>(micros());
-            const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
-            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
-            _lastTickStartUs = tickStartUs;
-            ++_tickCount;
-
-            ResetWorkingTiming(_tickCount, tickStartUs, dtUs);
-            TimingDiagnostics& timing = WorkingTiming();
-            timing.controlTiming.controlStartUs = tickStartUs;
-            timing.controlTiming.cycleCounterStart = ReadCycleCounter();
-            if (_resumePending)
-            {
-                timing.flags |= kTimingFlagResumedFromPause;
-                _resumePending = false;
-            }
-
-            const std::uint32_t loopEndTimeUs = _nextSyncTargetUs;
-
-            _appliedControl = _queuedControl;
-            if (!ApplyControlAtTickStart(_appliedControl))
-            {
-                _queuedControl = ControlVector::Brake;
-                timing.flags |= kTimingFlagRuntimeStopPending;
-                _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
-                _deferredTerminalReason = "LoopController motor PWM hook failed";
-                ServiceRuntimeLogsForFaultPath();
-                RecordPostServiceTiming();
-                FinalizeTiming();
-                PublishWorkingTiming();
-                WaitUntilUs(loopEndTimeUs);
-                _nextSyncTargetUs += _options.controlPeriodUs;
-                continue;
-            }
-            timing.tActuationAppliedUs =
-                RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
-
-            if (_sessionStartWallSensorAdcProbePending)
-            {
-                RunSessionStartWallSensorAdcProbe();
-            }
-
-            ResetLatchedRequests();
-
-            if (!CaptureTickState(dtSeconds, tickStartUs))
-            {
-                _queuedControl = ControlVector::Brake;
-                timing.flags |= kTimingFlagRuntimeStopPending;
-                _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
-                _deferredTerminalReason =
-                    (_deferredTerminalReason != nullptr) ?
-                    _deferredTerminalReason :
-                    "LoopController sensing update failed";
-
-                ServiceRuntimeLogsForFaultPath();
-                RecordPostServiceTiming();
-                FinalizeTiming();
-                PublishWorkingTiming();
-                WaitUntilUs(loopEndTimeUs);
-                _nextSyncTargetUs += _options.controlPeriodUs;
-                continue;
-            }
-
-            TickServices services(*this);
-            ControlVector candidateControl =
-                _activeModeWorkCallback(_activeModeWorkContext, loopEndTimeUs, _runtime->RuntimeState(), services);
-            RecordModeReturnTiming();
-
-            if (_requests.nextModeWorkRequested && (_requests.nextModeWork.onModeWork != nullptr))
-            {
-                _activeModeWorkCallback = _requests.nextModeWork.onModeWork;
-                _activeModeWorkContext = _requests.nextModeWork.context;
-            }
-
-            bool faultPathFlushRequired = false;
-            if (_requests.runtimeStopReason != nullptr)
-            {
-                _queuedControl = ControlVector::Brake;
-                timing.flags |= kTimingFlagRuntimeStopPending;
-                _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
-                _deferredTerminalReason = _requests.runtimeStopReason;
-                faultPathFlushRequired = true;
-            }
-            else if (_requests.endRequested)
-            {
-                _queuedControl = ControlVector::Brake;
-                _deferredTerminalOutcome = DeferredTerminalOutcome::Complete;
-            }
-            else if (_requests.pauseRequested)
-            {
-                _queuedControl = ControlVector::Brake;
-                timing.flags |= kTimingFlagPausePending;
-            }
-            else
-            {
-                _queuedControl = candidateControl;
-            }
-
-            if (faultPathFlushRequired)
-            {
-                ServiceRuntimeLogsForFaultPath();
-            }
-            else if (ComputeRemainingSlackUs(loopEndTimeUs) > 0U)
-            {
-                if (!ServiceRuntimeLogsNormal())
-                {
-                    const char* const runtimeReason =
-                        (_runtime != nullptr) ? _runtime->LastRuntimeLogError() : nullptr;
-                    _queuedControl = ControlVector::Brake;
-                    timing.flags |= kTimingFlagRuntimeStopPending;
-                    _deferredTerminalOutcome = DeferredTerminalOutcome::RuntimeStop;
-                    _deferredTerminalReason =
-                        ((runtimeReason != nullptr) && (runtimeReason[0] != '\0')) ?
-                        runtimeReason :
-                        "LoopController runtime log service failed";
-                    ServiceRuntimeLogsForFaultPath();
-                }
-            }
-
-            RecordPostServiceTiming();
-            FinalizeTiming();
-            PublishWorkingTiming();
-
-            // There is exactly one normal wait block per tick and it stays here at end-of-tick.
-            // Moving this behind a caller-visible per-tick return path would split cadence
-            // ownership and turn LoopController into a bad cooperative timer instead of the
-            // authoritative loop scheduler.
-            WaitUntilUs(loopEndTimeUs);
-            _nextSyncTargetUs += _options.controlPeriodUs;
-
-            // Pause is the explicit escape hatch for work that cannot remain inside strict cadence.
-            // Replacing this with caller-driven "tick once and come back" flow would break the
-            // class's sole responsibility while also doing a worse job of maintaining sync.
-            if (_requests.pauseRequested && (_deferredTerminalOutcome == DeferredTerminalOutcome::None))
-            {
-                result.tickCount = _tickCount;
-                if (!ResolvePauseRequest(result))
-                {
-                    ResetSessionState();
-                    return result;
-                }
-            }
-        }
-
-        result.status = SessionResult::Status::Completed;
-        result.tickCount = _tickCount;
-        return result;
-    }
-
-    void LoopController::EndSession()
-    {
-        if (!_sessionBegun)
+        if (!_sessionActive)
         {
             return;
         }
 
-        if (_runtime != nullptr)
+        if (callback == nullptr)
         {
-            (void)_motorPwmSink.Apply(ControlVector::Brake);
+            if (_runtime != nullptr)
+            {
+                _runtime->FailActiveMode("LoopController end-session request missing callback");
+            }
+            while (true)
+            {
+            }
+            return;
         }
 
-        ResetSessionState();
+        _pendingEndSessionCallback = callback;
+        _pendingEndSessionContext = context;
+    }
+
+    void LoopController::HaltExecutionEndProgram() noexcept
+    {
+        if (_sessionActive)
+        {
+            _programHaltRequested = true;
+        }
+    }
+
+    void LoopController::SetNextModeWorkCallback(
+        const ModeWorkCallback callback,
+        void* const context) noexcept
+    {
+        if (!_sessionActive)
+        {
+            return;
+        }
+
+        if (callback == nullptr)
+        {
+            if (_runtime != nullptr)
+            {
+                _runtime->FailActiveMode("LoopController next mode-work callback missing callback");
+            }
+            while (true)
+            {
+            }
+            return;
+        }
+
+        _stagedModeWorkCallback = callback;
+        _stagedModeWorkContext = context;
     }
 
     bool LoopController::SessionActive() const noexcept
@@ -431,6 +196,15 @@ namespace MazeMap::App::Internal
     float LoopController::CurrentTickDtSeconds() const noexcept
     {
         return static_cast<float>(CurrentTickDtUs()) * 1.0e-6f;
+    }
+
+    LoopController::ControlVector LoopController::RunApplicationModeTick(
+        void* const context,
+        const std::uint32_t loopEndTimeUs,
+        const MazeMap::VehicleState& state,
+        LoopController& loopController)
+    {
+        return static_cast<IApplicationMode*>(context)->RunTick(loopEndTimeUs, state, loopController);
     }
 
     std::uint16_t LoopController::RelativeTickUs(
@@ -478,13 +252,6 @@ namespace MazeMap::App::Internal
 #else
         return 0UL;
 #endif
-    }
-
-    void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
-    {
-        _runtime = &runtime;
-        _motorPwmSink.context = &runtime;
-        _motorPwmSink.setMotorPwm = &SetMotorPwmThunk;
     }
 
     void LoopController::RunSessionStartWallSensorAdcProbe() noexcept
@@ -536,6 +303,293 @@ namespace MazeMap::App::Internal
         _sessionStartWallSensorAdcProbePending = false;
     }
 
+    void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
+    {
+        _runtime = &runtime;
+        _motorPwmSink.context = &runtime;
+        _motorPwmSink.setMotorPwm = &SetMotorPwmThunk;
+    }
+
+    void LoopController::BindApplicationMode(IApplicationMode& mode) noexcept
+    {
+        _boundMode = &mode;
+    }
+
+    void LoopController::StartSessionFromStagedState() noexcept
+    {
+        if (!_stagedNextSessionValid)
+        {
+            _runtime->FailActiveMode("LoopController session state was not staged before session start");
+        }
+
+        if (!ValidateSessionOptions(_stagedNextSessionOptions))
+        {
+            _runtime->FailActiveMode("LoopController staged session state is invalid");
+        }
+
+        _sessionStartWallSensorAdcProbePending = true;
+        RunSessionStartWallSensorAdcProbe();
+        _options = _stagedNextSessionOptions;
+        _stagedNextSessionOptions = SessionOptions{};
+        _stagedNextSessionValid = false;
+        _activeModeWorkCallback = &RunApplicationModeTick;
+        _activeModeWorkContext = _boundMode;
+        _sessionActive = true;
+        _resumePending = false;
+        _publishedTimingValid = false;
+        _tickCount = 0U;
+        const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
+        _lastTickStartUs = nowUs - _options.controlPeriodUs;
+        _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
+        _queuedControl = ControlVector::Brake;
+        _appliedControl = ControlVector::Brake;
+        _publishedTimingIndex = 0U;
+        _workingTimingIndex = 1U;
+        _timingBuffers[0] = TimingDiagnostics{};
+        _timingBuffers[1] = TimingDiagnostics{};
+        ClearPendingRequests();
+    }
+
+    void LoopController::Run()
+    {
+        if ((_runtime == nullptr) || !_motorPwmSink || (_boundMode == nullptr))
+        {
+            if (_runtime != nullptr)
+            {
+                _runtime->FailActiveMode(
+                    "LoopController run missing bound infrastructure mode or runtime");
+            }
+            while (true)
+            {
+            }
+        }
+
+        StartSessionFromStagedState();
+
+        while (true)
+        {
+            const std::uint32_t tickStartUs = static_cast<std::uint32_t>(micros());
+            const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
+            const float dtSeconds = static_cast<float>(dtUs) * 1.0e-6f;
+            _lastTickStartUs = tickStartUs;
+            ++_tickCount;
+
+            ResetWorkingTiming(_tickCount, tickStartUs, dtUs);
+            TimingDiagnostics& timing = WorkingTiming();
+            timing.controlTiming.controlStartUs = tickStartUs;
+            timing.controlTiming.cycleCounterStart = ReadCycleCounter();
+            if (_resumePending)
+            {
+                timing.flags |= kTimingFlagResumedFromPause;
+                _resumePending = false;
+            }
+
+            const std::uint32_t loopEndTimeUs = _nextSyncTargetUs;
+            const ControlVector brakeControl = ControlVector::Brake;
+            const char* terminalFaultReason = nullptr;
+
+            _appliedControl = _queuedControl;
+            if (!ApplyControlAtTickStart(_appliedControl))
+            {
+                _queuedControl = ControlVector::Brake;
+                terminalFaultReason = "LoopController motor PWM hook failed";
+                ServiceRuntimeLogsForFaultPath();
+                RecordPostServiceTiming();
+                FinalizeTiming();
+                PublishWorkingTiming();
+                WaitUntilUs(loopEndTimeUs);
+                _nextSyncTargetUs += _options.controlPeriodUs;
+                _runtime->FailActiveMode(terminalFaultReason);
+            }
+            timing.tActuationAppliedUs =
+                RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
+
+            if (_sessionStartWallSensorAdcProbePending)
+            {
+                RunSessionStartWallSensorAdcProbe();
+            }
+
+            ClearPendingRequests();
+
+            if (!CaptureTickState(dtSeconds, tickStartUs))
+            {
+                terminalFaultReason = "LoopController sensing update failed";
+            }
+
+            ControlVector candidateControl = ControlVector::Brake;
+            if ((terminalFaultReason == nullptr) && (_activeModeWorkCallback == nullptr))
+            {
+                _runtime->FailActiveMode("LoopController active callback missing");
+            }
+
+            if (terminalFaultReason == nullptr)
+            {
+                candidateControl =
+                    _activeModeWorkCallback(
+                        _activeModeWorkContext,
+                        loopEndTimeUs,
+                        _runtime->RuntimeState(),
+                        *this);
+                RecordModeReturnTiming();
+
+                if ((_pendingPauseCallback == nullptr) &&
+                    (_pendingEndSessionCallback == nullptr) &&
+                    !_programHaltRequested &&
+                    (_stagedModeWorkCallback != nullptr))
+                {
+                    _activeModeWorkCallback = _stagedModeWorkCallback;
+                    _activeModeWorkContext = _stagedModeWorkContext;
+                }
+            }
+
+            if (terminalFaultReason != nullptr)
+            {
+                _queuedControl = ControlVector::Brake;
+            }
+            else if (_programHaltRequested)
+            {
+                _queuedControl = ControlVector::Brake;
+            }
+            else if (_pendingEndSessionCallback != nullptr)
+            {
+                _queuedControl = ControlVector::Brake;
+            }
+            else if (_pendingPauseCallback != nullptr)
+            {
+                _queuedControl = ControlVector::Brake;
+            }
+            else
+            {
+                _queuedControl = candidateControl;
+            }
+
+            if (terminalFaultReason != nullptr)
+            {
+                ServiceRuntimeLogsForFaultPath();
+            }
+            else if (ComputeRemainingSlackUs(loopEndTimeUs) > 0U)
+            {
+                if (!ServiceRuntimeLogsNormal())
+                {
+                    const char* const runtimeReason =
+                        (_runtime != nullptr) ? _runtime->LastRuntimeLogError() : nullptr;
+                    _queuedControl = ControlVector::Brake;
+                    terminalFaultReason =
+                        ((runtimeReason != nullptr) && (runtimeReason[0] != '\0')) ?
+                        runtimeReason :
+                        "LoopController runtime log service failed";
+                    ServiceRuntimeLogsForFaultPath();
+                }
+            }
+
+            RecordPostServiceTiming();
+            FinalizeTiming();
+            PublishWorkingTiming();
+
+            WaitUntilUs(loopEndTimeUs);
+            _nextSyncTargetUs += _options.controlPeriodUs;
+
+            if (terminalFaultReason != nullptr)
+            {
+                _appliedControl = brakeControl;
+                _queuedControl = brakeControl;
+                if (!ApplyControlAtTickStart(brakeControl))
+                {
+                    _runtime->FailActiveMode(
+                        "LoopController motor PWM hook failed during terminal fault handling");
+                }
+                _runtime->FailActiveMode(terminalFaultReason);
+            }
+
+            if (_programHaltRequested)
+            {
+                _appliedControl = brakeControl;
+                _queuedControl = brakeControl;
+                if (!ApplyControlAtTickStart(brakeControl))
+                {
+                    _runtime->FailActiveMode(
+                        "LoopController motor PWM hook failed during program halt");
+                }
+                ResetExecutionState();
+                return;
+            }
+
+            if (_pendingEndSessionCallback != nullptr)
+            {
+                _appliedControl = brakeControl;
+                _queuedControl = brakeControl;
+                if (!ApplyControlAtTickStart(brakeControl))
+                {
+                    _runtime->FailActiveMode(
+                        "LoopController motor PWM hook failed during session handoff");
+                }
+                ResolveEndSessionRequest();
+
+                if (_programHaltRequested)
+                {
+                    _appliedControl = brakeControl;
+                    _queuedControl = brakeControl;
+                    if (!ApplyControlAtTickStart(brakeControl))
+                    {
+                        _runtime->FailActiveMode(
+                            "LoopController motor PWM hook failed during end-session-driven program halt");
+                    }
+                    ResetExecutionState();
+                    return;
+                }
+
+                StartSessionFromStagedState();
+                continue;
+            }
+
+            if (_pendingPauseCallback != nullptr)
+            {
+                ResolvePauseRequest();
+
+                if (_programHaltRequested)
+                {
+                    _appliedControl = brakeControl;
+                    _queuedControl = brakeControl;
+                    if (!ApplyControlAtTickStart(brakeControl))
+                    {
+                        _runtime->FailActiveMode(
+                            "LoopController motor PWM hook failed during pause-driven program halt");
+                    }
+                    ResetExecutionState();
+                    return;
+                }
+
+                if (_pendingEndSessionCallback != nullptr)
+                {
+                    _appliedControl = brakeControl;
+                    _queuedControl = brakeControl;
+                    if (!ApplyControlAtTickStart(brakeControl))
+                    {
+                        _runtime->FailActiveMode(
+                            "LoopController motor PWM hook failed during pause-driven session handoff");
+                    }
+                    ResolveEndSessionRequest();
+
+                    if (_programHaltRequested)
+                    {
+                        _appliedControl = brakeControl;
+                        _queuedControl = brakeControl;
+                        if (!ApplyControlAtTickStart(brakeControl))
+                        {
+                            _runtime->FailActiveMode(
+                                "LoopController motor PWM hook failed during pause-and-end-session-driven program halt");
+                        }
+                        ResetExecutionState();
+                        return;
+                    }
+
+                    StartSessionFromStagedState();
+                    continue;
+                }
+            }
+        }
+    }
+
     bool LoopController::ValidateSessionOptions(const SessionOptions& options) const noexcept
     {
         return (options.controlPeriodUs > 0U) && SupportsSensorWorkPlan(options.workPlan);
@@ -543,27 +597,33 @@ namespace MazeMap::App::Internal
 
     bool LoopController::SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept
     {
-        return (workPlan.wallMask == WallMask::All) &&
-            workPlan.readEncoders &&
-            workPlan.readImuBundle &&
-            workPlan.useEncoderUpdate &&
-            workPlan.useGyroUpdate &&
-            workPlan.useAccelUpdate;
+        return IsFullSensorWorkPlan(workPlan);
     }
 
     const LoopController::TimingDiagnostics* LoopController::CurrentTimingForReaders() const noexcept
     {
+        if (_publishedTimingValid)
+        {
+            return &_timingBuffers[_publishedTimingIndex];
+        }
+
         if (_sessionActive && (_tickCount > 0U))
         {
             return &_timingBuffers[_workingTimingIndex];
         }
 
-        return _publishedTimingValid ? &_timingBuffers[_publishedTimingIndex] : nullptr;
+        return nullptr;
     }
 
-    void LoopController::ResetLatchedRequests() noexcept
+    void LoopController::ClearPendingRequests() noexcept
     {
-        _requests = LatchedRequests{};
+        _pendingPauseCallback = nullptr;
+        _pendingPauseContext = nullptr;
+        _pendingEndSessionCallback = nullptr;
+        _pendingEndSessionContext = nullptr;
+        _programHaltRequested = false;
+        _stagedModeWorkCallback = nullptr;
+        _stagedModeWorkContext = nullptr;
     }
 
     bool LoopController::ApplyControlAtTickStart(const ControlVector& control) noexcept
@@ -580,7 +640,6 @@ namespace MazeMap::App::Internal
     {
         if (_runtime == nullptr)
         {
-            _deferredTerminalReason = "LoopController runtime unavailable";
             return false;
         }
 
@@ -659,10 +718,10 @@ namespace MazeMap::App::Internal
                         (void)services.ServiceWallRead();
                     },
                     [&context, &services]() noexcept
-                     {
-                         (void)context.Runtime().ServiceUtilityDataLog();
-                         services.CaptureImu();
-                     });
+                    {
+                        (void)context.Runtime().ServiceUtilityDataLog();
+                        services.CaptureImu();
+                    });
                 context.Runtime().RuntimeState().SetDriveCommandState(driveCommandState);
             };
 
@@ -751,18 +810,9 @@ namespace MazeMap::App::Internal
 
     void LoopController::ServiceRuntimeLogsForFaultPath() noexcept
     {
-        if (_runtime == nullptr)
+        if (_runtime != nullptr)
         {
-            return;
-        }
-
-        if (!_runtime->ServiceUtilityDataLog() && (_deferredTerminalReason == nullptr))
-        {
-            const char* const runtimeReason = _runtime->LastRuntimeLogError();
-            if ((runtimeReason != nullptr) && (runtimeReason[0] != '\0'))
-            {
-                _deferredTerminalReason = runtimeReason;
-            }
+            (void)_runtime->ServiceUtilityDataLog();
         }
     }
 
@@ -778,80 +828,112 @@ namespace MazeMap::App::Internal
         return IsBrakeMotorPwmCommand(_appliedControl) || IsZeroMotorPwmCommand(_appliedControl);
     }
 
-    bool LoopController::ResolvePauseRequest(SessionResult& result)
+    void LoopController::ResolvePauseRequest()
     {
-        if (!WaitForPauseSettlement(_requests.pauseRequest))
+        WaitForBrakeSettlement();
+
+        const PauseCallback pauseCallback = _pendingPauseCallback;
+        void* const pauseContext = _pendingPauseContext;
+        ClearPendingRequests();
+
+        if (pauseCallback == nullptr)
         {
-            if (_runtime != nullptr)
-            {
-                (void)_runtime->FailActiveMode(_deferredTerminalReason);
-            }
-            result.status = SessionResult::Status::StoppedByRuntime;
-            result.tickCount = _tickCount;
-            return false;
+            _runtime->FailActiveMode("LoopController pause request missing callback");
         }
 
-        _pauseContextScratch.reason = _requests.pauseRequest.reason;
-        const PauseDisposition disposition =
-            _requests.pauseRequest.onPauseGranted(_activeModeWorkContext, _pauseContextScratch);
-        switch (disposition.action)
-        {
-        case PauseDisposition::Action::Complete:
-            result.status = SessionResult::Status::Completed;
-            result.tickCount = _tickCount;
-            return false;
+        pauseCallback(pauseContext, *this);
 
-        case PauseDisposition::Action::StopByRuntime:
-            if (_runtime != nullptr)
-            {
-                // P0: If the mode wants to fail, it will call this method directly. LoopController may only call it if there's an internal failure of this class's logic.
-                (void)_runtime->FailActiveMode(disposition.stopReason);
-            }
-            result.status = SessionResult::Status::StoppedByRuntime;
-            result.tickCount = _tickCount;
-            return false;
-
-        case PauseDisposition::Action::Resume:
-        default:
+        if (_pendingPauseCallback != nullptr)
         {
-            if (disposition.resetClockOnResume || _requests.pauseRequest.resetClockOnResume)
-            {
-                const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
-                _lastTickStartUs = nowUs - _options.controlPeriodUs;
-                _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
-            }
-            _queuedControl = ControlVector::Brake;
-            _appliedControl = ControlVector::Brake;
-            _resumePending = true;
-            result.tickCount = _tickCount;
-            return true;
+            _runtime->FailActiveMode("LoopController pause callback requested a nested pause");
         }
+
+        if (_pendingEndSessionCallback != nullptr)
+        {
+            return;
         }
+
+        if (_programHaltRequested)
+        {
+            return;
+        }
+
+        if (_stagedModeWorkCallback != nullptr)
+        {
+            _activeModeWorkCallback = _stagedModeWorkCallback;
+            _activeModeWorkContext = _stagedModeWorkContext;
+        }
+
+        _queuedControl = ControlVector::Brake;
+        _appliedControl = ControlVector::Brake;
+        _resumePending = true;
+        const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
+        _lastTickStartUs = nowUs - _options.controlPeriodUs;
+        _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
+        ClearPendingRequests();
     }
 
-    bool LoopController::WaitForPauseSettlement(const PauseRequest& request)
+    void LoopController::ResolveEndSessionRequest()
+    {
+        WaitForBrakeSettlement();
+
+        const EndSessionCallback endSessionCallback = _pendingEndSessionCallback;
+        void* const endSessionContext = _pendingEndSessionContext;
+        ClearPendingRequests();
+        _stagedNextSessionOptions = SessionOptions{};
+        _stagedNextSessionValid = false;
+
+        if (endSessionCallback == nullptr)
+        {
+            _runtime->FailActiveMode("LoopController end-session request missing callback");
+        }
+
+        endSessionCallback(endSessionContext, *this);
+
+        if (_pendingPauseCallback != nullptr)
+        {
+            _runtime->FailActiveMode(
+                "LoopController end-session callback requested a pause boundary");
+        }
+
+        if (_pendingEndSessionCallback != nullptr)
+        {
+            _runtime->FailActiveMode(
+                "LoopController end-session callback requested a nested end-session");
+        }
+
+        if (_stagedModeWorkCallback != nullptr)
+        {
+            _runtime->FailActiveMode(
+                "LoopController end-session callback requested in-session callback transfer");
+        }
+
+        if (_programHaltRequested)
+        {
+            return;
+        }
+
+        if (!_stagedNextSessionValid)
+        {
+            _runtime->FailActiveMode(
+                "LoopController end-session callback did not stage the next session state");
+        }
+
+        _queuedControl = ControlVector::Brake;
+        _appliedControl = ControlVector::Brake;
+    }
+
+    void LoopController::WaitForBrakeSettlement()
     {
         if (_runtime == nullptr)
         {
-            _deferredTerminalReason = "LoopController pause settlement missing runtime";
-            return false;
+            while (true)
+            {
+            }
         }
 
-        const float linearThreshold =
-            (std::isfinite(request.maxAbsLinearSpeed) && (request.maxAbsLinearSpeed > 0.0f)) ?
-            request.maxAbsLinearSpeed :
-            kDefaultPauseLinearThresholdMps;
-        const float angularThreshold =
-            (std::isfinite(request.maxAbsAngularSpeed) && (request.maxAbsAngularSpeed > 0.0f)) ?
-            request.maxAbsAngularSpeed :
-            kDefaultPauseAngularThresholdRadps;
-        const std::uint8_t settledTicks =
-            (request.consecutiveSettledTicks > 0U) ?
-            request.consecutiveSettledTicks :
-            kDefaultPauseSettledTicks;
-
         std::uint8_t settledCount = 0U;
-        while (settledCount < settledTicks)
+        while (settledCount < kPauseSettledTicks)
         {
             const std::uint32_t tickStartUs = static_cast<std::uint32_t>(micros());
             const std::uint32_t dtUs = tickStartUs - _lastTickStartUs;
@@ -863,35 +945,34 @@ namespace MazeMap::App::Internal
 
             ResetWorkingTiming(_tickCount, tickStartUs, dtUs);
             TimingDiagnostics& timing = WorkingTiming();
-            timing.flags = kTimingFlagPausePending;
             timing.controlTiming.controlStartUs = tickStartUs;
             timing.controlTiming.cycleCounterStart = ReadCycleCounter();
 
             _appliedControl = ControlVector::Brake;
             _queuedControl = _appliedControl;
-            (void)dtSeconds;
             if (!ApplyControlAtTickStart(_appliedControl))
             {
-                _deferredTerminalReason = "LoopController motor PWM hook failed during pause settlement";
                 ServiceRuntimeLogsForFaultPath();
-                return false;
+                _runtime->FailActiveMode(
+                    "LoopController motor PWM hook failed during brake settlement");
             }
             timing.tActuationAppliedUs =
                 RelativeTickUs(tickStartUs, static_cast<std::uint32_t>(micros()));
 
             if (!CaptureTickState(dtSeconds, tickStartUs))
             {
-                _deferredTerminalReason =
-                    (_deferredTerminalReason != nullptr) ?
-                    _deferredTerminalReason :
-                    "LoopController pause settlement capture failed";
                 ServiceRuntimeLogsForFaultPath();
-                return false;
+                _runtime->FailActiveMode("LoopController brake settlement capture failed");
             }
 
-            if (request.flushLogsBeforeGrant)
+            if (!ServiceRuntimeLogsNormal())
             {
+                const char* const runtimeReason = _runtime->LastRuntimeLogError();
                 ServiceRuntimeLogsForFaultPath();
+                _runtime->FailActiveMode(
+                    ((runtimeReason != nullptr) && (runtimeReason[0] != '\0')) ?
+                    runtimeReason :
+                    "LoopController runtime log service failed during brake settlement");
             }
 
             const MazeMap::VehicleState& runtimeState = _runtime->RuntimeState();
@@ -900,8 +981,8 @@ namespace MazeMap::App::Internal
             const bool settled =
                 std::isfinite(linearSpeedMps) &&
                 std::isfinite(angularSpeedRadps) &&
-                (std::fabs(linearSpeedMps) <= linearThreshold) &&
-                (std::fabs(angularSpeedRadps) <= angularThreshold) &&
+                (std::fabs(linearSpeedMps) <= kPauseLinearThresholdMps) &&
+                (std::fabs(angularSpeedRadps) <= kPauseAngularThresholdRadps) &&
                 !_runtime->Estimator().HasFault();
             settledCount = settled ? static_cast<std::uint8_t>(settledCount + 1U) : 0U;
 
@@ -910,17 +991,13 @@ namespace MazeMap::App::Internal
             PublishWorkingTiming();
             WaitUntilUs(deadlineUs);
         }
-
-        return true;
     }
 
-    void LoopController::ResetSessionState() noexcept
+    void LoopController::ResetExecutionState() noexcept
     {
         _options = SessionOptions{};
-        _callbacks = ModeCallbacks{};
         _activeModeWorkCallback = nullptr;
         _activeModeWorkContext = nullptr;
-        _sessionBegun = false;
         _sessionActive = false;
         _resumePending = false;
         _publishedTimingValid = false;
@@ -930,9 +1007,13 @@ namespace MazeMap::App::Internal
         _queuedControl = ControlVector::Brake;
         _appliedControl = ControlVector::Brake;
         _sessionStartWallSensorAdcProbePending = false;
-        _requests = LatchedRequests{};
-        _deferredTerminalOutcome = DeferredTerminalOutcome::None;
-        _deferredTerminalReason = nullptr;
-        _pauseContextScratch = PauseContext{};
+        _timingBuffers[0] = TimingDiagnostics{};
+        _timingBuffers[1] = TimingDiagnostics{};
+        _publishedTimingIndex = 0U;
+        _workingTimingIndex = 1U;
+        ClearPendingRequests();
+        _boundMode = nullptr;
+        _stagedNextSessionOptions = SessionOptions{};
+        _stagedNextSessionValid = false;
     }
 }

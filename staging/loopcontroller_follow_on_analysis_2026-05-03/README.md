@@ -24,6 +24,19 @@ The current names do not express that clearly. These findings therefore use:
 - `StageNextSessionState` as the target name for staging the successor session
 - `HaltExecutionEndProgram` as the target meaning for what the current `RequestEndLoop()` actually does when it causes `Run()` to return
 
+## Startup contract used by these findings
+
+The final-form startup contract assumed by this refactor block is:
+
+- `IApplicationMode::SetupMode()` performs pre-loop preparation only
+- `IApplicationMode::RunTick(...)` is the uniform initial loop callback for every mode
+- the initial callback context is the mode object itself
+- infrastructure, not the mode, wires `RunTick(...)` plus the mode object into `LoopController`
+- infrastructure owns the terminal `LoopController::Run()` boundary
+- `LoopController::Run()` should therefore be enforced as infrastructure-only, ideally through a narrow private/friend contract
+
+This keeps startup explicit while preventing each mode from inventing its own loop-launch dialect.
+
 ## Scope
 
 Each class file describes what must change once invalid `LoopController` capabilities such as `TickServices`, overpowered pause APIs, implicit callback-context carry-forward, and public runtime-stop result handling are removed, while honoring the lifecycle split above.
