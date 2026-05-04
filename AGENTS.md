@@ -184,6 +184,7 @@ Top-level application modes are selected only at startup by reading designated m
 - Do **not** model top-level modes as a runtime mode machine.
 - Do **not** implement runtime transitions between top-level modes.
 - Entering a different top-level mode requires a reboot.
+- Boot-selected modes are one-shot for the lifetime of the program. Do **not** assume same-process rerun, reentry, or "reset for the next run" semantics merely because a mode object may have static storage duration.
 - Internal setup, calibration stages, sections, subtests, and recovery paths are **phases** of one mode, not separate modes.
 - The selected top-level mode owner is the only place allowed to start the active `LoopController` session for that mode.
 - Starting that session means the mode is now active; ending that session means the mode is shutting down.
@@ -198,6 +199,9 @@ Top-level application modes are selected only at startup by reading designated m
 - If `LoopController` is paused, the robot must not move. Pause handling is for blocking, no-motion calculation, and other non-motion work only unless an explicit task says otherwise.
 - `LoopController` must not be paused, started, or stopped unless there is a fault or the vehicle is stationary.
 - Outside a `LoopController::RequestPause(...)` callback, mode code must not wait for another tick, sleep for control progress, or spin on control-state changes.
+- `SetupMode()` is infrastructure-owned one-time entry preparation, not a reusable session-reset hook.
+- `FailActiveMode(...)` is terminal and must not be treated as a recoverable return to ordinary mode flow.
+- `HaltExecutionEndProgram()` is terminal whole-program end, effectively the boot mode's "return from main" boundary.
 
 ### Mode categories
 

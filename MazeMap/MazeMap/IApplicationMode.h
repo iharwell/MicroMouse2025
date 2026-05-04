@@ -14,7 +14,8 @@ namespace MazeMap::App::Internal
     //
     // Startup contract:
     // - Infrastructure resolves the active IApplicationMode object.
-    // - SetupMode() performs pre-loop preparation only.
+    // - SetupMode() performs one-time pre-loop preparation only for the selected boot mode.
+    // - SetupMode() is not a reusable reset hook for another pass through the same mode object.
     // - SetupMode() must stage the initial LoopController session state through
     //   StageNextSessionState(...).
     // - Infrastructure then binds the mode object itself as the initial callback context and
@@ -44,6 +45,7 @@ namespace MazeMap::App::Internal
         // - May configure runtime services, logs, or mode-local retained state.
         // - Must stage the initial session state through StageNextSessionState(...).
         // - Does not choose the initial callback/context pair and does not enter Run().
+        // - Is called at most once for the selected boot mode during a program run.
         // - Failures are terminal and should go through SharedRobotRuntime::FailActiveMode(...),
         //   not boolean return values.
         virtual void SetupMode() = 0;

@@ -87,7 +87,7 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, dt_us)                        \
     X(std::uint8_t,  phase_id)                     \
     X(std::uint8_t,  primitive_id)                 \
-    X(std::uint8_t,  speed_bin)                    \
+    X(float,         speed_bin)                    \
     X(std::uint16_t, repeat_index)                 \
     X(std::uint16_t, mode_flags)                   \
     X(std::uint16_t, saturation_flags)             \
@@ -183,12 +183,12 @@ namespace MazeMap::App::Internal
         static constexpr std::size_t kStraightPhaseRepeatSlotCount =
             kOpenFloorStraightRepeatsPerSpeed * 2U;
         static constexpr std::size_t kSmoothPhaseCyclePrimitiveCount = 26U;
-        static constexpr std::size_t kSmoothPhaseMaxPrimitiveCount =
-            kSmoothPhaseCyclePrimitiveCount + 2U;
-        static constexpr std::size_t kSmoothPhaseSlotCapacity =
-            kOpenFloorSmoothSpeedBinsMps.size() * kSmoothPhaseMaxPrimitiveCount;
+        static constexpr std::size_t kSmoothPhasePrimitiveCountPerSpeed =
+            kSmoothPhaseCyclePrimitiveCount + 1U;
+        static constexpr std::size_t kSmoothPhasePrimitiveCount =
+            (kOpenFloorSmoothSpeedBinsMps.size() * kSmoothPhasePrimitiveCountPerSpeed) + 1U;
         static constexpr std::size_t kLoopPhasePrimitiveCount = 8U;
-        static constexpr std::size_t kMainPhaseCount = 7U;
+        static constexpr std::size_t kMainRegimeCount = 7U;
 
         using StageTick = LoopController::ControlVector (OpenFloorMeasurementController::*)(
             std::uint32_t loopEndTimeUs,
@@ -213,282 +213,159 @@ namespace MazeMap::App::Internal
             LoopCounterClockwise = 7U,
         };
 
-        class MainRowLabel final
-        {
-        public:
-            constexpr MainRowLabel() = default;
-            constexpr MainRowLabel(
-                MeasurementPhaseId phaseId,
-                MazeMap::ManeuverCode primitiveCode,
-                std::uint8_t speedBinLogId,
-                std::uint16_t repeatIndex) noexcept
-                : _phaseId(phaseId)
-                , _primitiveCode(primitiveCode)
-                , _speedBinLogId(speedBinLogId)
-                , _repeatIndex(repeatIndex)
-            {
-            }
-
-            constexpr MeasurementPhaseId PhaseId() const noexcept
-            {
-                return _phaseId;
-            }
-
-            constexpr MazeMap::ManeuverCode PrimitiveCode() const noexcept
-            {
-                return _primitiveCode;
-            }
-
-            constexpr std::uint8_t SpeedBinLogId() const noexcept
-            {
-                return _speedBinLogId;
-            }
-
-            constexpr std::uint16_t RepeatIndex() const noexcept
-            {
-                return _repeatIndex;
-            }
-
-        private:
-            MeasurementPhaseId _phaseId{ MeasurementPhaseId::Timing };
-            MazeMap::ManeuverCode _primitiveCode{ MazeMap::MC_NONE };
-            std::uint8_t _speedBinLogId{ kOpenFloorSpeedBinLogIdNone };
-            std::uint16_t _repeatIndex{};
-        };
-
         class MainStage;
 
-        class MainMeasurementPhase
+        class MainMeasurementRegime
         {
         public:
-            class SlotIdentity final
-            {
-            public:
-                constexpr SlotIdentity() = default;
-                constexpr SlotIdentity(
-                    const MazeMap::ManeuverCode primitiveCode,
-                    const std::uint8_t speedBinLogId) noexcept
-                    : _primitiveCode(primitiveCode)
-                    , _speedBinLogId(speedBinLogId)
-                {
-                }
+            virtual ~MainMeasurementRegime() = default;
 
-                constexpr MazeMap::ManeuverCode PrimitiveCode() const noexcept
-                {
-                    return _primitiveCode;
-                }
-
-                constexpr std::uint8_t SpeedBinLogId() const noexcept
-                {
-                    return _speedBinLogId;
-                }
-
-            private:
-                MazeMap::ManeuverCode _primitiveCode{ MazeMap::MC_NONE };
-                std::uint8_t _speedBinLogId{ kOpenFloorSpeedBinLogIdNone };
-            };
-
-            virtual ~MainMeasurementPhase() = default;
-
-            virtual const char* Name() const noexcept = 0;
-            virtual MeasurementPhaseId PhaseId() const noexcept = 0;
-            virtual void Reset() noexcept = 0;
-            virtual bool Prepare(OpenFloorMeasurementController& controller) = 0;
-            virtual std::uint16_t MaxPrimitiveCount() const noexcept = 0;
-            virtual std::uint8_t MaxSpeedBinCount() const noexcept = 0;
-            virtual std::uint16_t MaxRepeatCount() const noexcept = 0;
-            virtual bool IsSlotActive(
+            virtual const char* Title() const noexcept = 0;
+            virtual MeasurementPhaseId LogId() const noexcept = 0;
+            virtual std::uint16_t PrimitiveCount() const noexcept = 0;
+            virtual std::uint8_t SpeedCount() const noexcept = 0;
+            virtual std::uint16_t RepeatCount() const noexcept = 0;
+            virtual MazeMap::ManeuverCode PrimitiveCode(
+                std::uint16_t primitiveIndex) const noexcept = 0;
+            virtual float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept = 0;
-            virtual SlotIdentity DescribeSlot(
+                std::uint8_t speedIndex) const noexcept = 0;
+            virtual LoopController::ControlVector Tick(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept = 0;
-            virtual void BeginSlot(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) = 0;
-            virtual LoopController::ControlVector TickActiveSlot(
-                OpenFloorMeasurementController& controller,
-                const MazeMap::VehicleState& state,
-                LoopController& loopController,
+                std::uint8_t speedIndex,
                 bool& done) = 0;
         };
 
-        class StaticMeasurementPhase final : public MainMeasurementPhase
+        class StaticMeasurementRegime final : public MainMeasurementRegime
         {
         public:
-            const char* Name() const noexcept override;
-            MeasurementPhaseId PhaseId() const noexcept override;
-            void Reset() noexcept override;
-            bool Prepare(OpenFloorMeasurementController& controller) override;
-            std::uint16_t MaxPrimitiveCount() const noexcept override;
-            std::uint8_t MaxSpeedBinCount() const noexcept override;
-            std::uint16_t MaxRepeatCount() const noexcept override;
-            bool IsSlotActive(
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            SlotIdentity DescribeSlot(
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            void BeginSlot(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) override;
-            LoopController::ControlVector TickActiveSlot(
-                OpenFloorMeasurementController& controller,
-                const MazeMap::VehicleState& state,
-                LoopController& loopController,
-                bool& done) override;
-        };
+            explicit StaticMeasurementRegime(SharedRobotRuntime& runtime) noexcept;
 
-        class LaunchMeasurementPhase final : public MainMeasurementPhase
-        {
-        public:
-            const char* Name() const noexcept override;
-            MeasurementPhaseId PhaseId() const noexcept override;
-            void Reset() noexcept override;
-            bool Prepare(OpenFloorMeasurementController& controller) override;
-            std::uint16_t MaxPrimitiveCount() const noexcept override;
-            std::uint8_t MaxSpeedBinCount() const noexcept override;
-            std::uint16_t MaxRepeatCount() const noexcept override;
-            bool IsSlotActive(
+            const char* Title() const noexcept override;
+            MeasurementPhaseId LogId() const noexcept override;
+            std::uint16_t PrimitiveCount() const noexcept override;
+            std::uint8_t SpeedCount() const noexcept override;
+            std::uint16_t RepeatCount() const noexcept override;
+            MazeMap::ManeuverCode PrimitiveCode(std::uint16_t primitiveIndex) const noexcept override;
+            float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            SlotIdentity DescribeSlot(
+                std::uint8_t speedIndex) const noexcept override;
+            LoopController::ControlVector Tick(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            void BeginSlot(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) override;
-            LoopController::ControlVector TickActiveSlot(
-                OpenFloorMeasurementController& controller,
-                const MazeMap::VehicleState& state,
-                LoopController& loopController,
+                std::uint8_t speedIndex,
                 bool& done) override;
 
         private:
+            SharedRobotRuntime& _runtime;
+            bool _needsStart{ true };
+        };
+
+        class LaunchMeasurementRegime final : public MainMeasurementRegime
+        {
+        public:
+            explicit LaunchMeasurementRegime(SharedRobotRuntime& runtime) noexcept;
+
+            const char* Title() const noexcept override;
+            MeasurementPhaseId LogId() const noexcept override;
+            std::uint16_t PrimitiveCount() const noexcept override;
+            std::uint8_t SpeedCount() const noexcept override;
+            std::uint16_t RepeatCount() const noexcept override;
+            MazeMap::ManeuverCode PrimitiveCode(std::uint16_t primitiveIndex) const noexcept override;
+            float SpeedBinValue(
+                std::uint16_t primitiveIndex,
+                std::uint8_t speedIndex) const noexcept override;
+            LoopController::ControlVector Tick(
+                std::uint16_t primitiveIndex,
+                std::uint8_t speedIndex,
+                bool& done) override;
+
+        private:
+            SharedRobotRuntime& _runtime;
+            std::uint16_t _repeatIndex{};
+            bool _needsStart{ true };
             float _activeLeftCommand{};
             float _activeRightCommand{};
             std::uint32_t _deadlineMs{};
             bool _holdActive{};
         };
 
-        class StraightMeasurementPhase final : public MainMeasurementPhase
+        class StraightMeasurementRegime final : public MainMeasurementRegime
         {
         public:
-            const char* Name() const noexcept override;
-            MeasurementPhaseId PhaseId() const noexcept override;
-            void Reset() noexcept override;
-            bool Prepare(OpenFloorMeasurementController& controller) override;
-            std::uint16_t MaxPrimitiveCount() const noexcept override;
-            std::uint8_t MaxSpeedBinCount() const noexcept override;
-            std::uint16_t MaxRepeatCount() const noexcept override;
-            bool IsSlotActive(
+            explicit StraightMeasurementRegime(SharedRobotRuntime& runtime) noexcept;
+
+            const char* Title() const noexcept override;
+            MeasurementPhaseId LogId() const noexcept override;
+            std::uint16_t PrimitiveCount() const noexcept override;
+            std::uint8_t SpeedCount() const noexcept override;
+            std::uint16_t RepeatCount() const noexcept override;
+            MazeMap::ManeuverCode PrimitiveCode(std::uint16_t primitiveIndex) const noexcept override;
+            float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            SlotIdentity DescribeSlot(
+                std::uint8_t speedIndex) const noexcept override;
+            LoopController::ControlVector Tick(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            void BeginSlot(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) override;
-            LoopController::ControlVector TickActiveSlot(
-                OpenFloorMeasurementController& controller,
-                const MazeMap::VehicleState& state,
-                LoopController& loopController,
+                std::uint8_t speedIndex,
                 bool& done) override;
 
         private:
+            SharedRobotRuntime& _runtime;
+            bool _selectionValid{};
+            std::uint8_t _activeSpeedIndex{};
+            std::uint16_t _repeatIndex{};
+            bool _needsStart{};
             bool _holdActive{};
         };
 
-        class YawMeasurementPhase final : public MainMeasurementPhase
+        class YawMeasurementRegime final : public MainMeasurementRegime
         {
         public:
-            const char* Name() const noexcept override;
-            MeasurementPhaseId PhaseId() const noexcept override;
-            void Reset() noexcept override;
-            bool Prepare(OpenFloorMeasurementController& controller) override;
-            std::uint16_t MaxPrimitiveCount() const noexcept override;
-            std::uint8_t MaxSpeedBinCount() const noexcept override;
-            std::uint16_t MaxRepeatCount() const noexcept override;
-            bool IsSlotActive(
+            explicit YawMeasurementRegime(SharedRobotRuntime& runtime) noexcept;
+
+            const char* Title() const noexcept override;
+            MeasurementPhaseId LogId() const noexcept override;
+            std::uint16_t PrimitiveCount() const noexcept override;
+            std::uint8_t SpeedCount() const noexcept override;
+            std::uint16_t RepeatCount() const noexcept override;
+            MazeMap::ManeuverCode PrimitiveCode(std::uint16_t primitiveIndex) const noexcept override;
+            float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            SlotIdentity DescribeSlot(
+                std::uint8_t speedIndex) const noexcept override;
+            LoopController::ControlVector Tick(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            void BeginSlot(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) override;
-            LoopController::ControlVector TickActiveSlot(
-                OpenFloorMeasurementController& controller,
-                const MazeMap::VehicleState& state,
-                LoopController& loopController,
+                std::uint8_t speedIndex,
                 bool& done) override;
 
         private:
+            SharedRobotRuntime& _runtime;
+            bool _selectionValid{};
+            std::uint16_t _activePrimitiveIndex{};
+            std::uint8_t _activeSpeedIndex{};
+            bool _needsStart{};
             bool _holdActive{};
         };
 
-        class SmoothMeasurementPhase final : public MainMeasurementPhase
+        class SmoothMeasurementRegime final : public MainMeasurementRegime
         {
         public:
-            const char* Name() const noexcept override;
-            MeasurementPhaseId PhaseId() const noexcept override;
-            void Reset() noexcept override;
-            bool Prepare(OpenFloorMeasurementController& controller) override;
-            std::uint16_t MaxPrimitiveCount() const noexcept override;
-            std::uint8_t MaxSpeedBinCount() const noexcept override;
-            std::uint16_t MaxRepeatCount() const noexcept override;
-            bool IsSlotActive(
+            explicit SmoothMeasurementRegime(SharedRobotRuntime& runtime);
+
+            const char* Title() const noexcept override;
+            MeasurementPhaseId LogId() const noexcept override;
+            std::uint16_t PrimitiveCount() const noexcept override;
+            std::uint8_t SpeedCount() const noexcept override;
+            std::uint16_t RepeatCount() const noexcept override;
+            MazeMap::ManeuverCode PrimitiveCode(std::uint16_t primitiveIndex) const noexcept override;
+            float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            SlotIdentity DescribeSlot(
+                std::uint8_t speedIndex) const noexcept override;
+            LoopController::ControlVector Tick(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            void BeginSlot(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) override;
-            LoopController::ControlVector TickActiveSlot(
-                OpenFloorMeasurementController& controller,
-                const MazeMap::VehicleState& state,
-                LoopController& loopController,
+                std::uint8_t speedIndex,
                 bool& done) override;
 
         private:
-            static constexpr std::size_t SlotOffset(
-                std::uint8_t speedBinIndex,
-                std::uint16_t primitiveIndex) noexcept
-            {
-                return
-                    (static_cast<std::size_t>(speedBinIndex) * kSmoothPhaseMaxPrimitiveCount) +
-                    static_cast<std::size_t>(primitiveIndex);
-            }
-
-            bool IsLastActiveSlot(std::uint16_t primitiveIndex, std::uint8_t speedBinIndex) const noexcept;
+            bool IsLastPrimitive(std::uint16_t primitiveIndex) const noexcept;
             bool BuildQueue(
                 MazeMap::Vehicle& vehicle,
                 std::uint8_t speedIndex,
@@ -497,49 +374,53 @@ namespace MazeMap::App::Internal
                 MazeMap::ManeuverQueue& queue,
                 float& exitBoundarySpeedMps) const;
 
-            std::array<MazeMap::ManeuverInstance, kSmoothPhaseSlotCapacity> _maneuvers{};
-            std::array<float, kSmoothPhaseSlotCapacity> _speedLimitsMps{};
-            std::array<std::uint8_t, kOpenFloorSmoothSpeedBinsMps.size()> _primitiveCounts{};
+            SharedRobotRuntime& _runtime;
+            bool _valid{ true };
+            std::uint16_t _primitiveCount{};
+            bool _selectionValid{};
+            std::uint16_t _activePrimitiveIndex{};
+            bool _needsStart{};
+            std::array<MazeMap::ManeuverCode, kSmoothPhasePrimitiveCount> _primitiveCodes{};
+            std::array<MazeMap::ManeuverInstance, kSmoothPhasePrimitiveCount> _maneuvers{};
+            std::array<float, kSmoothPhasePrimitiveCount> _speedLimitsMps{};
+            std::array<float, kSmoothPhasePrimitiveCount> _speedBinValues{};
             std::uint16_t _activePostSlotHoldMs{};
             bool _holdActive{};
         };
 
-        class LoopMeasurementPhase final : public MainMeasurementPhase
+        class LoopMeasurementRegime final : public MainMeasurementRegime
         {
         public:
-            LoopMeasurementPhase(MeasurementPhaseId phaseId, bool clockwise) noexcept;
+            LoopMeasurementRegime(
+                SharedRobotRuntime& runtime,
+                MeasurementPhaseId phaseId,
+                bool clockwise);
 
-            const char* Name() const noexcept override;
-            MeasurementPhaseId PhaseId() const noexcept override;
-            void Reset() noexcept override;
-            bool Prepare(OpenFloorMeasurementController& controller) override;
-            std::uint16_t MaxPrimitiveCount() const noexcept override;
-            std::uint8_t MaxSpeedBinCount() const noexcept override;
-            std::uint16_t MaxRepeatCount() const noexcept override;
-            bool IsSlotActive(
+            const char* Title() const noexcept override;
+            MeasurementPhaseId LogId() const noexcept override;
+            std::uint16_t PrimitiveCount() const noexcept override;
+            std::uint8_t SpeedCount() const noexcept override;
+            std::uint16_t RepeatCount() const noexcept override;
+            MazeMap::ManeuverCode PrimitiveCode(std::uint16_t primitiveIndex) const noexcept override;
+            float SpeedBinValue(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            SlotIdentity DescribeSlot(
+                std::uint8_t speedIndex) const noexcept override;
+            LoopController::ControlVector Tick(
                 std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) const noexcept override;
-            void BeginSlot(
-                OpenFloorMeasurementController& controller,
-                std::uint16_t primitiveIndex,
-                std::uint8_t speedBinIndex,
-                std::uint16_t repeatIndex) override;
-            LoopController::ControlVector TickActiveSlot(
-                OpenFloorMeasurementController& controller,
-                const MazeMap::VehicleState& state,
-                LoopController& loopController,
+                std::uint8_t speedIndex,
                 bool& done) override;
 
         private:
             bool BuildQueue(MazeMap::Vehicle& vehicle, MazeMap::ManeuverQueue& queue) const;
 
+            SharedRobotRuntime& _runtime;
+            bool _valid{ true };
             MeasurementPhaseId _phaseId;
             bool _clockwise{};
+            bool _selectionValid{};
+            std::uint16_t _activePrimitiveIndex{};
+            std::uint16_t _repeatIndex{};
+            bool _needsStart{};
             std::array<MazeMap::ManeuverInstance, kLoopPhasePrimitiveCount> _maneuvers{};
             std::uint16_t _activePostSlotHoldMs{};
             bool _holdActive{};
@@ -575,8 +456,9 @@ namespace MazeMap::App::Internal
         class MainStage final
         {
         public:
+            MainStage(MainMeasurementRegime* const* regimes, std::size_t regimeCount) noexcept;
+
             void Reset() noexcept;
-            bool PreparePhases(OpenFloorMeasurementController& controller);
             bool Begin(OpenFloorMeasurementController& controller);
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
@@ -585,46 +467,23 @@ namespace MazeMap::App::Internal
             void FinalizeCompletedRun(OpenFloorMeasurementController& controller) noexcept;
 
         private:
-            MainMeasurementPhase& ActivePhase() const noexcept;
-            void ResetCursor() noexcept;
-            bool MoveToFirstActiveSlot() noexcept;
-            bool MoveToNextActiveSlot() noexcept;
-            bool SeekActiveSlotFromCurrent() noexcept;
-            bool AdvanceCursorOneStep() noexcept;
-            MainRowLabel BuildActiveLabels() const noexcept;
+            MainMeasurementRegime& ActiveRegime() const noexcept;
+            void ResetIndices() noexcept;
+            bool AdvanceIndices() noexcept;
             bool WriteBufferedRow(
                 OpenFloorMeasurementController& controller,
                 const char* failureReason);
             void BufferRow(const Runtime::OpenFloorMainRow& row);
             bool CheckFault(OpenFloorMeasurementController& controller);
 
-            StaticMeasurementPhase _staticPhase{};
-            LaunchMeasurementPhase _launchPhase{};
-            StraightMeasurementPhase _straightPhase{};
-            YawMeasurementPhase _yawPhase{};
-            SmoothMeasurementPhase _smoothPhase{};
-            LoopMeasurementPhase _clockwiseLoopPhase{ MeasurementPhaseId::LoopClockwise, true };
-            LoopMeasurementPhase _counterClockwiseLoopPhase{
-                MeasurementPhaseId::LoopCounterClockwise,
-                false,
-            };
-            std::array<MainMeasurementPhase*, kMainPhaseCount> _phases{
-                &_staticPhase,
-                &_launchPhase,
-                &_straightPhase,
-                &_yawPhase,
-                &_smoothPhase,
-                &_clockwiseLoopPhase,
-                &_counterClockwiseLoopPhase,
-            };
-            std::size_t _activePhaseIndex{};
+            MainMeasurementRegime* const* _regimes{};
+            std::size_t _regimeCount{};
+            std::size_t _activeRegimeIndex{};
             std::uint16_t _activePrimitiveIndex{};
-            std::uint8_t _activeSpeedBinIndex{};
+            std::uint8_t _activeSpeedIndex{};
             std::uint16_t _activeRepeatIndex{};
             bool _logOpen{};
             bool _completionPending{};
-            bool _slotStarted{};
-            MainRowLabel _activeLabels{};
             std::optional<Runtime::OpenFloorMainRow> _bufferedRow{};
         };
 
@@ -637,7 +496,10 @@ namespace MazeMap::App::Internal
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorTimingRow& row) const noexcept;
         void PopulateMainRowFromState(
-            const MainRowLabel& labels,
+            MeasurementPhaseId phaseId,
+            MazeMap::ManeuverCode primitiveCode,
+            float speedBinValue,
+            std::uint16_t repeatIndex,
             const MazeMap::VehicleState& state,
             Runtime::OpenFloorMainRow& row) const;
         void ConfigureSelectorMonitor() noexcept;
@@ -654,8 +516,6 @@ namespace MazeMap::App::Internal
             const MazeMap::VehicleState& state,
             LoopController& loopController);
 
-        static std::uint8_t SpeedBinForIndex(std::size_t speedIndex) noexcept;
-
         SharedRobotRuntime& _runtime;
         LoopController& _loopController;
         MazeMap::Vehicle& _vehicle;
@@ -663,13 +523,21 @@ namespace MazeMap::App::Internal
         ::DriveBase& _drive;
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
+        StaticMeasurementRegime _staticRegime;
+        LaunchMeasurementRegime _launchRegime;
+        StraightMeasurementRegime _straightRegime;
+        YawMeasurementRegime _yawRegime;
+        SmoothMeasurementRegime _smoothRegime;
+        LoopMeasurementRegime _clockwiseLoopRegime;
+        LoopMeasurementRegime _counterClockwiseLoopRegime;
+        std::array<MainMeasurementRegime*, kMainRegimeCount> _mainRegimes{};
         StageTick _activeStageTick{ &OpenFloorMeasurementController::TimingStageTick };
         std::uint8_t _selectorDrivePin{};
         std::uint8_t _selectorSensePin{};
         bool _selectorMonitorArmed{};
         SessionBoundaryAction _sessionBoundaryAction{ SessionBoundaryAction::None };
         TimingStage _timingStage{};
-        MainStage _mainStage{};
+        MainStage _mainStage;
     };
 
     IApplicationMode& GetOpenFloorMeasurementMode();

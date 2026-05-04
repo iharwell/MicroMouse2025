@@ -26,6 +26,8 @@ namespace MazeMap::App::Internal
     //
     // Startup and session-start contract:
     // - Infrastructure resolves the active IApplicationMode object.
+    // - SetupMode() is one-time pre-Run() preparation for the selected boot mode, not a reusable
+    //   reset hook for another pass through the same mode object.
     // - SetupMode() must stage the initial SessionOptions through StageNextSessionState(...).
     // - Infrastructure privately binds the mode object and enters Run().
     // - Every session start, including successor-session restarts, installs
@@ -245,6 +247,8 @@ namespace MazeMap::App::Internal
         //   finishes and braking is confirmed.
         // - Run() returns only for this outcome; ordinary top-level completion is terminal at the
         //   infrastructure boundary, not an end-session path.
+        // - Once Run() returns for this outcome, program execution is ending. Mode code must not
+        //   treat this as a same-process opportunity to rerun or reenter the boot-selected mode.
         void HaltExecutionEndProgram() noexcept;
 
         // `SetNextModeWorkCallback(callback, context)`:
