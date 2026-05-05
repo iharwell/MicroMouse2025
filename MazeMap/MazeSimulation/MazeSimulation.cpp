@@ -185,7 +185,7 @@ namespace
             (iterations > 0U) ?
             ((elapsedMs.count() * 1000.0) / static_cast<double>(iterations)) :
             0.0;
-        const MazeMap::VehicleState::StateVector& state = ukf.ukf().state();
+        const MazeMap::VehicleState& state = ukf.RuntimeState();
         const MazeMap::VehicleState::StateMatrix covariance = ukf.ukf().covariance();
 
         std::cout << std::fixed << std::setprecision(6);
@@ -198,15 +198,15 @@ namespace
         std::cout << "  elapsed_ms: " << elapsedMs.count() << "\n";
         std::cout << "  us_per_iteration: " << microsecondsPerIteration << "\n";
         std::cout << "  final_state:"
-            << " px=" << state(MazeMap::VehicleState::kPx)
-            << " py=" << state(MazeMap::VehicleState::kPy)
-            << " psi=" << state(MazeMap::VehicleState::kPsi)
-            << " u=" << state(MazeMap::VehicleState::kU)
-            << " v=" << state(MazeMap::VehicleState::kV)
-            << " r=" << state(MazeMap::VehicleState::kR)
-            << " omega_l=" << state(MazeMap::VehicleState::kOmegaL)
-            << " omega_r=" << state(MazeMap::VehicleState::kOmegaR)
-            << " bgz=" << state(MazeMap::VehicleState::kBgz)
+            << " px=" << state.GetPositionX()
+            << " py=" << state.GetPositionY()
+            << " psi=" << state.GetOrientation()
+            << " u=" << state.GetVelocity()
+            << " v=" << state.GetLateralVelocity()
+            << " r=" << state.GetRotationalVelocity()
+            << " omega_l=" << state.GetWheelSpeedLeft()
+            << " omega_r=" << state.GetWheelSpeedRight()
+            << " bgz=" << state.GetGyroBiasZ()
             << "\n";
         std::cout << "  covariance_diag:"
             << " px=" << covariance(MazeMap::VehicleState::kPx, MazeMap::VehicleState::kPx)

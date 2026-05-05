@@ -2595,15 +2595,33 @@ namespace MazeMap
             _prePredictState;
         const StateMatrix& poseReferenceCovariance = _prePredictCovariance;
         VehicleState constrainedState;
-        constrainedState.SetStateVector(_filter.state());
+        constrainedState.SetPosition(Eigen::Vector2f(_filter.state()(VehicleState::kPx), _filter.state()(VehicleState::kPy)));
+        constrainedState.SetOrientation(_filter.state()(VehicleState::kPsi));
+        constrainedState.SetVelocity(_filter.state()(VehicleState::kU));
+        constrainedState.SetLateralVelocity(_filter.state()(VehicleState::kV));
+        constrainedState.SetRotationalVelocity(_filter.state()(VehicleState::kR));
+        constrainedState.SetWheelSpeedLeft(_filter.state()(VehicleState::kOmegaL));
+        constrainedState.SetWheelSpeedRight(_filter.state()(VehicleState::kOmegaR));
+        constrainedState.SetGyroBiasZ(_filter.state()(VehicleState::kBgz));
         constrainedState.SetCovariance(_filter.covariance());
         constrainedState.ApplyStationaryZeroMotionConstraint(
             true,
             hasPoseReference,
             poseReferenceState,
             poseReferenceCovariance);
+        StateVector constrainedStateVector = StateVector::Zero();
+        constrainedStateVector(VehicleState::kPx) = constrainedState.GetPositionX();
+        constrainedStateVector(VehicleState::kPy) = constrainedState.GetPositionY();
+        constrainedStateVector(VehicleState::kPsi) = constrainedState.GetOrientation();
+        constrainedStateVector(VehicleState::kU) = constrainedState.GetVelocity();
+        constrainedStateVector(VehicleState::kV) = constrainedState.GetLateralVelocity();
+        constrainedStateVector(VehicleState::kR) = constrainedState.GetRotationalVelocity();
+        constrainedStateVector(VehicleState::kOmegaL) = constrainedState.GetWheelSpeedLeft();
+        constrainedStateVector(VehicleState::kOmegaR) = constrainedState.GetWheelSpeedRight();
+        constrainedStateVector(VehicleState::kBgz) = constrainedState.GetGyroBiasZ();
+        VehicleState::NormalizeStateVector(constrainedStateVector);
         _filter.setStateSquareRootCovariance(
-            constrainedState.GetStateVector(),
+            constrainedStateVector,
             constrainedState.GetSqrtCovariance());
         updateNonholonomicDiagnostics(false);
     }

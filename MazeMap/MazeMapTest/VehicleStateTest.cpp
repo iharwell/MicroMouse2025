@@ -35,7 +35,7 @@ namespace MazeMap
                 SrUkfCore::kStationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
 
             VehicleState stationaryState;
-            stationaryState.SetStateVector(BuildUkfState(
+            SetVehicleStateFromUkfStateVector(stationaryState, BuildUkfState(
                 0.40f,
                 -0.18f,
                 0.35f,
@@ -48,19 +48,15 @@ namespace MazeMap
             Assert::IsTrue(stationaryState.IsStationary());
 
             VehicleState movingState = stationaryState;
-            VehicleState::StateVector movingVector = movingState.GetStateVector();
-            movingVector(VehicleState::kU) = 2.0f * SrUkfCore::kStationaryEncoderVelocitySigmaMps;
-            movingState.SetStateVector(movingVector);
+            movingState.SetVelocity(2.0f * SrUkfCore::kStationaryEncoderVelocitySigmaMps);
             Assert::IsFalse(movingState.IsStationary());
 
-            movingVector = stationaryState.GetStateVector();
-            movingVector(VehicleState::kR) = 3.1f * SrUkfCore::kImuYawRateSigmaRadps;
-            movingState.SetStateVector(movingVector);
+            movingState = stationaryState;
+            movingState.SetRotationalVelocity(3.1f * SrUkfCore::kImuYawRateSigmaRadps);
             Assert::IsFalse(movingState.IsStationary());
 
-            movingVector = stationaryState.GetStateVector();
-            movingVector(VehicleState::kOmegaL) = 1.1f * wheelSpeedThresholdRadps;
-            movingState.SetStateVector(movingVector);
+            movingState = stationaryState;
+            movingState.SetWheelSpeedLeft(1.1f * wheelSpeedThresholdRadps);
             Assert::IsFalse(movingState.IsStationary());
         }
 
@@ -77,7 +73,7 @@ namespace MazeMap
                 tuned.stationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
 
             VehicleState state;
-            state.SetStateVector(BuildUkfState(
+            SetVehicleStateFromUkfStateVector(state, BuildUkfState(
                 0.0f,
                 0.0f,
                 0.0f,
@@ -89,16 +85,14 @@ namespace MazeMap
                 0.0f));
             Assert::IsTrue(state.IsStationary());
 
-            VehicleState::StateVector adjusted = state.GetStateVector();
-            adjusted(VehicleState::kR) = 0.31f;
-            state.SetStateVector(adjusted);
+            state.SetRotationalVelocity(0.31f);
             Assert::IsFalse(state.IsStationary());
         }
 
         TEST_METHOD(VehicleStateStationaryConstraintKeepsPoseReferenceAndCollapsesStationaryStates)
         {
             VehicleState state;
-            state.SetStateVector(BuildUkfState(
+            SetVehicleStateFromUkfStateVector(state, BuildUkfState(
                 0.40f,
                 -0.18f,
                 0.35f,
@@ -135,18 +129,17 @@ namespace MazeMap
                 poseReferenceState,
                 poseReferenceCovariance);
 
-            const VehicleState::StateVector& constrainedState = state.GetStateVector();
             const VehicleState::StateMatrix constrainedCovariance = state.GetCovariance();
 
-            Assert::AreEqual(poseReferenceState(VehicleState::kPx), constrainedState(VehicleState::kPx), 1.0e-6f);
-            Assert::AreEqual(poseReferenceState(VehicleState::kPy), constrainedState(VehicleState::kPy), 1.0e-6f);
-            Assert::AreEqual(poseReferenceState(VehicleState::kPsi), constrainedState(VehicleState::kPsi), 1.0e-6f);
-            Assert::AreEqual(0.0f, constrainedState(VehicleState::kU), 1.0e-7f);
-            Assert::AreEqual(0.0f, constrainedState(VehicleState::kV), 1.0e-7f);
-            Assert::AreEqual(0.0f, constrainedState(VehicleState::kR), 1.0e-7f);
-            Assert::AreEqual(0.0f, constrainedState(VehicleState::kOmegaL), 1.0e-7f);
-            Assert::AreEqual(0.0f, constrainedState(VehicleState::kOmegaR), 1.0e-7f);
-            Assert::AreEqual(-0.02f, constrainedState(VehicleState::kBgz), 1.0e-7f);
+            Assert::AreEqual(poseReferenceState(VehicleState::kPx), state.GetPositionX(), 1.0e-6f);
+            Assert::AreEqual(poseReferenceState(VehicleState::kPy), state.GetPositionY(), 1.0e-6f);
+            Assert::AreEqual(poseReferenceState(VehicleState::kPsi), state.GetOrientation(), 1.0e-6f);
+            Assert::AreEqual(0.0f, state.GetVelocity(), 1.0e-7f);
+            Assert::AreEqual(0.0f, state.GetLateralVelocity(), 1.0e-7f);
+            Assert::AreEqual(0.0f, state.GetRotationalVelocity(), 1.0e-7f);
+            Assert::AreEqual(0.0f, state.GetWheelSpeedLeft(), 1.0e-7f);
+            Assert::AreEqual(0.0f, state.GetWheelSpeedRight(), 1.0e-7f);
+            Assert::AreEqual(-0.02f, state.GetGyroBiasZ(), 1.0e-7f);
             Assert::IsTrue(state.IsStationary());
 
             constexpr std::array<int, 3> kPoseIndices = {

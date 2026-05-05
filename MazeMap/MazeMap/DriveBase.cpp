@@ -7,6 +7,23 @@ namespace
 {
     using ControlVector = MazeMap::App::Internal::LoopController::ControlVector;
 
+    MazeMap::VehicleState::StateVector BuildPlantStateVector(
+        const MazeMap::VehicleState& state) noexcept
+    {
+        MazeMap::VehicleState::StateVector result = MazeMap::VehicleState::StateVector::Zero();
+        result(MazeMap::VehicleState::kPx) = state.GetPositionX();
+        result(MazeMap::VehicleState::kPy) = state.GetPositionY();
+        result(MazeMap::VehicleState::kPsi) = state.GetOrientation();
+        result(MazeMap::VehicleState::kU) = state.GetVelocity();
+        result(MazeMap::VehicleState::kV) = state.GetLateralVelocity();
+        result(MazeMap::VehicleState::kR) = state.GetRotationalVelocity();
+        result(MazeMap::VehicleState::kOmegaL) = state.GetWheelSpeedLeft();
+        result(MazeMap::VehicleState::kOmegaR) = state.GetWheelSpeedRight();
+        result(MazeMap::VehicleState::kBgz) = state.GetGyroBiasZ();
+        MazeMap::VehicleState::NormalizeStateVector(result);
+        return result;
+    }
+
     ControlVector MakeClampedDriveControlVector(float leftMotorPwm, float rightMotorPwm) noexcept
     {
         if (!std::isfinite(leftMotorPwm) || !std::isfinite(rightMotorPwm))
@@ -398,7 +415,7 @@ void DriveBase::GetVelocityCommandOperatingState(
     MazeMap::VehicleState::StateVector& presentState,
     float& batteryVoltageV) const
 {
-    presentState = _estimator.StateVector();
+    presentState = BuildPlantStateVector(_estimator.RuntimeState());
     const MazeMap::PlantParams& params = _estimator.ukf().params();
     const MazeMap::PlantPreparedParams& prepared = _estimator.ukf().preparedParams();
     const float measuredLeftVelocityMps = _leftEncoderVelocityMps;

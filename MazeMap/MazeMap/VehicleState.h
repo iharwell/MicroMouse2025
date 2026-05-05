@@ -11,6 +11,8 @@
 
 namespace MazeMap
 {
+    class Estimator;
+
     enum class Side : uint8_t
     {
         Left = 0U,
@@ -185,14 +187,6 @@ namespace MazeMap
             , _timestampUs(0U)
             , _control()
         {
-        }
-
-        const StateVector& GetStateVector() const noexcept { return _state; }
-
-        void SetStateVector(const StateVector& state) noexcept
-        {
-            _state = state;
-            _state(kPsi) = NormalizeAngle(_state(kPsi));
         }
 
         const StateMatrix& GetSqrtCovariance() const noexcept { return _sqrtCovariance; }
@@ -444,6 +438,16 @@ namespace MazeMap
         }
 
     private:
+        friend class Estimator;
+
+        const StateVector& GetStateVector() const noexcept { return _state; }
+
+        void SetStateVector(const StateVector& state) noexcept
+        {
+            _state = state;
+            _state(kPsi) = NormalizeAngle(_state(kPsi));
+        }
+
         static bool BuildConstrainedLowerTriangularSquareRoot(
             const StateMatrix& covariance,
             const std::array<bool, kDimension>& exactZeroMask,

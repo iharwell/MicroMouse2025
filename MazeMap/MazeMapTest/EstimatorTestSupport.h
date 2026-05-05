@@ -33,6 +33,34 @@ namespace MazeMap
         return state;
     }
 
+    inline void SetVehicleStateFromUkfStateVector(
+        VehicleState& vehicleState,
+        const VehicleState::StateVector& state)
+    {
+        vehicleState.SetPosition(Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)));
+        vehicleState.SetOrientation(state(VehicleState::kPsi));
+        vehicleState.SetVelocity(state(VehicleState::kU));
+        vehicleState.SetLateralVelocity(state(VehicleState::kV));
+        vehicleState.SetRotationalVelocity(state(VehicleState::kR));
+        vehicleState.SetWheelSpeedLeft(state(VehicleState::kOmegaL));
+        vehicleState.SetWheelSpeedRight(state(VehicleState::kOmegaR));
+        vehicleState.SetGyroBiasZ(state(VehicleState::kBgz));
+    }
+
+    inline VehicleState::StateVector BuildUkfStateVector(const VehicleState& state)
+    {
+        return BuildUkfState(
+            state.GetPositionX(),
+            state.GetPositionY(),
+            state.GetOrientation(),
+            state.GetVelocity(),
+            state.GetLateralVelocity(),
+            state.GetRotationalVelocity(),
+            state.GetWheelSpeedLeft(),
+            state.GetWheelSpeedRight(),
+            state.GetGyroBiasZ());
+    }
+
     inline VehicleState::StateMatrix BuildUkfCovariance(
         float positionSigmaM = 0.01f,
         float headingSigmaRad = 0.03f,

@@ -497,8 +497,6 @@ namespace MazeMap::App::Internal
             ::DriveBase::BuildLoggedLeftSideObservation(sensors, maxRangeM);
         const MazeMap::WallObs rightObs =
             ::DriveBase::BuildLoggedRightSideObservation(sensors, maxRangeM);
-        const MazeMap::VehicleState::StateVector estimatorState = state.GetStateVector();
-
         row.master_time_us = _loopController.CurrentTickStartUs();
         row.control_tick_sequence = _loopController.CurrentTickSequence();
         row.dt_us = _loopController.CurrentTickDtUs();
@@ -519,15 +517,15 @@ namespace MazeMap::App::Internal
         row.ukf_mode_id = driveTelemetry.ukfModeId;
         row.ukf_yaw_valid_for_feedforward = driveTelemetry.ukfYawValidForFeedforward;
         row.bias_update_enabled = driveTelemetry.ukfBiasUpdateEnabled;
-        row.ukf_state_px_m = estimatorState(MazeMap::VehicleState::kPx);
-        row.ukf_state_py_m = estimatorState(MazeMap::VehicleState::kPy);
-        row.ukf_state_psi_rad = estimatorState(MazeMap::VehicleState::kPsi);
-        row.ukf_state_u_mps = estimatorState(MazeMap::VehicleState::kU);
-        row.ukf_state_v_mps = estimatorState(MazeMap::VehicleState::kV);
-        row.ukf_state_r_radps = estimatorState(MazeMap::VehicleState::kR);
-        row.ukf_state_omega_l_radps = estimatorState(MazeMap::VehicleState::kOmegaL);
-        row.ukf_state_omega_r_radps = estimatorState(MazeMap::VehicleState::kOmegaR);
-        row.ukf_state_bgz_radps = estimatorState(MazeMap::VehicleState::kBgz);
+        row.ukf_state_px_m = state.GetPositionX();
+        row.ukf_state_py_m = state.GetPositionY();
+        row.ukf_state_psi_rad = state.GetOrientation();
+        row.ukf_state_u_mps = state.GetVelocity();
+        row.ukf_state_v_mps = state.GetLateralVelocity();
+        row.ukf_state_r_radps = state.GetRotationalVelocity();
+        row.ukf_state_omega_l_radps = state.GetWheelSpeedLeft();
+        row.ukf_state_omega_r_radps = state.GetWheelSpeedRight();
+        row.ukf_state_bgz_radps = state.GetGyroBiasZ();
         row.gyro_bias_anchor_radps = driveTelemetry.ukfGyroBiasAnchorRadps;
         row.yaw_consistency_lp_radps = driveTelemetry.ukfYawConsistencyLowPassRadps;
         row.yaw_window_mismatch_rad = driveTelemetry.ukfYawWindowMismatchRad;

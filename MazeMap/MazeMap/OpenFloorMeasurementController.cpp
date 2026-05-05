@@ -1419,7 +1419,6 @@ namespace MazeMap::App::Internal
         const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
         const MazeMap::VehicleState::DriveCommandState& commandState = state.GetDriveCommandState();
         const MazeMap::DriveCommandPair appliedDriveCommand = state.GetAppliedDriveCommand();
-        const MazeMap::VehicleState::StateVector estimatorState = state.GetStateVector();
         const MazeMap::PlantPreparedParams& prepared = _runtime.Estimator().ukf().preparedParams();
         const float wheelRadiusM =
             (std::isfinite(prepared.wheelRadiusM) && (prepared.wheelRadiusM > 0.0f)) ?
@@ -1457,15 +1456,15 @@ namespace MazeMap::App::Internal
         row.nhc_sigma_mps = driveTelemetry.ukfNhcSigmaMps;
         row.nhc_residual_mps = driveTelemetry.ukfNhcResidualMps;
         row.nhc_residual_sigma = driveTelemetry.ukfNhcResidualSigma;
-        row.ukf_state_px_m = estimatorState(MazeMap::VehicleState::kPx);
-        row.ukf_state_py_m = estimatorState(MazeMap::VehicleState::kPy);
-        row.ukf_state_psi_rad = estimatorState(MazeMap::VehicleState::kPsi);
-        row.ukf_state_u_mps = estimatorState(MazeMap::VehicleState::kU);
-        row.ukf_state_v_mps = estimatorState(MazeMap::VehicleState::kV);
-        row.ukf_state_r_radps = estimatorState(MazeMap::VehicleState::kR);
-        row.ukf_state_omega_l_radps = estimatorState(MazeMap::VehicleState::kOmegaL);
-        row.ukf_state_omega_r_radps = estimatorState(MazeMap::VehicleState::kOmegaR);
-        row.ukf_state_bgz_radps = estimatorState(MazeMap::VehicleState::kBgz);
+        row.ukf_state_px_m = state.GetPositionX();
+        row.ukf_state_py_m = state.GetPositionY();
+        row.ukf_state_psi_rad = state.GetOrientation();
+        row.ukf_state_u_mps = state.GetVelocity();
+        row.ukf_state_v_mps = state.GetLateralVelocity();
+        row.ukf_state_r_radps = state.GetRotationalVelocity();
+        row.ukf_state_omega_l_radps = state.GetWheelSpeedLeft();
+        row.ukf_state_omega_r_radps = state.GetWheelSpeedRight();
+        row.ukf_state_bgz_radps = state.GetGyroBiasZ();
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;
         row.cmd_linear_mps = commandState.commandedLinearSpeedMps;

@@ -987,8 +987,7 @@ namespace MazeMap::App::Internal
         timing.controlTiming.ukfTotalDurationUs =
             timing.controlTiming.ukfPredictDurationUs + timing.controlTiming.ukfUpdateDurationUs;
 
-        runtimeState.SetStateVector(estimator.ukf().state());
-        runtimeState.SetCovariance(estimator.ukf().covariance());
+        estimator.SyncRuntimeState();
         runtimeState.SetDriveCommandState(driveCommandState);
         runtimeState.SetTimestampUs(tickStartUs);
         timing.frontTiming = snapshot.frontTiming;

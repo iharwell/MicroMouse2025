@@ -589,9 +589,9 @@ namespace MazeMap
             const float setpoint)
         {
             OscillationGeneratedCommand generated{};
-            const PlantModel::StateVector state = estimator.StateVector();
-            const float presentLinearSpeedMps = state(VehicleState::kU);
-            const float presentYawRateRadps = state(VehicleState::kR);
+            const VehicleState& runtimeState = estimator.RuntimeState();
+            const float presentLinearSpeedMps = runtimeState.GetVelocity();
+            const float presentYawRateRadps = runtimeState.GetRotationalVelocity();
             const float wheelRadiusM = estimator.ukf().preparedParams().wheelRadiusM;
 
             switch (pairingKind)
@@ -1104,7 +1104,8 @@ namespace MazeMap
                     scenario.dtSeconds);
 
                 const DriveTelemetry updatedTelemetry = drive.GetTelemetry();
-                const PlantModel::StateVector estimatorState = driveHarness.estimator.StateVector();
+                const PlantModel::StateVector estimatorState =
+                    BuildUkfStateVector(driveHarness.estimator.RuntimeState());
                 const MazeMap::PlantDerivatives estimatorDerivatives =
                     plant.forwardStep(estimatorState, control, params);
 
@@ -1487,7 +1488,7 @@ namespace MazeMap
                     MazeMap::CommandPD::RawCommand);
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(
-                    driveHarness.estimator.StateVector(),
+                    BuildUkfStateVector(driveHarness.estimator.RuntimeState()),
                     0.20f,
                     0.0f,
                     params,
@@ -1514,7 +1515,7 @@ namespace MazeMap
                     MazeMap::CommandPD::RawCommand);
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(
-                    driveHarness.estimator.StateVector(),
+                    BuildUkfStateVector(driveHarness.estimator.RuntimeState()),
                     0.20f,
                     0.40f,
                     params,
@@ -1540,7 +1541,7 @@ namespace MazeMap
                     MazeMap::CommandPD::RawCommand);
             const DriveCommandSolution solution =
                 plant.solveDriveCommandsForVelocityTarget(
-                    driveHarness.estimator.StateVector(),
+                    BuildUkfStateVector(driveHarness.estimator.RuntimeState()),
                     0.0f,
                     0.40f,
                     params,
@@ -1826,8 +1827,7 @@ namespace MazeMap
                     rightEncoderRemainderCounts,
                     kDriveBaseLoopDtSeconds);
             }
-            const float presentLinearSpeedMps =
-                driveHarness.estimator.StateVector()(VehicleState::kU);
+            const float presentLinearSpeedMps = driveHarness.estimator.RuntimeState().GetVelocity();
 
             const ControlVector rawCommand =
                 drive.DeltaCommand(

@@ -162,7 +162,10 @@ namespace MazeMap
             const float wheelOmegaRadps = 0.5f * (tuning.stationaryEncoderVelocitySigmaMps / PlantParams::Default().wheelRadiusM);
             stateVector(VehicleState::kOmegaL) = wheelOmegaRadps;
             stateVector(VehicleState::kOmegaR) = wheelOmegaRadps;
-            state.SetStateVector(stateVector);
+            state.SetVelocity(stateVector(VehicleState::kU));
+            state.SetRotationalVelocity(stateVector(VehicleState::kR));
+            state.SetWheelSpeedLeft(stateVector(VehicleState::kOmegaL));
+            state.SetWheelSpeedRight(stateVector(VehicleState::kOmegaR));
             Assert::IsTrue(state.IsStationary());
 
             SrUkfCore::ResetRuntimeTuning();

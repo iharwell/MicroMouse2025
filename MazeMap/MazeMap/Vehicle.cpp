@@ -102,6 +102,37 @@ namespace
             MazeMap::PlantModel::Prepare(GetDefaultProgressPlantParams());
         return kPrepared;
     }
+
+    MazeMap::VehicleState::StateVector BuildPlantStateVector(
+        const MazeMap::VehicleState& state) noexcept
+    {
+        MazeMap::VehicleState::StateVector result = MazeMap::VehicleState::StateVector::Zero();
+        result(MazeMap::VehicleState::kPx) = state.GetPositionX();
+        result(MazeMap::VehicleState::kPy) = state.GetPositionY();
+        result(MazeMap::VehicleState::kPsi) = state.GetOrientation();
+        result(MazeMap::VehicleState::kU) = state.GetVelocity();
+        result(MazeMap::VehicleState::kV) = state.GetLateralVelocity();
+        result(MazeMap::VehicleState::kR) = state.GetRotationalVelocity();
+        result(MazeMap::VehicleState::kOmegaL) = state.GetWheelSpeedLeft();
+        result(MazeMap::VehicleState::kOmegaR) = state.GetWheelSpeedRight();
+        result(MazeMap::VehicleState::kBgz) = state.GetGyroBiasZ();
+        MazeMap::VehicleState::NormalizeStateVector(result);
+        return result;
+    }
+
+    void ApplyPlantStateVector(
+        MazeMap::VehicleState& state,
+        const MazeMap::VehicleState::StateVector& vector) noexcept
+    {
+        state.SetPosition(Eigen::Vector2f(vector(MazeMap::VehicleState::kPx), vector(MazeMap::VehicleState::kPy)));
+        state.SetOrientation(vector(MazeMap::VehicleState::kPsi));
+        state.SetVelocity(vector(MazeMap::VehicleState::kU));
+        state.SetLateralVelocity(vector(MazeMap::VehicleState::kV));
+        state.SetRotationalVelocity(vector(MazeMap::VehicleState::kR));
+        state.SetWheelSpeedLeft(vector(MazeMap::VehicleState::kOmegaL));
+        state.SetWheelSpeedRight(vector(MazeMap::VehicleState::kOmegaR));
+        state.SetGyroBiasZ(vector(MazeMap::VehicleState::kBgz));
+    }
 }
 
 namespace MazeMap
@@ -168,9 +199,10 @@ namespace MazeMap
         PlantModel plantModel;
         projectedState.SetTime(previousState.GetTime() + timeDelta);
         projectedState.SetControlInput(previousState.GetControlInput());
-        projectedState.SetStateVector(
+        ApplyPlantStateVector(
+            projectedState,
             plantModel.integrate(
-                previousState.GetStateVector(),
+                BuildPlantStateVector(previousState),
                 previousState.GetControlInput(),
                 timeDelta,
                 GetDefaultProgressPreparedPlantParams()));

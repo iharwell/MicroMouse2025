@@ -31,7 +31,7 @@ namespace MazeMap
         const MapEvidenceUpdater& mapEvidence() const noexcept { return _mapEvidence; }
         VehicleState& RuntimeState() noexcept { return *_runtimeState; }
         const VehicleState& RuntimeState() const noexcept { return *_runtimeState; }
-        const VehicleState::StateVector& StateVector() const noexcept { return _core.state(); }
+        void SyncRuntimeState() noexcept;
         bool HasFault() const noexcept { return _faulted; }
         const char* FaultReason() const noexcept
         {
@@ -337,7 +337,6 @@ namespace MazeMap
             const SensorSnapshot& snapshot,
             float dtSeconds) noexcept;
         void ResetRuntimeMetadata() noexcept;
-        void SyncRuntimeState() noexcept;
         void TriggerFault(const char* reason) noexcept;
 
         SrUkfCore _core;
