@@ -212,7 +212,6 @@ namespace MazeMap::App::Internal
             virtual float SpeedBinValue(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept = 0;
-            virtual bool GroupPrimitives() const noexcept { return false; }
             virtual bool EnsureReady(OpenFloorMeasurementController& controller);
             virtual LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
@@ -293,7 +292,7 @@ namespace MazeMap::App::Internal
             const char* Title() const noexcept override { return "Yaw Launch"; }
             MeasurementLogId LogId() const noexcept override { return kLogId; }
             std::uint16_t PrimitiveCount() const noexcept override { return 2U; }
-            std::uint8_t SpeedCount() const noexcept override { return 10U; }
+            std::uint8_t SpeedCount() const noexcept override { return 5U; }
             std::uint16_t RepeatCount() const noexcept override { return 10U; }
             MazeMap::ManeuverCode PrimitiveCode(
                 std::uint16_t primitiveIndex,
@@ -307,7 +306,7 @@ namespace MazeMap::App::Internal
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override
             {
-                return (0.3f + speedIndex * 0.05f) * ((primitiveIndex == 0U) ? 1.0f : -1.0f);
+                return (0.5f + speedIndex * 0.05f) * ((primitiveIndex == 0U) ? 1.0f : -1.0f);
             }
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
@@ -322,9 +321,9 @@ namespace MazeMap::App::Internal
                 {
                     _counter = 0U;
                     // In this regime, no need to wait to prime drive since we won't use it for anything but the closing hold.
-                    controller._driveService.StartHold(250U, true);
+                    controller._driveService.StartHold(350U, false);
 				}
-                if (_counter < 250U)
+                if (_counter < 350U)
                 {
                     _counter++;
 					// Since the actual drive values are already calculated for logging purposes,
@@ -419,7 +418,6 @@ namespace MazeMap::App::Internal
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
-            bool GroupPrimitives() const noexcept override { return true; }
             bool EnsureReady(OpenFloorMeasurementController& controller) override;
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,
@@ -471,7 +469,6 @@ namespace MazeMap::App::Internal
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
-            bool GroupPrimitives() const noexcept override { return true; }
             bool EnsureReady(OpenFloorMeasurementController& controller) override;
             LoopController::ControlVector Tick(
                 OpenFloorMeasurementController& controller,

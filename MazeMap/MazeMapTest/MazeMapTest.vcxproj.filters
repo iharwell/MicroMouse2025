@@ -56,6 +56,9 @@
     <ClCompile Include="DirectionTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DirectionalPathFinderTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="DiagnosticCoverageTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

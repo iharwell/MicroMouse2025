@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace
 {
@@ -69,6 +70,19 @@ namespace
         limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
         limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
         return limits;
+    }
+
+    MotionLimits BuildOpenFloorMeasurementModeLimits(const MazeMap::Vehicle& vehicle) noexcept
+    {
+        return BuildOpenFloorMeasurementLimits(vehicle, std::numeric_limits<float>::infinity());
+    }
+
+    void ResetOpenFloorModeLimits(
+        Drive& driveService,
+        const MazeMap::Vehicle& vehicle) noexcept
+    {
+        driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+        driveService.SetLimits(BuildOpenFloorMeasurementModeLimits(vehicle));
     }
 
     LoopController::ControlVector StopControlVector() noexcept
@@ -1189,6 +1203,10 @@ namespace MazeMap::App::Internal
 
         if (done)
         {
+            if (IsCurrentSlotLastInRegime())
+            {
+                ResetOpenFloorModeLimits(controller._driveService, controller._vehicle);
+            }
             _completionPending = !AdvanceIndices();
         }
 
@@ -1204,38 +1222,19 @@ namespace MazeMap::App::Internal
     bool OpenFloorMeasurementController::MainStage::AdvanceIndices() noexcept
     {
         MainMeasurementRegime& regime = ActiveRegime();
-        if (!regime.GroupPrimitives())
+        ++_activePrimitiveIndex;
+        if (_activePrimitiveIndex < regime.PrimitiveCount())
         {
-            ++_activeRepeatIndex;
-            if (_activeRepeatIndex < regime.RepeatCount())
-            {
-                return true;
-            }
-
-            _activeRepeatIndex = 0U;
-            ++_activePrimitiveIndex;
-            if (_activePrimitiveIndex < regime.PrimitiveCount())
-            {
-                return true;
-            }
-        }
-        else
-        {
-            ++_activePrimitiveIndex;
-            if (_activePrimitiveIndex < regime.PrimitiveCount())
-            {
-                return true;
-            }
-
-            _activePrimitiveIndex = 0U;
-            ++_activeRepeatIndex;
-            if (_activeRepeatIndex < regime.RepeatCount())
-            {
-                return true;
-            }
+            return true;
         }
 
         _activePrimitiveIndex = 0U;
+        ++_activeRepeatIndex;
+        if (_activeRepeatIndex < regime.RepeatCount())
+        {
+            return true;
+        }
+
         _activeRepeatIndex = 0U;
         ++_activeSpeedIndex;
         if (_activeSpeedIndex < regime.SpeedCount())
@@ -1324,7 +1323,7 @@ namespace MazeMap::App::Internal
         }
         SetMissionLevelFanEnabled(true);
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-        _driveService.SetLimits(BuildOpenFloorMeasurementLimits(_vehicle, 0.0f));
+        _driveService.SetLimits(BuildOpenFloorMeasurementModeLimits(_vehicle));
 
         ConfigureSelectorMonitor();
         if (SelectorRemoved())
