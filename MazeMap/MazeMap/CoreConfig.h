@@ -251,7 +251,7 @@ namespace MazeMap::Config
     // [Medium] Active-high vacuum-fan duty during each racing run, including the finish hold before returning to
     // start. Raise only if additional downforce is worth the power draw and thermal cost; lower if traction is already
     // sufficient or the fan system runs too hot.
-    constexpr float kRacingFanDutyCycle = 1.0f;
+    constexpr float kRacingFanDutyCycle = 0.8f;
     // [Medium] Soft-start time for the vacuum fan in diagnostic and racing modes. Increase if the drivetrain or power
     // rail reacts poorly to a full-step fan start; decrease if you need full downforce sooner.
     constexpr uint16_t kRacingFanRampMs = 2000U;

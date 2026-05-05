@@ -15,6 +15,7 @@
 #include "StartupCalibration.h"
 
 #include <cmath>
+#include <cstdio>
 
 namespace
 {
@@ -27,7 +28,6 @@ namespace
     constexpr const char* kOpenFloorMeasurementStableId = "open_floor_measurement";
     constexpr const char* kOpenFloorMeasurementSelectorRemovedReason =
         "Open-floor measurement selector jumper removed";
-    constexpr MazeMap::ManeuverCode kOpenFloorMeasurementSpeedChangeStraightCode = MazeMap::S1;
     constexpr MazeMap::ManeuverCode kOpenFloorMeasurementLoopStraightCode = MazeMap::S2;
     constexpr std::array<MazeMap::ManeuverCode, 26U> kOpenFloorMeasurementSmoothCycleCodes = { {
         MazeMap::S135LS,
@@ -120,6 +120,29 @@ namespace
 
 namespace MazeMap::App::Internal
 {
+    OpenFloorMeasurementController::MainStage
+        OpenFloorMeasurementController::BuildRegisteredMainStage() noexcept
+    {
+        static MainMeasurementRegime* const regimes[] = {
+            &StaticMeasurementRegime::SharedInstance(),
+            &LaunchMeasurementRegime::SharedInstance(),
+            &YawLaunchMeasurementRegime::SharedInstance(),
+            &StraightMeasurementRegime::SharedInstance(),
+            &YawMeasurementRegime::SharedInstance(),
+            &SmoothMeasurementRegime::SharedInstance(),
+            &LoopMeasurementRegime::ClockwiseSharedInstance(),
+            &LoopMeasurementRegime::CounterClockwiseSharedInstance(),
+        };
+        return MainStage(regimes, sizeof(regimes) / sizeof(regimes[0]));
+    }
+
+    bool OpenFloorMeasurementController::MainMeasurementRegime::EnsureReady(
+        OpenFloorMeasurementController& controller)
+    {
+        (void)controller;
+        return true;
+    }
+
     OpenFloorMeasurementController::OpenFloorMeasurementController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
@@ -128,32 +151,17 @@ namespace MazeMap::App::Internal
         , _drive(runtime.Drive())
         , _driveService(runtime.DriveService())
         , _startupCalibration(runtime.StartupCalibrationService())
-        , _staticRegime(runtime)
-        , _launchRegime(runtime)
-        , _straightRegime(runtime)
-        , _yawRegime(runtime)
-        , _smoothRegime(runtime)
-        , _clockwiseLoopRegime(runtime, MeasurementPhaseId::LoopClockwise, true)
-        , _counterClockwiseLoopRegime(runtime, MeasurementPhaseId::LoopCounterClockwise, false)
-        , _mainRegimes{
-            &_staticRegime,
-            &_launchRegime,
-            &_straightRegime,
-            &_yawRegime,
-            &_smoothRegime,
-            &_clockwiseLoopRegime,
-            &_counterClockwiseLoopRegime,
-        }
-        , _mainStage(_mainRegimes.data(), _mainRegimes.size())
+        , _mainStage(BuildRegisteredMainStage())
     {
     }
 
     OpenFloorMeasurementController::~OpenFloorMeasurementController() = default;
 
-    OpenFloorMeasurementController::StaticMeasurementRegime::StaticMeasurementRegime(
-        SharedRobotRuntime& runtime) noexcept
-        : _runtime(runtime)
+    OpenFloorMeasurementController::StaticMeasurementRegime&
+        OpenFloorMeasurementController::StaticMeasurementRegime::SharedInstance() noexcept
     {
+        static StaticMeasurementRegime regime{};
+        return regime;
     }
 
     const char* OpenFloorMeasurementController::StaticMeasurementRegime::Title() const noexcept
@@ -161,10 +169,10 @@ namespace MazeMap::App::Internal
         return "static";
     }
 
-    OpenFloorMeasurementController::MeasurementPhaseId
+    OpenFloorMeasurementController::MeasurementLogId
         OpenFloorMeasurementController::StaticMeasurementRegime::LogId() const noexcept
     {
-        return MeasurementPhaseId::Static;
+        return kLogId;
     }
 
     std::uint16_t
@@ -184,9 +192,11 @@ namespace MazeMap::App::Internal
     }
 
     MazeMap::ManeuverCode OpenFloorMeasurementController::StaticMeasurementRegime::PrimitiveCode(
-        const std::uint16_t primitiveIndex) const noexcept
+        const std::uint16_t primitiveIndex,
+        const std::uint8_t speedIndex) const noexcept
     {
         (void)primitiveIndex;
+        (void)speedIndex;
         return MazeMap::MC_NONE;
     }
 
@@ -200,6 +210,7 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::StaticMeasurementRegime::Tick(
+        OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
         bool& done)
@@ -207,14 +218,12 @@ namespace MazeMap::App::Internal
         (void)primitiveIndex;
         (void)speedIndex;
 
-        auto& driveService = _runtime.DriveService();
+        Drive& driveService = controller._driveService;
         if (_needsStart)
         {
             const unsigned long totalHoldMs =
                 static_cast<unsigned long>(DiagnosticConfig::kStaticHoldMs) +
                 MazeMap::kOpenFloorInterPhaseHoldMs;
-            driveService.SetLimits(BuildOpenFloorMeasurementLimits(_runtime.SpeedVehicle(), 0.0f));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             driveService.StartHold(totalHoldMs, false);
             _needsStart = false;
         }
@@ -227,10 +236,11 @@ namespace MazeMap::App::Internal
         return control;
     }
 
-    OpenFloorMeasurementController::LaunchMeasurementRegime::LaunchMeasurementRegime(
-        SharedRobotRuntime& runtime) noexcept
-        : _runtime(runtime)
+    OpenFloorMeasurementController::LaunchMeasurementRegime&
+        OpenFloorMeasurementController::LaunchMeasurementRegime::SharedInstance() noexcept
     {
+        static LaunchMeasurementRegime regime{};
+        return regime;
     }
 
     const char* OpenFloorMeasurementController::LaunchMeasurementRegime::Title() const noexcept
@@ -238,32 +248,34 @@ namespace MazeMap::App::Internal
         return "launch";
     }
 
-    OpenFloorMeasurementController::MeasurementPhaseId
+    OpenFloorMeasurementController::MeasurementLogId
         OpenFloorMeasurementController::LaunchMeasurementRegime::LogId() const noexcept
     {
-        return MeasurementPhaseId::Launch;
+        return kLogId;
     }
 
     std::uint16_t
         OpenFloorMeasurementController::LaunchMeasurementRegime::PrimitiveCount() const noexcept
     {
-        return 1U;
+        return 2U;
     }
 
     std::uint8_t OpenFloorMeasurementController::LaunchMeasurementRegime::SpeedCount() const noexcept
     {
-        return 1U;
+        return static_cast<std::uint8_t>(MazeMap::kOpenFloorLaunchDriveMagnitudeCount);
     }
 
     std::uint16_t OpenFloorMeasurementController::LaunchMeasurementRegime::RepeatCount() const noexcept
     {
-        return static_cast<std::uint16_t>(kLaunchPhaseSlotCount);
+        return MazeMap::kOpenFloorLaunchRepeatsPerMagnitude;
     }
 
     MazeMap::ManeuverCode OpenFloorMeasurementController::LaunchMeasurementRegime::PrimitiveCode(
-        const std::uint16_t primitiveIndex) const noexcept
+        const std::uint16_t primitiveIndex,
+        const std::uint8_t speedIndex) const noexcept
     {
         (void)primitiveIndex;
+        (void)speedIndex;
         return MazeMap::MC_NONE;
     }
 
@@ -271,66 +283,57 @@ namespace MazeMap::App::Internal
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex) const noexcept
     {
-        (void)primitiveIndex;
-        (void)speedIndex;
+        if (speedIndex >= SpeedCount())
+        {
+            return 0.0f;
+        }
+
+        const float magnitude = MazeMap::kOpenFloorLaunchDriveMagnitudes[speedIndex];
+        if (primitiveIndex == 0U)
+        {
+            return magnitude;
+        }
+        if (primitiveIndex == 1U)
+        {
+            return -magnitude;
+        }
         return 0.0f;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::LaunchMeasurementRegime::Tick(
+        OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
         bool& done)
     {
-        (void)primitiveIndex;
-        (void)speedIndex;
-
-        auto& driveService = _runtime.DriveService();
-        if (_needsStart)
+        Drive& driveService = controller._driveService;
+        const float driveCommand = SpeedBinValue(primitiveIndex, speedIndex);
+        if (_tickCounter < kPulseTickCount)
         {
-            const std::uint16_t slotsPerMagnitude =
-                static_cast<std::uint16_t>(MazeMap::kOpenFloorLaunchRepeatsPerMagnitude * 2U);
-            const std::uint16_t magnitudeIndex = _repeatIndex / slotsPerMagnitude;
-            const std::uint16_t slotWithinMagnitude = _repeatIndex % slotsPerMagnitude;
-            const float sign = ((slotWithinMagnitude % 2U) == 0U) ? 1.0f : -1.0f;
-            const float magnitude = MazeMap::kOpenFloorLaunchDriveMagnitudes[magnitudeIndex];
-
-            _activeLeftCommand = magnitude * sign;
-            _activeRightCommand = magnitude * sign;
-            _deadlineMs = millis() + static_cast<std::uint32_t>(MazeMap::kOpenFloorLaunchPulseMs);
-            _holdActive = false;
-            _needsStart = false;
+            ++_tickCounter;
+            done = false;
+            return LoopController::ControlVector::RawMotorPwm(driveCommand, driveCommand);
         }
 
-        if (!_holdActive)
+        if (_tickCounter == kPulseTickCount)
         {
-            if (static_cast<long>(_deadlineMs - millis()) > 0)
-            {
-                done = false;
-                return LoopController::ControlVector::RawMotorPwm(
-                    _activeLeftCommand,
-                    _activeRightCommand);
-            }
-
-            driveService.SetLimits(BuildOpenFloorMeasurementLimits(_runtime.SpeedVehicle(), 0.0f));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs, false);
-            _holdActive = true;
+            ++_tickCounter;
         }
 
         const LoopController::ControlVector holdControl = driveService.GetNextControls(done);
         if (done)
         {
-            _repeatIndex = static_cast<std::uint16_t>((_repeatIndex + 1U) % RepeatCount());
-            _needsStart = true;
-            _holdActive = false;
+            _tickCounter = 0U;
         }
         return holdControl;
     }
 
-    OpenFloorMeasurementController::StraightMeasurementRegime::StraightMeasurementRegime(
-        SharedRobotRuntime& runtime) noexcept
-        : _runtime(runtime)
+    OpenFloorMeasurementController::StraightMeasurementRegime&
+        OpenFloorMeasurementController::StraightMeasurementRegime::SharedInstance() noexcept
     {
+        static StraightMeasurementRegime regime{};
+        return regime;
     }
 
     const char* OpenFloorMeasurementController::StraightMeasurementRegime::Title() const noexcept
@@ -338,16 +341,16 @@ namespace MazeMap::App::Internal
         return "straight";
     }
 
-    OpenFloorMeasurementController::MeasurementPhaseId
+    OpenFloorMeasurementController::MeasurementLogId
         OpenFloorMeasurementController::StraightMeasurementRegime::LogId() const noexcept
     {
-        return MeasurementPhaseId::Straight;
+        return kLogId;
     }
 
     std::uint16_t
         OpenFloorMeasurementController::StraightMeasurementRegime::PrimitiveCount() const noexcept
     {
-        return 1U;
+        return 2U;
     }
 
     std::uint8_t OpenFloorMeasurementController::StraightMeasurementRegime::SpeedCount() const noexcept
@@ -357,13 +360,15 @@ namespace MazeMap::App::Internal
 
     std::uint16_t OpenFloorMeasurementController::StraightMeasurementRegime::RepeatCount() const noexcept
     {
-        return static_cast<std::uint16_t>(kStraightPhaseRepeatSlotCount);
+        return MazeMap::kOpenFloorStraightRepeatsPerSpeed;
     }
 
     MazeMap::ManeuverCode OpenFloorMeasurementController::StraightMeasurementRegime::PrimitiveCode(
-        const std::uint16_t primitiveIndex) const noexcept
+        const std::uint16_t primitiveIndex,
+        const std::uint8_t speedIndex) const noexcept
     {
         (void)primitiveIndex;
+        (void)speedIndex;
         return MazeMap::S4;
     }
 
@@ -371,89 +376,56 @@ namespace MazeMap::App::Internal
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex) const noexcept
     {
-        (void)primitiveIndex;
-        return
-            (speedIndex < static_cast<std::uint8_t>(MazeMap::kOpenFloorStraightSpeedBinsMps.size())) ?
-                MazeMap::kOpenFloorStraightSpeedBinsMps[speedIndex] :
-                0.0f;
+        if (speedIndex >= SpeedCount())
+        {
+            return 0.0f;
+        }
+
+        const std::uint8_t magnitudeIndex = static_cast<std::uint8_t>(speedIndex);
+        const float magnitude = MazeMap::kOpenFloorStraightSpeedBinsMps[magnitudeIndex];
+        return (primitiveIndex) ? magnitude : -magnitude;
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::StraightMeasurementRegime::Tick(
+        OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
         bool& done)
     {
-        (void)primitiveIndex;
-
-        auto& driveService = _runtime.DriveService();
-        if ((!_selectionValid) || (_activeSpeedIndex != speedIndex))
-        {
-            _selectionValid = true;
-            _activeSpeedIndex = speedIndex;
-            _repeatIndex = 0U;
-            _needsStart = true;
-            _holdActive = false;
-        }
-
-        if (_needsStart)
-        {
-            const float speedMagnitudeMps = MazeMap::kOpenFloorStraightSpeedBinsMps[_activeSpeedIndex];
-            const float direction = ((_repeatIndex % 2U) == 0U) ? 1.0f : -1.0f;
-            const float activeSpeedMps = direction * speedMagnitudeMps;
-
-            driveService.SetLimits(
-                BuildOpenFloorMeasurementLimits(
-                    _runtime.SpeedVehicle(),
-                    std::fabs(activeSpeedMps)));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartStraight(
-                MazeMap::OpenFloorStrEquivalentDistanceMeters(4U),
-                activeSpeedMps,
-                0.0f);
-            _holdActive = false;
-            _needsStart = false;
-        }
-
-        if (_holdActive)
-        {
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
-            {
-                _repeatIndex = static_cast<std::uint16_t>((_repeatIndex + 1U) % RepeatCount());
-                _needsStart = true;
-                _holdActive = false;
-            }
-            return control;
-        }
-
+        done = false;
+        Drive& driveService = controller._driveService;
         if (driveService.IsEffectivelyComplete())
         {
-            driveService.SetLimits(BuildOpenFloorMeasurementLimits(_runtime.SpeedVehicle(), 0.0f));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs, false);
-            _holdActive = true;
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
+            if (_donesDetected == 0U)
             {
-                _repeatIndex = static_cast<std::uint16_t>((_repeatIndex + 1U) % RepeatCount());
-                _needsStart = true;
-                _holdActive = false;
+                // We just entered the regime motion.
+                const float activeSpeedMps = SpeedBinValue(primitiveIndex, speedIndex);
+                driveService.StartStraight(
+                    MazeMap::OpenFloorStrEquivalentDistanceMeters(4U),
+                    activeSpeedMps,
+                    0.0f);
             }
-            return control;
+			else if (_donesDetected == 1U)
+            {
+                driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs - 1, false);
+            }
+            else
+            {
+                // Final hold complete.
+                _donesDetected = 0;
+                return driveService.GetNextControls(done);
+            }
+            _donesDetected++;
         }
-
-        const LoopController::ControlVector control = driveService.GetNextControls(done);
-        if (done)
-        {
-            done = false;
-        }
-        return control;
+        bool doneLocal;
+        return driveService.GetNextControls(doneLocal);
     }
 
-    OpenFloorMeasurementController::YawMeasurementRegime::YawMeasurementRegime(
-        SharedRobotRuntime& runtime) noexcept
-        : _runtime(runtime)
+    OpenFloorMeasurementController::YawMeasurementRegime&
+        OpenFloorMeasurementController::YawMeasurementRegime::SharedInstance() noexcept
     {
+        static YawMeasurementRegime regime{};
+        return regime;
     }
 
     const char* OpenFloorMeasurementController::YawMeasurementRegime::Title() const noexcept
@@ -461,10 +433,10 @@ namespace MazeMap::App::Internal
         return "yaw";
     }
 
-    OpenFloorMeasurementController::MeasurementPhaseId
+    OpenFloorMeasurementController::MeasurementLogId
         OpenFloorMeasurementController::YawMeasurementRegime::LogId() const noexcept
     {
-        return MeasurementPhaseId::Yaw;
+        return kLogId;
     }
 
     std::uint16_t OpenFloorMeasurementController::YawMeasurementRegime::PrimitiveCount() const noexcept
@@ -482,12 +454,14 @@ namespace MazeMap::App::Internal
 
     std::uint16_t OpenFloorMeasurementController::YawMeasurementRegime::RepeatCount() const noexcept
     {
-        return static_cast<std::uint16_t>(DiagnosticConfig::kYawRepeatsPerPrimitiveSpeed);
+        return kRepeatCount;
     }
 
     MazeMap::ManeuverCode OpenFloorMeasurementController::YawMeasurementRegime::PrimitiveCode(
-        const std::uint16_t primitiveIndex) const noexcept
+        const std::uint16_t primitiveIndex,
+        const std::uint8_t speedIndex) const noexcept
     {
+        (void)speedIndex;
         return
             (primitiveIndex < PrimitiveCount()) ?
                 MazeMap::kOpenFloorYawManeuverCodes[primitiveIndex] :
@@ -506,128 +480,60 @@ namespace MazeMap::App::Internal
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::YawMeasurementRegime::Tick(
+        OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
         bool& done)
     {
-        auto& driveService = _runtime.DriveService();
-        if ((!_selectionValid) ||
-            (_activePrimitiveIndex != primitiveIndex) ||
-            (_activeSpeedIndex != speedIndex))
-        {
-            _selectionValid = true;
-            _activePrimitiveIndex = primitiveIndex;
-            _activeSpeedIndex = speedIndex;
-            _needsStart = true;
-            _holdActive = false;
-        }
-
-        if (_needsStart)
-        {
-            const float activeYawRad = MazeMap::kOpenFloorYawNominalAnglesRad[_activePrimitiveIndex];
-            const float activeMaxOmegaRadps = MazeMap::kOpenFloorYawOmegaBinsRadps[_activeSpeedIndex];
-
-            MotionLimits limits = BuildOpenFloorMeasurementLimits(_runtime.SpeedVehicle(), 0.0f);
-            limits.maxAngularSpeedRadps = activeMaxOmegaRadps;
-            driveService.SetLimits(limits);
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartTurn(activeYawRad);
-            _holdActive = false;
-            _needsStart = false;
-        }
-
-        if (_holdActive)
-        {
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
-            {
-                _needsStart = true;
-                _holdActive = false;
-            }
-            return control;
-        }
-
+        done = false;
+        Drive& driveService = controller._driveService;
         if (driveService.IsEffectivelyComplete())
         {
-            driveService.SetLimits(BuildOpenFloorMeasurementLimits(_runtime.SpeedVehicle(), 0.0f));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs, false);
-            _holdActive = true;
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
+            if (_donesDetected == 0U)
             {
-                _needsStart = true;
-                _holdActive = false;
+                MotionLimits limits = BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f);
+                limits.maxAngularSpeedRadps = SpeedBinValue(primitiveIndex, speedIndex);
+                driveService.SetLimits(limits);
+                driveService.StartTurn(MazeMap::kOpenFloorYawNominalAnglesRad[primitiveIndex]);
             }
-            return control;
+            else if (_donesDetected == 1U)
+            {
+                driveService.StartHold(MazeMap::kOpenFloorPostSegmentHoldMs, false);
+            }
+            else
+            {
+                _donesDetected = 0U;
+                return driveService.GetNextControls(done);
+            }
+            ++_donesDetected;
         }
 
-        const LoopController::ControlVector control = driveService.GetNextControls(done);
-        if (done)
-        {
-            done = false;
-        }
-        return control;
+        bool doneLocal = false;
+        return driveService.GetNextControls(doneLocal);
     }
 
-    OpenFloorMeasurementController::SmoothMeasurementRegime::SmoothMeasurementRegime(
-        SharedRobotRuntime& runtime)
-        : _runtime(runtime)
+    OpenFloorMeasurementController::SmoothMeasurementRegime&
+        OpenFloorMeasurementController::SmoothMeasurementRegime::SharedInstance() noexcept
+    {
+        static SmoothMeasurementRegime regime{};
+        return regime;
+    }
+
+    OpenFloorMeasurementController::SmoothMeasurementRegime::SmoothMeasurementRegime() noexcept
     {
         _primitiveCodes.fill(MazeMap::MC_NONE);
-        _speedLimitsMps.fill(0.0f);
-        _speedBinValues.fill(0.0f);
-
-        float entryBoundarySpeedMps = 0.0f;
-        std::uint16_t primitiveIndex = 0U;
-        for (std::size_t speedIndex = 0U; speedIndex < MazeMap::kOpenFloorSmoothSpeedBinsMps.size(); ++speedIndex)
+        _primitiveCodes[0] = kOpenFloorMeasurementLoopStraightCode;
+        for (std::size_t primitiveIndex = 0U;
+             primitiveIndex < kOpenFloorMeasurementSmoothCycleCodes.size();
+             ++primitiveIndex)
         {
-            MazeMap::ManeuverQueue queue{};
-            float exitBoundarySpeedMps = 0.0f;
-            if (!BuildQueue(
-                    _runtime.SpeedVehicle(),
-                    static_cast<std::uint8_t>(speedIndex),
-                    MazeMap::kOpenFloorSmoothSpeedBinsMps[speedIndex],
-                    entryBoundarySpeedMps,
-                    queue,
-                    exitBoundarySpeedMps) ||
-                queue.empty() ||
-                ((primitiveIndex + static_cast<std::uint16_t>(queue.size())) >
-                    static_cast<std::uint16_t>(_maneuvers.size())))
-            {
-                _valid = false;
-                break;
-            }
-
-            const bool isLastSpeedBin =
-                (speedIndex + 1U) >= MazeMap::kOpenFloorSmoothSpeedBinsMps.size();
-            const float speedBinValue = MazeMap::kOpenFloorSmoothSpeedBinsMps[speedIndex];
-            const std::uint16_t queueSize = static_cast<std::uint16_t>(queue.size());
-            for (std::uint16_t queuePrimitiveIndex = 0U;
-                 queuePrimitiveIndex < queueSize;
-                 ++queuePrimitiveIndex)
-            {
-                const bool isClosingStraight =
-                    isLastSpeedBin &&
-                    (queueSize > static_cast<std::uint16_t>(kSmoothPhasePrimitiveCountPerSpeed)) &&
-                    ((queuePrimitiveIndex + 1U) == queueSize);
-                _primitiveCodes[primitiveIndex] =
-                    (queuePrimitiveIndex == 0U) || isClosingStraight ?
-                        kOpenFloorMeasurementSpeedChangeStraightCode :
-                        kOpenFloorMeasurementSmoothCycleCodes[queuePrimitiveIndex - 1U];
-                _maneuvers[primitiveIndex] = queue[queuePrimitiveIndex];
-                _speedLimitsMps[primitiveIndex] = MazeMap::kOpenFloorSmoothSpeedBinsMps[speedIndex];
-                _speedBinValues[primitiveIndex] = speedBinValue;
-                ++primitiveIndex;
-            }
-
-            entryBoundarySpeedMps = exitBoundarySpeedMps;
+            _primitiveCodes[primitiveIndex + 1U] = kOpenFloorMeasurementSmoothCycleCodes[primitiveIndex];
         }
 
-        _primitiveCount = _valid ? primitiveIndex : 0U;
-        if (_primitiveCount != static_cast<std::uint16_t>(_maneuvers.size()))
+        _primitiveCount = static_cast<std::uint16_t>(_primitiveCodes.size());
+        if ((static_cast<std::size_t>(_primitiveCount) * kOpenFloorSmoothSpeedBinsMps.size()) !=
+            _maneuvers.size())
         {
-            _valid = false;
             _primitiveCount = 0U;
         }
     }
@@ -637,20 +543,20 @@ namespace MazeMap::App::Internal
         return "smooth";
     }
 
-    OpenFloorMeasurementController::MeasurementPhaseId
+    OpenFloorMeasurementController::MeasurementLogId
         OpenFloorMeasurementController::SmoothMeasurementRegime::LogId() const noexcept
     {
-        return MeasurementPhaseId::Smooth;
+        return kLogId;
     }
 
     std::uint16_t OpenFloorMeasurementController::SmoothMeasurementRegime::PrimitiveCount() const noexcept
     {
-        return _valid ? _primitiveCount : 0U;
+        return _primitiveCount;
     }
 
     std::uint8_t OpenFloorMeasurementController::SmoothMeasurementRegime::SpeedCount() const noexcept
     {
-        return 1U;
+        return static_cast<std::uint8_t>(MazeMap::kOpenFloorSmoothSpeedBinsMps.size());
     }
 
     std::uint16_t OpenFloorMeasurementController::SmoothMeasurementRegime::RepeatCount() const noexcept
@@ -659,134 +565,159 @@ namespace MazeMap::App::Internal
     }
 
     MazeMap::ManeuverCode OpenFloorMeasurementController::SmoothMeasurementRegime::PrimitiveCode(
-        const std::uint16_t primitiveIndex) const noexcept
+        const std::uint16_t primitiveIndex,
+        const std::uint8_t speedIndex) const noexcept
     {
-        return
-            (primitiveIndex < PrimitiveCount()) ?
-                _primitiveCodes[primitiveIndex] :
-                MazeMap::MC_NONE;
+        if (primitiveIndex >= PrimitiveCount())
+        {
+            return MazeMap::MC_NONE;
+        }
+        return static_cast<MazeMap::ManeuverCode>(
+            static_cast<int>(_primitiveCodes[primitiveIndex]) -
+            (((speedIndex == 0U) && (primitiveIndex == 0U)) ? 1 : 0));
     }
 
     float OpenFloorMeasurementController::SmoothMeasurementRegime::SpeedBinValue(
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex) const noexcept
     {
-        (void)speedIndex;
+        (void)primitiveIndex;
         return
-            (primitiveIndex < PrimitiveCount()) ?
-                _speedBinValues[primitiveIndex] :
+            (speedIndex < SpeedCount()) ?
+                MazeMap::kOpenFloorSmoothSpeedBinsMps[speedIndex] :
                 0.0f;
     }
 
+    bool OpenFloorMeasurementController::SmoothMeasurementRegime::EnsureReady(
+        OpenFloorMeasurementController& controller)
+    {
+        _stage = 0U;
+        return (PrimitiveCount() != 0U) && EnsureInitialized(controller._vehicle);
+    }
+
     LoopController::ControlVector OpenFloorMeasurementController::SmoothMeasurementRegime::Tick(
+        OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
         bool& done)
     {
-        (void)speedIndex;
+        done = false;
 
-        if (!_valid)
+        if (!_maneuversInitialized || (_configuredVehicle != &controller._vehicle))
         {
-            _runtime.FailActiveMode("Open-floor measurement smooth regime initialization failed");
+            controller._runtime.FailActiveMode(
+                "Open-floor measurement smooth regime initialization failed");
             done = false;
             return StopControlVector();
         }
 
-        auto& driveService = _runtime.DriveService();
-        if ((!_selectionValid) || (_activePrimitiveIndex != primitiveIndex))
+        Drive& driveService = controller._driveService;
+        if (driveService.IsEffectivelyComplete())
         {
-            _selectionValid = true;
-            _activePrimitiveIndex = primitiveIndex;
-            _needsStart = true;
-            _holdActive = false;
-        }
-
-        if (_needsStart)
-        {
-            driveService.SetLimits(
-                BuildOpenFloorMeasurementLimits(
-                    _runtime.SpeedVehicle(),
-                    _speedLimitsMps[_activePrimitiveIndex]));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartManeuver(_maneuvers[_activePrimitiveIndex]);
-            _activePostSlotHoldMs = IsLastPrimitive(_activePrimitiveIndex) ?
-                static_cast<std::uint16_t>(MazeMap::kOpenFloorInterPhaseHoldMs) :
-                0U;
-            _holdActive = false;
-            _needsStart = false;
-        }
-
-        if (_holdActive)
-        {
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
+            if (_stage == 0U)
             {
-                _holdActive = false;
-                _needsStart = true;
+                driveService.SetLimits(
+                    BuildOpenFloorMeasurementLimits(
+                        controller._vehicle,
+                        SpeedBinValue(primitiveIndex, speedIndex)));
+                driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+                driveService.StartManeuver(_maneuvers[ManeuverOffset(primitiveIndex, speedIndex)]);
+                _stage = 1U;
             }
-            return control;
-        }
-
-        if ((_activePostSlotHoldMs > 0U) && driveService.IsEffectivelyComplete())
-        {
-            driveService.SetLimits(BuildOpenFloorMeasurementLimits(_runtime.SpeedVehicle(), 0.0f));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartHold(_activePostSlotHoldMs, false);
-            _holdActive = true;
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
+            else if ((_stage == 1U) && controller.ActiveMainStageSlotEndsRegime())
             {
-                _holdActive = false;
-                _needsStart = true;
-            }
-            return control;
-        }
-
-        const LoopController::ControlVector control = driveService.GetNextControls(done);
-        if (done)
-        {
-            if (_activePostSlotHoldMs > 0U)
-            {
-                done = false;
+                driveService.SetLimits(BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f));
+                driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+                driveService.StartHold(MazeMap::kOpenFloorInterPhaseHoldMs, false);
+                _stage = 2U;
             }
             else
             {
-                _needsStart = true;
+                _stage = 0U;
+                return driveService.GetNextControls(done);
             }
         }
-        return control;
+
+        return driveService.GetNextControls(done);
     }
 
-    bool OpenFloorMeasurementController::SmoothMeasurementRegime::IsLastPrimitive(
-        const std::uint16_t primitiveIndex) const noexcept
+    bool OpenFloorMeasurementController::SmoothMeasurementRegime::EnsureInitialized(
+        MazeMap::Vehicle& vehicle)
     {
-        return (primitiveIndex + 1U) == PrimitiveCount();
+        if (_maneuversInitialized && (_configuredVehicle == &vehicle))
+        {
+            return true;
+        }
+        if (PrimitiveCount() == 0U)
+        {
+            return false;
+        }
+
+        MazeMap::DirectionalLocation current(2U, 3U, MazeMap::Up);
+        float entryBoundarySpeedMps = 0.0f;
+        for (std::uint8_t speedIndex = 0U; speedIndex < SpeedCount(); ++speedIndex)
+        {
+            MazeMap::ManeuverQueue queue{};
+            float exitBoundarySpeedMps = 0.0f;
+            MazeMap::DirectionalLocation endLocation{};
+            if (!BuildQueue(
+                    vehicle,
+                    speedIndex,
+                    current,
+                    MazeMap::kOpenFloorSmoothSpeedBinsMps[speedIndex],
+                    entryBoundarySpeedMps,
+                    queue,
+                    exitBoundarySpeedMps,
+                    endLocation) ||
+                queue.empty() ||
+                (queue.size() != PrimitiveCount()))
+            {
+                _configuredVehicle = nullptr;
+                _maneuversInitialized = false;
+                return false;
+            }
+
+            for (std::uint16_t primitiveIndex = 0U; primitiveIndex < PrimitiveCount(); ++primitiveIndex)
+            {
+                _maneuvers[ManeuverOffset(primitiveIndex, speedIndex)] = queue[primitiveIndex];
+            }
+
+            current = endLocation;
+            entryBoundarySpeedMps = exitBoundarySpeedMps;
+        }
+
+        _maneuversInitialized = true;
+        _configuredVehicle = _maneuversInitialized ? &vehicle : nullptr;
+        return _maneuversInitialized;
+    }
+
+    std::size_t OpenFloorMeasurementController::SmoothMeasurementRegime::ManeuverOffset(
+        const std::uint16_t primitiveIndex,
+        const std::uint8_t speedIndex) const noexcept
+    {
+        return
+            (static_cast<std::size_t>(speedIndex) * static_cast<std::size_t>(PrimitiveCount())) +
+            static_cast<std::size_t>(primitiveIndex);
     }
 
     bool OpenFloorMeasurementController::SmoothMeasurementRegime::BuildQueue(
         MazeMap::Vehicle& vehicle,
         const std::uint8_t speedIndex,
+        const MazeMap::DirectionalLocation& startLocation,
         const float cruiseSpeedMps,
         const float initialEntrySpeedMps,
         MazeMap::ManeuverQueue& queue,
-        float& exitBoundarySpeedMps) const
+        float& exitBoundarySpeedMps,
+        MazeMap::DirectionalLocation& endLocation) const
     {
         queue.clear();
         exitBoundarySpeedMps = 0.0f;
+        endLocation = startLocation;
 
-        MazeMap::DirectionalLocation current(
-            2U,
-            static_cast<std::uint8_t>(3U + speedIndex),
-            MazeMap::Up);
-        if (!queue.push_back(kOpenFloorMeasurementSpeedChangeStraightCode, current))
+        MazeMap::DirectionalLocation current = startLocation;
+        for (std::uint16_t primitiveIndex = 0U; primitiveIndex < PrimitiveCount(); ++primitiveIndex)
         {
-            return false;
-        }
-        current = queue.back().getEnd();
-
-        for (std::size_t entryIndex = 0U; entryIndex < kOpenFloorMeasurementSmoothCycleCodes.size(); ++entryIndex)
-        {
-            if (!queue.push_back(kOpenFloorMeasurementSmoothCycleCodes[entryIndex], current))
+            if (!queue.push_back(PrimitiveCode(primitiveIndex, speedIndex), current))
             {
                 queue.clear();
                 exitBoundarySpeedMps = 0.0f;
@@ -795,47 +726,37 @@ namespace MazeMap::App::Internal
             current = queue.back().getEnd();
         }
 
-        const bool isLastSpeedBin =
-            (static_cast<std::size_t>(speedIndex) + 1U) >= MazeMap::kOpenFloorSmoothSpeedBinsMps.size();
-        if (isLastSpeedBin && !queue.push_back(kOpenFloorMeasurementSpeedChangeStraightCode, current))
-        {
-            queue.clear();
-            exitBoundarySpeedMps = 0.0f;
-            return false;
-        }
-
-        const float finalExitSpeedMps = isLastSpeedBin ? 0.0f : cruiseSpeedMps;
-        queue.ComputeSpeeds(vehicle, initialEntrySpeedMps, finalExitSpeedMps);
+        queue.ComputeSpeeds(vehicle, initialEntrySpeedMps, cruiseSpeedMps);
         if (queue.empty())
         {
             return false;
         }
 
         exitBoundarySpeedMps = queue.back().getExitSpeed();
+        endLocation = queue.back().getEnd();
         return true;
     }
 
+    OpenFloorMeasurementController::LoopMeasurementRegime&
+        OpenFloorMeasurementController::LoopMeasurementRegime::ClockwiseSharedInstance() noexcept
+    {
+        static LoopMeasurementRegime regime{ 6U, true };
+        return regime;
+    }
+
+    OpenFloorMeasurementController::LoopMeasurementRegime&
+        OpenFloorMeasurementController::LoopMeasurementRegime::CounterClockwiseSharedInstance() noexcept
+    {
+        static LoopMeasurementRegime regime{ 7U, false };
+        return regime;
+    }
+
     OpenFloorMeasurementController::LoopMeasurementRegime::LoopMeasurementRegime(
-        SharedRobotRuntime& runtime,
-        const MeasurementPhaseId phaseId,
-        const bool clockwise)
-        : _runtime(runtime)
-        , _phaseId(phaseId)
+        const MeasurementLogId logId,
+        const bool clockwise) noexcept
+        : _logId(logId)
         , _clockwise(clockwise)
     {
-        MazeMap::ManeuverQueue queue{};
-        if (!BuildQueue(_runtime.SpeedVehicle(), queue) || (queue.size() != _maneuvers.size()))
-        {
-            _valid = false;
-            return;
-        }
-
-        for (std::uint16_t primitiveIndex = 0U;
-             primitiveIndex < static_cast<std::uint16_t>(_maneuvers.size());
-             ++primitiveIndex)
-        {
-            _maneuvers[primitiveIndex] = queue[primitiveIndex];
-        }
     }
 
     const char* OpenFloorMeasurementController::LoopMeasurementRegime::Title() const noexcept
@@ -843,15 +764,15 @@ namespace MazeMap::App::Internal
         return _clockwise ? "loop_clockwise" : "loop_counter_clockwise";
     }
 
-    OpenFloorMeasurementController::MeasurementPhaseId
+    OpenFloorMeasurementController::MeasurementLogId
         OpenFloorMeasurementController::LoopMeasurementRegime::LogId() const noexcept
     {
-        return _phaseId;
+        return _logId;
     }
 
     std::uint16_t OpenFloorMeasurementController::LoopMeasurementRegime::PrimitiveCount() const noexcept
     {
-        return _valid ? static_cast<std::uint16_t>(kLoopPhasePrimitiveCount) : 0U;
+        return static_cast<std::uint16_t>(kLoopPhasePrimitiveCount);
     }
 
     std::uint8_t OpenFloorMeasurementController::LoopMeasurementRegime::SpeedCount() const noexcept
@@ -861,12 +782,14 @@ namespace MazeMap::App::Internal
 
     std::uint16_t OpenFloorMeasurementController::LoopMeasurementRegime::RepeatCount() const noexcept
     {
-        return static_cast<std::uint16_t>(DiagnosticConfig::kLoopRepeats);
+        return kRepeatCount;
     }
 
     MazeMap::ManeuverCode OpenFloorMeasurementController::LoopMeasurementRegime::PrimitiveCode(
-        const std::uint16_t primitiveIndex) const noexcept
+        const std::uint16_t primitiveIndex,
+        const std::uint8_t speedIndex) const noexcept
     {
+        (void)speedIndex;
         const MazeMap::ManeuverCode turnCode = _clockwise ? MazeMap::IP90 : MazeMap::IP90_M;
         return
             (primitiveIndex < PrimitiveCount()) ?
@@ -883,90 +806,85 @@ namespace MazeMap::App::Internal
         return MazeMap::kOpenFloorStraightSpeedBinsMps[0U];
     }
 
+    bool OpenFloorMeasurementController::LoopMeasurementRegime::EnsureReady(
+        OpenFloorMeasurementController& controller)
+    {
+        _stage = 0U;
+        return EnsureInitialized(controller._vehicle);
+    }
+
     LoopController::ControlVector OpenFloorMeasurementController::LoopMeasurementRegime::Tick(
+        OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
         bool& done)
     {
-        (void)speedIndex;
+        done = false;
 
-        if (!_valid)
+        if (!_maneuversInitialized || (_configuredVehicle != &controller._vehicle))
         {
-            _runtime.FailActiveMode("Open-floor measurement loop regime initialization failed");
+            controller._runtime.FailActiveMode(
+                "Open-floor measurement loop regime initialization failed");
             done = false;
             return StopControlVector();
         }
 
-        auto& driveService = _runtime.DriveService();
-        if ((!_selectionValid) || (_activePrimitiveIndex != primitiveIndex))
+        Drive& driveService = controller._driveService;
+        if (driveService.IsEffectivelyComplete())
         {
-            _selectionValid = true;
-            _activePrimitiveIndex = primitiveIndex;
-            _repeatIndex = 0U;
-            _needsStart = true;
-            _holdActive = false;
-        }
-
-        if (_needsStart)
-        {
-            driveService.SetLimits(
-                BuildOpenFloorMeasurementLimits(
-                    _runtime.SpeedVehicle(),
-                    MazeMap::kOpenFloorStraightSpeedBinsMps[0U]));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartManeuver(_maneuvers[_activePrimitiveIndex]);
-            _activePostSlotHoldMs =
-                (_clockwise &&
-                    ((_activePrimitiveIndex + 1U) == PrimitiveCount()) &&
-                    ((_repeatIndex + 1U) == RepeatCount())) ?
-                static_cast<std::uint16_t>(MazeMap::kOpenFloorInterPhaseHoldMs) :
-                0U;
-            _holdActive = false;
-            _needsStart = false;
-        }
-
-        if (_holdActive)
-        {
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
+            if (_stage == 0U)
             {
-                _repeatIndex = static_cast<std::uint16_t>((_repeatIndex + 1U) % RepeatCount());
-                _holdActive = false;
-                _needsStart = true;
+                driveService.SetLimits(
+                    BuildOpenFloorMeasurementLimits(
+                        controller._vehicle,
+                        SpeedBinValue(primitiveIndex, speedIndex)));
+                driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+                driveService.StartManeuver(_maneuvers[primitiveIndex]);
+                _stage = 1U;
             }
-            return control;
-        }
-
-        if ((_activePostSlotHoldMs > 0U) && driveService.IsEffectivelyComplete())
-        {
-            driveService.SetLimits(BuildOpenFloorMeasurementLimits(_runtime.SpeedVehicle(), 0.0f));
-            driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
-            driveService.StartHold(_activePostSlotHoldMs, false);
-            _holdActive = true;
-            const LoopController::ControlVector control = driveService.GetNextControls(done);
-            if (done)
+            else if ((_stage == 1U) && controller.ActiveMainStageSlotEndsRegime())
             {
-                _repeatIndex = static_cast<std::uint16_t>((_repeatIndex + 1U) % RepeatCount());
-                _holdActive = false;
-                _needsStart = true;
-            }
-            return control;
-        }
-
-        const LoopController::ControlVector control = driveService.GetNextControls(done);
-        if (done)
-        {
-            if (_activePostSlotHoldMs > 0U)
-            {
-                done = false;
+                driveService.SetLimits(BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f));
+                driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+                driveService.StartHold(MazeMap::kOpenFloorInterPhaseHoldMs, false);
+                _stage = 2U;
             }
             else
             {
-                _repeatIndex = static_cast<std::uint16_t>((_repeatIndex + 1U) % RepeatCount());
-                _needsStart = true;
+                _stage = 0U;
+                return driveService.GetNextControls(done);
             }
         }
-        return control;
+
+        return driveService.GetNextControls(done);
+    }
+
+    bool OpenFloorMeasurementController::LoopMeasurementRegime::EnsureInitialized(
+        MazeMap::Vehicle& vehicle)
+    {
+        if (_maneuversInitialized && (_configuredVehicle == &vehicle))
+        {
+            return true;
+        }
+
+        MazeMap::ManeuverQueue queue{};
+        if (!BuildQueue(vehicle, queue) || (queue.size() != _maneuvers.size()))
+        {
+            _configuredVehicle = nullptr;
+            _maneuversInitialized = false;
+            return false;
+        }
+
+        for (std::uint16_t primitiveIndex = 0U;
+             primitiveIndex < static_cast<std::uint16_t>(_maneuvers.size());
+             ++primitiveIndex)
+        {
+            _maneuvers[primitiveIndex] = queue[primitiveIndex];
+        }
+
+        _configuredVehicle = &vehicle;
+        _maneuversInitialized = true;
+        return true;
     }
 
     bool OpenFloorMeasurementController::LoopMeasurementRegime::BuildQueue(
@@ -1133,7 +1051,10 @@ namespace MazeMap::App::Internal
     bool OpenFloorMeasurementController::MainStage::OpenMainLog(
         OpenFloorMeasurementController& controller)
     {
-        //InitializeMeasurementIndices();
+        _activeRegimeIndex = 0U;
+        _activePrimitiveIndex = 0U;
+        _activeSpeedIndex = 0U;
+        _activeRepeatIndex = 0U;
         _completionPending = false;
         _bufferedRow.reset();
         if ((_regimes == nullptr) || (_regimeCount == 0U))
@@ -1146,11 +1067,21 @@ namespace MazeMap::App::Internal
             MainMeasurementRegime* const regime = _regimes[regimeIndex];
             if ((regime == nullptr) ||
                 (regime->Title() == nullptr) ||
+                !regime->EnsureReady(controller) ||
                 (regime->PrimitiveCount() == 0U) ||
                 (regime->SpeedCount() == 0U) ||
-                (regime->RepeatCount() == 0U))
+                (regime->RepeatCount() == 0U) ||
+                (regime->LogId() == kTimingLogId))
             {
                 return false;
+            }
+
+            for (std::size_t priorRegimeIndex = 0U; priorRegimeIndex < regimeIndex; ++priorRegimeIndex)
+            {
+                if (_regimes[priorRegimeIndex]->LogId() == regime->LogId())
+                {
+                    return false;
+                }
             }
         }
 
@@ -1173,6 +1104,33 @@ namespace MazeMap::App::Internal
         if (!controller._runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", controller._sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
         if (!controller._runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", controller._sensors.GetGyroBiasRadps(), 6)) return false;
         if (!controller._runtime.WriteUtilityDataLogAccelBiasMetadata(controller._sensors)) return false;
+        for (std::size_t regimeIndex = 0U; regimeIndex < _regimeCount; ++regimeIndex)
+        {
+            MainMeasurementRegime* const regime = _regimes[regimeIndex];
+            char nameKey[32] = {};
+            char phaseIdKey[36] = {};
+            const int nameKeyLength = std::snprintf(
+                nameKey,
+                sizeof(nameKey),
+                "phase_battery_%02u_name",
+                static_cast<unsigned>(regimeIndex));
+            const int phaseIdKeyLength = std::snprintf(
+                phaseIdKey,
+                sizeof(phaseIdKey),
+                "phase_battery_%02u_phase_id",
+                static_cast<unsigned>(regimeIndex));
+            if ((nameKeyLength <= 0) ||
+                (nameKeyLength >= static_cast<int>(sizeof(nameKey))) ||
+                (phaseIdKeyLength <= 0) ||
+                (phaseIdKeyLength >= static_cast<int>(sizeof(phaseIdKey))) ||
+                !controller._runtime.WriteUtilityDataLogMetadata(nameKey, regime->Title()) ||
+                !controller._runtime.WriteUtilityDataLogMetadataUnsigned(
+                    phaseIdKey,
+                    static_cast<unsigned long>(regime->LogId())))
+            {
+                return false;
+            }
+        }
 
         Runtime::OpenFloorMainRow row{};
         if (!controller._runtime.BeginUtilityDataLogSchema(row))
@@ -1181,6 +1139,15 @@ namespace MazeMap::App::Internal
         }
 
         return true;
+    }
+
+    bool OpenFloorMeasurementController::MainStage::IsCurrentSlotLastInRegime() const noexcept
+    {
+        const MainMeasurementRegime& regime = ActiveRegime();
+        return
+            ((_activePrimitiveIndex + 1U) == regime.PrimitiveCount()) &&
+            ((_activeRepeatIndex + 1U) == regime.RepeatCount()) &&
+            ((_activeSpeedIndex + 1U) == regime.SpeedCount());
     }
 
     LoopController::ControlVector OpenFloorMeasurementController::MainStage::Tick(
@@ -1208,12 +1175,12 @@ namespace MazeMap::App::Internal
         MainMeasurementRegime& regime = ActiveRegime();
         bool done = false;
         const LoopController::ControlVector control =
-            regime.Tick(_activePrimitiveIndex, _activeSpeedIndex, done);
+            regime.Tick(controller, _activePrimitiveIndex, _activeSpeedIndex, done);
 
         Runtime::OpenFloorMainRow row{};
         controller.PopulateMainRowFromState(
             regime.LogId(),
-            regime.PrimitiveCode(_activePrimitiveIndex),
+            regime.PrimitiveCode(_activePrimitiveIndex, _activeSpeedIndex),
             regime.SpeedBinValue(_activePrimitiveIndex, _activeSpeedIndex),
             static_cast<std::uint16_t>(_activeRepeatIndex + 1U),
             state,
@@ -1234,37 +1201,49 @@ namespace MazeMap::App::Internal
         return *_regimes[_activeRegimeIndex];
     }
 
-    /*void OpenFloorMeasurementController::MainStage::InitializeMeasurementIndices() noexcept
-    {
-        _activeRegimeIndex = 0U;
-        _activePrimitiveIndex = 0U;
-        _activeSpeedIndex = 0U;
-        _activeRepeatIndex = 0U;
-    }*/
-
     bool OpenFloorMeasurementController::MainStage::AdvanceIndices() noexcept
     {
-        ++_activeRepeatIndex;
-        if (_activeRepeatIndex < ActiveRegime().RepeatCount())
+        MainMeasurementRegime& regime = ActiveRegime();
+        if (!regime.GroupPrimitives())
         {
-            return true;
+            ++_activeRepeatIndex;
+            if (_activeRepeatIndex < regime.RepeatCount())
+            {
+                return true;
+            }
+
+            _activeRepeatIndex = 0U;
+            ++_activePrimitiveIndex;
+            if (_activePrimitiveIndex < regime.PrimitiveCount())
+            {
+                return true;
+            }
+        }
+        else
+        {
+            ++_activePrimitiveIndex;
+            if (_activePrimitiveIndex < regime.PrimitiveCount())
+            {
+                return true;
+            }
+
+            _activePrimitiveIndex = 0U;
+            ++_activeRepeatIndex;
+            if (_activeRepeatIndex < regime.RepeatCount())
+            {
+                return true;
+            }
         }
 
+        _activePrimitiveIndex = 0U;
         _activeRepeatIndex = 0U;
         ++_activeSpeedIndex;
-        if (_activeSpeedIndex < ActiveRegime().SpeedCount())
+        if (_activeSpeedIndex < regime.SpeedCount())
         {
             return true;
         }
 
         _activeSpeedIndex = 0U;
-        ++_activePrimitiveIndex;
-        if (_activePrimitiveIndex < ActiveRegime().PrimitiveCount())
-        {
-            return true;
-        }
-
-        _activePrimitiveIndex = 0U;
         ++_activeRegimeIndex;
         return _activeRegimeIndex < _regimeCount;
     }
@@ -1329,7 +1308,7 @@ namespace MazeMap::App::Internal
         (void)BootUtilityModeFramework::ResetStartupTrace("mode:open_floor_measurement");
         (void)_runtime.AppendTextLogLine("Open-floor measurement mode");
         (void)_runtime.AppendTextLogLine(
-            "Open-floor battery: timing -> static -> launch -> straight -> yaw -> smooth -> loop cw -> loop ccw");
+            "Open-floor battery: timing capture plus the registered main-regime battery");
 
         if (!_drive.Begin())
         {
@@ -1344,6 +1323,8 @@ namespace MazeMap::App::Internal
             _runtime.FailActiveMode("Open-floor measurement startup bring-up failed");
         }
         SetMissionLevelFanEnabled(true);
+        _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
+        _driveService.SetLimits(BuildOpenFloorMeasurementLimits(_vehicle, 0.0f));
 
         ConfigureSelectorMonitor();
         if (SelectorRemoved())
@@ -1400,7 +1381,7 @@ namespace MazeMap::App::Internal
         row.mono_time_us = _loopController.CurrentTickStartUs();
         row.control_tick_sequence = _loopController.CurrentTickSequence();
         row.dt_us = _loopController.CurrentTickDtUs();
-        row.phase_id = static_cast<std::uint32_t>(static_cast<std::uint8_t>(MeasurementPhaseId::Timing));
+        row.phase_id = static_cast<std::uint32_t>(kTimingLogId);
         row.imu_drdy_us = sensors.imuTiming.drdyUs;
         row.imu_read_start_us = sensors.imuTiming.readStartUs;
         row.imu_read_done_us = sensors.imuTiming.readDoneUs;
@@ -1428,7 +1409,7 @@ namespace MazeMap::App::Internal
     }
 
     void OpenFloorMeasurementController::PopulateMainRowFromState(
-        const MeasurementPhaseId phaseId,
+        const MeasurementLogId phaseId,
         const MazeMap::ManeuverCode primitiveCode,
         const float speedBinValue,
         const std::uint16_t repeatIndex,
@@ -1568,6 +1549,11 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Open-floor measurement complete");
     }
 
+    bool OpenFloorMeasurementController::ActiveMainStageSlotEndsRegime() const noexcept
+    {
+        return _mainStage.IsCurrentSlotLastInRegime();
+    }
+
     LoopController::ControlVector OpenFloorMeasurementController::TimingStageTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
@@ -1594,14 +1580,14 @@ namespace MazeMap::App::Internal
             BootModeId::OpenFloorMeasurement,
             BootModeCategory::Utility,
             "open_floor_measurement",
-            "Run the ordered open-floor measurement battery with timing, static, launch, straight, yaw, smooth, and closed maneuver loops.",
+            "Run open-floor timing capture followed by the registered main-regime measurement battery.",
             "open_floor_timing.mmlog, open_floor_main.mmlog",
             &GetOpenFloorMeasurementMode,
             "GetOpenFloorMeasurementMode",
             "OpenFloorMeasurementController.cpp",
-            "timing capture; static hold; launch PWM pulses; straight drive tests; yaw drive tests; smooth maneuver sweep; clockwise closed maneuver loop; counter-clockwise closed maneuver loop",
+            "timing capture; registered main-regime battery",
             "DiagnosticConfig linear limits; OpenFloorMeasurementSpec speed bins; shared startup calibration; shared drive service",
-            "Inter-phase 500 ms brake holds; launch and straight samples insert 250 ms brake holds between motions; smooth phase uses the current hand-picked closed maneuver sequence; loop phases are maneuver-driven",
+            "Inter-phase 500 ms brake holds; launch and straight samples insert 250 ms brake holds between motions; loop-style regimes remain maneuver-driven",
             "open_floor_timing.mmlog, open_floor_main.mmlog",
         };
         return descriptor;
