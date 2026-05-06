@@ -26,3 +26,4 @@ public:
 	MazeMap::Direction GetOrientation();
 };
 
+

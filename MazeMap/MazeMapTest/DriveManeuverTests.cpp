@@ -183,14 +183,12 @@ namespace MazeMap::App
             const PlantParams params = PlantParams::Default();
             const DriveTelemetry telemetry = runtime.Drive().GetTelemetry();
 
-            ControlInput control{};
-            control.leftMotorCommand = telemetry.leftDriveCommand;
-            control.rightMotorCommand = telemetry.rightDriveCommand;
-            control.fanDutyCycle = GetMissionFanDutyCycle();
-            control.batteryVoltageV = params.supplyVoltageV;
+            const ControlVector control = ControlVector::RawMotorPwm(
+                telemetry.leftDriveCommand,
+                telemetry.rightDriveCommand);
 
             const VehicleState::StateVector previousTruthState = truthState;
-            truthState = plant.integrate(truthState, control, dtSeconds, params);
+            truthState = plant.integrate(truthState, control, 0.80f, params.supplyVoltageV, dtSeconds, params);
 
             const float leftDistanceDeltaM =
                 0.5f *
@@ -711,3 +709,7 @@ namespace MazeMap::App
 #undef DRIVE_SMOOTH_CONTRACT_TESTS
 #undef DRIVE_IN_PLACE_CONTRACT_TESTS
 }
+
+
+
+

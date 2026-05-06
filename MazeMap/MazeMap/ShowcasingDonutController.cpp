@@ -6,13 +6,16 @@
 #include "DiagnosticConfig.h"
 #include "Drive.h"
 #include "DriveBase.h"
+#include "DriveTelemetry.h"
 #include "MazeMapApplicationPrivate.h"
 #include "SharedRobotRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "PinPairStrap.h"
 #include "PlantModel.h"
 #include "RuntimeSensorSuite.h"
+#include "SensorSnapshot.h"
 #include "VehicleState.h"
+#include "WallObservationPipeline.h"
 
 #include <algorithm>
 #include <cmath>
@@ -218,6 +221,8 @@ namespace MazeMap::App::Internal
         _endReason = EndReason::None;
         _logFileName[0] = '\0';
         _mainLogOpen = false;
+        _bufferedMainRow = {};
+        _bufferedMainRowValid = false;
         _commandedSpeedMps = 0.0f;
         _peakCommandedSpeedMps = 0.0f;
         _peakEncoderSpeedMps = 0.0f;
@@ -269,6 +274,28 @@ namespace MazeMap::App::Internal
         }
 
         _mainLogOpen = true;
+        return true;
+    }
+
+    bool ShowcasingDonutController::WriteBufferedMainRow()
+    {
+        if (!_bufferedMainRowValid)
+        {
+            return true;
+        }
+
+        const LoopController::TimingDiagnostics& timing = _loopController.LastDiagnostics();
+        _bufferedMainRow.master_time_us = timing.tickStartUs;
+        _bufferedMainRow.control_tick_sequence = timing.sequence;
+        _bufferedMainRow.dt_us = timing.dtUs;
+        _bufferedMainRow.encoder_timestamp_us = timing.encoderReadDoneUs;
+        if (!_runtime.LogUtilityDataRow(_bufferedMainRow))
+        {
+            return false;
+        }
+
+        _bufferedMainRow = {};
+        _bufferedMainRowValid = false;
         return true;
     }
 
@@ -380,7 +407,7 @@ namespace MazeMap::App::Internal
 
         if (mismatch)
         {
-            const float dtSeconds = _loopController.CurrentTickDtSeconds();
+            const float dtSeconds = static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f;
             _tractionLoss.mismatchDurationS += (dtSeconds > 0.0f) ? dtSeconds : 0.0f;
         }
         else
@@ -448,9 +475,14 @@ namespace MazeMap::App::Internal
         const MazeMap::VehicleState& state,
         const bool abortMarker)
     {
-        Runtime::ShowcasingDonutMainRow row{};
-        PopulateMainRow(labels, state, abortMarker, row);
-        return _runtime.LogUtilityDataRow(row);
+        if (!WriteBufferedMainRow())
+        {
+            return false;
+        }
+
+        PopulateMainRow(labels, state, abortMarker, _bufferedMainRow);
+        _bufferedMainRowValid = true;
+        return true;
     }
 
     void ShowcasingDonutController::PopulateMainRow(
@@ -459,9 +491,8 @@ namespace MazeMap::App::Internal
         const bool abortMarker,
         Runtime::ShowcasingDonutMainRow& row) const
     {
+        row = {};
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
-        const MazeMap::VehicleState::DriveCommandState& commandState = state.GetDriveCommandState();
-        const MazeMap::DriveCommandPair appliedDriveCommand = state.GetAppliedDriveCommand();
         const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
         const MazeMap::PlantPreparedParams& prepared = _runtime.Estimator().ukf().preparedParams();
         const float wheelRadiusM =
@@ -488,18 +519,30 @@ namespace MazeMap::App::Internal
 
         MazeMap::WallObs frontLeftObs{};
         MazeMap::WallObs frontRightObs{};
-        ::DriveBase::BuildLoggedFrontPairObservations(
-            sensors,
+        MazeMap::BuildFrontWallObservations(
+            sensors.frontWallObservationValid,
+            sensors.frontWall,
+            sensors.frontWallUsesFallbackDetection,
+            sensors.frontWallUsesCharacterizationDetection,
+            sensors.frontLeftDistanceM,
+            sensors.frontRightDistanceM,
             maxRangeM,
             frontLeftObs,
             frontRightObs);
         const MazeMap::WallObs leftObs =
-            ::DriveBase::BuildLoggedLeftSideObservation(sensors, maxRangeM);
+            MazeMap::BuildSideWallObservation(
+                sensors.leftDistanceValidForControl,
+                sensors.leftTransitionDetected,
+                sensors.leftWallObservation,
+                sensors.sideLeftDistanceM,
+                maxRangeM);
         const MazeMap::WallObs rightObs =
-            ::DriveBase::BuildLoggedRightSideObservation(sensors, maxRangeM);
-        row.master_time_us = _loopController.CurrentTickStartUs();
-        row.control_tick_sequence = _loopController.CurrentTickSequence();
-        row.dt_us = _loopController.CurrentTickDtUs();
+            MazeMap::BuildSideWallObservation(
+                sensors.rightDistanceValidForControl,
+                sensors.rightTransitionDetected,
+                sensors.rightWallObservation,
+                sensors.sideRightDistanceM,
+                maxRangeM);
         row.section_id = labels.sectionId;
         row.primitive_id = labels.primitiveId;
         row.primitive_family = static_cast<std::uint8_t>(
@@ -510,9 +553,9 @@ namespace MazeMap::App::Internal
         row.start_marker_id = labels.startMarkerId;
         row.repeat_index = labels.repeatIndex;
         row.progress_norm = labels.progressNorm;
-        row.mode_flags = commandState.modeFlags;
+        row.mode_flags = driveTelemetry.modeFlags;
         row.clipping_flags = 0U;
-        row.saturation_flags = commandState.saturationFlags;
+        row.saturation_flags = driveTelemetry.saturationFlags;
         row.watchdog_flags = 0U;
         row.ukf_mode_id = driveTelemetry.ukfModeId;
         row.ukf_yaw_valid_for_feedforward = driveTelemetry.ukfYawValidForFeedforward;
@@ -534,19 +577,18 @@ namespace MazeMap::App::Internal
         row.nhc_residual_sigma = driveTelemetry.ukfNhcResidualSigma;
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;
-        row.cmd_linear_mps = commandState.commandedLinearSpeedMps;
-        row.cmd_angular_radps = commandState.commandedAngularSpeedRadps;
-        row.left_drive_command = appliedDriveCommand.left;
-        row.right_drive_command = appliedDriveCommand.right;
-        row.left_feedforward_command = commandState.feedforward.left;
-        row.right_feedforward_command = commandState.feedforward.right;
-        row.left_feedback_command = commandState.feedback.left;
-        row.right_feedback_command = commandState.feedback.right;
-        row.left_target_velocity_mps = commandState.leftTargetVelocityMps;
-        row.right_target_velocity_mps = commandState.rightTargetVelocityMps;
-        row.left_launch_assist_floor = commandState.leftLaunchAssistFloor;
-        row.right_launch_assist_floor = commandState.rightLaunchAssistFloor;
-        row.encoder_timestamp_us = 0U;
+        row.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;
+        row.cmd_angular_radps = driveTelemetry.commandedAngularSpeedRadps;
+        row.left_drive_command = driveTelemetry.leftDriveCommand;
+        row.right_drive_command = driveTelemetry.rightDriveCommand;
+        row.left_feedforward_command = driveTelemetry.leftFeedforwardCommand;
+        row.right_feedforward_command = driveTelemetry.rightFeedforwardCommand;
+        row.left_feedback_command = driveTelemetry.leftFeedbackCommand;
+        row.right_feedback_command = driveTelemetry.rightFeedbackCommand;
+        row.left_target_velocity_mps = driveTelemetry.leftTargetVelocityMps;
+        row.right_target_velocity_mps = driveTelemetry.rightTargetVelocityMps;
+        row.left_launch_assist_floor = driveTelemetry.leftLaunchAssistFloor;
+        row.right_launch_assist_floor = driveTelemetry.rightLaunchAssistFloor;
         row.left_encoder_count = driveTelemetry.leftEncoderCount;
         row.right_encoder_count = driveTelemetry.rightEncoderCount;
         row.left_encoder_omega_radps = driveTelemetry.leftEncoderOmegaRadps;
@@ -697,9 +739,14 @@ namespace MazeMap::App::Internal
 
         UpdatePeaks(state);
 
+        if (_mainLogOpen && !WriteBufferedMainRow())
+        {
+            _runtime.FailActiveMode("Showcasing donut main log write failed");
+            return LoopController::ControlVector::Brake;
+        }
+
         if (SelectorRemoved())
         {
-            (void)LogCurrentSample(CurrentLabels(), state, true);
             _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
             return LoopController::ControlVector::Brake;
         }
@@ -714,7 +761,8 @@ namespace MazeMap::App::Internal
         {
         case Phase::DonutSweep:
         {
-            const float dtSeconds = (std::max)(0.0f, _loopController.CurrentTickDtSeconds());
+            const float dtSeconds =
+                (std::max)(0.0f, static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f);
             _commandedSpeedMps =
                 (std::min)(kShowcasingDonutSpeedCapMps, _commandedSpeedMps + (kShowcasingDonutSpeedRampMps2 * dtSeconds));
             if (EndConditionReached(state))
@@ -757,20 +805,37 @@ namespace MazeMap::App::Internal
         }
 
         case Phase::Complete:
-            ReleaseSelectorMonitor();
-            _drive.Brake();
-            _drive.UseNominalWheelControlProfile();
-            SetMissionLevelFanEnabled(false);
-            (void)_runtime.AppendTextLogFormatted(
-                "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",
-                EndReasonText(_endReason),
-                _logFileName,
-                _peakCommandedSpeedMps,
-                _peakEncoderSpeedMps,
-                _peakYawRateRadps,
-                _peakPlanarAccelMps2);
-            _phase = Phase::Idle;
-            loopController.HaltExecutionEndProgram();
+            loopController.RequestEndSession(
+                +[](void* const context, LoopController& boundaryLoopController)
+                {
+                    auto* const self = static_cast<ShowcasingDonutController*>(context);
+                    if (self == nullptr)
+                    {
+                        GetSharedRobotRuntime().FailActiveMode(
+                            "Showcasing donut completion callback context was null");
+                        return;
+                    }
+
+                    if (!self->WriteBufferedMainRow())
+                    {
+                        self->_runtime.FailActiveMode("Showcasing donut main log write failed");
+                    }
+                    self->ReleaseSelectorMonitor();
+                    self->_drive.Brake();
+                    self->_drive.UseNominalWheelControlProfile();
+                    SetMissionLevelFanEnabled(false);
+                    (void)self->_runtime.AppendTextLogFormatted(
+                        "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",
+                        self->EndReasonText(self->_endReason),
+                        self->_logFileName,
+                        self->_peakCommandedSpeedMps,
+                        self->_peakEncoderSpeedMps,
+                        self->_peakYawRateRadps,
+                        self->_peakPlanarAccelMps2);
+                    self->_phase = Phase::Idle;
+                    boundaryLoopController.HaltExecutionEndProgram();
+                },
+                this);
             return LoopController::ControlVector::Brake;
 
         case Phase::Idle:

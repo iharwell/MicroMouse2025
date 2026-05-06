@@ -6,6 +6,7 @@
 #include "BootModeRegistry.h"
 #include "BootUtilityModeFramework.h"
 #include "DriveBase.h"
+#include "DriveTelemetry.h"
 #include "ManeuverQueue.h"
 #include "PinPairStrap.h"
 #include "PlantModel.h"
@@ -107,18 +108,21 @@ namespace
                         MazeMap::VehicleState::kDimension))) &&
             runtime.WriteUtilityDataLogMetadataFloat("re_m", prepared.wheelRadiusM, 6) &&
             runtime.WriteUtilityDataLogMetadataFloat("we_m", prepared.trackWidthM, 6) &&
-            runtime.WriteUtilityDataLogMetadataFloat("imu_x", prepared.imuPositionBodyM.x(), 6) &&
-            runtime.WriteUtilityDataLogMetadataFloat("imu_y", prepared.imuPositionBodyM.y(), 6) &&
+            runtime.WriteUtilityDataLogMetadataFloat("imu_x", prepared.raw.backLeftImuMount.positionBodyM().x(), 6) &&
+            runtime.WriteUtilityDataLogMetadataFloat("imu_y", prepared.raw.backLeftImuMount.positionBodyM().y(), 6) &&
             runtime.WriteUtilityDataLogMetadataFloat("jw_kgm2", prepared.wheelInertiaKgM2, 9);
     }
 
-    void ApplyControlTimingToTimingRow(
-        const ControlCycleTiming& timing,
+    void ApplyLoopTimingToTimingRow(
+        const LoopController::TimingDiagnostics& timing,
         OpenFloorTimingRow& row) noexcept
     {
-        row.control_start_us = timing.controlStartUs;
-        row.control_end_us = timing.controlEndUs;
-        row.pwm_latch_us = timing.pwmLatchUs;
+        row.mono_time_us = timing.tickStartUs;
+        row.control_tick_sequence = timing.sequence;
+        row.dt_us = timing.dtUs;
+        row.control_start_us = timing.tickStartUs;
+        row.control_end_us = timing.tickFinalizeUs;
+        row.pwm_latch_us = timing.commandAppliedUs;
         row.encoder_latch_us = timing.encoderLatchUs;
         row.encoder_read_done_us = timing.encoderReadDoneUs;
         row.ukf_predict_start_us = timing.ukfPredictStartUs;
@@ -1033,7 +1037,7 @@ namespace MazeMap::App::Internal
         }
 
         Runtime::OpenFloorTimingRow& row = *_bufferedRow;
-        ApplyControlTimingToTimingRow(controller._loopController.LastDiagnostics().controlTiming, row);
+        ApplyLoopTimingToTimingRow(controller._loopController.LastDiagnostics(), row);
         if (!controller._runtime.LogUtilityDataRow(row))
         {
             (void)failureReason;
@@ -1257,7 +1261,11 @@ namespace MazeMap::App::Internal
         }
 
         Runtime::OpenFloorMainRow& row = *_bufferedRow;
-        row.encoder_timestamp_us = controller._loopController.LastDiagnostics().controlTiming.encoderReadDoneUs;
+        const LoopController::TimingDiagnostics& timing = controller._loopController.LastDiagnostics();
+        row.master_time_us = timing.tickStartUs;
+        row.control_tick_sequence = timing.sequence;
+        row.dt_us = timing.dtUs;
+        row.encoder_timestamp_us = timing.encoderReadDoneUs;
         if (!controller._runtime.LogUtilityDataRow(row))
         {
             (void)failureReason;
@@ -1377,9 +1385,6 @@ namespace MazeMap::App::Internal
         Runtime::OpenFloorTimingRow& row) const noexcept
     {
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
-        row.mono_time_us = _loopController.CurrentTickStartUs();
-        row.control_tick_sequence = _loopController.CurrentTickSequence();
-        row.dt_us = _loopController.CurrentTickDtUs();
         row.phase_id = static_cast<std::uint32_t>(kTimingLogId);
         row.imu_drdy_us = sensors.imuTiming.drdyUs;
         row.imu_read_start_us = sensors.imuTiming.readStartUs;
@@ -1399,12 +1404,6 @@ namespace MazeMap::App::Internal
         row.right_led_off_us = sensors.rightTiming.ledOffCommandUs;
         row.right_adc_off_us = sensors.rightTiming.adcOffSampleUs;
         row.right_ready_us = sensors.rightTiming.observationReadyUs;
-        row.wall_adc_cfg_before_start = sensors.wallSensorAdcCfgBeforeStart;
-        row.wall_adc_gc_before_start = sensors.wallSensorAdcGcBeforeStart;
-        row.wall_adc_cfg_after_start = sensors.wallSensorAdcCfgAfterStart;
-        row.wall_adc_gc_after_start = sensors.wallSensorAdcGcAfterStart;
-        row.wall_adc_target_cfg = sensors.wallSensorAdcTargetCfg;
-        row.wall_adc_ipg_clock_hz = sensors.wallSensorAdcIpgClockHz;
     }
 
     void OpenFloorMeasurementController::PopulateMainRowFromState(
@@ -1417,8 +1416,6 @@ namespace MazeMap::App::Internal
     {
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
         const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
-        const MazeMap::VehicleState::DriveCommandState& commandState = state.GetDriveCommandState();
-        const MazeMap::DriveCommandPair appliedDriveCommand = state.GetAppliedDriveCommand();
         const MazeMap::PlantPreparedParams& prepared = _runtime.Estimator().ukf().preparedParams();
         const float wheelRadiusM =
             (std::isfinite(prepared.wheelRadiusM) && (prepared.wheelRadiusM > 0.0f)) ?
@@ -1438,15 +1435,12 @@ namespace MazeMap::App::Internal
                     ((leftWheelVelocityMps - rightWheelVelocityMps) / trackWidthM) :
                     0.0f);
 
-        row.master_time_us = _loopController.CurrentTickStartUs();
-        row.control_tick_sequence = _loopController.CurrentTickSequence();
-        row.dt_us = _loopController.CurrentTickDtUs();
         row.phase_id = static_cast<std::uint8_t>(phaseId);
         row.primitive_id = static_cast<std::uint8_t>(primitiveCode);
         row.speed_bin = speedBinValue;
         row.repeat_index = repeatIndex;
-        row.mode_flags = commandState.modeFlags;
-        row.saturation_flags = commandState.saturationFlags;
+        row.mode_flags = driveTelemetry.modeFlags;
+        row.saturation_flags = driveTelemetry.saturationFlags;
         row.ukf_mode_id = driveTelemetry.ukfModeId;
         row.ukf_yaw_valid_for_feedforward = driveTelemetry.ukfYawValidForFeedforward;
         row.bias_update_enabled = driveTelemetry.ukfBiasUpdateEnabled;
@@ -1467,18 +1461,18 @@ namespace MazeMap::App::Internal
         row.ukf_state_bgz_radps = state.GetGyroBiasZ();
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;
-        row.cmd_linear_mps = commandState.commandedLinearSpeedMps;
-        row.cmd_angular_radps = commandState.commandedAngularSpeedRadps;
-        row.left_drive_command = appliedDriveCommand.left;
-        row.right_drive_command = appliedDriveCommand.right;
-        row.left_feedforward_command = commandState.feedforward.left;
-        row.right_feedforward_command = commandState.feedforward.right;
-        row.left_feedback_command = commandState.feedback.left;
-        row.right_feedback_command = commandState.feedback.right;
-        row.left_target_velocity_mps = commandState.leftTargetVelocityMps;
-        row.right_target_velocity_mps = commandState.rightTargetVelocityMps;
-        row.left_launch_assist_floor = commandState.leftLaunchAssistFloor;
-        row.right_launch_assist_floor = commandState.rightLaunchAssistFloor;
+        row.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;
+        row.cmd_angular_radps = driveTelemetry.commandedAngularSpeedRadps;
+        row.left_drive_command = driveTelemetry.leftDriveCommand;
+        row.right_drive_command = driveTelemetry.rightDriveCommand;
+        row.left_feedforward_command = driveTelemetry.leftFeedforwardCommand;
+        row.right_feedforward_command = driveTelemetry.rightFeedforwardCommand;
+        row.left_feedback_command = driveTelemetry.leftFeedbackCommand;
+        row.right_feedback_command = driveTelemetry.rightFeedbackCommand;
+        row.left_target_velocity_mps = driveTelemetry.leftTargetVelocityMps;
+        row.right_target_velocity_mps = driveTelemetry.rightTargetVelocityMps;
+        row.left_launch_assist_floor = driveTelemetry.leftLaunchAssistFloor;
+        row.right_launch_assist_floor = driveTelemetry.rightLaunchAssistFloor;
         row.encoder_timestamp_us = 0U;
         row.left_encoder_count = driveTelemetry.leftEncoderCount;
         row.right_encoder_count = driveTelemetry.rightEncoderCount;

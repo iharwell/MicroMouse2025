@@ -48,9 +48,13 @@ namespace MazeMap
         SyncRuntimeState();
     }
 
-    bool Estimator::predict(float dt, const ControlInput& control) noexcept
+    bool Estimator::predict(
+        float dt,
+        const App::Internal::LoopController::ControlVector& control,
+        float fanDutyCycle,
+        float batteryVoltageV) noexcept
     {
-        return _core.predict(dt, control);
+        return _core.predict(dt, control, fanDutyCycle, batteryVoltageV);
     }
 
     MeasurementUpdateResult Estimator::updateEncoderPair(
@@ -71,11 +75,6 @@ namespace MazeMap
         return _core.updatePlanarAccel(observation);
     }
 
-    MeasurementUpdateResult Estimator::updateImuMerged(const ImuMergedObs& observation) noexcept
-    {
-        return _core.updateImuMerged(observation);
-    }
-
     bool Estimator::reset(
         const SrUkfCore::StateVector& state,
         const SrUkfCore::StateMatrix& covariance) noexcept
@@ -92,7 +91,7 @@ namespace MazeMap
     }
 
     Direction Estimator::dominantDirectionForSensor(
-        const SensorExtrinsics& sensor,
+        const SensorMount& sensor,
         const VehicleState::StateVector& state) noexcept
     {
         const WallGeometryModel geometryModel{};
@@ -107,7 +106,7 @@ namespace MazeMap
     }
 
     CellCoordinates Estimator::estimateSensorCell(
-        const SensorExtrinsics& sensor,
+        const SensorMount& sensor,
         const VehicleState::StateVector& state) noexcept
     {
         const WallGeometryModel geometryModel{};
@@ -143,7 +142,7 @@ namespace MazeMap
     }
 
     WallUpdateResult Estimator::updateSideSensor(
-        Side which,
+        RelativeDirection which,
         const WallObs& observation,
         const Maze& maze,
         bool freezeMapMutation,
@@ -153,8 +152,8 @@ namespace MazeMap
         if (result.filter.accepted && !freezeMapMutation)
         {
             const PlantParams& params = _core.params();
-            const SensorExtrinsics& sensor =
-                (which == Side::Left) ? params.sideLeftSensor : params.sideRightSensor;
+            const SensorMount& sensor =
+                (which == RelativeDirection::Left90) ? params.sideLeftSensor : params.sideRightSensor;
             const Direction direction = dominantDirectionForSensor(sensor, _core.state());
             const CellCoordinates cell = estimateSensorCell(sensor, _core.state());
             _mapEvidence.Apply(cell, direction, observation, result.prediction, evidenceConfig, freezeMapMutation);
@@ -293,25 +292,10 @@ namespace MazeMap
         SyncRuntimeState();
     }
 
-    void Estimator::SyncRuntimeMetadata(
-        const ControlInput& control,
-        const SensorSnapshot& snapshot,
-        float dtSeconds) noexcept
-    {
-        _runtimeState->SetControlInput(control);
-        _runtimeState->SetSensorSnapshot(snapshot);
-        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
-        {
-            _runtimeState->SetTime(_runtimeState->GetTime() + dtSeconds);
-        }
-    }
-
     void Estimator::ResetRuntimeMetadata() noexcept
     {
         _runtimeState->SetTime(0.0f);
         _runtimeState->SetTimestampUs(0U);
-        _runtimeState->SetControlInput(ControlInput{});
-        _runtimeState->SetDriveCommandState(VehicleState::DriveCommandState{});
         _runtimeState->SetSensorSnapshot(SensorSnapshot{});
     }
 
@@ -340,3 +324,4 @@ namespace MazeMap
         MazeMap::App::Internal::BootUtilityModeFramework::AppendStartupTrace(traceLine);
     }
 }
+

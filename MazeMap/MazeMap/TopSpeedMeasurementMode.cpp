@@ -291,7 +291,7 @@ namespace MazeMap::App::Internal
             case Phase::Complete:
                 (void)_runtime.AppendTextLogFormatted(
                     "Top speed complete: ticks=%lu peak_speed_mps=%.3f peak_planar_accel_mps2=%.3f vbat0=%.3f",
-                    static_cast<unsigned long>(_loopController.CurrentTickSequence()),
+                    static_cast<unsigned long>(_loopController.LastDiagnostics().sequence),
                     _peakMeasuredSpeedMps,
                     _peakPlanarAccelMps2,
                     _batteryVoltageStart);

@@ -71,12 +71,6 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, right_led_off_us)          \
     X(std::uint32_t, right_adc_off_us)          \
     X(std::uint32_t, right_ready_us)            \
-    X(std::uint32_t, wall_adc_cfg_before_start) \
-    X(std::uint32_t, wall_adc_gc_before_start)  \
-    X(std::uint32_t, wall_adc_cfg_after_start)  \
-    X(std::uint32_t, wall_adc_gc_after_start)   \
-    X(std::uint32_t, wall_adc_target_cfg)       \
-    X(std::uint32_t, wall_adc_ipg_clock_hz)     \
     X(std::uint32_t, cycle_counter_start)       \
     X(std::uint32_t, cycle_counter_end)
 

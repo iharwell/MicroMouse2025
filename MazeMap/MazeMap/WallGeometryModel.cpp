@@ -34,46 +34,36 @@ namespace
             (right.y() * vectorBody.x()) + (heading.y() * vectorBody.y()));
     }
 
-    Eigen::Vector2f ResolveSensorDirectionBody(const MazeMap::SensorExtrinsics& sensor) noexcept
-    {
-        if (std::fabs(sensor.yawOffsetRad) <= 1.0e-6f)
-        {
-            return sensor.directionBody;
-        }
-
-        const Eigen::Vector2f offsetHeading = HeadingUnitFromYaw(sensor.yawOffsetRad);
-        return RotateBodyVectorToWorld(sensor.directionBody, offsetHeading);
-    }
 }
 
 namespace MazeMap
 {
     Eigen::Vector2f WallGeometryModel::sensorOriginWorld(
         const VehicleState::StateVector& state,
-        const SensorExtrinsics& sensorExtrinsics) const noexcept
+        const SensorMount& sensorMount) const noexcept
     {
-        return sensorOriginWorld(buildStateFrame(state), sensorExtrinsics);
+        return sensorOriginWorld(buildStateFrame(state), sensorMount);
     }
 
     Eigen::Vector2f WallGeometryModel::sensorOriginWorld(
         const GeometryStateFrame& frame,
-        const SensorExtrinsics& sensorExtrinsics) const noexcept
+        const SensorMount& sensorMount) const noexcept
     {
-        return frame.positionWorldM + RotateBodyVectorToWorld(sensorExtrinsics.positionBodyM, frame.heading);
+        return frame.positionWorldM + RotateBodyVectorToWorld(sensorMount.positionBodyM(), frame.heading);
     }
 
     Eigen::Vector2f WallGeometryModel::sensorDirectionWorld(
         const VehicleState::StateVector& state,
-        const SensorExtrinsics& sensorExtrinsics) const noexcept
+        const SensorMount& sensorMount) const noexcept
     {
-        return sensorDirectionWorld(buildStateFrame(state), sensorExtrinsics);
+        return sensorDirectionWorld(buildStateFrame(state), sensorMount);
     }
 
     Eigen::Vector2f WallGeometryModel::sensorDirectionWorld(
         const GeometryStateFrame& frame,
-        const SensorExtrinsics& sensorExtrinsics) const noexcept
+        const SensorMount& sensorMount) const noexcept
     {
-        return RotateBodyVectorToWorld(ResolveSensorDirectionBody(sensorExtrinsics), frame.heading);
+        return RotateBodyVectorToWorld(sensorMount.SensorForwardBody(), frame.heading);
     }
 
     WallGeometryModel::GeometryStateFrame WallGeometryModel::buildStateFrame(
@@ -219,40 +209,40 @@ namespace MazeMap
 
     GeometryPrediction WallGeometryModel::predictRay(
         const VehicleState::StateVector& state,
-        const SensorExtrinsics& sensorExtrinsics,
+        const SensorMount& sensorMount,
         const Maze& maze) const noexcept
     {
-        return predictRay(state, sensorExtrinsics, maze, PlantParams::Default().noHitRangeM);
+        return predictRay(state, sensorMount, maze, PlantParams::Default().noHitRangeM);
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
         const GeometryStateFrame& frame,
-        const SensorExtrinsics& sensorExtrinsics,
+        const SensorMount& sensorMount,
         const Maze& maze) const noexcept
     {
-        return predictRay(frame, sensorExtrinsics, maze, PlantParams::Default().noHitRangeM);
+        return predictRay(frame, sensorMount, maze, PlantParams::Default().noHitRangeM);
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
         const VehicleState::StateVector& state,
-        const SensorExtrinsics& sensorExtrinsics,
+        const SensorMount& sensorMount,
         const Maze& maze,
         float maxRangeM) const noexcept
     {
-        return predictRay(buildStateFrame(state), sensorExtrinsics, maze, maxRangeM);
+        return predictRay(buildStateFrame(state), sensorMount, maze, maxRangeM);
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
         const GeometryStateFrame& frame,
-        const SensorExtrinsics& sensorExtrinsics,
+        const SensorMount& sensorMount,
         const Maze& maze,
         float maxRangeM) const noexcept
     {
         GeometryPrediction best{};
         best.rangeM = (maxRangeM > 0.0f) ? maxRangeM : PlantParams::Default().noHitRangeM;
 
-        const Eigen::Vector2f rayOrigin = sensorOriginWorld(frame, sensorExtrinsics);
-        const Eigen::Vector2f rayDirection = sensorDirectionWorld(frame, sensorExtrinsics);
+        const Eigen::Vector2f rayOrigin = sensorOriginWorld(frame, sensorMount);
+        const Eigen::Vector2f rayDirection = sensorDirectionWorld(frame, sensorMount);
         const CellCoordinates centerCell = frame.centerCell;
 
         const int minX = (std::max)(0, static_cast<int>(centerCell.GetX()) - static_cast<int>(kWallPredictionRadiusCells));

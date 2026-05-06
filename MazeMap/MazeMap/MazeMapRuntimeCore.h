@@ -13,6 +13,7 @@
 #include "ProportionalDerivativeCluster.h"
 #include "RollingAverageWindow.h"
 #include "Vehicle.h"
+#include "VehicleState.h"
 #include "WallDetectionThresholds.h"
 #include "WallObservationPipeline.h"
 #include "WallSensorCalibration.h"
@@ -70,24 +71,6 @@ struct MotionLimits
     float angularAccelRadps2;
     float angleToleranceRad = MazeMap::Config::kAngleToleranceRad;
     float angularSpeedToleranceRadps = MazeMap::Config::kAngularSpeedToleranceRadps;
-};
-
-struct ControlCycleTiming
-{
-    uint32_t controlStartUs = 0UL;
-    uint32_t controlEndUs = 0UL;
-    uint32_t pwmLatchUs = 0UL;
-    uint32_t encoderLatchUs = 0UL;
-    uint32_t encoderReadDoneUs = 0UL;
-    uint32_t ukfPredictStartUs = 0UL;
-    uint32_t ukfPredictEndUs = 0UL;
-    uint32_t ukfPredictDurationUs = 0UL;
-    uint32_t ukfUpdateStartUs = 0UL;
-    uint32_t ukfUpdateEndUs = 0UL;
-    uint32_t ukfUpdateDurationUs = 0UL;
-    uint32_t ukfTotalDurationUs = 0UL;
-    uint32_t cycleCounterStart = 0UL;
-    uint32_t cycleCounterEnd = 0UL;
 };
 
 struct RawWallSensorSample

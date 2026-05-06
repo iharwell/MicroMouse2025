@@ -139,4 +139,82 @@ namespace MazeMap
             return "unknown";
         }
     }
+
+    // Classified wall observations remain distinct from raw sensor snapshots because downstream
+    // consumers need the normalized range, confidence, and semantic interpretation together.
+    enum class ObsClass : uint8_t
+    {
+        WallLike = 0U,
+        PostLike = 1U,
+        OpenLike = 2U,
+        Ambiguous = 3U
+    };
+
+    // One canonical wall observation emitted by the pipeline. It survives as a value type because
+    // preprocessing, estimation, and map evidence all consume the same validated observation shape.
+    struct WallObs
+    {
+        bool valid = false;
+        float rho = 0.0f;
+        float confidence = 0.0f;
+        ObsClass cls = ObsClass::Ambiguous;
+    };
+
+    inline WallObs MakeWallObs(float rho, float confidence, ObsClass cls) noexcept
+    {
+        WallObs observation{};
+        observation.valid = true;
+        observation.rho = rho;
+        observation.confidence = confidence;
+        observation.cls = cls;
+        return observation;
+    }
+
+    inline void BuildFrontWallObservations(
+        bool frontWallObservationValid,
+        bool frontWall,
+        bool frontWallUsesFallbackDetection,
+        bool frontWallUsesCharacterizationDetection,
+        float frontLeftDistanceM,
+        float frontRightDistanceM,
+        float maxRangeM,
+        WallObs& left,
+        WallObs& right) noexcept
+    {
+        left = WallObs{};
+        right = WallObs{};
+        if (!frontWallObservationValid ||
+            !frontWall ||
+            !(std::isfinite(frontLeftDistanceM) && (frontLeftDistanceM > 0.0f)) ||
+            !(std::isfinite(frontRightDistanceM) && (frontRightDistanceM > 0.0f)))
+        {
+            return;
+        }
+
+        const float confidence =
+            frontWallUsesCharacterizationDetection ? 0.90f :
+            (frontWallUsesFallbackDetection ? 0.60f : 0.80f);
+        left = MakeWallObs((std::clamp)(frontLeftDistanceM, 0.01f, maxRangeM), confidence, ObsClass::WallLike);
+        right = MakeWallObs((std::clamp)(frontRightDistanceM, 0.01f, maxRangeM), confidence, ObsClass::WallLike);
+    }
+
+    inline WallObs BuildSideWallObservation(
+        bool distanceValidForControl,
+        bool transitionDetected,
+        bool wallObservation,
+        float sideDistanceM,
+        float maxRangeM) noexcept
+    {
+        WallObs observation{};
+        if (!distanceValidForControl ||
+            transitionDetected ||
+            !wallObservation ||
+            !(std::isfinite(sideDistanceM) && (sideDistanceM > 0.0f)))
+        {
+            return observation;
+        }
+
+        observation = MakeWallObs((std::clamp)(sideDistanceM, 0.01f, maxRangeM), 0.80f, ObsClass::WallLike);
+        return observation;
+    }
 }

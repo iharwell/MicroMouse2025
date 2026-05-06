@@ -256,12 +256,14 @@ namespace MazeMap
 
     inline void RunPredictionMatchingCycle(
         SrUkfCore& core,
-        const ControlInput& control,
+        const App::Internal::LoopController::ControlVector& control,
         const PlantParams& params,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState,
         float commandedLinearMps,
         float commandedAngularRadps,
+        float fanDutyCycle = 0.80f,
+        float batteryVoltageV = 0.0f,
         std::uint16_t saturationFlags = 0U,
         float leftLaunchAssistFloor = 0.0f,
         float rightLaunchAssistFloor = 0.0f)
@@ -276,7 +278,8 @@ namespace MazeMap
             0.0f,
             0.0f);
         const VehicleState::StateVector stateBeforePredict = core.state();
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(core.predict(dtSeconds, control));
+        Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+            core.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV));
         ApplyPredictionMatchingEncoderAndYawUpdates(
             core,
             stateBeforePredict,
@@ -307,7 +310,12 @@ namespace MazeMap
         return dumpLines.size();
     }
 
-    inline SrUkfCore RunUKFCycles(int numCycles, ControlInput control = ControlInput{})
+    inline SrUkfCore RunUKFCycles(
+        int numCycles,
+        App::Internal::LoopController::ControlVector control =
+            App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f),
+        float fanDutyCycle = 0.80f,
+        float batteryVoltageV = 0.0f)
     {
         const VehicleState::StateVector initialState =
             BuildUkfState(
@@ -331,7 +339,8 @@ namespace MazeMap
         for (int step = 0; step < numCycles; ++step)
         {
             core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(core.predict(dt, control));
+            Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
+                core.predict(dt, control, fanDutyCycle, batteryVoltageV));
 
             const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.attempted);
@@ -353,3 +362,5 @@ namespace MazeMap
         return core;
     }
 }
+
+

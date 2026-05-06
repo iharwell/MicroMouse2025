@@ -6,6 +6,8 @@
 #include "..\MazeMap\VehicleState.h"
 #include "..\MazeMap\WallGeometryModel.h"
 
+#include <cmath>
+
 namespace MazeMap
 {
     inline VehicleState::StateVector BuildUkfState(
@@ -90,28 +92,134 @@ namespace MazeMap
             (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
     }
 
+    inline App::Internal::LoopController::ControlVector MakeControlVector(
+        float leftMotorPwm = 0.0f,
+        float rightMotorPwm = 0.0f) noexcept
+    {
+        return App::Internal::LoopController::ControlVector::RawMotorPwm(leftMotorPwm, rightMotorPwm);
+    }
+
+    inline float DefaultFanDutyCycle() noexcept
+    {
+        return 0.80f;
+    }
+
+    inline float DefaultBatteryVoltageV(const PlantParams& params) noexcept
+    {
+        return params.supplyVoltageV;
+    }
+
     inline void UpdateDriveEstimator(
         DriveBase& drive,
         Estimator& estimator,
         float dtSeconds,
         const SensorSnapshot& snapshot,
-        const Maze* map = nullptr,
-        ControlCycleTiming* timing = nullptr)
+        const Maze* map = nullptr)
     {
         drive.RecordMeasurementInputs(snapshot);
-        const ControlInput control = drive.CurrentControlInput();
+        const auto control = drive.CurrentControlVector();
+        const float fanDutyCycle = GetMissionFanDutyCycle();
+        const float batteryVoltageV = drive.CurrentBatteryVoltageV();
         const EncoderObs encoderObservation = drive.ConsumeEncoderObservation(dtSeconds);
-        (void)estimator.UpdateRuntimeState(
-            dtSeconds,
-            control,
+        VehicleState& runtimeState = estimator.RuntimeState();
+        runtimeState.SetSensorSnapshot(snapshot);
+        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
+        }
+
+        if (estimator.HasFault())
+        {
+            estimator.SyncRuntimeState();
+            return;
+        }
+
+        estimator.ukf().setRuntimeContext(
             drive.GetLastLinearCommandMps(),
             drive.GetLastAngularCommandRadps(),
             drive.GetLastSaturationFlags(),
             drive.GetLastLeftLaunchAssistFloor(),
             drive.GetLastRightLaunchAssistFloor(),
-            encoderObservation,
-            snapshot,
-            map,
-            timing);
+            snapshot.accelBiasValid,
+            snapshot.accelBodyXMps2,
+            snapshot.accelBodyYMps2);
+
+        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+        {
+            if (!estimator.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
+            {
+                estimator.SyncRuntimeState();
+                return;
+            }
+        }
+
+        const bool updateYawFromEncoder = !std::isfinite(snapshot.gyroRawRadps);
+        (void)estimator.updateEncoderPair(encoderObservation, dtSeconds, updateYawFromEncoder);
+
+        if (std::isfinite(snapshot.gyroRawRadps))
+        {
+            const MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
+            if (!yawUpdate.accepted)
+            {
+                estimator.SyncRuntimeState();
+                return;
+            }
+        }
+
+        ImuAccelObs accelObservation{};
+        accelObservation.valid =
+            snapshot.accelBiasValid &&
+            std::isfinite(snapshot.accelBodyXMps2) &&
+            std::isfinite(snapshot.accelBodyYMps2);
+        accelObservation.accelBodyXMps2 = snapshot.accelBodyXMps2;
+        accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
+        (void)estimator.updatePlanarAccel(accelObservation);
+
+        if (map != nullptr)
+        {
+            const PlantParams& params = estimator.ukf().params();
+            WallObs frontLeftObs{};
+            WallObs frontRightObs{};
+            BuildFrontWallObservations(
+                snapshot.frontWallObservationValid,
+                snapshot.frontWall,
+                snapshot.frontWallUsesFallbackDetection,
+                snapshot.frontWallUsesCharacterizationDetection,
+                snapshot.frontLeftDistanceM,
+                snapshot.frontRightDistanceM,
+                params.noHitRangeM,
+                frontLeftObs,
+                frontRightObs);
+            if (frontLeftObs.valid && frontRightObs.valid)
+            {
+                (void)estimator.updateFrontPair(frontLeftObs, frontRightObs, *map, true);
+            }
+
+            const WallObs leftSideObs = BuildSideWallObservation(
+                snapshot.leftDistanceValidForControl,
+                snapshot.leftTransitionDetected,
+                snapshot.leftWallObservation,
+                snapshot.sideLeftDistanceM,
+                params.noHitRangeM);
+            if (leftSideObs.valid)
+            {
+                (void)estimator.updateSideSensor(RelativeDirection::Left90, leftSideObs, *map, true);
+            }
+
+            const WallObs rightSideObs = BuildSideWallObservation(
+                snapshot.rightDistanceValidForControl,
+                snapshot.rightTransitionDetected,
+                snapshot.rightWallObservation,
+                snapshot.sideRightDistanceM,
+                params.noHitRangeM);
+            if (rightSideObs.valid)
+            {
+                (void)estimator.updateSideSensor(RelativeDirection::Right90, rightSideObs, *map, true);
+            }
+        }
+
+        estimator.SyncRuntimeState();
     }
 }
+
+

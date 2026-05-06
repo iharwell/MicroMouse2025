@@ -3,9 +3,6 @@
 
 #include "EstimatorTestSupport.h"
 #include "PlantModelTestSupport.h"
-#include "..\MazeMap\EstimatorPredictModel.h"
-#include "..\MazeMap\GripUtilizationMetrics.h"
-#include "..\MazeMap\TorqueEstimateAdapter.h"
 
 #include <cmath>
 
@@ -16,41 +13,6 @@ namespace MazeMap
     namespace
     {
         constexpr float kZeroLinearVelocityToleranceMps = 0.008f;
-
-        PlantDerivatives EvaluateEstimatorAppliedBankTorqueStep(
-            const VehicleState::StateVector& state,
-            float leftAppliedBankTorqueNm,
-            float rightAppliedBankTorqueNm,
-            const PlantModel::PreparedParams& prepared,
-            float fanDutyCycle,
-            const ModelCycleContext* cycleContext = nullptr) noexcept
-        {
-            EstimatorPredictModel predictModel;
-            EstimatorPredictModel::PredictInput predictInput{};
-            predictInput.currentState = state;
-            predictInput.leftAppliedBankTorqueNm = leftAppliedBankTorqueNm;
-            predictInput.rightAppliedBankTorqueNm = rightAppliedBankTorqueNm;
-            predictInput.fanDutyCycle = fanDutyCycle;
-            predictInput.cycleContext = cycleContext;
-            return predictModel.EvaluateStep(predictInput, prepared);
-        }
-
-        PlantDerivatives EvaluateEstimatorAppliedBankTorqueStep(
-            const VehicleState::StateVector& state,
-            float leftAppliedBankTorqueNm,
-            float rightAppliedBankTorqueNm,
-            const PlantParams& params,
-            float fanDutyCycle,
-            const ModelCycleContext* cycleContext = nullptr) noexcept
-        {
-            return EvaluateEstimatorAppliedBankTorqueStep(
-                state,
-                leftAppliedBankTorqueNm,
-                rightAppliedBankTorqueNm,
-                PlantModel::Prepare(params),
-                fanDutyCycle,
-                cycleContext);
-        }
     }
 
     TEST_CLASS(PlantModelDynamicsTest)
@@ -66,101 +28,21 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = state(VehicleState::kU) / params.wheelRadiusM;
             state(VehicleState::kOmegaR) = state(VehicleState::kU) / params.wheelRadiusM;
 
-            ControlInput control;
-            control.leftMotorCommand = 0.55f;
-            control.rightMotorCommand = 0.55f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control;
+            control.leftMotorPwm = 0.55f;
+            control.rightMotorPwm = 0.55f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
-            const PlantDerivatives derivatives = plant.forwardStep(state, control, params);
+            const PlantDerivatives derivatives =
+                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, params);
             Assert::IsTrue(std::isfinite(derivatives.stateDot(VehicleState::kR)));
             Assert::AreEqual(0.0f, derivatives.stateDot(VehicleState::kR), 1.0e-4f);
         }
 
-        TEST_METHOD(PlantModelForwardStepFromAppliedBankTorquesMatchesZeroCommandAtRest)
+        TEST_METHOD(PlantModelTireForcesRetainPreProjectionUtilizationAboveUnity)
         {
             PlantModel plant;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = VehicleState::StateVector::Zero();
-
-            ControlInput control{};
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
-
-            const PlantDerivatives commanded = plant.forwardStep(state, control, params);
-            const PlantDerivatives applied =
-                EvaluateEstimatorAppliedBankTorqueStep(state, 0.0f, 0.0f, params, control.fanDutyCycle);
-
-            AssertPlantDerivativesNear(commanded, applied, 1.0e-6f);
-            Assert::IsTrue(std::isfinite(applied.longitudinalAccelMps2));
-            Assert::IsTrue(std::isfinite(applied.yawAccelRadps2));
-        }
-
-        TEST_METHOD(PlantModelForwardStepFromAppliedBankTorquesIsContinuousAcrossZeroSpeedCrossing)
-        {
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector negativeState = VehicleState::StateVector::Zero();
-            VehicleState::StateVector positiveState = VehicleState::StateVector::Zero();
-            negativeState(VehicleState::kU) = -1.0e-4f;
-            positiveState(VehicleState::kU) = 1.0e-4f;
-
-            const PlantDerivatives negative =
-                EvaluateEstimatorAppliedBankTorqueStep(negativeState, 0.0f, 0.0f, params, 0.80f);
-            const PlantDerivatives positive =
-                EvaluateEstimatorAppliedBankTorqueStep(positiveState, 0.0f, 0.0f, params, 0.80f);
-
-            Assert::IsTrue(std::isfinite(negative.longitudinalAccelMps2));
-            Assert::IsTrue(std::isfinite(positive.longitudinalAccelMps2));
-            Assert::IsTrue(std::isfinite(negative.yawAccelRadps2));
-            Assert::IsTrue(std::isfinite(positive.yawAccelRadps2));
-            Assert::IsTrue(std::fabs(negative.longitudinalAccelMps2 - positive.longitudinalAccelMps2) <= 1.0e-3f);
-            Assert::IsTrue(std::fabs(negative.yawAccelRadps2 - positive.yawAccelRadps2) <= 1.0e-3f);
-        }
-
-        TEST_METHOD(PlantModelForwardStepFromAppliedBankTorquesUsesFrozenCycleEdgeShapeContext)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
-            state(VehicleState::kU) = 0.15f;
-            state(VehicleState::kV) = 0.08f;
-            state(VehicleState::kR) = 2.5f;
-            state(VehicleState::kOmegaL) = 24.0f;
-            state(VehicleState::kOmegaR) = 18.0f;
-
-            const PlantDerivatives baseline =
-                EvaluateEstimatorAppliedBankTorqueStep(state, 0.0f, 0.0f, prepared, 0.80f);
-
-            ModelCycleContext cycleContext{};
-            cycleContext.utilization.leftBankPreProjectionUtilization = 1.20f;
-            cycleContext.utilization.rightBankPreProjectionUtilization = 1.15f;
-            cycleContext.memory.leftBankMemory = 1.0f;
-            cycleContext.memory.rightBankMemory = 1.0f;
-            cycleContext.regrip.leftBankInRecovery = true;
-            cycleContext.regrip.rightBankInRecovery = true;
-            cycleContext.regrip.leftBankRecoveryScore = 1.0f;
-            cycleContext.regrip.rightBankRecoveryScore = 1.0f;
-            cycleContext.regrip.leftBankRecoveryTimeRemainingS = 0.05f;
-            cycleContext.regrip.rightBankRecoveryTimeRemainingS = 0.05f;
-            cycleContext.schedule.leftEdgeShapeStrength = 1.0f;
-            cycleContext.schedule.rightEdgeShapeStrength = 1.0f;
-            cycleContext.schedule.leftBankHoldoffActive = true;
-            cycleContext.schedule.rightBankHoldoffActive = true;
-
-            const PlantDerivatives edgeShaped =
-                EvaluateEstimatorAppliedBankTorqueStep(state, 0.0f, 0.0f, prepared, 0.80f, &cycleContext);
-
-            Assert::IsTrue(
-                std::fabs(edgeShaped.contactForces.LeftBankForwardForceN()) <
-                std::fabs(baseline.contactForces.LeftBankForwardForceN()));
-            Assert::IsTrue(
-                std::fabs(edgeShaped.contactForces.RightBankForwardForceN()) <
-                std::fabs(baseline.contactForces.RightBankForwardForceN()));
-        }
-
-        TEST_METHOD(GripUtilizationMetricsRetainsPreProjectionUtilizationAboveUnity)
-        {
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
 
@@ -169,32 +51,13 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 45.0f;
             state(VehicleState::kOmegaR) = 43.0f;
 
-            AppliedTorqueEstimate appliedTorque{};
-            const GripUtilizationSnapshot snapshot =
-                GripUtilizationMetrics::Compute(state, appliedTorque, prepared);
+            const ContactForces forces = plant.tireForces(state, prepared);
 
-            Assert::IsTrue(snapshot.leftBankPreProjectionUtilization > 1.0f);
-            Assert::IsTrue(snapshot.rightBankPreProjectionUtilization > 1.0f);
-            Assert::IsTrue(snapshot.leftBankAnomalySeverity <= 1.0f);
-            Assert::IsTrue(snapshot.rightBankAnomalySeverity <= 1.0f);
+            Assert::IsTrue(forces.LeftBankMaxPreProjectionUtilization() > 1.0f);
+            Assert::IsTrue(forces.RightBankMaxPreProjectionUtilization() > 1.0f);
         }
 
-        TEST_METHOD(PlantModelForwardStepFromAppliedBankTorquesUsesPhysicalTorqueThresholdsAtRest)
-        {
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = VehicleState::StateVector::Zero();
-
-            const PlantDerivatives derivatives =
-                EvaluateEstimatorAppliedBankTorqueStep(state, 0.02f, 0.02f, params, 0.80f);
-
-            Assert::IsTrue(std::isfinite(derivatives.stateDot(VehicleState::kOmegaL)));
-            Assert::IsTrue(std::isfinite(derivatives.stateDot(VehicleState::kOmegaR)));
-            Assert::IsTrue(derivatives.regime != MotionRegime::StoppedHold);
-            Assert::IsTrue(derivatives.stateDot(VehicleState::kOmegaL) > 0.0f);
-            Assert::IsTrue(derivatives.stateDot(VehicleState::kOmegaR) > 0.0f);
-        }
-
-        TEST_METHOD(GripUtilizationMetricsPreservePreProjectionUtilizationAboveUnity)
+        TEST_METHOD(PlantModelTireForcesPreservePreProjectionUtilizationAboveUnity)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
@@ -205,17 +68,10 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 55.0f;
             state(VehicleState::kOmegaR) = 55.0f;
 
-            AppliedTorqueEstimate appliedTorque{};
-            appliedTorque.batteryVoltageAvailable = true;
-            const GripUtilizationSnapshot snapshot =
-                GripUtilizationMetrics::Compute(state, appliedTorque, prepared);
-
-            Assert::IsTrue(snapshot.leftBankPreProjectionUtilization > 1.0f);
-            Assert::IsTrue(snapshot.rightBankPreProjectionUtilization > 1.0f);
-            Assert::IsTrue(snapshot.leftBankAnomalySeverity > 0.0f);
-            Assert::IsTrue(snapshot.rightBankAnomalySeverity > 0.0f);
-
             const ContactForces forces = plant.tireForces(state, prepared);
+
+            Assert::IsTrue(forces.LeftBankMaxPreProjectionUtilization() > 1.0f);
+            Assert::IsTrue(forces.RightBankMaxPreProjectionUtilization() > 1.0f);
             for (const ContactForce& force : forces.contacts)
             {
                 Assert::IsTrue(force.saturation >= 0.0f);
@@ -243,11 +99,11 @@ namespace MazeMap
                 47.0f,
                 -0.03f);
 
-            ControlInput control{};
-            control.leftMotorCommand = 0.38f;
-            control.rightMotorCommand = 0.23f;
-            control.fanDutyCycle = 0.72f;
-            control.batteryVoltageV = params.supplyVoltageV - 0.35f;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.38f;
+            control.rightMotorPwm = 0.23f;
+            const float controlFanDutyCycle = 0.72f;
+            const float controlBatteryVoltageV = params.supplyVoltageV - 0.35f;
 
             const WheelKinematics rawKinematics = plant.wheelKinematics(state, params);
             const WheelKinematics preparedKinematics = plant.wheelKinematics(state, prepared);
@@ -263,32 +119,32 @@ namespace MazeMap
                 plant.tireForces(state, prepared),
                 1.0e-6f);
             AssertContactForcesNear(
-                plant.tireForces(state, control, params),
-                plant.tireForces(state, control, prepared),
+                plant.tireForces(state, control, controlFanDutyCycle, params),
+                plant.tireForces(state, control, controlFanDutyCycle, prepared),
                 1.0e-6f);
 
             AssertPlantDerivativesNear(
-                plant.forwardStep(state, control, params),
-                plant.forwardStep(state, control, prepared),
+                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, params),
+                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, prepared),
                 1.0e-6f);
 
             Assert::AreEqual(
-                plant.imuPlanarAcceleration(state, control, params).x(),
-                plant.imuPlanarAcceleration(state, control, prepared).x(),
+                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, params).x(),
+                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, prepared).x(),
                 1.0e-6f);
             Assert::AreEqual(
-                plant.imuPlanarAcceleration(state, control, params).y(),
-                plant.imuPlanarAcceleration(state, control, prepared).y(),
+                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, params).y(),
+                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, prepared).y(),
                 1.0e-6f);
 
             AssertStateVectorNear(
-                plant.integrate(state, control, 0.0015f, params),
-                plant.integrate(state, control, 0.0015f, prepared),
+                plant.integrate(state, control, controlFanDutyCycle, controlBatteryVoltageV, 0.0015f, params),
+                plant.integrate(state, control, controlFanDutyCycle, controlBatteryVoltageV, 0.0015f, prepared),
                 1.0e-6f);
 
             AssertDriveCommandSolutionNear(
-                plant.solveDriveCommands(state, 1.25f, 3.75f, params, control.fanDutyCycle, control.batteryVoltageV),
-                plant.solveDriveCommands(state, 1.25f, 3.75f, prepared, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveDriveCommands(state, 1.25f, 3.75f, params, controlFanDutyCycle, controlBatteryVoltageV),
+                plant.solveDriveCommands(state, 1.25f, 3.75f, prepared, controlFanDutyCycle, controlBatteryVoltageV),
                 1.0e-6f);
             AssertDriveCommandSolutionNear(
                 plant.solveDriveCommands(
@@ -297,21 +153,21 @@ namespace MazeMap
                     state(VehicleState::kR),
                     3.75f,
                     params,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 plant.solveDriveCommands(
                     state(VehicleState::kU),
                     1.25f,
                     state(VehicleState::kR),
                     3.75f,
                     prepared,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 1.0e-6f);
 
             AssertDriveCommandSolutionNear(
-                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, params, control.fanDutyCycle, control.batteryVoltageV),
-                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, prepared, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, params, controlFanDutyCycle, controlBatteryVoltageV),
+                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, prepared, controlFanDutyCycle, controlBatteryVoltageV),
                 1.0e-6f);
             AssertDriveCommandSolutionNear(
                 plant.solveDriveCommandsForVelocityTarget(
@@ -320,16 +176,16 @@ namespace MazeMap
                     state(VehicleState::kR),
                     2.95f,
                     params,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 plant.solveDriveCommandsForVelocityTarget(
                     state(VehicleState::kU),
                     2.05f,
                     state(VehicleState::kR),
                     2.95f,
                     prepared,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 1.0e-6f);
 
             float rawMaxLongitudinalAccelMps2 = 0.0f;
@@ -341,13 +197,13 @@ namespace MazeMap
                 params,
                 rawMaxLongitudinalAccelMps2,
                 rawMaxYawAccelRadps2,
-                control.fanDutyCycle);
+                controlFanDutyCycle);
             plant.velocityTargetTechnicalLimits(
                 state,
                 prepared,
                 preparedMaxLongitudinalAccelMps2,
                 preparedMaxYawAccelRadps2,
-                control.fanDutyCycle);
+                controlFanDutyCycle);
             Assert::AreEqual(rawMaxLongitudinalAccelMps2, preparedMaxLongitudinalAccelMps2, 1.0e-6f);
             Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
 
@@ -361,20 +217,20 @@ namespace MazeMap
                 params,
                 rawMaxLongitudinalAccelMps2,
                 rawMaxYawAccelRadps2,
-                control.fanDutyCycle);
+                controlFanDutyCycle);
             plant.velocityTargetTechnicalLimits(
                 state(VehicleState::kU),
                 state(VehicleState::kR),
                 prepared,
                 preparedMaxLongitudinalAccelMps2,
                 preparedMaxYawAccelRadps2,
-                control.fanDutyCycle);
+                controlFanDutyCycle);
             Assert::AreEqual(rawMaxLongitudinalAccelMps2, preparedMaxLongitudinalAccelMps2, 1.0e-6f);
             Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
 
             AssertDriveCommandSolutionNear(
-                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, params, control.fanDutyCycle, control.batteryVoltageV),
-                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, prepared, control.fanDutyCycle, control.batteryVoltageV),
+                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, params, controlFanDutyCycle, controlBatteryVoltageV),
+                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, prepared, controlFanDutyCycle, controlBatteryVoltageV),
                 1.0e-6f);
             AssertDriveCommandSolutionNear(
                 plant.solveTractionLimitedDriveCommands(
@@ -383,16 +239,16 @@ namespace MazeMap
                     state(VehicleState::kR),
                     3.75f,
                     params,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 plant.solveTractionLimitedDriveCommands(
                     state(VehicleState::kU),
                     1.25f,
                     state(VehicleState::kR),
                     3.75f,
                     prepared,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 1.0e-6f);
 
             AssertDriveCommandSolutionNear(
@@ -401,15 +257,15 @@ namespace MazeMap
                     2.05f,
                     2.95f,
                     params,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     state,
                     2.05f,
                     2.95f,
                     prepared,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 1.0e-6f);
             AssertDriveCommandSolutionNear(
                 plant.solveTractionLimitedDriveCommandsForVelocityTarget(
@@ -418,25 +274,25 @@ namespace MazeMap
                     state(VehicleState::kR),
                     2.95f,
                     params,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 plant.solveTractionLimitedDriveCommandsForVelocityTarget(
                     state(VehicleState::kU),
                     2.05f,
                     state(VehicleState::kR),
                     2.95f,
                     prepared,
-                    control.fanDutyCycle,
-                    control.batteryVoltageV),
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV),
                 1.0e-6f);
 
             Assert::AreEqual(
-                plant.driveTorqueFromCommand(control.leftMotorCommand, state(VehicleState::kOmegaL), control.batteryVoltageV, params),
-                plant.driveTorqueFromCommand(control.leftMotorCommand, state(VehicleState::kOmegaL), control.batteryVoltageV, prepared),
+                plant.driveTorqueFromCommand(control.leftMotorPwm, state(VehicleState::kOmegaL), controlBatteryVoltageV, params),
+                plant.driveTorqueFromCommand(control.leftMotorPwm, state(VehicleState::kOmegaL), controlBatteryVoltageV, prepared),
                 1.0e-6f);
             Assert::AreEqual(
-                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), control.batteryVoltageV, params),
-                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), control.batteryVoltageV, prepared),
+                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), controlBatteryVoltageV, params),
+                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), controlBatteryVoltageV, prepared),
                 1.0e-6f);
             Assert::AreEqual(
                 plant.driveFrictionTorque(state(VehicleState::kOmegaL), 0.018f, params),
@@ -461,12 +317,20 @@ namespace MazeMap
                 0.0f,
                 0.12f);
 
-            ControlInput control{};
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            const float controlBatteryVoltageV = params.supplyVoltageV;
+            const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
             for (int step = 0; step < 1000; ++step)
             {
-                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
+                state = AdvancePlantPredictionState(
+                    plant,
+                    prepared,
+                    state,
+                    control,
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV,
+                    dt);
             }
 
             Assert::AreEqual(0.03f, state(VehicleState::kPx), 1.0e-7f);
@@ -496,12 +360,20 @@ namespace MazeMap
                 0.8f,
                 -0.7f);
 
-            ControlInput control{};
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            const float controlBatteryVoltageV = params.supplyVoltageV;
+            const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
             for (int step = 0; step < 250; ++step)
             {
-                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
+                state = AdvancePlantPredictionState(
+                    plant,
+                    prepared,
+                    state,
+                    control,
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV,
+                    dt);
             }
 
             Assert::AreEqual(0.0f, state(VehicleState::kU), kZeroLinearVelocityToleranceMps);
@@ -527,12 +399,20 @@ namespace MazeMap
                 -0.7f);
             VehicleState::StateVector state = initialState;
 
-            ControlInput control{};
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            const float controlBatteryVoltageV = params.supplyVoltageV;
+            const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
             for (int step = 0; step < 25; ++step)
             {
-                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
+                state = AdvancePlantPredictionState(
+                    plant,
+                    prepared,
+                    state,
+                    control,
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV,
+                    dt);
             }
 
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < params.stopEnterSpeedMps);
@@ -557,15 +437,15 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 1.05f * (state(VehicleState::kU) / params.wheelRadiusM);
             state(VehicleState::kOmegaR) = 0.95f * (state(VehicleState::kU) / params.wheelRadiusM);
 
-            ControlInput control;
-            control.leftMotorCommand = 0.65f;
-            control.rightMotorCommand = 0.60f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control;
+            control.leftMotorPwm = 0.65f;
+            control.rightMotorPwm = 0.60f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const WheelKinematics kinematics = plant.wheelKinematics(state, params);
             const SlipTargets slip = plant.slipTargets(state, kinematics, params);
-            const ContactForces forces = plant.tireForces(state, control, params);
+            const ContactForces forces = plant.tireForces(state, control, controlFanDutyCycle, params);
 
             Assert::IsTrue(std::isfinite(slip.kappaLeft));
             Assert::IsTrue(std::isfinite(slip.kappaRight));
@@ -586,11 +466,11 @@ namespace MazeMap
             }
         }
 
-        TEST_METHOD(GripUtilizationMetricsExposeRawPreProjectionUtilizationFromAppliedTorques)
+        TEST_METHOD(ContactForcesExposeRawPreProjectionUtilization)
         {
+            const PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            const PlantModel plant;
 
             VehicleState::StateVector state = BuildUkfState(
                 0.0f,
@@ -603,58 +483,34 @@ namespace MazeMap
                 10.0f,
                 0.0f);
 
-            ControlInput control{};
-            control.leftMotorCommand = 1.0f;
-            control.rightMotorCommand = 0.92f;
-            control.fanDutyCycle = 0.30f;
-            control.batteryVoltageV = params.supplyVoltageV;
-
-            const AppliedTorqueEstimate appliedTorque =
-                TorqueEstimateAdapter::Estimate(
-                    plant,
-                    state,
-                    control,
-                    prepared,
-                    control.batteryVoltageV);
-            const PlantDerivatives predicted =
-                EvaluateEstimatorAppliedBankTorqueStep(
-                    state,
-                    appliedTorque.leftAppliedBankTorqueNm,
-                    appliedTorque.rightAppliedBankTorqueNm,
-                    prepared,
-                    control.fanDutyCycle);
-
-            GripUtilizationInputs inputs{};
-            inputs.fanDutyCycle = control.fanDutyCycle;
-            const GripUtilizationSnapshot snapshot =
-                GripUtilizationMetrics::Compute(
-                    state,
-                    appliedTorque,
-                    prepared,
-                    inputs);
+            const ContactForces forces = plant.tireForces(state, prepared);
 
             Assert::AreEqual(
-                predicted.contactForces.LeftBankMaxPreProjectionUtilization(),
-                snapshot.leftBankPreProjectionUtilization,
+                (std::max)(
+                    forces.contacts[0].preProjectionUtilization,
+                    forces.contacts[2].preProjectionUtilization),
+                forces.LeftBankMaxPreProjectionUtilization(),
                 1.0e-6f);
             Assert::AreEqual(
-                predicted.contactForces.RightBankMaxPreProjectionUtilization(),
-                snapshot.rightBankPreProjectionUtilization,
+                (std::max)(
+                    forces.contacts[1].preProjectionUtilization,
+                    forces.contacts[3].preProjectionUtilization),
+                forces.RightBankMaxPreProjectionUtilization(),
                 1.0e-6f);
-            Assert::IsTrue(snapshot.leftBankPreProjectionUtilization >= 0.0f);
-            Assert::IsTrue(snapshot.rightBankPreProjectionUtilization >= 0.0f);
+            Assert::IsTrue(forces.LeftBankMaxPreProjectionUtilization() >= 0.0f);
+            Assert::IsTrue(forces.RightBankMaxPreProjectionUtilization() >= 0.0f);
             Assert::IsTrue(
-                snapshot.leftBankPreProjectionUtilization > 1.0f ||
-                snapshot.rightBankPreProjectionUtilization > 1.0f);
+                forces.LeftBankMaxPreProjectionUtilization() > 1.0f ||
+                forces.RightBankMaxPreProjectionUtilization() > 1.0f);
         }
 
         TEST_METHOD(PlantModelImuAccelerationIncludesLeverArmTerms)
         {
             PlantModel plant;
             PlantParams zeroLeverParams = PlantParams::Default();
-            zeroLeverParams.imu.positionBodyM = Eigen::Vector2f::Zero();
+            zeroLeverParams.backLeftImuMount = SensorMount(Eigen::Vector2f::Zero(), Eigen::Matrix2f::Identity());
             PlantParams leverParams = zeroLeverParams;
-            leverParams.imu.positionBodyM = Eigen::Vector2f(0.020f, -0.010f);
+            leverParams.backLeftImuMount = SensorMount(Eigen::Vector2f(0.020f, -0.010f), Eigen::Matrix2f::Identity());
 
             VehicleState::StateVector state = VehicleState::StateVector::Zero();
             state(VehicleState::kU) = 1.4f;
@@ -663,21 +519,23 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 0.9f * (state(VehicleState::kU) / zeroLeverParams.wheelRadiusM);
             state(VehicleState::kOmegaR) = 1.1f * (state(VehicleState::kU) / zeroLeverParams.wheelRadiusM);
 
-            ControlInput control;
-            control.leftMotorCommand = 0.30f;
-            control.rightMotorCommand = 0.55f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = zeroLeverParams.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control;
+            control.leftMotorPwm = 0.30f;
+            control.rightMotorPwm = 0.55f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = zeroLeverParams.supplyVoltageV;
 
-            const PlantDerivatives zeroLever = plant.forwardStep(state, control, zeroLeverParams);
-            const PlantDerivatives withLever = plant.forwardStep(state, control, leverParams);
+            const PlantDerivatives zeroLever =
+                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, zeroLeverParams);
+            const PlantDerivatives withLever =
+                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, leverParams);
 
             const float expectedDeltaX =
-                (withLever.stateDot(VehicleState::kR) * leverParams.imu.positionBodyM.y()) -
-                ((state(VehicleState::kR) * state(VehicleState::kR)) * leverParams.imu.positionBodyM.x());
+                (withLever.stateDot(VehicleState::kR) * leverParams.backLeftImuMount.positionBodyM().y()) -
+                ((state(VehicleState::kR) * state(VehicleState::kR)) * leverParams.backLeftImuMount.positionBodyM().x());
             const float expectedDeltaY =
-                (-withLever.stateDot(VehicleState::kR) * leverParams.imu.positionBodyM.x()) -
-                ((state(VehicleState::kR) * state(VehicleState::kR)) * leverParams.imu.positionBodyM.y());
+                (-withLever.stateDot(VehicleState::kR) * leverParams.backLeftImuMount.positionBodyM().x()) -
+                ((state(VehicleState::kR) * state(VehicleState::kR)) * leverParams.backLeftImuMount.positionBodyM().y());
 
             Assert::AreEqual(
                 zeroLever.imuAccelBodyMps2.x() + expectedDeltaX,
@@ -701,14 +559,21 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 0.95f * (state(VehicleState::kU) / params.wheelRadiusM);
             state(VehicleState::kOmegaR) = 1.05f * (state(VehicleState::kU) / params.wheelRadiusM);
 
-            ControlInput control;
-            control.leftMotorCommand = 0.25f;
-            control.rightMotorCommand = 0.45f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control;
+            control.leftMotorPwm = 0.25f;
+            control.rightMotorPwm = 0.45f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
-            const PlantDerivatives derivatives = plant.forwardStep(state, control, params);
-            const Eigen::Vector2f predictedMeasurement = plant.imuPlanarAcceleration(state, control, params);
+            const PlantDerivatives derivatives =
+                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, params);
+            const Eigen::Vector2f predictedMeasurement =
+                plant.imuPlanarAcceleration(
+                    state,
+                    control,
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV,
+                    params);
 
             Assert::AreEqual(derivatives.imuAccelBodyMps2.x(), predictedMeasurement.x(), 1.0e-5f);
             Assert::AreEqual(derivatives.imuAccelBodyMps2.y(), predictedMeasurement.y(), 1.0e-5f);
@@ -729,17 +594,24 @@ namespace MazeMap
                 0.0f,
                 0.0f);
 
-            ControlInput control{};
-            control.leftMotorCommand = 0.50f;
-            control.rightMotorCommand = 0.50f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.50f;
+            control.rightMotorPwm = 0.50f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             constexpr float dt = 0.002f;
             constexpr int kSteps = 25;
             for (int step = 0; step < kSteps; ++step)
             {
-                state = AdvancePlantPredictionState(plant, prepared, state, control, dt);
+                state = AdvancePlantPredictionState(
+                    plant,
+                    prepared,
+                    state,
+                    control,
+                    controlFanDutyCycle,
+                    controlBatteryVoltageV,
+                    dt);
             }
 
             const float totalTimeS = dt * static_cast<float>(kSteps);
@@ -762,11 +634,11 @@ namespace MazeMap
             const PlantParams params = PlantParams::Default();
             const float staticWindowRadps = params.staticFrictionMaxSpeedMps / params.wheelRadiusM;
 
-            ControlInput control{};
-            control.leftMotorCommand = 0.25f;
-            control.rightMotorCommand = 0.25f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.25f;
+            control.rightMotorPwm = 0.25f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const VehicleState::StateVector atRest = BuildUkfState(
                 0.0f,
@@ -777,7 +649,8 @@ namespace MazeMap
                 0.0f,
                 0.0f,
                 0.0f);
-            const PlantDerivatives derivativesAtRest = plant.forwardStep(atRest, control, params);
+            const PlantDerivatives derivativesAtRest =
+                plant.forwardStep(atRest, control, controlFanDutyCycle, controlBatteryVoltageV, params);
             Assert::AreEqual(0.0f, derivativesAtRest.stateDot(VehicleState::kOmegaL), 1.0e-6f);
             Assert::AreEqual(0.0f, derivativesAtRest.stateDot(VehicleState::kOmegaR), 1.0e-6f);
 
@@ -813,14 +686,15 @@ namespace MazeMap
                 0.0f,
                 0.0f,
                 0.0f);
-            ControlInput control{};
-            control.leftMotorCommand = 0.45f;
-            control.rightMotorCommand = 0.45f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.45f;
+            control.rightMotorPwm = 0.45f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             constexpr float dt = 0.004f;
-            const VehicleState::StateVector integrated = plant.integrate(state, control, dt, params);
+            const VehicleState::StateVector integrated =
+                plant.integrate(state, control, controlFanDutyCycle, controlBatteryVoltageV, dt, params);
 
             Assert::IsTrue(std::isfinite(integrated.sum()));
             Assert::IsTrue(std::isfinite(integrated(VehicleState::kU)));
@@ -845,9 +719,10 @@ namespace MazeMap
                 0.5f / params.wheelRadiusM,
                 0.5f / params.wheelRadiusM);
 
-            ControlInput control{};
-            control.batteryVoltageV = params.supplyVoltageV;
-            const VehicleState::StateVector integrated = plant.integrate(state, control, 0.01f, params);
+            App::Internal::LoopController::ControlVector control{};
+            const float controlBatteryVoltageV = params.supplyVoltageV;
+            const VehicleState::StateVector integrated =
+                plant.integrate(state, control, 0.80f, controlBatteryVoltageV, 0.01f, params);
 
             Assert::IsTrue(integrated(VehicleState::kPsi) <= PI_F);
             Assert::IsTrue(integrated(VehicleState::kPsi) >= -PI_F);
@@ -855,3 +730,7 @@ namespace MazeMap
 
     };
 }
+
+
+
+

@@ -139,12 +139,11 @@ namespace MazeMap
             {
                 const LoggedOpenFloorPoseJumpSample& sample = kLatestLoggedOpenFloorPoseJumpWindow[index];
 
-                ControlInput control{};
-                control.leftMotorCommand = sample.leftDriveCommand;
-                control.rightMotorCommand = sample.rightDriveCommand;
-                control.fanDutyCycle = 0.80f;
-                control.batteryVoltageV = params.supplyVoltageV;
-                Assert::IsTrue(core.predict(sample.dtSeconds, control));
+                const App::Internal::LoopController::ControlVector control =
+                    App::Internal::LoopController::ControlVector::RawMotorPwm(
+                        sample.leftDriveCommand,
+                        sample.rightDriveCommand);
+                Assert::IsTrue(core.predict(sample.dtSeconds, control, 0.80f, params.supplyVoltageV));
 
                 EncoderObs encoderObservation{};
                 encoderObservation.totalLeftCounts = sample.leftEncoderCount;
@@ -185,3 +184,8 @@ namespace MazeMap
         }
     };
 }
+
+
+
+
+

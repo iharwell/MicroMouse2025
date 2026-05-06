@@ -5,6 +5,7 @@
 #include "Direction.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeCore.h"
+#include "SensorSnapshot.h"
 #include "VehicleState.h"
 
 #include <cstdint>

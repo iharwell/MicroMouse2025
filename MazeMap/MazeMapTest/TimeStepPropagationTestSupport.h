@@ -75,11 +75,13 @@ namespace MazeMap
         const PlantModel& plant,
         const PlantModel::PreparedParams& prepared,
         const VehicleState::StateVector& state,
-        const ControlInput& control,
+        const App::Internal::LoopController::ControlVector& control,
+        float fanDutyCycle,
+        float batteryVoltageV,
         float dtSeconds) noexcept
     {
         const VehicleState::StateVector integratedState =
-            plant.integrate(state, control, dtSeconds, prepared);
+            plant.integrate(state, control, fanDutyCycle, batteryVoltageV, dtSeconds, prepared);
         if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
         {
             return integratedState;
@@ -116,3 +118,5 @@ namespace MazeMap
                 dtSeconds));
     }
 }
+
+

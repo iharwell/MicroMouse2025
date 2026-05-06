@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "MazeMapApplicationPrivate.h"
 #include "DriveBase.h"
+#include "DriveTelemetry.h"
 #include "EncoderProgressWatchdog.h"
 #include "LoopController.h"
 #include "MazeMapRuntimeInfrastructure.h"
@@ -8,6 +9,7 @@
 #include "SharedRobotRuntime.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "RuntimeBinaryLogSupport.h"
+#include "SensorSnapshot.h"
 #include "VehicleState.h"
 #include "WallDistanceCalibration.h"
 
@@ -112,6 +114,12 @@ public:
         const MazeMap::VehicleState& state,
         LoopController& loopController) override
     {
+        if (!WriteBufferedSample())
+        {
+            _runtime.FailActiveMode("Failed to write diagnostic sample");
+            return LoopController::ControlVector::Brake;
+        }
+
         if (_phaseFn == nullptr)
         {
             _runtime.FailActiveMode("Diagnostic phase callback was not installed");
@@ -130,15 +138,39 @@ public:
             return LoopController::ControlVector::Brake;
         }
 
+        BufferCurrentSample(state);
+        ++_sampleCount;
+
+        return (this->*_phaseFn)(loopEndTimeUs, state, loopController);
+    }
+
+private:
+    bool WriteBufferedSample()
+    {
+        if (!_logRowBuffered)
+        {
+            return true;
+        }
+
+        const LoopController::TimingDiagnostics& timing = _loopController.LastDiagnostics();
+        _logRow.t_us = timing.tickStartUs;
+        _logRow.dt_us = timing.dtUs;
+        if (!_runtime.LogUtilityDataRow(_logRow))
+        {
+            return false;
+        }
+
+        _logRowBuffered = false;
+        return true;
+    }
+
+    void BufferCurrentSample(const MazeMap::VehicleState& state)
+    {
         const SensorSnapshot& snapshot = state.GetSensorSnapshot();
         const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
-        const MazeMap::VehicleState::DriveCommandState& commandState = state.GetDriveCommandState();
-        const MazeMap::DriveCommandPair appliedDriveCommand = state.GetAppliedDriveCommand();
         _logRow = {};
         _logRow.sample = static_cast<std::uint32_t>(_sampleCount);
         _logRow.phase_id = static_cast<std::uint32_t>(_phaseId);
-        _logRow.t_us = _loopController.CurrentTickStartUs();
-        _logRow.dt_us = _loopController.CurrentTickDtUs();
         _logRow.stationary =
             (_phaseFn == &DiagnosticController::HoldPhaseTick && _holdStationary) ? 1U : 0U;
         _logRow.pose_x_m = state.GetPositionX();
@@ -148,10 +180,10 @@ public:
         _logRow.angular_speed_radps = state.GetRotationalVelocity();
         // LoopController refreshes runtime state before calling the mode callback, so these
         // command fields match the sampled state for this log row.
-        _logRow.cmd_linear_mps = commandState.commandedLinearSpeedMps;
-        _logRow.cmd_angular_radps = commandState.commandedAngularSpeedRadps;
-        _logRow.left_drive_cmd = appliedDriveCommand.left;
-        _logRow.right_drive_cmd = appliedDriveCommand.right;
+        _logRow.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;
+        _logRow.cmd_angular_radps = driveTelemetry.commandedAngularSpeedRadps;
+        _logRow.left_drive_cmd = driveTelemetry.leftDriveCommand;
+        _logRow.right_drive_cmd = driveTelemetry.rightDriveCommand;
         _logRow.left_encoder_count = driveTelemetry.leftEncoderCount;
         _logRow.right_encoder_count = driveTelemetry.rightEncoderCount;
         _logRow.left_distance_m = driveTelemetry.leftDistanceM;
@@ -204,17 +236,8 @@ public:
         _logRow.gyro_bias_radps = snapshot.gyroBiasRadps;
         _logRow.gyro_raw_radps = snapshot.gyroRawRadps;
         _logRow.gyro_radps = snapshot.gyroRadps;
-        if (!_runtime.LogUtilityDataRow(_logRow))
-        {
-            _runtime.FailActiveMode("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
-        }
-        ++_sampleCount;
-
-        return (this->*_phaseFn)(loopEndTimeUs, state, loopController);
+        _logRowBuffered = true;
     }
-
-private:
     using PhaseFn = LoopController::ControlVector (DiagnosticController::*)(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
@@ -325,6 +348,7 @@ private:
     unsigned long _phaseId;
     unsigned long _sampleCount;
     DiagnosticLogRow _logRow{};
+    bool _logRowBuffered{};
     PhaseFn _phaseFn{};
 
     bool _holdStationary{};
@@ -472,6 +496,7 @@ private:
         _faulted = false;
         _cleanupComplete = false;
         _pendingReturnDistanceM = 0.0f;
+        _logRowBuffered = false;
     }
 
     void CleanupMode() noexcept
@@ -491,10 +516,31 @@ private:
 
     void CompleteMode(LoopController& loopController) noexcept
     {
-        (void)_runtime.AppendTextLogFormatted("Diagnostic complete, log saved to %s", GetLogFileName());
-        (void)_runtime.AppendTextLogLine("Use the # event,summary lines in the log header to map phases to tunables.");
-        CleanupMode();
-        loopController.HaltExecutionEndProgram();
+        loopController.RequestEndSession(
+            +[](void* const context, LoopController& boundaryLoopController)
+            {
+                auto* const self = static_cast<DiagnosticController*>(context);
+                if (self == nullptr)
+                {
+                    GetSharedRobotRuntime().FailActiveMode(
+                        "Diagnostic completion callback context was null");
+                    return;
+                }
+
+                if (!self->WriteBufferedSample())
+                {
+                    self->_runtime.FailActiveMode("Failed to write final diagnostic sample");
+                }
+
+                (void)self->_runtime.AppendTextLogFormatted(
+                    "Diagnostic complete, log saved to %s",
+                    self->GetLogFileName());
+                (void)self->_runtime.AppendTextLogLine(
+                    "Use the # event,summary lines in the log header to map phases to tunables.");
+                self->CleanupMode();
+                boundaryLoopController.HaltExecutionEndProgram();
+            },
+            this);
     }
 
     bool StartHoldPhase(
@@ -1599,7 +1645,8 @@ private:
 
         const float accelLimitedSpeedMps = (std::min)(
             limits.maxSpeedMps,
-            _straightPhaseState.commandedSpeedMps + (limits.accelMps2 * _loopController.CurrentTickDtSeconds()));
+            _straightPhaseState.commandedSpeedMps +
+            (limits.accelMps2 * (static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f)));
         const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
         _straightPhaseState.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
@@ -1721,7 +1768,8 @@ private:
                 _forwardPhaseState.holdStarted = true;
                 _forwardPhaseState.holdStartDistanceM = _drive.GetAverageDistanceMeters();
             }
-            _forwardPhaseState.holdElapsedSeconds += _loopController.CurrentTickDtSeconds();
+            _forwardPhaseState.holdElapsedSeconds +=
+                static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f;
             command = LoopController::ControlVector::RawMotorPwm(
                 _forwardPhaseState.forwardDriveCommand,
                 _forwardPhaseState.forwardDriveCommand);
@@ -1834,7 +1882,7 @@ private:
         _arcPhaseState.metrics.peakOmegaRadps = (std::max)(
             _arcPhaseState.metrics.peakOmegaRadps,
             std::fabs(state.GetRotationalVelocity()));
-        const float dtSeconds = _loopController.CurrentTickDtSeconds();
+        const float dtSeconds = static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f;
         _arcPhaseState.metrics.durationSeconds += dtSeconds;
         _arcPhaseState.metrics.omegaIntegralRad += state.GetRotationalVelocity() * dtSeconds;
         _arcPhaseState.metrics.speedIntegralMpsSeconds += std::fabs(state.GetVelocity()) * dtSeconds;
@@ -1906,7 +1954,8 @@ private:
 
         const float accelLimitedSpeedMps = (std::min)(
             _arcPhaseState.cruiseSpeedMps,
-            _arcPhaseState.commandedSpeedMps + (_arcPhaseState.limits.accelMps2 * _loopController.CurrentTickDtSeconds()));
+            _arcPhaseState.commandedSpeedMps +
+            (_arcPhaseState.limits.accelMps2 * (static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f)));
         const float decelLimitedSpeedMps =
             ReachableSpeedWithBoundary(0.0f, remainingM, _arcPhaseState.limits.decelMps2);
         _arcPhaseState.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);

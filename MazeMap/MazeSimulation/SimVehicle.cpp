@@ -130,3 +130,4 @@ MazeMap::Direction SimVehicle::GetOrientation()
 {
 	return _orientation;
 }
+

@@ -2,8 +2,13 @@
 // Declares the square-root UKF core that owns the process model and measurement updates.
 
 #include "Maze.h"
-#include "EstimatorPredictModel.h"
+#include "EncoderObs.h"
+#include "ImuAccelObs.h"
+#include "LoopController.h"
 #include "PlantModel.h"
+#include "SensorMount.h"
+#include "WallObservationPipeline.h"
+#include "Direction.h"
 #include "WallGeometryModel.h"
 #include "UKF.h"
 
@@ -39,6 +44,53 @@ namespace MazeMap
     // Owns the square-root UKF state, process model, and direct measurement updates.
     class EXPORT SrUkfCore
     {
+    private:
+        struct GripUtilizationSnapshot
+        {
+            float longitudinalClosureSeverity = 0.0f;
+            float differentialClosureSeverity = 0.0f;
+            float lateralAccelerationSeverity = 0.0f;
+            float yawConsistencySeverity = 0.0f;
+            float leftBankAnomalySeverity = 0.0f;
+            float rightBankAnomalySeverity = 0.0f;
+            float leftBankPreProjectionUtilization = 0.0f;
+            float rightBankPreProjectionUtilization = 0.0f;
+        };
+
+        struct TransientContactMemoryState
+        {
+            float leftBankMemory = 0.0f;
+            float rightBankMemory = 0.0f;
+        };
+
+        struct RegripRecoveryState
+        {
+            bool leftBankInRecovery = false;
+            bool rightBankInRecovery = false;
+            float leftBankRecoveryScore = 0.0f;
+            float rightBankRecoveryScore = 0.0f;
+            float leftBankRecoveryTimeRemainingS = 0.0f;
+            float rightBankRecoveryTimeRemainingS = 0.0f;
+        };
+
+        struct RobustUpdateSchedule
+        {
+            bool exactStationaryLock = false;
+            bool planarAccelForwardUpdateEnabled = false;
+            bool planarAccelLateralUpdateEnabled = false;
+            bool softOdometryEnabled = false;
+            float closureCovarianceScaleLeft = 1.0f;
+            float closureCovarianceScaleRight = 1.0f;
+            float lateralPseudoMeasurementCovarianceScale = 1.0f;
+            float forwardSpeedProcessNoiseScale = 1.0f;
+            float lateralSpeedProcessNoiseScale = 1.0f;
+            float yawRateProcessNoiseScale = 1.0f;
+            float leftWheelSpeedProcessNoiseScale = 1.0f;
+            float rightWheelSpeedProcessNoiseScale = 1.0f;
+            bool leftBankHoldoffActive = false;
+            bool rightBankHoldoffActive = false;
+        };
+
     public:
         enum class OperatingMode : std::uint8_t
         {
@@ -169,11 +221,6 @@ namespace MazeMap
             return _preparedParams;
         }
 
-        const ModelCycleContext& modelCycleContext() const noexcept
-        {
-            return _frozenCycleContext;
-        }
-
         OperatingMode operatingMode() const noexcept { return _operatingMode; }
         std::uint8_t operatingModeId() const noexcept { return static_cast<std::uint8_t>(_operatingMode); }
         float gyroBiasAnchorRadps() const noexcept { return _gyroBiasAnchorRadps; }
@@ -224,6 +271,38 @@ namespace MazeMap
         float softOdometryInnovationNis() const noexcept { return 0.0f; }
         bool directWheelUpdateBodyStateInvariant() const noexcept { return _directWheelUpdateBodyStateInvariant; }
         bool releaseInflationApplied() const noexcept { return _releaseInflationApplied; }
+        bool exactStationaryLock() const noexcept { return _frozenSchedule.exactStationaryLock; }
+        bool leftBankHoldoffActive() const noexcept { return _frozenSchedule.leftBankHoldoffActive; }
+        bool rightBankHoldoffActive() const noexcept { return _frozenSchedule.rightBankHoldoffActive; }
+        bool leftBankInRecovery() const noexcept { return _regripRecovery.leftBankInRecovery; }
+        bool rightBankInRecovery() const noexcept { return _regripRecovery.rightBankInRecovery; }
+        float longitudinalClosureSeverity() const noexcept { return _frozenGripUtilization.longitudinalClosureSeverity; }
+        float differentialClosureSeverity() const noexcept { return _frozenGripUtilization.differentialClosureSeverity; }
+        float lateralAccelerationSeverity() const noexcept { return _frozenGripUtilization.lateralAccelerationSeverity; }
+        float yawConsistencySeverity() const noexcept { return _frozenGripUtilization.yawConsistencySeverity; }
+        float leftBankAnomalySeverity() const noexcept { return _frozenGripUtilization.leftBankAnomalySeverity; }
+        float rightBankAnomalySeverity() const noexcept { return _frozenGripUtilization.rightBankAnomalySeverity; }
+        float leftBankPreProjectionUtilization() const noexcept { return _frozenGripUtilization.leftBankPreProjectionUtilization; }
+        float rightBankPreProjectionUtilization() const noexcept { return _frozenGripUtilization.rightBankPreProjectionUtilization; }
+        float leftBankMemory() const noexcept { return _transientContactMemory.leftBankMemory; }
+        float rightBankMemory() const noexcept { return _transientContactMemory.rightBankMemory; }
+        float leftBankRecoveryScore() const noexcept { return _regripRecovery.leftBankRecoveryScore; }
+        float rightBankRecoveryScore() const noexcept { return _regripRecovery.rightBankRecoveryScore; }
+        float leftBankRecoveryTimeRemainingS() const noexcept { return _regripRecovery.leftBankRecoveryTimeRemainingS; }
+        float rightBankRecoveryTimeRemainingS() const noexcept { return _regripRecovery.rightBankRecoveryTimeRemainingS; }
+        float forwardSpeedProcessNoiseScale() const noexcept { return _frozenSchedule.forwardSpeedProcessNoiseScale; }
+        float lateralSpeedProcessNoiseScale() const noexcept { return _frozenSchedule.lateralSpeedProcessNoiseScale; }
+        float yawRateProcessNoiseScale() const noexcept { return _frozenSchedule.yawRateProcessNoiseScale; }
+        float leftWheelSpeedProcessNoiseScale() const noexcept { return _frozenSchedule.leftWheelSpeedProcessNoiseScale; }
+        float rightWheelSpeedProcessNoiseScale() const noexcept { return _frozenSchedule.rightWheelSpeedProcessNoiseScale; }
+        float closureCovarianceScaleLeft() const noexcept { return _frozenSchedule.closureCovarianceScaleLeft; }
+        float closureCovarianceScaleRight() const noexcept { return _frozenSchedule.closureCovarianceScaleRight; }
+        float lateralPseudoMeasurementCovarianceScale() const noexcept
+        {
+            return _frozenSchedule.lateralPseudoMeasurementCovarianceScale;
+        }
+        float appliedLeftBankTorqueNm() const noexcept { return _frozenAppliedTorque.leftAppliedBankTorqueNm; }
+        float appliedRightBankTorqueNm() const noexcept { return _frozenAppliedTorque.rightAppliedBankTorqueNm; }
 
         void setRuntimeContext(
             float commandedLinearMps,
@@ -235,10 +314,52 @@ namespace MazeMap
             float accelBodyXMps2,
             float accelBodyYMps2) noexcept;
         float resolveYawRateForFeedforward(float yawRateRawRadps) const noexcept;
+        DriveCommandSolution solveAlignedDriveCommands(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f) const noexcept;
+        DriveCommandSolution solveAlignedDriveCommands(
+            float forwardVelocityMps,
+            float desiredLongitudinalAccelMps2,
+            float yawRateRadps,
+            float desiredYawAccelRadps2,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f) const noexcept;
+        DriveCommandSolution solveAlignedDriveCommandsForVelocityTarget(
+            const StateVector& currentState,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS) const noexcept;
+        DriveCommandSolution solveAlignedDriveCommandsForVelocityTarget(
+            float currentForwardVelocityMps,
+            float targetForwardVelocityMps,
+            float currentYawRateRadps,
+            float targetYawRateRadps,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f,
+            float responseTimeS = PlantModel::kDefaultVelocityTargetResponseTimeS) const noexcept;
+        void alignedVelocityTargetTechnicalLimits(
+            const StateVector& currentState,
+            float& maxLongitudinalAccelMps2,
+            float& maxYawAccelRadps2,
+            float fanDutyCycle = 0.80f,
+            float reserveUsage = 1.0f) const noexcept;
+        FeedforwardAuditResult evaluateAlignedFeedforwardOffline(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            float fanDutyCycle,
+            float batteryVoltageV,
+            float reserveUsage,
+            float dtS) const noexcept;
 
         static float ComputeNonholonomicSigmaMps(float absForwardSpeedMps) noexcept;
         static bool IsStationaryCandidate(
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
             float commandedLinearMps,
             float commandedAngularRadps,
             const EncoderObs& observation,
@@ -292,15 +413,26 @@ namespace MazeMap
         bool setState(const StateVector& state, const StateMatrix& covariance) noexcept;
         static StateMatrix BuildDefaultInitialCovariance() noexcept;
 
-        bool predict(float dt, const ControlInput& control) noexcept;
+        bool predict(
+            float dt,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle = 0.80f,
+            float batteryVoltageV = 0.0f) noexcept;
 
         template <typename LoopHook>
-        bool predict(float dt, const ControlInput& control, LoopHook&& loopHook) noexcept
+        bool predict(
+            float dt,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
+            LoopHook&& loopHook) noexcept
         {
             using HookType = std::remove_reference_t<LoopHook>;
             return predictImpl(
                 dt,
                 control,
+                fanDutyCycle,
+                batteryVoltageV,
                 const_cast<void*>(static_cast<const void*>(&loopHook)),
                 [](void* context) noexcept
                 {
@@ -364,13 +496,12 @@ namespace MazeMap
                 });
         }
 
-        MeasurementUpdateResult updateImuMerged(const ImuMergedObs& observation) noexcept;
         FrontPairUpdateResult updateFrontPair(
             const WallObs& left,
             const WallObs& right,
             const Maze& maze) noexcept;
         WallUpdateResult updateSideSensor(
-            Side which,
+            RelativeDirection which,
             const WallObs& observation,
             const Maze& maze) noexcept;
 
@@ -395,6 +526,7 @@ namespace MazeMap
         static float ComputeMeasuredYawRateVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeMeasuredWheelVarianceRadps2(const EncoderObs& observation, const PlantParams& params) noexcept;
         static float ComputeEncoderPairNisThreshold(const EncoderObs& observation) noexcept;
+        static StateVector IntegrateStationaryHoldState(const StateVector& currentState, float dtS) noexcept;
         static bool IsPivotScrubCandidate(
             const EncoderObs& observation,
             float commandedLinearMps,
@@ -413,8 +545,42 @@ namespace MazeMap
             StateVector& projectedState,
             StateMatrix& projectedSqrtCovariance) noexcept;
         void updateInitialStationaryGyroBias(float yawRateRadps, bool stationaryZeroMotionCandidate) noexcept;
+        GripUtilizationSnapshot buildGripUtilizationSnapshot(
+            const StateVector& currentState,
+            const AppliedTorqueEstimate& appliedTorque,
+            float leftClosureResidualMps,
+            float rightClosureResidualMps,
+            float fanDutyCycle) const noexcept;
+        static TransientContactMemoryState AdvanceTransientContactMemory(
+            const TransientContactMemoryState& previousState,
+            const GripUtilizationSnapshot& utilization,
+            float dtS) noexcept;
+        static RegripRecoveryState AdvanceRegripRecovery(
+            const RegripRecoveryState& prior,
+            const GripUtilizationSnapshot& utilization,
+            const TransientContactMemoryState& memory,
+            float dtS) noexcept;
+        static bool IsHoldoffActive(const RegripRecoveryState& state) noexcept;
+        static bool IsHoldoffActiveLeft(const RegripRecoveryState& state) noexcept;
+        static bool IsHoldoffActiveRight(const RegripRecoveryState& state) noexcept;
+        RobustUpdateSchedule buildFrozenSchedule(
+            const GripUtilizationSnapshot& utilization,
+            const TransientContactMemoryState& memory,
+            const RegripRecoveryState& regrip,
+            bool exactStationaryLock,
+            bool lowSpeedLaunchWindowActive,
+            bool inconsistencyWindowActive) const noexcept;
+        float closurePseudoMeasurementScale(RelativeDirection side) const noexcept;
+        float lateralPseudoMeasurementScale() const noexcept;
+        PlantModel::FeedforwardEnvelopeModifiers buildFeedforwardPolicyModifiers() const noexcept;
 
-        bool predictImpl(float dt, const ControlInput& control, void* loopHookContext, LoopHookInvoker loopHook) noexcept;
+        bool predictImpl(
+            float dt,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
+            void* loopHookContext,
+            LoopHookInvoker loopHook) noexcept;
         MeasurementUpdateResult updateEncoderPairImpl(
             const EncoderObs& observation,
             float dt,
@@ -450,7 +616,11 @@ namespace MazeMap
         void resetPivotScrubTelemetry() noexcept;
         bool shouldEnableNonholonomicConstraint() const noexcept;
         float correctedYawRateRadps(float yawRateRawRadps) const noexcept;
-        void buildFrozenCycleContext(float dtSeconds, const ControlInput& control) noexcept;
+        void refreshFrozenPolicyState(
+            float dtSeconds,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV) noexcept;
         bool applyClosurePseudoMeasurements(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         bool applyAdaptiveLateralPseudoMeasurement(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(
@@ -458,19 +628,23 @@ namespace MazeMap
             const Maze& maze) const noexcept;
         float wallPredictionForSensor(
             const StateVector& sigmaPoint,
-            const SensorExtrinsics& sensor,
+            const SensorMount& sensor,
             const Maze& maze) const noexcept;
 
         PlantModel _plantModel;
-        EstimatorPredictModel _predictModel;
         WallGeometryModel _geometryModel;
         PlantParams _params;
         PlantModel::PreparedParams _preparedParams;
         UKF<VehicleState::kDimension, 3> _filter;
-        ModelCycleContext _frozenCycleContext;
-        TransientContactMemoryState _transientContactMemory;
-        RegripRecoveryState _regripRecovery;
-        ControlInput _lastControl;
+        float _frozenDtS = 0.0f;
+        AppliedTorqueEstimate _frozenAppliedTorque{};
+        GripUtilizationSnapshot _frozenGripUtilization{};
+        RobustUpdateSchedule _frozenSchedule{};
+        TransientContactMemoryState _transientContactMemory{};
+        RegripRecoveryState _regripRecovery{};
+        App::Internal::LoopController::ControlVector _lastControl{};
+        float _lastFanDutyCycle = 0.80f;
+        float _lastBatteryVoltageV = 0.0f;
         EncoderObs _lastEncoderObs;
         float _lastEncoderDtSeconds;
         StateVector _prePredictState;
@@ -557,3 +731,4 @@ namespace MazeMap
         float _yawWindowSpanS;
     };
 }
+

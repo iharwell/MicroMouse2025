@@ -2,8 +2,6 @@
 // Declares runtime logging, telemetry, and measurement-capture infrastructure for the MazeMap application runtime.
 #include "CellCoordinates.h"
 #include "Direction.h"
-#include "DriveBase.h"
-#include "LoopController.h"
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementSpec.h"
@@ -98,86 +96,6 @@ namespace MazeMap::App::Internal::Runtime
         const char* modeName,
         unsigned long& phaseId,
         unsigned long& sampleCount);
-
-    inline void PopulateDiagnosticLogRow(
-        DiagnosticLogRow& row,
-        const std::uint32_t sample,
-        const std::uint32_t phaseId,
-        const bool stationary,
-        const LoopController& loopController,
-        const MazeMap::VehicleState& state,
-        const DriveBase& drive)
-    {
-        const SensorSnapshot& sensors = state.GetSensorSnapshot();
-        const DriveTelemetry driveTelemetry = drive.GetTelemetry();
-        row = {};
-        row.sample = sample;
-        row.phase_id = phaseId;
-        row.t_us = loopController.CurrentTickStartUs();
-        row.dt_us = loopController.CurrentTickDtUs();
-        row.stationary = stationary ? 1U : 0U;
-        row.pose_x_m = state.GetPositionX();
-        row.pose_y_m = state.GetPositionY();
-        row.yaw_rad = state.GetOrientation();
-        row.linear_speed_mps = state.GetVelocity();
-        row.angular_speed_radps = state.GetRotationalVelocity();
-        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
-        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
-        row.left_drive_cmd = driveTelemetry.leftDriveCommand;
-        row.right_drive_cmd = driveTelemetry.rightDriveCommand;
-        row.left_encoder_count = driveTelemetry.leftEncoderCount;
-        row.right_encoder_count = driveTelemetry.rightEncoderCount;
-        row.left_distance_m = driveTelemetry.leftDistanceM;
-        row.right_distance_m = driveTelemetry.rightDistanceM;
-        row.left_velocity_mps = driveTelemetry.leftVelocityMps;
-        row.right_velocity_mps = driveTelemetry.rightVelocityMps;
-        row.imu_fr_status = sensors.imuFrontRight.status;
-        row.imu_fr_gyro_x = sensors.imuFrontRight.gyroX;
-        row.imu_fr_gyro_y = sensors.imuFrontRight.gyroY;
-        row.imu_fr_gyro_z = sensors.imuFrontRight.gyroZ;
-        row.imu_fr_accel_x = sensors.imuFrontRight.accelX;
-        row.imu_fr_accel_y = sensors.imuFrontRight.accelY;
-        row.imu_fr_accel_z = sensors.imuFrontRight.accelZ;
-        row.imu_fr_temp = sensors.imuFrontRight.temp;
-        row.imu_fr_int = sensors.imuFrontRight.interruptHigh ? 1U : 0U;
-        row.imu_bl_status = sensors.imuBackLeft.status;
-        row.imu_bl_gyro_x = sensors.imuBackLeft.gyroX;
-        row.imu_bl_gyro_y = sensors.imuBackLeft.gyroY;
-        row.imu_bl_gyro_z = sensors.imuBackLeft.gyroZ;
-        row.imu_bl_accel_x = sensors.imuBackLeft.accelX;
-        row.imu_bl_accel_y = sensors.imuBackLeft.accelY;
-        row.imu_bl_accel_z = sensors.imuBackLeft.accelZ;
-        row.imu_bl_temp = sensors.imuBackLeft.temp;
-        row.imu_bl_int = sensors.imuBackLeft.interruptHigh ? 1U : 0U;
-        row.ws_fl_ambient = sensors.frontLeft.ambientLight;
-        row.ws_fl_lit = sensors.frontLeft.litLight;
-        row.ws_fl_delta = sensors.frontLeft.differentialLight;
-        row.ws_fl_raw_distance_m = sensors.frontLeft.rawDistanceM;
-        row.ws_fl_distance_m = sensors.frontLeft.distanceM;
-        row.ws_fr_ambient = sensors.frontRight.ambientLight;
-        row.ws_fr_lit = sensors.frontRight.litLight;
-        row.ws_fr_delta = sensors.frontRight.differentialLight;
-        row.ws_fr_raw_distance_m = sensors.frontRight.rawDistanceM;
-        row.ws_fr_distance_m = sensors.frontRight.distanceM;
-        row.ws_sl_ambient = sensors.sideLeft.ambientLight;
-        row.ws_sl_lit = sensors.sideLeft.litLight;
-        row.ws_sl_delta = sensors.sideLeft.differentialLight;
-        row.ws_sl_raw_distance_m = sensors.sideLeft.rawDistanceM;
-        row.ws_sl_distance_m = sensors.sideLeft.distanceM;
-        row.ws_sr_ambient = sensors.sideRight.ambientLight;
-        row.ws_sr_lit = sensors.sideRight.litLight;
-        row.ws_sr_delta = sensors.sideRight.differentialLight;
-        row.ws_sr_raw_distance_m = sensors.sideRight.rawDistanceM;
-        row.ws_sr_distance_m = sensors.sideRight.distanceM;
-        row.front_wall = sensors.frontWall ? 1U : 0U;
-        row.left_wall = sensors.leftWall ? 1U : 0U;
-        row.right_wall = sensors.rightWall ? 1U : 0U;
-        row.corridor_error_m = sensors.corridorErrorM;
-        row.front_skew_m = sensors.frontSkewM;
-        row.gyro_bias_radps = sensors.gyroBiasRadps;
-        row.gyro_raw_radps = sensors.gyroRawRadps;
-        row.gyro_radps = sensors.gyroRadps;
-    }
 
     inline bool WriteMmLogAccelBiasMetadata(
         MazeMap::mmlog::MmLogLogger& log,

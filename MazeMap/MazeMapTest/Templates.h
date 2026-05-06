@@ -151,3 +151,4 @@ inline std::wstring Microsoft::VisualStudio::CppUnitTestFramework::ToString(Maze
 {
 	return std::wstring();
 }
+

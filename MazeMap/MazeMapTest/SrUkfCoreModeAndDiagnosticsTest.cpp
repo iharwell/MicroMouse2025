@@ -3,7 +3,6 @@
 
 #include "SrUkfCoreTestSupport.h"
 #include "..\MazeMap\PlantModel.h"
-#include "..\MazeMap\UkfRobustUpdatePolicy.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -42,13 +41,11 @@ namespace MazeMap
             return BuildUkfCovariance(0.02f, 0.05f, 0.20f, 0.15f, 0.25f, 0.50f, 0.05f);
         }
 
-        ControlInput BuildPlanarAccelUpdateTestControl(const PlantParams& params) noexcept
+        App::Internal::LoopController::ControlVector BuildPlanarAccelUpdateTestControl(const PlantParams& params) noexcept
         {
-            ControlInput control{};
-            control.leftMotorCommand = 0.26f;
-            control.rightMotorCommand = 0.23f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.26f;
+            control.rightMotorPwm = 0.23f;
             return control;
         }
 
@@ -56,10 +53,12 @@ namespace MazeMap
             SrUkfCore& core,
             const VehicleState::StateVector& initialState,
             const VehicleState::StateMatrix& initialCovariance,
-            const ControlInput& control)
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV)
         {
             Assert::IsTrue(core.reset(initialState, initialCovariance));
-            Assert::IsTrue(core.predict(kPlanarAccelUpdateTestDtSeconds, control));
+            Assert::IsTrue(core.predict(kPlanarAccelUpdateTestDtSeconds, control, fanDutyCycle, batteryVoltageV));
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 0;
@@ -72,12 +71,15 @@ namespace MazeMap
         ImuAccelObs BuildPlanarAccelObservation(
             const PlantModel& plant,
             const VehicleState::StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
             const PlantModel::PreparedParams& prepared,
+            float fanDutyCycle,
+            float batteryVoltageV,
             float lateralAccelDeltaMps2,
             float forwardAccelDeltaMps2) noexcept
         {
-            const Eigen::Vector2f predicted = plant.imuPlanarAcceleration(state, control, prepared);
+            const Eigen::Vector2f predicted =
+                plant.imuPlanarAcceleration(state, control, fanDutyCycle, batteryVoltageV, prepared);
             ImuAccelObs observation{};
             observation.valid = true;
             observation.accelBodyXMps2 = predicted.x() + lateralAccelDeltaMps2;
@@ -179,7 +181,7 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreRegimeHelpersExposeSpecThresholds)
         {
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             Assert::IsTrue(SrUkfCore::IsStationaryCandidate(
                 control,
@@ -227,86 +229,6 @@ namespace MazeMap
                 0.01f));
         }
 
-        TEST_METHOD(UkfRobustUpdatePolicyAppliesLaunchAndSevereEdgeScheduling)
-        {
-            const FrozenCycleSchedule nominal =
-                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
-                    GripUtilizationSnapshot{},
-                    TransientContactMemoryState{},
-                    RegripRecoveryState{},
-                    false,
-                    true,
-                    false,
-                    false,
-                    false,
-                    false);
-
-            const FrozenCycleSchedule launch =
-                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
-                    GripUtilizationSnapshot{},
-                    TransientContactMemoryState{},
-                    RegripRecoveryState{},
-                    false,
-                    true,
-                    false,
-                    false,
-                    true,
-                    false);
-            Assert::IsTrue(launch.lateralPseudoMeasurementCovarianceScale < nominal.lateralPseudoMeasurementCovarianceScale);
-
-            GripUtilizationSnapshot oneBank{};
-            oneBank.leftBankAnomalySeverity = 1.0f;
-            const FrozenCycleSchedule oneBankSchedule =
-                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
-                    oneBank,
-                    TransientContactMemoryState{},
-                    RegripRecoveryState{},
-                    false,
-                    true,
-                    false,
-                    false,
-                    false,
-                    false);
-            Assert::IsTrue(oneBankSchedule.closureCovarianceScaleLeft > oneBankSchedule.closureCovarianceScaleRight);
-
-            GripUtilizationSnapshot severe{};
-            severe.longitudinalClosureSeverity = 1.0f;
-            severe.differentialClosureSeverity = 1.0f;
-            severe.lateralAccelerationSeverity = 1.0f;
-            severe.yawConsistencySeverity = 1.0f;
-            severe.leftBankAnomalySeverity = 1.0f;
-            severe.rightBankAnomalySeverity = 1.0f;
-            severe.leftBankPreProjectionUtilization = 1.20f;
-            severe.rightBankPreProjectionUtilization = 1.15f;
-
-            TransientContactMemoryState memory{};
-            memory.leftBankMemory = 1.0f;
-            memory.rightBankMemory = 1.0f;
-
-            RegripRecoveryState regrip{};
-            regrip.leftBankInRecovery = true;
-            regrip.rightBankInRecovery = true;
-            regrip.leftBankRecoveryScore = 1.0f;
-            regrip.rightBankRecoveryScore = 1.0f;
-            regrip.leftBankRecoveryTimeRemainingS = 0.05f;
-            regrip.rightBankRecoveryTimeRemainingS = 0.05f;
-
-            const FrozenCycleSchedule severeEdge =
-                UkfRobustUpdatePolicy::BuildFrozenCycleSchedule(
-                    severe,
-                    memory,
-                    regrip,
-                    false,
-                    true,
-                    false,
-                    false,
-                    false,
-                    true);
-            Assert::IsTrue(severeEdge.leftBankHoldoffActive);
-            Assert::IsTrue(severeEdge.rightBankHoldoffActive);
-            Assert::IsTrue(severeEdge.lateralPseudoMeasurementCovarianceScale >= 64.0f);
-        }
-
         TEST_METHOD(SrUkfCorePivotScrubModeMasksEncoderYawAndAppliesSoftZeroU)
         {
             const PlantParams params = PlantParams::Default();
@@ -326,11 +248,11 @@ namespace MazeMap
                 BuildUkfCovariance(0.001f, 0.01f, 0.04f, 0.04f, 0.20f, 10.0f, 0.02f);
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            ControlInput control{};
-            control.leftMotorCommand = 0.60f;
-            control.rightMotorCommand = -0.60f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.60f;
+            control.rightMotorPwm = -0.60f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             struct PivotTickResults
             {
@@ -350,7 +272,7 @@ namespace MazeMap
             {
                 PivotTickResults results{};
                 core.setRuntimeContext(0.0f, 2.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-                results.predictAccepted = core.predict(kPivotDtSeconds, control);
+                results.predictAccepted = core.predict(kPivotDtSeconds, control, controlFanDutyCycle, controlBatteryVoltageV);
 
                 EncoderObs encoder{};
                 encoder.totalLeftCounts = totalLeftCounts;
@@ -458,14 +380,14 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            ControlInput control{};
-            control.leftMotorCommand = 0.60f;
-            control.rightMotorCommand = -0.60f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.60f;
+            control.rightMotorPwm = -0.60f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             core.setRuntimeContext(0.0f, 2.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(core.predict(0.001f, control));
+            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 10;
@@ -496,14 +418,14 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            ControlInput control{};
-            control.leftMotorCommand = 0.25f;
-            control.rightMotorCommand = 0.25f;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.25f;
+            control.rightMotorPwm = 0.25f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             core.setRuntimeContext(0.12f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(core.predict(0.001f, control));
+            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 6;
@@ -527,6 +449,7 @@ namespace MazeMap
         }
         TEST_METHOD(SrUkfCoreLaunchModeDisablesGripPseudoMeasurement)
         {
+            const PlantParams params = PlantParams::Default();
             SrUkfCore core;
             const VehicleState::StateVector initialState = BuildUkfState(
                 0.0f,
@@ -541,16 +464,18 @@ namespace MazeMap
                 initialState,
                 BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.05f, 0.30f, 0.03f)));
 
-            ControlInput control{};
-            control.leftMotorCommand = 0.20f;
-            control.rightMotorCommand = 0.20f;
+            App::Internal::LoopController::ControlVector control{};
+            control.leftMotorPwm = 0.20f;
+            control.rightMotorPwm = 0.20f;
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
             core.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(core.predict(0.001f, control));
+            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
 
-            control.leftMotorCommand = -0.20f;
-            control.rightMotorCommand = -0.20f;
+            control.leftMotorPwm = -0.20f;
+            control.rightMotorPwm = -0.20f;
             core.setRuntimeContext(-0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(core.predict(0.001f, control));
+            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
 
             EncoderObs encoder{};
             encoder.omegaLeftRadps = 2.0f;
@@ -669,33 +594,31 @@ namespace MazeMap
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) >= (0.020f * 0.020f));
         }
 
-        TEST_METHOD(SrUkfCoreRejectsInvalidMergedImuUpdate)
-        {
-            SrUkfCore core;
-            ImuMergedObs observation{};
-            observation.valid = false;
-            observation.gyroZRadps = 0.5f;
-            observation.accelBodyXMps2 = 1.0f;
-            observation.accelBodyYMps2 = 0.1f;
-
-            const MeasurementUpdateResult result = core.updateImuMerged(observation);
-            Assert::IsFalse(result.attempted);
-            Assert::IsFalse(result.accepted);
-        }
-
-        TEST_METHOD(SrUkfCoreMergedImuUpdateMatchesSequentialYawAndPlanarAccelPath)
+        TEST_METHOD(SrUkfCoreYawAndPlanarAccelUpdatesRemainCallableSeparately)
         {
             const PlantParams params = PlantParams::Default();
             const PlantModel plant;
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
             const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
-            const ControlInput control = BuildPlanarAccelUpdateTestControl(params);
+            const App::Internal::LoopController::ControlVector control = BuildPlanarAccelUpdateTestControl(params);
 
             SrUkfCore mergedCore(params);
             SrUkfCore sequentialCore(params);
-            PrimeCoreForPlanarAccelUpdate(mergedCore, initialState, initialCovariance, control);
-            PrimeCoreForPlanarAccelUpdate(sequentialCore, initialState, initialCovariance, control);
+            PrimeCoreForPlanarAccelUpdate(
+                mergedCore,
+                initialState,
+                initialCovariance,
+                control,
+                0.80f,
+                params.supplyVoltageV);
+            PrimeCoreForPlanarAccelUpdate(
+                sequentialCore,
+                initialState,
+                initialCovariance,
+                control,
+                0.80f,
+                params.supplyVoltageV);
 
             const ImuAccelObs accelObservation =
                 BuildPlanarAccelObservation(
@@ -703,27 +626,28 @@ namespace MazeMap
                     mergedCore.state(),
                     control,
                     prepared,
+                    0.80f,
+                    params.supplyVoltageV,
                     0.35f,
                     -0.55f);
-            ImuMergedObs mergedObservation{};
-            mergedObservation.valid = true;
-            mergedObservation.gyroZRadps =
+            const float gyroObservation =
                 mergedCore.state()(VehicleState::kR) +
                 mergedCore.state()(VehicleState::kBgz) +
                 0.08f;
-            mergedObservation.accelBodyXMps2 = accelObservation.accelBodyXMps2;
-            mergedObservation.accelBodyYMps2 = accelObservation.accelBodyYMps2;
 
-            const MeasurementUpdateResult mergedResult = mergedCore.updateImuMerged(mergedObservation);
-            const MeasurementUpdateResult yawResult = sequentialCore.updateYawRate(mergedObservation.gyroZRadps);
+            const MeasurementUpdateResult yawResult = sequentialCore.updateYawRate(gyroObservation);
             const MeasurementUpdateResult accelResult = sequentialCore.updatePlanarAccel(accelObservation);
+            const MeasurementUpdateResult mergedYawResult = mergedCore.updateYawRate(gyroObservation);
+            const MeasurementUpdateResult mergedAccelResult = mergedCore.updatePlanarAccel(accelObservation);
 
-            Assert::IsTrue(mergedResult.attempted);
-            Assert::IsTrue(mergedResult.accepted);
             Assert::IsTrue(yawResult.attempted);
             Assert::IsTrue(yawResult.accepted);
             Assert::IsTrue(accelResult.attempted);
             Assert::IsTrue(accelResult.accepted);
+            Assert::IsTrue(mergedYawResult.attempted);
+            Assert::IsTrue(mergedYawResult.accepted);
+            Assert::IsTrue(mergedAccelResult.attempted);
+            Assert::IsTrue(mergedAccelResult.accepted);
             Assert::IsTrue(
                 (mergedCore.state() - sequentialCore.state()).cwiseAbs().maxCoeff() <= 1.0e-6f);
             Assert::IsTrue(
@@ -737,14 +661,32 @@ namespace MazeMap
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
             const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
-            const ControlInput control = BuildPlanarAccelUpdateTestControl(params);
+            const App::Internal::LoopController::ControlVector control = BuildPlanarAccelUpdateTestControl(params);
 
             SrUkfCore baselineCore(params);
             SrUkfCore lateralPerturbedCore(params);
             SrUkfCore forwardPerturbedCore(params);
-            PrimeCoreForPlanarAccelUpdate(baselineCore, initialState, initialCovariance, control);
-            PrimeCoreForPlanarAccelUpdate(lateralPerturbedCore, initialState, initialCovariance, control);
-            PrimeCoreForPlanarAccelUpdate(forwardPerturbedCore, initialState, initialCovariance, control);
+            PrimeCoreForPlanarAccelUpdate(
+                baselineCore,
+                initialState,
+                initialCovariance,
+                control,
+                0.80f,
+                params.supplyVoltageV);
+            PrimeCoreForPlanarAccelUpdate(
+                lateralPerturbedCore,
+                initialState,
+                initialCovariance,
+                control,
+                0.80f,
+                params.supplyVoltageV);
+            PrimeCoreForPlanarAccelUpdate(
+                forwardPerturbedCore,
+                initialState,
+                initialCovariance,
+                control,
+                0.80f,
+                params.supplyVoltageV);
 
             const ImuAccelObs baselineObservation =
                 BuildPlanarAccelObservation(
@@ -752,6 +694,8 @@ namespace MazeMap
                     baselineCore.state(),
                     control,
                     prepared,
+                    0.80f,
+                    params.supplyVoltageV,
                     0.0f,
                     0.35f);
             const ImuAccelObs lateralPerturbedObservation =
@@ -760,6 +704,8 @@ namespace MazeMap
                     lateralPerturbedCore.state(),
                     control,
                     prepared,
+                    0.80f,
+                    params.supplyVoltageV,
                     25.0f,
                     0.35f);
             const ImuAccelObs forwardPerturbedObservation =
@@ -768,6 +714,8 @@ namespace MazeMap
                     forwardPerturbedCore.state(),
                     control,
                     prepared,
+                    0.80f,
+                    params.supplyVoltageV,
                     0.0f,
                     -0.35f);
 
@@ -802,3 +750,8 @@ namespace MazeMap
         }
     };
 }
+
+
+
+
+

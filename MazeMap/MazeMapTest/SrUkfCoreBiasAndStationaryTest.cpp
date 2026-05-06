@@ -47,7 +47,7 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.002f;
             constexpr float rawStationaryGyroRadps = 0.04f;
@@ -56,7 +56,7 @@ namespace MazeMap
             for (int step = 0; step < kSteps; ++step)
             {
                 core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
             }
@@ -106,7 +106,7 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             encoder.totalLeftCounts = 12;
             encoder.totalRightCounts = 8;
@@ -117,7 +117,7 @@ namespace MazeMap
             for (int step = 0; step < kSteps; ++step)
             {
                 core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(0.0f).accepted);
             }
@@ -126,7 +126,7 @@ namespace MazeMap
             Assert::AreEqual(
                 static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
                 static_cast<int>(core.operatingMode()));
-            Assert::IsTrue(core.modelCycleContext().schedule.exactStationaryLock);
+            Assert::IsTrue(core.exactStationaryLock());
             Assert::AreEqual(initialState(VehicleState::kPx), state(VehicleState::kPx), kStationaryPoseDriftToleranceM);
             Assert::AreEqual(initialState(VehicleState::kPy), state(VehicleState::kPy), kStationaryPoseDriftToleranceM);
             Assert::AreEqual(initialState(VehicleState::kPsi), state(VehicleState::kPsi), 1.0e-4f);
@@ -135,7 +135,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreInitialStationaryGyroBiasSeedsFromSamplesFiftyToOneHundredFiftyAndSlowWalks)
         {
             SrUkfCore core;
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
             const int kSteps =
@@ -150,7 +150,7 @@ namespace MazeMap
                     (step < 49) ? 0.01f :
                     ((step < 150) ? 0.04f : 0.07f);
                 core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
                 AdvanceInitialStationaryGyroBiasExpectation(expected, rawStationaryGyroRadps, dt);
@@ -167,7 +167,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreStationaryGyroMeasurementDoesNotCollapseBiasVarianceToZero)
         {
             SrUkfCore core;
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
             constexpr float rawStationaryGyroRadps = 0.04f;
@@ -180,7 +180,7 @@ namespace MazeMap
             for (int step = 0; step < 200; ++step)
             {
                 core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
             }
@@ -338,14 +338,14 @@ namespace MazeMap
             SrUkfCore core;
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
 
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
                 Assert::IsTrue(encoderResult.attempted);
@@ -391,14 +391,14 @@ namespace MazeMap
             const float initialLateralVelocityVarianceMps2 = core.covariance()(VehicleState::kV, VehicleState::kV);
             Assert::AreEqual(1.0f, initialLateralVelocityVarianceMps2, 1.0e-6f);
 
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
 
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
                 Assert::IsTrue(encoderResult.attempted);
@@ -432,7 +432,7 @@ namespace MazeMap
             SrUkfCore core;
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            ControlInput control{};
+            App::Internal::LoopController::ControlVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
@@ -442,7 +442,7 @@ namespace MazeMap
             for (int step = 0; step < kSteps; ++step)
             {
                 core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-                Assert::IsTrue(core.predict(dt, control));
+                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
                 Assert::IsTrue(encoderResult.attempted);
@@ -509,7 +509,7 @@ namespace MazeMap
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core(params);
-            ControlInput stationaryControl{};
+            App::Internal::LoopController::ControlVector stationaryControl{};
             EncoderObs stationaryEncoder{};
             constexpr float dt = 0.002f;
             const int stationarySteps =
@@ -526,13 +526,13 @@ namespace MazeMap
             Assert::IsTrue(core.operatingMode() != SrUkfCore::OperatingMode::InconsistentOrSaturated);
             const VehicleState::StateMatrix stationaryCovariance = core.covariance();
 
-            ControlInput launchControl{};
-            launchControl.leftMotorCommand = 0.30f;
-            launchControl.rightMotorCommand = 0.30f;
-            launchControl.fanDutyCycle = 0.80f;
-            launchControl.batteryVoltageV = params.supplyVoltageV;
+            App::Internal::LoopController::ControlVector launchControl{};
+            launchControl.leftMotorPwm = 0.30f;
+            launchControl.rightMotorPwm = 0.30f;
+            const float launchControlFanDutyCycle = 0.80f;
+            const float launchControlBatteryVoltageV = params.supplyVoltageV;
             core.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
-            Assert::IsTrue(core.predict(dt, launchControl));
+            Assert::IsTrue(core.predict(dt, launchControl, launchControlFanDutyCycle, launchControlBatteryVoltageV));
 
             EncoderObs launchEncoder{};
             launchEncoder.totalLeftCounts = 2;
@@ -561,42 +561,11 @@ namespace MazeMap
                 stationaryCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR));
         }
 
-        TEST_METHOD(CodexDebugStationaryEncoderOnlyProbe)
-        {
-            SrUkfCore core;
-            ControlInput control{};
-            EncoderObs encoder{};
-            constexpr float dt = 0.001f;
-            constexpr int kSteps = 1000;
-
-            for (int step = 0; step < kSteps; ++step)
-            {
-                Assert::IsTrue(core.predict(dt, control));
-                Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
-            }
-
-            const ModelCycleContext& cycleContext = core.modelCycleContext();
-            const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
-            const std::wstring message =
-                std::wstring(L"mode=") + std::to_wstring(static_cast<int>(core.operatingMode())) +
-                L" exact_lock=" + std::to_wstring(cycleContext.schedule.exactStationaryLock ? 1 : 0) +
-                L" holdoff_l=" + std::to_wstring(cycleContext.schedule.leftBankHoldoffActive ? 1 : 0) +
-                L" holdoff_r=" + std::to_wstring(cycleContext.schedule.rightBankHoldoffActive ? 1 : 0) +
-                L" u=" + std::to_wstring(state(VehicleState::kU)) +
-                L" v=" + std::to_wstring(state(VehicleState::kV)) +
-                L" r=" + std::to_wstring(state(VehicleState::kR)) +
-                L" bgz=" + std::to_wstring(state(VehicleState::kBgz)) +
-                L" xi_l=" + std::to_wstring(cycleContext.utilization.leftBankPreProjectionUtilization) +
-                L" xi_r=" + std::to_wstring(cycleContext.utilization.rightBankPreProjectionUtilization) +
-                L" mem_l=" + std::to_wstring(cycleContext.memory.leftBankMemory) +
-                L" mem_r=" + std::to_wstring(cycleContext.memory.rightBankMemory) +
-                L" r_var=" + std::to_wstring(covariance(VehicleState::kR, VehicleState::kR)) +
-                L" u_var=" + std::to_wstring(covariance(VehicleState::kU, VehicleState::kU)) +
-                L" v_var=" + std::to_wstring(covariance(VehicleState::kV, VehicleState::kV)) +
-                L" omega_l_var=" + std::to_wstring(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL)) +
-                L" omega_r_var=" + std::to_wstring(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR));
-            Assert::IsTrue(false, message.c_str());
-        }
     };
 }
+
+
+
+
+
+

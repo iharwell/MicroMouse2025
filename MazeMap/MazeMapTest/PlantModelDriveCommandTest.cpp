@@ -56,7 +56,7 @@ namespace MazeMap
             const PlantModel& plant,
             const PlantModel::PreparedParams& prepared,
             const VehicleState::StateVector& initialState,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
             int steps)
         {
             SrUkfCore core(prepared.raw, plant);
@@ -73,7 +73,9 @@ namespace MazeMap
                     kPredictDtSeconds,
                     syntheticEncoderState,
                     commandedLinearMps,
-                    commandedAngularRadps);
+                    commandedAngularRadps,
+                    0.80f,
+                    prepared.raw.supplyVoltageV);
             }
 
             return core.state();
@@ -131,14 +133,7 @@ namespace MazeMap
                     0.80f,
                     params.supplyVoltageV);
 
-            return std::fabs(solution.control.leftMotorCommand - solution.control.rightMotorCommand);
-        }
-
-        ModelCycleContext BuildAlignedFeedforwardContext(const PlantModel::PreparedParams& prepared) noexcept
-        {
-            ModelCycleContext cycleContext{};
-            cycleContext.geometry = BuildEstimatorGeometry(prepared);
-            return cycleContext;
+            return std::fabs(solution.control.leftMotorPwm - solution.control.rightMotorPwm);
         }
 
         void AssertCanonicalAllocationMatchesSpec(const DriveCommandSolution& solution)
@@ -214,7 +209,9 @@ namespace MazeMap
                     kPredictDtSeconds,
                     syntheticEncoderState,
                     commandedLinearMps,
-                    commandedAngularRadps);
+                    commandedAngularRadps,
+                    solution.fanDutyCycle,
+                    solution.batteryVoltageV);
             }
 
             return core.state();
@@ -317,8 +314,8 @@ namespace MazeMap
 
             Assert::IsFalse(solution.tractionLimited);
             Assert::IsTrue(solution.converged);
-            Assert::AreEqual(0.0f, solution.control.leftMotorCommand, 1.0e-6f);
-            Assert::AreEqual(0.0f, solution.control.rightMotorCommand, 1.0e-6f);
+            Assert::AreEqual(0.0f, solution.control.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(0.0f, solution.control.rightMotorPwm, 1.0e-6f);
             Assert::AreEqual(0.0f, solution.leftWheelTorqueNm, 1.0e-6f);
             Assert::AreEqual(0.0f, solution.rightWheelTorqueNm, 1.0e-6f);
         }
@@ -330,7 +327,7 @@ namespace MazeMap
             const DriveCommandSolution solution =
                 SolveStationaryYawOnlyVelocityTargetCommand(plant, params);
             const float averageCommand =
-                0.5f * (solution.control.leftMotorCommand + solution.control.rightMotorCommand);
+                0.5f * (solution.control.leftMotorPwm + solution.control.rightMotorPwm);
 
             Assert::AreEqual(0.0f, averageCommand, 1.0e-6f);
         }
@@ -382,11 +379,11 @@ namespace MazeMap
                         PlantModel::kDefaultVelocityTargetResponseTimeS);
                 const float weakerBankCommand =
                     (std::min)(
-                        std::fabs(solution.control.leftMotorCommand),
-                        std::fabs(solution.control.rightMotorCommand));
+                        std::fabs(solution.control.leftMotorPwm),
+                        std::fabs(solution.control.rightMotorPwm));
 
                 Assert::IsFalse(solution.tractionLimited);
-                Assert::IsTrue(solution.control.leftMotorCommand * solution.control.rightMotorCommand < 0.0f);
+                Assert::IsTrue(solution.control.leftMotorPwm * solution.control.rightMotorPwm < 0.0f);
                 Assert::IsTrue(weakerBankCommand >= (breakawayDriveCommand - 1.0e-3f));
             }
         }
@@ -443,20 +440,21 @@ namespace MazeMap
             state(VehicleState::kR) = yawRateRadps;
             state(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
             state(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
-            const PlantDerivatives achieved = plant.forwardStep(state, solution.control, params);
+            const PlantDerivatives achieved =
+                plant.forwardStep(state, solution.control, solution.fanDutyCycle, solution.batteryVoltageV, params);
             const float expectedLeftWheelAccelRadps2 =
                 (solution.commandedLongitudinalAccelMps2 + (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
             const float expectedRightWheelAccelRadps2 =
                 (solution.commandedLongitudinalAccelMps2 - (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
 
             std::wstring failure;
-            if (!std::isfinite(solution.control.leftMotorCommand) ||
-                !std::isfinite(solution.control.rightMotorCommand))
+            if (!std::isfinite(solution.control.leftMotorPwm) ||
+                !std::isfinite(solution.control.rightMotorPwm))
             {
                 failure =
                     std::wstring(L"non-finite motor command left/right=") +
-                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
-                    std::to_wstring(solution.control.rightMotorCommand);
+                    std::to_wstring(solution.control.leftMotorPwm) + L"," +
+                    std::to_wstring(solution.control.rightMotorPwm);
             }
             else if (!std::isfinite(achieved.longitudinalAccelMps2) || !std::isfinite(achieved.yawAccelRadps2))
             {
@@ -775,10 +773,10 @@ namespace MazeMap
             Assert::AreEqual(static_cast<int>(explicitDefaultSolution.tractionLimited), static_cast<int>(solution.tractionLimited));
             Assert::AreEqual(explicitDefaultSolution.commandedLongitudinalAccelMps2, solution.commandedLongitudinalAccelMps2, 1.0e-6f);
             Assert::AreEqual(explicitDefaultSolution.commandedYawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-6f);
-            Assert::AreEqual(explicitDefaultSolution.control.leftMotorCommand, solution.control.leftMotorCommand, 1.0e-6f);
-            Assert::AreEqual(explicitDefaultSolution.control.rightMotorCommand, solution.control.rightMotorCommand, 1.0e-6f);
-            Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) <= 1.0f);
-            Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) <= 1.0f);
+            Assert::AreEqual(explicitDefaultSolution.control.leftMotorPwm, solution.control.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(explicitDefaultSolution.control.rightMotorPwm, solution.control.rightMotorPwm, 1.0e-6f);
+            Assert::IsTrue(std::fabs(solution.control.leftMotorPwm) <= 1.0f);
+            Assert::IsTrue(std::fabs(solution.control.rightMotorPwm) <= 1.0f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsForVelocityTargetReportsReturnedControlPredictionAtOperatingPoint)
@@ -799,7 +797,13 @@ namespace MazeMap
             VehicleState::StateVector validationState = operatingState;
             validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
             validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
-            const PlantDerivatives achieved = plant.forwardStep(validationState, solution.control, params);
+            const PlantDerivatives achieved =
+                plant.forwardStep(
+                    validationState,
+                    solution.control,
+                    solution.fanDutyCycle,
+                    solution.batteryVoltageV,
+                    params);
 
             std::wstring failure;
             if (solution.tractionLimited)
@@ -842,7 +846,6 @@ namespace MazeMap
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector state = BuildRollingUkfState(0.35f, 0.50f, params);
-            const ModelCycleContext cycleContext = BuildAlignedFeedforwardContext(prepared);
             const float reserveUsage = 0.25f;
 
             const DriveCommandSolution solution =
@@ -851,7 +854,6 @@ namespace MazeMap
                     50.0f,
                     200.0f,
                     prepared,
-                    cycleContext,
                     0.80f,
                     params.supplyVoltageV,
                     reserveUsage);
@@ -867,7 +869,6 @@ namespace MazeMap
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector state = BuildRollingUkfState(0.35f, 0.50f, params);
-            const ModelCycleContext cycleContext = BuildAlignedFeedforwardContext(prepared);
             const float reserveUsage = 0.35f;
 
             const DriveCommandSolution canonical =
@@ -876,7 +877,6 @@ namespace MazeMap
                     12.0f,
                     65.0f,
                     prepared,
-                    cycleContext,
                     0.80f,
                     params.supplyVoltageV,
                     reserveUsage);
@@ -1104,13 +1104,12 @@ namespace MazeMap
                 std::fabs(actual.requestedDifferentialForceN - baseline.requestedDifferentialForceN) > 0.5f);
         }
 
-        TEST_METHOD(PlantModelEvaluateFeedforwardOfflineReportsAlignedContext)
+        TEST_METHOD(PlantModelEvaluateFeedforwardOfflineReportsFiniteOutputs)
         {
             PlantModel plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector state = BuildRollingUkfState(0.22f, 0.31f, params);
-            const ModelCycleContext cycleContext = BuildAlignedFeedforwardContext(prepared);
 
             const FeedforwardAuditResult audit =
                 plant.evaluateFeedforwardOffline(
@@ -1118,14 +1117,11 @@ namespace MazeMap
                     8.5f,
                     35.0f,
                     prepared,
-                    cycleContext,
                     0.80f,
                     params.supplyVoltageV,
                     0.75f,
                     0.001f);
 
-            Assert::IsTrue(audit.usedAlignedCycleContext);
-            Assert::IsFalse(audit.usedGripOnlyFallback);
             Assert::IsTrue(audit.issued.valid);
             Assert::IsTrue(std::isfinite(audit.predictedForwardAccelMps2));
             Assert::IsTrue(std::isfinite(audit.predictedYawAccelRadps2));
@@ -1161,12 +1157,23 @@ namespace MazeMap
             PlantModel::StateVector validationState = currentState;
             validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
             validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
-            const PlantDerivatives achievedFull = plant.forwardStep(validationState, solution.control, params);
+            const PlantDerivatives achievedFull =
+                plant.forwardStep(
+                    validationState,
+                    solution.control,
+                    solution.fanDutyCycle,
+                    solution.batteryVoltageV,
+                    params);
 
             PlantModel::StateVector zeroLateralValidationState = validationState;
             zeroLateralValidationState(VehicleState::kV) = 0.0f;
             const PlantDerivatives achievedZeroLateral =
-                plant.forwardStep(zeroLateralValidationState, solution.control, params);
+                plant.forwardStep(
+                    zeroLateralValidationState,
+                    solution.control,
+                    solution.fanDutyCycle,
+                    solution.batteryVoltageV,
+                    params);
 
             std::wstring failure;
             if (!std::isfinite(solution.commandedYawAccelRadps2))
@@ -1223,7 +1230,13 @@ namespace MazeMap
             validationState(VehicleState::kR) = yawRateRadps;
             validationState(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
             validationState(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
-            const PlantDerivatives achieved = plant.forwardStep(validationState, solution.control, params);
+            const PlantDerivatives achieved =
+                plant.forwardStep(
+                    validationState,
+                    solution.control,
+                    solution.fanDutyCycle,
+                    solution.batteryVoltageV,
+                    params);
             const float expectedLeftWheelAccelRadps2 =
                 (solution.commandedLongitudinalAccelMps2 + (0.5f * params.trackWidthM * solution.commandedYawAccelRadps2)) / params.wheelRadiusM;
             const float expectedRightWheelAccelRadps2 =
@@ -1317,9 +1330,14 @@ namespace MazeMap
             currentState(VehicleState::kOmegaR) =
                 (currentState(VehicleState::kU) - (halfTrackWidthM * currentState(VehicleState::kR))) / params.wheelRadiusM;
 
-            ControlInput baselineControl{};
-            baselineControl.fanDutyCycle = fanDutyCycle;
-            const ContactForces baselineForces = plant.tireForces(currentState, baselineControl, params);
+            App::Internal::LoopController::ControlVector baselineControl{};
+            const float baselineControlFanDutyCycle = fanDutyCycle;
+            const ContactForces baselineForces =
+                plant.tireForces(
+                    currentState,
+                    baselineControl,
+                    baselineControlFanDutyCycle,
+                    params);
             const float baselineFrontRightForceN =
                 baselineForces.contacts[0].rightForceN +
                 baselineForces.contacts[1].rightForceN;
@@ -1488,8 +1506,8 @@ namespace MazeMap
                 ((legacyRightSummedCapacityN - rightBankForwardCapacityN) > 1.0e-4f));
             Assert::AreEqual(expectedYawAccelRadps2, solution.commandedYawAccelRadps2, 1.0e-3f);
             Assert::AreEqual(solution.commandedYawAccelRadps2, repeatSolution.commandedYawAccelRadps2, 1.0e-6f);
-            Assert::AreEqual(solution.control.leftMotorCommand, repeatSolution.control.leftMotorCommand, 1.0e-6f);
-            Assert::AreEqual(solution.control.rightMotorCommand, repeatSolution.control.rightMotorCommand, 1.0e-6f);
+            Assert::AreEqual(solution.control.leftMotorPwm, repeatSolution.control.leftMotorPwm, 1.0e-6f);
+            Assert::AreEqual(solution.control.rightMotorPwm, repeatSolution.control.rightMotorPwm, 1.0e-6f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsDoesNotTractionLimitWellInsideNominalEnvelope)
@@ -1511,8 +1529,8 @@ namespace MazeMap
                     params.supplyVoltageV);
 
             Assert::IsFalse(solution.tractionLimited);
-            Assert::IsTrue(std::isfinite(solution.control.leftMotorCommand));
-            Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
+            Assert::IsTrue(std::isfinite(solution.control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(solution.control.rightMotorPwm));
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsSupportsHistoricalThreeMeterPerSecondEnvelope)
@@ -1534,8 +1552,8 @@ namespace MazeMap
 
             Assert::IsFalse(solution.tractionLimited);
             Assert::IsTrue(solution.converged);
-            Assert::IsTrue(std::fabs(solution.control.leftMotorCommand) < 1.0f);
-            Assert::IsTrue(std::fabs(solution.control.rightMotorCommand) < 1.0f);
+            Assert::IsTrue(std::fabs(solution.control.leftMotorPwm) < 1.0f);
+            Assert::IsTrue(std::fabs(solution.control.rightMotorPwm) < 1.0f);
         }
 
         TEST_METHOD(PlantModelSolveDriveCommandsBeyondPeakRemainsStable)
@@ -1549,7 +1567,8 @@ namespace MazeMap
             state(VehicleState::kU) = 2.0f;
             state(VehicleState::kOmegaL) = solution.leftWheelSpeedRadps;
             state(VehicleState::kOmegaR) = solution.rightWheelSpeedRadps;
-            const PlantDerivatives achieved = plant.forwardStep(state, solution.control, params);
+            const PlantDerivatives achieved =
+                plant.forwardStep(state, solution.control, solution.fanDutyCycle, solution.batteryVoltageV, params);
 
             std::wstring failure;
             if (!solution.tractionLimited)
@@ -1563,13 +1582,13 @@ namespace MazeMap
                     std::to_wstring(achieved.longitudinalAccelMps2) + L"," +
                     std::to_wstring(achieved.yawAccelRadps2);
             }
-            else if (std::fabs(solution.control.leftMotorCommand) > 1.0f ||
-                std::fabs(solution.control.rightMotorCommand) > 1.0f)
+            else if (std::fabs(solution.control.leftMotorPwm) > 1.0f ||
+                std::fabs(solution.control.rightMotorPwm) > 1.0f)
             {
                 failure =
                     std::wstring(L"motor command exceeded unit bounds left/right=") +
-                    std::to_wstring(solution.control.leftMotorCommand) + L"," +
-                    std::to_wstring(solution.control.rightMotorCommand);
+                    std::to_wstring(solution.control.leftMotorPwm) + L"," +
+                    std::to_wstring(solution.control.rightMotorPwm);
             }
 
             if (!failure.empty())
@@ -1585,8 +1604,8 @@ namespace MazeMap
             const DriveCommandSolution solution =
                 plant.solveDriveCommands(0.005f, 0.0f, 0.0f, 20.0f, params, 0.80f, params.supplyVoltageV);
 
-            Assert::IsTrue(std::isfinite(solution.control.leftMotorCommand));
-            Assert::IsTrue(std::isfinite(solution.control.rightMotorCommand));
+            Assert::IsTrue(std::isfinite(solution.control.leftMotorPwm));
+            Assert::IsTrue(std::isfinite(solution.control.rightMotorPwm));
             Assert::IsTrue(std::isfinite(solution.leftWheelSpeedRadps));
             Assert::IsTrue(std::isfinite(solution.rightWheelSpeedRadps));
             Assert::IsTrue(std::isfinite(solution.leftWheelTorqueNm));
@@ -1619,3 +1638,7 @@ namespace MazeMap
         }
     };
 }
+
+
+
+

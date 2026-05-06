@@ -65,14 +65,16 @@ namespace
     bool ExecuteOpenFloorStationaryMeasurementCycle(
         MazeMap::Estimator& ukf,
         float dtSeconds,
-        const MazeMap::ControlInput& control,
+        const MazeMap::App::Internal::LoopController::ControlVector& control,
+        float fanDutyCycle,
+        float batteryVoltageV,
         const MazeMap::EncoderObs& encoderObservation,
         const MazeMap::ImuAccelObs& accelObservation,
         float rawGyroRadps)
     {
         ApplyOpenFloorBenchmarkRuntimeContext(ukf, accelObservation);
 
-        if (!ukf.predict(dtSeconds, control))
+        if (!ukf.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
         {
             return false;
         }
@@ -126,11 +128,10 @@ namespace
         ResetOpenFloorBenchmarkUkf(ukf);
 
         const MazeMap::PlantParams& params = ukf.ukf().params();
-        MazeMap::ControlInput control{};
-        control.leftMotorCommand = 0.0f;
-        control.rightMotorCommand = 0.0f;
-        control.fanDutyCycle = 0.80f;
-        control.batteryVoltageV = params.supplyVoltageV;
+        const MazeMap::App::Internal::LoopController::ControlVector control =
+            MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f);
+        constexpr float fanDutyCycle = 0.80f;
+        const float batteryVoltageV = params.supplyVoltageV;
 
         MazeMap::EncoderObs encoderObservation{};
         encoderObservation.totalLeftCounts = 0;
@@ -149,6 +150,8 @@ namespace
                     ukf,
                     kOpenFloorUkfBenchmarkDtSeconds,
                     control,
+                    fanDutyCycle,
+                    batteryVoltageV,
                     encoderObservation,
                     accelObservation,
                     kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
@@ -170,6 +173,8 @@ namespace
                     ukf,
                     kOpenFloorUkfBenchmarkDtSeconds,
                     control,
+                    fanDutyCycle,
+                    batteryVoltageV,
                     encoderObservation,
                     accelObservation,
                     kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
@@ -193,7 +198,7 @@ namespace
         std::cout << "  measurement_set: " << kOpenFloorUkfBenchmarkMeasurementSet << "\n";
         std::cout << "  iterations: " << iterations << "\n";
         std::cout << "  dt_seconds: " << kOpenFloorUkfBenchmarkDtSeconds << "\n";
-        std::cout << "  fan_duty: " << control.fanDutyCycle << "\n";
+        std::cout << "  fan_duty: " << fanDutyCycle << "\n";
         std::cout << "  raw_gyro_radps: " << kOpenFloorUkfBenchmarkStationaryGyroRawRadps << "\n";
         std::cout << "  elapsed_ms: " << elapsedMs.count() << "\n";
         std::cout << "  us_per_iteration: " << microsecondsPerIteration << "\n";
@@ -588,6 +593,8 @@ void runMMSSim()
 //   4. Use the Error List window to view errors
 //   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
 //   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
+
+
 
 
 

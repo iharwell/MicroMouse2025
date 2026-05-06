@@ -241,11 +241,7 @@ Additional useful agent recommendations from the same result:
 - add whole-state timestamp access on `VehicleState`
   - `SetTimestampUs(std::uint32_t timestampUs) noexcept;`
   - `GetTimestampUs() const noexcept;`
-- add `LoopController` timing getters:
-  - `CurrentTickSequence()`
-  - `CurrentTickStartUs()`
-  - `CurrentTickDtUs()`
-  - `CurrentTickDtSeconds()`
+- expose one authoritative `LoopController` timing snapshot:
   - `LastDiagnostics()`
 
 These are aligned with the user’s “timing stays on `LoopController`” rule.
@@ -327,17 +323,13 @@ Practical caution:
 - do not apply these as a blind mechanical signature edit before runtime ownership is fixed
 - state source and timing source must be correct first
 
-### Agent result: timing getters
+### Agent result: loop timing surface
 
-The agent recommendation to expose timing via getters is still aligned:
+The agent recommendation to expose timing through one authoritative snapshot is still aligned:
 
-- `CurrentTickSequence()`
-- `CurrentTickStartUs()`
-- `CurrentTickDtUs()`
-- `CurrentTickDtSeconds()`
 - `LastDiagnostics()`
 
-These are useful replacements for `state.sequence`, `state.tickStartUs`, `state.dtUs`, and `state.dtSeconds`.
+That snapshot is the replacement for `state.sequence`, `state.tickStartUs`, `state.dtUs`, and `state.dtSeconds`.
 
 ## Recommended migration order
 
@@ -419,7 +411,7 @@ These currently read:
 - `state.dtUs`
 - `state.dtSeconds`
 
-Those should migrate to `LoopController` timing getters / `LastDiagnostics()`.
+Those should migrate to `LoopController::LastDiagnostics()`.
 
 ## Concrete files likely in play
 

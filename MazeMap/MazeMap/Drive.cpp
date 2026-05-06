@@ -1204,7 +1204,10 @@ namespace MazeMap::App::Internal
             (_runtime != nullptr) ? _runtime->RuntimeState() : MazeMap::VehicleState{};
         const SensorSnapshot& sensors = commandState.GetSensorSnapshot();
         const DriveTelemetry driveTelemetry = (_drive != nullptr) ? _drive->GetTelemetry() : DriveTelemetry{};
-        const float dtSeconds = (_loopController != nullptr) ? _loopController->CurrentTickDtSeconds() : 0.0f;
+        const float dtSeconds =
+            (_loopController != nullptr) ?
+                (static_cast<float>(_loopController->LastDiagnostics().dtUs) * 1.0e-6f) :
+                0.0f;
 
         ControlVector control = LoopController::ControlVector::Brake;
         switch (_activePrimitive)

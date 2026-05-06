@@ -438,10 +438,6 @@ void RuntimeSensorSuite::Capture(
     void* const callbackContext)
 {
     snapshot = SensorSnapshot{};
-    snapshot.wallSensorAdcCfgBeforeStart = MazeMap::Platform::GetWallSensorAdcCurrentCfg();
-    snapshot.wallSensorAdcGcBeforeStart = MazeMap::Platform::GetWallSensorAdcCurrentGc();
-    snapshot.wallSensorAdcTargetCfg = MazeMap::Platform::GetWallSensorAdcRuntimeMode();
-    snapshot.wallSensorAdcIpgClockHz = MazeMap::Platform::GetWallSensorAdcIpgClockHz();
 
     AsyncWallSensorSweepRead wallRead{};
     StartAsyncWallSensorSweepRead(
@@ -454,9 +450,6 @@ void RuntimeSensorSuite::Capture(
         _vehicle.SideRight,
         _sideRightLedOffCommandUs,
         wallRead);
-
-    snapshot.wallSensorAdcCfgAfterStart = MazeMap::Platform::GetWallSensorAdcCurrentCfg();
-    snapshot.wallSensorAdcGcAfterStart = MazeMap::Platform::GetWallSensorAdcCurrentGc();
 
     bool imuCaptured = false;
     class CaptureContext final
@@ -782,20 +775,20 @@ void RuntimeSensorSuite::InitializeWallSensorLedOffState() noexcept
 
 void RuntimeSensorSuite::CaptureInertialSnapshot(const bool stationary, SensorSnapshot& snapshot)
 {
-    const MazeMap::ImuExtrinsics imuExtrinsics = MazeMap::Vehicle::GetBackLeftImuExtrinsics();
+    const MazeMap::SensorMount imuMount = MazeMap::Vehicle::GetBackLeftImuMount();
     snapshot.imuFrontRight = {};
     snapshot.imuBackLeft = CaptureImuTelemetry(_vehicle.IMU_BL, Pins::IMU_INT_1B, &snapshot.imuTiming);
 
-    float rawGyroRadps = imuExtrinsics.gyroZSign * ReadGyroZRadpsRaw();
+    float rawGyroRadps = imuMount.TransformClockwiseYawRateToBody(ReadGyroZRadpsRaw());
 #if defined(ARDUINO_TEENSY41)
     rawGyroRadps =
-        imuExtrinsics.gyroZSign *
-        (_vehicle.IMU_BL.GyroRawToClockwiseYawDps(snapshot.imuBackLeft.gyroZ) * DEG_TO_RAD_F);
+        imuMount.TransformClockwiseYawRateToBody(
+            _vehicle.IMU_BL.GyroRawToClockwiseYawDps(snapshot.imuBackLeft.gyroZ) * DEG_TO_RAD_F);
 
     const Eigen::Vector2f accelImuG(
         _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelX),
         _vehicle.IMU_BL.AccelRawToG(snapshot.imuBackLeft.accelY));
-    const Eigen::Vector2f accelBodyG = imuExtrinsics.accelBodyFromImu * accelImuG;
+    const Eigen::Vector2f accelBodyG = imuMount.TransformPlanarVectorToBody(accelImuG);
     snapshot.accelBiasValid = _accelBiasInitialized;
     if (_accelBiasInitialized && stationary)
     {

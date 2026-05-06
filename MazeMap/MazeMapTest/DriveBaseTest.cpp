@@ -100,14 +100,12 @@ namespace MazeMap
         {
             const PlantParams& params = PlantParams::Default();
             const DriveTelemetry telemetry = drive.GetTelemetry();
-            ControlInput control{};
-            control.leftMotorCommand = telemetry.leftDriveCommand;
-            control.rightMotorCommand = telemetry.rightDriveCommand;
-            control.fanDutyCycle = 0.80f;
-            control.batteryVoltageV = params.supplyVoltageV;
+            const ControlVector control = ControlVector::RawMotorPwm(
+                telemetry.leftDriveCommand,
+                telemetry.rightDriveCommand);
 
             const PlantModel::StateVector previousTruthState = truthState;
-            truthState = plant.integrate(truthState, control, dtSeconds, params);
+            truthState = plant.integrate(truthState, control, 0.80f, params.supplyVoltageV, dtSeconds, params);
 
             const float leftDistanceDeltaM =
                 0.5f *
@@ -206,8 +204,8 @@ namespace MazeMap
             float tolerance = 1.0e-6f)
         {
             Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::AreEqual(solution.control.leftMotorCommand, command.leftMotorPwm, tolerance);
-            Assert::AreEqual(solution.control.rightMotorCommand, command.rightMotorPwm, tolerance);
+            Assert::AreEqual(solution.control.leftMotorPwm, command.leftMotorPwm, tolerance);
+            Assert::AreEqual(solution.control.rightMotorPwm, command.rightMotorPwm, tolerance);
         }
 
         void AssertPositiveInPlaceTurnCommandMeetsMinimumDrive(
@@ -1037,16 +1035,20 @@ namespace MazeMap
                     true);
 
                 const DriveTelemetry appliedTelemetry = drive.GetTelemetry();
-                ControlInput control{};
-                control.leftMotorCommand = appliedTelemetry.leftDriveCommand;
-                control.rightMotorCommand = appliedTelemetry.rightDriveCommand;
-                control.fanDutyCycle = 0.80f;
-                control.batteryVoltageV = params.supplyVoltageV;
+                const ControlVector control = ControlVector::RawMotorPwm(
+                    appliedTelemetry.leftDriveCommand,
+                    appliedTelemetry.rightDriveCommand);
 
                 const PlantModel::StateVector previousTruthState = truthState;
-                truthState = plant.integrate(truthState, control, scenario.dtSeconds, params);
+                truthState = plant.integrate(
+                    truthState,
+                    control,
+                    0.80f,
+                    params.supplyVoltageV,
+                    scenario.dtSeconds,
+                    params);
                 const MazeMap::PlantDerivatives truthDerivatives =
-                    plant.forwardStep(truthState, control, params);
+                    plant.forwardStep(truthState, control, 0.80f, params.supplyVoltageV, params);
 
                 const float leftDistanceDeltaM =
                     0.5f *
@@ -1107,7 +1109,7 @@ namespace MazeMap
                 const PlantModel::StateVector estimatorState =
                     BuildUkfStateVector(driveHarness.estimator.RuntimeState());
                 const MazeMap::PlantDerivatives estimatorDerivatives =
-                    plant.forwardStep(estimatorState, control, params);
+                    plant.forwardStep(estimatorState, control, 0.80f, params.supplyVoltageV, params);
 
                 OscillationPairingTraceSample sample{};
                 sample.targetSignal = generatedCommand.targetSignal;
@@ -1606,7 +1608,7 @@ namespace MazeMap
             AssertPositiveInPlaceTurnCommandMeetsMinimumDrive(command);
         }
 
-        TEST_METHOD(DriveBaseRawFeedforwardReportsAlignedCycleContextUsage)
+        TEST_METHOD(DriveBaseRawFeedforwardMatchesUkfAlignedVelocityTargetSolve)
         {
             PlantModel plant;
             DriveBaseHarness driveHarness(plant, Config::kDriveBasePDCluster);
@@ -1614,15 +1616,20 @@ namespace MazeMap
             Assert::IsTrue(drive.Begin());
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
+            const DriveCommandSolution expectedSolution =
+                driveHarness.estimator.ukf().solveAlignedDriveCommandsForVelocityTarget(
+                    driveHarness.estimator.ukf().state(),
+                    0.20f,
+                    driveHarness.estimator.ukf().state()(VehicleState::kR),
+                    GetMissionFanDutyCycle(),
+                    drive.CurrentBatteryVoltageV(),
+                    PlantModel::kDefaultVelocityTargetResponseTimeS);
             const ControlVector command =
                 drive.PointCommand(
                     0.20f,
                     MazeMap::CommandPD::RawCommand);
-            const DriveTelemetry telemetry = drive.GetTelemetry();
 
-            Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::IsTrue(telemetry.feedforwardUsedAlignedCycleContext != 0U);
-            Assert::IsFalse(telemetry.feedforwardUsedGripOnlyFallback != 0U);
+            AssertDriveCommandMatchesSolution(command, expectedSolution);
         }
 
         TEST_METHOD(DriveConfigYawRateTrackingUsesImuYawByDefault)
@@ -2100,3 +2107,7 @@ namespace MazeMap
 
     };
 }
+
+
+
+

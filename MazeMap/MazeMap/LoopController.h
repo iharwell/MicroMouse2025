@@ -1,8 +1,7 @@
 #pragma once
 
-#include "DriveTelemetry.h"
-#include "MazeMapRuntimeCore.h"
 #include "SensorSnapshot.h"
+#include "VehicleState.h"
 
 #include <cstdint>
 #include <limits>
@@ -131,18 +130,25 @@ namespace MazeMap::App::Internal
         // public cadence-control plane back into LoopController.
         struct TimingDiagnostics final
         {
-            std::uint32_t sequence{};              // One-based session-local tick sequence.
-            std::uint32_t tickStartUs{};           // Absolute tick-start timestamp.
-            std::uint32_t dtUs{};                  // Elapsed time since the previous tick start.
-            ControlCycleTiming controlTiming{};    // Detailed control/estimator timing bundle.
-            OpticalObservationTiming frontTiming{}; // Front wall-sensor observation timing.
-            OpticalObservationTiming leftTiming{};  // Left wall-sensor observation timing.
-            OpticalObservationTiming rightTiming{}; // Right wall-sensor observation timing.
-            ImuObservationTiming imuTiming{};      // IMU observation timing bundle.
-            std::uint16_t tActuationAppliedUs{};   // Tick-relative actuation-apply completion.
-            std::uint16_t tModeReturnUs{};         // Tick-relative active-callback return time.
-            std::uint16_t tPostServiceDoneUs{};    // Tick-relative post-callback service completion.
-            std::uint16_t overrunUs{};             // Positive overrun beyond the scheduled deadline.
+            std::uint32_t sequence{};             // One-based session-local tick sequence.
+            std::uint32_t tickStartUs{};          // Absolute tick-start timestamp.
+            std::uint32_t dtUs{};                 // Elapsed time since the previous tick start.
+            std::uint32_t commandAppliedUs{};     // Absolute timestamp when the tick-start command application completed.
+            std::uint32_t encoderLatchUs{};       // Absolute timestamp just before sensor/encoder capture begins.
+            std::uint32_t encoderReadDoneUs{};    // Absolute timestamp after encoder observations have been consumed.
+            std::uint32_t ukfPredictStartUs{};    // Absolute timestamp just before estimator predict begins.
+            std::uint32_t ukfPredictEndUs{};      // Absolute timestamp when estimator predict completes.
+            std::uint32_t ukfPredictDurationUs{}; // Observed estimator predict duration.
+            std::uint32_t ukfUpdateStartUs{};     // Absolute timestamp just before estimator updates begin.
+            std::uint32_t ukfUpdateEndUs{};       // Absolute timestamp when estimator updates complete.
+            std::uint32_t ukfUpdateDurationUs{};  // Observed estimator update duration.
+            std::uint32_t ukfTotalDurationUs{};   // Combined estimator predict+update duration.
+            std::uint32_t callbackReturnUs{};     // Absolute timestamp when the active mode callback returned.
+            std::uint32_t postServiceDoneUs{};    // Absolute timestamp when post-callback services completed.
+            std::uint32_t tickFinalizeUs{};       // Absolute timestamp when end-of-tick finalize work completed.
+            std::uint32_t cycleCounterStart{};    // Cycle counter sampled at tick start.
+            std::uint32_t cycleCounterEnd{};      // Cycle counter sampled at finalize.
+            std::uint16_t overrunUs{};            // Positive overrun beyond the scheduled deadline.
         };
 
         // Explicit in-session callback transfer target.
@@ -281,13 +287,14 @@ namespace MazeMap::App::Internal
         bool SessionActive() const noexcept;
 
         // `LastDiagnostics()`:
-        // Returns the most recently published completed-tick timing snapshot.
+        // Returns the most recent loop timing snapshot.
         //
         // This is read-only observation output and does not expose cadence-control authority.
         //
         // Return value:
-        // The last completed-tick timing snapshot. Before the first completed tick, the returned
-        // object still exists but its fields remain at their zero-initialized defaults.
+        // The most recently published completed-tick snapshot. Before the first completed tick,
+        // the returned object still exists but its fields remain at their zero-initialized
+        // defaults.
         const TimingDiagnostics& LastDiagnostics() const noexcept;
 
         // `LastAppliedCommand()`:
@@ -297,42 +304,6 @@ namespace MazeMap::App::Internal
         // The command LoopController most recently handed to the runtime actuation hook at a
         // tick boundary.
         const ControlVector& LastAppliedCommand() const noexcept;
-
-        // `CurrentTickSequence()`:
-        // Returns the current published or in-progress session-local tick sequence number.
-        //
-        // Returns `0` before any tick timing is available.
-        //
-        // Return value:
-        // The current session-local tick sequence number, or `0` before the first session tick.
-        std::uint32_t CurrentTickSequence() const noexcept;
-
-        // `CurrentTickStartUs()`:
-        // Returns the current published or in-progress absolute tick-start timestamp.
-        //
-        // Returns `0` before any tick timing is available.
-        //
-        // Return value:
-        // The absolute tick-start timestamp in microseconds, or `0` before timing is available.
-        std::uint32_t CurrentTickStartUs() const noexcept;
-
-        // `CurrentTickDtUs()`:
-        // Returns the current published or in-progress tick delta in microseconds.
-        //
-        // Returns `0` before any tick timing is available.
-        //
-        // Return value:
-        // The current tick delta in microseconds, or `0` before timing is available.
-        std::uint32_t CurrentTickDtUs() const noexcept;
-
-        // `CurrentTickDtSeconds()`:
-        // Returns the current published or in-progress tick delta in seconds.
-        //
-        // Returns `0.0f` before any tick timing is available.
-        //
-        // Return value:
-        // The current tick delta in seconds, or `0.0f` before timing is available.
-        float CurrentTickDtSeconds() const noexcept;
 
     private:
         friend class ::MazeMap::App::Application;
@@ -363,7 +334,6 @@ namespace MazeMap::App::Internal
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
-        static std::uint16_t RelativeTickUs(std::uint32_t tickStartUs, std::uint32_t timestampUs) noexcept;
         static bool IsBrakeMotorPwmCommand(const ControlVector& command) noexcept;
         static bool IsZeroMotorPwmCommand(const ControlVector& command) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
@@ -376,7 +346,6 @@ namespace MazeMap::App::Internal
         void RestoreSessionStartPhysicalState() noexcept;
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
-        const TimingDiagnostics* CurrentTimingForReaders() const noexcept;
         void ClearPendingRequests() noexcept;
         bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
         bool CaptureTickState(float dtSeconds, std::uint32_t tickStartUs);

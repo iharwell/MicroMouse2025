@@ -201,9 +201,7 @@
     <ClInclude Include="DriveTelemetry.h" />
     <ClInclude Include="EigenCompat.h" />
     <ClInclude Include="EncoderProgressWatchdog.h" />
-    <ClInclude Include="EstimatorGeometry.h" />
-    <ClInclude Include="EstimatorPredictModel.h" />
-    <ClInclude Include="EdgeForceShapeModifier.h" />
+    <ClInclude Include="AppliedTorqueEstimate.h" />
     <ClInclude Include="EncoderStallPolicy.h" />
     <ClInclude Include="FanRampProfile.h" />
     <ClInclude Include="framework.h" />
@@ -211,7 +209,6 @@
     <ClInclude Include="FrontWallCharacterizationConfig.h" />
     <ClInclude Include="FrontWallCharacterizationStorage.h" />
     <ClInclude Include="FloodFillPathFinder.h" />
-    <ClInclude Include="GripUtilizationMetrics.h" />
     <ClInclude Include="GyroBiasUpdatePolicy.h" />
     <ClInclude Include="HardwareConfig.h" />
     <ClInclude Include="HalfStepPath.h" />
@@ -268,11 +265,12 @@
     <ClInclude Include="PinPairStrap.h" />
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
+    <ClInclude Include="EncoderObs.h" />
+    <ClInclude Include="ImuAccelObs.h" />
     <ClInclude Include="PlanarAccelLateralUpdate.h" />
     <ClInclude Include="PredictorSubstepPolicy.h" />
     <ClInclude Include="ProportionalDerivative.h" />
     <ClInclude Include="ProportionalDerivativeCluster.h" />
-    <ClInclude Include="RegripRecoveryMonitor.h" />
     <ClInclude Include="RollingAverageWindow.h" />
     <ClInclude Include="RuntimeSensorSuite.h" />
     <ClInclude Include="ShowcasingDonutController.h" />
@@ -286,15 +284,13 @@
     <ClInclude Include="SmoothTurnYawRateController.h" />
     <ClInclude Include="StartupWaitProfile.h" />
     <ClInclude Include="SrUkfCore.h" />
+    <ClInclude Include="SensorMount.h" />
     <ClInclude Include="TeensyLayout.h" />
     <ClInclude Include="TrackWidthEstimate.h" />
-    <ClInclude Include="TorqueEstimateAdapter.h" />
     <ClInclude Include="TractionLimitSweep.h" />
-    <ClInclude Include="TransientContactMemory.h" />
     <ClInclude Include="TurnCommandGeometry.h" />
     <ClInclude Include="TurnWallEdgeTracker.h" />
     <ClInclude Include="UKF.h" />
-    <ClInclude Include="UkfRobustUpdatePolicy.h" />
     <ClInclude Include="Vehicle.h" />
     <ClInclude Include="VehicleState.h" />
     <ClInclude Include="WallDistanceCalibration.h" />
@@ -306,7 +302,6 @@
     <ClInclude Include="WallSensor.h" />
     <ClInclude Include="WallSensorCalibration.h" />
     <ClInclude Include="WallSensorPreprocessor.h" />
-    <ClInclude Include="WheelAuthorityPolicy.h" />
     <ClInclude Include="WheelControlProfile.h" />
   </ItemGroup>
   <ItemGroup>
@@ -322,10 +317,7 @@
     <ClCompile Include="DriveTelemetry.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="EncoderProgressWatchdog.cpp" />
-    <ClCompile Include="EdgeForceShapeModifier.cpp" />
-    <ClCompile Include="EstimatorPredictModel.cpp" />
     <ClCompile Include="Fresnel.cpp" />
-    <ClCompile Include="GripUtilizationMetrics.cpp" />
     <ClCompile Include="Kinematics.cpp" />
     <ClCompile Include="LoopController.cpp" />
     <ClCompile Include="Maneuver.cpp" />
@@ -383,6 +375,7 @@
     </ClCompile>
     <ClCompile Include="RuntimeSensorSuite.cpp" />
     <ClCompile Include="SensorSnapshot.cpp" />
+    <ClCompile Include="SensorMount.cpp" />
     <ClCompile Include="MazeLocation.cpp" />
     <ClCompile Include="MazeMapCore.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
@@ -402,16 +395,11 @@
     <ClCompile Include="PredictorSubstepPolicy.cpp" />
     <ClCompile Include="ProportionalDerivative.cpp" />
     <ClCompile Include="ProportionalDerivativeCluster.cpp" />
-    <ClCompile Include="RegripRecoveryMonitor.cpp" />
     <ClCompile Include="SigmaPointSetSimplex.cpp" />
     <ClCompile Include="SoftOdometryAid.cpp" />
     <ClCompile Include="SrUkfCore.cpp" />
-    <ClCompile Include="TorqueEstimateAdapter.cpp" />
-    <ClCompile Include="TransientContactMemory.cpp" />
-    <ClCompile Include="UkfRobustUpdatePolicy.cpp" />
     <ClCompile Include="WallGeometryModel.cpp" />
     <ClCompile Include="WallSensorPreprocessor.cpp" />
-    <ClCompile Include="WheelAuthorityPolicy.cpp" />
     <ClCompile Include="Vehicle.cpp" />
     <ClCompile Include="VehicleState.cpp" />
     <ClCompile Include="WallDistanceCalibration.cpp" />

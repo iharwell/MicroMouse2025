@@ -5,6 +5,7 @@
 #include "CellCoordinates.h"
 #include "Direction.h"
 #include "Maze.h"
+#include "SensorMount.h"
 #include "VehicleState.h"
 
 #include <cstdint>
@@ -46,41 +47,41 @@ namespace MazeMap
 
         GeometryPrediction predictRay(
             const VehicleState::StateVector& state,
-            const SensorExtrinsics& sensorExtrinsics,
+            const SensorMount& sensorMount,
             const Maze& maze) const noexcept;
 
         GeometryPrediction predictRay(
             const GeometryStateFrame& frame,
-            const SensorExtrinsics& sensorExtrinsics,
+            const SensorMount& sensorMount,
             const Maze& maze) const noexcept;
 
         GeometryPrediction predictRay(
             const VehicleState::StateVector& state,
-            const SensorExtrinsics& sensorExtrinsics,
+            const SensorMount& sensorMount,
             const Maze& maze,
             float maxRangeM) const noexcept;
 
         GeometryPrediction predictRay(
             const GeometryStateFrame& frame,
-            const SensorExtrinsics& sensorExtrinsics,
+            const SensorMount& sensorMount,
             const Maze& maze,
             float maxRangeM) const noexcept;
 
         Eigen::Vector2f sensorOriginWorld(
             const VehicleState::StateVector& state,
-            const SensorExtrinsics& sensorExtrinsics) const noexcept;
+            const SensorMount& sensorMount) const noexcept;
 
         Eigen::Vector2f sensorOriginWorld(
             const GeometryStateFrame& frame,
-            const SensorExtrinsics& sensorExtrinsics) const noexcept;
+            const SensorMount& sensorMount) const noexcept;
 
         Eigen::Vector2f sensorDirectionWorld(
             const VehicleState::StateVector& state,
-            const SensorExtrinsics& sensorExtrinsics) const noexcept;
+            const SensorMount& sensorMount) const noexcept;
 
         Eigen::Vector2f sensorDirectionWorld(
             const GeometryStateFrame& frame,
-            const SensorExtrinsics& sensorExtrinsics) const noexcept;
+            const SensorMount& sensorMount) const noexcept;
 
         GeometryStateFrame buildStateFrame(
             const VehicleState::StateVector& state) const noexcept;

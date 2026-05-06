@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Vehicle.h"
+#include "VehicleState.h"
 #include "PlantModel.h"
 #include <array>
 #include <limits>
@@ -47,13 +48,13 @@ namespace
     MazeMap::WallSensor MakeWallSensor(
         uint8_t wallSensorInPin,
         uint8_t ledOutPin,
-        const MazeMap::SensorExtrinsics& extrinsics)
+        const MazeMap::SensorMount& mount)
     {
         return MazeMap::WallSensor(
             wallSensorInPin,
             ledOutPin,
-            extrinsics.positionBodyM,
-            extrinsics.directionBody,
+            mount.positionBodyM(),
+            mount.SensorForwardBody(),
             GetDefaultWallSensorAdcToLightTable(),
             GetDefaultWallSensorDistanceModel());
     }
@@ -63,7 +64,7 @@ namespace
         return MakeWallSensor(
             kFrontLeftWallSensorPin,
             kFrontLeftWallSensorLedPin,
-            MazeMap::Vehicle::GetFrontLeftSensorExtrinsics());
+            MazeMap::Vehicle::GetFrontLeftSensorMount());
     }
 
     MazeMap::WallSensor MakeFrontRightWallSensor()
@@ -71,7 +72,7 @@ namespace
         return MakeWallSensor(
             kFrontRightWallSensorPin,
             kFrontRightWallSensorLedPin,
-            MazeMap::Vehicle::GetFrontRightSensorExtrinsics());
+            MazeMap::Vehicle::GetFrontRightSensorMount());
     }
 
     MazeMap::WallSensor MakeSideLeftWallSensor()
@@ -79,7 +80,7 @@ namespace
         return MakeWallSensor(
             kSideLeftWallSensorPin,
             kSideLeftWallSensorLedPin,
-            MazeMap::Vehicle::GetSideLeftSensorExtrinsics());
+            MazeMap::Vehicle::GetSideLeftSensorMount());
     }
 
     MazeMap::WallSensor MakeSideRightWallSensor()
@@ -87,52 +88,9 @@ namespace
         return MakeWallSensor(
             kSideRightWallSensorPin,
             kSideRightWallSensorLedPin,
-            MazeMap::Vehicle::GetSideRightSensorExtrinsics());
+            MazeMap::Vehicle::GetSideRightSensorMount());
     }
 
-    const MazeMap::PlantParams& GetDefaultProgressPlantParams()
-    {
-        static const MazeMap::PlantParams kParams = MazeMap::PlantParams::Default();
-        return kParams;
-    }
-
-    const MazeMap::PlantModel::PreparedParams& GetDefaultProgressPreparedPlantParams()
-    {
-        static const MazeMap::PlantModel::PreparedParams kPrepared =
-            MazeMap::PlantModel::Prepare(GetDefaultProgressPlantParams());
-        return kPrepared;
-    }
-
-    MazeMap::VehicleState::StateVector BuildPlantStateVector(
-        const MazeMap::VehicleState& state) noexcept
-    {
-        MazeMap::VehicleState::StateVector result = MazeMap::VehicleState::StateVector::Zero();
-        result(MazeMap::VehicleState::kPx) = state.GetPositionX();
-        result(MazeMap::VehicleState::kPy) = state.GetPositionY();
-        result(MazeMap::VehicleState::kPsi) = state.GetOrientation();
-        result(MazeMap::VehicleState::kU) = state.GetVelocity();
-        result(MazeMap::VehicleState::kV) = state.GetLateralVelocity();
-        result(MazeMap::VehicleState::kR) = state.GetRotationalVelocity();
-        result(MazeMap::VehicleState::kOmegaL) = state.GetWheelSpeedLeft();
-        result(MazeMap::VehicleState::kOmegaR) = state.GetWheelSpeedRight();
-        result(MazeMap::VehicleState::kBgz) = state.GetGyroBiasZ();
-        MazeMap::VehicleState::NormalizeStateVector(result);
-        return result;
-    }
-
-    void ApplyPlantStateVector(
-        MazeMap::VehicleState& state,
-        const MazeMap::VehicleState::StateVector& vector) noexcept
-    {
-        state.SetPosition(Eigen::Vector2f(vector(MazeMap::VehicleState::kPx), vector(MazeMap::VehicleState::kPy)));
-        state.SetOrientation(vector(MazeMap::VehicleState::kPsi));
-        state.SetVelocity(vector(MazeMap::VehicleState::kU));
-        state.SetLateralVelocity(vector(MazeMap::VehicleState::kV));
-        state.SetRotationalVelocity(vector(MazeMap::VehicleState::kR));
-        state.SetWheelSpeedLeft(vector(MazeMap::VehicleState::kOmegaL));
-        state.SetWheelSpeedRight(vector(MazeMap::VehicleState::kOmegaR));
-        state.SetGyroBiasZ(vector(MazeMap::VehicleState::kBgz));
-    }
 }
 
 namespace MazeMap
@@ -152,63 +110,36 @@ namespace MazeMap
     {
     }
 
-    ImuExtrinsics Vehicle::GetBackLeftImuExtrinsics() noexcept
+    SensorMount Vehicle::GetBackLeftImuMount() noexcept
     {
-        ImuExtrinsics extrinsics{};
         // Body frame is +X right, +Y forward.
-        extrinsics.positionBodyM = Eigen::Vector2f(-0.023f, -0.011f);
-        extrinsics.accelBodyFromImu = Eigen::Matrix2f::Identity();
-        extrinsics.gyroZSign = 1.0f;
-        return extrinsics;
+        return SensorMount(Eigen::Vector2f(-0.023f, -0.011f), Eigen::Matrix2f::Identity());
     }
 
-    SensorExtrinsics Vehicle::GetFrontLeftSensorExtrinsics() noexcept
+    SensorMount Vehicle::GetFrontLeftSensorMount() noexcept
     {
-        return {
+        return SensorMount::FromForwardDirectionBody(
             Eigen::Vector2f(-0.03465f, 0.04223f),
-            Eigen::Vector2f(-0.10453f, 0.99452f),
-            0.0f
-        };
+            Eigen::Vector2f(-0.10453f, 0.99452f));
     }
-    SensorExtrinsics Vehicle::GetFrontRightSensorExtrinsics() noexcept
+    SensorMount Vehicle::GetFrontRightSensorMount() noexcept
     {
-        return {
+        return SensorMount::FromForwardDirectionBody(
             Eigen::Vector2f(0.03459f, 0.04223f),
-            Eigen::Vector2f(0.10453f, 0.99452f),
-            0.0f
-        };
+            Eigen::Vector2f(0.10453f, 0.99452f));
     }
-    SensorExtrinsics Vehicle::GetSideLeftSensorExtrinsics() noexcept
+    SensorMount Vehicle::GetSideLeftSensorMount() noexcept
     {
-        return {
+        return SensorMount::FromForwardDirectionBody(
             Eigen::Vector2f(-0.02918f, 0.05026f),
-            Eigen::Vector2f(-1.0f, 0.0f),
-            0.0f
-        };
+            Eigen::Vector2f(-1.0f, 0.0f));
     }
-    SensorExtrinsics Vehicle::GetSideRightSensorExtrinsics() noexcept
+    SensorMount Vehicle::GetSideRightSensorMount() noexcept
     {
-        return {
+        return SensorMount::FromForwardDirectionBody(
             Eigen::Vector2f(0.02772f, 0.05026f),
-            Eigen::Vector2f(1.0f, 0.0f),
-            0.0f
-        };
+            Eigen::Vector2f(1.0f, 0.0f));
     }
-    void Vehicle::ProgressVehicleState(const VehicleState& previousState, VehicleState& projectedState, float timeDelta)
-    {
-        PlantModel plantModel;
-        projectedState.SetTime(previousState.GetTime() + timeDelta);
-        projectedState.SetControlInput(previousState.GetControlInput());
-        ApplyPlantStateVector(
-            projectedState,
-            plantModel.integrate(
-                BuildPlantStateVector(previousState),
-                previousState.GetControlInput(),
-                timeDelta,
-                GetDefaultProgressPreparedPlantParams()));
-        projectedState.SetSqrtCovariance(previousState.GetSqrtCovariance());
-    }
-
     float Vehicle::GetStraightLineCost(float distance, float initialVelocity, float finalVelocity)
     {
         return const_cast<const Vehicle*>(this)->GetStraightLineCost(distance, initialVelocity, finalVelocity);
@@ -423,3 +354,4 @@ namespace MazeMap
         //result.SetAcceleration(previousState.GetAcceleration() + )
     }
 }
+

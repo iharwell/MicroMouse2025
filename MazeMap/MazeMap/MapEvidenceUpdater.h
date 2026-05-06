@@ -1,6 +1,7 @@
 #pragma once
 // Declares the wall-evidence accumulator that converts accepted UKF wall updates into maze edge state.
 
+#include "WallObservationPipeline.h"
 #include "WallGeometryModel.h"
 
 #include <array>

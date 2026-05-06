@@ -4,8 +4,10 @@
 
 #include "Defines.h"
 #include "EigenCompat.h"
-#include "EstimatorGeometry.h"
+#include "AppliedTorqueEstimate.h"
+#include "LoopController.h"
 #include "Maze.h"
+#include "SensorMount.h"
 #include "VehicleState.h"
 
 #include <algorithm>
@@ -14,7 +16,7 @@
 
 namespace MazeMap
 {
-    class EstimatorPredictModel;
+    class SrUkfCore;
 
     // Contact-point velocity resolved in the project body frame (+X right, +Y forward).
     struct ContactKinematics
@@ -121,7 +123,9 @@ namespace MazeMap
     // Inverse-dynamics result for a requested body motion at the current operating point.
     struct DriveCommandSolution
     {
-        ControlInput control{};
+        App::Internal::LoopController::ControlVector control{};
+        float fanDutyCycle = 0.80f;
+        float batteryVoltageV = 8.4f;
         float requestedCommonForceN = 0.0f;
         float requestedDifferentialForceN = 0.0f;
         float commandedCommonForceN = 0.0f;
@@ -132,8 +136,6 @@ namespace MazeMap
         float rightTangentialCapacityN = 0.0f;
         bool commonForceClamped = false;
         bool differentialForceClamped = false;
-        bool usedAlignedCycleContext = false;
-        bool usedGripOnlyFallback = false;
         bool closedLoopReserveMode = false;
         float reserveUsage = 1.0f;
         float slipSpeedFloorMps = 0.0f;
@@ -181,11 +183,9 @@ namespace MazeMap
         float forwardAccelResidualMps2 = 0.0f;
         float yawAccelResidualRadps2 = 0.0f;
 
-        bool usedAlignedCycleContext = false;
-        bool usedGripOnlyFallback = false;
     };
 
-    // Tunable physical parameters and sensor extrinsics for the UKF plant model.
+    // Tunable physical parameters and fixed sensor-mount facts for the UKF plant model.
     struct PlantParams
     {
         float massKg;
@@ -267,11 +267,11 @@ namespace MazeMap
             Eigen::Vector2f::Zero()
         };
 
-        SensorExtrinsics frontLeftSensor{};
-        SensorExtrinsics frontRightSensor{};
-        SensorExtrinsics sideLeftSensor{};
-        SensorExtrinsics sideRightSensor{};
-        ImuExtrinsics imu{};
+        SensorMount frontLeftSensor{};
+        SensorMount frontRightSensor{};
+        SensorMount sideLeftSensor{};
+        SensorMount sideRightSensor{};
+        SensorMount backLeftImuMount{};
 
         static EXPORT PlantParams Default() noexcept;
 
@@ -383,8 +383,6 @@ namespace MazeMap
         float stopExitWheelSpeedRadps = 0.0f;
         float stopEnterCommand = 0.0f;
         float stopExitCommand = 0.0f;
-
-        Eigen::Vector2f imuPositionBodyM = Eigen::Vector2f::Zero();
     };
 
     // Shared vehicle plant owner for runtime dynamics, inverse solves, and plant-side diagnostics.
@@ -401,11 +399,15 @@ namespace MazeMap
 
         PlantDerivatives forwardStep(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
             const PlantParams& params) const noexcept;
         PlantDerivatives forwardStep(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
             const PreparedParams& params) const noexcept;
 
         WheelKinematics wheelKinematics(const StateVector& state, const PlantParams& params) const noexcept;
@@ -426,32 +428,53 @@ namespace MazeMap
         ContactForces tireForces(const StateVector& state, const PreparedParams& params) const noexcept;
         ContactForces tireForces(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
             const PlantParams& params) const noexcept;
         ContactForces tireForces(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
             const PreparedParams& params) const noexcept;
 
         Eigen::Vector2f imuPlanarAcceleration(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
             const PlantParams& params) const noexcept;
         Eigen::Vector2f imuPlanarAcceleration(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
             const PreparedParams& params) const noexcept;
 
         StateVector integrate(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
             float dt,
             const PlantParams& params) const noexcept;
         StateVector integrate(
             const StateVector& state,
-            const ControlInput& control,
+            const App::Internal::LoopController::ControlVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV,
             float dt,
             const PreparedParams& params) const noexcept;
+
+        AppliedTorqueEstimate estimateAppliedTorque(
+            const StateVector& currentState,
+            const App::Internal::LoopController::ControlVector& control,
+            const PlantParams& params,
+            float batteryVoltageV = 0.0f) const noexcept;
+        AppliedTorqueEstimate estimateAppliedTorque(
+            const StateVector& currentState,
+            const App::Internal::LoopController::ControlVector& control,
+            const PreparedParams& params,
+            float batteryVoltageV = 0.0f) const noexcept;
 
         // Algebraic traction-clamped inverse solve for the requested body accelerations at the
         // current operating point. The normal path performs no iterative refinement.
@@ -467,14 +490,6 @@ namespace MazeMap
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
             const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 8.4f) const noexcept;
-        DriveCommandSolution solveDriveCommands(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 8.4f) const noexcept;
         DriveCommandSolution solveDriveCommands(
@@ -491,15 +506,6 @@ namespace MazeMap
             float yawRateRadps,
             float desiredYawAccelRadps2,
             const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f) const noexcept;
-        DriveCommandSolution solveDriveCommands(
-            float forwardVelocityMps,
-            float desiredLongitudinalAccelMps2,
-            float yawRateRadps,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) const noexcept;
 
@@ -508,27 +514,8 @@ namespace MazeMap
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
             const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 8.4f,
-            float reserveUsage = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommands(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 8.4f,
-            float reserveUsage = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommands(
-            float forwardVelocityMps,
-            float desiredLongitudinalAccelMps2,
-            float yawRateRadps,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
             float reserveUsage = 0.90f) const noexcept;
         DriveCommandSolution solveClosedLoopDriveCommands(
             float forwardVelocityMps,
@@ -555,15 +542,6 @@ namespace MazeMap
             float targetForwardVelocityMps,
             float targetYawRateRadps,
             const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
-        DriveCommandSolution solveDriveCommandsForVelocityTarget(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
@@ -582,16 +560,6 @@ namespace MazeMap
             float currentYawRateRadps,
             float targetYawRateRadps,
             const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
-        DriveCommandSolution solveDriveCommandsForVelocityTarget(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
@@ -601,27 +569,6 @@ namespace MazeMap
             float targetForwardVelocityMps,
             float targetYawRateRadps,
             const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float reserveUsage = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float reserveUsage = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f,
             float responseTimeS = kDefaultVelocityTargetResponseTimeS,
@@ -691,14 +638,6 @@ namespace MazeMap
         void velocityTargetTechnicalLimits(
             const StateVector& currentState,
             const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float& maxLongitudinalAccelMps2,
-            float& maxYawAccelRadps2,
-            float fanDutyCycle = 0.80f,
-            float reserveUsage = 1.0f) const noexcept;
-        void velocityTargetTechnicalLimits(
-            const StateVector& currentState,
-            const PreparedParams& params,
             float& maxLongitudinalAccelMps2,
             float& maxYawAccelRadps2,
             float fanDutyCycle = 0.80f) const noexcept;
@@ -709,15 +648,6 @@ namespace MazeMap
             float& maxLongitudinalAccelMps2,
             float& maxYawAccelRadps2,
             float fanDutyCycle = 0.80f) const noexcept;
-        void velocityTargetTechnicalLimits(
-            float forwardVelocityMps,
-            float yawRateRadps,
-            const PreparedParams& params,
-            const ModelCycleContext& cycleContext,
-            float& maxLongitudinalAccelMps2,
-            float& maxYawAccelRadps2,
-            float fanDutyCycle = 0.80f,
-            float reserveUsage = 1.0f) const noexcept;
         void velocityTargetTechnicalLimits(
             float forwardVelocityMps,
             float yawRateRadps,
@@ -837,14 +767,25 @@ namespace MazeMap
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
             const PreparedParams& prepared,
-            const ModelCycleContext& cycleContext,
             float fanDutyCycle,
             float batteryVoltageV,
             float reserveUsage,
             float dtS) const noexcept;
 
     private:
-        friend class EstimatorPredictModel;
+        friend class SrUkfCore;
+
+        struct WheelOnlyMeasurementPrediction
+        {
+            float leftWheelSpeedRadps = 0.0f;
+            float rightWheelSpeedRadps = 0.0f;
+            float forwardSpeedMps = 0.0f;
+            float yawRateRadps = 0.0f;
+        };
+
+        WheelOnlyMeasurementPrediction predictWheelOnlyMeasurement(
+            const StateVector& state,
+            const PreparedParams& params) const noexcept;
 
         PlantDerivatives forwardStepFromAppliedBankTorques(
             const StateVector& state,
@@ -852,14 +793,20 @@ namespace MazeMap
             float rightAppliedBankTorqueNm,
             const PlantParams& params,
             float fanDutyCycle = 0.80f,
-            const ModelCycleContext* cycleContext = nullptr) const noexcept;
+            float leftUtilizationScale = 1.0f,
+            float rightUtilizationScale = 1.0f,
+            float leftCapacityScale = 1.0f,
+            float rightCapacityScale = 1.0f) const noexcept;
         PlantDerivatives forwardStepFromAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             const PreparedParams& params,
             float fanDutyCycle = 0.80f,
-            const ModelCycleContext* cycleContext = nullptr) const noexcept;
+            float leftUtilizationScale = 1.0f,
+            float rightUtilizationScale = 1.0f,
+            float leftCapacityScale = 1.0f,
+            float rightCapacityScale = 1.0f) const noexcept;
         PlantDerivatives evaluateAppliedBankTorqueStep(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
@@ -867,13 +814,31 @@ namespace MazeMap
             float activityNorm,
             const PreparedParams& params,
             float fanDutyCycle) const noexcept;
-        PlantDerivatives evaluateEstimatorAppliedBankTorqueStep(
+        PlantDerivatives evaluateAppliedBankTorqueStepWithPolicyScales(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             const PreparedParams& params,
             float fanDutyCycle,
-            const ModelCycleContext* cycleContext) const noexcept;
+            float leftUtilizationScale,
+            float rightUtilizationScale,
+            float leftCapacityScale,
+            float rightCapacityScale) const noexcept;
+        StateVector integrateAppliedBankTorques(
+            const StateVector& state,
+            float leftAppliedBankTorqueNm,
+            float rightAppliedBankTorqueNm,
+            const PreparedParams& params,
+            float fanDutyCycle,
+            float dtS,
+            float leftUtilizationScale,
+            float rightUtilizationScale,
+            float leftCapacityScale,
+            float rightCapacityScale) const noexcept;
+        static StateVector advanceStateFromDerivatives(
+            const StateVector& currentState,
+            const PlantDerivatives& evaluatedStep,
+            float dtS) noexcept;
 
         struct FeedforwardRequest
         {
@@ -893,25 +858,23 @@ namespace MazeMap
             bool hasVelocityTargets = false;
             float targetForwardVelocityMps = 0.0f;
             float targetYawRateRadps = 0.0f;
-            bool alignedCycleContextAvailable = false;
-            const ModelCycleContext* cycleContext = nullptr;
+        };
+
+        struct FeedforwardEnvelopeModifiers
+        {
+            float leftUtilizationScale = 1.0f;
+            float rightUtilizationScale = 1.0f;
+            float leftCapacityScale = 1.0f;
+            float rightCapacityScale = 1.0f;
         };
 
         struct FeedforwardSolveContext
         {
-            EstimatorGeometry geometry{};
-            FrozenCycleSchedule schedule{};
-            GripUtilizationSnapshot utilization{};
-            TransientContactMemoryState memory{};
-            RegripRecoveryState regrip{};
-
             float batteryVoltageV = 8.4f;
             float fanDutyCycle = 0.80f;
             float reserveUsage = 1.0f;
             float slipSpeedFloorMps = 0.0f;
-
-            bool alignedCycleContext = false;
-            bool gripOnlyFallback = false;
+            FeedforwardEnvelopeModifiers envelope{};
         };
 
         struct FeedforwardForceRequest
@@ -935,7 +898,8 @@ namespace MazeMap
 
         FeedforwardSolveContext buildFeedforwardSolveContext(
             const FeedforwardRequest& request,
-            const PreparedParams& prepared) const noexcept;
+            const PreparedParams& prepared,
+            const FeedforwardEnvelopeModifiers& envelopeModifiers) const noexcept;
         float computeControllerPivotScrubYawMomentNm(
             const FeedforwardRequest& request,
             const StateVector& operatingState,
@@ -952,6 +916,17 @@ namespace MazeMap
             float reserveUsage) const noexcept;
         DriveCommandSolution solveFeedforwardCanonical(
             const FeedforwardRequest& request,
-            const PreparedParams& prepared) const noexcept;
+            const PreparedParams& prepared,
+            const FeedforwardEnvelopeModifiers& envelopeModifiers) const noexcept;
+        FeedforwardAuditResult evaluateFeedforwardOfflineInternal(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2,
+            const PreparedParams& prepared,
+            float fanDutyCycle,
+            float batteryVoltageV,
+            float reserveUsage,
+            float dtS,
+            const FeedforwardEnvelopeModifiers& envelopeModifiers) const noexcept;
     };
 }

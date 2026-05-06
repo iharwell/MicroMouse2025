@@ -4,6 +4,8 @@
 #include "LoopController.h"
 #include "ManeuverInstance.h"
 #include "MazeMapRuntimeCore.h"
+#include "DriveTelemetry.h"
+#include "SensorSnapshot.h"
 #include "VehicleState.h"
 
 #include <cstddef>

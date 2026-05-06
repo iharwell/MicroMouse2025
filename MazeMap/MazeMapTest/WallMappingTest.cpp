@@ -11,11 +11,33 @@
 #include "..\MazeMap\WallSensorCalibration.h"
 
 #include <array>
+#include <cmath>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
 namespace MazeMap
 {
+	static Eigen::Matrix2f RotationBodyFromYaw(const float yawOffsetRad)
+	{
+		const float s = std::sin(yawOffsetRad);
+		const float c = std::cos(yawOffsetRad);
+
+		Eigen::Matrix2f rotation = Eigen::Matrix2f::Identity();
+		rotation(0, 0) = c;
+		rotation(0, 1) = s;
+		rotation(1, 0) = -s;
+		rotation(1, 1) = c;
+		return rotation;
+	}
+
+	static SensorMount RotateMountYaw(const SensorMount& mount, const float yawOffsetRad)
+	{
+		return SensorMount(
+			mount.positionBodyM(),
+			mount.bodyFromSensor() * RotationBodyFromYaw(yawOffsetRad),
+			mount.clockwiseYawSign());
+	}
+
 	TEST_CLASS(WallMappingTest)
 	{
 	public:
@@ -154,7 +176,36 @@ namespace MazeMap
 			Assert::AreEqual(static_cast<int>(ObsClass::OpenLike), static_cast<int>(openObservation.cls));
 		}
 
-		TEST_METHOD(WallGeometryModelRespectsSensorExtrinsicsForFrontWallPrediction)
+		TEST_METHOD(WallObservationPipelineBuildsCanonicalWallObservations)
+		{
+			WallObs frontLeft{};
+			WallObs frontRight{};
+			BuildFrontWallObservations(
+				true,
+				true,
+				false,
+				true,
+				0.18f,
+				0.21f,
+				0.25f,
+				frontLeft,
+				frontRight);
+
+			Assert::IsTrue(frontLeft.valid);
+			Assert::IsTrue(frontRight.valid);
+			Assert::AreEqual(0.18f, frontLeft.rho, 1.0e-6f);
+			Assert::AreEqual(0.21f, frontRight.rho, 1.0e-6f);
+			Assert::AreEqual(0.90f, frontLeft.confidence, 1.0e-6f);
+			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(frontLeft.cls));
+
+			const WallObs sideObservation = BuildSideWallObservation(true, false, true, 0.14f, 0.25f);
+			Assert::IsTrue(sideObservation.valid);
+			Assert::AreEqual(0.14f, sideObservation.rho, 1.0e-6f);
+			Assert::AreEqual(0.80f, sideObservation.confidence, 1.0e-6f);
+			Assert::AreEqual(static_cast<int>(ObsClass::WallLike), static_cast<int>(sideObservation.cls));
+		}
+
+		TEST_METHOD(WallGeometryModelRespectsSensorMountForFrontWallPrediction)
 		{
 			Maze maze;
 			maze.SetWall(maze(0, 0), Direction::Up, WallState::Wall);
@@ -171,8 +222,7 @@ namespace MazeMap
 			Assert::IsTrue(baseline.hit);
 			Assert::AreEqual(static_cast<int>(GeometryHitType::WallFace), static_cast<int>(baseline.type));
 
-			SensorExtrinsics rotatedSensor = params.frontLeftSensor;
-			rotatedSensor.yawOffsetRad += 0.35f;
+			const SensorMount rotatedSensor = RotateMountYaw(params.frontLeftSensor, 0.35f);
 			GeometryPrediction rotated = geometry.predictRay(state, rotatedSensor, maze);
 			Assert::IsTrue(rotated.rangeM > baseline.rangeM);
 		}
@@ -189,10 +239,11 @@ namespace MazeMap
 			Maze maze;
 
 			WallGeometryModel geometry;
-			SensorExtrinsics sensor{};
-			sensor.positionBodyM = Eigen::Vector2f(0.0f, 0.0f);
-			sensor.directionBody = Eigen::Vector2f(0.0f, 1.0f);
-			sensor.yawOffsetRad = PI_F / 4.0f;
+			const SensorMount sensor = RotateMountYaw(
+				SensorMount::FromForwardDirectionBody(
+					Eigen::Vector2f(0.0f, 0.0f),
+					Eigen::Vector2f(0.0f, 1.0f)),
+				PI_F / 4.0f);
 
 			VehicleState::StateVector state = VehicleState::StateVector::Zero();
 			state(VehicleState::kPx) = 0.09f;
@@ -282,3 +333,5 @@ namespace MazeMap
 
 	};
 }
+
+

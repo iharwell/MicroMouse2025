@@ -3,10 +3,15 @@
 #include <cstdint>
 #include <stdint.h>
 
+// Authoritative per-cycle drive report emitted by DriveBase. This survives as a distinct
+// contract because drive control, encoder capture, and UKF-facing command context are sampled
+// together here and consumed outside the drive owner without exposing DriveBase internals.
 struct DriveTelemetry
 {
     float leftDriveCommand = 0.0f;
     float rightDriveCommand = 0.0f;
+    float commandedLinearSpeedMps = 0.0f;
+    float commandedAngularSpeedRadps = 0.0f;
     float leftFeedforwardCommand = 0.0f;
     float rightFeedforwardCommand = 0.0f;
     float leftFeedbackCommand = 0.0f;
@@ -88,7 +93,5 @@ struct DriveTelemetry
     std::uint8_t ukfRightBankInRecovery = 0U;
     std::uint8_t ukfDirectWheelUpdateBodyInvariant = 0U;
     std::uint8_t ukfReleaseInflationApplied = 0U;
-    std::uint8_t feedforwardUsedAlignedCycleContext = 0U;
-    std::uint8_t feedforwardUsedGripOnlyFallback = 0U;
     bool encoderObservationValid = false;
 };

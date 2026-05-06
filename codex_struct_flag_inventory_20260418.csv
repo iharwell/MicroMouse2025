@@ -69,7 +69,6 @@ MazeMap\MazeMap\MazeMapRuntimeCore.h,609,WallSensorTelemetry,6,0,0,True,True,Fal
 MazeMap\MazeMap\MazeMapRuntimeCore.h,619,ImuTelemetry,9,0,0,True,True,False,accepted
 MazeMap\MazeMap\MazeMapRuntimeCore.h,632,SensorSnapshot,59,0,0,False,True,False,accepted
 MazeMap\MazeMap\MazeMapRuntimeCore.h,686,DriveTelemetry,32,0,0,False,True,False,accepted
-MazeMap\MazeMap\MazeMapRuntimeCore.h,722,ControlCycleTiming,13,0,0,True,True,False,accepted
 MazeMap\MazeMap\MazeMapRuntimeCore.h,739,EncoderProgressWatchdog,3,2,0,True,False,False,accepted
 MazeMap\MazeMap\MazeMapRuntimeCore.h,817,RawWallSensorSample,8,0,0,True,True,False,accepted
 MazeMap\MazeMap\MazeMapRuntimeCore.h,828,WallSensorCalibrationInput,7,0,0,True,True,False,accepted

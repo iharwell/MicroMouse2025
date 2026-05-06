@@ -186,6 +186,7 @@ namespace MazeMap::App::Internal
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
         void ResetState() noexcept;
         bool BeginMainLog();
+        bool WriteBufferedMainRow();
         bool LogCurrentSample(
             const LogLabels& labels,
             const MazeMap::VehicleState& state,
@@ -219,6 +220,8 @@ namespace MazeMap::App::Internal
         EndReason _endReason{ EndReason::None };
         char _logFileName[kLogFileNameCapacity]{};
         bool _mainLogOpen{};
+        Runtime::ShowcasingDonutMainRow _bufferedMainRow{};
+        bool _bufferedMainRowValid{};
         std::uint8_t _selectorDrivePin{};
         std::uint8_t _selectorSensePin{};
         bool _selectorMonitorArmed{};

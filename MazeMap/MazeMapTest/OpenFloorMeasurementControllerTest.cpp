@@ -12,3 +12,4 @@ namespace MazeMap::App
     public:
     };
 }
+

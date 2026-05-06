@@ -144,20 +144,20 @@ namespace MazeMap
         float tolerance)
     {
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.leftMotorCommand,
-            actual.control.leftMotorCommand,
+            expected.control.leftMotorPwm,
+            actual.control.leftMotorPwm,
             tolerance);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.rightMotorCommand,
-            actual.control.rightMotorCommand,
+            expected.control.rightMotorPwm,
+            actual.control.rightMotorPwm,
             tolerance);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.fanDutyCycle,
-            actual.control.fanDutyCycle,
+            expected.fanDutyCycle,
+            actual.fanDutyCycle,
             tolerance);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.batteryVoltageV,
-            actual.control.batteryVoltageV,
+            expected.batteryVoltageV,
+            actual.batteryVoltageV,
             tolerance);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.leftSlipRatio, actual.leftSlipRatio, tolerance);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.rightSlipRatio, actual.rightSlipRatio, tolerance);
@@ -211,3 +211,5 @@ namespace MazeMap
     }
 
 }
+
+

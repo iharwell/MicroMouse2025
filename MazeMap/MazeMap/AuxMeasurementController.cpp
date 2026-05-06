@@ -36,7 +36,6 @@ namespace
         const std::uint32_t phaseId,
         const bool stationary,
         const bool fanEnabled,
-        const LoopController& loopController,
         const MazeMap::VehicleState& state,
         const DriveBase& drive)
     {
@@ -45,8 +44,6 @@ namespace
         row = {};
         row.sample = sample;
         row.phase_id = phaseId;
-        row.t_us = loopController.CurrentTickStartUs();
-        row.dt_us = loopController.CurrentTickDtUs();
         row.stationary = stationary ? 1U : 0U;
         row.fan_enabled = fanEnabled ? 1U : 0U;
         row.pose_x_m = state.GetPositionX();
@@ -201,6 +198,7 @@ private:
         _sampleCount = 0U;
         _logFileName[0] = '\0';
         _logRow = {};
+        _logRowBuffered = false;
         ResetTurningTractionState();
         _startupCalibration.Cancel();
     }
@@ -255,17 +253,29 @@ private:
 
     bool LogSample(const MazeMap::VehicleState& state)
     {
+        if (_logRowBuffered)
+        {
+            const LoopController::TimingDiagnostics& timing = _loopController.LastDiagnostics();
+            _logRow.t_us = timing.tickStartUs;
+            _logRow.dt_us = timing.dtUs;
+            if (!_runtime.LogUtilityDataRow(_logRow))
+            {
+                return false;
+            }
+            _logRowBuffered = false;
+        }
+
         PopulateAuxMeasurementLogRow(
             _logRow,
             static_cast<std::uint32_t>(_sampleCount),
             static_cast<std::uint32_t>(_phaseId),
             PhaseIsStationary(),
             _fanEnabled,
-            _loopController,
             state,
             _drive);
         ++_sampleCount;
-        return _runtime.LogUtilityDataRow(_logRow);
+        _logRowBuffered = true;
+        return true;
     }
 
     void SetFanEnabled(const bool enabled)
@@ -281,13 +291,41 @@ private:
 
     LoopController::ControlVector FinishMode(LoopController& loopController)
     {
-        (void)_runtime.AppendTextLogFormatted("Auxiliary measurement complete, log saved to %s", _logFileName);
-        _startupCalibration.Cancel();
-        _drive.Brake();
-        _drive.UseNominalWheelControlProfile();
-        SetFanEnabled(false);
-        _phase = Phase::Idle;
-        loopController.HaltExecutionEndProgram();
+        loopController.RequestEndSession(
+            +[](void* const context, LoopController& boundaryLoopController)
+            {
+                auto* const self = static_cast<AuxMeasurementController*>(context);
+                if (self == nullptr)
+                {
+                    GetSharedRobotRuntime().FailActiveMode(
+                        "Auxiliary measurement completion callback context was null");
+                    return;
+                }
+
+                if (self->_logRowBuffered)
+                {
+                    const LoopController::TimingDiagnostics& timing = self->_loopController.LastDiagnostics();
+                    self->_logRow.t_us = timing.tickStartUs;
+                    self->_logRow.dt_us = timing.dtUs;
+                    if (!self->_runtime.LogUtilityDataRow(self->_logRow))
+                    {
+                        self->_runtime.FailActiveMode(
+                            "Failed to write final auxiliary measurement sample");
+                    }
+                    self->_logRowBuffered = false;
+                }
+
+                (void)self->_runtime.AppendTextLogFormatted(
+                    "Auxiliary measurement complete, log saved to %s",
+                    self->_logFileName);
+                self->_startupCalibration.Cancel();
+                self->_drive.Brake();
+                self->_drive.UseNominalWheelControlProfile();
+                self->SetFanEnabled(false);
+                self->_phase = Phase::Idle;
+                boundaryLoopController.HaltExecutionEndProgram();
+            },
+            this);
         return LoopController::ControlVector::Brake;
     }
 
@@ -325,7 +363,7 @@ private:
 
         _turningTractionCommandedSpeedMps +=
             AuxMeasurementConfig::kTurningTractionSweepAccelMps2 *
-            (std::max)(0.0f, _loopController.CurrentTickDtSeconds());
+            (std::max)(0.0f, static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f);
         if constexpr (AuxMeasurementConfig::kTurningTractionSweepMaxSpeedMps > 0.0f)
         {
             _turningTractionCommandedSpeedMps =
@@ -493,6 +531,7 @@ private:
     unsigned long _phaseId{};
     unsigned long _sampleCount{};
     AuxMeasurementLogRow _logRow{};
+    bool _logRowBuffered{};
 
     float _turningTractionDirectionSign{};
     float _turningTractionCommandedSpeedMps{};

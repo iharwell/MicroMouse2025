@@ -48,12 +48,6 @@ struct SensorSnapshot
     OpticalObservationTiming frontTiming{};
     OpticalObservationTiming leftTiming{};
     OpticalObservationTiming rightTiming{};
-    std::uint32_t wallSensorAdcCfgBeforeStart = 0U;
-    std::uint32_t wallSensorAdcGcBeforeStart = 0U;
-    std::uint32_t wallSensorAdcCfgAfterStart = 0U;
-    std::uint32_t wallSensorAdcGcAfterStart = 0U;
-    std::uint32_t wallSensorAdcTargetCfg = 0U;
-    std::uint32_t wallSensorAdcIpgClockHz = 0U;
     ImuTelemetry imuFrontRight{};
     ImuTelemetry imuBackLeft{};
     ImuObservationTiming imuTiming{};

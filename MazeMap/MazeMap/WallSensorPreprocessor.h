@@ -1,7 +1,7 @@
 #pragma once
 // Declares the wall-sensor preprocessing stage that converts raw LED on/off samples into UKF observations.
 
-#include "VehicleState.h"
+#include "WallObservationPipeline.h"
 #include "WallSensor.h"
 #include "WallSensorCalibration.h"
 

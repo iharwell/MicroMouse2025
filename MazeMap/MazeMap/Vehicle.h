@@ -3,7 +3,7 @@
 #include "Defines.h"
 #include "Direction.h"
 #include "CircularBuffer.h"
-#include "VehicleState.h"
+#include "SensorMount.h"
 #include "WallSensor.h"
 #include "LSM6DSV16X_IMU.h"
 #include <cmath>
@@ -83,13 +83,11 @@ namespace MazeMap
             return 16.5f;
         }
 
-        static ImuExtrinsics GetBackLeftImuExtrinsics() noexcept;
-        static SensorExtrinsics GetFrontLeftSensorExtrinsics() noexcept;
-        static SensorExtrinsics GetFrontRightSensorExtrinsics() noexcept;
-        static SensorExtrinsics GetSideLeftSensorExtrinsics() noexcept;
-        static SensorExtrinsics GetSideRightSensorExtrinsics() noexcept;
-
-        void ProgressVehicleState(const VehicleState& previousState, VehicleState& projectedState, float timeDelta);
+        static SensorMount GetBackLeftImuMount() noexcept;
+        static SensorMount GetFrontLeftSensorMount() noexcept;
+        static SensorMount GetFrontRightSensorMount() noexcept;
+        static SensorMount GetSideLeftSensorMount() noexcept;
+        static SensorMount GetSideRightSensorMount() noexcept;
 
         float GetStraightLineCost(float distance, float initialVelocity, float finalVelocity);
         float GetStraightLineCost(float distance, float initialVelocity, float finalVelocity) const;

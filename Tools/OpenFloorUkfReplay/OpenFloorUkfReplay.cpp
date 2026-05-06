@@ -198,7 +198,6 @@ namespace
         bool tractionLimited = false;
         bool commonForceClamped = false;
         bool differentialForceClamped = false;
-        bool usedGripOnlyFallback = false;
     };
 
     enum class FeedforwardPathId : std::size_t
@@ -215,20 +214,6 @@ namespace
         ScalarOpenVelocity,
         ScalarClosedVelocity,
         ScalarTractionVelocity,
-        ContextStateOpenAccel,
-        ContextStateClosedAccel,
-        ContextStateOpenVelocity,
-        ContextStateClosedVelocity,
-        ContextScalarOpenAccel,
-        ContextScalarClosedAccel,
-        ContextScalarOpenVelocity,
-        ContextScalarClosedVelocity,
-        DriveBaseDeltaForwardRaw,
-        DriveBaseDeltaCombinedRaw,
-        DriveBaseDeltaYawRaw,
-        DriveBasePointForwardRaw,
-        DriveBasePointCombinedRaw,
-        DriveBasePointYawRaw,
         Count
     };
 
@@ -238,8 +223,6 @@ namespace
         const char* pathId = "";
         const char* label = "";
         const char* category = "";
-        bool sensorOnlyEvaluable = false;
-        const char* unavailableReason = "";
     };
 
     struct ErrorStats
@@ -391,8 +374,6 @@ namespace
         std::string pathId;
         std::string label;
         std::string category;
-        bool sensorOnlyEvaluable = false;
-        std::string unavailableReason;
         std::uint64_t comparableTransitions = 0U;
         std::uint64_t validSolutions = 0U;
         FeedforwardMetrics metrics{};
@@ -537,32 +518,18 @@ namespace
     {
         static const std::array<FeedforwardPathDefinition, kFeedforwardPathCount> definitions =
         {{
-            { FeedforwardPathId::StateOpenAccel, "state_open_accel", "PlantModel state-vector acceleration solve", "plant_model_state", true, "" },
-            { FeedforwardPathId::StateClosedAccel, "state_closed_accel", "PlantModel state-vector closed-loop acceleration solve", "plant_model_state", true, "" },
-            { FeedforwardPathId::StateTractionAccel, "state_traction_accel", "PlantModel state-vector traction-limited acceleration wrapper", "plant_model_state", true, "" },
-            { FeedforwardPathId::StateOpenVelocity, "state_open_velocity", "PlantModel state-vector velocity-target solve", "plant_model_state", true, "" },
-            { FeedforwardPathId::StateClosedVelocity, "state_closed_velocity", "PlantModel state-vector closed-loop velocity-target solve", "plant_model_state", true, "" },
-            { FeedforwardPathId::StateTractionVelocity, "state_traction_velocity", "PlantModel state-vector traction-limited velocity-target wrapper", "plant_model_state", true, "" },
-            { FeedforwardPathId::ScalarOpenAccel, "scalar_open_accel", "PlantModel scalar operating-point acceleration solve", "plant_model_scalar", true, "" },
-            { FeedforwardPathId::ScalarClosedAccel, "scalar_closed_accel", "PlantModel scalar closed-loop acceleration solve", "plant_model_scalar", true, "" },
-            { FeedforwardPathId::ScalarTractionAccel, "scalar_traction_accel", "PlantModel scalar traction-limited acceleration wrapper", "plant_model_scalar", true, "" },
-            { FeedforwardPathId::ScalarOpenVelocity, "scalar_open_velocity", "PlantModel scalar operating-point velocity-target solve", "plant_model_scalar", true, "" },
-            { FeedforwardPathId::ScalarClosedVelocity, "scalar_closed_velocity", "PlantModel scalar closed-loop velocity-target solve", "plant_model_scalar", true, "" },
-            { FeedforwardPathId::ScalarTractionVelocity, "scalar_traction_velocity", "PlantModel scalar traction-limited velocity-target wrapper", "plant_model_scalar", true, "" },
-            { FeedforwardPathId::ContextStateOpenAccel, "context_state_open_accel", "PlantModel state-vector acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::ContextStateClosedAccel, "context_state_closed_accel", "PlantModel state-vector closed-loop acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::ContextStateOpenVelocity, "context_state_open_velocity", "PlantModel state-vector velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::ContextStateClosedVelocity, "context_state_closed_velocity", "PlantModel state-vector closed-loop velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::ContextScalarOpenAccel, "context_scalar_open_accel", "PlantModel scalar acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::ContextScalarClosedAccel, "context_scalar_closed_accel", "PlantModel scalar closed-loop acceleration solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::ContextScalarOpenVelocity, "context_scalar_open_velocity", "PlantModel scalar velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::ContextScalarClosedVelocity, "context_scalar_closed_velocity", "PlantModel scalar closed-loop velocity-target solve with cycle context", "plant_model_context", false, "Requires UKF-derived ModelCycleContext; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::DriveBaseDeltaForwardRaw, "drivebase_delta_forward_raw", "DriveBase::DeltaCommand(presentLinear, accel, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::DriveBaseDeltaCombinedRaw, "drivebase_delta_combined_raw", "DriveBase::DeltaCommand(presentLinear, accel, presentYaw, yawAccel, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::DriveBaseDeltaYawRaw, "drivebase_delta_yaw_raw", "DriveBase::DeltaYawRateCommand(presentYaw, yawAccel, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::DriveBasePointForwardRaw, "drivebase_point_forward_raw", "DriveBase::PointCommand(linear, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::DriveBasePointCombinedRaw, "drivebase_point_combined_raw", "DriveBase::PointCommand(linear, yaw, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." },
-            { FeedforwardPathId::DriveBasePointYawRaw, "drivebase_point_yaw_raw", "DriveBase::PointYawRateCommand(yaw, RawCommand)", "drivebase_raw", false, "Requires DriveBase UKF-owned state/context; excluded by sensor-only validation policy." }
+            { FeedforwardPathId::StateOpenAccel, "state_open_accel", "PlantModel state-vector acceleration solve", "plant_model_state" },
+            { FeedforwardPathId::StateClosedAccel, "state_closed_accel", "PlantModel state-vector closed-loop acceleration solve", "plant_model_state" },
+            { FeedforwardPathId::StateTractionAccel, "state_traction_accel", "PlantModel state-vector traction-limited acceleration wrapper", "plant_model_state" },
+            { FeedforwardPathId::StateOpenVelocity, "state_open_velocity", "PlantModel state-vector velocity-target solve", "plant_model_state" },
+            { FeedforwardPathId::StateClosedVelocity, "state_closed_velocity", "PlantModel state-vector closed-loop velocity-target solve", "plant_model_state" },
+            { FeedforwardPathId::StateTractionVelocity, "state_traction_velocity", "PlantModel state-vector traction-limited velocity-target wrapper", "plant_model_state" },
+            { FeedforwardPathId::ScalarOpenAccel, "scalar_open_accel", "PlantModel scalar operating-point acceleration solve", "plant_model_scalar" },
+            { FeedforwardPathId::ScalarClosedAccel, "scalar_closed_accel", "PlantModel scalar closed-loop acceleration solve", "plant_model_scalar" },
+            { FeedforwardPathId::ScalarTractionAccel, "scalar_traction_accel", "PlantModel scalar traction-limited acceleration wrapper", "plant_model_scalar" },
+            { FeedforwardPathId::ScalarOpenVelocity, "scalar_open_velocity", "PlantModel scalar operating-point velocity-target solve", "plant_model_scalar" },
+            { FeedforwardPathId::ScalarClosedVelocity, "scalar_closed_velocity", "PlantModel scalar closed-loop velocity-target solve", "plant_model_scalar" },
+            { FeedforwardPathId::ScalarTractionVelocity, "scalar_traction_velocity", "PlantModel scalar traction-limited velocity-target wrapper", "plant_model_scalar" }
         }};
         return definitions;
     }
@@ -578,8 +545,6 @@ namespace
             summary.pathId = definition.pathId;
             summary.label = definition.label;
             summary.category = definition.category;
-            summary.sensorOnlyEvaluable = definition.sensorOnlyEvaluable;
-            summary.unavailableReason = definition.unavailableReason;
             summaries.push_back(std::move(summary));
         }
         return summaries;
@@ -1136,7 +1101,7 @@ namespace
                     << "  --run-id <id>    Optional single-run filter.\n"
                     << "  --sample-csv <path>  Optional per-sample CSV export for the selected run.\n"
                     << "  --feedforward-sample-csv <path>  Optional per-sample feedforward-path audit CSV export for the selected run.\n"
-                    << "  --metrics <list> Optional sample metric list or aliases: context, accel_compare, speed_compare.\n";
+                    << "  --metrics <list> Optional sample metric list or aliases: default, accel_compare, speed_compare.\n";
                 std::exit(0);
             }
             else
@@ -1320,7 +1285,7 @@ namespace
             return true;
         }
 
-        if (normalized == "context")
+        if (normalized == "default")
         {
             for (const std::string& metric : DefaultSampleMetricSelection())
             {
@@ -2202,11 +2167,6 @@ namespace
         FeedforwardSampleExportRow& exportRow) noexcept
     {
         const FeedforwardPathDefinition& definition = GetFeedforwardPathDefinition(pathId);
-        if (!definition.sensorOnlyEvaluable)
-        {
-            return false;
-        }
-
         FeedforwardTransitionInputs inputs{};
         if (!BuildFeedforwardTransitionInputs(
             plantModel,
@@ -2308,7 +2268,6 @@ namespace
         exportRow.tractionLimited = solution.tractionLimited;
         exportRow.commonForceClamped = solution.commonForceClamped;
         exportRow.differentialForceClamped = solution.differentialForceClamped;
-        exportRow.usedGripOnlyFallback = solution.usedGripOnlyFallback;
         if (envelope.valid)
         {
             exportRow.envelopeLeftMin = envelope.leftMin;
@@ -2518,11 +2477,7 @@ namespace
         }
         if (exportFeedforwardRows)
         {
-            const std::size_t evaluablePathCount = static_cast<std::size_t>(std::count_if(
-                report.feedforwardPaths.begin(),
-                report.feedforwardPaths.end(),
-                [](const FeedforwardPathSummary& summary) { return summary.sensorOnlyEvaluable; }));
-            report.feedforwardSampleExportRows.reserve((keptRows.size() - 1U) * evaluablePathCount);
+            report.feedforwardSampleExportRows.reserve((keptRows.size() - 1U) * report.feedforwardPaths.size());
         }
 
         for (std::size_t index = 0; (index + 1U) < keptRows.size(); ++index)
@@ -2544,11 +2499,6 @@ namespace
             ++report.feedforwardTransitions;
             for (FeedforwardPathSummary& pathSummary : report.feedforwardPaths)
             {
-                if (!pathSummary.sensorOnlyEvaluable)
-                {
-                    continue;
-                }
-
                 ++pathSummary.comparableTransitions;
                 FeedforwardSampleExportRow sample{};
                 if (!BuildFeedforwardSampleExportRow(
@@ -2706,14 +2656,6 @@ namespace
             total += summary.validSolutions;
         }
         return total;
-    }
-
-    std::size_t FeedforwardEvaluablePathCount(const std::vector<FeedforwardPathSummary>& summaries) noexcept
-    {
-        return static_cast<std::size_t>(std::count_if(
-            summaries.begin(),
-            summaries.end(),
-            [](const FeedforwardPathSummary& summary) { return summary.sensorOnlyEvaluable; }));
     }
 
     void WritePhaseAssociationRow(
@@ -2966,8 +2908,7 @@ namespace
             << "delta_feedforward_command_error,envelope_left_min,envelope_left_max,envelope_right_min,"
             << "envelope_right_max,logged_drive_within_envelope,logged_feedforward_within_envelope,"
             << "predicted_next_forward_mps,predicted_next_yaw_rate_radps,predicted_forward_target_error_mps,"
-            << "predicted_yaw_target_error_radps,traction_limited,common_force_clamped,differential_force_clamped,"
-            << "used_grip_only_fallback\n";
+            << "predicted_yaw_target_error_radps,traction_limited,common_force_clamped,differential_force_clamped\n";
 
         for (const FeedforwardSampleExportRow& row : runIt->feedforwardSampleExportRows)
         {
@@ -3028,8 +2969,7 @@ namespace
                 << FormatDouble(row.predictedYawTargetErrorRadps) << ','
                 << (row.tractionLimited ? "true" : "false") << ','
                 << (row.commonForceClamped ? "true" : "false") << ','
-                << (row.differentialForceClamped ? "true" : "false") << ','
-                << (row.usedGripOnlyFallback ? "true" : "false") << '\n';
+                << (row.differentialForceClamped ? "true" : "false") << '\n';
         }
 
         std::cout
@@ -3039,7 +2979,7 @@ namespace
         std::cout << "Feedforward path summary for run " << runIt->runId << ":\n";
         for (const FeedforwardPathSummary& summary : runIt->feedforwardPaths)
         {
-            if (!summary.sensorOnlyEvaluable || (summary.validSolutions == 0U))
+            if (summary.validSolutions == 0U)
             {
                 continue;
             }
@@ -3136,7 +3076,6 @@ namespace
                 return bucket.consistency.headingDeg;
             });
         const std::uint64_t totalFeedforwardEvaluations = TotalFeedforwardValidSolutions(corpus.feedforwardPaths);
-        const std::size_t evaluableFeedforwardPaths = FeedforwardEvaluablePathCount(corpus.feedforwardPaths);
 
         markdown
             << "# Open-Floor UKF Replay Report\n\n"
@@ -3158,9 +3097,7 @@ namespace
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"
             << "- Post-update replay deltas compare the replayed UKF state against the logged UKF state from the capture; they are consistency checks, not external ground truth.\n"
             << "- Feedforward validation uses the present row's wheel-side velocities plus debiased gyro as the current state, the following row's wheel-side velocities plus debiased gyro as the target state, the following row's `dt_us` as the response horizon, and never uses logged UKF state for that validation.\n"
-            << "- Feedforward path coverage: " << evaluableFeedforwardPaths << " sensor-validatable public paths evaluated, "
-            << (corpus.feedforwardPaths.size() - evaluableFeedforwardPaths)
-            << " additional public paths reported as unavailable because they require UKF-owned state or cycle context.\n"
+            << "- Feedforward path coverage: " << corpus.feedforwardPaths.size() << " canonical PlantModel public paths evaluated.\n"
             << "- Feedforward audit sensor bounds: each wheel-side velocity is treated as a `+/- 0.06 m/s` sensor and debiased yaw rate as a `+/- 0.03 rad/s` sensor when computing per-path command envelopes.\n"
             << "- Feedforward evaluations completed: " << totalFeedforwardEvaluations << "\n"
             << "- Phase analysis uses canonical `section_id` + `phase_id` buckets from the open-floor schema.\n"
@@ -3195,14 +3132,13 @@ namespace
         if (!corpus.feedforwardPaths.empty())
         {
             markdown << "\n## Feedforward Path Audit\n\n";
-            markdown << "| path_id | category | status | samples | drive_avg_rmse | drive_delta_rmse | ff_avg_rmse | ff_delta_rmse | drive_envelope_hit_pct | note |\n";
-            markdown << "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
+            markdown << "| path_id | category | samples | drive_avg_rmse | drive_delta_rmse | ff_avg_rmse | ff_delta_rmse | drive_envelope_hit_pct | label |\n";
+            markdown << "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n";
             for (const FeedforwardPathSummary& summary : corpus.feedforwardPaths)
             {
                 markdown
                     << "| " << summary.pathId
                     << " | " << summary.category
-                    << " | " << (summary.sensorOnlyEvaluable ? "evaluated" : "unavailable")
                     << " | " << summary.validSolutions
                     << " | "
                     << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.averageDriveCommand.rmse()) : "")
@@ -3215,7 +3151,7 @@ namespace
                     << " | "
                     << (summary.validSolutions > 0U ? FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 2) : "")
                     << " | "
-                    << (summary.sensorOnlyEvaluable ? summary.label : summary.unavailableReason)
+                    << summary.label
                     << " |\n";
             }
         }
@@ -3335,15 +3271,13 @@ namespace
         }
 
         feedforwardPathCsv
-            << "path_id,label,category,sensor_only_evaluable,unavailable_reason,comparable_transitions,valid_solutions,drive_average_rmse,drive_delta_rmse,feedforward_average_rmse,feedforward_delta_rmse,drive_envelope_hit_pct,feedforward_envelope_hit_pct,forward_target_rmse_mps,yaw_target_rmse_radps\n";
+            << "path_id,label,category,comparable_transitions,valid_solutions,drive_average_rmse,drive_delta_rmse,feedforward_average_rmse,feedforward_delta_rmse,drive_envelope_hit_pct,feedforward_envelope_hit_pct,forward_target_rmse_mps,yaw_target_rmse_radps\n";
         for (const FeedforwardPathSummary& summary : corpus.feedforwardPaths)
         {
             feedforwardPathCsv
                 << summary.pathId << ','
                 << '"' << summary.label << '"' << ','
                 << summary.category << ','
-                << (summary.sensorOnlyEvaluable ? "true" : "false") << ','
-                << '"' << summary.unavailableReason << '"' << ','
                 << summary.comparableTransitions << ','
                 << summary.validSolutions << ','
                 << FormatDouble(summary.metrics.averageDriveCommand.rmse()) << ','
@@ -3433,9 +3367,6 @@ namespace
                 << "    \"" << summary.pathId << "\": {\n"
                 << "      \"label\": \"" << summary.label << "\",\n"
                 << "      \"category\": \"" << summary.category << "\",\n"
-                << "      \"sensor_only_evaluable\": " << (summary.sensorOnlyEvaluable ? "true" : "false") << ",\n"
-                << "      \"unavailable_reason\": "
-                << (summary.unavailableReason.empty() ? "null" : (std::string("\"") + summary.unavailableReason + "\"")) << ",\n"
                 << "      \"comparable_transitions\": " << summary.comparableTransitions << ",\n"
                 << "      \"valid_solutions\": " << summary.validSolutions << ",\n"
                 << "      \"drive_average_rmse\": " << FormatDouble(summary.metrics.averageDriveCommand.rmse(), 12) << ",\n"
