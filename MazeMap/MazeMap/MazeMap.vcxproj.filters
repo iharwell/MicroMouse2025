@@ -99,6 +99,9 @@
     <ClInclude Include="CircularBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CommandVector.h">
+      <Filter>Header Files\App\Internal</Filter>
+    </ClInclude>
     <ClInclude Include="CommandPD.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -460,6 +463,9 @@
     </ClCompile>
     <ClCompile Include="CellCoordinates.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CommandVector.cpp">
+      <Filter>Source Files\App\Internal</Filter>
     </ClCompile>
     <ClCompile Include="CompactPath.cpp">
       <Filter>Source Files</Filter>

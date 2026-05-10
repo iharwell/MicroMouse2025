@@ -92,11 +92,11 @@ namespace MazeMap
             (params.gearRatio * static_cast<float>(params.encoderCountsPerMotorRev));
     }
 
-    inline App::Internal::LoopController::ControlVector MakeControlVector(
+    inline App::Internal::CommandVector MakeControlVector(
         float leftMotorPwm = 0.0f,
         float rightMotorPwm = 0.0f) noexcept
     {
-        return App::Internal::LoopController::ControlVector::RawMotorPwm(leftMotorPwm, rightMotorPwm);
+        return App::Internal::CommandVector(leftMotorPwm, rightMotorPwm);
     }
 
     inline float DefaultFanDutyCycle() noexcept

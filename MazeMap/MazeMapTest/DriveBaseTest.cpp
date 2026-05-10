@@ -20,7 +20,7 @@ namespace MazeMap
 {
     namespace
     {
-        using ControlVector = MazeMap::App::Internal::LoopController::ControlVector;
+        using CommandVector = MazeMap::App::Internal::CommandVector;
 
         constexpr std::uint8_t kDriveBaseRightEncoderChannel = 1U;
         constexpr std::uint8_t kDriveBaseLeftEncoderChannel = 2U;
@@ -100,7 +100,7 @@ namespace MazeMap
         {
             const PlantParams& params = PlantParams::Default();
             const DriveTelemetry telemetry = drive.GetTelemetry();
-            const ControlVector control = ControlVector::RawMotorPwm(
+            const CommandVector control = CommandVector(
                 telemetry.leftDriveCommand,
                 telemetry.rightDriveCommand);
 
@@ -145,28 +145,28 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) <= maxLateralVelocityMps);
         }
 
-        bool IsFiniteControlVector(const ControlVector& command) noexcept
+        bool IsFiniteControlVector(const CommandVector& command) noexcept
         {
-            return std::isfinite(command.leftMotorPwm) && std::isfinite(command.rightMotorPwm);
+            return std::isfinite(command.LeftMotorPwm()) && std::isfinite(command.RightMotorPwm());
         }
 
         float ControlVectorDifferenceMagnitude(
-            const ControlVector& lhs,
-            const ControlVector& rhs) noexcept
+            const CommandVector& lhs,
+            const CommandVector& rhs) noexcept
         {
             return
-                std::fabs(lhs.leftMotorPwm - rhs.leftMotorPwm) +
-                std::fabs(lhs.rightMotorPwm - rhs.rightMotorPwm);
+                std::fabs(lhs.LeftMotorPwm() - rhs.LeftMotorPwm()) +
+                std::fabs(lhs.RightMotorPwm() - rhs.RightMotorPwm());
         }
 
-        float ControlVectorAverage(const ControlVector& command) noexcept
+        float ControlVectorAverage(const CommandVector& command) noexcept
         {
-            return 0.5f * (command.leftMotorPwm + command.rightMotorPwm);
+            return 0.5f * (command.LeftMotorPwm() + command.RightMotorPwm());
         }
 
-        float ControlVectorDelta(const ControlVector& command) noexcept
+        float ControlVectorDelta(const CommandVector& command) noexcept
         {
-            return 0.5f * (command.leftMotorPwm - command.rightMotorPwm);
+            return 0.5f * (command.LeftMotorPwm() - command.RightMotorPwm());
         }
 
         void UpdateDriveBaseSignals(
@@ -178,19 +178,19 @@ namespace MazeMap
             float dtSeconds = 0.001f);
 
         void AssertDriveCommandsEqual(
-            const ControlVector& expected,
-            const ControlVector& actual,
+            const CommandVector& expected,
+            const CommandVector& actual,
             float tolerance = 1.0e-3f)
         {
             Assert::IsTrue(IsFiniteControlVector(expected));
             Assert::IsTrue(IsFiniteControlVector(actual));
-            Assert::AreEqual(expected.leftMotorPwm, actual.leftMotorPwm, tolerance);
-            Assert::AreEqual(expected.rightMotorPwm, actual.rightMotorPwm, tolerance);
+            Assert::AreEqual(expected.LeftMotorPwm(), actual.LeftMotorPwm(), tolerance);
+            Assert::AreEqual(expected.RightMotorPwm(), actual.RightMotorPwm(), tolerance);
         }
 
         void AssertDriveCommandsDiffer(
-            const ControlVector& lhs,
-            const ControlVector& rhs,
+            const CommandVector& lhs,
+            const CommandVector& rhs,
             float minimumDifference = 1.0e-4f)
         {
             Assert::IsTrue(IsFiniteControlVector(lhs));
@@ -199,22 +199,22 @@ namespace MazeMap
         }
 
         void AssertDriveCommandMatchesSolution(
-            const ControlVector& command,
+            const CommandVector& command,
             const DriveCommandSolution& solution,
             float tolerance = 1.0e-6f)
         {
             Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::AreEqual(solution.control.leftMotorPwm, command.leftMotorPwm, tolerance);
-            Assert::AreEqual(solution.control.rightMotorPwm, command.rightMotorPwm, tolerance);
+            Assert::AreEqual(solution.control.LeftMotorPwm(), command.LeftMotorPwm(), tolerance);
+            Assert::AreEqual(solution.control.RightMotorPwm(), command.RightMotorPwm(), tolerance);
         }
 
         void AssertPositiveInPlaceTurnCommandMeetsMinimumDrive(
-            const ControlVector& command,
+            const CommandVector& command,
             float minimumDriveCommand = kDriveBaseInPlaceTurnMinimumDriveCommand)
         {
             Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::IsTrue(command.leftMotorPwm >= minimumDriveCommand);
-            Assert::IsTrue(command.rightMotorPwm <= -minimumDriveCommand);
+            Assert::IsTrue(command.LeftMotorPwm() >= minimumDriveCommand);
+            Assert::IsTrue(command.RightMotorPwm() <= -minimumDriveCommand);
         }
 
         void PrimeDriveBaseWithEncoderDelta(
@@ -469,7 +469,7 @@ namespace MazeMap
 
         struct OscillationGeneratedCommand final
         {
-            ControlVector command{};
+            CommandVector command{};
             float linearCommandTargetMps = 0.0f;
             float angularCommandTargetRadps = 0.0f;
             float targetSignal = 0.0f;
@@ -1035,7 +1035,7 @@ namespace MazeMap
                     true);
 
                 const DriveTelemetry appliedTelemetry = drive.GetTelemetry();
-                const ControlVector control = ControlVector::RawMotorPwm(
+                const CommandVector control = CommandVector(
                     appliedTelemetry.leftDriveCommand,
                     appliedTelemetry.rightDriveCommand);
 
@@ -1360,14 +1360,14 @@ namespace MazeMap
 
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 6, 42);
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.DeltaCommand(
                     0.20f,
                     8.5f);
 
             Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::IsTrue(command.leftMotorPwm > 0.0f);
-            Assert::AreEqual(command.leftMotorPwm, command.rightMotorPwm, 1.0e-6f);
+            Assert::IsTrue(command.LeftMotorPwm() > 0.0f);
+            Assert::AreEqual(command.LeftMotorPwm(), command.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(DriveBaseDeltaCommandHeadingHoldStaysSymmetricWhenAlreadyAligned)
@@ -1379,14 +1379,14 @@ namespace MazeMap
 
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 6, 42);
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.DeltaCommand(
                     0.20f,
                     8.5f,
                     MazeMap::CommandPD::StateHeadingPD);
 
             Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::AreEqual(command.leftMotorPwm, command.rightMotorPwm, 1.0e-3f);
+            Assert::AreEqual(command.LeftMotorPwm(), command.RightMotorPwm(), 1.0e-3f);
         }
 
         TEST_METHOD(DriveBaseDeltaCommandRawMatchesPlantFeedforwardAtSteadyForwardTarget)
@@ -1398,7 +1398,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.DeltaCommand(
                     0.20f,
                     0.0f,
@@ -1426,7 +1426,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.DeltaCommand(
                     0.20f,
                     0.0f,
@@ -1456,7 +1456,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.DeltaYawRateCommand(
                     0.40f,
                     0.0f,
@@ -1484,7 +1484,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointCommand(
                     0.20f,
                     MazeMap::CommandPD::RawCommand);
@@ -1510,7 +1510,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointCommand(
                     0.20f,
                     0.40f,
@@ -1537,7 +1537,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             const PlantParams params = PlantParams::Default();
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointYawRateCommand(
                     0.40f,
                     MazeMap::CommandPD::RawCommand);
@@ -1563,7 +1563,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(drive, driveHarness.estimator, BuildDriveBaseSensorSnapshot(0.0f));
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointYawRateCommand(
                     3.0f,
                     MazeMap::CommandPD::StateYawPD);
@@ -1580,7 +1580,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(drive, driveHarness.estimator, BuildDriveBaseSensorSnapshot(0.0f));
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointYawRateCommand(
                     3.0f,
                     MazeMap::CommandPD::IMUYaw);
@@ -1597,7 +1597,7 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             UpdateDriveBaseSignals(drive, driveHarness.estimator, BuildDriveBaseSensorSnapshot(0.0f));
 
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointCommandWithHeadingTarget(
                     0.0f,
                     0.0f,
@@ -1624,7 +1624,7 @@ namespace MazeMap
                     GetMissionFanDutyCycle(),
                     drive.CurrentBatteryVoltageV(),
                     PlantModel::kDefaultVelocityTargetResponseTimeS);
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointCommand(
                     0.20f,
                     MazeMap::CommandPD::RawCommand);
@@ -1647,13 +1647,13 @@ namespace MazeMap
             UpdateDriveEstimator(drive, driveHarness.estimator, 0.001f, BuildDriveBaseSensorSnapshot(0.15f));
 
             const ManeuverPoint point(0.0f, 0.0f, 0.25f, 0.30f, 0.20f);
-            const ControlVector scalarCommand =
+            const CommandVector scalarCommand =
                 drive.PointCommand(
                     point.Velocity,
                     point.Omega,
                     MazeMap::CommandPD::StateWheelOmegaPD |
                     MazeMap::CommandPD::IMUYaw);
-            const ControlVector pointCommand =
+            const CommandVector pointCommand =
                 drive.PointCommand(
                     point,
                     MazeMap::CommandPD::StateWheelOmegaPD |
@@ -1661,8 +1661,8 @@ namespace MazeMap
 
             Assert::IsTrue(IsFiniteControlVector(scalarCommand));
             Assert::IsTrue(IsFiniteControlVector(pointCommand));
-            Assert::AreEqual(scalarCommand.leftMotorPwm, pointCommand.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(scalarCommand.rightMotorPwm, pointCommand.rightMotorPwm, 1.0e-6f);
+            Assert::AreEqual(scalarCommand.LeftMotorPwm(), pointCommand.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(scalarCommand.RightMotorPwm(), pointCommand.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(DriveBasePointCommandManeuverPointRejectsNonFiniteTargets)
@@ -1680,14 +1680,14 @@ namespace MazeMap
                 0.0f,
                 std::numeric_limits<float>::quiet_NaN(),
                 0.20f);
-            const ControlVector command =
+            const CommandVector command =
                 drive.PointCommand(
                     invalidPoint,
                     MazeMap::CommandPD::StateWheelOmegaPD |
                     MazeMap::CommandPD::IMUYaw);
 
-            Assert::AreEqual(0.0f, command.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(0.0f, command.rightMotorPwm, 1.0e-6f);
+            Assert::AreEqual(0.0f, command.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(0.0f, command.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(DriveBasePointCommandCoupledStateYawPdChangesCommandWhenEstimatorYawRateDiffers)
@@ -1699,12 +1699,12 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 24, -24);
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector stateYawCommand =
+            const CommandVector stateYawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
@@ -1732,13 +1732,13 @@ namespace MazeMap
                     0.0f,
                     false));
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
             drive.SetProportionalDerivativeCluster(zeroYawCluster);
-            const ControlVector zeroGainYawCommand =
+            const CommandVector zeroGainYawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
@@ -1764,12 +1764,12 @@ namespace MazeMap
                     0.0f,
                     false));
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector imuYawCommand =
+            const CommandVector imuYawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
@@ -1795,12 +1795,12 @@ namespace MazeMap
                     0.0f,
                     false));
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector imuYawCommand =
+            const CommandVector imuYawCommand =
                 drive.PointCommand(
                     0.20f,
                     0.0f,
@@ -1819,9 +1819,9 @@ namespace MazeMap
             PlantModel::StateVector truthState = PlantModel::StateVector::Zero();
             float leftEncoderRemainderCounts = 0.0f;
             float rightEncoderRemainderCounts = 0.0f;
-            ControlVector appliedCommand{};
-            appliedCommand.leftMotorPwm = 0.80f;
-            appliedCommand.rightMotorPwm = 0.80f;
+            CommandVector appliedCommand{};
+            appliedCommand.SetLeftMotorPwm(0.80f);
+            appliedCommand.SetRightMotorPwm(0.80f);
             drive.CommandGenerated(appliedCommand, 0.0f, 0.0f, false);
             for (int cycleIndex = 0; cycleIndex < ScaleLegacyLoopSteps(24); ++cycleIndex)
             {
@@ -1836,12 +1836,12 @@ namespace MazeMap
             }
             const float presentLinearSpeedMps = driveHarness.estimator.RuntimeState().GetVelocity();
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.DeltaCommand(
                     presentLinearSpeedMps,
                     1.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector stateAccelerationCommand =
+            const CommandVector stateAccelerationCommand =
                 drive.DeltaCommand(
                     presentLinearSpeedMps,
                     1.0f,
@@ -1867,12 +1867,12 @@ namespace MazeMap
                     true));
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.DeltaCommand(
                     0.0f,
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector stateAccelerationCommand =
+            const CommandVector stateAccelerationCommand =
                 drive.DeltaCommand(
                     0.0f,
                     0.0f,
@@ -1897,12 +1897,12 @@ namespace MazeMap
                     1.50f,
                     true));
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.DeltaCommand(
                     0.0f,
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector imuAccelerationCommand =
+            const CommandVector imuAccelerationCommand =
                 drive.DeltaCommand(
                     0.0f,
                     0.0f,
@@ -1921,11 +1921,11 @@ namespace MazeMap
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector stateVelocityCommand =
+            const CommandVector stateVelocityCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::StateVelocityPD);
@@ -1944,12 +1944,12 @@ namespace MazeMap
             drive.SetPose(0.0f, 0.0f, 0.0f);
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
             drive.SetProportionalDerivativeCluster(zeroVelocityCluster);
-            const ControlVector zeroGainVelocityCommand =
+            const CommandVector zeroGainVelocityCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::StateVelocityPD);
@@ -1967,11 +1967,11 @@ namespace MazeMap
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector stateWheelOmegaCommand =
+            const CommandVector stateWheelOmegaCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::StateWheelOmegaPD);
@@ -1989,11 +1989,11 @@ namespace MazeMap
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 48);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
-            const ControlVector encoderVelocityCommand =
+            const CommandVector encoderVelocityCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::EncoderVelocity);
@@ -2011,7 +2011,7 @@ namespace MazeMap
             PrimeDriveBaseWithEncoderDelta(drive, driveHarness.estimator, 48, 24);
             drive.SetPose(0.0f, 0.0f, 0.0f);
 
-            const ControlVector rawCommand =
+            const CommandVector rawCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
@@ -2027,14 +2027,14 @@ namespace MazeMap
             Assert::AreEqual(0.0f, drive.GetLastFeedbackCommandAverage(), 1.0e-6f);
             Assert::AreEqual(0.0f, drive.GetLastFeedbackCommandDelta(), 1.0e-6f);
 
-            const ControlVector encoderVelocityCommand =
+            const CommandVector encoderVelocityCommand =
                 drive.PointCommand(
                     0.0f,
                     MazeMap::CommandPD::EncoderVelocity);
-            const ControlVector feedbackOnly =
-                ControlVector::RawMotorPwm(
-                    encoderVelocityCommand.leftMotorPwm - rawCommand.leftMotorPwm,
-                    encoderVelocityCommand.rightMotorPwm - rawCommand.rightMotorPwm);
+            const CommandVector feedbackOnly =
+                CommandVector(
+                    encoderVelocityCommand.LeftMotorPwm() - rawCommand.LeftMotorPwm(),
+                    encoderVelocityCommand.RightMotorPwm() - rawCommand.RightMotorPwm());
 
             Assert::AreEqual(
                 ControlVectorAverage(rawCommand),

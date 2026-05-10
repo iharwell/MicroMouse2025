@@ -216,20 +216,20 @@ namespace MazeMap::App::Internal
             }
         }
 
-        LoopController::ControlVector PollDrive(const Phase nextPhase)
+        CommandVector PollDrive(const Phase nextPhase)
         {
             bool done = false;
-            const LoopController::ControlVector control = _driveService.GetNextControls(done);
+            const CommandVector control = _driveService.GetNextControls(done);
             if (!done)
             {
                 return control;
             }
 
             _phase = nextPhase;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
-        LoopController::ControlVector RunTick(
+        CommandVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) override
@@ -239,7 +239,7 @@ namespace MazeMap::App::Internal
             if (SelectorRemoved())
             {
                 _runtime.FailActiveMode(kTopSpeedMeasurementSelectorRemovedReason);
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             UpdatePeaks(state);
@@ -255,7 +255,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunPrelaunchHold;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunPrelaunchHold:
                 return PollDrive(Phase::LaunchStraight);
@@ -269,7 +269,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunStraight;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunStraight:
                 return PollDrive(Phase::LaunchCompletionHold);
@@ -283,7 +283,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunCompletionHold;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunCompletionHold:
                 return PollDrive(Phase::Complete);
@@ -301,12 +301,12 @@ namespace MazeMap::App::Internal
                 _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::Idle:
             default:
                 _runtime.FailActiveMode("Top speed measurement phase was not initialized");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
         }
 

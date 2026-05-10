@@ -7,7 +7,7 @@
 
 namespace MazeMap::App::Internal
 {
-    LoopController::ControlVector ManeuverExecutor::ActiveRoutineThunk(
+    CommandVector ManeuverExecutor::ActiveRoutineThunk(
         void* context,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
@@ -119,7 +119,7 @@ namespace MazeMap::App::Internal
         _queueState = QueueRoutineState{};
     }
 
-    LoopController::ControlVector ManeuverExecutor::ReturnToContinuation(
+    CommandVector ManeuverExecutor::ReturnToContinuation(
         LoopController& loopController) noexcept
     {
         const Continuation continuation = _continuation;
@@ -130,10 +130,10 @@ namespace MazeMap::App::Internal
         }
 
         loopController.SetNextModeWorkCallback(continuation.callback, continuation.context);
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
-    LoopController::ControlVector ManeuverExecutor::CompleteCurrentPhase(
+    CommandVector ManeuverExecutor::CompleteCurrentPhase(
         void* const nextState,
         const ActivePhaseTickFn nextPhaseTick,
         LoopController& loopController) noexcept
@@ -141,18 +141,18 @@ namespace MazeMap::App::Internal
         if ((nextState != nullptr) && (nextPhaseTick != nullptr))
         {
             ActivatePhase(nextState, nextPhaseTick);
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         return ReturnToContinuation(loopController);
     }
 
-    LoopController::ControlVector ManeuverExecutor::FaultPhase(
+    CommandVector ManeuverExecutor::FaultPhase(
         const char* const reason) noexcept
     {
         ResetActiveRoutine();
         FailInvariant(reason);
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
     bool ManeuverExecutor::SEND_IT(
@@ -190,7 +190,7 @@ namespace MazeMap::App::Internal
             InstallRoutineCallback(loopController);
     }
 
-    LoopController::ControlVector ManeuverExecutor::DelegatedDriveRoutineTick(
+    CommandVector ManeuverExecutor::DelegatedDriveRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
@@ -206,7 +206,7 @@ namespace MazeMap::App::Internal
         }
 
         bool done = false;
-        const LoopController::ControlVector control = _driveService->GetNextControls(done);
+        const CommandVector control = _driveService->GetNextControls(done);
         if (!done)
         {
             return control;
@@ -215,7 +215,7 @@ namespace MazeMap::App::Internal
         return CompleteCurrentPhase(delegated.nextState, delegated.nextPhaseTick, loopController);
     }
 
-    LoopController::ControlVector ManeuverExecutor::QueueDispatchRoutineTick(
+    CommandVector ManeuverExecutor::QueueDispatchRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
@@ -258,7 +258,7 @@ namespace MazeMap::App::Internal
             loopController);
     }
 
-    LoopController::ControlVector ManeuverExecutor::QueueAdvanceRoutineTick(
+    CommandVector ManeuverExecutor::QueueAdvanceRoutineTick(
         void* const rawState,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,

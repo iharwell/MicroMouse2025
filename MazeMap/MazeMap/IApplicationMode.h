@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "LoopController.h"
 
 #include <cstdint>
@@ -67,7 +68,7 @@ namespace MazeMap::App::Internal
         // Return value:
         // Control proposal for the current tick. The callback may instead request a different
         // lifecycle boundary, but that boundary is still explicit rather than implied by return.
-        virtual LoopController::ControlVector RunTick(
+        virtual CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) = 0;

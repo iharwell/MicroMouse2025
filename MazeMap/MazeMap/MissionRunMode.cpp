@@ -91,7 +91,7 @@ namespace MazeMap::App::Internal
             return true;
         }
 
-        LoopController::ControlVector RunTick(
+        CommandVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) override
@@ -111,19 +111,19 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunStartupCalibration;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunStartupCalibration:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
+                const CommandVector control = _startupCalibration.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::LaunchPostStartupHold;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::LaunchPostStartupHold:
@@ -135,19 +135,19 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunPostStartupHold;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunPostStartupHold:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                const CommandVector control = _driveService.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::Complete;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::Complete:
@@ -157,12 +157,12 @@ namespace MazeMap::App::Internal
                 _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::Idle:
             default:
                 _runtime.FailActiveMode("Mission mode phase was not initialized");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
         }
 

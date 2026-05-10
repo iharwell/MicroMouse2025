@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "SensorSnapshot.h"
 #include "VehicleState.h"
 
@@ -104,26 +105,6 @@ namespace MazeMap::App::Internal
         // Session-local tick numbering restarts at this value whenever a new session begins.
         static constexpr std::uint32_t kInitialModeCallbackTick = 1U;
 
-        // Command proposal applied by LoopController at the start of the next tick.
-        //
-        // `Brake` uses the established non-finite PWM vocabulary that the runtime actuation hookup
-        // interprets as brake rather than as raw motor drive.
-        struct EXPORT ControlVector final
-        {
-            float leftMotorPwm{};  // Left raw motor-PWM request for the next tick.
-            float rightMotorPwm{}; // Right raw motor-PWM request for the next tick.
-
-            // Canonical brake command vocabulary. The runtime actuation hook interprets this as
-            // brake rather than as finite raw PWM drive.
-            static const ControlVector Brake;
-
-            // `RawMotorPwm(leftMotorPwm, rightMotorPwm)`:
-            // Builds one explicit raw-PWM command proposal without any additional interpretation.
-            static ControlVector RawMotorPwm(
-                float leftMotorPwm,
-                float rightMotorPwm) noexcept;
-        };
-
         // Published timing snapshot for one completed tick.
         //
         // These timestamps and durations are observation output only. They do not give callers a
@@ -161,7 +142,7 @@ namespace MazeMap::App::Internal
         //
         // Returning from this callback completes only the current tick. It does not imply pause,
         // end-session, or terminal halt unless one of those boundaries was requested explicitly.
-        using ModeWorkCallback = ControlVector (*)(
+        using ModeWorkCallback = CommandVector (*)(
             void* context,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
@@ -303,7 +284,7 @@ namespace MazeMap::App::Internal
         // Return value:
         // The command LoopController most recently handed to the runtime actuation hook at a
         // tick boundary.
-        const ControlVector& LastAppliedCommand() const noexcept;
+        const CommandVector& LastAppliedCommand() const noexcept;
 
     private:
         friend class ::MazeMap::App::Application;
@@ -321,21 +302,21 @@ namespace MazeMap::App::Internal
                 return setMotorPwm != nullptr;
             }
 
-            bool Apply(const ControlVector& control) const noexcept
+            bool Apply(const CommandVector& control) const noexcept
             {
                 return
                     (setMotorPwm != nullptr) &&
-                    setMotorPwm(context, control.leftMotorPwm, control.rightMotorPwm);
+                    setMotorPwm(context, control.LeftMotorPwm(), control.RightMotorPwm());
             }
         };
 
-        static ControlVector RunApplicationModeTick(
+        static CommandVector RunApplicationModeTick(
             void* context,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
-        static bool IsBrakeMotorPwmCommand(const ControlVector& command) noexcept;
-        static bool IsZeroMotorPwmCommand(const ControlVector& command) noexcept;
+        static bool IsBrakeMotorPwmCommand(const CommandVector& command) noexcept;
+        static bool IsZeroMotorPwmCommand(const CommandVector& command) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
 
         void RunSessionStartWallSensorAdcProbe() noexcept;
@@ -347,7 +328,7 @@ namespace MazeMap::App::Internal
         bool ValidateSessionOptions(const SessionOptions& options) const noexcept;
         bool SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept;
         void ClearPendingRequests() noexcept;
-        bool ApplyControlAtTickStart(const ControlVector& control) noexcept;
+        bool ApplyControlAtTickStart(const CommandVector& control) noexcept;
         bool CaptureTickState(float dtSeconds, std::uint32_t tickStartUs);
         void ResetWorkingTiming(
             std::uint32_t sequence,
@@ -381,8 +362,8 @@ namespace MazeMap::App::Internal
         std::uint32_t _tickCount{};        // One-based active-session tick sequence.
         std::uint32_t _lastTickStartUs{};  // Previous tick-start timestamp.
         std::uint32_t _nextSyncTargetUs{}; // Absolute deadline for the current/next synchronized tick.
-        ControlVector _queuedControl{};    // Command to apply at the start of the next tick.
-        ControlVector _appliedControl{};   // Command applied at the start of the current tick.
+        CommandVector _queuedControl{};    // Command to apply at the start of the next tick.
+        CommandVector _appliedControl{};   // Command applied at the start of the current tick.
         MotorPwmSink _motorPwmSink{};      // Runtime-owned raw motor-PWM application hook.
         bool _sessionStartWallSensorAdcProbePending{}; // Deferred session-start ADC probe request.
         TimingDiagnostics _timingBuffers[2]{}; // Double-buffered published/working timing storage.

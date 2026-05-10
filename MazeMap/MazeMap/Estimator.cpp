@@ -50,7 +50,7 @@ namespace MazeMap
 
     bool Estimator::predict(
         float dt,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV) noexcept
     {

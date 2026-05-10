@@ -144,12 +144,12 @@ namespace MazeMap
         float tolerance)
     {
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.leftMotorPwm,
-            actual.control.leftMotorPwm,
+            expected.control.LeftMotorPwm(),
+            actual.control.LeftMotorPwm(),
             tolerance);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.rightMotorPwm,
-            actual.control.rightMotorPwm,
+            expected.control.RightMotorPwm(),
+            actual.control.RightMotorPwm(),
             tolerance);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
             expected.fanDutyCycle,

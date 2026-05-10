@@ -214,19 +214,19 @@ namespace MazeMap::App::Internal
         }
     }
 
-    LoopController::ControlVector StartupCalibration::GetNextControls(bool& done)
+    CommandVector StartupCalibration::GetNextControls(bool& done)
     {
         done = false;
         if (_phase == Phase::None)
         {
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
         if (_phase == Phase::ReportCompletion)
         {
             _phase = Phase::None;
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if ((_phase == Phase::SampleWest) ||
@@ -255,7 +255,7 @@ namespace MazeMap::App::Internal
             }
 
             UpdateDoneState(done);
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if ((_phase == Phase::SouthTouch) || (_phase == Phase::WestTouch))
@@ -265,11 +265,11 @@ namespace MazeMap::App::Internal
                 LogIssue("StartupCalibration expected an active WallTouch phase and will continue with best-effort fallback");
                 AdvanceAfterWallTouchPhase();
                 UpdateDoneState(done);
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             bool childDone = false;
-            const LoopController::ControlVector control = _wallTouch->GetNextControls(childDone);
+            const CommandVector control = _wallTouch->GetNextControls(childDone);
             if (!childDone)
             {
                 return control;
@@ -277,18 +277,18 @@ namespace MazeMap::App::Internal
 
             AdvanceAfterWallTouchPhase();
             UpdateDoneState(done);
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (_driveService == nullptr)
         {
             CompleteBestEffort("StartupCalibration expected an active Drive phase and cannot continue");
             UpdateDoneState(done);
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         bool childDone = false;
-        const LoopController::ControlVector control = _driveService->GetNextControls(childDone);
+        const CommandVector control = _driveService->GetNextControls(childDone);
         if (!childDone)
         {
             return control;
@@ -296,7 +296,7 @@ namespace MazeMap::App::Internal
 
         AdvanceAfterDrivePhase();
         UpdateDoneState(done);
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
     void StartupCalibration::AttachRuntime(SharedRobotRuntime& runtime) noexcept

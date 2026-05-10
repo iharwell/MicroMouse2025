@@ -21,7 +21,7 @@ namespace MazeMap::App
 {
     namespace
     {
-        using ControlVector = Internal::LoopController::ControlVector;
+        using CommandVector = Internal::CommandVector;
 
         constexpr std::uint8_t kDriveManeuverRightEncoderChannel = 1U;
         constexpr std::uint8_t kDriveManeuverLeftEncoderChannel = 2U;
@@ -124,9 +124,9 @@ namespace MazeMap::App
                 BuildDriveManeuverSensorSnapshot(yawRateRadps));
         }
 
-        void ApplyControlVector(DriveBase& drive, const ControlVector& control) noexcept
+        void ApplyControlVector(DriveBase& drive, const CommandVector& control) noexcept
         {
-            if (std::isfinite(control.leftMotorPwm) && std::isfinite(control.rightMotorPwm))
+            if (std::isfinite(control.LeftMotorPwm()) && std::isfinite(control.RightMotorPwm()))
             {
                 drive.CommandOpenLoopRaw(control);
             }
@@ -183,7 +183,7 @@ namespace MazeMap::App
             const PlantParams params = PlantParams::Default();
             const DriveTelemetry telemetry = runtime.Drive().GetTelemetry();
 
-            const ControlVector control = ControlVector::RawMotorPwm(
+            const CommandVector control = CommandVector(
                 telemetry.leftDriveCommand,
                 telemetry.rightDriveCommand);
 
@@ -341,7 +341,7 @@ namespace MazeMap::App
                 }
 
                 bool done = false;
-                const ControlVector control = driveService.GetNextControls(done);
+                const CommandVector control = driveService.GetNextControls(done);
                 if (done)
                 {
                     trace.completed = true;

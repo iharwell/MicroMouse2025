@@ -1,9 +1,9 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "CellCoordinates.h"
 #include "CommandPD.h"
 #include "Direction.h"
-#include "LoopController.h"
 #include "MazeMapRuntimeCore.h"
 #include "SensorSnapshot.h"
 #include "VehicleState.h"
@@ -29,7 +29,7 @@ namespace MazeMap::App::Internal
         void Cancel() noexcept;
 
         void Start(const MazeMap::CellCoordinates& wallCell, MazeMap::Direction wallDirection);
-        LoopController::ControlVector GetNextControls(bool& done);
+        CommandVector GetNextControls(bool& done);
 
     private:
         friend class SharedRobotRuntime;
@@ -73,25 +73,25 @@ namespace MazeMap::App::Internal
         void SetFault(const char* reason) noexcept;
         bool BeginHoldBeforeReturn(bool resetPoseDuringHold) noexcept;
         bool BeginReturnToPreferred() noexcept;
-        LoopController::ControlVector ForwardControl(
+        CommandVector ForwardControl(
             const MazeMap::VehicleState& state,
             float desiredSpeedMps,
             float yawRateBiasRadps = 0.0f) const;
 
-        LoopController::ControlVector SeekControls(
+        CommandVector SeekControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
             bool& done);
-        LoopController::ControlVector SeatControls(const MazeMap::VehicleState& state, bool& done);
-        LoopController::ControlVector SquareControls(
+        CommandVector SeatControls(const MazeMap::VehicleState& state, bool& done);
+        CommandVector SquareControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
             bool& done);
-        LoopController::ControlVector HoldBeforeReturnControls(
+        CommandVector HoldBeforeReturnControls(
             const MazeMap::VehicleState& state,
             bool& done);
-        LoopController::ControlVector ReturnToPreferredControls(bool& done);
+        CommandVector ReturnToPreferredControls(bool& done);
 
         SharedRobotRuntime* _runtime{};
         DriveBase* _drive{};

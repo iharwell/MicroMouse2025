@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "Defines.h"
 #include "DriveTelemetry.h"
 #include "LoopController.h"
@@ -140,7 +141,7 @@ namespace MazeMap::App::Internal
         ShowcasingDonutController& operator=(ShowcasingDonutController&&) = delete;
 
         void SetupMode() override;
-        LoopController::ControlVector RunTick(
+        CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) override;

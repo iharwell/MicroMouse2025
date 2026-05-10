@@ -72,7 +72,7 @@ namespace MazeMap::App::Internal
         _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
-    LoopController::ControlVector WallSensorLedCalibrationController::RunTick(
+    CommandVector WallSensorLedCalibrationController::RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -121,19 +121,19 @@ namespace MazeMap::App::Internal
         return options;
     }
 
-    LoopController::ControlVector WallSensorLedCalibrationController::OnModeWork(
+    CommandVector WallSensorLedCalibrationController::OnModeWork(
         LoopController& loopController)
     {
         if (_pauseRequested)
         {
             _runtime.FailActiveMode(
                 "Wall sensor LED calibration unexpectedly resumed after pause request");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         _pauseRequested = true;
         loopController.RequestPause(&WallSensorLedCalibrationController::PauseThunk, this);
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
     void WallSensorLedCalibrationController::OnPauseGranted(

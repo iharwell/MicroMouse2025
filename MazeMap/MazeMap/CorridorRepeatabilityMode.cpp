@@ -152,7 +152,7 @@ namespace MazeMap::App::Internal
                 (0.5f * Config::kCellSizeM) + OutboundDistanceM());
         }
 
-        LoopController::ControlVector RunTick(
+        CommandVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) override
@@ -172,19 +172,19 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunStartupCalibration;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunStartupCalibration:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
+                const CommandVector control = _startupCalibration.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::LaunchStartHold;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::LaunchStartHold:
@@ -195,19 +195,19 @@ namespace MazeMap::App::Internal
                 _driveService.SetOperationMode(Drive::OperationMode::Maze);
                 _driveService.StartHold(AuxMeasurementConfig::kCorridorRepeatabilityStartSettleMs, true);
                 _phase = Phase::RunStartHold;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunStartHold:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                const CommandVector control = _driveService.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::LaunchOutbound;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::LaunchOutbound:
@@ -226,20 +226,20 @@ namespace MazeMap::App::Internal
                     &heading,
                     &targetPosition);
                 _phase = Phase::RunOutbound;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::RunOutbound:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                const CommandVector control = _driveService.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::LaunchFarTouch;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::LaunchFarTouch:
@@ -259,19 +259,19 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunFarTouch;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunFarTouch:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _wallTouch.GetNextControls(done);
+                const CommandVector control = _wallTouch.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::LaunchTurnHome;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::LaunchTurnHome:
@@ -282,19 +282,19 @@ namespace MazeMap::App::Internal
                 _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
                 _driveService.StartTurn(PI_F);
                 _phase = Phase::RunTurnHome;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunTurnHome:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                const CommandVector control = _driveService.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::LaunchReturn;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::LaunchReturn:
@@ -313,20 +313,20 @@ namespace MazeMap::App::Internal
                     &heading,
                     &targetPosition);
                 _phase = Phase::RunReturn;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::RunReturn:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                const CommandVector control = _driveService.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::LaunchFaceNorth;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::LaunchFaceNorth:
@@ -337,19 +337,19 @@ namespace MazeMap::App::Internal
                 _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
                 _driveService.StartTurn(PI_F);
                 _phase = Phase::RunFaceNorth;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunFaceNorth:
             {
                 bool done = false;
-                const LoopController::ControlVector control = _driveService.GetNextControls(done);
+                const CommandVector control = _driveService.GetNextControls(done);
                 if (!done)
                 {
                     return control;
                 }
 
                 _phase = Phase::AdvanceSpeed;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             case Phase::AdvanceSpeed:
@@ -358,7 +358,7 @@ namespace MazeMap::App::Internal
                     (_speedIndex < AuxMeasurementConfig::kCorridorRepeatabilitySpeedCount) ?
                         Phase::LaunchStartHold :
                         Phase::Complete;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::Complete:
                 (void)_runtime.AppendTextLogLine("Corridor repeatability complete");
@@ -368,12 +368,12 @@ namespace MazeMap::App::Internal
                 _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::Idle:
             default:
                 _runtime.FailActiveMode("Corridor repeatability phase was not initialized");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
         }
 

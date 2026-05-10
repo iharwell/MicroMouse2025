@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "CommandPD.h"
 #include "LoopController.h"
 #include "ManeuverInstance.h"
@@ -253,7 +254,7 @@ namespace MazeMap::App::Internal
         // parameter.
 
         // Hold measures stationary time, not raw wall-clock time with brake output forced. If a
-        // caller only wants to return ControlVector::Brake for some interval, it should do that in
+        // caller only wants to return CommandVector::Brake() for some interval, it should do that in
         // the mode directly instead of routing that trivial case through Drive.
         //
         // Parameters:
@@ -369,7 +370,7 @@ namespace MazeMap::App::Internal
         //   latest latched instruction
         //   + current live Drive configuration
         //   + current runtime state
-        // to produce the best coherent ControlVector Drive can infer for the present tick.
+        // to produce the best coherent CommandVector Drive can infer for the present tick.
         //
         // Unexpected or non-finite inputs are handled by semantic recovery rather than by a
         // separate fault path. That recovery should converge onto one retained instruction rather
@@ -402,7 +403,7 @@ namespace MazeMap::App::Internal
         // Proposed control vector for the present tick. The mode may return it directly to
         // LoopController, replace it, or ignore it. Drive does not inject an independent fault or
         // "safe fallback" behavior into this command path.
-        LoopController::ControlVector GetNextControls(bool& done);
+        CommandVector GetNextControls(bool& done);
 
     private:
         friend class SharedRobotRuntime;
@@ -424,30 +425,30 @@ namespace MazeMap::App::Internal
         void ResetActivePrimitive() noexcept;
 
         // Primitive-specific stepping helpers behind the generic public GetNextControls(...).
-        LoopController::ControlVector HoldControls(
+        CommandVector HoldControls(
             const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
             bool& done);
-        LoopController::ControlVector LinearMotionControls(
+        CommandVector LinearMotionControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
             float dtSeconds,
             bool& done);
-        LoopController::ControlVector TurnControls(
+        CommandVector TurnControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
             bool& done);
-        LoopController::ControlVector TurnTransitionControls(
+        CommandVector TurnTransitionControls(
             const MazeMap::VehicleState& state,
             const DriveTelemetry& driveTelemetry,
             bool& done);
-        LoopController::ControlVector ArcControls(
+        CommandVector ArcControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
             bool& done);
-        LoopController::ControlVector ManeuverControls(
+        CommandVector ManeuverControls(
             const DriveTelemetry& driveTelemetry,
             bool& done);
 

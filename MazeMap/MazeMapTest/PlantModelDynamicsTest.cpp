@@ -28,9 +28,9 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = state(VehicleState::kU) / params.wheelRadiusM;
             state(VehicleState::kOmegaR) = state(VehicleState::kU) / params.wheelRadiusM;
 
-            App::Internal::LoopController::ControlVector control;
-            control.leftMotorPwm = 0.55f;
-            control.rightMotorPwm = 0.55f;
+            App::Internal::CommandVector control;
+            control.SetLeftMotorPwm(0.55f);
+            control.SetRightMotorPwm(0.55f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -99,9 +99,9 @@ namespace MazeMap
                 47.0f,
                 -0.03f);
 
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.38f;
-            control.rightMotorPwm = 0.23f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.38f);
+            control.SetRightMotorPwm(0.23f);
             const float controlFanDutyCycle = 0.72f;
             const float controlBatteryVoltageV = params.supplyVoltageV - 0.35f;
 
@@ -287,8 +287,8 @@ namespace MazeMap
                 1.0e-6f);
 
             Assert::AreEqual(
-                plant.driveTorqueFromCommand(control.leftMotorPwm, state(VehicleState::kOmegaL), controlBatteryVoltageV, params),
-                plant.driveTorqueFromCommand(control.leftMotorPwm, state(VehicleState::kOmegaL), controlBatteryVoltageV, prepared),
+                plant.driveTorqueFromCommand(control.LeftMotorPwm(), state(VehicleState::kOmegaL), controlBatteryVoltageV, params),
+                plant.driveTorqueFromCommand(control.LeftMotorPwm(), state(VehicleState::kOmegaL), controlBatteryVoltageV, prepared),
                 1.0e-6f);
             Assert::AreEqual(
                 plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), controlBatteryVoltageV, params),
@@ -317,7 +317,7 @@ namespace MazeMap
                 0.0f,
                 0.12f);
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             const float controlBatteryVoltageV = params.supplyVoltageV;
             const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
@@ -360,7 +360,7 @@ namespace MazeMap
                 0.8f,
                 -0.7f);
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             const float controlBatteryVoltageV = params.supplyVoltageV;
             const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
@@ -399,7 +399,7 @@ namespace MazeMap
                 -0.7f);
             VehicleState::StateVector state = initialState;
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             const float controlBatteryVoltageV = params.supplyVoltageV;
             const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
@@ -437,9 +437,9 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 1.05f * (state(VehicleState::kU) / params.wheelRadiusM);
             state(VehicleState::kOmegaR) = 0.95f * (state(VehicleState::kU) / params.wheelRadiusM);
 
-            App::Internal::LoopController::ControlVector control;
-            control.leftMotorPwm = 0.65f;
-            control.rightMotorPwm = 0.60f;
+            App::Internal::CommandVector control;
+            control.SetLeftMotorPwm(0.65f);
+            control.SetRightMotorPwm(0.60f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -519,9 +519,9 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 0.9f * (state(VehicleState::kU) / zeroLeverParams.wheelRadiusM);
             state(VehicleState::kOmegaR) = 1.1f * (state(VehicleState::kU) / zeroLeverParams.wheelRadiusM);
 
-            App::Internal::LoopController::ControlVector control;
-            control.leftMotorPwm = 0.30f;
-            control.rightMotorPwm = 0.55f;
+            App::Internal::CommandVector control;
+            control.SetLeftMotorPwm(0.30f);
+            control.SetRightMotorPwm(0.55f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = zeroLeverParams.supplyVoltageV;
 
@@ -559,9 +559,9 @@ namespace MazeMap
             state(VehicleState::kOmegaL) = 0.95f * (state(VehicleState::kU) / params.wheelRadiusM);
             state(VehicleState::kOmegaR) = 1.05f * (state(VehicleState::kU) / params.wheelRadiusM);
 
-            App::Internal::LoopController::ControlVector control;
-            control.leftMotorPwm = 0.25f;
-            control.rightMotorPwm = 0.45f;
+            App::Internal::CommandVector control;
+            control.SetLeftMotorPwm(0.25f);
+            control.SetRightMotorPwm(0.45f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -594,9 +594,9 @@ namespace MazeMap
                 0.0f,
                 0.0f);
 
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.50f;
-            control.rightMotorPwm = 0.50f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.50f);
+            control.SetRightMotorPwm(0.50f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -634,9 +634,9 @@ namespace MazeMap
             const PlantParams params = PlantParams::Default();
             const float staticWindowRadps = params.staticFrictionMaxSpeedMps / params.wheelRadiusM;
 
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.25f;
-            control.rightMotorPwm = 0.25f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.25f);
+            control.SetRightMotorPwm(0.25f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -686,9 +686,9 @@ namespace MazeMap
                 0.0f,
                 0.0f,
                 0.0f);
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.45f;
-            control.rightMotorPwm = 0.45f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.45f);
+            control.SetRightMotorPwm(0.45f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -719,7 +719,7 @@ namespace MazeMap
                 0.5f / params.wheelRadiusM,
                 0.5f / params.wheelRadiusM);
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             const float controlBatteryVoltageV = params.supplyVoltageV;
             const VehicleState::StateVector integrated =
                 plant.integrate(state, control, 0.80f, controlBatteryVoltageV, 0.01f, params);

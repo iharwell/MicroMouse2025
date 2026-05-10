@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "LoopController.h"
 #include "ManeuverQueue.h"
 #include "MazeMapRuntimeCore.h"
@@ -39,7 +40,7 @@ namespace MazeMap::App::Internal
     private:
         friend class SharedRobotRuntime;
 
-        using ActivePhaseTickFn = LoopController::ControlVector (ManeuverExecutor::*)(
+        using ActivePhaseTickFn = CommandVector (ManeuverExecutor::*)(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
@@ -67,7 +68,7 @@ namespace MazeMap::App::Internal
             bool snapToExpectedLocation{};
         };
 
-        static LoopController::ControlVector ActiveRoutineThunk(
+        static CommandVector ActiveRoutineThunk(
             void* context,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
@@ -86,26 +87,26 @@ namespace MazeMap::App::Internal
         void ActivatePhase(void* activeState, ActivePhaseTickFn activePhaseTick) noexcept;
         void ResetActiveRoutine() noexcept;
 
-        LoopController::ControlVector ReturnToContinuation(
+        CommandVector ReturnToContinuation(
             LoopController& loopController) noexcept;
-        LoopController::ControlVector CompleteCurrentPhase(
+        CommandVector CompleteCurrentPhase(
             void* nextState,
             ActivePhaseTickFn nextPhaseTick,
             LoopController& loopController) noexcept;
-        LoopController::ControlVector FaultPhase(
+        CommandVector FaultPhase(
             const char* reason) noexcept;
 
-        LoopController::ControlVector DelegatedDriveRoutineTick(
+        CommandVector DelegatedDriveRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
-        LoopController::ControlVector QueueDispatchRoutineTick(
+        CommandVector QueueDispatchRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
-        LoopController::ControlVector QueueAdvanceRoutineTick(
+        CommandVector QueueAdvanceRoutineTick(
             void* rawState,
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,

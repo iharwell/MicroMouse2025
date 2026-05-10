@@ -183,6 +183,7 @@
     <ClInclude Include="Cell.h" />
     <ClInclude Include="CellCoordinates.h" />
     <ClInclude Include="CircularBuffer.h" />
+    <ClInclude Include="CommandVector.h" />
     <ClInclude Include="CommandPD.h" />
     <ClInclude Include="CompactPath.h" />
     <ClInclude Include="CoreConfig.h" />
@@ -307,6 +308,7 @@
   <ItemGroup>
     <ClCompile Include="Cell.cpp" />
     <ClCompile Include="CellCoordinates.cpp" />
+    <ClCompile Include="CommandVector.cpp" />
     <ClCompile Include="CompactPath.cpp" />
     <ClCompile Include="Defines.cpp" />
     <ClCompile Include="Direction.cpp" />

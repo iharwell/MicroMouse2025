@@ -21,6 +21,7 @@
 
 namespace
 {
+    using MazeMap::App::Internal::CommandVector;
     using MazeMap::App::Internal::Drive;
     using MazeMap::App::Internal::LoopController;
     using MazeMap::App::Internal::OpenFloorMeasurementController;
@@ -86,9 +87,9 @@ namespace
         driveService.SetLimits(BuildOpenFloorMeasurementModeLimits(vehicle));
     }
 
-    LoopController::ControlVector StopControlVector() noexcept
+    CommandVector StopControlVector() noexcept
     {
-        return LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f);
+        return CommandVector(0.0f, 0.0f);
     }
 
     bool WriteOpenFloorV62Metadata(MazeMap::App::Internal::SharedRobotRuntime& runtime)
@@ -227,7 +228,7 @@ namespace MazeMap::App::Internal
         return 0.0f;
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::StaticMeasurementRegime::Tick(
+    CommandVector OpenFloorMeasurementController::StaticMeasurementRegime::Tick(
         OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
@@ -246,7 +247,7 @@ namespace MazeMap::App::Internal
             _needsStart = false;
         }
 
-        const LoopController::ControlVector control = driveService.GetNextControls(done);
+        const CommandVector control = driveService.GetNextControls(done);
         if (done)
         {
             _needsStart = true;
@@ -318,7 +319,7 @@ namespace MazeMap::App::Internal
         return 0.0f;
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::LaunchMeasurementRegime::Tick(
+    CommandVector OpenFloorMeasurementController::LaunchMeasurementRegime::Tick(
         OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
@@ -330,7 +331,7 @@ namespace MazeMap::App::Internal
         {
             ++_tickCounter;
             done = false;
-            return LoopController::ControlVector::RawMotorPwm(driveCommand, driveCommand);
+            return CommandVector(driveCommand, driveCommand);
         }
 
         if (_tickCounter == kPulseTickCount)
@@ -339,7 +340,7 @@ namespace MazeMap::App::Internal
             ++_tickCounter;
         }
 
-        const LoopController::ControlVector holdControl = driveService.GetNextControls(done);
+        const CommandVector holdControl = driveService.GetNextControls(done);
         if (done)
         {
             _tickCounter = 0U;
@@ -404,7 +405,7 @@ namespace MazeMap::App::Internal
         return (primitiveIndex) ? magnitude : -magnitude;
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::StraightMeasurementRegime::Tick(
+    CommandVector OpenFloorMeasurementController::StraightMeasurementRegime::Tick(
         OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
@@ -497,7 +498,7 @@ namespace MazeMap::App::Internal
                 0.0f;
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::YawMeasurementRegime::Tick(
+    CommandVector OpenFloorMeasurementController::YawMeasurementRegime::Tick(
         OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
@@ -613,7 +614,7 @@ namespace MazeMap::App::Internal
         return (PrimitiveCount() != 0U) && EnsureInitialized(controller._vehicle);
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::SmoothMeasurementRegime::Tick(
+    CommandVector OpenFloorMeasurementController::SmoothMeasurementRegime::Tick(
         OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
@@ -831,7 +832,7 @@ namespace MazeMap::App::Internal
         return EnsureInitialized(controller._vehicle);
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::LoopMeasurementRegime::Tick(
+    CommandVector OpenFloorMeasurementController::LoopMeasurementRegime::Tick(
         OpenFloorMeasurementController& controller,
         const std::uint16_t primitiveIndex,
         const std::uint8_t speedIndex,
@@ -966,12 +967,12 @@ namespace MazeMap::App::Internal
         return true;
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::TimingStage::Tick(
+    CommandVector OpenFloorMeasurementController::TimingStage::Tick(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
     {
-        const LoopController::ControlVector stopControl = LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f);
+        const CommandVector stopControl = CommandVector(0.0f, 0.0f);
         if (!WriteBufferedRow(controller, "Open-floor measurement timing log write failed"))
         {
             controller._runtime.FailActiveMode("Open-floor measurement timing log write failed");
@@ -1168,7 +1169,7 @@ namespace MazeMap::App::Internal
             ((_activeSpeedIndex + 1U) == regime.SpeedCount());
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::MainStage::Tick(
+    CommandVector OpenFloorMeasurementController::MainStage::Tick(
         OpenFloorMeasurementController& controller,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1192,7 +1193,7 @@ namespace MazeMap::App::Internal
 
         MainMeasurementRegime& regime = ActiveRegime();
         bool done = false;
-        const LoopController::ControlVector control =
+        const CommandVector control =
             regime.Tick(controller, _activePrimitiveIndex, _activeSpeedIndex, done);
 
         Runtime::OpenFloorMainRow row{};
@@ -1362,7 +1363,7 @@ namespace MazeMap::App::Internal
         self->ReleaseSelectorMonitor();
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::RunTick(
+    CommandVector OpenFloorMeasurementController::RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1546,7 +1547,7 @@ namespace MazeMap::App::Internal
         return _mainStage.IsCurrentSlotLastInRegime();
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::TimingStageTick(
+    CommandVector OpenFloorMeasurementController::TimingStageTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1555,7 +1556,7 @@ namespace MazeMap::App::Internal
         return _timingStage.Tick(*this, state, loopController);
     }
 
-    LoopController::ControlVector OpenFloorMeasurementController::MainStageTick(
+    CommandVector OpenFloorMeasurementController::MainStageTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)

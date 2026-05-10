@@ -256,7 +256,7 @@ namespace MazeMap
 
     inline void RunPredictionMatchingCycle(
         SrUkfCore& core,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         const PlantParams& params,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState,
@@ -312,8 +312,8 @@ namespace MazeMap
 
     inline SrUkfCore RunUKFCycles(
         int numCycles,
-        App::Internal::LoopController::ControlVector control =
-            App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f),
+        App::Internal::CommandVector control =
+            App::Internal::CommandVector(0.0f, 0.0f),
         float fanDutyCycle = 0.80f,
         float batteryVoltageV = 0.0f)
     {

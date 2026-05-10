@@ -1001,26 +1001,6 @@ def scan_function_signatures(
                 "A bool parameter often collapses multiple semantic operations. Prefer owner behavior or a richer domain vocabulary.",
             )
 
-        output_params = [
-            param
-            for param in params
-            if ("&" in param or "*" in param)
-            and not re.search(r"\bconst\b", param)
-            and "&&" not in param
-            and not re.search(r"\(\s*\*", param)
-        ]
-        if output_params:
-            add_finding(
-                findings,
-                raw_lines,
-                severity_for_existing("P1", "P2", selected_lines),
-                "output-parameter",
-                path,
-                start,
-                f"`{name}` has non-const pointer/reference parameter(s): {', '.join(output_params)}.",
-                "Output parameters often indicate transported state. Prefer a capability on the owner or a complete domain result type.",
-            )
-
 
 def scan_pass_through_methods(
     path: Path,

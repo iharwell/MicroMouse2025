@@ -47,6 +47,9 @@
     <ClCompile Include="CellTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CommandVectorTest.cpp">
+      <Filter>Source Files\App</Filter>
+    </ClCompile>
     <ClCompile Include="DriveBaseTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

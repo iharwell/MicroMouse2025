@@ -11,6 +11,7 @@
 
 using MazeMap::App::Internal::Drive;
 using MazeMap::App::Internal::GetSharedRobotRuntime;
+using CommandVector = MazeMap::App::Internal::CommandVector;
 using LoopController = MazeMap::App::Internal::LoopController;
 using MazeMap::App::Internal::SharedRobotRuntime;
 using MazeMap::App::Internal::StartupCalibration;
@@ -289,7 +290,7 @@ private:
         SetMissionLevelFanEnabled(enabled);
     }
 
-    LoopController::ControlVector FinishMode(LoopController& loopController)
+    CommandVector FinishMode(LoopController& loopController)
     {
         loopController.RequestEndSession(
             +[](void* const context, LoopController& boundaryLoopController)
@@ -326,23 +327,23 @@ private:
                 boundaryLoopController.HaltExecutionEndProgram();
             },
             this);
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
-    LoopController::ControlVector PollDriveHold(const Phase nextPhase)
+    CommandVector PollDriveHold(const Phase nextPhase)
     {
         bool done = false;
-        const LoopController::ControlVector control = _driveService.GetNextControls(done);
+        const CommandVector control = _driveService.GetNextControls(done);
         if (!done)
         {
             return control;
         }
 
         _phase = nextPhase;
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
-    LoopController::ControlVector RunTurningTractionSweep(
+    CommandVector RunTurningTractionSweep(
         const MazeMap::VehicleState& state,
         LoopController& loopController)
     {
@@ -380,7 +381,7 @@ private:
             MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
-    LoopController::ControlVector RunTick(
+    CommandVector RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController) override
@@ -389,7 +390,7 @@ private:
         if (!LogSample(state))
         {
             _runtime.FailActiveMode("Failed to write auxiliary measurement sample");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         switch (_phase)
@@ -398,7 +399,7 @@ private:
             if (!BeginPhase("startup_calibration"))
             {
                 _runtime.FailActiveMode("Failed to log auxiliary startup calibration phase");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
             _startupCalibration.Start();
             if (!_startupCalibration.Active())
@@ -409,86 +410,86 @@ private:
             {
                 _phase = Phase::RunStartupCalibration;
             }
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunStartupCalibration:
         {
             bool done = false;
-            const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
+            const CommandVector control = _startupCalibration.GetNextControls(done);
             if (!done)
             {
                 return control;
             }
             _phase = Phase::LaunchBaselineHold;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         case Phase::LaunchBaselineHold:
-            if (!BeginPhase("fan_off_baseline")) { _runtime.FailActiveMode("Failed to log auxiliary baseline phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_off_baseline")) { _runtime.FailActiveMode("Failed to log auxiliary baseline phase"); return CommandVector::Brake(); }
             SetFanEnabled(false);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(AuxMeasurementConfig::kBaselineHoldMs, true);
             _phase = Phase::RunBaselineHold;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunBaselineHold:
             return PollDriveHold(Phase::LaunchFanOnHold);
 
         case Phase::LaunchFanOnHold:
-            if (!BeginPhase("fan_on_hold")) { _runtime.FailActiveMode("Failed to log auxiliary fan-on phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_on_hold")) { _runtime.FailActiveMode("Failed to log auxiliary fan-on phase"); return CommandVector::Brake(); }
             SetFanEnabled(true);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(AuxMeasurementConfig::kFanHoldMs, true);
             _phase = Phase::RunFanOnHold;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunFanOnHold:
             return PollDriveHold(Phase::LaunchRecoveryHold);
 
         case Phase::LaunchRecoveryHold:
-            if (!BeginPhase("fan_off_recovery")) { _runtime.FailActiveMode("Failed to log auxiliary recovery phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_off_recovery")) { _runtime.FailActiveMode("Failed to log auxiliary recovery phase"); return CommandVector::Brake(); }
             SetFanEnabled(false);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::Maze);
             _driveService.StartHold(AuxMeasurementConfig::kRecoveryHoldMs, true);
             _phase = Phase::RunRecoveryHold;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunRecoveryHold:
             return PollDriveHold(Phase::Complete);
 
         case Phase::LaunchStartupHold:
-            if (!BeginPhase("startup_settle")) { _runtime.FailActiveMode("Failed to log auxiliary startup phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("startup_settle")) { _runtime.FailActiveMode("Failed to log auxiliary startup phase"); return CommandVector::Brake(); }
             SetFanEnabled(false);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartHold(AuxMeasurementConfig::kStartupSettleMs, true);
             _phase = Phase::RunStartupHold;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunStartupHold:
             return PollDriveHold(Phase::LaunchFanSpinupHold);
 
         case Phase::LaunchFanSpinupHold:
-            if (!BeginPhase("fan_spinup")) { _runtime.FailActiveMode("Failed to log auxiliary fan-spinup phase"); return LoopController::ControlVector::Brake; }
+            if (!BeginPhase("fan_spinup")) { _runtime.FailActiveMode("Failed to log auxiliary fan-spinup phase"); return CommandVector::Brake(); }
             SetFanEnabled(true);
             _driveService.SetLimits(BuildAuxiliaryDriveLimits(_vehicle));
             _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
             _driveService.StartHold(AuxMeasurementConfig::kTurningTractionSweepFanSettleMs, true);
             _phase = Phase::RunFanSpinupHold;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunFanSpinupHold:
         {
-            const LoopController::ControlVector control = PollDriveHold(Phase::TurningTractionSweep);
+            const CommandVector control = PollDriveHold(Phase::TurningTractionSweep);
             if (_phase == Phase::TurningTractionSweep)
             {
                 if (!BeginPhase("turning_traction_sweep"))
                 {
                     _runtime.FailActiveMode("Failed to log turning traction sweep phase");
-                    return LoopController::ControlVector::Brake;
+                    return CommandVector::Brake();
                 }
                 ResetTurningTractionState();
                 _turningTractionDirectionSign = AuxMeasurementConfig::kTurningTractionSweepClockwise ? 1.0f : -1.0f;
@@ -509,7 +510,7 @@ private:
         case Phase::Idle:
         default:
             _runtime.FailActiveMode("Auxiliary measurement phase was not initialized");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
     }
 

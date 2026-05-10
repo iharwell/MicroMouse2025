@@ -730,7 +730,7 @@ namespace MazeMap::App::Internal
         return (kShowcasingDonutRadiusM > 1.0e-5f) ? (_commandedSpeedMps / kShowcasingDonutRadiusM) : 0.0f;
     }
 
-    LoopController::ControlVector ShowcasingDonutController::RunTick(
+    CommandVector ShowcasingDonutController::RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -742,19 +742,19 @@ namespace MazeMap::App::Internal
         if (_mainLogOpen && !WriteBufferedMainRow())
         {
             _runtime.FailActiveMode("Showcasing donut main log write failed");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (SelectorRemoved())
         {
             _runtime.FailActiveMode(kShowcasingDonutSelectorRemovedReason);
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (_mainLogOpen && !LogCurrentSample(CurrentLabels(), state, false))
         {
             _runtime.FailActiveMode("Showcasing donut main log write failed");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         switch (_phase)
@@ -769,10 +769,10 @@ namespace MazeMap::App::Internal
             {
                 (void)_runtime.AppendTextLogLine("Showcasing donut flashy turns");
                 _phase = Phase::FlashyMoves;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
-            const LoopController::ControlVector control = _drive.PointControlVector(
+            const CommandVector control = _drive.PointControlVector(
                 _commandedSpeedMps,
                 CommandedYawRateRadps(),
                 MazeMap::CommandPD::StateWheelOmegaPD);
@@ -782,7 +782,7 @@ namespace MazeMap::App::Internal
         case Phase::FlashyMoves:
         {
             bool done = false;
-            const LoopController::ControlVector control = _driveService.GetNextControls(done);
+            const CommandVector control = _driveService.GetNextControls(done);
             if (!done)
             {
                 return control;
@@ -791,17 +791,17 @@ namespace MazeMap::App::Internal
             if (_flashTurnsStarted >= kShowcasingDonutFlashTurnCount)
             {
                 _phase = Phase::Complete;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             if (!BeginFlashTurn(kShowcasingDonutFlashTurnAngleRad))
             {
                 _runtime.FailActiveMode("Showcasing donut flashy turn could not start");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             ++_flashTurnsStarted;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         case Phase::Complete:
@@ -836,12 +836,12 @@ namespace MazeMap::App::Internal
                     boundaryLoopController.HaltExecutionEndProgram();
                 },
                 this);
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::Idle:
         default:
             _runtime.FailActiveMode("Showcasing donut phase was not initialized");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
     }
 

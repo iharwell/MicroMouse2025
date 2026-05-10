@@ -2,11 +2,11 @@
 // Defines the concrete runtime motion owner that produces wheel/motor commands, maintains odometry,
 // and runs the closed-loop wheel/pose control machinery. This is not the planned higher-level
 // "Drive" translation layer; it is the low-level destination for concrete motion commands.
+#include "CommandVector.h"
 #include "CommandPD.h"
 #include "DriveTelemetry.h"
 #include "EncoderObs.h"
 #include "LaunchAssistProfile.h"
-#include "LoopController.h"
 #include "Maneuver.h"
 #include "MazeMapRuntimeCore.h"
 #include "MotorEncoderDrive.h"
@@ -185,9 +185,9 @@ public:
             std::isfinite(snapshot.accelBodyYMps2);
     }
 
-    MazeMap::App::Internal::LoopController::ControlVector CurrentControlVector() const noexcept
+    MazeMap::App::Internal::CommandVector CurrentControlVector() const noexcept
     {
-        return MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(
+        return MazeMap::App::Internal::CommandVector(
             _leftMotor.getDriveCommand(),
             _rightMotor.getDriveCommand());
     }
@@ -220,7 +220,7 @@ public:
     // Supported `pd` flags here: `StateAccelerationPD`, `IMUForwardAccel`.
     // Any heading, yaw-rate, wheel-speed, encoder, or lateral-accel selection has no explicit target
     // on this overload and therefore defaults to hold/no-op behavior.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaCommand(
+    EXPORT MazeMap::App::Internal::CommandVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -231,7 +231,7 @@ public:
     // Supported `pd` flags here: `StateAccelerationPD`, `IMUForwardAccel`.
     // This overload does not expose a separate yaw-acceleration feedback-source selector, so heading,
     // yaw-rate, wheel-speed, encoder, and lateral-accel flags remain hold/no-op selections.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaCommand(
+    EXPORT MazeMap::App::Internal::CommandVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
         float presentYawRateRadps,
@@ -242,7 +242,7 @@ public:
     // acceleration. This is the single-axis rotational variant of `DeltaCommand`.
     // No additional `pd` feedback target is currently exposed on this overload; every flag presently
     // behaves the same as `RawCommand`.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector DeltaYawRateCommand(
+    EXPORT MazeMap::App::Internal::CommandVector DeltaYawRateCommand(
         float presentYawRateRadps,
         float desiredYawAccelRadps2,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -254,7 +254,7 @@ public:
     // Supported `pd` flags here: `StateVelocityPD`, `StateWheelOmegaPD`, `EncoderVelocity`.
     // This overload does not set a new heading, yaw-rate, longitudinal-acceleration, or
     // lateral-acceleration target.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
+    EXPORT MazeMap::App::Internal::CommandVector PointCommand(
         float desiredLinearSpeedMps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
@@ -264,14 +264,14 @@ public:
     // Supported `pd` flags here: `StateVelocityPD`, `StateYawPD`, `StateWheelOmegaPD`,
     // `EncoderVelocity`, `IMUYaw`.
     // This overload does not set a heading, longitudinal-acceleration, or lateral-acceleration target.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
+    EXPORT MazeMap::App::Internal::CommandVector PointCommand(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
     // PointControlVector resolves the same coupled target as `PointCommand`. It remains as the
     // stable entry point for loop-controller call sites that already operate in control-vector space.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVector(
+    EXPORT MazeMap::App::Internal::CommandVector PointControlVector(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
@@ -279,7 +279,7 @@ public:
     // PointCommandWithHeadingTarget resolves the same coupled velocity/yaw-rate target as
     // `PointCommand`, but it also lets the caller add DriveBase-owned heading correction in the
     // same composed command so feedforward/feedback decomposition remains authoritative here.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommandWithHeadingTarget(
+    EXPORT MazeMap::App::Internal::CommandVector PointCommandWithHeadingTarget(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         float targetYawRad,
@@ -288,7 +288,7 @@ public:
 
     // PointControlVectorWithHeadingTarget is the stable control-vector-space wrapper for
     // `PointCommandWithHeadingTarget`.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVectorWithHeadingTarget(
+    EXPORT MazeMap::App::Internal::CommandVector PointControlVectorWithHeadingTarget(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         float targetYawRad,
@@ -299,13 +299,13 @@ public:
     // maneuver execution should target this overload instead of rebuilding scalar command bridges.
     // It exposes the same `pd` selections as the scalar `(desiredLinearSpeedMps, desiredYawRateRadps)`
     // overload because it forwards directly to that entry point.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointCommand(
+    EXPORT MazeMap::App::Internal::CommandVector PointCommand(
         const MazeMap::ManeuverPoint& point,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
     // PointControlVector resolves the same maneuver-point target as `PointCommand`. It remains as the
     // stable entry point for loop-controller call sites that already operate in control-vector space.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointControlVector(
+    EXPORT MazeMap::App::Internal::CommandVector PointControlVector(
         const MazeMap::ManeuverPoint& point,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
@@ -315,7 +315,7 @@ public:
     // Supported `pd` flags here: `StateYawPD`, `StateWheelOmegaPD`, `EncoderVelocity`, `IMUYaw`.
     // This overload does not set a new linear-speed, heading, longitudinal-acceleration, or
     // lateral-acceleration target.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector PointYawRateCommand(
+    EXPORT MazeMap::App::Internal::CommandVector PointYawRateCommand(
         float desiredYawRateRadps,
         MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
 
@@ -327,17 +327,17 @@ public:
     // `IMUForwardAccel`, `IMULateralAccel`.
     // `IMULateralAccel` still requires a nonzero present or target speed so the requested lateral
     // acceleration can be converted into a yaw-rate correction.
-    EXPORT MazeMap::App::Internal::LoopController::ControlVector FeedbackCommand(
+    EXPORT MazeMap::App::Internal::CommandVector FeedbackCommand(
         float setpoint,
         MazeMap::CommandPD pd) const;
 
     EXPORT void CommandGenerated(
-        const MazeMap::App::Internal::LoopController::ControlVector& command,
+        const MazeMap::App::Internal::CommandVector& command,
         float linearSpeedMps,
         float angularSpeedRadps,
         bool applyLaunchAssist = true);
 
-    EXPORT void CommandOpenLoopRaw(const MazeMap::App::Internal::LoopController::ControlVector& command);
+    EXPORT void CommandOpenLoopRaw(const MazeMap::App::Internal::CommandVector& command);
 
     void Brake()
     {
@@ -424,13 +424,13 @@ public:
     }
 
     DriveTelemetry GetGeneratedTelemetry(
-        const MazeMap::App::Internal::LoopController::ControlVector& command) const noexcept
+        const MazeMap::App::Internal::CommandVector& command) const noexcept
     {
         DriveTelemetry telemetry{};
         const MazeMap::SrUkfCore& ukf = _estimator.ukf();
         const MazeMap::VehicleState::StateMatrix covariance = _estimator.ukf().covariance();
-        telemetry.leftDriveCommand = command.leftMotorPwm;
-        telemetry.rightDriveCommand = command.rightMotorPwm;
+        telemetry.leftDriveCommand = command.LeftMotorPwm();
+        telemetry.rightDriveCommand = command.RightMotorPwm();
         telemetry.commandedLinearSpeedMps = _lastLinearCommandMps;
         telemetry.commandedAngularSpeedRadps = _lastAngularCommandRadps;
         telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
@@ -512,12 +512,12 @@ public:
     DriveTelemetry GetTelemetry() const
     {
         DriveTelemetry telemetry{};
-        const MazeMap::App::Internal::LoopController::ControlVector appliedControl = CurrentControlVector();
+        const MazeMap::App::Internal::CommandVector appliedControl = CurrentControlVector();
         const int32_t pendingLeftCounts = _leftMotor.getEncoderCount();
         const int32_t pendingRightCounts = _rightMotor.getEncoderCount();
         const MazeMap::VehicleState::StateMatrix covariance = _estimator.ukf().covariance();
-        telemetry.leftDriveCommand = appliedControl.leftMotorPwm;
-        telemetry.rightDriveCommand = appliedControl.rightMotorPwm;
+        telemetry.leftDriveCommand = appliedControl.LeftMotorPwm();
+        telemetry.rightDriveCommand = appliedControl.RightMotorPwm();
         telemetry.commandedLinearSpeedMps = _lastLinearCommandMps;
         telemetry.commandedAngularSpeedRadps = _lastAngularCommandRadps;
         telemetry.leftFeedforwardCommand = _lastLeftFeedforwardCommand;
@@ -779,20 +779,6 @@ private:
 
     static float ResolveCommandResponseTimeS() noexcept;
 
-    static MazeMap::App::Internal::LoopController::ControlVector AddDriveCommands(
-        const MazeMap::App::Internal::LoopController::ControlVector& lhs,
-        const MazeMap::App::Internal::LoopController::ControlVector& rhs) noexcept;
-
-    static MazeMap::App::Internal::LoopController::ControlVector SubtractDriveCommands(
-        const MazeMap::App::Internal::LoopController::ControlVector& lhs,
-        const MazeMap::App::Internal::LoopController::ControlVector& rhs) noexcept;
-
-    static float AverageDriveCommand(
-        const MazeMap::App::Internal::LoopController::ControlVector& command) noexcept;
-
-    static float DeltaDriveCommand(
-        const MazeMap::App::Internal::LoopController::ControlVector& command) noexcept;
-
     static float ResolvePositiveOrZero(float value) noexcept;
 
     static float ClampMagnitude(float value, float limit) noexcept;
@@ -823,34 +809,34 @@ private:
         float& desiredLongitudinalAccelMps2,
         float& desiredYawAccelRadps2) const noexcept;
 
-    MazeMap::App::Internal::LoopController::ControlVector ResolveRawAccelerationCommand(
+    MazeMap::App::Internal::CommandVector ResolveRawAccelerationCommand(
         float presentLinearSpeedMps,
         float presentYawRateRadps,
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2) const;
 
-    MazeMap::App::Internal::LoopController::ControlVector ResolveRawVelocityTargetCommand(
+    MazeMap::App::Internal::CommandVector ResolveRawVelocityTargetCommand(
         const CommandContext& context,
         float desiredLinearSpeedMps,
         float desiredYawRateRadps) const;
 
-    MazeMap::App::Internal::LoopController::ControlVector ResolveLongitudinalCorrectionCommand(
+    MazeMap::App::Internal::CommandVector ResolveLongitudinalCorrectionCommand(
         const CommandContext& context,
         float desiredLongitudinalAccelCorrectionMps2) const;
 
-    MazeMap::App::Internal::LoopController::ControlVector ResolveYawCorrectionCommand(
+    MazeMap::App::Internal::CommandVector ResolveYawCorrectionCommand(
         const CommandContext& context,
         float desiredYawAccelCorrectionRadps2) const;
 
-    MazeMap::App::Internal::LoopController::ControlVector ComposeGeneratedCommand(
-        const MazeMap::App::Internal::LoopController::ControlVector& baseCommand,
+    MazeMap::App::Internal::CommandVector ComposeGeneratedCommand(
+        const MazeMap::App::Internal::CommandVector& baseCommand,
         const CommandContext& context,
         const CommandTargets& targets,
         MazeMap::CommandPD pd) const;
 
     void CacheGeneratedCommandTelemetry(
-        const MazeMap::App::Internal::LoopController::ControlVector& feedforwardCommand,
-        const MazeMap::App::Internal::LoopController::ControlVector& feedbackCommand) const noexcept;
+        const MazeMap::App::Internal::CommandVector& feedforwardCommand,
+        const MazeMap::App::Internal::CommandVector& feedbackCommand) const noexcept;
 
     float ResolveStraightHeadingYawRateCommand(
         float targetYawRad,

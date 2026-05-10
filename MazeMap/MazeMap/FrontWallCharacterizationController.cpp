@@ -115,6 +115,7 @@ public:
     }
 
 private:
+    using CommandVector = MazeMap::App::Internal::CommandVector;
     using LoopController = MazeMap::App::Internal::LoopController;
     enum class Phase : std::uint8_t
     {
@@ -302,21 +303,21 @@ private:
         _phase = Phase::LaunchPostCaptureSettle;
     }
 
-    LoopController::ControlVector PollDrivePhase(
+    CommandVector PollDrivePhase(
         const Phase nextPhase)
     {
         bool done = false;
-        const LoopController::ControlVector control = _driveService.GetNextControls(done);
+        const CommandVector control = _driveService.GetNextControls(done);
         if (!done)
         {
             return control;
         }
 
         _phase = nextPhase;
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
-    LoopController::ControlVector RunTick(
+    CommandVector RunTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController) override
@@ -333,7 +334,7 @@ private:
             {
                 _phase = Phase::RunStartupSettle;
             }
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunStartupSettle:
             return PollDrivePhase(Phase::Capture);
@@ -350,12 +351,12 @@ private:
             {
                 _phase = Phase::RunPostCaptureSettle;
             }
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::RunPostCaptureSettle:
         {
             bool done = false;
-            const LoopController::ControlVector control = _driveService.GetNextControls(done);
+            const CommandVector control = _driveService.GetNextControls(done);
             if (!done)
             {
                 return control;
@@ -364,20 +365,20 @@ private:
             _phase = Phase::Complete;
             FinalizeSuccessfulRun();
             loopController.HaltExecutionEndProgram();
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         case Phase::Complete:
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
 
         case Phase::Idle:
         default:
             _runtime.FailActiveMode("Front wall characterization phase was not initialized");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
     }
 
-    LoopController::ControlVector CaptureCurveTick(
+    CommandVector CaptureCurveTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -389,7 +390,7 @@ private:
             _captureStorage.terminalDistanceM = traveledDistanceM;
             _pauseAction = PauseAction::PersistAndExport;
             loopController.RequestPause(&FrontWallCharacterizationController::PauseThunk, this);
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         };
 
         const SensorSnapshot& snapshot = state.GetSensorSnapshot();
@@ -398,7 +399,7 @@ private:
             if (!StartCaptureCurvePhase())
             {
                 _runtime.FailActiveMode("Front wall characterization capture phase start failed");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             _captureStarted = true;
@@ -467,7 +468,7 @@ private:
         }
 
         bool driveDone = false;
-        const LoopController::ControlVector control = _driveService.GetNextControls(driveDone);
+        const CommandVector control = _driveService.GetNextControls(driveDone);
         if (driveDone)
         {
             return requestPersistPause(traveledDistanceM, "drive_complete");

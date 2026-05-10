@@ -41,11 +41,11 @@ namespace MazeMap
             return BuildUkfCovariance(0.02f, 0.05f, 0.20f, 0.15f, 0.25f, 0.50f, 0.05f);
         }
 
-        App::Internal::LoopController::ControlVector BuildPlanarAccelUpdateTestControl(const PlantParams& params) noexcept
+        App::Internal::CommandVector BuildPlanarAccelUpdateTestControl(const PlantParams& params) noexcept
         {
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.26f;
-            control.rightMotorPwm = 0.23f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.26f);
+            control.SetRightMotorPwm(0.23f);
             return control;
         }
 
@@ -53,7 +53,7 @@ namespace MazeMap
             SrUkfCore& core,
             const VehicleState::StateVector& initialState,
             const VehicleState::StateMatrix& initialCovariance,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV)
         {
@@ -71,7 +71,7 @@ namespace MazeMap
         ImuAccelObs BuildPlanarAccelObservation(
             const PlantModel& plant,
             const VehicleState::StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             const PlantModel::PreparedParams& prepared,
             float fanDutyCycle,
             float batteryVoltageV,
@@ -181,7 +181,7 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreRegimeHelpersExposeSpecThresholds)
         {
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             Assert::IsTrue(SrUkfCore::IsStationaryCandidate(
                 control,
@@ -248,9 +248,9 @@ namespace MazeMap
                 BuildUkfCovariance(0.001f, 0.01f, 0.04f, 0.04f, 0.20f, 10.0f, 0.02f);
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.60f;
-            control.rightMotorPwm = -0.60f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.60f);
+            control.SetRightMotorPwm(-0.60f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -380,9 +380,9 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.60f;
-            control.rightMotorPwm = -0.60f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.60f);
+            control.SetRightMotorPwm(-0.60f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -418,9 +418,9 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.25f;
-            control.rightMotorPwm = 0.25f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.25f);
+            control.SetRightMotorPwm(0.25f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -464,16 +464,16 @@ namespace MazeMap
                 initialState,
                 BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.05f, 0.30f, 0.03f)));
 
-            App::Internal::LoopController::ControlVector control{};
-            control.leftMotorPwm = 0.20f;
-            control.rightMotorPwm = 0.20f;
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.20f);
+            control.SetRightMotorPwm(0.20f);
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
             core.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
             Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
 
-            control.leftMotorPwm = -0.20f;
-            control.rightMotorPwm = -0.20f;
+            control.SetLeftMotorPwm(-0.20f);
+            control.SetRightMotorPwm(-0.20f);
             core.setRuntimeContext(-0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
             Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
 
@@ -601,7 +601,7 @@ namespace MazeMap
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
             const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
-            const App::Internal::LoopController::ControlVector control = BuildPlanarAccelUpdateTestControl(params);
+            const App::Internal::CommandVector control = BuildPlanarAccelUpdateTestControl(params);
 
             SrUkfCore mergedCore(params);
             SrUkfCore sequentialCore(params);
@@ -661,7 +661,7 @@ namespace MazeMap
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
             const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
-            const App::Internal::LoopController::ControlVector control = BuildPlanarAccelUpdateTestControl(params);
+            const App::Internal::CommandVector control = BuildPlanarAccelUpdateTestControl(params);
 
             SrUkfCore baselineCore(params);
             SrUkfCore lateralPerturbedCore(params);

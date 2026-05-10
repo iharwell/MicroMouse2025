@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "Defines.h"
 #include "DiagnosticConfig.h"
 #include "Drive.h"
@@ -167,7 +168,7 @@ namespace MazeMap::App::Internal
         OpenFloorMeasurementController& operator=(OpenFloorMeasurementController&&) = delete;
 
         void SetupMode() override;
-        LoopController::ControlVector RunTick(
+        CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) override;
@@ -180,7 +181,7 @@ namespace MazeMap::App::Internal
             kOpenFloorSmoothSpeedBinsMps.size() * kSmoothPhasePrimitiveCountPerSpeed;
         static constexpr std::size_t kLoopPhasePrimitiveCount = 8U;
 
-        using StageTick = LoopController::ControlVector (OpenFloorMeasurementController::*)(
+        using StageTick = CommandVector (OpenFloorMeasurementController::*)(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
@@ -207,7 +208,7 @@ namespace MazeMap::App::Internal
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept = 0;
             virtual bool EnsureReady(OpenFloorMeasurementController& controller);
-            virtual LoopController::ControlVector Tick(
+            virtual CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -230,7 +231,7 @@ namespace MazeMap::App::Internal
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -258,7 +259,7 @@ namespace MazeMap::App::Internal
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -302,7 +303,7 @@ namespace MazeMap::App::Internal
             {
                 return (0.5f + speedIndex * 0.05f) * ((primitiveIndex == 0U) ? 1.0f : -1.0f);
             }
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -323,7 +324,7 @@ namespace MazeMap::App::Internal
 					// Since the actual drive values are already calculated for logging purposes,
                     // we can just pull them directly with the sign naturally providing the direction.
                     const float commandVal = SpeedBinValue(primitiveIndex, speedIndex);
-                    return LoopController::ControlVector::RawMotorPwm(commandVal, -commandVal);
+                    return CommandVector(commandVal, -commandVal);
                 }
                 else
                 {
@@ -354,7 +355,7 @@ namespace MazeMap::App::Internal
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -382,7 +383,7 @@ namespace MazeMap::App::Internal
             float SpeedBinValue(
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -413,7 +414,7 @@ namespace MazeMap::App::Internal
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
             bool EnsureReady(OpenFloorMeasurementController& controller) override;
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -464,7 +465,7 @@ namespace MazeMap::App::Internal
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex) const noexcept override;
             bool EnsureReady(OpenFloorMeasurementController& controller) override;
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 std::uint16_t primitiveIndex,
                 std::uint8_t speedIndex,
@@ -488,7 +489,7 @@ namespace MazeMap::App::Internal
         {
         public:
             bool OpenTimingLog(OpenFloorMeasurementController& controller);
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
                 LoopController& loopController);
@@ -511,7 +512,7 @@ namespace MazeMap::App::Internal
 
             bool OpenMainLog(OpenFloorMeasurementController& controller);
             bool IsCurrentSlotLastInRegime() const noexcept;
-            LoopController::ControlVector Tick(
+            CommandVector Tick(
                 OpenFloorMeasurementController& controller,
                 const MazeMap::VehicleState& state,
                 LoopController& loopController);
@@ -554,11 +555,11 @@ namespace MazeMap::App::Internal
         bool SelectorRemoved() const noexcept;
         void FinalizeSuccessfulRun() noexcept;
         bool ActiveMainStageSlotEndsRegime() const noexcept;
-        LoopController::ControlVector TimingStageTick(
+        CommandVector TimingStageTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
-        LoopController::ControlVector MainStageTick(
+        CommandVector MainStageTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);

@@ -195,6 +195,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CellTest.cpp" />
+    <ClCompile Include="CommandVectorTest.cpp" />
     <ClCompile Include="DriveBaseTest.cpp" />
     <ClCompile Include="DriveManeuverTests.cpp" />
     <ClCompile Include="DirectionTest.cpp" />

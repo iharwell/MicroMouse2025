@@ -4,7 +4,7 @@
 #include "MazeMapRuntimeCore.h"
 #include "EncoderObs.h"
 #include "ImuAccelObs.h"
-#include "LoopController.h"
+#include "CommandVector.h"
 #include "Maze.h"
 #include "MapEvidenceUpdater.h"
 #include "SensorMount.h"
@@ -55,14 +55,14 @@ namespace MazeMap
 
         bool predict(
             float dt,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) noexcept;
 
         template <typename LoopHook>
         bool predict(
             float dt,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             LoopHook&& loopHook) noexcept

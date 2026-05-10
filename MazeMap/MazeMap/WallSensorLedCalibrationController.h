@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CommandVector.h"
 #include "Defines.h"
 #include "LoopController.h"
 #include "IApplicationMode.h"
@@ -21,7 +22,7 @@ namespace MazeMap::App::Internal
         explicit WallSensorLedCalibrationController(SharedRobotRuntime& runtime);
 
         void SetupMode() override;
-        LoopController::ControlVector RunTick(
+        CommandVector RunTick(
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) override;
@@ -41,7 +42,7 @@ namespace MazeMap::App::Internal
         static void SetAllLeds(bool enabled);
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept;
-        LoopController::ControlVector OnModeWork(LoopController& loopController);
+        CommandVector OnModeWork(LoopController& loopController);
         void OnPauseGranted(LoopController& loopController);
         void ToggleActiveLeds();
         void PrintFrequency(const char* label, std::uint32_t halfPeriodUs);

@@ -75,7 +75,7 @@ namespace MazeMap
         const PlantModel& plant,
         const PlantModel::PreparedParams& prepared,
         const VehicleState::StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         float dtSeconds) noexcept

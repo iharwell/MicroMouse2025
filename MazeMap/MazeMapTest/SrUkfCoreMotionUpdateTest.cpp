@@ -13,7 +13,7 @@ namespace MazeMap
     namespace
     {
         constexpr float kZeroVelocityToleranceMps = 0.008f;
-        using ControlVector = App::Internal::LoopController::ControlVector;
+        using CommandVector = App::Internal::CommandVector;
 
         VehicleState::StateVector PredictStationarySplitCommandStateAfterPivotPredictSequence()
         {
@@ -35,7 +35,7 @@ namespace MazeMap
                 return VehicleState::StateVector::Constant(std::numeric_limits<float>::quiet_NaN());
             }
 
-            const ControlVector control = ControlVector::RawMotorPwm(0.60f, -0.60f);
+            const CommandVector control = CommandVector(0.60f, -0.60f);
 
             constexpr float dtSeconds = 0.001f;
             constexpr int kPredictSteps = 500;
@@ -82,7 +82,7 @@ namespace MazeMap
                 BuildUkfCovariance(0.001f, 0.01f, 0.005f, 0.005f, 1.0f, 0.05f, 0.02f);
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -147,7 +147,7 @@ namespace MazeMap
                 BuildUkfCovariance(0.001f, 0.01f, 0.005f, 0.005f, 1.0f, 0.05f, 0.02f);
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             const float controlFanDutyCycle = 0.80f;
             const float controlBatteryVoltageV = params.supplyVoltageV;
 
@@ -202,7 +202,7 @@ namespace MazeMap
                 return (static_cast<float>(counts) * distancePerCountM) / (params.wheelRadiusM * dtSeconds);
             };
             SrUkfCore core(params);
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             constexpr float dt = 0.001f;
             const float fanDutyCycle = 0.80f;
             const float batteryVoltageV = params.supplyVoltageV;
@@ -343,7 +343,7 @@ namespace MazeMap
         {
             SrUkfCore core;
             const PlantParams params = PlantParams::Default();
-            const ControlVector control = ControlVector::RawMotorPwm(0.18f, 0.18f);
+            const CommandVector control = CommandVector(0.18f, 0.18f);
             const float fanDutyCycle = 0.80f;
             const float batteryVoltageV = params.supplyVoltageV;
             EncoderObs encoder{};
@@ -374,7 +374,7 @@ namespace MazeMap
         {
             SrUkfCore core;
             const PlantParams params = PlantParams::Default();
-            const ControlVector control = ControlVector::RawMotorPwm(0.5f, 0.5f);
+            const CommandVector control = CommandVector(0.5f, 0.5f);
             const float fanDutyCycle = 0.80f;
             const float batteryVoltageV = params.supplyVoltageV;
             EncoderObs encoder{};
@@ -477,7 +477,7 @@ namespace MazeMap
                     0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            const ControlVector control = ControlVector::RawMotorPwm(0.08f, 0.08f);
+            const CommandVector control = CommandVector(0.08f, 0.08f);
             const float fanDutyCycle = 0.80f;
             const float batteryVoltageV = params.supplyVoltageV;
 
@@ -528,7 +528,7 @@ namespace MazeMap
                     initialWheelSpeedRadps);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            const ControlVector control = ControlVector::RawMotorPwm(0.30f, 0.60f);
+            const CommandVector control = CommandVector(0.30f, 0.60f);
             const float fanDutyCycle = 0.80f;
             const float batteryVoltageV = params.supplyVoltageV;
 
@@ -753,7 +753,7 @@ namespace MazeMap
             const PlantParams& params = PlantParams::Default();
             constexpr float forwardVelocityTargetMps = 1.0f;
             constexpr float dt = 0.001f;
-            auto core = RunUKFCycles(2000, App::Internal::LoopController::ControlVector{});
+            auto core = RunUKFCycles(2000, App::Internal::CommandVector{});
             SyntheticEncoderRemainderState syntheticEncoderState{};
 
             for (int step = 0; step < 3000; ++step)
@@ -847,7 +847,7 @@ namespace MazeMap
 
             const float beforeVarianceRadps2 = core.covariance()(VehicleState::kBgz, VehicleState::kBgz);
 
-            const ControlVector control = ControlVector::RawMotorPwm(0.16f, 0.16f);
+            const CommandVector control = CommandVector(0.16f, 0.16f);
             const float fanDutyCycle = 0.80f;
             const float batteryVoltageV = params.supplyVoltageV;
 
@@ -877,7 +877,7 @@ namespace MazeMap
                     0.01f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.002f, 0.002f, 0.003f, 0.003f, 0.003f, 0.003f, 0.002f)));
 
-            const ControlVector control = ControlVector::RawMotorPwm(0.19f, 0.17f);
+            const CommandVector control = CommandVector(0.19f, 0.17f);
             const float fanDutyCycle = 0.80f;
             const float batteryVoltageV = params.supplyVoltageV;
             constexpr float dt = 0.002f;
@@ -917,9 +917,9 @@ namespace MazeMap
                     0.01f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.003f, 0.003f, 0.004f, 0.004f, 0.004f, 0.004f, 0.002f)));
 
-            App::Internal::LoopController::ControlVector firstControl{};
-            firstControl.leftMotorPwm = 0.08f;
-            firstControl.rightMotorPwm = 0.06f;
+            App::Internal::CommandVector firstControl{};
+            firstControl.SetLeftMotorPwm(0.08f);
+            firstControl.SetRightMotorPwm(0.06f);
             const float firstControlFanDutyCycle = 0.80f;
             const float firstControlBatteryVoltageV = params.supplyVoltageV;
 
@@ -949,9 +949,9 @@ namespace MazeMap
                 1.0e-6f);
 
             const VehicleState::StateVector stateBeforeSecondPredict = core.state();
-            App::Internal::LoopController::ControlVector secondControl{};
-            secondControl.leftMotorPwm = 0.31f;
-            secondControl.rightMotorPwm = 0.27f;
+            App::Internal::CommandVector secondControl{};
+            secondControl.SetLeftMotorPwm(0.31f);
+            secondControl.SetRightMotorPwm(0.27f);
             const float secondControlFanDutyCycle = 0.80f;
             const float secondControlBatteryVoltageV = params.supplyVoltageV;
 

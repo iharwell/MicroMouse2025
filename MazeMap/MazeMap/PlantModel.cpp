@@ -25,7 +25,7 @@ namespace
     using MazeMap::SlipTargets;
     using MazeMap::VehicleState;
     using MazeMap::WheelKinematics;
-    using ControlVector = MazeMap::App::Internal::LoopController::ControlVector;
+    using CommandVector = MazeMap::App::Internal::CommandVector;
 
     using PreparedParams = PlantModel::PreparedParams;
 
@@ -57,9 +57,9 @@ namespace
         return (std::clamp)(value, 0.0f, 1.0f);
     }
 
-    inline ControlVector ZeroControlVector() noexcept
+    inline CommandVector ZeroControlVector() noexcept
     {
-        return ControlVector::RawMotorPwm(0.0f, 0.0f);
+        return CommandVector(0.0f, 0.0f);
     }
 
     inline float SignedDirectionFast(float preferredValue, float fallbackValue) noexcept
@@ -970,18 +970,18 @@ namespace
         solution.rightContactTorqueNm = rightContactTorqueNm;
         solution.leftWheelTorqueNm = leftWheelTorqueNm;
         solution.rightWheelTorqueNm = rightWheelTorqueNm;
-        solution.control.leftMotorPwm =
+        solution.control.SetLeftMotorPwm(
             DriveCommandFromTorqueFast(
                 leftWheelTorqueNm,
                 leftWheelSpeedRadps,
                 solution.batteryVoltageV,
-                params);
-        solution.control.rightMotorPwm =
+                params));
+        solution.control.SetRightMotorPwm(
             DriveCommandFromTorqueFast(
                 rightWheelTorqueNm,
                 rightWheelSpeedRadps,
                 solution.batteryVoltageV,
-                params);
+                params));
         solution.commandedLongitudinalAccelMps2 = achievedLongitudinalAccelMps2;
         solution.commandedYawAccelRadps2 = achievedYawAccelRadps2;
     }
@@ -1034,7 +1034,7 @@ namespace
 
     struct VelocityTargetExactSolution
     {
-        ControlVector control = ZeroControlVector();
+        CommandVector control = ZeroControlVector();
         float fanDutyCycle = 0.80f;
         float batteryVoltageV = 8.4f;
         float leftSlipRatio = 0.0f;
@@ -1730,18 +1730,18 @@ namespace
         solution.rightWheelTorqueNm = rightWheelTorqueNm;
         solution.leftSlipRatio = leftContactForceN * params.invLongitudinalTireStiffnessN;
         solution.rightSlipRatio = rightContactForceN * params.invLongitudinalTireStiffnessN;
-        solution.control.leftMotorPwm =
+        solution.control.SetLeftMotorPwm(
             DriveCommandFromTorqueFast(
                 leftWheelTorqueNm,
                 leftWheelSpeedRadps,
                 solution.batteryVoltageV,
-                params);
-        solution.control.rightMotorPwm =
+                params));
+        solution.control.SetRightMotorPwm(
             DriveCommandFromTorqueFast(
                 rightWheelTorqueNm,
                 rightWheelSpeedRadps,
                 solution.batteryVoltageV,
-                params);
+                params));
         solution.commandedLongitudinalAccelMps2 =
             (leftContactForceN + rightContactForceN) * params.invLongitudinalMassKg;
         solution.commandedYawAccelRadps2 =
@@ -1755,14 +1755,14 @@ namespace
             (std::fabs(solution.longitudinalAccelErrorMps2) <= 0.05f) &&
             (std::fabs(solution.yawAccelErrorRadps2) <= 0.2f);
         solution.valid =
-            std::isfinite(solution.control.leftMotorPwm) &&
-            std::isfinite(solution.control.rightMotorPwm) &&
+            std::isfinite(solution.control.LeftMotorPwm()) &&
+            std::isfinite(solution.control.RightMotorPwm()) &&
             std::isfinite(solution.commandedLongitudinalAccelMps2) &&
             std::isfinite(solution.commandedYawAccelRadps2) &&
             std::isfinite(solution.longitudinalAccelErrorMps2) &&
             std::isfinite(solution.yawAccelErrorRadps2) &&
-            (std::fabs(solution.control.leftMotorPwm) < 0.999f) &&
-            (std::fabs(solution.control.rightMotorPwm) < 0.999f);
+            (std::fabs(solution.control.LeftMotorPwm()) < 0.999f) &&
+            (std::fabs(solution.control.RightMotorPwm()) < 0.999f);
         return solution.valid;
     }
 
@@ -2065,7 +2065,7 @@ namespace MazeMap
 
     PlantDerivatives PlantModel::forwardStep(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         const PlantParams& params) const noexcept
@@ -2076,18 +2076,18 @@ namespace MazeMap
 
     PlantDerivatives PlantModel::forwardStep(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         const PreparedParams& params) const noexcept
     {
         const float resolvedBatteryVoltageV = EffectiveBatteryVoltage(batteryVoltageV, params);
         const float leftDriveTorqueNm =
-            DriveTorqueFromCommandFast(control.leftMotorPwm, state(VehicleState::kOmegaL), resolvedBatteryVoltageV, params);
+            DriveTorqueFromCommandFast(control.LeftMotorPwm(), state(VehicleState::kOmegaL), resolvedBatteryVoltageV, params);
         const float rightDriveTorqueNm =
-            DriveTorqueFromCommandFast(control.rightMotorPwm, state(VehicleState::kOmegaR), resolvedBatteryVoltageV, params);
+            DriveTorqueFromCommandFast(control.RightMotorPwm(), state(VehicleState::kOmegaR), resolvedBatteryVoltageV, params);
         const float activityNorm =
-            (std::max)(std::fabs(control.leftMotorPwm), std::fabs(control.rightMotorPwm));
+            (std::max)(std::fabs(control.LeftMotorPwm()), std::fabs(control.RightMotorPwm()));
         return evaluateAppliedBankTorqueStep(
             state,
             leftDriveTorqueNm,
@@ -2634,14 +2634,14 @@ namespace MazeMap
     {
         return tireForces(
             state,
-            App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f),
+            App::Internal::CommandVector(0.0f, 0.0f),
             0.80f,
             params);
     }
 
     ContactForces PlantModel::tireForces(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         const PlantParams& params) const noexcept
     {
@@ -2651,7 +2651,7 @@ namespace MazeMap
 
     ContactForces PlantModel::tireForces(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         const PreparedParams& params) const noexcept
     {
@@ -2661,7 +2661,7 @@ namespace MazeMap
         const float omegaLeftRadps = state(VehicleState::kOmegaL);
         const float omegaRightRadps = state(VehicleState::kOmegaR);
         const float commandNorm =
-            (std::max)(std::fabs(control.leftMotorPwm), std::fabs(control.rightMotorPwm));
+            (std::max)(std::fabs(control.LeftMotorPwm()), std::fabs(control.RightMotorPwm()));
 
         const float speedNormMps =
             ComputeSpeedNormMps(
@@ -2698,7 +2698,7 @@ namespace MazeMap
 
     Eigen::Vector2f PlantModel::imuPlanarAcceleration(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         const PlantParams& params) const noexcept
@@ -2709,7 +2709,7 @@ namespace MazeMap
 
     Eigen::Vector2f PlantModel::imuPlanarAcceleration(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         const PreparedParams& params) const noexcept
@@ -2719,7 +2719,7 @@ namespace MazeMap
 
     PlantModel::StateVector PlantModel::integrate(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         float dt,
@@ -2731,7 +2731,7 @@ namespace MazeMap
 
     PlantModel::StateVector PlantModel::integrate(
         const StateVector& state,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         float dt,
@@ -2743,7 +2743,7 @@ namespace MazeMap
         }
 
         const float commandNorm =
-            (std::max)(std::fabs(control.leftMotorPwm), std::fabs(control.rightMotorPwm));
+            (std::max)(std::fabs(control.LeftMotorPwm()), std::fabs(control.RightMotorPwm()));
         const PlantDerivatives derivatives = forwardStep(state, control, fanDutyCycle, batteryVoltageV, params);
         StateVector implicitState = state + (dt * derivatives.stateDot);
         implicitState(VehicleState::kPsi) = VehicleState::NormalizeAngle(implicitState(VehicleState::kPsi));
@@ -3814,7 +3814,7 @@ namespace MazeMap
                 request.currentRightWheelSpeedRadps,
                 prepared);
 
-        const ControlVector neutralControl = ControlVector::RawMotorPwm(0.0f, 0.0f);
+        const CommandVector neutralControl = CommandVector(0.0f, 0.0f);
         const PlantDerivatives baselineDerivatives =
             forwardStep(
                 operatingState,
@@ -4006,8 +4006,8 @@ namespace MazeMap
                 solution);
         solution.valid =
             predictionValid &&
-            std::isfinite(solution.control.leftMotorPwm) &&
-            std::isfinite(solution.control.rightMotorPwm) &&
+            std::isfinite(solution.control.LeftMotorPwm()) &&
+            std::isfinite(solution.control.RightMotorPwm()) &&
             std::isfinite(solution.leftWheelTorqueNm) &&
             std::isfinite(solution.rightWheelTorqueNm) &&
             std::isfinite(solution.leftWheelSpeedRadps) &&
@@ -4041,7 +4041,7 @@ namespace MazeMap
 
     AppliedTorqueEstimate PlantModel::estimateAppliedTorque(
         const StateVector& currentState,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         const PlantParams& params,
         float batteryVoltageV) const noexcept
     {
@@ -4050,7 +4050,7 @@ namespace MazeMap
 
     AppliedTorqueEstimate PlantModel::estimateAppliedTorque(
         const StateVector& currentState,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         const PreparedParams& params,
         float batteryVoltageV) const noexcept
     {
@@ -4062,8 +4062,8 @@ namespace MazeMap
             std::isfinite(currentState(VehicleState::kOmegaL)) ? currentState(VehicleState::kOmegaL) : 0.0f;
         const float rightWheelSpeedRadps =
             std::isfinite(currentState(VehicleState::kOmegaR)) ? currentState(VehicleState::kOmegaR) : 0.0f;
-        const float leftMotorCommand = std::isfinite(control.leftMotorPwm) ? control.leftMotorPwm : 0.0f;
-        const float rightMotorCommand = std::isfinite(control.rightMotorPwm) ? control.rightMotorPwm : 0.0f;
+        const float leftMotorCommand = std::isfinite(control.LeftMotorPwm()) ? control.LeftMotorPwm() : 0.0f;
+        const float rightMotorCommand = std::isfinite(control.RightMotorPwm()) ? control.RightMotorPwm() : 0.0f;
 
         estimate.leftAppliedBankTorqueNm =
             driveTorqueFromCommand(leftMotorCommand, leftWheelSpeedRadps, resolvedBatteryVoltageV, params);

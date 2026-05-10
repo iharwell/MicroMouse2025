@@ -1,6 +1,6 @@
 #pragma once
 
-#include "LoopController.h"
+#include "CommandVector.h"
 #include "MazeMapRuntimeCore.h"
 
 #include <array>
@@ -79,7 +79,7 @@ namespace MazeMap::App::Internal
         // Return value:
         // Proposed control vector for the present tick. The mode may return it directly to
         // LoopController, replace it, or ignore it.
-        LoopController::ControlVector GetNextControls(bool& done);
+        CommandVector GetNextControls(bool& done);
 
     private:
         friend class SharedRobotRuntime;

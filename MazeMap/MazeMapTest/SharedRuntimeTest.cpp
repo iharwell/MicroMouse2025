@@ -256,10 +256,10 @@ namespace MazeMap::App
             drive.StartStraight(0.25f, 0.20f, 0.0f);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
         }
 
         TEST_METHOD(SharedRuntime_DriveTurnUsesHeadingTargetCommandPath)
@@ -279,7 +279,7 @@ namespace MazeMap::App
             limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
             drive.SetLimits(limits);
 
-            const Internal::LoopController::ControlVector expected =
+            const Internal::CommandVector expected =
                 runtime.Drive().PointControlVectorWithHeadingTarget(
                     0.0f,
                     limits.maxAngularSpeedRadps,
@@ -290,10 +290,10 @@ namespace MazeMap::App
             drive.StartTurn(HALF_PI_F);
 
             bool done = false;
-            const Internal::LoopController::ControlVector actual = drive.GetNextControls(done);
+            const Internal::CommandVector actual = drive.GetNextControls(done);
             Assert::IsFalse(done);
-            Assert::AreEqual(expected.leftMotorPwm, actual.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(expected.rightMotorPwm, actual.rightMotorPwm, 1.0e-6f);
+            Assert::AreEqual(expected.LeftMotorPwm(), actual.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(expected.RightMotorPwm(), actual.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveStraightUsesDriveBaseHeadingCluster)
@@ -314,7 +314,7 @@ namespace MazeMap::App
 
             const Eigen::Vector2f targetHeadingUnit(0.0f, 1.0f);
             const auto runStraightOnce =
-                [&runtime, &drive, &targetHeadingUnit]() -> Internal::LoopController::ControlVector
+                [&runtime, &drive, &targetHeadingUnit]() -> Internal::CommandVector
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
@@ -322,7 +322,7 @@ namespace MazeMap::App
                 drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
 
                 bool done = false;
-                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
                 return control;
             };
@@ -333,14 +333,14 @@ namespace MazeMap::App
             zeroHeadingCluster.HeadingStatePD = MazeMap::ProportionalDerivative(0.0f, 0.0f);
 
             runtime.Drive().SetProportionalDerivativeCluster(baselineCluster);
-            const Internal::LoopController::ControlVector baselineControl = runStraightOnce();
+            const Internal::CommandVector baselineControl = runStraightOnce();
 
             runtime.Drive().SetProportionalDerivativeCluster(zeroHeadingCluster);
-            const Internal::LoopController::ControlVector zeroHeadingControl = runStraightOnce();
+            const Internal::CommandVector zeroHeadingControl = runStraightOnce();
 
             Assert::IsTrue(
-                (std::fabs(baselineControl.leftMotorPwm - zeroHeadingControl.leftMotorPwm) > 1.0e-6f) ||
-                (std::fabs(baselineControl.rightMotorPwm - zeroHeadingControl.rightMotorPwm) > 1.0e-6f));
+                (std::fabs(baselineControl.LeftMotorPwm() - zeroHeadingControl.LeftMotorPwm()) > 1.0e-6f) ||
+                (std::fabs(baselineControl.RightMotorPwm() - zeroHeadingControl.RightMotorPwm()) > 1.0e-6f));
         }
 
         TEST_METHOD(SharedRuntime_DriveHoldRejectsFanOffWheelSpeedAboveBaseSettleThreshold)
@@ -367,11 +367,11 @@ namespace MazeMap::App
             Assert::IsFalse(drive.IsEffectivelyComplete());
 
             bool firstDone = false;
-            const Internal::LoopController::ControlVector firstControl = drive.GetNextControls(firstDone);
+            const Internal::CommandVector firstControl = drive.GetNextControls(firstDone);
             Assert::IsTrue(firstDone);
             Assert::IsTrue(drive.IsEffectivelyComplete());
-            Assert::IsFalse(std::isfinite(firstControl.leftMotorPwm));
-            Assert::IsFalse(std::isfinite(firstControl.rightMotorPwm));
+            Assert::IsFalse(std::isfinite(firstControl.LeftMotorPwm()));
+            Assert::IsFalse(std::isfinite(firstControl.RightMotorPwm()));
 
             bool secondDone = false;
             (void)drive.GetNextControls(secondDone);
@@ -408,11 +408,11 @@ namespace MazeMap::App
             Assert::IsFalse(drive.IsEffectivelyComplete());
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsTrue(done);
             Assert::IsTrue(drive.IsEffectivelyComplete());
-            Assert::IsFalse(std::isfinite(control.leftMotorPwm));
-            Assert::IsFalse(std::isfinite(control.rightMotorPwm));
+            Assert::IsFalse(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsFalse(std::isfinite(control.RightMotorPwm()));
         }
 
         TEST_METHOD(SharedRuntime_DriveIllPosedStraightRequestRemainsActiveAndFinite)
@@ -433,9 +433,9 @@ namespace MazeMap::App
             drive.StartStraight(NAN, INFINITY, NAN);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            const Internal::CommandVector control = drive.GetNextControls(done);
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
         }
 
         TEST_METHOD(SharedRuntime_DriveZeroVectorHeadingOverrideFallsBackToCapturedHeading)
@@ -455,7 +455,7 @@ namespace MazeMap::App
 
             const Eigen::Vector2f zeroHeading(0.0f, 0.0f);
             const auto sampleStraightControl =
-                [&runtime, &drive, &limits](const Eigen::Vector2f* headingOverride) -> Internal::LoopController::ControlVector
+                [&runtime, &drive, &limits](const Eigen::Vector2f* headingOverride) -> Internal::CommandVector
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
@@ -465,17 +465,17 @@ namespace MazeMap::App
                 drive.StartStraight(0.25f, 0.20f, 0.0f, headingOverride, nullptr);
 
                 bool done = false;
-                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
                 return control;
             };
 
-            const Internal::LoopController::ControlVector zeroHeadingControl = sampleStraightControl(&zeroHeading);
-            const Internal::LoopController::ControlVector nullHeadingControl = sampleStraightControl(nullptr);
-            Assert::AreEqual(nullHeadingControl.leftMotorPwm, zeroHeadingControl.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(nullHeadingControl.rightMotorPwm, zeroHeadingControl.rightMotorPwm, 1.0e-6f);
+            const Internal::CommandVector zeroHeadingControl = sampleStraightControl(&zeroHeading);
+            const Internal::CommandVector nullHeadingControl = sampleStraightControl(nullptr);
+            Assert::AreEqual(nullHeadingControl.LeftMotorPwm(), zeroHeadingControl.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(nullHeadingControl.RightMotorPwm(), zeroHeadingControl.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveInfiniteHeadingCoordinatesBehaveLikeFiniteDirectionHints)
@@ -494,7 +494,7 @@ namespace MazeMap::App
             limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
 
             const auto sampleStraightControl =
-                [&runtime, &drive, &limits](const Eigen::Vector2f& headingOverride) -> Internal::LoopController::ControlVector
+                [&runtime, &drive, &limits](const Eigen::Vector2f& headingOverride) -> Internal::CommandVector
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
@@ -504,26 +504,26 @@ namespace MazeMap::App
                 drive.StartStraight(0.25f, 0.20f, 0.0f, &headingOverride, nullptr);
 
                 bool done = false;
-                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
                 return control;
             };
 
             const Eigen::Vector2f rightInfiniteHeading(INFINITY, 1.0f);
             const Eigen::Vector2f rightFiniteHeading(1.0f, 0.0f);
-            const Internal::LoopController::ControlVector rightInfiniteControl = sampleStraightControl(rightInfiniteHeading);
-            const Internal::LoopController::ControlVector rightFiniteControl = sampleStraightControl(rightFiniteHeading);
-            Assert::AreEqual(rightFiniteControl.leftMotorPwm, rightInfiniteControl.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(rightFiniteControl.rightMotorPwm, rightInfiniteControl.rightMotorPwm, 1.0e-6f);
+            const Internal::CommandVector rightInfiniteControl = sampleStraightControl(rightInfiniteHeading);
+            const Internal::CommandVector rightFiniteControl = sampleStraightControl(rightFiniteHeading);
+            Assert::AreEqual(rightFiniteControl.LeftMotorPwm(), rightInfiniteControl.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(rightFiniteControl.RightMotorPwm(), rightInfiniteControl.RightMotorPwm(), 1.0e-6f);
 
             const Eigen::Vector2f diagonalInfiniteHeading(INFINITY, INFINITY);
             const Eigen::Vector2f diagonalFiniteHeading(1.0f, 1.0f);
-            const Internal::LoopController::ControlVector diagonalInfiniteControl = sampleStraightControl(diagonalInfiniteHeading);
-            const Internal::LoopController::ControlVector diagonalFiniteControl = sampleStraightControl(diagonalFiniteHeading);
-            Assert::AreEqual(diagonalFiniteControl.leftMotorPwm, diagonalInfiniteControl.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(diagonalFiniteControl.rightMotorPwm, diagonalInfiniteControl.rightMotorPwm, 1.0e-6f);
+            const Internal::CommandVector diagonalInfiniteControl = sampleStraightControl(diagonalInfiniteHeading);
+            const Internal::CommandVector diagonalFiniteControl = sampleStraightControl(diagonalFiniteHeading);
+            Assert::AreEqual(diagonalFiniteControl.LeftMotorPwm(), diagonalInfiniteControl.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(diagonalFiniteControl.RightMotorPwm(), diagonalInfiniteControl.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveInfiniteTargetPositionCoordinatesRemainFunctional)
@@ -545,7 +545,7 @@ namespace MazeMap::App
                 [&runtime, &drive, &limits](
                     const Eigen::Vector2f& headingOverride,
                     const Eigen::Vector2f& targetPositionOverride,
-                    bool& done) -> Internal::LoopController::ControlVector
+                    bool& done) -> Internal::CommandVector
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
@@ -554,9 +554,9 @@ namespace MazeMap::App
                 drive.SetLimits(limits);
                 drive.StartStraight(NAN, 0.20f, 0.0f, &headingOverride, &targetPositionOverride);
 
-                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
-                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                const Internal::CommandVector control = drive.GetNextControls(done);
+                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
                 return control;
             };
 
@@ -592,10 +592,10 @@ namespace MazeMap::App
             drive.StartTurn(INFINITY);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsTrue(done);
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
             Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
         }
 
@@ -618,10 +618,10 @@ namespace MazeMap::App
             drive.StartArc(INFINITY, 4.0f);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsTrue(done);
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
             Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-4f);
             Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
         }
@@ -656,10 +656,10 @@ namespace MazeMap::App
             drive.StartArc(NAN, NAN);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
             Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-6f);
             Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-6f);
         }
@@ -683,19 +683,19 @@ namespace MazeMap::App
             drive.StartTurn(NAN);
 
             bool malformedDone = false;
-            const Internal::LoopController::ControlVector malformedControl = drive.GetNextControls(malformedDone);
+            const Internal::CommandVector malformedControl = drive.GetNextControls(malformedDone);
             Assert::IsFalse(malformedDone);
-            Assert::IsTrue(std::isfinite(malformedControl.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(malformedControl.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(malformedControl.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(malformedControl.RightMotorPwm()));
             Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
 
             drive.StartTurn(HALF_PI_F);
 
             bool recoveredDone = false;
-            const Internal::LoopController::ControlVector recoveredControl = drive.GetNextControls(recoveredDone);
+            const Internal::CommandVector recoveredControl = drive.GetNextControls(recoveredDone);
             Assert::IsFalse(recoveredDone);
-            Assert::IsTrue(std::isfinite(recoveredControl.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(recoveredControl.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(recoveredControl.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(recoveredControl.RightMotorPwm()));
         }
 
         TEST_METHOD(SharedRuntime_DriveServicePreservesExplicitStraightDirectionAgainstSignedLimits)
@@ -706,16 +706,16 @@ namespace MazeMap::App
 
             const Eigen::Vector2f targetHeadingUnit(1.0f, 0.0f);
             const auto sampleStraightControl =
-                [&drive, &targetHeadingUnit](const MotionLimits& limits) -> Internal::LoopController::ControlVector
+                [&drive, &targetHeadingUnit](const MotionLimits& limits) -> Internal::CommandVector
             {
                 drive.SetLimits(limits);
                 drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
 
                 bool done = false;
-                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
                 return control;
             };
 
@@ -737,10 +737,10 @@ namespace MazeMap::App
             signedLimits.angleToleranceRad = -positiveLimits.angleToleranceRad;
             signedLimits.angularSpeedToleranceRadps = -positiveLimits.angularSpeedToleranceRadps;
 
-            const Internal::LoopController::ControlVector positiveControl = sampleStraightControl(positiveLimits);
-            const Internal::LoopController::ControlVector signedControl = sampleStraightControl(signedLimits);
-            Assert::AreEqual(positiveControl.leftMotorPwm, signedControl.leftMotorPwm, 1.0e-6f);
-            Assert::AreEqual(positiveControl.rightMotorPwm, signedControl.rightMotorPwm, 1.0e-6f);
+            const Internal::CommandVector positiveControl = sampleStraightControl(positiveLimits);
+            const Internal::CommandVector signedControl = sampleStraightControl(signedLimits);
+            Assert::AreEqual(positiveControl.LeftMotorPwm(), signedControl.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(positiveControl.RightMotorPwm(), signedControl.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveTurnRecoversMazeRightTurnFromDegenerateRequest)
@@ -775,11 +775,11 @@ namespace MazeMap::App
             drive.SetLimits(limits);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
             Assert::IsFalse(drive.IsEffectivelyComplete());
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
             Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
         }
 
@@ -815,11 +815,11 @@ namespace MazeMap::App
             drive.SetLimits(limits);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
             Assert::IsFalse(drive.IsEffectivelyComplete());
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
             Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
             Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-4f);
         }
@@ -845,11 +845,11 @@ namespace MazeMap::App
             drive.StartArc(NAN, NAN);
 
             bool done = false;
-            const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+            const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
             Assert::IsFalse(drive.IsEffectivelyComplete());
-            Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-            Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
             Assert::IsTrue(runtime.Drive().GetLastLinearCommandMps() > 1.0e-4f);
             Assert::IsTrue(runtime.Drive().GetLastAngularCommandRadps() > 1.0e-4f);
         }
@@ -872,10 +872,10 @@ namespace MazeMap::App
                 drive.SetLimits(changedLimits);
 
                 bool done = false;
-                const Internal::LoopController::ControlVector control = drive.GetNextControls(done);
+                const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.leftMotorPwm));
-                Assert::IsTrue(std::isfinite(control.rightMotorPwm));
+                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
                 return runtime.Drive().GetLastLinearCommandMps();
             };
 

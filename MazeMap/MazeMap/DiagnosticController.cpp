@@ -14,6 +14,7 @@
 #include "WallDistanceCalibration.h"
 
 using MazeMap::App::Internal::GetSharedRobotRuntime;
+using CommandVector = MazeMap::App::Internal::CommandVector;
 using MazeMap::App::Internal::SharedRobotRuntime;
 
 namespace
@@ -109,7 +110,7 @@ public:
         _loopController.StageNextSessionState(BuildLoopOptions());
     }
 
-    LoopController::ControlVector RunTick(
+    CommandVector RunTick(
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController) override
@@ -117,25 +118,25 @@ public:
         if (!WriteBufferedSample())
         {
             _runtime.FailActiveMode("Failed to write diagnostic sample");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (_phaseFn == nullptr)
         {
             _runtime.FailActiveMode("Diagnostic phase callback was not installed");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (_runtime.Estimator().HasFault())
         {
             _runtime.FailActiveMode(_runtime.Estimator().FaultReason());
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (!IsWithinBoundary(state))
         {
             _runtime.FailActiveMode("Diagnostic boundary exceeded");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         BufferCurrentSample(state);
@@ -238,7 +239,7 @@ private:
         _logRow.gyro_radps = snapshot.gyroRadps;
         _logRowBuffered = true;
     }
-    using PhaseFn = LoopController::ControlVector (DiagnosticController::*)(
+    using PhaseFn = CommandVector (DiagnosticController::*)(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController);
@@ -1569,7 +1570,7 @@ private:
             (std::fabs(state.GetPositionY() - _startY) <= DiagnosticConfig::kBoundaryHalfSpanM);
     }
 
-    LoopController::ControlVector HoldPhaseTick(
+    CommandVector HoldPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1584,10 +1585,10 @@ private:
                 "Failed to advance diagnostic hold phase");
         }
 
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
-    LoopController::ControlVector StraightPhaseTick(
+    CommandVector StraightPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1620,13 +1621,13 @@ private:
                 state))
             {
                 _runtime.FailActiveMode("Failed to write straight diagnostic result");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
             (void)AdvanceToNextStep(
                 _straightPhaseState.nextStep,
                 loopController,
                 "Failed to advance diagnostic straight phase");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
         if (_straightPhaseState.translationWatchdog.Stalled(
                 _straightPhaseState.traveledM,
@@ -1635,12 +1636,12 @@ private:
                 millis()))
         {
             _runtime.FailActiveMode("Straight diagnostic encoder progress stalled");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
         if (static_cast<long>(_straightPhaseState.timeoutMs - millis()) <= 0)
         {
             _runtime.FailActiveMode("Straight diagnostic phase timed out");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         const float accelLimitedSpeedMps = (std::min)(
@@ -1668,7 +1669,7 @@ private:
             MazeMap::CommandPD::StateWheelOmegaPD);
     }
 
-    LoopController::ControlVector KickoffCharacterizationTick(
+    CommandVector KickoffCharacterizationTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1689,14 +1690,14 @@ private:
         const bool pulseActive =
             !_kickoffPhaseState.travelLimited &&
             (static_cast<long>(_kickoffPhaseState.pulseDeadlineMs - nowMs) > 0);
-        const LoopController::ControlVector command =
+        const CommandVector command =
             _kickoffPhaseState.travelLimited ?
-            LoopController::ControlVector::Brake :
+            CommandVector::Brake() :
             pulseActive ?
-            LoopController::ControlVector::RawMotorPwm(
+            CommandVector(
                 _kickoffPhaseState.driveCommand,
                 _kickoffPhaseState.driveCommand) :
-            LoopController::ControlVector::Brake;
+            CommandVector::Brake();
 
         _kickoffPhaseState.maxSpeedMps = (std::max)(
             _kickoffPhaseState.maxSpeedMps,
@@ -1709,7 +1710,7 @@ private:
             {
                 _runtime.FailActiveMode("Failed to complete kickoff characterization sample");
             }
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (!_kickoffPhaseState.travelLimited &&
@@ -1721,13 +1722,13 @@ private:
             {
                 _runtime.FailActiveMode("Failed to complete kickoff characterization sample");
             }
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         return command;
     }
 
-    LoopController::ControlVector ForwardCharacterizationTick(
+    CommandVector ForwardCharacterizationTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1750,14 +1751,14 @@ private:
             }
         }
 
-        LoopController::ControlVector command = LoopController::ControlVector::Brake;
+        CommandVector command = CommandVector::Brake();
         if (_forwardPhaseState.travelLimited)
         {
-            command = LoopController::ControlVector::Brake;
+            command = CommandVector::Brake();
         }
         else if (static_cast<long>(_forwardPhaseState.kickoffDeadlineMs - nowMs) > 0)
         {
-            command = LoopController::ControlVector::RawMotorPwm(
+            command = CommandVector(
                 LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand,
                 LegacyDiagnosticConfig::kForwardSweepKickoffDriveCommand);
         }
@@ -1770,7 +1771,7 @@ private:
             }
             _forwardPhaseState.holdElapsedSeconds +=
                 static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f;
-            command = LoopController::ControlVector::RawMotorPwm(
+            command = CommandVector(
                 _forwardPhaseState.forwardDriveCommand,
                 _forwardPhaseState.forwardDriveCommand);
         }
@@ -1791,7 +1792,7 @@ private:
             {
                 _runtime.FailActiveMode("Failed to complete forward characterization sample");
             }
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (!_forwardPhaseState.travelLimited &&
@@ -1803,13 +1804,13 @@ private:
             {
                 _runtime.FailActiveMode("Failed to complete forward characterization sample");
             }
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         return command;
     }
 
-    LoopController::ControlVector TurnPhaseTick(
+    CommandVector TurnPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1822,7 +1823,7 @@ private:
             _turnPhaseState.peakOmegaRadps,
             std::fabs(state.GetRotationalVelocity()));
         bool done = false;
-        const LoopController::ControlVector control = _driveService.GetNextControls(done);
+        const CommandVector control = _driveService.GetNextControls(done);
         if (done)
         {
             if (!WriteTurnResult(
@@ -1834,7 +1835,7 @@ private:
                     state))
             {
                 _runtime.FailActiveMode("Failed to write turn diagnostic result");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
             if (_turnPhaseState.nextStep == ScenarioStep::RecoverySettle)
             {
@@ -1851,24 +1852,24 @@ private:
                     "Failed to write square diagnostic result"))
             {
                 _runtime.FailActiveMode("Failed to write square diagnostic result");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
             (void)AdvanceToNextStep(
                 _turnPhaseState.nextStep,
                 loopController,
                 "Failed to advance diagnostic turn phase");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
         if (static_cast<long>(_turnPhaseState.timeoutMs - millis()) <= 0)
         {
             _runtime.FailActiveMode("Turn diagnostic phase timed out");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         return control;
     }
 
-    LoopController::ControlVector ArcPhaseTick(
+    CommandVector ArcPhaseTick(
         std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
         LoopController& loopController)
@@ -1905,7 +1906,7 @@ private:
                     state))
             {
                 _runtime.FailActiveMode("Failed to write arc diagnostic result");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
             if (_arcPhaseState.writeCircleSummary)
             {
@@ -1916,7 +1917,7 @@ private:
                         _circleSequenceTotalMetrics))
                 {
                     _runtime.FailActiveMode("Failed to write circle diagnostic result");
-                    return LoopController::ControlVector::Brake;
+                    return CommandVector::Brake();
                 }
                 if (!WriteClosureResult(
                         "arc_circle_result",
@@ -1928,14 +1929,14 @@ private:
                         "Failed to write arc circle diagnostic result"))
                 {
                     _runtime.FailActiveMode("Failed to write arc circle diagnostic result");
-                    return LoopController::ControlVector::Brake;
+                    return CommandVector::Brake();
                 }
             }
             (void)AdvanceToNextStep(
                 _arcPhaseState.nextStep,
                 loopController,
                 "Failed to advance diagnostic arc phase");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
         if (_arcPhaseState.translationWatchdog.Stalled(
                 _arcPhaseState.traveledM,
@@ -1944,12 +1945,12 @@ private:
                 millis()))
         {
             _runtime.FailActiveMode("Arc diagnostic encoder progress stalled");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
         if (static_cast<long>(_arcPhaseState.timeoutMs - millis()) <= 0)
         {
             _runtime.FailActiveMode("Arc diagnostic phase timed out");
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         const float accelLimitedSpeedMps = (std::min)(

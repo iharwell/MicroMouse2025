@@ -47,7 +47,7 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.002f;
             constexpr float rawStationaryGyroRadps = 0.04f;
@@ -106,7 +106,7 @@ namespace MazeMap
                 0.0f);
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             encoder.totalLeftCounts = 12;
             encoder.totalRightCounts = 8;
@@ -135,7 +135,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreInitialStationaryGyroBiasSeedsFromSamplesFiftyToOneHundredFiftyAndSlowWalks)
         {
             SrUkfCore core;
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
             const int kSteps =
@@ -167,7 +167,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreStationaryGyroMeasurementDoesNotCollapseBiasVarianceToZero)
         {
             SrUkfCore core;
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
             constexpr float rawStationaryGyroRadps = 0.04f;
@@ -338,7 +338,7 @@ namespace MazeMap
             SrUkfCore core;
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
@@ -391,7 +391,7 @@ namespace MazeMap
             const float initialLateralVelocityVarianceMps2 = core.covariance()(VehicleState::kV, VehicleState::kV);
             Assert::AreEqual(1.0f, initialLateralVelocityVarianceMps2, 1.0e-6f);
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
@@ -432,7 +432,7 @@ namespace MazeMap
             SrUkfCore core;
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            App::Internal::LoopController::ControlVector control{};
+            App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
             constexpr int kSteps = 1000;
@@ -509,7 +509,7 @@ namespace MazeMap
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core(params);
-            App::Internal::LoopController::ControlVector stationaryControl{};
+            App::Internal::CommandVector stationaryControl{};
             EncoderObs stationaryEncoder{};
             constexpr float dt = 0.002f;
             const int stationarySteps =
@@ -526,9 +526,9 @@ namespace MazeMap
             Assert::IsTrue(core.operatingMode() != SrUkfCore::OperatingMode::InconsistentOrSaturated);
             const VehicleState::StateMatrix stationaryCovariance = core.covariance();
 
-            App::Internal::LoopController::ControlVector launchControl{};
-            launchControl.leftMotorPwm = 0.30f;
-            launchControl.rightMotorPwm = 0.30f;
+            App::Internal::CommandVector launchControl{};
+            launchControl.SetLeftMotorPwm(0.30f);
+            launchControl.SetRightMotorPwm(0.30f);
             const float launchControlFanDutyCycle = 0.80f;
             const float launchControlBatteryVoltageV = params.supplyVoltageV;
             core.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);

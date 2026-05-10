@@ -140,25 +140,25 @@ namespace MazeMap::App::Internal
         _activePhase = ActivePhase::Seek;
     }
 
-    LoopController::ControlVector WallTouch::GetNextControls(bool& done)
+    CommandVector WallTouch::GetNextControls(bool& done)
     {
         done = false;
         if (_faulted)
         {
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
         if (_activePhase == ActivePhase::None)
         {
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (_runtime == nullptr)
         {
             SetFault("WallTouch requires a shared runtime");
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         const MazeMap::VehicleState state = _runtime->RuntimeState();
@@ -168,10 +168,10 @@ namespace MazeMap::App::Internal
         {
             SetFault(_runtime->Estimator().FaultReason());
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
-        LoopController::ControlVector control = LoopController::ControlVector::Brake;
+        CommandVector control = CommandVector::Brake();
         switch (_activePhase)
         {
         case ActivePhase::Seek:
@@ -303,14 +303,14 @@ namespace MazeMap::App::Internal
         return true;
     }
 
-    LoopController::ControlVector WallTouch::ForwardControl(
+    CommandVector WallTouch::ForwardControl(
         const MazeMap::VehicleState& state,
         float desiredSpeedMps,
         float yawRateBiasRadps) const
     {
         if (_drive == nullptr)
         {
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         float clampedSpeedMps = desiredSpeedMps;
@@ -334,7 +334,7 @@ namespace MazeMap::App::Internal
         return _drive->PointControlVector(clampedSpeedMps, angularCommandRadps, _trackingCommandPd);
     }
 
-    LoopController::ControlVector WallTouch::SeekControls(
+    CommandVector WallTouch::SeekControls(
         const MazeMap::VehicleState& state,
         const SensorSnapshot& sensors,
         const DriveTelemetry& driveTelemetry,
@@ -355,12 +355,12 @@ namespace MazeMap::App::Internal
             if (_allowPassThroughNoWall)
             {
                 (void)BeginHoldBeforeReturn(false);
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             SetFault("WallTouch exceeded max approach travel");
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (std::isfinite(currentDistanceM) &&
@@ -383,7 +383,7 @@ namespace MazeMap::App::Internal
             approachSpeedMps *= (std::clamp)(driveRatio, 0.1f, 1.0f);
         }
 
-        LoopController::ControlVector control = LoopController::ControlVector::Brake;
+        CommandVector control = CommandVector::Brake();
         const float encoderSpeedMps =
             0.5f * (std::fabs(driveTelemetry.leftVelocityMps) + std::fabs(driveTelemetry.rightVelocityMps));
         if (!std::isfinite(encoderSpeedMps) || (encoderSpeedMps < Config::kWallTouchMaxApproachEncoderSpeedMps))
@@ -429,7 +429,7 @@ namespace MazeMap::App::Internal
         return control;
     }
 
-    LoopController::ControlVector WallTouch::SeatControls(
+    CommandVector WallTouch::SeatControls(
         const MazeMap::VehicleState& state,
         bool& done)
     {
@@ -469,7 +469,7 @@ namespace MazeMap::App::Internal
         return ForwardControl(state, seatSpeedMps);
     }
 
-    LoopController::ControlVector WallTouch::SquareControls(
+    CommandVector WallTouch::SquareControls(
         const MazeMap::VehicleState& state,
         const SensorSnapshot& sensors,
         bool& done)
@@ -491,7 +491,7 @@ namespace MazeMap::App::Internal
             {
                 SetFault("WallTouch lost front-wall signal during square-up");
                 done = true;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
         }
         else
@@ -536,7 +536,7 @@ namespace MazeMap::App::Internal
         {
             SetFault("WallTouch square-up timed out");
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         float yawBiasRadps = Config::kFrontSkewGain * sensors.frontSkewM;
@@ -547,7 +547,7 @@ namespace MazeMap::App::Internal
         return ForwardControl(state, seatSpeedMps, yawBiasRadps);
     }
 
-    LoopController::ControlVector WallTouch::HoldBeforeReturnControls(
+    CommandVector WallTouch::HoldBeforeReturnControls(
         const MazeMap::VehicleState& state,
         bool& done)
     {
@@ -578,7 +578,7 @@ namespace MazeMap::App::Internal
                 done = true;
             }
 
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         if (_state.resetPoseDuringHold)
@@ -589,26 +589,26 @@ namespace MazeMap::App::Internal
             return ForwardControl(state, holdSeatSpeedMps);
         }
 
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
-    LoopController::ControlVector WallTouch::ReturnToPreferredControls(bool& done)
+    CommandVector WallTouch::ReturnToPreferredControls(bool& done)
     {
         if (_driveService == nullptr)
         {
             SetFault("WallTouch delegated Drive service is unavailable");
             done = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         bool delegatedDone = false;
-        const LoopController::ControlVector control = _driveService->GetNextControls(delegatedDone);
+        const CommandVector control = _driveService->GetNextControls(delegatedDone);
         if (!delegatedDone)
         {
             return control;
         }
 
         done = true;
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 }

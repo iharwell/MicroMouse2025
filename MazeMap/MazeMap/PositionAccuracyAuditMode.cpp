@@ -194,46 +194,46 @@ namespace MazeMap::App::Internal
             return _wallTouch.Active();
         }
 
-        LoopController::ControlVector PollStartupCalibration()
+        CommandVector PollStartupCalibration()
         {
             bool done = false;
-            const LoopController::ControlVector control = _startupCalibration.GetNextControls(done);
+            const CommandVector control = _startupCalibration.GetNextControls(done);
             if (!done)
             {
                 return control;
             }
 
             _phase = Phase::LaunchStartHold;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
-        LoopController::ControlVector PollDrive(const Phase nextPhase)
+        CommandVector PollDrive(const Phase nextPhase)
         {
             bool done = false;
-            const LoopController::ControlVector control = _driveService.GetNextControls(done);
+            const CommandVector control = _driveService.GetNextControls(done);
             if (!done)
             {
                 return control;
             }
 
             _phase = nextPhase;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
-        LoopController::ControlVector PollWallTouch(const Phase nextPhase)
+        CommandVector PollWallTouch(const Phase nextPhase)
         {
             bool done = false;
-            const LoopController::ControlVector control = _wallTouch.GetNextControls(done);
+            const CommandVector control = _wallTouch.GetNextControls(done);
             if (!done)
             {
                 return control;
             }
 
             _phase = nextPhase;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
-        LoopController::ControlVector RunTick(
+        CommandVector RunTick(
             const std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController) override
@@ -253,7 +253,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunStartupCalibration;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunStartupCalibration:
                 return PollStartupCalibration();
@@ -267,7 +267,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunStartHold;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunStartHold:
                 return PollDrive(Phase::LaunchOutbound);
@@ -285,7 +285,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunOutbound;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunOutbound:
                 return PollDrive(Phase::LaunchFarTouch);
@@ -299,7 +299,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunFarTouch;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunFarTouch:
                 return PollWallTouch(Phase::LaunchTurnHome);
@@ -313,7 +313,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunTurnHome;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunTurnHome:
                 return PollDrive(Phase::LaunchReturn);
@@ -331,7 +331,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunReturn;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunReturn:
                 return PollDrive(Phase::LaunchFaceNorth);
@@ -345,7 +345,7 @@ namespace MazeMap::App::Internal
                 {
                     _phase = Phase::RunFaceNorth;
                 }
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::RunFaceNorth:
                 return PollDrive(Phase::AdvanceSpeed);
@@ -356,7 +356,7 @@ namespace MazeMap::App::Internal
                     (_speedIndex < AuxMeasurementConfig::kPositionAuditStraightSpeedCount) ?
                         Phase::LaunchStartHold :
                         Phase::Complete;
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::Complete:
                 (void)_runtime.AppendTextLogLine("Position accuracy audit complete");
@@ -366,12 +366,12 @@ namespace MazeMap::App::Internal
                 _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
 
             case Phase::Idle:
             default:
                 _runtime.FailActiveMode("Position accuracy audit phase was not initialized");
-                return LoopController::ControlVector::Brake;
+                return CommandVector::Brake();
             }
         }
 

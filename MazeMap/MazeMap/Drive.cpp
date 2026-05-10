@@ -269,8 +269,6 @@ namespace MazeMap::App::Internal
 
     namespace
     {
-        using ControlVector = LoopController::ControlVector;
-
         float ResolveSignedPreference(std::initializer_list<float> signedValues) noexcept
         {
             for (const float value : signedValues)
@@ -958,7 +956,7 @@ namespace MazeMap::App::Internal
                 capturedSpeedMps);
         }
 
-        LoopController::ControlVector MakePointControlVector(
+        CommandVector MakePointControlVector(
             DriveBase* drive,
             const float desiredSpeedMps,
             const float desiredYawRateRadps,
@@ -969,10 +967,10 @@ namespace MazeMap::App::Internal
                     std::isfinite(desiredSpeedMps) ? desiredSpeedMps : 0.0f,
                     std::isfinite(desiredYawRateRadps) ? desiredYawRateRadps : 0.0f,
                     commandPd) :
-                LoopController::ControlVector::Brake;
+                CommandVector::Brake();
         }
 
-        LoopController::ControlVector MakePointControlVectorWithHeadingTarget(
+        CommandVector MakePointControlVectorWithHeadingTarget(
             DriveBase* drive,
             const float desiredSpeedMps,
             const float desiredYawRateRadps,
@@ -987,7 +985,7 @@ namespace MazeMap::App::Internal
                     std::isfinite(targetYawRad) ? targetYawRad : 0.0f,
                     velocityAndYawPd,
                     headingPd) :
-                LoopController::ControlVector::Brake;
+                CommandVector::Brake();
         }
 
         bool IsLinearMotionCompleteAtExit(
@@ -1003,7 +1001,7 @@ namespace MazeMap::App::Internal
                     Config::kSpeedToleranceMps);
         }
 
-        ControlVector MakeFiniteTurnToHeadingControls(
+        CommandVector MakeFiniteTurnToHeadingControls(
             DriveBase* drive,
             const MotionLimits& limits,
             const Drive::CommandPDSettings& commandPdSettings,
@@ -1016,7 +1014,7 @@ namespace MazeMap::App::Internal
             if (IsTurnComplete(remainingRad, state.GetRotationalVelocity(), limits))
             {
                 done = true;
-                return ControlVector::Brake;
+                return CommandVector::Brake();
             }
 
             const float finiteRemainingRad = std::isfinite(remainingRad) ? remainingRad : 0.0f;
@@ -1374,14 +1372,14 @@ namespace MazeMap::App::Internal
         _effectivelyComplete = false;
     }
 
-    LoopController::ControlVector Drive::GetNextControls(bool& done)
+    CommandVector Drive::GetNextControls(bool& done)
     {
         done = false;
         if (_activePrimitive == ActivePrimitive::None)
         {
             done = true;
             _effectivelyComplete = true;
-            return LoopController::ControlVector::Brake;
+            return CommandVector::Brake();
         }
 
         const MazeMap::VehicleState commandState =
@@ -1393,7 +1391,7 @@ namespace MazeMap::App::Internal
                 (static_cast<float>(_loopController->LastDiagnostics().dtUs) * 1.0e-6f) :
                 0.0f;
 
-        ControlVector control = LoopController::ControlVector::Brake;
+        CommandVector control = CommandVector::Brake();
         switch (_activePrimitive)
         {
         case ActivePrimitive::Hold:
@@ -1469,7 +1467,7 @@ namespace MazeMap::App::Internal
         _activePrimitive = ActivePrimitive::None;
     }
 
-    LoopController::ControlVector Drive::HoldControls(
+    CommandVector Drive::HoldControls(
         const SensorSnapshot& sensors,
         const DriveTelemetry& driveTelemetry,
         bool& done)
@@ -1477,10 +1475,10 @@ namespace MazeMap::App::Internal
         auto& hold = *StorageAs<HoldPrimitive>(_primitiveStorageWords);
         hold.ObserveStationaryState(IsMotionSettled(sensors, driveTelemetry));
         done = hold.IsComplete();
-        return LoopController::ControlVector::Brake;
+        return CommandVector::Brake();
     }
 
-    LoopController::ControlVector Drive::LinearMotionControls(
+    CommandVector Drive::LinearMotionControls(
         const MazeMap::VehicleState& state,
         const SensorSnapshot& sensors,
         const DriveTelemetry& driveTelemetry,
@@ -1569,7 +1567,7 @@ namespace MazeMap::App::Internal
             _commandPdSettings.heading);
     }
 
-    LoopController::ControlVector Drive::TurnControls(
+    CommandVector Drive::TurnControls(
         const MazeMap::VehicleState& state,
         const SensorSnapshot& sensors,
         bool& done)
@@ -1601,7 +1599,7 @@ namespace MazeMap::App::Internal
             done);
     }
 
-    LoopController::ControlVector Drive::TurnTransitionControls(
+    CommandVector Drive::TurnTransitionControls(
         const MazeMap::VehicleState& state,
         const DriveTelemetry& driveTelemetry,
         bool& done)
@@ -1651,7 +1649,7 @@ namespace MazeMap::App::Internal
             _commandPdSettings.velocity | _commandPdSettings.yawRate);
     }
 
-    LoopController::ControlVector Drive::ArcControls(
+    CommandVector Drive::ArcControls(
         const MazeMap::VehicleState& state,
         const SensorSnapshot& sensors,
         const DriveTelemetry& driveTelemetry,
@@ -1681,7 +1679,7 @@ namespace MazeMap::App::Internal
             _commandPdSettings.velocity | _commandPdSettings.yawRate);
     }
 
-    LoopController::ControlVector Drive::ManeuverControls(
+    CommandVector Drive::ManeuverControls(
         const DriveTelemetry& driveTelemetry,
         bool& done)
     {

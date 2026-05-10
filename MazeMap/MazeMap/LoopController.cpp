@@ -159,21 +159,6 @@ namespace MazeMap::App::Internal
 
     }
 
-    const LoopController::ControlVector LoopController::ControlVector::Brake =
-        LoopController::ControlVector::RawMotorPwm(
-            std::numeric_limits<float>::quiet_NaN(),
-            std::numeric_limits<float>::quiet_NaN());
-
-    LoopController::ControlVector LoopController::ControlVector::RawMotorPwm(
-        const float leftMotorPwm,
-        const float rightMotorPwm) noexcept
-    {
-        ControlVector control{};
-        control.leftMotorPwm = leftMotorPwm;
-        control.rightMotorPwm = rightMotorPwm;
-        return control;
-    }
-
     void LoopController::StageNextSessionState(const SessionOptions& options) noexcept
     {
         if (!ValidateSessionOptions(options))
@@ -282,12 +267,12 @@ namespace MazeMap::App::Internal
         return PublishedTiming();
     }
 
-    const LoopController::ControlVector& LoopController::LastAppliedCommand() const noexcept
+    const CommandVector& LoopController::LastAppliedCommand() const noexcept
     {
         return _appliedControl;
     }
 
-    LoopController::ControlVector LoopController::RunApplicationModeTick(
+    CommandVector LoopController::RunApplicationModeTick(
         void* const context,
         const std::uint32_t loopEndTimeUs,
         const MazeMap::VehicleState& state,
@@ -296,18 +281,18 @@ namespace MazeMap::App::Internal
         return static_cast<IApplicationMode*>(context)->RunTick(loopEndTimeUs, state, loopController);
     }
 
-    bool LoopController::IsBrakeMotorPwmCommand(const ControlVector& command) noexcept
+    bool LoopController::IsBrakeMotorPwmCommand(const CommandVector& command) noexcept
     {
-        return !std::isfinite(command.leftMotorPwm) || !std::isfinite(command.rightMotorPwm);
+        return !std::isfinite(command.LeftMotorPwm()) || !std::isfinite(command.RightMotorPwm());
     }
 
-    bool LoopController::IsZeroMotorPwmCommand(const ControlVector& command) noexcept
+    bool LoopController::IsZeroMotorPwmCommand(const CommandVector& command) noexcept
     {
         return
-            std::isfinite(command.leftMotorPwm) &&
-            std::isfinite(command.rightMotorPwm) &&
-            (std::fabs(command.leftMotorPwm) <= kZeroMotorPwmThreshold) &&
-            (std::fabs(command.rightMotorPwm) <= kZeroMotorPwmThreshold);
+            std::isfinite(command.LeftMotorPwm()) &&
+            std::isfinite(command.RightMotorPwm()) &&
+            (std::fabs(command.LeftMotorPwm()) <= kZeroMotorPwmThreshold) &&
+            (std::fabs(command.RightMotorPwm()) <= kZeroMotorPwmThreshold);
     }
 
     std::uint32_t LoopController::ReadCycleCounter() noexcept
@@ -410,8 +395,8 @@ namespace MazeMap::App::Internal
         const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
         _lastTickStartUs = nowUs - _options.controlPeriodUs;
         _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
-        _queuedControl = ControlVector::Brake;
-        _appliedControl = ControlVector::Brake;
+        _queuedControl = CommandVector::Brake();
+        _appliedControl = CommandVector::Brake();
         _publishedTimingIndex = 0U;
         _workingTimingIndex = 1U;
         _timingBuffers[0] = TimingDiagnostics{};
@@ -473,13 +458,13 @@ namespace MazeMap::App::Internal
             timing.cycleCounterStart = ReadCycleCounter();
 
             const std::uint32_t loopEndTimeUs = _nextSyncTargetUs;
-            const ControlVector brakeControl = ControlVector::Brake;
+            const CommandVector brakeControl = CommandVector::Brake();
             const char* terminalFaultReason = nullptr;
 
             _appliedControl = _queuedControl;
             if (!ApplyControlAtTickStart(_appliedControl))
             {
-                _queuedControl = ControlVector::Brake;
+                _queuedControl = CommandVector::Brake();
                 terminalFaultReason = "LoopController motor PWM hook failed";
                 ServiceRuntimeLogsForFaultPath();
                 RecordPostServiceTiming();
@@ -503,7 +488,7 @@ namespace MazeMap::App::Internal
                 terminalFaultReason = "LoopController sensing update failed";
             }
 
-            ControlVector candidateControl = ControlVector::Brake;
+            CommandVector candidateControl = CommandVector::Brake();
             if ((terminalFaultReason == nullptr) && (_activeModeWorkCallback == nullptr))
             {
                 _runtime->FailActiveMode("LoopController active callback missing");
@@ -531,19 +516,19 @@ namespace MazeMap::App::Internal
 
             if (terminalFaultReason != nullptr)
             {
-                _queuedControl = ControlVector::Brake;
+                _queuedControl = CommandVector::Brake();
             }
             else if (_programHaltRequested)
             {
-                _queuedControl = ControlVector::Brake;
+                _queuedControl = CommandVector::Brake();
             }
             else if (_pendingEndSessionCallback != nullptr)
             {
-                _queuedControl = ControlVector::Brake;
+                _queuedControl = CommandVector::Brake();
             }
             else if (_pendingPauseCallback != nullptr)
             {
-                _queuedControl = ControlVector::Brake;
+                _queuedControl = CommandVector::Brake();
             }
             else
             {
@@ -560,7 +545,7 @@ namespace MazeMap::App::Internal
                 {
                     const char* const runtimeReason =
                         (_runtime != nullptr) ? _runtime->LastRuntimeLogError() : nullptr;
-                    _queuedControl = ControlVector::Brake;
+                    _queuedControl = CommandVector::Brake();
                     terminalFaultReason =
                         ((runtimeReason != nullptr) && (runtimeReason[0] != '\0')) ?
                         runtimeReason :
@@ -724,7 +709,7 @@ namespace MazeMap::App::Internal
         _stagedModeWorkContext = nullptr;
     }
 
-    bool LoopController::ApplyControlAtTickStart(const ControlVector& control) noexcept
+    bool LoopController::ApplyControlAtTickStart(const CommandVector& control) noexcept
     {
         if (!_motorPwmSink)
         {
@@ -760,7 +745,7 @@ namespace MazeMap::App::Internal
 
         DriveBase& drive = _runtime->Drive();
         drive.RecordMeasurementInputs(snapshot);
-        const LoopController::ControlVector control = drive.CurrentControlVector();
+        const CommandVector control = drive.CurrentControlVector();
         const float fanDutyCycle = GetMissionFanDutyCycle();
         const float batteryVoltageV = drive.CurrentBatteryVoltageV();
         const MazeMap::EncoderObs encoderObservation = drive.ConsumeEncoderObservation(dtSeconds);
@@ -1016,8 +1001,8 @@ namespace MazeMap::App::Internal
             _activeModeWorkContext = _stagedModeWorkContext;
         }
 
-        _queuedControl = ControlVector::Brake;
-        _appliedControl = ControlVector::Brake;
+        _queuedControl = CommandVector::Brake();
+        _appliedControl = CommandVector::Brake();
         const std::uint32_t nowUs = static_cast<std::uint32_t>(micros());
         _lastTickStartUs = nowUs - _options.controlPeriodUs;
         _nextSyncTargetUs = nowUs + _options.controlPeriodUs;
@@ -1070,8 +1055,8 @@ namespace MazeMap::App::Internal
                 "LoopController end-session callback did not stage the next session state");
         }
 
-        _queuedControl = ControlVector::Brake;
-        _appliedControl = ControlVector::Brake;
+        _queuedControl = CommandVector::Brake();
+        _appliedControl = CommandVector::Brake();
     }
 
     void LoopController::WaitForBrakeSettlement()
@@ -1098,7 +1083,7 @@ namespace MazeMap::App::Internal
             TimingDiagnostics& timing = WorkingTiming();
             timing.cycleCounterStart = ReadCycleCounter();
 
-            _appliedControl = ControlVector::Brake;
+            _appliedControl = CommandVector::Brake();
             _queuedControl = _appliedControl;
             if (!ApplyControlAtTickStart(_appliedControl))
             {
@@ -1153,8 +1138,8 @@ namespace MazeMap::App::Internal
         _tickCount = 0U;
         _lastTickStartUs = 0U;
         _nextSyncTargetUs = 0U;
-        _queuedControl = ControlVector::Brake;
-        _appliedControl = ControlVector::Brake;
+        _queuedControl = CommandVector::Brake();
+        _appliedControl = CommandVector::Brake();
         _sessionStartWallSensorAdcProbePending = false;
         _timingBuffers[0] = TimingDiagnostics{};
         _timingBuffers[1] = TimingDiagnostics{};

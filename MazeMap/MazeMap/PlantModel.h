@@ -5,7 +5,7 @@
 #include "Defines.h"
 #include "EigenCompat.h"
 #include "AppliedTorqueEstimate.h"
-#include "LoopController.h"
+#include "CommandVector.h"
 #include "Maze.h"
 #include "SensorMount.h"
 #include "VehicleState.h"
@@ -123,7 +123,7 @@ namespace MazeMap
     // Inverse-dynamics result for a requested body motion at the current operating point.
     struct DriveCommandSolution
     {
-        App::Internal::LoopController::ControlVector control{};
+        App::Internal::CommandVector control{};
         float fanDutyCycle = 0.80f;
         float batteryVoltageV = 8.4f;
         float requestedCommonForceN = 0.0f;
@@ -399,13 +399,13 @@ namespace MazeMap
 
         PlantDerivatives forwardStep(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             const PlantParams& params) const noexcept;
         PlantDerivatives forwardStep(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             const PreparedParams& params) const noexcept;
@@ -428,38 +428,38 @@ namespace MazeMap
         ContactForces tireForces(const StateVector& state, const PreparedParams& params) const noexcept;
         ContactForces tireForces(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             const PlantParams& params) const noexcept;
         ContactForces tireForces(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             const PreparedParams& params) const noexcept;
 
         Eigen::Vector2f imuPlanarAcceleration(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             const PlantParams& params) const noexcept;
         Eigen::Vector2f imuPlanarAcceleration(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             const PreparedParams& params) const noexcept;
 
         StateVector integrate(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             float dt,
             const PlantParams& params) const noexcept;
         StateVector integrate(
             const StateVector& state,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             float dt,
@@ -467,12 +467,12 @@ namespace MazeMap
 
         AppliedTorqueEstimate estimateAppliedTorque(
             const StateVector& currentState,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             const PlantParams& params,
             float batteryVoltageV = 0.0f) const noexcept;
         AppliedTorqueEstimate estimateAppliedTorque(
             const StateVector& currentState,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             const PreparedParams& params,
             float batteryVoltageV = 0.0f) const noexcept;
 

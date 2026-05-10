@@ -65,7 +65,7 @@ namespace
     bool ExecuteOpenFloorStationaryMeasurementCycle(
         MazeMap::Estimator& ukf,
         float dtSeconds,
-        const MazeMap::App::Internal::LoopController::ControlVector& control,
+        const MazeMap::App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         const MazeMap::EncoderObs& encoderObservation,
@@ -128,8 +128,8 @@ namespace
         ResetOpenFloorBenchmarkUkf(ukf);
 
         const MazeMap::PlantParams& params = ukf.ukf().params();
-        const MazeMap::App::Internal::LoopController::ControlVector control =
-            MazeMap::App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f);
+        const MazeMap::App::Internal::CommandVector control =
+            MazeMap::App::Internal::CommandVector(0.0f, 0.0f);
         constexpr float fanDutyCycle = 0.80f;
         const float batteryVoltageV = params.supplyVoltageV;
 

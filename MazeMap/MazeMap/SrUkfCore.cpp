@@ -13,7 +13,7 @@
 
 namespace
 {
-    using ControlVector = MazeMap::App::Internal::LoopController::ControlVector;
+    using CommandVector = MazeMap::App::Internal::CommandVector;
 
     constexpr std::array<const char*, MazeMap::VehicleState::kDimension> kUkfStateFieldNames = {
         "px_m",
@@ -570,7 +570,7 @@ namespace MazeMap
         _prePredictCovariance = _filter.covariance();
         refreshFrozenPolicyState(
             0.0f,
-            App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f),
+            App::Internal::CommandVector(0.0f, 0.0f),
             0.80f,
             0.0f);
     }
@@ -889,7 +889,7 @@ namespace MazeMap
     }
 
     bool SrUkfCore::IsStationaryCandidate(
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float commandedLinearMps,
         float commandedAngularRadps,
         const EncoderObs& observation,
@@ -904,10 +904,10 @@ namespace MazeMap
             std::fabs(commandedLinearMps) < Tuning().stationaryCandidateMaxLinearCommandMps &&
             std::isfinite(commandedAngularRadps) &&
             std::fabs(commandedAngularRadps) < Tuning().stationaryCandidateMaxAngularCommandRadps &&
-            std::isfinite(control.leftMotorPwm) &&
-            std::fabs(control.leftMotorPwm) < Tuning().stationaryCandidateMaxDriveCommand &&
-            std::isfinite(control.rightMotorPwm) &&
-            std::fabs(control.rightMotorPwm) < Tuning().stationaryCandidateMaxDriveCommand &&
+            std::isfinite(control.LeftMotorPwm()) &&
+            std::fabs(control.LeftMotorPwm()) < Tuning().stationaryCandidateMaxDriveCommand &&
+            std::isfinite(control.RightMotorPwm()) &&
+            std::fabs(control.RightMotorPwm()) < Tuning().stationaryCandidateMaxDriveCommand &&
             std::isfinite(observation.omegaLeftRadps) &&
             std::fabs(observation.omegaLeftRadps) < Tuning().stationaryCandidateMaxEncoderOmegaRadps &&
             std::isfinite(observation.omegaRightRadps) &&
@@ -1342,8 +1342,8 @@ namespace MazeMap
                 sink,
                 "ukf_dump_last_control",
                 "left_motor_pwm=%.9g;right_motor_pwm=%.9g;fan_duty_cycle=%.9g;battery_voltage_v=%.9g",
-                static_cast<double>(_lastControl.leftMotorPwm),
-                static_cast<double>(_lastControl.rightMotorPwm),
+                static_cast<double>(_lastControl.LeftMotorPwm()),
+                static_cast<double>(_lastControl.RightMotorPwm()),
                 static_cast<double>(_lastFanDutyCycle),
                 static_cast<double>(_lastBatteryVoltageV)))
         {
@@ -1814,7 +1814,7 @@ namespace MazeMap
         _sqrtImuNoise(2, 2) = Tuning().imuAccelSigmaMps2;
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
-        _lastControl = App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f);
+        _lastControl = App::Internal::CommandVector(0.0f, 0.0f);
         _lastFanDutyCycle = 0.80f;
         _lastBatteryVoltageV = 0.0f;
         _lastEncoderObs = EncoderObs{};
@@ -1833,7 +1833,7 @@ namespace MazeMap
         _regripRecovery = {};
         refreshFrozenPolicyState(
             0.0f,
-            App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f),
+            App::Internal::CommandVector(0.0f, 0.0f),
             0.80f,
             0.0f);
         return true;
@@ -1905,7 +1905,7 @@ namespace MazeMap
         _sqrtImuNoise(0, 0) = Tuning().imuYawRateSigmaRadps;
         _sqrtImuNoise(1, 1) = Tuning().imuAccelSigmaMps2;
         _sqrtImuNoise(2, 2) = Tuning().imuAccelSigmaMps2;
-        _lastControl = App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f);
+        _lastControl = App::Internal::CommandVector(0.0f, 0.0f);
         _lastFanDutyCycle = 0.80f;
         _lastBatteryVoltageV = 0.0f;
         _lastEncoderObs = EncoderObs{};
@@ -1926,7 +1926,7 @@ namespace MazeMap
         _regripRecovery = {};
         refreshFrozenPolicyState(
             0.0f,
-            App::Internal::LoopController::ControlVector::RawMotorPwm(0.0f, 0.0f),
+            App::Internal::CommandVector(0.0f, 0.0f),
             0.80f,
             0.0f);
         return true;
@@ -2437,7 +2437,7 @@ namespace MazeMap
 
     void SrUkfCore::refreshFrozenPolicyState(
         float dtSeconds,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV) noexcept
     {
@@ -2662,7 +2662,7 @@ namespace MazeMap
 
     bool SrUkfCore::predict(
         float dt,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV) noexcept
     {
@@ -2671,7 +2671,7 @@ namespace MazeMap
 
     bool SrUkfCore::predictImpl(
         float dt,
-        const App::Internal::LoopController::ControlVector& control,
+        const App::Internal::CommandVector& control,
         float fanDutyCycle,
         float batteryVoltageV,
         void* loopHookContext,
@@ -2748,8 +2748,8 @@ namespace MazeMap
         predictProcessNoiseSquareRoot(VehicleState::kBgz, VehicleState::kBgz) =
             GyroBiasProcessSquareRootForMode(_operatingMode);
         _filter.setProcessNoiseSquareRoot(predictProcessNoiseSquareRoot);
-        Eigen::Matrix<float, 3, 1> controlVector;
-        controlVector << control.leftMotorPwm, control.rightMotorPwm, fanDutyCycle;
+        Eigen::Matrix<float, 3, 1> filterCommandVector;
+        filterCommandVector << control.LeftMotorPwm(), control.RightMotorPwm(), fanDutyCycle;
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
             InvokeLoopHook(loopHookContext, loopHook);
@@ -2757,7 +2757,7 @@ namespace MazeMap
         const PlantModel::FeedforwardEnvelopeModifiers predictModifiers = buildFeedforwardPolicyModifiers();
         const bool predicted = _filter.Predict(
             dt,
-            controlVector,
+            filterCommandVector,
             [this, predictModifiers](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
             {
                 if (_frozenSchedule.exactStationaryLock)
@@ -3268,8 +3268,8 @@ namespace MazeMap
     bool SrUkfCore::controlCommandsAreEffectivelyZero() const noexcept
     {
         return
-            (std::fabs(_lastControl.leftMotorPwm) <= 1.0e-6f) &&
-            (std::fabs(_lastControl.rightMotorPwm) <= 1.0e-6f) &&
+            (std::fabs(_lastControl.LeftMotorPwm()) <= 1.0e-6f) &&
+            (std::fabs(_lastControl.RightMotorPwm()) <= 1.0e-6f) &&
             (std::fabs(_commandedLinearMps) <= Tuning().stationaryCandidateMaxLinearCommandMps) &&
             (std::fabs(_commandedAngularRadps) <= Tuning().stationaryCandidateMaxAngularCommandRadps);
     }
@@ -3386,7 +3386,7 @@ namespace MazeMap
 
     void SrUkfCore::updateCommandSignFlipWindow(float dtSeconds) noexcept
     {
-        const float averageDriveCommand = 0.5f * (_lastControl.leftMotorPwm + _lastControl.rightMotorPwm);
+        const float averageDriveCommand = _lastControl.Average();
         const float averageDriveCommandSign =
             (std::fabs(averageDriveCommand) > 1.0e-4f) ?
             ((averageDriveCommand > 0.0f) ? 1.0f : -1.0f) :
@@ -3526,8 +3526,8 @@ namespace MazeMap
             (_timeSinceStationaryExitS <= Tuning().stationaryExitLaunchWindowS);
         const bool launchTrigger = HasLaunchOrReversalTrigger(
             _filter.state()(VehicleState::kU),
-            _lastControl.leftMotorPwm,
-            _lastControl.rightMotorPwm,
+            _lastControl.LeftMotorPwm(),
+            _lastControl.RightMotorPwm(),
             _leftLaunchAssistFloor,
             _rightLaunchAssistFloor,
             recentCommandSignFlip,
@@ -3580,7 +3580,7 @@ namespace MazeMap
     bool SrUkfCore::shouldEnableNonholonomicConstraint() const noexcept
     {
         const float forwardSpeedMps = std::fabs(_filter.state()(VehicleState::kU));
-        const float driveDelta = std::fabs(_lastControl.leftMotorPwm - _lastControl.rightMotorPwm);
+        const float driveDelta = 2.0f * std::fabs(_lastControl.Differential());
         return
             !_stationaryCertified &&
             (_operatingMode == OperatingMode::GripLinear) &&

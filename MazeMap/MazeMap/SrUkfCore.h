@@ -4,7 +4,7 @@
 #include "Maze.h"
 #include "EncoderObs.h"
 #include "ImuAccelObs.h"
-#include "LoopController.h"
+#include "CommandVector.h"
 #include "PlantModel.h"
 #include "SensorMount.h"
 #include "WallObservationPipeline.h"
@@ -359,7 +359,7 @@ namespace MazeMap
 
         static float ComputeNonholonomicSigmaMps(float absForwardSpeedMps) noexcept;
         static bool IsStationaryCandidate(
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float commandedLinearMps,
             float commandedAngularRadps,
             const EncoderObs& observation,
@@ -415,14 +415,14 @@ namespace MazeMap
 
         bool predict(
             float dt,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) noexcept;
 
         template <typename LoopHook>
         bool predict(
             float dt,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             LoopHook&& loopHook) noexcept
@@ -576,7 +576,7 @@ namespace MazeMap
 
         bool predictImpl(
             float dt,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV,
             void* loopHookContext,
@@ -618,7 +618,7 @@ namespace MazeMap
         float correctedYawRateRadps(float yawRateRawRadps) const noexcept;
         void refreshFrozenPolicyState(
             float dtSeconds,
-            const App::Internal::LoopController::ControlVector& control,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
             float batteryVoltageV) noexcept;
         bool applyClosurePseudoMeasurements(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
@@ -642,7 +642,7 @@ namespace MazeMap
         RobustUpdateSchedule _frozenSchedule{};
         TransientContactMemoryState _transientContactMemory{};
         RegripRecoveryState _regripRecovery{};
-        App::Internal::LoopController::ControlVector _lastControl{};
+        App::Internal::CommandVector _lastControl{};
         float _lastFanDutyCycle = 0.80f;
         float _lastBatteryVoltageV = 0.0f;
         EncoderObs _lastEncoderObs;
