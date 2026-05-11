@@ -86,6 +86,9 @@
     <ClCompile Include="SharedRuntimeTest.cpp">
       <Filter>Source Files\App</Filter>
     </ClCompile>
+    <ClCompile Include="MmLogSchemaCompositionTest.cpp">
+      <Filter>Source Files\mmlog</Filter>
+    </ClCompile>
     <ClCompile Include="..\MazeMap\MmLog.cpp">
       <Filter>Source Files\mmlog</Filter>
     </ClCompile>

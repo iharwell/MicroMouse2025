@@ -186,12 +186,6 @@ namespace MazeMap {
                 S32,
             };
 
-            struct FieldDescriptor final {
-                FieldKind kind;
-                const char* name;
-                std::size_t width;
-            };
-
             constexpr std::size_t cstrlen(const char* const s) noexcept {
                 std::size_t n = 0u;
                 while (s[n] != '\0') {
@@ -248,23 +242,6 @@ namespace MazeMap {
                 }
             }
 
-            template <std::size_t HeaderChars, std::size_t FieldCount>
-            constexpr std::array<char, HeaderChars> buildHeaderArray(const std::array<FieldDescriptor, FieldCount>& descriptors) noexcept {
-                std::array<char, HeaderChars> out{};
-                std::size_t pos = 0u;
-
-                for (std::size_t i = 0u; i < FieldCount; ++i) {
-                    copyChars(out.data(), pos, fieldKindToken(descriptors[i].kind));
-                    out[pos++] = '_';
-                    copyChars(out.data(), pos, descriptors[i].name);
-                    if ((i + 1u) != FieldCount) {
-                        out[pos++] = ',';
-                    }
-                }
-                out[pos] = '\0';
-                return out;
-            }
-
             constexpr std::uint32_t fnv1a32_impl(const char* const text) noexcept {
                 std::uint32_t hash = 2166136261u;
                 for (std::size_t i = 0u; text[i] != '\0'; ++i) {
@@ -272,6 +249,133 @@ namespace MazeMap {
                     hash *= 16777619u;
                 }
                 return hash;
+            }
+
+            template <typename T, typename = void>
+            struct has_entry_contract : std::false_type {};
+
+            template <typename T>
+            struct has_entry_contract<
+                T,
+                std::void_t<
+                decltype(T::mmlog_entry_marker),
+                decltype(T::field_count),
+                decltype(T::row_bytes),
+                decltype(T::header_chars),
+                decltype(T::header_storage),
+                decltype(T::header_cstr())>> : std::true_type {};
+
+            template <typename T, bool IsEntry = has_entry_contract<T>::value>
+            struct SchemaFieldTraits;
+
+            constexpr std::size_t countHeaderEntries(const char* const header) noexcept {
+                if (header == nullptr || header[0] == '\0') {
+                    return 0u;
+                }
+
+                std::size_t count = 1u;
+                for (std::size_t i = 0u; header[i] != '\0'; ++i) {
+                    if (header[i] == ',') {
+                        ++count;
+                    }
+                }
+                return count;
+            }
+
+            constexpr std::size_t prefixedHeaderChars(
+                const char* const header,
+                const char* const prefix) noexcept {
+                return cstrlen(header) + (countHeaderEntries(header) * (cstrlen(prefix) + 1u));
+            }
+
+            template <std::size_t HeaderChars>
+            constexpr void appendPrefixedHeader(
+                std::array<char, HeaderChars>& out,
+                std::size_t& pos,
+                const char* const header,
+                const char* const prefix) noexcept {
+                std::size_t source = 0u;
+
+                while (header[source] != '\0') {
+                    while (header[source] != '\0' && header[source] != '_' && header[source] != ',') {
+                        out[pos++] = header[source++];
+                    }
+                    if (header[source] == '_') {
+                        out[pos++] = header[source++];
+                        copyChars(out.data(), pos, prefix);
+                        out[pos++] = '_';
+                    }
+                    while (header[source] != '\0' && header[source] != ',') {
+                        out[pos++] = header[source++];
+                    }
+                    if (header[source] == ',') {
+                        out[pos++] = header[source++];
+                    }
+                }
+            }
+
+            template <typename T>
+            struct SchemaFieldTraits<T, false> final {
+                static constexpr std::size_t field_count = 1u;
+                static constexpr std::size_t row_bytes = sizeof(T);
+
+                static constexpr std::size_t headerChars(const char* const name) noexcept {
+                    return FieldTraits<T>::token_length + 1u + cstrlen(name);
+                }
+
+                template <std::size_t HeaderChars>
+                static constexpr void appendHeader(
+                    std::array<char, HeaderChars>& out,
+                    std::size_t& pos,
+                    const char* const name) noexcept {
+                    copyChars(out.data(), pos, fieldKindToken(FieldTraits<T>::kind));
+                    out[pos++] = '_';
+                    copyChars(out.data(), pos, name);
+                }
+            };
+
+            template <typename T>
+            struct SchemaFieldTraits<T, true> final {
+                static constexpr std::size_t field_count = T::field_count;
+                static constexpr std::size_t row_bytes = T::row_bytes;
+
+                static constexpr std::size_t headerChars(const char* const name) noexcept {
+                    return prefixedHeaderChars(T::header_cstr(), name);
+                }
+
+                template <std::size_t HeaderChars>
+                static constexpr void appendHeader(
+                    std::array<char, HeaderChars>& out,
+                    std::size_t& pos,
+                    const char* const name) noexcept {
+                    appendPrefixedHeader(out, pos, T::header_cstr(), name);
+                }
+            };
+
+            template <typename T>
+            constexpr std::size_t schemaFieldHeaderChars(const char* const name) noexcept {
+                return SchemaFieldTraits<T>::headerChars(name);
+            }
+
+            template <typename T, std::size_t HeaderChars>
+            constexpr void appendSchemaFieldHeader(
+                std::array<char, HeaderChars>& out,
+                std::size_t& pos,
+                bool& first,
+                const char* const name) noexcept {
+                if (!first) {
+                    out[pos++] = ',';
+                }
+                first = false;
+                SchemaFieldTraits<T>::appendHeader(out, pos, name);
+            }
+
+            template <std::size_t HeaderChars>
+            constexpr std::array<char, HeaderChars> terminateHeader(
+                std::array<char, HeaderChars> out,
+                const std::size_t pos) noexcept {
+                out[pos] = '\0';
+                return out;
             }
 
             template <typename T, typename = void>
@@ -285,7 +389,7 @@ namespace MazeMap {
                 decltype(T::row_bytes),
                 decltype(T::schema_version),
                 decltype(T::schema_hash),
-                decltype(T::descriptors),
+                decltype(T::header_chars),
                 decltype(T::header_storage),
                 decltype(T::header_cstr())>> : std::true_type{};
 
@@ -472,15 +576,55 @@ namespace MazeMap {
         // -----------------------------------------------------------------------------
 
 #define MMLOG_DETAIL_DECLARE_MEMBER(Type, Name) Type Name{};
-#define MMLOG_DETAIL_COUNT_FIELD(Type, Name) + 1u
-#define MMLOG_DETAIL_ROW_BYTES(Type, Name) + sizeof(Type)
-#define MMLOG_DETAIL_HEADER_CHARS(Type, Name) + ::mmlog::detail::FieldTraits<Type>::token_length + 1u + (sizeof(#Name) - 1u)
-#define MMLOG_DETAIL_DESCRIPTOR(Type, Name) ::mmlog::detail::FieldDescriptor{::mmlog::detail::FieldTraits<Type>::kind, #Name, sizeof(Type)},
+#define MMLOG_DETAIL_COUNT_MEMBER(Type, Name) + 1u
+#define MMLOG_DETAIL_COUNT_FIELD(Type, Name) + ::MazeMap::mmlog::detail::SchemaFieldTraits<Type>::field_count
+#define MMLOG_DETAIL_ROW_BYTES(Type, Name) + ::MazeMap::mmlog::detail::SchemaFieldTraits<Type>::row_bytes
+#define MMLOG_DETAIL_HEADER_CHARS(Type, Name) + ::MazeMap::mmlog::detail::schemaFieldHeaderChars<Type>(#Name)
+#define MMLOG_DETAIL_APPEND_HEADER(Type, Name) ::MazeMap::mmlog::detail::appendSchemaFieldHeader<Type>(out, pos, first, #Name);
+
+/**
+ * Declares a packed reusable row fragment whose fields are flattened when used
+ * as a member of an MMLOG_DEFINE_ROW row or another MMLOG_DEFINE_ENTRY entry.
+ *
+ * The entry field-list macro uses the same X(Type, Name) shape as rows. When a
+ * parent schema declares X(MyEntry, prefix), the sidecar header emits each leaf
+ * as type_prefix_leaf while the binary row stores the packed MyEntry bytes in
+ * place.
+ */
+#define MMLOG_DEFINE_ENTRY(EntryName, FieldListMacro)                                                                 \
+    MMLOG_PACKED_BEGIN                                                                                                \
+    struct MMLOG_PACKED EntryName final {                                                                             \
+        FieldListMacro(MMLOG_DETAIL_DECLARE_MEMBER)                                                                   \
+                                                                                                                      \
+        inline static constexpr bool mmlog_entry_marker = true;                                                       \
+        inline static constexpr std::size_t member_count = 0u FieldListMacro(MMLOG_DETAIL_COUNT_MEMBER);             \
+        inline static constexpr std::size_t field_count = 0u FieldListMacro(MMLOG_DETAIL_COUNT_FIELD);               \
+        inline static constexpr std::size_t row_bytes = 0u FieldListMacro(MMLOG_DETAIL_ROW_BYTES);                   \
+        inline static constexpr std::size_t header_chars =                                                            \
+            1u +                                                                                                      \
+            (0u FieldListMacro(MMLOG_DETAIL_HEADER_CHARS)) +                                                          \
+            ((member_count == 0u) ? 0u : (member_count - 1u));                                                        \
+                                                                                                                      \
+        inline static constexpr auto header_storage = []() constexpr {                                               \
+            std::array<char, header_chars> out{};                                                                     \
+            std::size_t pos = 0u;                                                                                     \
+            bool first = true;                                                                                        \
+            FieldListMacro(MMLOG_DETAIL_APPEND_HEADER)                                                                \
+            return ::MazeMap::mmlog::detail::terminateHeader(out, pos);                                               \
+        }();                                                                                                          \
+                                                                                                                      \
+        static constexpr const char* header_cstr() noexcept { return header_storage.data(); }                        \
+    };                                                                                                                \
+    MMLOG_PACKED_END                                                                                                  \
+    static_assert(::std::is_trivially_copyable<EntryName>::value, #EntryName " must be trivially copyable.");       \
+    static_assert(::std::is_standard_layout<EntryName>::value, #EntryName " must be standard layout.");             \
+    static_assert(sizeof(EntryName) == EntryName::row_bytes, #EntryName " contains padding.")
 
 /**
  * Declares a packed row type and its compile-time schema metadata from a field-list macro.
  *
- * The field-list macro must expand as repeated invocations of X(Type, Name). The generated
+ * The field-list macro must expand as repeated invocations of X(Type, Name). Type may be an
+ * allowed scalar field type or an MMLOG_DEFINE_ENTRY-generated entry type. The generated
  * structure is intended to act as a write-only staging object: application code assigns named
  * members, then passes the row to log(), which serializes the packed bytes in declaration order.
  *
@@ -501,19 +645,23 @@ namespace MazeMap {
     struct MMLOG_PACKED RowName final {                                                                               \
         FieldListMacro(MMLOG_DETAIL_DECLARE_MEMBER)                                                                   \
                                                                                                                       \
+        inline static constexpr std::size_t member_count = 0u FieldListMacro(MMLOG_DETAIL_COUNT_MEMBER);             \
         inline static constexpr std::size_t field_count = 0u FieldListMacro(MMLOG_DETAIL_COUNT_FIELD);               \
         inline static constexpr std::size_t row_bytes = 0u FieldListMacro(MMLOG_DETAIL_ROW_BYTES);                   \
         inline static constexpr std::size_t header_chars =                                                            \
             1u +                                                                                                      \
             (0u FieldListMacro(MMLOG_DETAIL_HEADER_CHARS)) +                                                          \
-            ((field_count == 0u) ? 0u : (field_count - 1u));                                                          \
-        inline static constexpr std::array<::mmlog::detail::FieldDescriptor, field_count> descriptors{{              \
-            FieldListMacro(MMLOG_DETAIL_DESCRIPTOR)                                                                   \
-        }};                                                                                                           \
-        inline static constexpr auto header_storage =                                                                 \
-            ::mmlog::detail::buildHeaderArray<header_chars>(descriptors);                                             \
-        inline static constexpr std::uint32_t schema_version = ::mmlog::kSchemaVersion;                              \
-        inline static constexpr std::uint32_t schema_hash = ::mmlog::fnv1a32(header_storage.data());                 \
+            ((member_count == 0u) ? 0u : (member_count - 1u));                                                        \
+                                                                                                                      \
+        inline static constexpr auto header_storage = []() constexpr {                                               \
+            std::array<char, header_chars> out{};                                                                     \
+            std::size_t pos = 0u;                                                                                     \
+            bool first = true;                                                                                        \
+            FieldListMacro(MMLOG_DETAIL_APPEND_HEADER)                                                                \
+            return ::MazeMap::mmlog::detail::terminateHeader(out, pos);                                               \
+        }();                                                                                                          \
+        inline static constexpr std::uint32_t schema_version = ::MazeMap::mmlog::kSchemaVersion;                     \
+        inline static constexpr std::uint32_t schema_hash = ::MazeMap::mmlog::fnv1a32(header_storage.data());        \
                                                                                                                       \
         static constexpr const char* header_cstr() noexcept { return header_storage.data(); }                        \
     };                                                                                                                \
@@ -521,7 +669,7 @@ namespace MazeMap {
     static_assert(::std::is_trivially_copyable<RowName>::value, #RowName " must be trivially copyable.");          \
     static_assert(::std::is_standard_layout<RowName>::value, #RowName " must be standard layout.");                \
     static_assert(sizeof(RowName) == RowName::row_bytes, #RowName " contains padding.");                            \
-    static_assert(RowName::row_bytes <= ::mmlog::kServiceBlockBytes,                                                  \
+    static_assert(RowName::row_bytes <= ::MazeMap::mmlog::kServiceBlockBytes,                                         \
                   #RowName " exceeds the 512-byte service block size. Split the schema across multiple log files.")
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
