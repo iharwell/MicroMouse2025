@@ -2,27 +2,11 @@
 #include "DriveBase.h"
 
 #include "PlantModel.h"
+#include "Vehicle.h"
 
 namespace
 {
     using CommandVector = MazeMap::App::Internal::CommandVector;
-
-    MazeMap::VehicleState::StateVector BuildPlantStateVector(
-        const MazeMap::VehicleState& state) noexcept
-    {
-        MazeMap::VehicleState::StateVector result = MazeMap::VehicleState::StateVector::Zero();
-        result(MazeMap::VehicleState::kPx) = state.GetPositionX();
-        result(MazeMap::VehicleState::kPy) = state.GetPositionY();
-        result(MazeMap::VehicleState::kPsi) = state.GetOrientation();
-        result(MazeMap::VehicleState::kU) = state.GetVelocity();
-        result(MazeMap::VehicleState::kV) = state.GetLateralVelocity();
-        result(MazeMap::VehicleState::kR) = state.GetRotationalVelocity();
-        result(MazeMap::VehicleState::kOmegaL) = state.GetWheelSpeedLeft();
-        result(MazeMap::VehicleState::kOmegaR) = state.GetWheelSpeedRight();
-        result(MazeMap::VehicleState::kBgz) = state.GetGyroBiasZ();
-        MazeMap::VehicleState::NormalizeStateVector(result);
-        return result;
-    }
 
     CommandVector MakeClampedDriveControlVector(float leftMotorPwm, float rightMotorPwm) noexcept
     {
@@ -42,11 +26,6 @@ MazeMap::App::Internal::CommandVector DriveBase::DeltaCommand(
     float desiredLongitudinalAccelMps2,
     MazeMap::CommandPD pd) const
 {
-    if (_estimator.HasFault())
-    {
-        return {};
-    }
-
     const CommandContext context = CaptureCommandContext();
     CommandTargets targets = BuildHoldTargets(context);
     targets.hasLongitudinalAccelTarget = true;
@@ -68,11 +47,6 @@ MazeMap::App::Internal::CommandVector DriveBase::DeltaCommand(
     float desiredYawAccelRadps2,
     MazeMap::CommandPD pd) const
 {
-    if (_estimator.HasFault())
-    {
-        return {};
-    }
-
     const CommandContext context = CaptureCommandContext();
     CommandTargets targets = BuildHoldTargets(context);
     targets.hasLongitudinalAccelTarget = true;
@@ -94,11 +68,6 @@ MazeMap::App::Internal::CommandVector DriveBase::DeltaYawRateCommand(
     float desiredYawAccelRadps2,
     MazeMap::CommandPD pd) const
 {
-    if (_estimator.HasFault())
-    {
-        return {};
-    }
-
     const CommandContext context = CaptureCommandContext();
     CommandTargets targets = BuildHoldTargets(context);
     targets.hasYawAccelTarget = true;
@@ -117,11 +86,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointCommand(
     float desiredLinearSpeedMps,
     MazeMap::CommandPD pd) const
 {
-    if (_estimator.HasFault())
-    {
-        return {};
-    }
-
     const CommandContext context = CaptureCommandContext();
     CommandTargets targets = BuildHoldTargets(context);
     targets.hasVelocityTarget = true;
@@ -141,11 +105,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointCommand(
     float desiredYawRateRadps,
     MazeMap::CommandPD pd) const
 {
-    if (_estimator.HasFault())
-    {
-        return {};
-    }
-
     const CommandContext context = CaptureCommandContext();
     CommandTargets targets = BuildHoldTargets(context);
     targets.hasVelocityTarget = true;
@@ -169,11 +128,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointCommandWithHeadingTarget(
     MazeMap::CommandPD pointPd,
     MazeMap::CommandPD headingPd) const
 {
-    if (_estimator.HasFault())
-    {
-        return {};
-    }
-
     const CommandContext context = CaptureCommandContext();
     CommandTargets targets = BuildHoldTargets(context);
     targets.hasVelocityTarget = true;
@@ -244,11 +198,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointYawRateCommand(
     float desiredYawRateRadps,
     MazeMap::CommandPD pd) const
 {
-    if (_estimator.HasFault())
-    {
-        return {};
-    }
-
     const CommandContext context = CaptureCommandContext();
     CommandTargets targets = BuildHoldTargets(context);
     targets.hasYawRateTarget = true;
@@ -267,7 +216,7 @@ MazeMap::App::Internal::CommandVector DriveBase::FeedbackCommand(
     float setpoint,
     MazeMap::CommandPD pd) const
 {
-    if (_estimator.HasFault() || (pd == MazeMap::CommandPD::RawCommand))
+    if (pd == MazeMap::CommandPD::RawCommand)
     {
         return {};
     }
@@ -291,12 +240,6 @@ MazeMap::App::Internal::CommandVector DriveBase::FeedbackCommand(
     targets.hasLateralAccelTarget =
         MazeMap::HasCommandPD(pd, MazeMap::CommandPD::IMULateralAccel);
     targets.lateralAccelTargetMps2 = setpoint;
-    if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::StateWheelOmegaPD))
-    {
-        targets.hasWheelOmegaTargets = true;
-        targets.leftWheelOmegaTargetRadps = setpoint;
-        targets.rightWheelOmegaTargetRadps = setpoint;
-    }
     if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::EncoderVelocity))
     {
         targets.hasWheelLinearTargets = true;
@@ -319,19 +262,19 @@ void DriveBase::CommandGenerated(
     float angularSpeedRadps,
     bool applyLaunchAssist)
 {
-    if (_estimator.HasFault())
-    {
-        Brake();
-        return;
-    }
-
+    RefreshSensorSnapshotDerivedState();
     const float leftMeasuredMps = _leftEncoderVelocityMps;
     const float rightMeasuredMps = _rightEncoderVelocityMps;
     float leftDriveCommand = command.LeftMotorPwm();
     float rightDriveCommand = command.RightMotorPwm();
     const unsigned long nowMs = millis();
     if (applyLaunchAssist &&
-        UpdateWheelLaunchAssistState(_leftLaunchAssist, leftMeasuredMps, leftDriveCommand, _leftMotor.getDriveCommand(), nowMs))
+        UpdateWheelLaunchAssistState(
+            _leftLaunchAssist,
+            leftMeasuredMps,
+            leftDriveCommand,
+            _lastProposedCommand.LeftMotorPwm(),
+            nowMs))
     {
         _lastLeftLaunchAssistFloor = GetWheelLaunchAssistFloor(_leftLaunchAssist, nowMs);
         leftDriveCommand = ApplyLaunchAssistFloor(
@@ -345,7 +288,12 @@ void DriveBase::CommandGenerated(
         _lastLeftLaunchAssistFloor = 0.0f;
     }
     if (applyLaunchAssist &&
-        UpdateWheelLaunchAssistState(_rightLaunchAssist, rightMeasuredMps, rightDriveCommand, _rightMotor.getDriveCommand(), nowMs))
+        UpdateWheelLaunchAssistState(
+            _rightLaunchAssist,
+            rightMeasuredMps,
+            rightDriveCommand,
+            _lastProposedCommand.RightMotorPwm(),
+            nowMs))
     {
         _lastRightLaunchAssistFloor = GetWheelLaunchAssistFloor(_rightLaunchAssist, nowMs);
         rightDriveCommand = ApplyLaunchAssistFloor(
@@ -361,10 +309,8 @@ void DriveBase::CommandGenerated(
 
     _lastLinearCommandMps = linearSpeedMps;
     _lastAngularCommandRadps = angularSpeedRadps;
-    _lastLeftFeedforwardCommand = 0.0f;
-    _lastRightFeedforwardCommand = 0.0f;
-    _lastLeftFeedbackCommand = leftDriveCommand;
-    _lastRightFeedbackCommand = rightDriveCommand;
+    _lastFeedforwardCommand = {};
+    _lastFeedbackCommand = CommandVector(leftDriveCommand, rightDriveCommand);
     _lastLeftTargetVelocityMps = 0.0f;
     _lastRightTargetVelocityMps = 0.0f;
     _lastModeFlags = kModeClosedLoop |
@@ -373,25 +319,17 @@ void DriveBase::CommandGenerated(
     _lastSaturationFlags =
         ((std::fabs(leftDriveCommand) >= 0.999f) ? 0x1u : 0u) |
         ((std::fabs(rightDriveCommand) >= 0.999f) ? 0x2u : 0u);
-    SetOpenLoopRaw(leftDriveCommand, rightDriveCommand);
+    _lastProposedCommand = MakeClampedDriveControlVector(leftDriveCommand, rightDriveCommand);
 }
 
 void DriveBase::CommandOpenLoopRaw(
     const MazeMap::App::Internal::CommandVector& command)
 {
-    if (_estimator.HasFault())
-    {
-        Brake();
-        return;
-    }
-
     _lastLinearCommandMps = 0.0f;
     _lastAngularCommandRadps = 0.0f;
     ResetLaunchAssist();
-    _lastLeftFeedforwardCommand = 0.0f;
-    _lastRightFeedforwardCommand = 0.0f;
-    _lastLeftFeedbackCommand = command.LeftMotorPwm();
-    _lastRightFeedbackCommand = command.RightMotorPwm();
+    _lastFeedforwardCommand = {};
+    _lastFeedbackCommand = command;
     _lastLeftTargetVelocityMps = 0.0f;
     _lastRightTargetVelocityMps = 0.0f;
     _lastLeftLaunchAssistFloor = 0.0f;
@@ -400,74 +338,44 @@ void DriveBase::CommandOpenLoopRaw(
     _lastSaturationFlags =
         ((std::fabs(command.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
         ((std::fabs(command.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-    SetOpenLoopRaw(command.LeftMotorPwm(), command.RightMotorPwm());
+    _lastProposedCommand = MakeClampedDriveControlVector(command.LeftMotorPwm(), command.RightMotorPwm());
 }
 
-void DriveBase::GetVelocityCommandOperatingState(
-    MazeMap::VehicleState::StateVector& presentState,
+void DriveBase::GetVelocityCommandOperatingPoint(
+    float& presentLinearSpeedMps,
+    float& presentYawRateRadps,
     float& batteryVoltageV) const
 {
-    presentState = BuildPlantStateVector(_estimator.RuntimeState());
-    const MazeMap::PlantParams& params = _estimator.ukf().params();
-    const MazeMap::PlantPreparedParams& prepared = _estimator.ukf().preparedParams();
+    RefreshSensorSnapshotDerivedState();
     const float measuredLeftVelocityMps = _leftEncoderVelocityMps;
     const float measuredRightVelocityMps = _rightEncoderVelocityMps;
-    const float measuredLinearSpeedMps = 0.5f * (measuredLeftVelocityMps + measuredRightVelocityMps);
-    const float wheelRadiusM =
-        (std::isfinite(params.wheelRadiusM) && (params.wheelRadiusM > 0.0f)) ?
-        params.wheelRadiusM :
-        0.0f;
-    const float measuredAngularSpeedRadps =
-        _lastImuYawRateValid ?
-            _lastImuYawRateRadps :
-            (std::isfinite(prepared.trackWidthM) && (prepared.trackWidthM > 0.0f)) ?
-                ((measuredLeftVelocityMps - measuredRightVelocityMps) / prepared.trackWidthM) :
-                0.0f;
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kPx)))
+    float measuredLinearSpeedMps = 0.0f;
+    float measuredAngularSpeedRadps = 0.0f;
+    measuredLinearSpeedMps =
+        MazeMap::Vehicle::BodyForwardVelocityFromWheelLinear(measuredLeftVelocityMps, measuredRightVelocityMps);
+    measuredAngularSpeedRadps =
+        MazeMap::Vehicle::BodyYawRateFromWheelLinear(measuredLeftVelocityMps, measuredRightVelocityMps);
+    if (_lastImuYawRateValid)
     {
-        presentState(MazeMap::VehicleState::kPx) = 0.0f;
+        measuredAngularSpeedRadps = _lastImuYawRateRadps;
     }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kPy)))
+    presentLinearSpeedMps =
+        std::isfinite(_runtimeState.GetVelocity()) ?
+        _runtimeState.GetVelocity() :
+        measuredLinearSpeedMps;
+    presentYawRateRadps =
+        std::isfinite(_runtimeState.GetRotationalVelocity()) ?
+        _runtimeState.GetRotationalVelocity() :
+        measuredAngularSpeedRadps;
+    if (!std::isfinite(presentLinearSpeedMps))
     {
-        presentState(MazeMap::VehicleState::kPy) = 0.0f;
+        presentLinearSpeedMps = 0.0f;
     }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kPsi)))
+    if (!std::isfinite(presentYawRateRadps))
     {
-        presentState(MazeMap::VehicleState::kPsi) = 0.0f;
+        presentYawRateRadps = 0.0f;
     }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kBgz)))
-    {
-        presentState(MazeMap::VehicleState::kBgz) = 0.0f;
-    }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kU)))
-    {
-        presentState(MazeMap::VehicleState::kU) = measuredLinearSpeedMps;
-    }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kV)))
-    {
-        presentState(MazeMap::VehicleState::kV) = 0.0f;
-    }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kR)))
-    {
-        presentState(MazeMap::VehicleState::kR) = measuredAngularSpeedRadps;
-    }
-    const float feedforwardYawRateRadps = _estimator.ukf().resolveYawRateForFeedforward(_lastGyroRawRadps);
-    if (std::isfinite(feedforwardYawRateRadps))
-    {
-        presentState(MazeMap::VehicleState::kR) = feedforwardYawRateRadps;
-    }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kOmegaL)))
-    {
-        presentState(MazeMap::VehicleState::kOmegaL) =
-            (wheelRadiusM > 0.0f) ? (measuredLeftVelocityMps / wheelRadiusM) : 0.0f;
-    }
-    if (!std::isfinite(presentState(MazeMap::VehicleState::kOmegaR)))
-    {
-        presentState(MazeMap::VehicleState::kOmegaR) =
-            (wheelRadiusM > 0.0f) ? (measuredRightVelocityMps / wheelRadiusM) : 0.0f;
-    }
-    MazeMap::VehicleState::NormalizeStateVector(presentState);
-    batteryVoltageV = 0.5f * (_leftMotor.getVoltage() + _rightMotor.getVoltage());
+    batteryVoltageV = CurrentBatteryVoltageV();
 }
 
 float DriveBase::ResolveCommandResponseTimeS() noexcept
@@ -492,6 +400,62 @@ float DriveBase::ClampMagnitude(float value, float limit) noexcept
         0.0f;
 }
 
+void DriveBase::RefreshSensorSnapshotDerivedState() const noexcept
+{
+    const SensorSnapshot& snapshot = _runtimeState.GetSensorSnapshot();
+    _lastGyroRawRadps = snapshot.gyroRawRadps;
+    _lastImuYawRateRadps = snapshot.gyroRadps;
+    _lastImuYawRateValid = std::isfinite(snapshot.gyroRadps);
+    _lastImuAccelBodyXMps2 = snapshot.accelBodyXMps2;
+    _lastImuAccelBodyYMps2 = snapshot.accelBodyYMps2;
+    _lastImuAccelValid =
+        snapshot.accelBiasValid &&
+        std::isfinite(snapshot.accelBodyXMps2) &&
+        std::isfinite(snapshot.accelBodyYMps2);
+
+    if (!snapshot.encoderObservationValid)
+    {
+        _encoderObservationValid = false;
+        _lastEncoderObservation = {};
+        _leftEncoderVelocityMps = 0.0f;
+        _rightEncoderVelocityMps = 0.0f;
+        return;
+    }
+
+    const MazeMap::EncoderObs& observation = snapshot.encoderObservation;
+    const float snapshotTimeS = _runtimeState.GetTime();
+    const bool duplicateObservation =
+        _hasProcessedEncoderSnapshot &&
+        (_lastEncoderSnapshotTimeS == snapshotTimeS) &&
+        (_lastEncoderObservation.totalLeftCounts == observation.totalLeftCounts) &&
+        (_lastEncoderObservation.totalRightCounts == observation.totalRightCounts) &&
+        (_lastEncoderObservation.omegaLeftRadps == observation.omegaLeftRadps) &&
+        (_lastEncoderObservation.omegaRightRadps == observation.omegaRightRadps);
+
+    if (!duplicateObservation)
+    {
+        _leftEncoderCountTotal += observation.totalLeftCounts;
+        _rightEncoderCountTotal += observation.totalRightCounts;
+        if (std::isfinite(observation.leftDistanceDeltaM))
+        {
+            _leftEncoderDistanceMeters += observation.leftDistanceDeltaM;
+        }
+        if (std::isfinite(observation.rightDistanceDeltaM))
+        {
+            _rightEncoderDistanceMeters += observation.rightDistanceDeltaM;
+        }
+        _lastEncoderObservation = observation;
+        _lastEncoderSnapshotTimeS = snapshotTimeS;
+        _hasProcessedEncoderSnapshot = true;
+    }
+
+    _encoderObservationValid = true;
+    _leftEncoderVelocityMps =
+        std::isfinite(observation.leftVelocityMps) ? observation.leftVelocityMps : 0.0f;
+    _rightEncoderVelocityMps =
+        std::isfinite(observation.rightVelocityMps) ? observation.rightVelocityMps : 0.0f;
+}
+
 DriveBase::CommandTargets DriveBase::BuildHoldTargets(const CommandContext& context) const noexcept
 {
     CommandTargets targets{};
@@ -502,45 +466,27 @@ DriveBase::CommandTargets DriveBase::BuildHoldTargets(const CommandContext& cont
     targets.lateralAccelTargetMps2 = context.imuLateralAccelMps2;
     targets.leftWheelLinearTargetMps = context.encoderLeftVelocityMps;
     targets.rightWheelLinearTargetMps = context.encoderRightVelocityMps;
-    if (context.wheelRadiusM > 0.0f)
-    {
-        targets.leftWheelOmegaTargetRadps =
-            context.presentState(MazeMap::VehicleState::kOmegaL);
-        targets.rightWheelOmegaTargetRadps =
-            context.presentState(MazeMap::VehicleState::kOmegaR);
-    }
     return targets;
 }
 
 DriveBase::CommandContext DriveBase::CaptureCommandContext() const
 {
     CommandContext context{};
-    GetVelocityCommandOperatingState(context.presentState, context.batteryVoltageV);
+    GetVelocityCommandOperatingPoint(
+        context.presentLinearSpeedMps,
+        context.presentYawRateRadps,
+        context.batteryVoltageV);
     context.presentYawRad =
-        WrapAngleRad(context.presentState(MazeMap::VehicleState::kPsi));
-    context.presentLinearSpeedMps =
-        context.presentState(MazeMap::VehicleState::kU);
-    context.presentYawRateRadps =
-        context.presentState(MazeMap::VehicleState::kR);
+        WrapAngleRad(std::isfinite(_runtimeState.GetOrientation()) ? _runtimeState.GetOrientation() : 0.0f);
 
-    const MazeMap::PlantPreparedParams& prepared = _estimator.ukf().preparedParams();
-    context.wheelRadiusM = ResolvePositiveOrZero(prepared.wheelRadiusM);
-    context.trackWidthM = ResolvePositiveOrZero(prepared.trackWidthM);
     context.encoderLeftVelocityMps = _leftEncoderVelocityMps;
     context.encoderRightVelocityMps = _rightEncoderVelocityMps;
 
-    const MazeMap::App::Internal::CommandVector control =
-        MazeMap::App::Internal::CommandVector(
-            _leftMotor.getDriveCommand(),
-            _rightMotor.getDriveCommand());
-
     context.presentDerivatives =
         _plantModel.forwardStep(
-            context.presentState,
-            control,
+            _lastProposedCommand,
             GetMissionFanDutyCycle(),
-            context.batteryVoltageV,
-            prepared);
+            context.batteryVoltageV);
     context.stateLongitudinalAccelMps2 =
         context.presentDerivatives.longitudinalAccelMps2;
     context.stateImuLateralAccelMps2 =
@@ -561,7 +507,6 @@ DriveBase::CommandContext DriveBase::CaptureCommandContext() const
         context.stateImuLateralAccelMps2;
 
     ResolveDefaultVelocityTargetOperatingEnvelope(
-        context.presentState,
         context.maxLongitudinalAccelMps2,
         context.maxYawAccelRadps2);
     return context;
@@ -574,27 +519,20 @@ void DriveBase::ResolveWheelTargets(
 {
     float unusedLeftTargetAccelMps2 = 0.0f;
     float unusedRightTargetAccelMps2 = 0.0f;
-    float leftTargetOmegaRadps = 0.0f;
-    float rightTargetOmegaRadps = 0.0f;
-        _plantModel.resolveWheelMotionTargets(
+    float unusedLeftTargetOmegaRadps = 0.0f;
+    float unusedRightTargetOmegaRadps = 0.0f;
+    _plantModel.resolveWheelMotionTargets(
             desiredLinearSpeedMps,
             desiredYawRateRadps,
             0.0f,
             0.0f,
-            _estimator.ukf().preparedParams(),
             targets.leftWheelLinearTargetMps,
             targets.rightWheelLinearTargetMps,
             unusedLeftTargetAccelMps2,
             unusedRightTargetAccelMps2,
-            leftTargetOmegaRadps,
-            rightTargetOmegaRadps);
+            unusedLeftTargetOmegaRadps,
+            unusedRightTargetOmegaRadps);
     targets.hasWheelLinearTargets = true;
-    if (_estimator.ukf().preparedParams().wheelRadiusM > 0.0f)
-    {
-        targets.hasWheelOmegaTargets = true;
-        targets.leftWheelOmegaTargetRadps = leftTargetOmegaRadps;
-        targets.rightWheelOmegaTargetRadps = rightTargetOmegaRadps;
-    }
 }
 
 void DriveBase::ResolveVelocityPointAcceleration(
@@ -650,9 +588,7 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawAccelerationCommand(
     float desiredLongitudinalAccelMps2,
     float desiredYawAccelRadps2) const
 {
-    float batteryVoltageV = 0.0f;
-    MazeMap::VehicleState::StateVector unusedPresentState = MazeMap::VehicleState::StateVector::Zero();
-    GetVelocityCommandOperatingState(unusedPresentState, batteryVoltageV);
+    const float batteryVoltageV = CurrentBatteryVoltageV();
 
     const float resolvedPresentLinearSpeedMps =
         std::isfinite(presentLinearSpeedMps) ?
@@ -676,18 +612,13 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawAccelerationCommand(
         (std::fabs(resolvedYawAccelRadps2) <= 1.0e-5f);
     const MazeMap::DriveCommandSolution solution =
         isSteadyHoldRequest ?
-        _estimator.ukf().solveAlignedDriveCommandsForVelocityTarget(
+        _plantModel.solveSteadyStateFeedforward(
             resolvedPresentLinearSpeedMps,
-            resolvedPresentLinearSpeedMps,
-            resolvedPresentYawRateRadps,
             resolvedPresentYawRateRadps,
             GetMissionFanDutyCycle(),
-            batteryVoltageV,
-            ResolveCommandResponseTimeS()) :
-        _estimator.ukf().solveAlignedDriveCommands(
-            resolvedPresentLinearSpeedMps,
+            batteryVoltageV) :
+        _plantModel.solveAccelerationFeedforward(
             resolvedLongitudinalAccelMps2,
-            resolvedPresentYawRateRadps,
             resolvedYawAccelRadps2,
             GetMissionFanDutyCycle(),
             batteryVoltageV);
@@ -702,13 +633,11 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawVelocityTargetCommand
     float desiredYawRateRadps) const
 {
     const MazeMap::DriveCommandSolution solution =
-        _estimator.ukf().solveAlignedDriveCommandsForVelocityTarget(
-            context.presentState,
+        _plantModel.solveSteadyStateFeedforward(
             desiredLinearSpeedMps,
             desiredYawRateRadps,
             GetMissionFanDutyCycle(),
-            context.batteryVoltageV,
-            ResolveCommandResponseTimeS());
+            context.batteryVoltageV);
     return MakeClampedDriveControlVector(
         solution.control.LeftMotorPwm(),
         solution.control.RightMotorPwm());
@@ -768,12 +697,10 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
         targets.hasVelocityTarget ||
         targets.hasYawRateTarget ||
         targets.hasHeadingTarget ||
-        targets.hasWheelLinearTargets ||
-        targets.hasWheelOmegaTargets;
+        targets.hasWheelLinearTargets;
     const float responseTimeS = ResolveCommandResponseTimeS();
     const float maxVelocityTargetDeltaMps = responseTimeS * context.maxLongitudinalAccelMps2;
     const float maxYawRateTargetDeltaRadps = responseTimeS * context.maxYawAccelRadps2;
-    const float trackWidthM = _estimator.ukf().preparedParams().trackWidthM;
     bool targetCommandAdjusted = false;
     if (useVelocityTargetComposition)
     {
@@ -978,44 +905,6 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
             }
         }
 
-        const float wheelRadiusM = context.wheelRadiusM;
-        if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::StateWheelOmegaPD) &&
-            (wheelRadiusM > 0.0f))
-        {
-            const float wheelVelocityStateKp =
-                MazeMap::ScaleWheelControlValue(
-                    GetProportionalDerivativeCluster()
-                        .GetWheelVelocityPD(MazeMap::CommandPD::StateWheelOmegaPD)
-                        .GetProportionalGain(),
-                    _wheelControlProfile.velocityKpScale);
-            const float leftTargetOmegaRadps =
-                adjustedTargets.hasWheelOmegaTargets ?
-                adjustedTargets.leftWheelOmegaTargetRadps :
-                context.presentState(MazeMap::VehicleState::kOmegaL);
-            const float rightTargetOmegaRadps =
-                adjustedTargets.hasWheelOmegaTargets ?
-                adjustedTargets.rightWheelOmegaTargetRadps :
-                context.presentState(MazeMap::VehicleState::kOmegaR);
-            const float leftVelocityErrorMps =
-                wheelRadiusM * (leftTargetOmegaRadps - context.presentState(MazeMap::VehicleState::kOmegaL));
-            const float rightVelocityErrorMps =
-                wheelRadiusM * (rightTargetOmegaRadps - context.presentState(MazeMap::VehicleState::kOmegaR));
-            if (useVelocityTargetComposition)
-            {
-                adjustedTargets.velocityTargetMps +=
-                    0.5f * wheelVelocityStateKp * (leftVelocityErrorMps + rightVelocityErrorMps);
-                adjustedTargets.yawRateTargetRadps +=
-                    wheelVelocityStateKp * (leftVelocityErrorMps - rightVelocityErrorMps) / trackWidthM;
-                targetCommandAdjusted = true;
-            }
-            else
-            {
-                command += CommandVector(
-                    wheelVelocityStateKp * leftVelocityErrorMps,
-                    wheelVelocityStateKp * rightVelocityErrorMps);
-            }
-        }
-
         if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::EncoderVelocity))
         {
             const float wheelVelocityEncoderKp =
@@ -1038,10 +927,15 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 rightTargetVelocityMps - context.encoderRightVelocityMps;
             if (useVelocityTargetComposition)
             {
+                float forwardVelocityErrorMps = 0.0f;
+                float yawRateErrorRadps = 0.0f;
+                forwardVelocityErrorMps =
+                    MazeMap::Vehicle::BodyForwardVelocityFromWheelLinear(leftVelocityErrorMps, rightVelocityErrorMps);
+                yawRateErrorRadps =
+                    MazeMap::Vehicle::BodyYawRateFromWheelLinear(leftVelocityErrorMps, rightVelocityErrorMps);
                 adjustedTargets.velocityTargetMps +=
-                    0.5f * wheelVelocityEncoderKp * (leftVelocityErrorMps + rightVelocityErrorMps);
-                adjustedTargets.yawRateTargetRadps +=
-                    wheelVelocityEncoderKp * (leftVelocityErrorMps - rightVelocityErrorMps) / trackWidthM;
+                    wheelVelocityEncoderKp * forwardVelocityErrorMps;
+                adjustedTargets.yawRateTargetRadps += wheelVelocityEncoderKp * yawRateErrorRadps;
                 targetCommandAdjusted = true;
             }
             else
@@ -1099,14 +993,8 @@ void DriveBase::CacheGeneratedCommandTelemetry(
     const MazeMap::App::Internal::CommandVector& feedforwardCommand,
     const MazeMap::App::Internal::CommandVector& feedbackCommand) const noexcept
 {
-    _lastFeedforwardCommandAverage = feedforwardCommand.Average();
-    _lastFeedforwardCommandDelta = feedforwardCommand.Differential();
-    _lastFeedbackCommandAverage = feedbackCommand.Average();
-    _lastFeedbackCommandDelta = feedbackCommand.Differential();
-    _lastLeftFeedforwardCommand = feedforwardCommand.LeftMotorPwm();
-    _lastRightFeedforwardCommand = feedforwardCommand.RightMotorPwm();
-    _lastLeftFeedbackCommand = feedbackCommand.LeftMotorPwm();
-    _lastRightFeedbackCommand = feedbackCommand.RightMotorPwm();
+    _lastFeedforwardCommand = feedforwardCommand;
+    _lastFeedbackCommand = feedbackCommand;
 }
 
 float DriveBase::GetWheelVelocityKp() const

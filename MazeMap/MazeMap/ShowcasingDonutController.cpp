@@ -14,6 +14,7 @@
 #include "PlantModel.h"
 #include "RuntimeSensorSuite.h"
 #include "SensorSnapshot.h"
+#include "Vehicle.h"
 #include "VehicleState.h"
 #include "WallObservationPipeline.h"
 
@@ -128,7 +129,7 @@ namespace MazeMap::App::Internal
     ShowcasingDonutController::ShowcasingDonutController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _vehicle(runtime.SpeedVehicle())
+        , _vehicle(runtime.Vehicle())
         , _drive(runtime.Drive())
         , _driveService(runtime.DriveService())
     {
@@ -494,28 +495,21 @@ namespace MazeMap::App::Internal
         row = {};
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
         const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
-        const MazeMap::PlantPreparedParams& prepared = _runtime.Estimator().ukf().preparedParams();
-        const float wheelRadiusM =
-            (std::isfinite(prepared.wheelRadiusM) && (prepared.wheelRadiusM > 0.0f)) ?
-                prepared.wheelRadiusM :
-                0.0f;
-        const float trackWidthM =
-            (std::isfinite(prepared.trackWidthM) && (prepared.trackWidthM > 0.0f)) ?
-                prepared.trackWidthM :
-                0.0f;
+        const float leftWheelVelocityMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedLeft());
+        const float rightWheelVelocityMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedRight());
         const float measuredLinearSpeedMps =
-            wheelRadiusM > 0.0f ?
-                (0.5f * wheelRadiusM * (state.GetWheelSpeedLeft() + state.GetWheelSpeedRight())) :
-                0.0f;
+            MazeMap::Vehicle::BodyForwardVelocityFromWheelLinear(leftWheelVelocityMps, rightWheelVelocityMps);
+        const float measuredAngularSpeedFromWheelsRadps =
+            MazeMap::Vehicle::BodyYawRateFromWheelLinear(leftWheelVelocityMps, rightWheelVelocityMps);
         const float measuredAngularSpeedRadps =
             std::isfinite(sensors.gyroRadps) ?
                 sensors.gyroRadps :
-                ((wheelRadiusM > 0.0f) && (trackWidthM > 0.0f)) ?
-                    (wheelRadiusM * (state.GetWheelSpeedLeft() - state.GetWheelSpeedRight()) / trackWidthM) :
-                    0.0f;
+                measuredAngularSpeedFromWheelsRadps;
         const bool encoderValid = driveTelemetry.encoderObservationValid;
         const bool imuValid = std::isfinite(sensors.gyroRawRadps);
-        const float maxRangeM = MazeMap::PlantParams::Default().noHitRangeM;
+        const float maxRangeM = MazeMap::kDefaultWallObservationMaxRangeM;
 
         MazeMap::WallObs frontLeftObs{};
         MazeMap::WallObs frontRightObs{};
@@ -557,9 +551,6 @@ namespace MazeMap::App::Internal
         row.clipping_flags = 0U;
         row.saturation_flags = driveTelemetry.saturationFlags;
         row.watchdog_flags = 0U;
-        row.ukf_mode_id = driveTelemetry.ukfModeId;
-        row.ukf_yaw_valid_for_feedforward = driveTelemetry.ukfYawValidForFeedforward;
-        row.bias_update_enabled = driveTelemetry.ukfBiasUpdateEnabled;
         row.ukf_state_px_m = state.GetPositionX();
         row.ukf_state_py_m = state.GetPositionY();
         row.ukf_state_psi_rad = state.GetOrientation();
@@ -569,12 +560,6 @@ namespace MazeMap::App::Internal
         row.ukf_state_omega_l_radps = state.GetWheelSpeedLeft();
         row.ukf_state_omega_r_radps = state.GetWheelSpeedRight();
         row.ukf_state_bgz_radps = state.GetGyroBiasZ();
-        row.gyro_bias_anchor_radps = driveTelemetry.ukfGyroBiasAnchorRadps;
-        row.yaw_consistency_lp_radps = driveTelemetry.ukfYawConsistencyLowPassRadps;
-        row.yaw_window_mismatch_rad = driveTelemetry.ukfYawWindowMismatchRad;
-        row.nhc_sigma_mps = driveTelemetry.ukfNhcSigmaMps;
-        row.nhc_residual_mps = driveTelemetry.ukfNhcResidualMps;
-        row.nhc_residual_sigma = driveTelemetry.ukfNhcResidualSigma;
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;
         row.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;
@@ -775,7 +760,7 @@ namespace MazeMap::App::Internal
             const CommandVector control = _drive.PointControlVector(
                 _commandedSpeedMps,
                 CommandedYawRateRadps(),
-                MazeMap::CommandPD::StateWheelOmegaPD);
+                MazeMap::CommandPD::EncoderVelocity);
             return control;
         }
 

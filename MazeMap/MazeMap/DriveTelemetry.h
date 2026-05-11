@@ -3,9 +3,8 @@
 #include <cstdint>
 #include <stdint.h>
 
-// Authoritative per-cycle drive report emitted by DriveBase. This survives as a distinct
-// contract because drive control, encoder capture, and UKF-facing command context are sampled
-// together here and consumed outside the drive owner without exposing DriveBase internals.
+// Authoritative per-cycle drive report emitted by DriveBase. Estimator/UKF diagnostics are
+// intentionally not part of this drive-owned contract.
 struct DriveTelemetry
 {
     float leftDriveCommand = 0.0f;
@@ -30,68 +29,5 @@ struct DriveTelemetry
     float rightEncoderOmegaRadps = 0.0f;
     uint16_t modeFlags = 0U;
     uint16_t saturationFlags = 0U;
-    std::uint8_t ukfModeId = 0U;
-    std::uint8_t ukfYawValidForFeedforward = 1U;
-    std::uint8_t ukfBiasUpdateEnabled = 0U;
-    std::uint8_t ukfNhcEnabled = 0U;
-    float ukfGyroBiasAnchorRadps = 0.0f;
-    float ukfYawConsistencyLowPassRadps = 0.0f;
-    float ukfYawWindowMismatchRad = 0.0f;
-    float ukfNhcSigmaMps = 0.0f;
-    float ukfNhcResidualMps = 0.0f;
-    float ukfNhcResidualSigma = 0.0f;
-    float ukfFeedforwardYawRateRadps = 0.0f;
-    float ukfClosureResidualLeftMps = 0.0f;
-    float ukfClosureResidualRightMps = 0.0f;
-    float ukfLongitudinalClosureSeverity = 0.0f;
-    float ukfDifferentialClosureSeverity = 0.0f;
-    float ukfLateralAccelerationSeverity = 0.0f;
-    float ukfYawConsistencySeverity = 0.0f;
-    float ukfLeftBankAnomalySeverity = 0.0f;
-    float ukfRightBankAnomalySeverity = 0.0f;
-    float ukfLeftPreProjectionUtilization = 0.0f;
-    float ukfRightPreProjectionUtilization = 0.0f;
-    float ukfLeftBankMemory = 0.0f;
-    float ukfRightBankMemory = 0.0f;
-    float ukfLeftBankRecoveryScore = 0.0f;
-    float ukfRightBankRecoveryScore = 0.0f;
-    float ukfLeftBankRecoveryTimeRemainingS = 0.0f;
-    float ukfRightBankRecoveryTimeRemainingS = 0.0f;
-    float ukfStationaryCandidateDwellS = 0.0f;
-    float ukfLaunchHoldRemainingS = 0.0f;
-    float ukfInconsistentHoldRemainingS = 0.0f;
-    float ukfNhcReenableDelayRemainingS = 0.0f;
-    float ukfForwardProcessNoiseScale = 1.0f;
-    float ukfLateralProcessNoiseScale = 1.0f;
-    float ukfYawRateProcessNoiseScale = 1.0f;
-    float ukfLeftWheelProcessNoiseScale = 1.0f;
-    float ukfRightWheelProcessNoiseScale = 1.0f;
-    float ukfClosureCovarianceScaleLeft = 1.0f;
-    float ukfClosureCovarianceScaleRight = 1.0f;
-    float ukfLateralPseudoCovarianceScale = 1.0f;
-    float ukfAppliedLeftBankTorqueNm = 0.0f;
-    float ukfAppliedRightBankTorqueNm = 0.0f;
-    float ukfGyroInnovationRadps = 0.0f;
-    float ukfForwardAccelInnovationMps2 = 0.0f;
-    float ukfLateralAccelInnovationMps2 = 0.0f;
-    float ukfGyroInnovationNis = 0.0f;
-    float ukfForwardAccelInnovationNis = 0.0f;
-    float ukfLateralAccelInnovationNis = 0.0f;
-    float ukfClosureLeftNis = 0.0f;
-    float ukfClosureRightNis = 0.0f;
-    float ukfLateralPseudoNis = 0.0f;
-    float ukfForwardSpeedVariance = 0.0f;
-    float ukfLateralSpeedVariance = 0.0f;
-    float ukfYawRateVariance = 0.0f;
-    float ukfLeftWheelSpeedVariance = 0.0f;
-    float ukfRightWheelSpeedVariance = 0.0f;
-    float ukfGyroBiasVariance = 0.0f;
-    std::uint8_t ukfExactStationaryLock = 0U;
-    std::uint8_t ukfLeftBankHoldoffActive = 0U;
-    std::uint8_t ukfRightBankHoldoffActive = 0U;
-    std::uint8_t ukfLeftBankInRecovery = 0U;
-    std::uint8_t ukfRightBankInRecovery = 0U;
-    std::uint8_t ukfDirectWheelUpdateBodyInvariant = 0U;
-    std::uint8_t ukfReleaseInflationApplied = 0U;
     bool encoderObservationValid = false;
 };

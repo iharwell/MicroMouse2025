@@ -100,7 +100,7 @@ public:
     explicit AuxMeasurementController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _vehicle(runtime.SpeedVehicle())
+        , _vehicle(runtime.Vehicle())
         , _drive(runtime.Drive())
         , _driveService(runtime.DriveService())
         , _startupCalibration(runtime.StartupCalibrationService())
@@ -135,7 +135,14 @@ public:
         {
             _drive.SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
             _startupCalibration.SetIsInMaze(false);
-            _drive.SetPose(0.5f * Config::kCellSizeM, 0.5f * Config::kCellSizeM, DirectionToYawRad(MazeMap::Up));
+            if (!_runtime.Estimator().ResetPose(
+                    0.5f * Config::kCellSizeM,
+                    0.5f * Config::kCellSizeM,
+                    DirectionToYawRad(MazeMap::Up)))
+            {
+                _runtime.FailActiveMode(_runtime.Estimator().FaultReason());
+                return;
+            }
         }
         else
         {
@@ -378,7 +385,7 @@ private:
         return _drive.PointControlVector(
             _turningTractionCommandedSpeedMps,
             yawRateRadps,
-            MazeMap::CommandPD::StateWheelOmegaPD);
+            MazeMap::CommandPD::EncoderVelocity);
     }
 
     CommandVector RunTick(

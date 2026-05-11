@@ -7,8 +7,6 @@
 
 #include <cstdint>
 
-class DriveBase;
-
 namespace MazeMap
 {
     struct TurnWallEdgeTracker;
@@ -113,7 +111,6 @@ namespace MazeMap::App::Internal
             LoopController& loopController);
 
         SharedRobotRuntime* _runtime{};
-        DriveBase* _drive{};
         Drive* _driveService{};
         void* _activeState{};
         ActivePhaseTickFn _activePhaseTick{};

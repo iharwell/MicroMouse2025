@@ -13,7 +13,6 @@ namespace MazeMap
         RawCommand = 0U,
         StateHeadingPD = 1U,
         StateYawPD = 2U,
-        StateWheelOmegaPD = 4U,
         StateVelocityPD = 16U,
         StateAccelerationPD = 32U,
         EncoderVelocity = 64U,

@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Vehicle.h"
+#include "CommandVector.h"
+#include "EncoderObs.h"
 #include "VehicleState.h"
 #include "PlantModel.h"
 #include <array>
@@ -96,7 +98,43 @@ namespace
 namespace MazeMap
 {
     Vehicle::Vehicle()
-        : _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
+        : _leftMotor(
+            kDriveResistanceOhms,
+            kDriveSupplyVoltageV,
+            kDriveTorqueConstantNmPerA,
+            kDriveSpeedConstantRadpsPerVolt,
+            kDriveNoLoadCurrentA,
+            kDriveGearRatio,
+            kDriveWheelDiameterM,
+            kDriveEncoderPulsesPerRev,
+            kLeftDriveMotorOutPinA,
+            kLeftDriveMotorOutPinB,
+            kLeftDriveEncoderInPinA,
+            kLeftDriveEncoderInPinB,
+            kLeftDriveEncoderChannel,
+            kLeftDriveInvertMotorDirection,
+            kLeftDriveInvertEncoderDirection,
+            kDriveSupplyVoltageV / kDriveResistanceOhms,
+            1.0f)
+        , _rightMotor(
+            kDriveResistanceOhms,
+            kDriveSupplyVoltageV,
+            kDriveTorqueConstantNmPerA,
+            kDriveSpeedConstantRadpsPerVolt,
+            kDriveNoLoadCurrentA,
+            kDriveGearRatio,
+            kDriveWheelDiameterM,
+            kDriveEncoderPulsesPerRev,
+            kRightDriveMotorOutPinA,
+            kRightDriveMotorOutPinB,
+            kRightDriveEncoderInPinA,
+            kRightDriveEncoderInPinB,
+            kRightDriveEncoderChannel,
+            kRightDriveInvertMotorDirection,
+            kRightDriveInvertEncoderDirection,
+            kDriveSupplyVoltageV / kDriveResistanceOhms,
+            1.0f)
+        , _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
         , _peakLateralAcceleration(GetSustainedLateralAccelerationReferenceMps2())
         , _peakRotationalVelocity(kVehiclePeakRotationalVelocityRadps)
         , _peakAngularAcceleration(kVehiclePeakAngularAccelerationRadps2)
@@ -108,6 +146,46 @@ namespace MazeMap
         , IMU_FR()
         , IMU_BL()
     {
+    }
+
+    void Vehicle::ApplyMotorCommand(const App::Internal::CommandVector& command) noexcept
+    {
+        if (!command.IsFinite())
+        {
+            _leftMotor.brake();
+            _rightMotor.brake();
+            return;
+        }
+
+        _leftMotor.setDriveCommand(command.LeftMotorPwm());
+        _rightMotor.setDriveCommand(command.RightMotorPwm());
+    }
+
+    void Vehicle::ResetDriveEncoders() noexcept
+    {
+        _leftMotor.resetEncoderDistanceMeters();
+        _rightMotor.resetEncoderDistanceMeters();
+    }
+
+    EncoderObs Vehicle::CaptureEncoderObservation(const float dtSeconds) noexcept
+    {
+        EncoderObs observation{};
+        observation.totalLeftCounts = _leftMotor.consumeEncoderCount();
+        observation.totalRightCounts = _rightMotor.consumeEncoderCount();
+        observation.leftDistanceDeltaM = _leftMotor.pulsesToDistance(observation.totalLeftCounts);
+        observation.rightDistanceDeltaM = _rightMotor.pulsesToDistance(observation.totalRightCounts);
+
+        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
+        {
+            const float invWheelRadiusM = 2.0f / kDriveWheelDiameterM;
+            const float invDtSeconds = 1.0f / dtSeconds;
+            observation.leftVelocityMps = observation.leftDistanceDeltaM * invDtSeconds;
+            observation.rightVelocityMps = observation.rightDistanceDeltaM * invDtSeconds;
+            observation.omegaLeftRadps = observation.leftVelocityMps * invWheelRadiusM;
+            observation.omegaRightRadps = observation.rightVelocityMps * invWheelRadiusM;
+        }
+
+        return observation;
     }
 
     SensorMount Vehicle::GetBackLeftImuMount() noexcept

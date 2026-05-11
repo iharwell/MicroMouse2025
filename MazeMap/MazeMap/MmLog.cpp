@@ -11,6 +11,20 @@ namespace MazeMap {
 
             constexpr std::size_t kLineBufferChars = 513u;
 
+            void copyTextTruncated(char* const destination, const std::size_t destinationSize, const char* const source) noexcept {
+                if (destination == nullptr || destinationSize == 0u) {
+                    return;
+                }
+
+                const char* const resolvedSource = (source == nullptr) ? "" : source;
+#if defined(_MSC_VER)
+                (void)strncpy_s(destination, destinationSize, resolvedSource, _TRUNCATE);
+#else
+                std::strncpy(destination, resolvedSource, destinationSize - 1u);
+                destination[destinationSize - 1u] = '\0';
+#endif
+            }
+
             bool endsWith(const char* const text, const char* const suffix) noexcept {
                 const std::size_t textLen = std::strlen(text);
                 const std::size_t suffixLen = std::strlen(suffix);
@@ -508,8 +522,7 @@ namespace MazeMap {
 
                 const char* const source =
                     (m_lastError[0] != '\0') ? m_lastError : ((fallback != nullptr) ? fallback : "MmLog close failed.");
-                std::strncpy(savedError, source, sizeof(savedError) - 1u);
-                savedError[sizeof(savedError) - 1u] = '\0';
+                copyTextTruncated(savedError, sizeof(savedError), source);
             };
 
             if (m_isOpen && !flush()) {
@@ -543,8 +556,7 @@ namespace MazeMap {
 
             resetAllState();
             if (savedError[0] != '\0') {
-                std::strncpy(m_lastError, savedError, sizeof(m_lastError) - 1u);
-                m_lastError[sizeof(m_lastError) - 1u] = '\0';
+                copyTextTruncated(m_lastError, sizeof(m_lastError), savedError);
             }
             return ok;
         }
@@ -829,8 +841,7 @@ namespace MazeMap {
 
         bool MmLogLogger::fail(const char* const text) {
             const char* const message = (text == nullptr) ? "Unknown MmLog error." : text;
-            std::strncpy(m_lastError, message, sizeof(m_lastError) - 1u);
-            m_lastError[sizeof(m_lastError) - 1u] = '\0';
+            copyTextTruncated(m_lastError, sizeof(m_lastError), message);
             return false;
         }
 

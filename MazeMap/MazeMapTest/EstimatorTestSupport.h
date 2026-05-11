@@ -116,11 +116,9 @@ namespace MazeMap
         const SensorSnapshot& snapshot,
         const Maze* map = nullptr)
     {
-        drive.RecordMeasurementInputs(snapshot);
         const auto control = drive.CurrentControlVector();
         const float fanDutyCycle = GetMissionFanDutyCycle();
         const float batteryVoltageV = drive.CurrentBatteryVoltageV();
-        const EncoderObs encoderObservation = drive.ConsumeEncoderObservation(dtSeconds);
         VehicleState& runtimeState = estimator.RuntimeState();
         runtimeState.SetSensorSnapshot(snapshot);
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
@@ -134,16 +132,6 @@ namespace MazeMap
             return;
         }
 
-        estimator.ukf().setRuntimeContext(
-            drive.GetLastLinearCommandMps(),
-            drive.GetLastAngularCommandRadps(),
-            drive.GetLastSaturationFlags(),
-            drive.GetLastLeftLaunchAssistFloor(),
-            drive.GetLastRightLaunchAssistFloor(),
-            snapshot.accelBiasValid,
-            snapshot.accelBodyXMps2,
-            snapshot.accelBodyYMps2);
-
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
             if (!estimator.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
@@ -154,7 +142,10 @@ namespace MazeMap
         }
 
         const bool updateYawFromEncoder = !std::isfinite(snapshot.gyroRawRadps);
-        (void)estimator.updateEncoderPair(encoderObservation, dtSeconds, updateYawFromEncoder);
+        if (snapshot.encoderObservationValid)
+        {
+            (void)estimator.updateEncoderPair(snapshot.encoderObservation, dtSeconds, updateYawFromEncoder);
+        }
 
         if (std::isfinite(snapshot.gyroRawRadps))
         {
@@ -177,7 +168,7 @@ namespace MazeMap
 
         if (map != nullptr)
         {
-            const PlantParams& params = estimator.ukf().params();
+            const PlantParams params = PlantParams::Default();
             WallObs frontLeftObs{};
             WallObs frontRightObs{};
             BuildFrontWallObservations(

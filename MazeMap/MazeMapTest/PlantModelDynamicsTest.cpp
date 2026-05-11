@@ -142,52 +142,6 @@ namespace MazeMap
                 plant.integrate(state, control, controlFanDutyCycle, controlBatteryVoltageV, 0.0015f, prepared),
                 1.0e-6f);
 
-            AssertDriveCommandSolutionNear(
-                plant.solveDriveCommands(state, 1.25f, 3.75f, params, controlFanDutyCycle, controlBatteryVoltageV),
-                plant.solveDriveCommands(state, 1.25f, 3.75f, prepared, controlFanDutyCycle, controlBatteryVoltageV),
-                1.0e-6f);
-            AssertDriveCommandSolutionNear(
-                plant.solveDriveCommands(
-                    state(VehicleState::kU),
-                    1.25f,
-                    state(VehicleState::kR),
-                    3.75f,
-                    params,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                plant.solveDriveCommands(
-                    state(VehicleState::kU),
-                    1.25f,
-                    state(VehicleState::kR),
-                    3.75f,
-                    prepared,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                1.0e-6f);
-
-            AssertDriveCommandSolutionNear(
-                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, params, controlFanDutyCycle, controlBatteryVoltageV),
-                plant.solveDriveCommandsForVelocityTarget(state, 2.05f, 2.95f, prepared, controlFanDutyCycle, controlBatteryVoltageV),
-                1.0e-6f);
-            AssertDriveCommandSolutionNear(
-                plant.solveDriveCommandsForVelocityTarget(
-                    state(VehicleState::kU),
-                    2.05f,
-                    state(VehicleState::kR),
-                    2.95f,
-                    params,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                plant.solveDriveCommandsForVelocityTarget(
-                    state(VehicleState::kU),
-                    2.05f,
-                    state(VehicleState::kR),
-                    2.95f,
-                    prepared,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                1.0e-6f);
-
             float rawMaxLongitudinalAccelMps2 = 0.0f;
             float rawMaxYawAccelRadps2 = 0.0f;
             float preparedMaxLongitudinalAccelMps2 = 0.0f;
@@ -228,72 +182,6 @@ namespace MazeMap
             Assert::AreEqual(rawMaxLongitudinalAccelMps2, preparedMaxLongitudinalAccelMps2, 1.0e-6f);
             Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
 
-            AssertDriveCommandSolutionNear(
-                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, params, controlFanDutyCycle, controlBatteryVoltageV),
-                plant.solveTractionLimitedDriveCommands(state, 1.25f, 3.75f, prepared, controlFanDutyCycle, controlBatteryVoltageV),
-                1.0e-6f);
-            AssertDriveCommandSolutionNear(
-                plant.solveTractionLimitedDriveCommands(
-                    state(VehicleState::kU),
-                    1.25f,
-                    state(VehicleState::kR),
-                    3.75f,
-                    params,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                plant.solveTractionLimitedDriveCommands(
-                    state(VehicleState::kU),
-                    1.25f,
-                    state(VehicleState::kR),
-                    3.75f,
-                    prepared,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                1.0e-6f);
-
-            AssertDriveCommandSolutionNear(
-                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
-                    state,
-                    2.05f,
-                    2.95f,
-                    params,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
-                    state,
-                    2.05f,
-                    2.95f,
-                    prepared,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                1.0e-6f);
-            AssertDriveCommandSolutionNear(
-                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
-                    state(VehicleState::kU),
-                    2.05f,
-                    state(VehicleState::kR),
-                    2.95f,
-                    params,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                plant.solveTractionLimitedDriveCommandsForVelocityTarget(
-                    state(VehicleState::kU),
-                    2.05f,
-                    state(VehicleState::kR),
-                    2.95f,
-                    prepared,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV),
-                1.0e-6f);
-
-            Assert::AreEqual(
-                plant.driveTorqueFromCommand(control.LeftMotorPwm(), state(VehicleState::kOmegaL), controlBatteryVoltageV, params),
-                plant.driveTorqueFromCommand(control.LeftMotorPwm(), state(VehicleState::kOmegaL), controlBatteryVoltageV, prepared),
-                1.0e-6f);
-            Assert::AreEqual(
-                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), controlBatteryVoltageV, params),
-                plant.driveCommandFromTorque(0.021f, state(VehicleState::kOmegaR), controlBatteryVoltageV, prepared),
-                1.0e-6f);
             Assert::AreEqual(
                 plant.driveFrictionTorque(state(VehicleState::kOmegaL), 0.018f, params),
                 plant.driveFrictionTorque(state(VehicleState::kOmegaL), 0.018f, prepared),

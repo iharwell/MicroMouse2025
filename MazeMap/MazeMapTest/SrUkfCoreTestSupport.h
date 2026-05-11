@@ -7,8 +7,11 @@
 #include "..\MazeMap\SrUkfCore.h"
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstdint>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <limits>
 #include <string>
@@ -17,9 +20,30 @@
 
 namespace MazeMap
 {
+    constexpr float kUkfTestImuYawRateVarianceRadps2 = 1.2e-6f;
+    constexpr float kUkfTestImuYawRateSigmaRadps = 0.0010954451f;
+    constexpr float kUkfTestImuAccelSigmaMps2 = 0.569900f;
+    constexpr float kUkfTestGeneralEncoderLinearSpeedSigmaMps = 0.021187f;
+    constexpr float kUkfTestGeneralEncoderYawRateSigmaRadps = 0.111268f;
+    constexpr float kUkfTestStationaryEncoderVelocitySigmaMps = 0.002936f;
+    constexpr float kUkfTestEncoderPairNisThreshold = 13.81551f;
+    constexpr float kUkfTestPivotScrubMinCommandAngularRadps = 1.0f;
+    constexpr float kUkfTestStationaryCertificationDwellS = 0.150f;
+    constexpr float kUkfTestGyroBiasProcessVarianceStationaryRadps2PerSample = 3.0e-16f;
+    constexpr float kUkfTestGyroBiasProcessVarianceMovingRadps2PerSample = 0.0f;
+    constexpr float kUkfTestGyroBiasInitialVarianceUnseededRadps2 = 3.05e-4f;
+    constexpr std::uint16_t kUkfTestInitialStationaryGyroBiasSeedStartSample = 3U;
+    constexpr std::uint16_t kUkfTestInitialStationaryGyroBiasSeedEndSample = 8U;
+
+    inline SrUkfCore MakeDefaultSrUkfCore() noexcept
+    {
+        const PlantModel plantModel{};
+        return SrUkfCore(plantModel);
+    }
+
     inline float StationaryGyroBiasMeasurementVarianceRadps2() noexcept
     {
-        return SrUkfCore::kImuYawRateVarianceRadps2;
+        return kUkfTestImuYawRateVarianceRadps2;
     }
 
     struct InitialStationaryGyroBiasExpectation final
@@ -61,8 +85,8 @@ namespace MazeMap
             ++expectation.sampleOrdinal;
         }
 
-        if ((expectation.sampleOrdinal >= SrUkfCore::kInitialStationaryGyroBiasSeedStartSample) &&
-            (expectation.sampleOrdinal <= SrUkfCore::kInitialStationaryGyroBiasSeedEndSample))
+        if ((expectation.sampleOrdinal >= kUkfTestInitialStationaryGyroBiasSeedStartSample) &&
+            (expectation.sampleOrdinal <= kUkfTestInitialStationaryGyroBiasSeedEndSample))
         {
             expectation.seedAccumRadps += static_cast<double>(yawRateRadps);
             if (expectation.collectedSeedSamples < (std::numeric_limits<std::uint16_t>::max)())
@@ -74,16 +98,16 @@ namespace MazeMap
         const float measurementVarianceRadps2 = StationaryGyroBiasMeasurementVarianceRadps2();
         if (!expectation.seedApplied)
         {
-            if ((expectation.sampleOrdinal >= SrUkfCore::kInitialStationaryGyroBiasSeedEndSample) &&
+            if ((expectation.sampleOrdinal >= kUkfTestInitialStationaryGyroBiasSeedEndSample) &&
                 (expectation.collectedSeedSamples > 0U))
             {
                 expectation.biasRadps = static_cast<float>(
                     expectation.seedAccumRadps /
                     static_cast<double>(expectation.collectedSeedSamples));
-                expectation.varianceRadps2 = SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
+                expectation.varianceRadps2 = kUkfTestGyroBiasInitialVarianceUnseededRadps2;
                 if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
                 {
-                    expectation.varianceRadps2 = SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
+                    expectation.varianceRadps2 = kUkfTestGyroBiasInitialVarianceUnseededRadps2;
                 }
                 expectation.seedApplied = true;
             }
@@ -93,10 +117,10 @@ namespace MazeMap
         const float priorVarianceRadps2 =
             (std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)) ?
             expectation.varianceRadps2 :
-            SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
+            kUkfTestGyroBiasInitialVarianceUnseededRadps2;
         const float predictedVarianceRadps2 =
             priorVarianceRadps2 +
-            SrUkfCore::kGyroBiasProcessVarianceStationaryRadps2PerSample;
+            kUkfTestGyroBiasProcessVarianceStationaryRadps2PerSample;
         const float innovationVarianceRadps2 = predictedVarianceRadps2 + measurementVarianceRadps2;
         if (!(std::isfinite(predictedVarianceRadps2) && std::isfinite(innovationVarianceRadps2)) ||
             !(innovationVarianceRadps2 > 0.0f))
@@ -110,7 +134,7 @@ namespace MazeMap
         expectation.varianceRadps2 = (1.0f - kalmanGain) * predictedVarianceRadps2;
         if (!(std::isfinite(expectation.varianceRadps2) && (expectation.varianceRadps2 > 0.0f)))
         {
-            expectation.varianceRadps2 = SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2;
+            expectation.varianceRadps2 = kUkfTestGyroBiasInitialVarianceUnseededRadps2;
         }
     }
 
@@ -118,17 +142,23 @@ namespace MazeMap
     {
         std::vector<std::pair<std::string, std::string>> dumpLines;
         const bool dumpOk = core.WriteDebugTextDump(
-            [&dumpLines](const char* type, const char* message) noexcept
+            [&dumpLines](const char* type, const char* format, std::va_list args) noexcept
             {
+                char message[1024] = {};
+                std::va_list argsCopy;
+                va_copy(argsCopy, args);
+                const int length = std::vsnprintf(message, sizeof(message), format, argsCopy);
+                va_end(argsCopy);
+                if (length <= 0 || length >= static_cast<int>(sizeof(message)))
+                {
+                    return false;
+                }
                 dumpLines.emplace_back(
                     (type != nullptr) ? type : "",
-                    (message != nullptr) ? message : "");
+                    message);
                 return true;
             });
-        if (!dumpOk)
-        {
-            dumpLines.clear();
-        }
+        (void)dumpOk;
         return dumpLines;
     }
 
@@ -141,6 +171,20 @@ namespace MazeMap
         {
             if (line.first == "ukf_dump_process_noise_sqrt_row" &&
                 line.second.find(rowToken) != std::string::npos)
+            {
+                return line.second;
+            }
+        }
+        return std::string();
+    }
+
+    inline std::string FindDebugDumpMessage(
+        const std::vector<std::pair<std::string, std::string>>& dumpLines,
+        const char* type)
+    {
+        for (const auto& line : dumpLines)
+        {
+            if (line.first == type)
             {
                 return line.second;
             }
@@ -166,6 +210,58 @@ namespace MazeMap
     {
         const auto dumpLines = CollectDebugDumpLines(core);
         return ExtractNamedFloat(FindProcessNoiseRowMessage(dumpLines, rowName), rowName);
+    }
+
+    inline float FindDebugDumpFloat(const SrUkfCore& core, const char* type, const char* fieldName)
+    {
+        return ExtractNamedFloat(FindDebugDumpMessage(CollectDebugDumpLines(core), type), fieldName);
+    }
+
+    inline bool ExtractNamedBool(const std::string& message, const char* fieldName, bool fallback = false)
+    {
+        const std::string token = std::string(fieldName) + "=";
+        const std::size_t start = message.find(token);
+        if (start == std::string::npos)
+        {
+            return fallback;
+        }
+
+        const char* valueStart = message.c_str() + start + token.size();
+        if (std::strncmp(valueStart, "true", 4) == 0)
+        {
+            return true;
+        }
+        if (std::strncmp(valueStart, "false", 5) == 0)
+        {
+            return false;
+        }
+        return fallback;
+    }
+
+    inline bool FindDebugDumpBool(
+        const SrUkfCore& core,
+        const char* type,
+        const char* fieldName,
+        bool fallback = false)
+    {
+        return ExtractNamedBool(FindDebugDumpMessage(CollectDebugDumpLines(core), type), fieldName, fallback);
+    }
+
+    inline int FindDebugDumpModeId(const SrUkfCore& core)
+    {
+        return static_cast<int>(FindDebugDumpFloat(core, "ukf_dump_mode", "mode_id"));
+    }
+
+    inline float UkfTestNonholonomicSigmaMps(float absForwardSpeedMps) noexcept
+    {
+        const float resolvedForwardSpeedMps =
+            (std::isfinite(absForwardSpeedMps) && (absForwardSpeedMps > 0.0f)) ?
+            absForwardSpeedMps :
+            0.0f;
+        const float sigmaMps = std::sqrt(
+            (0.005f * 0.005f) +
+            ((0.035f * resolvedForwardSpeedMps) * (0.035f * resolvedForwardSpeedMps)));
+        return (std::clamp)(sigmaMps, 0.005f, 0.060f);
     }
 
     struct SyntheticEncoderRemainderState final
@@ -268,15 +364,11 @@ namespace MazeMap
         float leftLaunchAssistFloor = 0.0f,
         float rightLaunchAssistFloor = 0.0f)
     {
-        core.setRuntimeContext(
-            commandedLinearMps,
-            commandedAngularRadps,
-            saturationFlags,
-            leftLaunchAssistFloor,
-            rightLaunchAssistFloor,
-            true,
-            0.0f,
-            0.0f);
+        (void)commandedLinearMps;
+        (void)commandedAngularRadps;
+        (void)saturationFlags;
+        (void)leftLaunchAssistFloor;
+        (void)rightLaunchAssistFloor;
         const VehicleState::StateVector stateBeforePredict = core.state();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
             core.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV));
@@ -331,14 +423,13 @@ namespace MazeMap
         const VehicleState::StateMatrix initialCovariance =
             BuildUkfCovariance(0.001f, 0.01f, 0.005f, 0.005f, 0.05f, 0.05f, 0.02f);
 
-        SrUkfCore core;
+        SrUkfCore core = MakeDefaultSrUkfCore();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(core.reset(initialState, initialCovariance));
         EncoderObs encoder{};
         constexpr float dt = 0.001f;
 
         for (int step = 0; step < numCycles; ++step)
         {
-            core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
                 core.predict(dt, control, fanDutyCycle, batteryVoltageV));
 

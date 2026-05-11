@@ -202,7 +202,6 @@
     <ClInclude Include="DriveTelemetry.h" />
     <ClInclude Include="EigenCompat.h" />
     <ClInclude Include="EncoderProgressWatchdog.h" />
-    <ClInclude Include="AppliedTorqueEstimate.h" />
     <ClInclude Include="EncoderStallPolicy.h" />
     <ClInclude Include="FanRampProfile.h" />
     <ClInclude Include="framework.h" />

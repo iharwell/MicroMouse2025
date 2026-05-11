@@ -38,6 +38,15 @@ namespace MazeMap
 			mount.clockwiseYawSign());
 	}
 
+	static WallGeometryModel::GeometryStateFrame BuildGeometryFrame(
+		const WallGeometryModel& geometry,
+		const VehicleState::StateVector& state)
+	{
+		return geometry.buildStateFrame(
+			Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)),
+			state(VehicleState::kPsi));
+	}
+
 	TEST_CLASS(WallMappingTest)
 	{
 	public:
@@ -218,12 +227,13 @@ namespace MazeMap
 			state(VehicleState::kPy) = 0.09f;
 			state(VehicleState::kPsi) = 0.0f;
 
-			GeometryPrediction baseline = geometry.predictRay(state, params.frontLeftSensor, maze);
+			const WallGeometryModel::GeometryStateFrame frame = BuildGeometryFrame(geometry, state);
+			GeometryPrediction baseline = geometry.predictRay(frame, params.frontLeftSensor, maze);
 			Assert::IsTrue(baseline.hit);
 			Assert::AreEqual(static_cast<int>(GeometryHitType::WallFace), static_cast<int>(baseline.type));
 
 			const SensorMount rotatedSensor = RotateMountYaw(params.frontLeftSensor, 0.35f);
-			GeometryPrediction rotated = geometry.predictRay(state, rotatedSensor, maze);
+			GeometryPrediction rotated = geometry.predictRay(frame, rotatedSensor, maze);
 			Assert::IsTrue(rotated.rangeM > baseline.rangeM);
 		}
 
@@ -250,7 +260,7 @@ namespace MazeMap
 			state(VehicleState::kPy) = 0.09f;
 			state(VehicleState::kPsi) = 0.0f;
 
-			const GeometryPrediction prediction = geometry.predictRay(state, sensor, maze);
+			const GeometryPrediction prediction = geometry.predictRay(BuildGeometryFrame(geometry, state), sensor, maze);
 			Assert::IsTrue(prediction.hit);
 			Assert::AreEqual(static_cast<int>(GeometryHitType::Post), static_cast<int>(prediction.type));
 		}

@@ -48,7 +48,6 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(std::uint16_t, watchdog_flags) \
     FIELD(std::uint16_t, measurement_flags) \
     FIELD(std::uint8_t, ukf_mode_id) \
-    FIELD(std::uint8_t, ukf_yaw_valid_for_feedforward) \
     FIELD(std::uint8_t, bias_update_enabled) \
     FIELD(float, ukf_state_px_m) \
     FIELD(float, ukf_state_py_m) \

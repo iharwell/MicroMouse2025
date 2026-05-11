@@ -53,7 +53,7 @@ public:
     explicit DiagnosticController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _vehicle(runtime.SpeedVehicle())
+        , _vehicle(runtime.Vehicle())
         , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
         , _driveService(runtime.DriveService())
@@ -98,7 +98,15 @@ public:
             _runtime.FailActiveMode("Diagnostic log open failed");
         }
 
-        _drive.SetStartPoint(MazeMap::DirectionalLocation(MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0)), MazeMap::Up));
+        float startXMeters = 0.0f;
+        float startYMeters = 0.0f;
+        MazeMap::MazeLocation::CellCenter(MazeMap::CellCoordinates(0, 0))
+            .GetPhysicalLocation(MazeMap::Config::kCellSizeM, startXMeters, startYMeters);
+        if (!_runtime.Estimator().ResetPose(startXMeters, startYMeters, DirectionToYawRad(MazeMap::Up)))
+        {
+            _runtime.FailActiveMode(_runtime.Estimator().FaultReason());
+            return;
+        }
         _startX = _runtime.RuntimeState().GetPositionX();
         _startY = _runtime.RuntimeState().GetPositionY();
 
@@ -1294,6 +1302,7 @@ private:
         if (!_runtime.WriteUtilityDataLogMetadata("format_spec", "micromouse_logging_spec_rev_g")) return false;
         if (!_runtime.WriteUtilityDataLogMetadata("endianness", "little")) return false;
         if (!MazeMap::App::Internal::Runtime::WriteDiagnosticTuningEvents(
+                _runtime.Plant(),
                 [this](const char* type, const char* message) -> bool
                 {
                     return _runtime.WriteTextLogEntry(micros(), type, message);
@@ -1666,7 +1675,7 @@ private:
         return _drive.PointControlVector(
             _straightPhaseState.commandedSpeedMps,
             angularCommandRadps,
-            MazeMap::CommandPD::StateWheelOmegaPD);
+            MazeMap::CommandPD::EncoderVelocity);
     }
 
     CommandVector KickoffCharacterizationTick(
@@ -1839,7 +1848,14 @@ private:
             }
             if (_turnPhaseState.nextStep == ScenarioStep::RecoverySettle)
             {
-                _drive.SetPose(state.GetPositionX(), state.GetPositionY(), DirectionToYawRad(MazeMap::Up));
+                if (!_runtime.Estimator().ResetPose(
+                        state.GetPositionX(),
+                        state.GetPositionY(),
+                        DirectionToYawRad(MazeMap::Up)))
+                {
+                    _runtime.FailActiveMode(_runtime.Estimator().FaultReason());
+                    return CommandVector::Brake();
+                }
             }
             if (_turnPhaseState.writeSquareClosure &&
                 !WriteClosureResult(
@@ -1979,7 +1995,7 @@ private:
         return _drive.PointControlVector(
             _arcPhaseState.commandedSpeedMps,
             angularCommandRadps,
-            MazeMap::CommandPD::StateWheelOmegaPD);
+            MazeMap::CommandPD::EncoderVelocity);
     }
 
 };

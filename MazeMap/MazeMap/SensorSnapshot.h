@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EncoderObs.h"
 #include "SensorTelemetryTypes.h"
 
 #include <cstdint>
@@ -40,7 +41,9 @@ struct SensorSnapshot
     bool rightWallObservationWindowValid = false;
     bool leftTransitionDetected = false;
     bool rightTransitionDetected = false;
+    bool encoderObservationValid = false;
 
+    MazeMap::EncoderObs encoderObservation{};
     WallSensorTelemetry frontLeft{};
     WallSensorTelemetry frontRight{};
     WallSensorTelemetry sideLeft{};

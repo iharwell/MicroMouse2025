@@ -3,13 +3,14 @@
 
 #include "Defines.h"
 #include "Direction.h"
-#include "DriveBase.h"
 #include "Estimator.h"
 #include "HardwareConfig.h"
 #include "IApplicationMode.h"
+#include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeSignalHelpers.h"
 #include "EncoderObs.h"
 #include "ImuAccelObs.h"
+#include "PlantModel.h"
 #include "SharedRobotRuntime.h"
 #include "Vehicle.h"
 #include "WallObservationPipeline.h"
@@ -28,16 +29,6 @@ namespace MazeMap::App::Internal
         constexpr float kPauseAngularThresholdRadps = 0.05f;
         constexpr std::uint8_t kPauseSettledTicks = 2U;
         constexpr float kNoImuObservation = std::numeric_limits<float>::quiet_NaN();
-
-        bool SetMotorPwmThunk(void* const context, const float leftMotorPwm, const float rightMotorPwm) noexcept
-        {
-            if (context == nullptr)
-            {
-                return false;
-            }
-
-            return static_cast<SharedRobotRuntime*>(context)->SetMotorPWM(leftMotorPwm, rightMotorPwm);
-        }
 
         inline void WaitUntilUs(const std::uint32_t absoluteDeadlineUs) noexcept
         {
@@ -331,7 +322,7 @@ namespace MazeMap::App::Internal
             MazeMap::Platform::GetWallSensorAdcCurrentGc());
 
         uint8_t probeChannel = 0U;
-        const uint8_t probePin = _runtime->SpeedVehicle().FrontLeft.GetWallSensorInPin();
+        const uint8_t probePin = _runtime->Vehicle().FrontLeft.GetWallSensorInPin();
         if (MazeMap::Platform::ResolveWallSensorAdc1Channel(probePin, probeChannel))
         {
             (void)MazeMap::Platform::ReadSingleWallSensorAdcCodeFromConfiguredChannel(probeChannel);
@@ -356,8 +347,6 @@ namespace MazeMap::App::Internal
     void LoopController::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
-        _motorPwmSink.context = &runtime;
-        _motorPwmSink.setMotorPwm = &SetMotorPwmThunk;
     }
 
     void LoopController::BindApplicationMode(IApplicationMode& mode) noexcept
@@ -418,7 +407,8 @@ namespace MazeMap::App::Internal
             _runtime->FailActiveMode("LoopController session-start yaw was unavailable");
         }
 
-        if (!_runtime->Drive().RestoreSessionStartPhysicalState(
+        _runtime->Vehicle().ResetDriveEncoders();
+        if (!_runtime->Estimator().RestoreSessionStartPhysicalState(
                 _options.SessionStartPointX,
                 _options.SessionStartPointY,
                 _modeStartYawRad))
@@ -431,7 +421,7 @@ namespace MazeMap::App::Internal
 
     void LoopController::Run()
     {
-        if ((_runtime == nullptr) || !_motorPwmSink || (_boundMode == nullptr))
+        if ((_runtime == nullptr) || (_boundMode == nullptr))
         {
             if (_runtime != nullptr)
             {
@@ -465,7 +455,7 @@ namespace MazeMap::App::Internal
             if (!ApplyControlAtTickStart(_appliedControl))
             {
                 _queuedControl = CommandVector::Brake();
-                terminalFaultReason = "LoopController motor PWM hook failed";
+                terminalFaultReason = "LoopController motor command application failed";
                 ServiceRuntimeLogsForFaultPath();
                 RecordPostServiceTiming();
                 FinalizeTiming();
@@ -568,7 +558,7 @@ namespace MazeMap::App::Internal
                 if (!ApplyControlAtTickStart(brakeControl))
                 {
                     _runtime->FailActiveMode(
-                        "LoopController motor PWM hook failed during terminal fault handling");
+                        "LoopController motor command application failed during terminal fault handling");
                 }
                 _runtime->FailActiveMode(terminalFaultReason);
             }
@@ -580,7 +570,7 @@ namespace MazeMap::App::Internal
                 if (!ApplyControlAtTickStart(brakeControl))
                 {
                     _runtime->FailActiveMode(
-                        "LoopController motor PWM hook failed during program halt");
+                        "LoopController motor command application failed during program halt");
                 }
                 ResetExecutionState();
                 return;
@@ -593,7 +583,7 @@ namespace MazeMap::App::Internal
                 if (!ApplyControlAtTickStart(brakeControl))
                 {
                     _runtime->FailActiveMode(
-                        "LoopController motor PWM hook failed during session handoff");
+                        "LoopController motor command application failed during session handoff");
                 }
                 ResolveEndSessionRequest();
 
@@ -604,7 +594,7 @@ namespace MazeMap::App::Internal
                     if (!ApplyControlAtTickStart(brakeControl))
                     {
                         _runtime->FailActiveMode(
-                            "LoopController motor PWM hook failed during end-session-driven program halt");
+                            "LoopController motor command application failed during end-session-driven program halt");
                     }
                     ResetExecutionState();
                     return;
@@ -625,7 +615,7 @@ namespace MazeMap::App::Internal
                     if (!ApplyControlAtTickStart(brakeControl))
                     {
                         _runtime->FailActiveMode(
-                            "LoopController motor PWM hook failed during pause-driven program halt");
+                            "LoopController motor command application failed during pause-driven program halt");
                     }
                     ResetExecutionState();
                     return;
@@ -638,7 +628,7 @@ namespace MazeMap::App::Internal
                     if (!ApplyControlAtTickStart(brakeControl))
                     {
                         _runtime->FailActiveMode(
-                            "LoopController motor PWM hook failed during pause-driven session handoff");
+                            "LoopController motor command application failed during pause-driven session handoff");
                     }
                     ResolveEndSessionRequest();
 
@@ -649,7 +639,7 @@ namespace MazeMap::App::Internal
                         if (!ApplyControlAtTickStart(brakeControl))
                         {
                             _runtime->FailActiveMode(
-                                "LoopController motor PWM hook failed during pause-and-end-session-driven program halt");
+                                "LoopController motor command application failed during pause-and-end-session-driven program halt");
                         }
                         ResetExecutionState();
                         return;
@@ -711,12 +701,13 @@ namespace MazeMap::App::Internal
 
     bool LoopController::ApplyControlAtTickStart(const CommandVector& control) noexcept
     {
-        if (!_motorPwmSink)
+        if (_runtime == nullptr)
         {
             return false;
         }
 
-        return _motorPwmSink.Apply(control);
+        _runtime->Vehicle().ApplyMotorCommand(control);
+        return true;
     }
 
     bool LoopController::CaptureTickState(const float dtSeconds, const std::uint32_t tickStartUs)
@@ -730,12 +721,18 @@ namespace MazeMap::App::Internal
         const bool stationaryHint = ShouldTreatAppliedControlAsStationary();
         timing.encoderLatchUs = static_cast<std::uint32_t>(micros());
         SensorSnapshot snapshot{};
-        if (WorkPlanRequestsWallSensors(_options.workPlan) || _options.workPlan.readImuBundle)
+        if (WorkPlanRequestsWallSensors(_options.workPlan) ||
+            _options.workPlan.readImuBundle ||
+            _options.workPlan.readEncoders)
         {
             _runtime->Sensors().Capture(
                 stationaryHint,
                 _runtime->RuntimeState(),
-                snapshot);
+                snapshot,
+                nullptr,
+                nullptr,
+                _options.workPlan.readEncoders,
+                dtSeconds);
         }
 
         ApplySensorWorkPlanToSnapshot(
@@ -743,12 +740,9 @@ namespace MazeMap::App::Internal
             snapshot,
             MazeMap::Config::kExpectedSideWallDistanceM);
 
-        DriveBase& drive = _runtime->Drive();
-        drive.RecordMeasurementInputs(snapshot);
-        const CommandVector control = drive.CurrentControlVector();
+        const CommandVector control = _appliedControl;
         const float fanDutyCycle = GetMissionFanDutyCycle();
-        const float batteryVoltageV = drive.CurrentBatteryVoltageV();
-        const MazeMap::EncoderObs encoderObservation = drive.ConsumeEncoderObservation(dtSeconds);
+        const float batteryVoltageV = 0.0f;
         timing.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
 
         MazeMap::Estimator& estimator = _runtime->Estimator();
@@ -792,13 +786,15 @@ namespace MazeMap::App::Internal
 
         timing.ukfUpdateStartUs = static_cast<std::uint32_t>(micros());
 
-        if (_options.workPlan.readEncoders && _options.workPlan.useEncoderUpdate)
+        if (_options.workPlan.readEncoders &&
+            _options.workPlan.useEncoderUpdate &&
+            snapshot.encoderObservationValid)
         {
             const bool updateYawFromEncoder =
                 !_options.workPlan.readImuBundle ||
                 !_options.workPlan.useGyroUpdate ||
                 !std::isfinite(snapshot.gyroRawRadps);
-            (void)estimator.updateEncoderPair(encoderObservation, dtSeconds, updateYawFromEncoder);
+            (void)estimator.updateEncoderPair(snapshot.encoderObservation, dtSeconds, updateYawFromEncoder);
         }
 
         if (_options.workPlan.readImuBundle &&
@@ -843,7 +839,7 @@ namespace MazeMap::App::Internal
                     snapshot.frontWallUsesCharacterizationDetection,
                     snapshot.frontLeftDistanceM,
                     snapshot.frontRightDistanceM,
-                    estimator.ukf().params().noHitRangeM,
+                    MazeMap::kDefaultWallObservationMaxRangeM,
                     frontLeftObservation,
                     frontRightObservation);
                 (void)estimator.updateFrontPair(frontLeftObservation, frontRightObservation, maze, true);
@@ -856,7 +852,7 @@ namespace MazeMap::App::Internal
                     snapshot.leftTransitionDetected,
                     snapshot.leftWallObservation,
                     snapshot.sideLeftDistanceM,
-                    estimator.ukf().params().noHitRangeM);
+                    MazeMap::kDefaultWallObservationMaxRangeM);
                 (void)estimator.updateSideSensor(MazeMap::RelativeDirection::Left90, leftObservation, maze, true);
             }
 
@@ -867,7 +863,7 @@ namespace MazeMap::App::Internal
                     snapshot.rightTransitionDetected,
                     snapshot.rightWallObservation,
                     snapshot.sideRightDistanceM,
-                    estimator.ukf().params().noHitRangeM);
+                    MazeMap::kDefaultWallObservationMaxRangeM);
                 (void)estimator.updateSideSensor(MazeMap::RelativeDirection::Right90, rightObservation, maze, true);
             }
         }
@@ -1089,7 +1085,7 @@ namespace MazeMap::App::Internal
             {
                 ServiceRuntimeLogsForFaultPath();
                 _runtime->FailActiveMode(
-                    "LoopController motor PWM hook failed during brake settlement");
+                    "LoopController motor command application failed during brake settlement");
             }
             timing.commandAppliedUs = static_cast<std::uint32_t>(micros());
 

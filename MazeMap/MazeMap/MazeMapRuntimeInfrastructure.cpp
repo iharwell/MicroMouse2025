@@ -120,6 +120,7 @@ namespace MazeMap::App::Internal::Runtime
             return fail();
         }
         if (!WriteDiagnosticTuningEvents(
+                runtime.Plant(),
                 [&runtime](const char* type, const char* message) -> bool
                 {
                     return runtime.WriteTextLogEntry(micros(), type, message);

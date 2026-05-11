@@ -52,7 +52,6 @@ namespace MazeMap
             ProportionalDerivative yawRateIMULateralAccelPD,
             ProportionalDerivative longitudinalAccelerationStatePD,
             ProportionalDerivative longitudinalAccelerationIMUForwardAccelPD,
-            ProportionalDerivative wheelVelocityStatePD,
             ProportionalDerivative wheelVelocityEncoderPD,
             ProportionalDerivative yawAccelerationStatePD,
             ProportionalDerivative yawAccelerationGyroPD,
@@ -68,7 +67,6 @@ namespace MazeMap
             , YawRateIMULateralAccelPD(yawRateIMULateralAccelPD)
             , LongitudinalAccelerationStatePD(longitudinalAccelerationStatePD)
             , LongitudinalAccelerationIMUForwardAccelPD(longitudinalAccelerationIMUForwardAccelPD)
-            , WheelVelocityStatePD(wheelVelocityStatePD)
             , WheelVelocityEncoderPD(wheelVelocityEncoderPD)
             , YawAccelerationStatePD(yawAccelerationStatePD)
             , YawAccelerationGyroPD(yawAccelerationGyroPD)
@@ -136,9 +134,6 @@ namespace MazeMap
 
         // Longitudinal-acceleration correction using IMU forward acceleration.
         ProportionalDerivative LongitudinalAccelerationIMUForwardAccelPD{};
-
-        // Wheel-velocity correction using wheel velocity from state.
-        ProportionalDerivative WheelVelocityStatePD{};
 
         // Wheel-velocity correction using encoder wheel velocity.
         ProportionalDerivative WheelVelocityEncoderPD{};

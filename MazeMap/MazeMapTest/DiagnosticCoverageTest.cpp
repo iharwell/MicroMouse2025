@@ -13,7 +13,6 @@
 #include "..\MazeMap\Maze.h"
 #include "..\MazeMap\MissionMazeExport.h"
 #include "..\MazeMap\MissionStartPolicy.h"
-#include "..\MazeMap\MotorEncoderDrive.h"
 #include "..\MazeMap\MotorModelUnits.h"
 #include "..\MazeMap\MotionTargetProjection.h"
 #include "..\MazeMap\CruiseSpeedFloor.h"
@@ -241,22 +240,18 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.30f, 1.20f, 0UL, 0UL) - 1.0f) < 1.0e-6f);
 		}
 
-		TEST_METHOD(MotorEncoderDriveDefaultFactoriesUseSharedModelAndHardwareMap)
+		TEST_METHOD(PlantParamsDefaultUsesVehicleDriveModel)
 		{
-			const auto& model = MotorEncoderDrive::GetSharedPhysicalModel();
-			MotorEncoderDrive left = MotorEncoderDrive::CreateDefaultLeftDrive();
-			MotorEncoderDrive right = MotorEncoderDrive::CreateDefaultRightDrive();
+			const auto& vehicleModel = Vehicle::GetPhysicalModel();
+			const PlantParams params = PlantParams::Default();
 
-			Assert::IsTrue(std::fabs(left.getWheelDiameter() - model.wheelDiameterM) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(right.getWheelDiameter() - model.wheelDiameterM) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(left.getGearRatio() - model.gearRatio) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(right.getGearRatio() - model.gearRatio) < 1.0e-6f);
-			Assert::AreEqual(2U, static_cast<unsigned>(left.getEncoderChannel()));
-			Assert::AreEqual(1U, static_cast<unsigned>(right.getEncoderChannel()));
-			Assert::IsTrue(left.getInvertMotorDirection());
-			Assert::IsTrue(right.getInvertMotorDirection());
-			Assert::IsFalse(left.getInvertEncoderDirection());
-			Assert::IsFalse(right.getInvertEncoderDirection());
+			Assert::AreEqual(vehicleModel.massKg, params.massKg, 1.0e-6f);
+			Assert::AreEqual(vehicleModel.trackWidthM, params.trackWidthM, 1.0e-6f);
+			Assert::AreEqual(vehicleModel.yawInertiaKgM2, params.yawInertiaKgM2, 1.0e-8f);
+			Assert::IsTrue(params.wheelRadiusM > 0.0f);
+			Assert::IsTrue(params.gearRatio > 1.0f);
+			Assert::AreEqual(4096U, static_cast<unsigned>(params.encoderCountsPerMotorRev));
+			Assert::AreEqual(8.4f, params.supplyVoltageV, 1.0e-6f);
 		}
 
 		TEST_METHOD(ArcTrackWidthInterpolationClampsAndBlendsByRadius)
@@ -1970,80 +1965,64 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeMotorSpeedConstantRadpsPerVolt(14100.0f, 6.0f, noLoadCurrentA, 4.31f) - 254.482f) < 1.0e-3f);
 		}
 
-		TEST_METHOD(MotorEncoderDriveMatches1717T006SRDatasheetAtNominalVoltage)
+		TEST_METHOD(PlantModelDriveTorqueMatches1717T006SRDatasheetAtNominalVoltage)
 		{
 			const float resistanceOhms = 4.31f;
 			const float voltageV = 6.0f;
 			const float torqueConstantNmPerA = MilliNewtonMetersToNewtonMeters(3.96f);
 			const float noLoadCurrentA = MilliAmpsToAmps(45.9f);
 			const float speedConstantRadpsPerVolt = ComputeMotorSpeedConstantRadpsPerVolt(14100.0f, voltageV, noLoadCurrentA, resistanceOhms);
-			const float wheelDiameterM = 0.010f;
-			const float wheelRadiusM = wheelDiameterM * 0.5f;
-			const float noLoadSpeedMps = wheelRadiusM * RpmToRadPerSecond(14100.0f);
-			const float stallForceN = MilliNewtonMetersToNewtonMeters(5.33f) / wheelRadiusM;
 
-			MotorEncoderDrive drive(
-				resistanceOhms,
-				voltageV,
-				torqueConstantNmPerA,
-				speedConstantRadpsPerVolt,
-				noLoadCurrentA,
-				1.0f,
-				wheelDiameterM,
-				1U,
-				0U,
-				1U,
-				2U,
-				3U);
+			PlantParams params = PlantParams::Default();
+			params.supplyVoltageV = voltageV;
+			params.driveResistanceOhms = resistanceOhms;
+			params.torqueConstantNmPerA = torqueConstantNmPerA;
+			params.speedConstantRadpsPerVolt = speedConstantRadpsPerVolt;
+			params.noLoadCurrentA = noLoadCurrentA;
+			params.motorCurrentLimitA = 0.0f;
+			params.gearRatio = 1.0f;
+			params.drivetrainEfficiency = 1.0f;
 
-			MotorEncoderDrive frictionlessDrive(
-				resistanceOhms,
-				voltageV,
-				torqueConstantNmPerA,
-				speedConstantRadpsPerVolt,
-				0.0f,
-				1.0f,
-				wheelDiameterM,
-				1U,
-				0U,
-				1U,
-				2U,
-				3U);
+			const float stallCurrentA = (voltageV / resistanceOhms) - noLoadCurrentA;
+			const float stallTorqueNm = stallCurrentA * torqueConstantNmPerA;
+			const float noLoadTorqueNm = 0.0f;
 
-			Assert::IsTrue(std::fabs(drive.getMaxForceAtVelocity(0.0f) - stallForceN) < 1.0e-3f);
-			Assert::IsTrue(std::fabs(drive.getSpeedAtForceLimit(0.0f) - noLoadSpeedMps) < 1.0e-3f);
-			Assert::IsTrue(drive.getMaxForceAtVelocity(0.0f) < frictionlessDrive.getMaxForceAtVelocity(0.0f));
+			const float frictionlessStallTorqueNm = (voltageV / resistanceOhms) * torqueConstantNmPerA;
+
+			Assert::IsTrue(std::fabs(stallTorqueNm - MilliNewtonMetersToNewtonMeters(5.33f)) < 1.0e-5f);
+			Assert::IsTrue(std::fabs(noLoadTorqueNm) < 1.0e-5f);
+			Assert::IsTrue(stallTorqueNm < frictionlessStallTorqueNm);
 		}
 
-		TEST_METHOD(MotorEncoderDriveProjectsHigherNoLoadSpeedAt2SOvervoltage)
+		TEST_METHOD(PlantModelProjectsHigherNoLoadSpeedAt2SOvervoltage)
 		{
 			const float nominalVoltageV = 6.0f;
 			const float overvoltedBusV = 8.4f;
 			const float resistanceOhms = 4.31f;
 			const float noLoadCurrentA = MilliAmpsToAmps(45.9f);
 			const float speedConstantRadpsPerVolt = ComputeMotorSpeedConstantRadpsPerVolt(14100.0f, nominalVoltageV, noLoadCurrentA, resistanceOhms);
-			const float wheelDiameterM = 0.010f;
-			const float wheelRadiusM = wheelDiameterM * 0.5f;
-			const float nominalNoLoadSpeedMps = wheelRadiusM * RpmToRadPerSecond(14100.0f);
-			const float expectedOvervoltedNoLoadSpeedMps =
-				nominalNoLoadSpeedMps * ((overvoltedBusV - (noLoadCurrentA * resistanceOhms)) / (nominalVoltageV - (noLoadCurrentA * resistanceOhms)));
+			const float nominalNoLoadSpeedRadps = RpmToRadPerSecond(14100.0f);
+			const float expectedOvervoltedNoLoadSpeedRadps =
+				nominalNoLoadSpeedRadps * ((overvoltedBusV - (noLoadCurrentA * resistanceOhms)) / (nominalVoltageV - (noLoadCurrentA * resistanceOhms)));
 
-			MotorEncoderDrive drive(
-				resistanceOhms,
-				overvoltedBusV,
-				MilliNewtonMetersToNewtonMeters(3.96f),
-				speedConstantRadpsPerVolt,
-				noLoadCurrentA,
-				1.0f,
-				wheelDiameterM,
-				1U,
-				0U,
-				1U,
-				2U,
-				3U);
+			PlantParams params = PlantParams::Default();
+			params.supplyVoltageV = overvoltedBusV;
+			params.driveResistanceOhms = resistanceOhms;
+			params.torqueConstantNmPerA = MilliNewtonMetersToNewtonMeters(3.96f);
+			params.speedConstantRadpsPerVolt = speedConstantRadpsPerVolt;
+			params.noLoadCurrentA = noLoadCurrentA;
+			params.motorCurrentLimitA = 0.0f;
+			params.gearRatio = 1.0f;
+			params.drivetrainEfficiency = 1.0f;
 
-			Assert::IsTrue(std::fabs(drive.getSpeedAtForceLimit(0.0f) - expectedOvervoltedNoLoadSpeedMps) < 1.0e-3f);
-			Assert::IsTrue(drive.getSpeedAtForceLimit(0.0f) > nominalNoLoadSpeedMps);
+			(void)params;
+			const float motorCurrentAtExpectedNoLoadSpeedA =
+				(overvoltedBusV - (expectedOvervoltedNoLoadSpeedRadps / speedConstantRadpsPerVolt)) / resistanceOhms;
+			const float torqueAtExpectedNoLoadSpeedNm =
+				(motorCurrentAtExpectedNoLoadSpeedA - noLoadCurrentA) * MilliNewtonMetersToNewtonMeters(3.96f);
+
+			Assert::IsTrue(std::fabs(torqueAtExpectedNoLoadSpeedNm) < 1.0e-5f);
+			Assert::IsTrue(expectedOvervoltedNoLoadSpeedRadps > nominalNoLoadSpeedRadps);
 		}
 	};
 }

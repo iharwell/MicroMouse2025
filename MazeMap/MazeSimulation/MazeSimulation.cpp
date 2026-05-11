@@ -14,6 +14,7 @@
 #include "..\MazeMap\PathFinder.h"
 #include "..\MazeMap\DirectionalPathFinder.h"
 #include "..\MazeMap\Estimator.h"
+#include "..\MazeMap\PlantModel.h"
 #include "Mazes.h"
 #include "SimVehicle.h"
 #include "../MazeMap/ManeuverPathFinder.h"
@@ -30,36 +31,15 @@ namespace
 {
     constexpr const char* kOpenFloorUkfBenchmarkArg = "--benchmark-open-floor-ukf-stationary";
     constexpr const char* kOpenFloorUkfBenchmarkMeasurementSet =
-        "runtime_context + predict + encoder_pair + yaw_rate + planar_accel";
+        "predict + encoder_pair + yaw_rate + planar_accel";
     constexpr uint32_t kDefaultOpenFloorUkfBenchmarkIterations = 200000U;
     constexpr uint32_t kOpenFloorUkfBenchmarkWarmupIterations = 2048U;
     constexpr float kOpenFloorUkfBenchmarkDtSeconds = 0.001f;
     constexpr float kOpenFloorUkfBenchmarkStationaryGyroRawRadps = 0.015f;
 
-    MazeMap::VehicleState::StateMatrix BuildOpenFloorBenchmarkCovariance()
-    {
-        return MazeMap::SrUkfCore::BuildDefaultInitialCovariance();
-    }
-
     void ResetOpenFloorBenchmarkUkf(MazeMap::Estimator& ukf)
     {
-        MazeMap::VehicleState::StateVector state = MazeMap::VehicleState::StateVector::Zero();
-        (void)ukf.reset(state, BuildOpenFloorBenchmarkCovariance());
-    }
-
-    void ApplyOpenFloorBenchmarkRuntimeContext(
-        MazeMap::Estimator& ukf,
-        const MazeMap::ImuAccelObs& accelObservation) noexcept
-    {
-        ukf.ukf().setRuntimeContext(
-            0.0f,
-            0.0f,
-            0U,
-            0.0f,
-            0.0f,
-            accelObservation.valid,
-            accelObservation.accelBodyXMps2,
-            accelObservation.accelBodyYMps2);
+        (void)ukf.ResetPose(0.0f, 0.0f, 0.0f);
     }
 
     bool ExecuteOpenFloorStationaryMeasurementCycle(
@@ -72,8 +52,6 @@ namespace
         const MazeMap::ImuAccelObs& accelObservation,
         float rawGyroRadps)
     {
-        ApplyOpenFloorBenchmarkRuntimeContext(ukf, accelObservation);
-
         if (!ukf.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
         {
             return false;
@@ -124,14 +102,14 @@ namespace
 
     int RunOpenFloorUkfStationaryBenchmark(uint32_t iterations)
     {
-        MazeMap::Estimator ukf;
+        MazeMap::PlantModel plant(vehicle);
+        MazeMap::Estimator ukf(plant);
         ResetOpenFloorBenchmarkUkf(ukf);
 
-        const MazeMap::PlantParams& params = ukf.ukf().params();
         const MazeMap::App::Internal::CommandVector control =
             MazeMap::App::Internal::CommandVector(0.0f, 0.0f);
         constexpr float fanDutyCycle = 0.80f;
-        const float batteryVoltageV = params.supplyVoltageV;
+        constexpr float batteryVoltageV = 0.0f;
 
         MazeMap::EncoderObs encoderObservation{};
         encoderObservation.totalLeftCounts = 0;
@@ -191,7 +169,7 @@ namespace
             ((elapsedMs.count() * 1000.0) / static_cast<double>(iterations)) :
             0.0;
         const MazeMap::VehicleState& state = ukf.RuntimeState();
-        const MazeMap::VehicleState::StateMatrix covariance = ukf.ukf().covariance();
+        const MazeMap::VehicleState::StateMatrix covariance = state.GetCovariance();
 
         std::cout << std::fixed << std::setprecision(6);
         std::cout << "Open-floor UKF stationary benchmark\n";

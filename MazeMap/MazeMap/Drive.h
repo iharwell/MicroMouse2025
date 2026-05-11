@@ -455,7 +455,7 @@ namespace MazeMap::App::Internal
         SharedRobotRuntime* _runtime{};     // Canonical runtime owner for live state and services.
         LoopController* _loopController{};  // LoopController queried internally for current tick timing.
         DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
-        MazeMap::Vehicle* _speedVehicle{};  // Vehicle facts used for speed-limit derivation.
+        MazeMap::Vehicle* _vehicle{};       // Canonical vehicle facts used for limit derivation.
         MazeMap::Maze* _maze{};             // Maze facts used when maze-mode wall correction is enabled.
         MotionLimits _limits{};             // Drive-level live motion envelope, interpreted at use.
         CommandPDSettings _commandPdSettings{};              // Drive-level live CommandPD selections.

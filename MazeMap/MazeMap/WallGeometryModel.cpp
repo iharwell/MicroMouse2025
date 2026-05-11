@@ -1,10 +1,11 @@
 #include "pch.h"
 #include "WallGeometryModel.h"
 
-#include "PlantModel.h"
+#include "WallObservationPipeline.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 namespace
@@ -39,10 +40,11 @@ namespace
 namespace MazeMap
 {
     Eigen::Vector2f WallGeometryModel::sensorOriginWorld(
-        const VehicleState::StateVector& state,
+        const Eigen::Vector2f& positionWorldM,
+        float yawRad,
         const SensorMount& sensorMount) const noexcept
     {
-        return sensorOriginWorld(buildStateFrame(state), sensorMount);
+        return sensorOriginWorld(buildStateFrame(positionWorldM, yawRad), sensorMount);
     }
 
     Eigen::Vector2f WallGeometryModel::sensorOriginWorld(
@@ -53,10 +55,11 @@ namespace MazeMap
     }
 
     Eigen::Vector2f WallGeometryModel::sensorDirectionWorld(
-        const VehicleState::StateVector& state,
+        const Eigen::Vector2f& positionWorldM,
+        float yawRad,
         const SensorMount& sensorMount) const noexcept
     {
-        return sensorDirectionWorld(buildStateFrame(state), sensorMount);
+        return sensorDirectionWorld(buildStateFrame(positionWorldM, yawRad), sensorMount);
     }
 
     Eigen::Vector2f WallGeometryModel::sensorDirectionWorld(
@@ -67,11 +70,12 @@ namespace MazeMap
     }
 
     WallGeometryModel::GeometryStateFrame WallGeometryModel::buildStateFrame(
-        const VehicleState::StateVector& state) const noexcept
+        const Eigen::Vector2f& positionWorldM,
+        float yawRad) const noexcept
     {
         GeometryStateFrame frame{};
-        frame.positionWorldM = Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy));
-        frame.heading = HeadingUnitFromYaw(state(VehicleState::kPsi));
+        frame.positionWorldM = positionWorldM;
+        frame.heading = HeadingUnitFromYaw(yawRad);
         frame.centerCell = WorldToCell(frame.positionWorldM.x(), frame.positionWorldM.y());
         return frame;
     }
@@ -208,11 +212,12 @@ namespace MazeMap
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
-        const VehicleState::StateVector& state,
+        const Eigen::Vector2f& positionWorldM,
+        float yawRad,
         const SensorMount& sensorMount,
         const Maze& maze) const noexcept
     {
-        return predictRay(state, sensorMount, maze, PlantParams::Default().noHitRangeM);
+        return predictRay(positionWorldM, yawRad, sensorMount, maze, kDefaultWallObservationMaxRangeM);
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
@@ -220,16 +225,17 @@ namespace MazeMap
         const SensorMount& sensorMount,
         const Maze& maze) const noexcept
     {
-        return predictRay(frame, sensorMount, maze, PlantParams::Default().noHitRangeM);
+        return predictRay(frame, sensorMount, maze, kDefaultWallObservationMaxRangeM);
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
-        const VehicleState::StateVector& state,
+        const Eigen::Vector2f& positionWorldM,
+        float yawRad,
         const SensorMount& sensorMount,
         const Maze& maze,
         float maxRangeM) const noexcept
     {
-        return predictRay(buildStateFrame(state), sensorMount, maze, maxRangeM);
+        return predictRay(buildStateFrame(positionWorldM, yawRad), sensorMount, maze, maxRangeM);
     }
 
     GeometryPrediction WallGeometryModel::predictRay(
@@ -239,7 +245,7 @@ namespace MazeMap
         float maxRangeM) const noexcept
     {
         GeometryPrediction best{};
-        best.rangeM = (maxRangeM > 0.0f) ? maxRangeM : PlantParams::Default().noHitRangeM;
+        best.rangeM = (maxRangeM > 0.0f) ? maxRangeM : kDefaultWallObservationMaxRangeM;
 
         const Eigen::Vector2f rayOrigin = sensorOriginWorld(frame, sensorMount);
         const Eigen::Vector2f rayDirection = sensorDirectionWorld(frame, sensorMount);

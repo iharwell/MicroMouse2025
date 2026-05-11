@@ -2,7 +2,6 @@
 #include "StartupCalibration.h"
 
 #include "Drive.h"
-#include "DriveBase.h"
 #include "SharedRobotRuntime.h"
 #include "RuntimeSensorSuite.h"
 #include "WallDistanceCalibration.h"
@@ -148,9 +147,9 @@ namespace MazeMap::App::Internal
         _sensorsCalibrated = ok ? SensorCalibration::Imu : SensorCalibration::None;
         if (ok)
         {
-            if (_drive != nullptr)
+            if (_runtime != nullptr)
             {
-                _drive->SetGyroBiasZ(_sensors->GetGyroBiasRadps());
+                (void)_runtime->Estimator().SetGyroBiasZ(_sensors->GetGyroBiasRadps());
             }
             RefreshSensorsCalibrated();
         }
@@ -191,10 +190,9 @@ namespace MazeMap::App::Internal
 
         if ((_runtime == nullptr) ||
             (_sensors == nullptr) ||
-            (_drive == nullptr) ||
             (_driveService == nullptr) ||
             (_wallTouch == nullptr) ||
-            (_speedVehicle == nullptr))
+            (_vehicle == nullptr))
         {
             CompleteBestEffort("StartupCalibration could not begin because shared runtime services were unavailable");
             return;
@@ -204,10 +202,14 @@ namespace MazeMap::App::Internal
             LogIssue("StartupCalibration is falling back to live wall calibration because no saved wall-calibration dataset was available");
         }
 
-        _drive->SetPose(
-            StartupCellCenterCoordinateM(),
-            Config::kMissionStartRearWallInsetM,
-            DirectionToYawRad(MazeMap::Up));
+        if (!_runtime->Estimator().ResetPose(
+                StartupCellCenterCoordinateM(),
+                Config::kMissionStartRearWallInsetM,
+                DirectionToYawRad(MazeMap::Up)))
+        {
+            CompleteBestEffort(_runtime->Estimator().FaultReason());
+            return;
+        }
         if (!BeginDriveHoldPhase(Phase::SouthStartHold, Config::kStartupWallCalibrationSettleMs))
         {
             CompleteBestEffort("StartupCalibration could not begin the initial startup settle");
@@ -303,10 +305,9 @@ namespace MazeMap::App::Internal
     {
         _runtime = &runtime;
         _sensors = &runtime.Sensors();
-        _drive = &runtime.Drive();
         _driveService = &runtime.DriveService();
         _wallTouch = &runtime.WallTouchService();
-        _speedVehicle = &runtime.SpeedVehicle();
+        _vehicle = &runtime.Vehicle();
         _travelLimits = BuildStartupTravelLimits();
     }
 
@@ -421,7 +422,7 @@ namespace MazeMap::App::Internal
         const float targetYMeters,
         const MazeMap::Direction headingDirection) noexcept
     {
-        if ((_drive == nullptr) || (_driveService == nullptr))
+        if ((_runtime == nullptr) || (_driveService == nullptr))
         {
             return false;
         }
@@ -465,7 +466,7 @@ namespace MazeMap::App::Internal
         const Phase phase,
         const MazeMap::Direction targetDirection) noexcept
     {
-        if ((_drive == nullptr) || (_driveService == nullptr))
+        if ((_runtime == nullptr) || (_driveService == nullptr))
         {
             return false;
         }
@@ -627,7 +628,7 @@ namespace MazeMap::App::Internal
 
     bool StartupCalibration::SampleWestFacingSideCalibration() noexcept
     {
-        if ((_speedVehicle == nullptr) || (_runtime == nullptr))
+        if ((_vehicle == nullptr) || (_runtime == nullptr))
         {
             CompleteBestEffort("StartupCalibration could not sample west-facing side calibration because runtime state was unavailable");
             return false;
@@ -637,9 +638,9 @@ namespace MazeMap::App::Internal
         WallSensorCalibrationCapture rightCapture{};
         SampleWallCalibrationCaptureAverageRawPair(
             WallSensorId::SideLeft,
-            _speedVehicle->SideLeft,
+            _vehicle->SideLeft,
             WallSensorId::SideRight,
-            _speedVehicle->SideRight,
+            _vehicle->SideRight,
             leftCapture,
             rightCapture);
 
@@ -647,7 +648,7 @@ namespace MazeMap::App::Internal
         {
             float actualDistanceM = 0.0f;
             const bool storedReference =
-                TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideLeft, actualDistanceM) &&
+                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideLeft, actualDistanceM) &&
                 StoreSideReference(WallSensorId::SideLeft, leftCapture, actualDistanceM);
             if (storedReference)
             {
@@ -679,7 +680,7 @@ namespace MazeMap::App::Internal
 
     bool StartupCalibration::SampleEastFacingSideCalibration() noexcept
     {
-        if ((_speedVehicle == nullptr) || (_runtime == nullptr))
+        if ((_vehicle == nullptr) || (_runtime == nullptr))
         {
             CompleteBestEffort("StartupCalibration could not sample east-facing side calibration because runtime state was unavailable");
             return false;
@@ -689,9 +690,9 @@ namespace MazeMap::App::Internal
         WallSensorCalibrationCapture rightCapture{};
         SampleWallCalibrationCaptureAverageRawPair(
             WallSensorId::SideLeft,
-            _speedVehicle->SideLeft,
+            _vehicle->SideLeft,
             WallSensorId::SideRight,
-            _speedVehicle->SideRight,
+            _vehicle->SideRight,
             leftCapture,
             rightCapture);
 
@@ -699,7 +700,7 @@ namespace MazeMap::App::Internal
         {
             float actualDistanceM = 0.0f;
             const bool storedReference =
-                TryDistanceToSouthWall(_runtime->RuntimeState(), _speedVehicle->SideRight, actualDistanceM) &&
+                TryDistanceToSouthWall(_runtime->RuntimeState(), _vehicle->SideRight, actualDistanceM) &&
                 StoreSideReference(WallSensorId::SideRight, rightCapture, actualDistanceM);
             if (storedReference)
             {
@@ -735,7 +736,7 @@ namespace MazeMap::App::Internal
 
     bool StartupCalibration::SampleFrontBaseline() noexcept
     {
-        if ((_speedVehicle == nullptr) || (_runtime == nullptr))
+        if ((_vehicle == nullptr) || (_runtime == nullptr))
         {
             CompleteBestEffort("StartupCalibration could not sample the front baseline because runtime state was unavailable");
             return false;
@@ -745,9 +746,9 @@ namespace MazeMap::App::Internal
         WallSensorCalibrationCapture frontRightCapture{};
         SampleWallCalibrationCaptureAverageRawPair(
             WallSensorId::FrontLeft,
-            _speedVehicle->FrontLeft,
+            _vehicle->FrontLeft,
             WallSensorId::FrontRight,
-            _speedVehicle->FrontRight,
+            _vehicle->FrontRight,
             frontLeftCapture,
             frontRightCapture);
 
@@ -770,16 +771,20 @@ namespace MazeMap::App::Internal
         {
             LogIssue("StartupCalibration completed without full side-wall references and will keep the best available side-wall distance model");
         }
-        if (_drive != nullptr)
+        if (_runtime != nullptr)
         {
-            _drive->SetPose(
-                StartupCellCenterCoordinateM(),
-                StartupCellCenterCoordinateM(),
-                DirectionToYawRad(MazeMap::Up));
+            if (!_runtime->Estimator().ResetPose(
+                    StartupCellCenterCoordinateM(),
+                    StartupCellCenterCoordinateM(),
+                    DirectionToYawRad(MazeMap::Up)))
+            {
+                CompleteBestEffort(_runtime->Estimator().FaultReason());
+                return false;
+            }
         }
         else
         {
-            LogIssue("StartupCalibration could not reseat the final startup pose because DriveBase was unavailable");
+            LogIssue("StartupCalibration could not reseat the final startup pose because shared runtime was unavailable");
         }
         if (!BeginDriveHoldPhase(Phase::FinalHold, Config::kStartupWallCalibrationSettleMs))
         {

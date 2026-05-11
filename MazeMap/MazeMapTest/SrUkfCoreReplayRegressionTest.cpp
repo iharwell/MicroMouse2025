@@ -117,7 +117,7 @@ namespace MazeMap
                 static_cast<int>(sizeof(kLatestLoggedOpenFloorPoseJumpWindow) / sizeof(kLatestLoggedOpenFloorPoseJumpWindow[0]));
             const LoggedOpenFloorPoseJumpSample& first = kLatestLoggedOpenFloorPoseJumpWindow[0];
 
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState = BuildUkfState(
                 first.poseXM,
                 first.poseYM,
@@ -184,6 +184,7 @@ namespace MazeMap
         }
     };
 }
+
 
 
 

@@ -6,10 +6,24 @@
 #include "SensorMount.h"
 #include "WallSensor.h"
 #include "LSM6DSV16X_IMU.h"
+#include "MotorEncoderDrive.h"
+#include "MotorModelUnits.h"
 #include <cmath>
+#include <cstdint>
+
+class RuntimeSensorSuite;
 
 namespace MazeMap
 {
+    struct EncoderObs;
+    class PlantModel;
+
+    namespace App::Internal
+    {
+        class CommandVector;
+        class LoopController;
+    }
+
     struct ArcTrackWidthInterpolation
     {
         float tightRadiusM;
@@ -39,6 +53,10 @@ namespace MazeMap
     class EXPORT Vehicle
     {
     private:
+        friend class PlantModel;
+        friend class App::Internal::LoopController;
+        friend class ::RuntimeSensorSuite;
+
         inline static constexpr VehiclePhysicalModel kPhysicalModel = {
             0.14f, //Mass
             0.0842f, //Width
@@ -60,12 +78,57 @@ namespace MazeMap
             // exists so both anchor radii currently share that fit.
             { 0.063f, 0.13235f, 0.153f, 0.13235f }
         };
+        inline static constexpr float kDriveNominalVoltageV = 6.0f;
+        inline static constexpr float kDriveNominalNoLoadSpeedRpm = 14100.0f;
+        inline static constexpr float kDriveSupplyVoltageV = 8.4f;
+        inline static constexpr float kDriveResistanceOhms = 4.31f;
+        inline static constexpr float kDriveTorqueConstantNmPerA = MilliNewtonMetersToNewtonMeters(3.96f);
+        inline static constexpr float kDriveNoLoadCurrentA = MilliAmpsToAmps(45.9f);
+        inline static constexpr float kDriveSpeedConstantRadpsPerVolt =
+            ComputeMotorSpeedConstantRadpsPerVolt(
+                kDriveNominalNoLoadSpeedRpm,
+                kDriveNominalVoltageV,
+                kDriveNoLoadCurrentA,
+                kDriveResistanceOhms);
+        inline static constexpr float kDriveGearRatio = 56.0f / 17.0f;
+        // March 22, 2026 low-speed straight-audit fit: aux001-aux003 speed_idx 0 still over-reported outbound
+        // encoder distance by about 3.05 mm on the 0.72 m north-corridor run, so trim the shared wheel diameter
+        // down by 0.42% to keep the fixed-distance phases from finishing short.
+        // Investigation note: the supplied tire OD is 25.000 mm. Revisit this rolling-diameter correction after
+        // the post-UKF encoder-distance audit instead of treating this as physical wheel geometry.
+        inline static constexpr float kDriveWheelDiameterM = 0.025220f;
+        inline static constexpr float kDriveWheelYOffsetM = 0.01475f;
+        inline static constexpr std::uint16_t kDriveEncoderPulsesPerRev = 4096U;
+
+        inline static constexpr std::uint8_t kLeftDriveMotorOutPinA = 24U;
+        inline static constexpr std::uint8_t kLeftDriveMotorOutPinB = 25U;
+        inline static constexpr std::uint8_t kLeftDriveEncoderInPinA = 2U;
+        inline static constexpr std::uint8_t kLeftDriveEncoderInPinB = 3U;
+        inline static constexpr std::uint8_t kLeftDriveEncoderChannel = 2U;
+        inline static constexpr bool kLeftDriveInvertMotorDirection = true;
+        inline static constexpr bool kLeftDriveInvertEncoderDirection = false;
+
+        inline static constexpr std::uint8_t kRightDriveMotorOutPinA = 5U;
+        inline static constexpr std::uint8_t kRightDriveMotorOutPinB = 6U;
+        inline static constexpr std::uint8_t kRightDriveEncoderInPinA = 7U;
+        inline static constexpr std::uint8_t kRightDriveEncoderInPinB = 8U;
+        inline static constexpr std::uint8_t kRightDriveEncoderChannel = 1U;
+        inline static constexpr bool kRightDriveInvertMotorDirection = true;
+        inline static constexpr bool kRightDriveInvertEncoderDirection = false;
+
+        MotorEncoderDrive _leftMotor;
+        MotorEncoderDrive _rightMotor;
+
         float _peakForwardAcceleration;
         float _peakLateralAcceleration;
         float _peakRotationalVelocity;
         float _peakAngularAcceleration;
 
         float _maxSpeed;
+
+        void ApplyMotorCommand(const App::Internal::CommandVector& command) noexcept;
+        void ResetDriveEncoders() noexcept;
+        EncoderObs CaptureEncoderObservation(float dtSeconds) noexcept;
     public:
         using ImuFrontRight = LSM6DSV16X_IMU<36, 32, 11, 12, 13>;
         using ImuBackLeft = LSM6DSV16X_IMU<37, 33, 11, 12, 13>;
@@ -82,6 +145,49 @@ namespace MazeMap
         {
             return 16.5f;
         }
+
+        static constexpr float GetDriveWheelRadiusM() noexcept
+        {
+            return 0.5f * kDriveWheelDiameterM;
+        }
+
+        static constexpr float WheelLinearVelocityFromOmega(float omegaRadps) noexcept
+        {
+            static_assert(kDriveWheelDiameterM > 0.0f, "Drive wheel diameter must be positive.");
+            return omegaRadps * GetDriveWheelRadiusM();
+        }
+
+        static constexpr float WheelOmegaFromLinearVelocity(float wheelLinearMps) noexcept
+        {
+            static_assert(kDriveWheelDiameterM > 0.0f, "Drive wheel diameter must be positive.");
+            return wheelLinearMps / GetDriveWheelRadiusM();
+        }
+
+        static constexpr float LeftWheelLinearVelocityFromBody(float forwardMps, float yawRateRadps) noexcept
+        {
+            static_assert(kPhysicalModel.trackWidthM > 0.0f, "Vehicle track width must be positive.");
+            return forwardMps + (0.5f * GetPhysicalModel().trackWidthM * yawRateRadps);
+        }
+
+        static constexpr float RightWheelLinearVelocityFromBody(float forwardMps, float yawRateRadps) noexcept
+        {
+            static_assert(kPhysicalModel.trackWidthM > 0.0f, "Vehicle track width must be positive.");
+            return forwardMps - (0.5f * GetPhysicalModel().trackWidthM * yawRateRadps);
+        }
+
+        static constexpr float BodyForwardVelocityFromWheelLinear(float leftMps, float rightMps) noexcept
+        {
+            return 0.5f * (leftMps + rightMps);
+        }
+
+        static constexpr float BodyYawRateFromWheelLinear(float leftMps, float rightMps) noexcept
+        {
+            static_assert(kPhysicalModel.trackWidthM > 0.0f, "Vehicle track width must be positive.");
+            return (leftMps - rightMps) / GetPhysicalModel().trackWidthM;
+        }
+
+        const MotorEncoderDrive& GetLeftMotorEncoderDrive() const noexcept { return _leftMotor; }
+        const MotorEncoderDrive& GetRightMotorEncoderDrive() const noexcept { return _rightMotor; }
 
         static SensorMount GetBackLeftImuMount() noexcept;
         static SensorMount GetFrontLeftSensorMount() noexcept;

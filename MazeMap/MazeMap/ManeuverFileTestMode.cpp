@@ -31,7 +31,7 @@ namespace
 
     bool LoadManeuverQueueFromSd(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
-        MazeMap::Vehicle& speedVehicle,
+        MazeMap::Vehicle& vehicle,
         MazeMap::ManeuverQueue& queue)
     {
 #if defined(ARDUINO_TEENSY41)
@@ -104,11 +104,11 @@ namespace
             return false;
         }
 
-        queue.ComputeSpeeds(speedVehicle, 0.0f, 0.0f);
+        queue.ComputeSpeeds(vehicle, 0.0f, 0.0f);
         return true;
 #else
         (void)runtime;
-        (void)speedVehicle;
+        (void)vehicle;
         (void)queue;
         return false;
 #endif
@@ -123,7 +123,7 @@ namespace MazeMap::App::Internal
         explicit ManeuverFileTestMode(SharedRobotRuntime& runtime)
             : _runtime(runtime)
             , _loopController(runtime.ControlLoop())
-            , _speedVehicle(runtime.SpeedVehicle())
+            , _vehicle(runtime.Vehicle())
             , _drive(runtime.Drive())
             , _driveService(runtime.DriveService())
             , _startupCalibration(runtime.StartupCalibrationService())
@@ -161,7 +161,7 @@ namespace MazeMap::App::Internal
                 _runtime.FailActiveMode("Maneuver file test startup bring-up failed");
             }
 
-            if (!LoadManeuverQueueFromSd(_runtime, _speedVehicle, _queue))
+            if (!LoadManeuverQueueFromSd(_runtime, _vehicle, _queue))
             {
                 _runtime.FailActiveMode("Maneuver file test could not load test.txt");
             }
@@ -376,7 +376,7 @@ namespace MazeMap::App::Internal
 
         SharedRobotRuntime& _runtime;
         LoopController& _loopController;
-        MazeMap::Vehicle& _speedVehicle;
+        MazeMap::Vehicle& _vehicle;
         DriveBase& _drive;
         Drive& _driveService;
         StartupCalibration& _startupCalibration;

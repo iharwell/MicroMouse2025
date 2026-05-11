@@ -4,19 +4,22 @@
 
 #include "Defines.h"
 #include "EigenCompat.h"
-#include "AppliedTorqueEstimate.h"
 #include "CommandVector.h"
+#include "EncoderObs.h"
 #include "Maze.h"
 #include "SensorMount.h"
 #include "VehicleState.h"
 
 #include <algorithm>
 #include <array>
+#include <cstdarg>
 #include <cstdint>
 
 namespace MazeMap
 {
     class SrUkfCore;
+    class Vehicle;
+    class MotorEncoderDrive;
 
     // Contact-point velocity resolved in the project body frame (+X right, +Y forward).
     struct ContactKinematics
@@ -168,21 +171,6 @@ namespace MazeMap
         float yawAccelErrorRadps2 = 0.0f;
         bool converged = false;
         bool valid = false;
-    };
-
-    struct FeedforwardAuditResult
-    {
-        DriveCommandSolution issued{};
-        PlantDerivatives predictedAppliedStep{};
-        VehicleState::StateVector predictedNextState = VehicleState::StateVector::Zero();
-
-        float predictedForwardAccelMps2 = 0.0f;
-        float predictedYawAccelRadps2 = 0.0f;
-        float predictedLateralAccelMps2 = 0.0f;
-
-        float forwardAccelResidualMps2 = 0.0f;
-        float yawAccelResidualRadps2 = 0.0f;
-
     };
 
     // Tunable physical parameters and fixed sensor-mount facts for the UKF plant model.
@@ -353,19 +341,6 @@ namespace MazeMap
         float combinedAccelNominalSq = 0.0f;
 
         float supplyVoltageV = 0.0f;
-        float driveResistanceOhms = 0.0f;
-        float invDriveResistanceOhms = 0.0f;
-        float torqueConstantNmPerA = 0.0f;
-        float speedConstantRadpsPerVolt = 0.0f;
-        float noLoadCurrentA = 0.0f;
-        float motorCurrentLimitA = 0.0f;
-        float gearRatio = 0.0f;
-        float drivetrainEfficiency = 1.0f;
-        float driveGain = 0.0f;
-        float invDriveGain = 0.0f;
-        float wheelSpeedToBackEmfVoltPerRadps = 0.0f;
-        float wheelSpeedToCurrentAPerRadps = 0.0f;
-        float wheelTorquePerAmpNm = 0.0f;
         float rollingFrictionTorqueNm = 0.0f;
         float viscousFrictionNmPerRadps = 0.0f;
         float pivotScrubBreakawayYawMomentNm = 0.0f;
@@ -395,8 +370,43 @@ namespace MazeMap
         static constexpr float kDefaultVelocityTargetResponseTimeS = 0.025f;
         static constexpr float kTractionLimitedReserveScale = 0.90f;
 
+        PlantModel() noexcept;
+        explicit PlantModel(const Vehicle& vehicle) noexcept;
+
+        void AttachRuntimeState(const VehicleState& runtimeState) noexcept;
+        float wallObservationNoHitRangeM() const noexcept;
+
         static PreparedParams Prepare(const PlantParams& params) noexcept;
 
+        template <typename WriteFloatFn>
+        bool WriteOpenFloorUkfMetadata(WriteFloatFn&& writeFloat) const
+        {
+            return
+                writeFloat("re_m", _preparedParams.wheelRadiusM, 6) &&
+                writeFloat("we_m", _preparedParams.trackWidthM, 6) &&
+                writeFloat("imu_x", _preparedParams.raw.backLeftImuMount.positionBodyM().x(), 6) &&
+                writeFloat("imu_y", _preparedParams.raw.backLeftImuMount.positionBodyM().y(), 6) &&
+                writeFloat("jw_kgm2", _preparedParams.wheelInertiaKgM2, 9);
+        }
+
+        template <typename WriteConfigFn>
+        bool WriteDriveModelDiagnosticConfig(WriteConfigFn&& writeConfig) const
+        {
+            return writeConfig(
+                "motor_model:wheel_diam_m=%.6f;encoder_cpr=%lu;gear=%.6f;supply_v=%.3f",
+                2.0f * _preparedParams.wheelRadiusM,
+                static_cast<unsigned long>(_preparedParams.raw.encoderCountsPerMotorRev),
+                _preparedParams.raw.gearRatio,
+                _preparedParams.raw.supplyVoltageV);
+        }
+
+        using DebugTextSink = bool (*)(void* context, const char* type, const char* format, std::va_list args) noexcept;
+        bool WriteUkfPlantDebugTextDump(void* context, DebugTextSink sink) const noexcept;
+
+        PlantDerivatives forwardStep(
+            const App::Internal::CommandVector& control,
+            float fanDutyCycle,
+            float batteryVoltageV) const noexcept;
         PlantDerivatives forwardStep(
             const StateVector& state,
             const App::Internal::CommandVector& control,
@@ -465,124 +475,16 @@ namespace MazeMap
             float dt,
             const PreparedParams& params) const noexcept;
 
-        AppliedTorqueEstimate estimateAppliedTorque(
-            const StateVector& currentState,
-            const App::Internal::CommandVector& control,
-            const PlantParams& params,
-            float batteryVoltageV = 0.0f) const noexcept;
-        AppliedTorqueEstimate estimateAppliedTorque(
-            const StateVector& currentState,
-            const App::Internal::CommandVector& control,
-            const PreparedParams& params,
-            float batteryVoltageV = 0.0f) const noexcept;
-
-        // Algebraic traction-clamped inverse solve for the requested body accelerations at the
-        // current operating point. The normal path performs no iterative refinement.
-        DriveCommandSolution solveDriveCommands(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 8.4f) const noexcept;
-        DriveCommandSolution solveDriveCommands(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 8.4f) const noexcept;
-        DriveCommandSolution solveDriveCommands(
-            float forwardVelocityMps,
-            float desiredLongitudinalAccelMps2,
-            float yawRateRadps,
-            float desiredYawAccelRadps2,
-            const PlantParams& params,
+        DriveCommandSolution solveSteadyStateFeedforward(
+            float desiredForwardVelocityMps,
+            float desiredYawRateRadps,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) const noexcept;
-        DriveCommandSolution solveDriveCommands(
-            float forwardVelocityMps,
+        DriveCommandSolution solveAccelerationFeedforward(
             float desiredLongitudinalAccelMps2,
-            float yawRateRadps,
             float desiredYawAccelRadps2,
-            const PreparedParams& params,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) const noexcept;
-
-        DriveCommandSolution solveClosedLoopDriveCommands(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 8.4f,
-            float reserveUsage = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommands(
-            float forwardVelocityMps,
-            float desiredLongitudinalAccelMps2,
-            float yawRateRadps,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float reserveUsage = 0.90f) const noexcept;
-
-        // Returns the traction-limited control command that drives the current body rates toward the target
-        // body rates over the requested response horizon using the canonical default when none is supplied.
-        DriveCommandSolution solveDriveCommandsForVelocityTarget(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
-        DriveCommandSolution solveDriveCommandsForVelocityTarget(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
-        DriveCommandSolution solveDriveCommandsForVelocityTarget(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
-        DriveCommandSolution solveDriveCommandsForVelocityTarget(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS) const noexcept;
-
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float reserveUsage = 0.90f) const noexcept;
-        DriveCommandSolution solveClosedLoopDriveCommandsForVelocityTarget(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float reserveUsage = 0.90f) const noexcept;
 
         void ComputeBodyAction(
             float currentForwardVelocityMps,
@@ -614,6 +516,17 @@ namespace MazeMap
             float targetYawRateRadps,
             float targetLongitudinalAccelMps2,
             float targetYawAccelRadps2,
+            float& leftTargetVelocityMps,
+            float& rightTargetVelocityMps,
+            float& leftTargetAccelMps2,
+            float& rightTargetAccelMps2,
+            float& leftTargetOmegaRadps,
+            float& rightTargetOmegaRadps) const noexcept;
+        void resolveWheelMotionTargets(
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            float targetLongitudinalAccelMps2,
+            float targetYawAccelRadps2,
             const PreparedParams& params,
             float& leftTargetVelocityMps,
             float& rightTargetVelocityMps,
@@ -622,13 +535,37 @@ namespace MazeMap
             float& leftTargetOmegaRadps,
             float& rightTargetOmegaRadps) const noexcept;
 
-        void resolveBodyVelocityFromWheelSpeeds(
-            float leftWheelLinearVelocityMps,
-            float rightWheelLinearVelocityMps,
-            const PreparedParams& params,
-            float& forwardVelocityMps,
-            float& yawRateRadps) const noexcept;
+        Eigen::Matrix<float, 2, 2> encoderPairCovarianceRadps(
+            float linearSpeedSigmaMps,
+            float yawRateSigmaRadps) const noexcept;
+        Eigen::Matrix<float, 2, 2> encoderPairSqrtNoise(
+            const EncoderObs& observation,
+            float stationaryLinearSpeedSigmaMps,
+            float generalLinearSpeedSigmaMps,
+            float generalYawRateSigmaRadps) const noexcept;
+        float stationaryEncoderOmegaSigmaRadps(float stationaryLinearSpeedSigmaMps) const noexcept;
+        float measuredLinearSpeedMps(const EncoderObs& observation) const noexcept;
+        float measuredYawRateRadps(const EncoderObs& observation) const noexcept;
+        float measuredYawRateVarianceRadps2(
+            const EncoderObs& observation,
+            float stationaryLinearSpeedSigmaMps,
+            float generalLinearSpeedSigmaMps,
+            float generalYawRateSigmaRadps) const noexcept;
+        float measuredWheelVarianceRadps2(
+            const EncoderObs& observation,
+            float stationaryLinearSpeedSigmaMps,
+            float generalLinearSpeedSigmaMps,
+            float generalYawRateSigmaRadps) const noexcept;
+        Eigen::Vector2f wheelLinearVelocityFromBodyState(const StateVector& state) const noexcept;
+        float sustainedCombinedAccelerationUsage(float accelerationMps2) const noexcept;
+        float nominalCombinedAccelerationUsage(float accelerationMps2) const noexcept;
+        float peakCombinedAccelerationUsage(float accelerationMps2) const noexcept;
+        float stopExitYawRateUsage(float yawRateRadps) const noexcept;
 
+        void velocityTargetTechnicalLimits(
+            float& maxLongitudinalAccelMps2,
+            float& maxYawAccelRadps2,
+            float fanDutyCycle = 0.80f) const noexcept;
         void velocityTargetTechnicalLimits(
             const StateVector& currentState,
             const PlantParams& params,
@@ -655,103 +592,6 @@ namespace MazeMap
             float& maxLongitudinalAccelMps2,
             float& maxYawAccelRadps2,
             float fanDutyCycle = 0.80f) const noexcept;
-
-        // Legacy compatibility entry points. These now forward to the canonical closed-loop-reserve solver, which
-        // applies reserve only by reducing per-side usable force limits before the explicit allocator runs.
-        DriveCommandSolution solveTractionLimitedDriveCommands(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveTractionLimitedDriveCommands(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveTractionLimitedDriveCommands(
-            float forwardVelocityMps,
-            float desiredLongitudinalAccelMps2,
-            float yawRateRadps,
-            float desiredYawAccelRadps2,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveTractionLimitedDriveCommands(
-            float forwardVelocityMps,
-            float desiredLongitudinalAccelMps2,
-            float yawRateRadps,
-            float desiredYawAccelRadps2,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float tractionReserveScale = 0.90f) const noexcept;
-        DriveCommandSolution solveTractionLimitedDriveCommandsForVelocityTarget(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f,
-            float responseTimeS = kDefaultVelocityTargetResponseTimeS,
-            float tractionReserveScale = 0.90f) const noexcept;
-
-        float driveTorqueFromCommand(
-            float motorCommand,
-            float wheelBankSpeedRadps,
-            float batteryVoltageV,
-            const PlantParams& params) const noexcept;
-        float driveTorqueFromCommand(
-            float motorCommand,
-            float wheelBankSpeedRadps,
-            float batteryVoltageV,
-            const PreparedParams& params) const noexcept;
-
-        float driveCommandFromTorque(
-            float wheelTorqueNm,
-            float wheelBankSpeedRadps,
-            float batteryVoltageV,
-            const PlantParams& params) const noexcept;
-        float driveCommandFromTorque(
-            float wheelTorqueNm,
-            float wheelBankSpeedRadps,
-            float batteryVoltageV,
-            const PreparedParams& params) const noexcept;
 
         float driveFrictionTorque(
             float wheelBankSpeedRadps,
@@ -762,18 +602,29 @@ namespace MazeMap
             float wheelTorqueRequestNm,
             const PreparedParams& params) const noexcept;
 
-        FeedforwardAuditResult evaluateFeedforwardOffline(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PreparedParams& prepared,
+        PlantDerivatives forwardStepFromAppliedBankTorques(
+            const StateVector& state,
+            float leftAppliedBankTorqueNm,
+            float rightAppliedBankTorqueNm,
+            float fanDutyCycle = 0.80f) const noexcept;
+        Eigen::Vector2f imuPlanarAcceleration(
+            const StateVector& state,
+            const App::Internal::CommandVector& control,
             float fanDutyCycle,
-            float batteryVoltageV,
-            float reserveUsage,
-            float dtS) const noexcept;
+            float batteryVoltageV) const noexcept;
 
     private:
+        friend struct PlantParams;
         friend class SrUkfCore;
+
+        static PlantParams BuildParamsFromVehicleFacts() noexcept;
+        StateVector BuildBoundStateVector() const noexcept;
+        void resolveAppliedBankTorques(
+            const StateVector& currentState,
+            const App::Internal::CommandVector& control,
+            float batteryVoltageV,
+            float& leftAppliedBankTorqueNm,
+            float& rightAppliedBankTorqueNm) const noexcept;
 
         struct WheelOnlyMeasurementPrediction
         {
@@ -792,21 +643,13 @@ namespace MazeMap
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             const PlantParams& params,
-            float fanDutyCycle = 0.80f,
-            float leftUtilizationScale = 1.0f,
-            float rightUtilizationScale = 1.0f,
-            float leftCapacityScale = 1.0f,
-            float rightCapacityScale = 1.0f) const noexcept;
+            float fanDutyCycle = 0.80f) const noexcept;
         PlantDerivatives forwardStepFromAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             const PreparedParams& params,
-            float fanDutyCycle = 0.80f,
-            float leftUtilizationScale = 1.0f,
-            float rightUtilizationScale = 1.0f,
-            float leftCapacityScale = 1.0f,
-            float rightCapacityScale = 1.0f) const noexcept;
+            float fanDutyCycle = 0.80f) const noexcept;
         PlantDerivatives evaluateAppliedBankTorqueStep(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
@@ -814,27 +657,19 @@ namespace MazeMap
             float activityNorm,
             const PreparedParams& params,
             float fanDutyCycle) const noexcept;
-        PlantDerivatives evaluateAppliedBankTorqueStepWithPolicyScales(
+        StateVector integrateAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
-            const PreparedParams& params,
             float fanDutyCycle,
-            float leftUtilizationScale,
-            float rightUtilizationScale,
-            float leftCapacityScale,
-            float rightCapacityScale) const noexcept;
+            float dtS) const noexcept;
         StateVector integrateAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             const PreparedParams& params,
             float fanDutyCycle,
-            float dtS,
-            float leftUtilizationScale,
-            float rightUtilizationScale,
-            float leftCapacityScale,
-            float rightCapacityScale) const noexcept;
+            float dtS) const noexcept;
         static StateVector advanceStateFromDerivatives(
             const StateVector& currentState,
             const PlantDerivatives& evaluatedStep,
@@ -860,21 +695,12 @@ namespace MazeMap
             float targetYawRateRadps = 0.0f;
         };
 
-        struct FeedforwardEnvelopeModifiers
-        {
-            float leftUtilizationScale = 1.0f;
-            float rightUtilizationScale = 1.0f;
-            float leftCapacityScale = 1.0f;
-            float rightCapacityScale = 1.0f;
-        };
-
         struct FeedforwardSolveContext
         {
             float batteryVoltageV = 8.4f;
             float fanDutyCycle = 0.80f;
             float reserveUsage = 1.0f;
             float slipSpeedFloorMps = 0.0f;
-            FeedforwardEnvelopeModifiers envelope{};
         };
 
         struct FeedforwardForceRequest
@@ -898,8 +724,7 @@ namespace MazeMap
 
         FeedforwardSolveContext buildFeedforwardSolveContext(
             const FeedforwardRequest& request,
-            const PreparedParams& prepared,
-            const FeedforwardEnvelopeModifiers& envelopeModifiers) const noexcept;
+            const PreparedParams& prepared) const noexcept;
         float computeControllerPivotScrubYawMomentNm(
             const FeedforwardRequest& request,
             const StateVector& operatingState,
@@ -916,17 +741,10 @@ namespace MazeMap
             float reserveUsage) const noexcept;
         DriveCommandSolution solveFeedforwardCanonical(
             const FeedforwardRequest& request,
-            const PreparedParams& prepared,
-            const FeedforwardEnvelopeModifiers& envelopeModifiers) const noexcept;
-        FeedforwardAuditResult evaluateFeedforwardOfflineInternal(
-            const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            const PreparedParams& prepared,
-            float fanDutyCycle,
-            float batteryVoltageV,
-            float reserveUsage,
-            float dtS,
-            const FeedforwardEnvelopeModifiers& envelopeModifiers) const noexcept;
+            const PreparedParams& prepared) const noexcept;
+        PreparedParams _preparedParams{};
+        const VehicleState* _runtimeState = nullptr;
+        const MotorEncoderDrive* _leftDrive = nullptr;
+        const MotorEncoderDrive* _rightDrive = nullptr;
     };
 }

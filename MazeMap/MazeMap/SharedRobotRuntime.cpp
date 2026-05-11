@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "SharedRobotRuntime.h"
+#include "CommandVector.h"
 #include "TeensyLayout.h"
 #include "MazeMapApplicationPrivate.h"
 #include "MazeMapRuntimeInfrastructure.h"
@@ -198,7 +199,14 @@ static bool OpenFreshTextLogFile(SharedRuntimeTextLogFileHandle& file, const cha
         file = nullptr;
     }
 
+#if defined(_MSC_VER)
+    if (path == nullptr || fopen_s(&file, path, "wb") != 0)
+    {
+        file = nullptr;
+    }
+#else
     file = std::fopen(path, "wb");
+#endif
     return file != nullptr;
 }
 
@@ -210,7 +218,14 @@ static bool OpenAppendTextLogFile(SharedRuntimeTextLogFileHandle& file, const ch
         file = nullptr;
     }
 
+#if defined(_MSC_VER)
+    if (path == nullptr || fopen_s(&file, path, "ab") != 0)
+    {
+        file = nullptr;
+    }
+#else
     file = std::fopen(path, "ab");
+#endif
     return file != nullptr;
 }
 
@@ -423,22 +438,21 @@ static bool FlushTextLogQueueToFile(
 namespace MazeMap::App::Internal
 {
     SharedRobotRuntime::SharedRobotRuntime()
-        : speedVehicle()
-        , searchVehicle()
+        : vehicle()
         , maze()
-        , searchPathFinder(maze, speedVehicle)
-        , speedPathFinder(maze, speedVehicle)
+        , searchPathFinder(maze, vehicle)
+        , speedPathFinder(maze, vehicle)
         , wallBeliefMap()
-        , plantModel()
+        , plantModel(vehicle)
         , runtimeState()
-        , estimator(MazeMap::PlantParams::Default(), &runtimeState)
-        , drive(plantModel, estimator, MazeMap::Config::kDriveBasePDCluster)
+        , estimator(plantModel, &runtimeState)
+        , drive(plantModel, runtimeState, MazeMap::Config::kDriveBasePDCluster)
         , driveService()
         , startupCalibrationService()
         , wallTouchService()
         , maneuverExecutor()
         , controlLoop()
-        , sensors(speedVehicle, gWallDistanceCalibration)
+        , sensors(vehicle, gWallDistanceCalibration)
         , dataLogger()
         , textLogFile()
         , textLogQueue()
@@ -450,6 +464,7 @@ namespace MazeMap::App::Internal
         , modeFaultCleanupCallback(nullptr)
         , modeFaultCleanupContext(nullptr)
     {
+        plantModel.AttachRuntimeState(runtimeState);
         ResetUtilityLogIdentity(
             activeDataLogFileName,
             sizeof(activeDataLogFileName),
@@ -463,12 +478,6 @@ namespace MazeMap::App::Internal
         (void)textLogQueue.attach(textLogStorage, sizeof(textLogStorage));
 #endif
 
-        // Search-mode queue timing stays intentionally conservative even though the shared
-        // physical vehicle model is reused everywhere else.
-        searchVehicle.SetMaxSpeed(Config::kSearchMaxSpeedMps);
-        searchVehicle.SetMaxForwardAcceleration(Config::kSearchAccelMps2);
-        searchVehicle.SetMaxLateralAcceleration(Config::kSearchMaxLateralAccelerationMps2);
-
         driveService.AttachRuntime(*this);
         startupCalibrationService.AttachRuntime(*this);
         wallTouchService.AttachRuntime(*this);
@@ -481,24 +490,14 @@ namespace MazeMap::App::Internal
         CloseRuntimeLogsForFault();
     }
 
-    MazeMap::Vehicle& SharedRobotRuntime::SpeedVehicle() noexcept
+    MazeMap::Vehicle& SharedRobotRuntime::Vehicle() noexcept
     {
-        return speedVehicle;
+        return vehicle;
     }
 
-    const MazeMap::Vehicle& SharedRobotRuntime::SpeedVehicle() const noexcept
+    const MazeMap::Vehicle& SharedRobotRuntime::Vehicle() const noexcept
     {
-        return speedVehicle;
-    }
-
-    MazeMap::Vehicle& SharedRobotRuntime::SearchVehicle() noexcept
-    {
-        return searchVehicle;
-    }
-
-    const MazeMap::Vehicle& SharedRobotRuntime::SearchVehicle() const noexcept
-    {
-        return searchVehicle;
+        return vehicle;
     }
 
     MazeMap::Maze& SharedRobotRuntime::Maze() noexcept
@@ -890,8 +889,7 @@ namespace MazeMap::App::Internal
 
         modeFaulted = true;
         SetMissionLevelFanEnabled(false);
-        drive.Brake();
-        drive.UseNominalWheelControlProfile();
+        (void)controlLoop.ApplyControlAtTickStart(CommandVector::Brake());
         (void)WriteTextLogEntry(
             (activeModeFaultSource[0] != '\0') ? activeModeFaultSource : nullptr,
             micros(),
@@ -1073,21 +1071,6 @@ namespace MazeMap::App::Internal
         Runtime::CaptureMmLogFailure(UtilityDataLogger(), overflowed, writeFailed);
     }
 
-    bool SharedRobotRuntime::SetMotorPWM(const float leftMotorPwm, const float rightMotorPwm) noexcept
-    {
-        if (!std::isfinite(leftMotorPwm) || !std::isfinite(rightMotorPwm))
-        {
-            drive.Brake();
-        }
-        else
-        {
-            drive.CommandOpenLoopRaw(
-                CommandVector(leftMotorPwm, rightMotorPwm));
-        }
-
-        return true;
-    }
-
     DriveBase& SharedRobotRuntime::Drive() noexcept
     {
         return drive;
@@ -1096,6 +1079,16 @@ namespace MazeMap::App::Internal
     MazeMap::Estimator& SharedRobotRuntime::Estimator() noexcept
     {
         return estimator;
+    }
+
+    MazeMap::PlantModel& SharedRobotRuntime::Plant() noexcept
+    {
+        return plantModel;
+    }
+
+    const MazeMap::PlantModel& SharedRobotRuntime::Plant() const noexcept
+    {
+        return plantModel;
     }
 
     MazeMap::VehicleState& SharedRobotRuntime::RuntimeState() noexcept

@@ -37,6 +37,7 @@ namespace MazeMap
 		CellCoordinates end,
 		HalfStepPath<PATH_SIZE * 2>& result)
 	{
+		_lastEstimatedTime = 0.0f;
 		Reset();
 		for (uint8_t i = 0; i < 8; i++)
 		{
@@ -48,9 +49,53 @@ namespace MazeMap
 	}
 	void DirectionalPathFinder::HalfStepPathToNearestUnknown(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{
-		(void)start;
-		(void)startDirection;
-		(void)result;
+		_lastEstimatedTime = 0.0f;
+		result.clear();
+
+		bool visited[16][16] = {};
+		CellCoordinates queue[16 * 16] = {};
+		uint16_t read = 0;
+		uint16_t write = 0;
+		queue[write++] = start;
+		visited[start.GetX()][start.GetY()] = true;
+
+		const Direction preferredDirections[] =
+		{
+			startDirection,
+			startDirection + RelativeDirection::R90,
+			startDirection + RelativeDirection::L90,
+			-startDirection
+		};
+
+		while (read < write)
+		{
+			const CellCoordinates current = queue[read++];
+			if (!GetMaze()[current].IsFullyKnown())
+			{
+				HalfStepPathFromTo(start, startDirection, current, result);
+				return;
+			}
+
+			for (uint8_t i = 0; i < 4; ++i)
+			{
+				const Direction direction = preferredDirections[i];
+				if ((direction == Direction::None) ||
+					!current.IsValidMove(direction) ||
+					(GetMaze()[current].GetWall(direction) != WallState::NoWall))
+				{
+					continue;
+				}
+
+				const CellCoordinates next = current >> direction;
+				if (visited[next.GetX()][next.GetY()])
+				{
+					continue;
+				}
+
+				visited[next.GetX()][next.GetY()] = true;
+				queue[write++] = next;
+			}
+		}
 	}
 	void DirectionalPathFinder::HalfStepPathToGoal(CellCoordinates start, Direction startDirection, HalfStepPath<PATH_SIZE * 2>& result)
 	{

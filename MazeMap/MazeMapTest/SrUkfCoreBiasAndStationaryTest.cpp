@@ -18,15 +18,6 @@ namespace MazeMap
         constexpr float kStationaryBiasSeedYawRateTolerance = 5.0e-3f;
         constexpr float kStationaryBiasWalkTolerance = 1.0e-4f;
 
-        struct ScopedUkfRuntimeTuningRestore
-        {
-            SrUkfCore::RuntimeTuning saved = SrUkfCore::GetRuntimeTuning();
-
-            ~ScopedUkfRuntimeTuningRestore()
-            {
-                SrUkfCore::SetRuntimeTuning(saved);
-            }
-        };
     }
 
     TEST_CLASS(SrUkfCoreBiasAndStationaryTest)
@@ -34,7 +25,7 @@ namespace MazeMap
     public:
         TEST_METHOD(SrUkfCoreStationaryYawConstraintCollapsesMotionStateWithoutSnappingBiasBackToAnchor)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const PlantParams params = PlantParams::Default();
             const VehicleState::StateVector initialState = BuildUkfState(
                 0.0f,
@@ -52,10 +43,9 @@ namespace MazeMap
             constexpr float dt = 0.002f;
             constexpr float rawStationaryGyroRadps = 0.04f;
             const int kSteps =
-                static_cast<int>(std::ceil(SrUkfCore::GetRuntimeTuning().stationaryCertificationDwellS / dt)) + 10;
+                static_cast<int>(std::ceil(kUkfTestStationaryCertificationDwellS / dt)) + 10;
             for (int step = 0; step < kSteps; ++step)
             {
-                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
@@ -63,9 +53,7 @@ namespace MazeMap
 
             const VehicleState::StateVector& state = core.state();
             const VehicleState::StateMatrix covariance = core.covariance();
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
-                static_cast<int>(core.operatingMode()));
+            Assert::AreEqual(0, FindDebugDumpModeId(core));
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < params.stopEnterSpeedMps);
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < params.stopEnterSpeedMps);
             Assert::IsTrue(std::fabs(state(VehicleState::kR)) < params.stopEnterYawRateRadps);
@@ -75,7 +63,7 @@ namespace MazeMap
             Assert::IsTrue(
                 std::fabs((state(VehicleState::kR) + state(VehicleState::kBgz)) - rawStationaryGyroRadps) <
                 rawStationaryGyroRadps);
-            Assert::IsFalse(core.biasUpdateEnabled());
+            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_mode", "bias_update_enabled"));
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kU, VehicleState::kU)));
             Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) < 1.0e-4f);
             Assert::IsTrue(
@@ -93,7 +81,7 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreExactStationaryLockKeepsPoseFixedWhenEncoderCountsRemainNonZero)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState = BuildUkfState(
                 0.42f,
                 -0.17f,
@@ -112,21 +100,18 @@ namespace MazeMap
             encoder.totalRightCounts = 8;
             constexpr float dt = 0.002f;
             const int kSteps =
-                static_cast<int>(std::ceil(SrUkfCore::GetRuntimeTuning().stationaryCertificationDwellS / dt)) + 10;
+                static_cast<int>(std::ceil(kUkfTestStationaryCertificationDwellS / dt)) + 10;
 
             for (int step = 0; step < kSteps; ++step)
             {
-                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(0.0f).accepted);
             }
 
             const VehicleState::StateVector& state = core.state();
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
-                static_cast<int>(core.operatingMode()));
-            Assert::IsTrue(core.exactStationaryLock());
+            Assert::AreEqual(0, FindDebugDumpModeId(core));
+            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_grip_recovery", "exact_stationary_lock"));
             Assert::AreEqual(initialState(VehicleState::kPx), state(VehicleState::kPx), kStationaryPoseDriftToleranceM);
             Assert::AreEqual(initialState(VehicleState::kPy), state(VehicleState::kPy), kStationaryPoseDriftToleranceM);
             Assert::AreEqual(initialState(VehicleState::kPsi), state(VehicleState::kPsi), 1.0e-4f);
@@ -134,14 +119,14 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreInitialStationaryGyroBiasSeedsFromSamplesFiftyToOneHundredFiftyAndSlowWalks)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
             const int kSteps =
                 (std::max)(
                     200,
-                    static_cast<int>(std::ceil(SrUkfCore::GetRuntimeTuning().stationaryCertificationDwellS / dt)) + 20);
+                    static_cast<int>(std::ceil(kUkfTestStationaryCertificationDwellS / dt)) + 20);
             InitialStationaryGyroBiasExpectation expected{};
 
             for (int step = 0; step < kSteps; ++step)
@@ -149,7 +134,6 @@ namespace MazeMap
                 const float rawStationaryGyroRadps =
                     (step < 49) ? 0.01f :
                     ((step < 150) ? 0.04f : 0.07f);
-                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
@@ -161,12 +145,12 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(state(VehicleState::kR)) < kStationaryBiasSeedYawRateTolerance);
             Assert::IsTrue(state(VehicleState::kBgz) > 0.04f);
             Assert::IsTrue(state(VehicleState::kBgz) < 0.08f);
-            Assert::IsTrue(core.biasUpdateEnabled());
+            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_mode", "bias_update_enabled"));
         }
 
         TEST_METHOD(SrUkfCoreStationaryGyroMeasurementDoesNotCollapseBiasVarianceToZero)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             App::Internal::CommandVector control{};
             EncoderObs encoder{};
             constexpr float dt = 0.0005f;
@@ -179,7 +163,6 @@ namespace MazeMap
 
             for (int step = 0; step < 200; ++step)
             {
-                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
@@ -195,19 +178,15 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreGyroBiasDefaultsMatchExplicitAuthor62Tuning)
         {
-            const SrUkfCore::RuntimeTuning defaults = SrUkfCore::BuildDefaultRuntimeTuning();
-
-            Assert::AreEqual(1.2e-6f, SrUkfCore::kImuYawRateVarianceRadps2, 1.0e-12f);
+            Assert::AreEqual(1.2e-6f, kUkfTestImuYawRateVarianceRadps2, 1.0e-12f);
             Assert::AreEqual(
-                SrUkfCore::kImuYawRateVarianceRadps2,
-                SrUkfCore::kImuYawRateSigmaRadps * SrUkfCore::kImuYawRateSigmaRadps,
+                kUkfTestImuYawRateVarianceRadps2,
+                kUkfTestImuYawRateSigmaRadps * kUkfTestImuYawRateSigmaRadps,
                 1.0e-12f);
-            Assert::AreEqual(SrUkfCore::kImuYawRateSigmaRadps, defaults.imuYawRateSigmaRadps, 1.0e-10f);
-            Assert::AreEqual(0.569900f, SrUkfCore::kImuAccelSigmaMps2, 1.0e-6f);
-            Assert::AreEqual(SrUkfCore::kImuAccelSigmaMps2, defaults.imuAccelSigmaMps2, 1.0e-10f);
-            Assert::AreEqual(0.0f, SrUkfCore::kGyroBiasProcessVarianceMovingRadps2PerSample, 0.0f);
-            Assert::AreEqual(3.0e-16f, SrUkfCore::kGyroBiasProcessVarianceStationaryRadps2PerSample, 1.0e-20f);
-            Assert::AreEqual(3.05e-4f, SrUkfCore::kGyroBiasInitialVarianceUnseededRadps2, 1.0e-12f);
+            Assert::AreEqual(0.569900f, kUkfTestImuAccelSigmaMps2, 1.0e-6f);
+            Assert::AreEqual(0.0f, kUkfTestGyroBiasProcessVarianceMovingRadps2PerSample, 0.0f);
+            Assert::AreEqual(3.0e-16f, kUkfTestGyroBiasProcessVarianceStationaryRadps2PerSample, 1.0e-20f);
+            Assert::AreEqual(3.05e-4f, kUkfTestGyroBiasInitialVarianceUnseededRadps2, 1.0e-12f);
         }
         TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsPoseX)
         {
@@ -319,8 +298,6 @@ namespace MazeMap
         }
         TEST_METHOD(SrUkfCoreRepeatedZeroEncoderUpdatesDriveYawRateVarianceExtremelyLow)
         {
-            const ScopedUkfRuntimeTuningRestore restore{};
-            SrUkfCore::ResetRuntimeTuning();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.0f,
@@ -335,7 +312,7 @@ namespace MazeMap
             const VehicleState::StateMatrix initialCovariance =
                 BuildUkfCovariance(0.001f, 0.01f, 0.005f, 0.005f, 1.0f, 0.05f, 0.02f);
 
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
             App::Internal::CommandVector control{};
@@ -355,8 +332,9 @@ namespace MazeMap
             const VehicleState::StateMatrix covariance = core.covariance();
             const float finalYawRateVarianceRadps2 = covariance(VehicleState::kR, VehicleState::kR);
             const PlantParams params = PlantParams::Default();
+            const PlantModel plantModel{};
             const float stationaryEncoderOmegaSigmaRadps =
-                SrUkfCore::ComputeStationaryEncoderOmegaSigmaRadps(params);
+                plantModel.stationaryEncoderOmegaSigmaRadps(kUkfTestStationaryEncoderVelocitySigmaMps);
             const float stationaryYawRateSigmaRadps =
                 std::sqrt(2.0f) * params.wheelRadiusM * stationaryEncoderOmegaSigmaRadps / params.trackWidthM;
             const float stationaryYawMeasurementVarianceRadps2 =
@@ -385,7 +363,7 @@ namespace MazeMap
             const VehicleState::StateMatrix initialCovariance =
                 BuildUkfCovariance(0.001f, 0.01f, 0.005f, 1.0f, 1.0f, 0.05f, 0.02f);
 
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
             const float initialLateralVelocityVarianceMps2 = core.covariance()(VehicleState::kV, VehicleState::kV);
@@ -429,7 +407,7 @@ namespace MazeMap
             const VehicleState::StateMatrix initialCovariance =
                 BuildUkfCovariance(0.02f, 0.04f, 0.20f, 0.15f, 0.25f, 0.50f, 0.05f);
 
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
             App::Internal::CommandVector control{};
@@ -441,7 +419,6 @@ namespace MazeMap
 
             for (int step = 0; step < kSteps; ++step)
             {
-                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
@@ -452,7 +429,7 @@ namespace MazeMap
                 Assert::IsTrue(yawResult.attempted);
                 Assert::IsTrue(yawResult.accepted);
                 if (!capturedFirstCertifiedCovariance &&
-                    (core.operatingMode() == SrUkfCore::OperatingMode::StationaryCertified))
+                    (FindDebugDumpModeId(core) == 0))
                 {
                     firstCertifiedCovariance = core.covariance();
                     capturedFirstCertifiedCovariance = true;
@@ -463,9 +440,7 @@ namespace MazeMap
             const VehicleState::StateMatrix covariance = core.covariance();
 
             Assert::IsTrue(capturedFirstCertifiedCovariance);
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::StationaryCertified),
-                static_cast<int>(core.operatingMode()));
+            Assert::AreEqual(0, FindDebugDumpModeId(core));
             Assert::AreEqual(initialState(VehicleState::kPx), state(VehicleState::kPx), kStationaryPoseDriftToleranceM);
             Assert::AreEqual(initialState(VehicleState::kPy), state(VehicleState::kPy), kStationaryPoseDriftToleranceM);
             Assert::AreEqual(initialState(VehicleState::kPsi), state(VehicleState::kPsi), 1.0e-4f);
@@ -475,7 +450,7 @@ namespace MazeMap
             Assert::AreEqual(0.0f, state(VehicleState::kOmegaL), kStationaryMotionTolerance);
             Assert::AreEqual(0.0f, state(VehicleState::kOmegaR), kStationaryMotionTolerance);
             Assert::AreEqual(0.0f, state(VehicleState::kBgz), kStationaryBiasWalkTolerance);
-            Assert::IsTrue(core.biasUpdateEnabled());
+            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_mode", "bias_update_enabled"));
 
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kU, VehicleState::kU)));
             Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) < 1.0e-4f);
@@ -508,22 +483,21 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreStationaryReleaseInflatesMotionAndWheelCovariance)
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             App::Internal::CommandVector stationaryControl{};
             EncoderObs stationaryEncoder{};
             constexpr float dt = 0.002f;
             const int stationarySteps =
-                static_cast<int>(std::ceil(SrUkfCore::GetRuntimeTuning().stationaryCertificationDwellS / dt)) + 10;
+                static_cast<int>(std::ceil(kUkfTestStationaryCertificationDwellS / dt)) + 10;
 
             for (int step = 0; step < stationarySteps; ++step)
             {
-                core.setRuntimeContext(0.0f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
                 Assert::IsTrue(core.predict(dt, stationaryControl));
                 Assert::IsTrue(core.updateEncoderPair(stationaryEncoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(0.0f).accepted);
             }
 
-            Assert::IsTrue(core.operatingMode() != SrUkfCore::OperatingMode::InconsistentOrSaturated);
+            Assert::IsTrue(FindDebugDumpModeId(core) != 3);
             const VehicleState::StateMatrix stationaryCovariance = core.covariance();
 
             App::Internal::CommandVector launchControl{};
@@ -531,7 +505,6 @@ namespace MazeMap
             launchControl.SetRightMotorPwm(0.30f);
             const float launchControlFanDutyCycle = 0.80f;
             const float launchControlBatteryVoltageV = params.supplyVoltageV;
-            core.setRuntimeContext(0.20f, 0.0f, 0U, 0.0f, 0.0f, true, 0.0f, 0.0f);
             Assert::IsTrue(core.predict(dt, launchControl, launchControlFanDutyCycle, launchControlBatteryVoltageV));
 
             EncoderObs launchEncoder{};
@@ -542,8 +515,8 @@ namespace MazeMap
             Assert::IsTrue(core.updateEncoderPair(launchEncoder, dt).accepted);
 
             const VehicleState::StateMatrix releasedCovariance = core.covariance();
-            Assert::IsTrue(core.releaseInflationApplied());
-            Assert::IsTrue(core.operatingMode() != SrUkfCore::OperatingMode::StationaryCertified);
+            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "release_inflation_applied"));
+            Assert::IsTrue(FindDebugDumpModeId(core) != 0);
             Assert::IsTrue(
                 releasedCovariance(VehicleState::kU, VehicleState::kU) >
                 stationaryCovariance(VehicleState::kU, VehicleState::kU));
@@ -563,6 +536,7 @@ namespace MazeMap
 
     };
 }
+
 
 
 

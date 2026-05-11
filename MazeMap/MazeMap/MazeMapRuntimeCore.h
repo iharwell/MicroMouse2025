@@ -9,7 +9,6 @@
 #include "ImuCalibrationPolicy.h"
 #include "Maze.h"
 #include "MissionStartPolicy.h"
-#include "MotorEncoderDrive.h"
 #include "ProportionalDerivativeCluster.h"
 #include "RollingAverageWindow.h"
 #include "Vehicle.h"
@@ -193,29 +192,16 @@ inline constexpr uint16_t kImuSelfTestAverageSamples = 64U;
 inline constexpr uint16_t kImuSelfTestSettleMs = 50U;
 inline constexpr float kImuSelfTestGyroFullScaleDps = 2000.0f;
 
-inline MazeMap::EncoderCountPair CaptureDriveEncoderCounts()
-{
-    MazeMap::EncoderCountPair counts{};
-    const auto& leftDriveHardware = MazeMap::MotorEncoderDrive::GetLeftHardwareConfig();
-    const auto& rightDriveHardware = MazeMap::MotorEncoderDrive::GetRightHardwareConfig();
-    counts.left = MazeMap::Platform::ReadEncoderCount(leftDriveHardware.encoderChannel);
-    counts.right = MazeMap::Platform::ReadEncoderCount(rightDriveHardware.encoderChannel);
-    return counts;
-}
-
-inline bool HaveDriveEncodersMovedSince(const MazeMap::EncoderCountPair& startCounts)
-{
-    return MazeMap::HaveEncoderCountsChanged(startCounts, CaptureDriveEncoderCounts());
-}
-
+template <typename CaptureEncoderCounts>
 inline StationaryImuCalibrationResult WaitForImuCalibrationSettle(
     const MazeMap::EncoderCountPair& startCounts,
-    unsigned long settleMs)
+    unsigned long settleMs,
+    CaptureEncoderCounts&& captureEncoderCounts)
 {
     const unsigned long settleStartMs = millis();
     while ((millis() - settleStartMs) < settleMs)
     {
-        if (HaveDriveEncodersMovedSince(startCounts))
+        if (MazeMap::HaveEncoderCountsChanged(startCounts, captureEncoderCounts()))
         {
             return StationaryImuCalibrationResult::RestartEncoderMotion;
         }
@@ -226,11 +212,13 @@ inline StationaryImuCalibrationResult WaitForImuCalibrationSettle(
     return StationaryImuCalibrationResult::Success;
 }
 
+template <typename CaptureEncoderCounts>
 inline StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample(
     MazeMap::Vehicle::ImuBackLeft& imu,
     uint16_t sampleCount,
     const MazeMap::EncoderCountPair& startCounts,
-    AveragedBackLeftImuSample& averagedSample)
+    AveragedBackLeftImuSample& averagedSample,
+    CaptureEncoderCounts&& captureEncoderCounts)
 {
     if (sampleCount == 0U)
     {
@@ -248,7 +236,7 @@ inline StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample(
 
     for (uint16_t sampleIndex = 0U; sampleIndex < sampleCount; ++sampleIndex)
     {
-        if (HaveDriveEncodersMovedSince(startCounts))
+        if (MazeMap::HaveEncoderCountsChanged(startCounts, captureEncoderCounts()))
         {
             return StationaryImuCalibrationResult::RestartEncoderMotion;
         }
@@ -264,7 +252,7 @@ inline StationaryImuCalibrationResult AverageBackLeftImuSelfTestSample(
         delay(kImuCalibrationSampleIntervalMs);
     }
 
-    if (HaveDriveEncodersMovedSince(startCounts))
+    if (MazeMap::HaveEncoderCountsChanged(startCounts, captureEncoderCounts()))
     {
         return StationaryImuCalibrationResult::RestartEncoderMotion;
     }

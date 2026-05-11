@@ -3,10 +3,11 @@
 
 #include "Cell.h"
 #include "CellCoordinates.h"
+#include "Defines.h"
 #include "Direction.h"
+#include "EigenCompat.h"
 #include "Maze.h"
 #include "SensorMount.h"
-#include "VehicleState.h"
 
 #include <cstdint>
 
@@ -46,7 +47,8 @@ namespace MazeMap
         };
 
         GeometryPrediction predictRay(
-            const VehicleState::StateVector& state,
+            const Eigen::Vector2f& positionWorldM,
+            float yawRad,
             const SensorMount& sensorMount,
             const Maze& maze) const noexcept;
 
@@ -56,7 +58,8 @@ namespace MazeMap
             const Maze& maze) const noexcept;
 
         GeometryPrediction predictRay(
-            const VehicleState::StateVector& state,
+            const Eigen::Vector2f& positionWorldM,
+            float yawRad,
             const SensorMount& sensorMount,
             const Maze& maze,
             float maxRangeM) const noexcept;
@@ -68,7 +71,8 @@ namespace MazeMap
             float maxRangeM) const noexcept;
 
         Eigen::Vector2f sensorOriginWorld(
-            const VehicleState::StateVector& state,
+            const Eigen::Vector2f& positionWorldM,
+            float yawRad,
             const SensorMount& sensorMount) const noexcept;
 
         Eigen::Vector2f sensorOriginWorld(
@@ -76,7 +80,8 @@ namespace MazeMap
             const SensorMount& sensorMount) const noexcept;
 
         Eigen::Vector2f sensorDirectionWorld(
-            const VehicleState::StateVector& state,
+            const Eigen::Vector2f& positionWorldM,
+            float yawRad,
             const SensorMount& sensorMount) const noexcept;
 
         Eigen::Vector2f sensorDirectionWorld(
@@ -84,7 +89,8 @@ namespace MazeMap
             const SensorMount& sensorMount) const noexcept;
 
         GeometryStateFrame buildStateFrame(
-            const VehicleState::StateVector& state) const noexcept;
+            const Eigen::Vector2f& positionWorldM,
+            float yawRad) const noexcept;
 
         static CellCoordinates WorldToCell(float xMeters, float yMeters) noexcept;
 

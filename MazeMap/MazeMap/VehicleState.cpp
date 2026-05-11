@@ -1,30 +1,29 @@
 #include "pch.h"
 #include "VehicleState.h"
 
-#include "PlantModel.h"
-#include "SrUkfCore.h"
+#include "Vehicle.h"
 
 namespace
 {
     float UkfStationaryLinearSpeedThresholdMps() noexcept
     {
-        return MazeMap::SrUkfCore::GetRuntimeTuning().stationaryEncoderVelocitySigmaMps;
+        return 0.002936f;
     }
 
     float UkfStationaryYawRateThresholdRadps() noexcept
     {
-        return 3.0f * MazeMap::SrUkfCore::GetRuntimeTuning().imuYawRateSigmaRadps;
+        return 3.0f * 0.0010954451f;
     }
 
     float UkfStationaryWheelSpeedThresholdRadps() noexcept
     {
-        const MazeMap::PlantParams params = MazeMap::PlantParams::Default();
-        if (!std::isfinite(params.wheelRadiusM) || !(params.wheelRadiusM > 0.0f))
+        constexpr float wheelRadiusM = MazeMap::Vehicle::GetDriveWheelRadiusM();
+        if (!std::isfinite(wheelRadiusM) || !(wheelRadiusM > 0.0f))
         {
             return 0.0f;
         }
 
-        return UkfStationaryLinearSpeedThresholdMps() / params.wheelRadiusM;
+        return UkfStationaryLinearSpeedThresholdMps() / wheelRadiusM;
     }
 }
 

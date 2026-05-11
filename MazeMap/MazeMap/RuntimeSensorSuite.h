@@ -46,7 +46,9 @@ public:
         const MazeMap::VehicleState& state,
         SensorSnapshot& snapshot,
         CaptureHandler callback = nullptr,
-        void* callbackContext = nullptr);
+        void* callbackContext = nullptr,
+        bool captureEncoders = false,
+        float encoderDtSeconds = 0.0f);
 
     // Reports the active IMU gyro scale used by the runtime sensor owner.
     float GetGyroSensitivityMdpsPerLsb() const noexcept;

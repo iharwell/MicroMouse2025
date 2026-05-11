@@ -396,7 +396,13 @@ namespace MazeMap {
 
                 bool openWrite(const char* const path) noexcept {
                     close();
+#if defined(_MSC_VER)
+                    if (path == nullptr || fopen_s(&m_file, path, "wb") != 0) {
+                        m_file = nullptr;
+                    }
+#else
                     m_file = std::fopen(path, "wb");
+#endif
                     return m_file != nullptr;
                 }
 

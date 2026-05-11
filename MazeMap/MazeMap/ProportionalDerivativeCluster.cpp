@@ -20,14 +20,13 @@ namespace
         MazeMap::ProportionalDerivative(12.0f, 1.2f),
         MazeMap::ProportionalDerivative(13.0f, 1.3f),
         MazeMap::ProportionalDerivative(14.0f, 1.4f),
-        MazeMap::ProportionalDerivative(15.0f, 1.5f),
-        MazeMap::ProportionalDerivative(16.0f, 1.6f));
+        MazeMap::ProportionalDerivative(15.0f, 1.5f));
 
     static_assert(
         kConstexprCluster.HeadingStatePD.GetProportionalGain() == 1.0f,
         "ProportionalDerivativeCluster must remain constexpr-constructible.");
     static_assert(
-        kConstexprCluster.YawAccelerationEncoderDeltaPD.GetDerivativeGain() == 1.6f,
+        kConstexprCluster.YawAccelerationEncoderDeltaPD.GetDerivativeGain() == 1.5f,
         "ProportionalDerivativeCluster member access must remain constexpr-safe.");
 
     unsigned CountSelectedSources(
@@ -57,7 +56,6 @@ void MazeMap::ProportionalDerivativeCluster::ResetDerivativeHistories() noexcept
     YawRateIMULateralAccelPD.ResetDerivativeHistory();
     LongitudinalAccelerationStatePD.ResetDerivativeHistory();
     LongitudinalAccelerationIMUForwardAccelPD.ResetDerivativeHistory();
-    WheelVelocityStatePD.ResetDerivativeHistory();
     WheelVelocityEncoderPD.ResetDerivativeHistory();
     YawAccelerationStatePD.ResetDerivativeHistory();
     YawAccelerationGyroPD.ResetDerivativeHistory();
@@ -147,14 +145,13 @@ const MazeMap::ProportionalDerivative& MazeMap::ProportionalDerivativeCluster::G
 const MazeMap::ProportionalDerivative& MazeMap::ProportionalDerivativeCluster::GetWheelVelocityPD(
     const CommandPD pd) const noexcept
 {
-    const bool useState = MazeMap::HasCommandPD(pd, MazeMap::CommandPD::StateWheelOmegaPD);
     const bool useEncoder = MazeMap::HasCommandPD(pd, MazeMap::CommandPD::EncoderVelocity);
-    if (CountSelectedSources(useState, useEncoder) != 1U)
+    if (CountSelectedSources(useEncoder) != 1U)
     {
         return kZeroProportionalDerivative;
     }
 
-    return useState ? WheelVelocityStatePD : WheelVelocityEncoderPD;
+    return WheelVelocityEncoderPD;
 }
 
 const MazeMap::ProportionalDerivative& MazeMap::ProportionalDerivativeCluster::GetYawAccelerationPD(

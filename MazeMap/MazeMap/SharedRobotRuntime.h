@@ -50,7 +50,7 @@ namespace MazeMap::App::Internal
     // Single production owner of the heavyweight robot runtime infrastructure.
     //
     // Ownership contract:
-    // SharedRobotRuntime owns the production vehicles, maze, estimator, pathfinders, sensors,
+    // SharedRobotRuntime owns the production vehicle, maze, estimator, pathfinders, sensors,
     // drive helpers, maneuver executor, one LoopController instance, and the runtime logging
     // objects that top-level modes must share instead of duplicating.
     //
@@ -87,7 +87,6 @@ namespace MazeMap::App::Internal
         // Behavior:
         // - Creates the canonical production subsystem owners.
         // - Attaches internal services that need a SharedRobotRuntime back-reference.
-        // - Applies the intentionally conservative search-vehicle limits.
         SharedRobotRuntime();
 
         // Best-effort final cleanup for runtime-owned logs during object destruction.
@@ -110,33 +109,19 @@ namespace MazeMap::App::Internal
         // SharedRobotRuntime is the unique production runtime owner; move assignment is forbidden.
         SharedRobotRuntime& operator=(SharedRobotRuntime&&) = delete;
 
-        // `SpeedVehicle()`:
-        // Returns the mutable production speed-tuned Vehicle owner.
+        // `Vehicle()`:
+        // Returns the mutable canonical production Vehicle owner.
         //
         // Behavior:
-        // Modes and shared services use this owner for canonical speed-vehicle facts and setup.
-        MazeMap::Vehicle& SpeedVehicle() noexcept;
+        // Modes and shared services use this owner for robot construction facts and setup.
+        MazeMap::Vehicle& Vehicle() noexcept;
 
-        // `SpeedVehicle() const`:
-        // Returns the read-only production speed-tuned Vehicle owner.
+        // `Vehicle() const`:
+        // Returns the read-only canonical production Vehicle owner.
         //
         // Behavior:
-        // Exposes canonical speed-vehicle facts without permitting mutation.
-        const MazeMap::Vehicle& SpeedVehicle() const noexcept;
-
-        // `SearchVehicle()`:
-        // Returns the mutable production conservative/search Vehicle owner.
-        //
-        // Behavior:
-        // Modes and shared services use this owner for conservative/search vehicle facts.
-        MazeMap::Vehicle& SearchVehicle() noexcept;
-
-        // `SearchVehicle() const`:
-        // Returns the read-only production conservative/search Vehicle owner.
-        //
-        // Behavior:
-        // Exposes canonical conservative/search vehicle facts without permitting mutation.
-        const MazeMap::Vehicle& SearchVehicle() const noexcept;
+        // Exposes canonical robot facts without permitting mutation.
+        const MazeMap::Vehicle& Vehicle() const noexcept;
 
         // `Maze()`:
         // Returns the mutable production Maze owner.
@@ -604,25 +589,6 @@ namespace MazeMap::App::Internal
         // Receives whether the logger recorded a write failure condition.
         void CaptureUtilityDataLogFailure(bool& overflowed, bool& writeFailed) const noexcept;
 
-        // `SetMotorPWM(leftMotorPwm, rightMotorPwm)`:
-        // Production raw actuation hook used by the shared LoopController.
-        //
-        // Parameters:
-        // `leftMotorPwm`:
-        // Left motor PWM command or the non-finite brake vocabulary.
-        //
-        // `rightMotorPwm`:
-        // Right motor PWM command or the non-finite brake vocabulary.
-        //
-        // Behavior:
-        // - Non-finite PWM inputs are interpreted as the established brake vocabulary and call
-        //   DriveBase::Brake().
-        // - Finite PWM inputs are forwarded as raw open-loop motor commands.
-        //
-        // Return value:
-        // Currently always `true`.
-        bool SetMotorPWM(float leftMotorPwm, float rightMotorPwm) noexcept;
-
         // `Drive()`:
         // Returns the concrete low-level DriveBase owner used for raw command application and
         // measurement interpretation.
@@ -637,6 +603,11 @@ namespace MazeMap::App::Internal
         // Behavior:
         // Exposes the authoritative runtime estimator instance.
         MazeMap::Estimator& Estimator() noexcept;
+
+        // `Plant()`:
+        // Returns the production plant model owner.
+        MazeMap::PlantModel& Plant() noexcept;
+        const MazeMap::PlantModel& Plant() const noexcept;
 
         // `RuntimeState()`:
         // Returns the authoritative live runtime VehicleState owner.
@@ -699,8 +670,7 @@ namespace MazeMap::App::Internal
 
         static constexpr std::size_t kTextLogSourceLength = 64U;
 
-        MazeMap::Vehicle speedVehicle;                   // Production speed-tuned vehicle facts.
-        MazeMap::Vehicle searchVehicle;                  // Production conservative/search vehicle facts.
+        MazeMap::Vehicle vehicle;                        // Canonical production vehicle facts and devices.
         MazeMap::Maze maze;                              // Production canonical maze instance.
         MazeMap::FloodFillPathFinder searchPathFinder;   // Production flood-fill owner.
         MazeMap::ManeuverPathFinder speedPathFinder;     // Production maneuver pathfinder owner.

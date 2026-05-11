@@ -6,7 +6,6 @@
 #include <array>
 #include <cstdint>
 
-class DriveBase;
 class RuntimeSensorSuite;
 
 namespace MazeMap
@@ -138,10 +137,9 @@ namespace MazeMap::App::Internal
 
         SharedRobotRuntime* _runtime{};
         RuntimeSensorSuite* _sensors{};
-        DriveBase* _drive{};
         Drive* _driveService{};
         WallTouch* _wallTouch{};
-        MazeMap::Vehicle* _speedVehicle{};
+        MazeMap::Vehicle* _vehicle{};
         MotionLimits _travelLimits{};
         bool _isInMaze{};
         bool _broughtUp{};

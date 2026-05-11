@@ -7,6 +7,7 @@
 #include "CommandVector.h"
 #include "Maze.h"
 #include "MapEvidenceUpdater.h"
+#include "PlantModel.h"
 #include "SensorMount.h"
 #include "WallObservationPipeline.h"
 #include "Direction.h"
@@ -25,13 +26,11 @@ namespace MazeMap
     {
     public:
         explicit Estimator(
-            const PlantParams& params = PlantParams::Default(),
+            const PlantModel& plantModel,
             VehicleState* runtimeState = nullptr) noexcept;
 
         void AttachRuntimeState(VehicleState& runtimeState) noexcept;
 
-        SrUkfCore& ukf() noexcept { return _core; }
-        const SrUkfCore& ukf() const noexcept { return _core; }
         MapEvidenceUpdater& mapEvidence() noexcept { return _mapEvidence; }
         const MapEvidenceUpdater& mapEvidence() const noexcept { return _mapEvidence; }
         VehicleState& RuntimeState() noexcept { return *_runtimeState; }
@@ -46,7 +45,7 @@ namespace MazeMap
 
         bool ResetPose(float xMeters, float yMeters, float yawRad) noexcept;
         bool ResetForSessionTransition(float xMeters, float yMeters, float yawRad) noexcept;
-        bool SetStateCoordinate(int stateIndex, float coordinateM) noexcept;
+        bool RestoreSessionStartPhysicalState(float xMeters, float yMeters, float yawRad) noexcept;
         bool SetGyroBiasZ(float gyroBiasRadps) noexcept;
         void ProjectMeasuredKinematics(
             float dtSeconds,
@@ -101,10 +100,6 @@ namespace MazeMap
             return _core.updatePlanarAccel(observation, static_cast<LoopHook&&>(loopHook));
         }
 
-        bool reset(
-            const SrUkfCore::StateVector& state,
-            const SrUkfCore::StateMatrix& covariance) noexcept;
-
         FrontPairUpdateResult updateFrontPair(
             const WallObs& left,
             const WallObs& right,
@@ -130,9 +125,13 @@ namespace MazeMap
         {
             return SrUkfCore::BuildDefaultInitialCovariance();
         }
+        bool reset(
+            const SrUkfCore::StateVector& state,
+            const SrUkfCore::StateMatrix& covariance) noexcept;
         void ResetRuntimeMetadata() noexcept;
         void TriggerFault(const char* reason) noexcept;
 
+        const PlantModel& _plantModel;
         SrUkfCore _core;
         MapEvidenceUpdater _mapEvidence;
         VehicleState _localRuntimeState{};

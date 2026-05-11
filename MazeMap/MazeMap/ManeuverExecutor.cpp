@@ -2,7 +2,6 @@
 #include "ManeuverExecutor.h"
 
 #include "Drive.h"
-#include "DriveBase.h"
 #include "SharedRobotRuntime.h"
 
 namespace MazeMap::App::Internal
@@ -32,7 +31,6 @@ namespace MazeMap::App::Internal
     void ManeuverExecutor::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
-        _drive = &runtime.Drive();
         _driveService = &runtime.DriveService();
     }
 
@@ -62,7 +60,6 @@ namespace MazeMap::App::Internal
     {
         return
             (_runtime != nullptr) &&
-            (_drive != nullptr) &&
             (_driveService != nullptr) &&
             !Active();
     }
@@ -280,7 +277,16 @@ namespace MazeMap::App::Internal
 
         if (queueState.snapToExpectedLocation)
         {
-            _drive->SetStartPoint(*queueState.currentLocation);
+            float xMeters = 0.0f;
+            float yMeters = 0.0f;
+            queueState.currentLocation->GetLocation().GetPhysicalLocation(Config::kCellSizeM, xMeters, yMeters);
+            if (!_runtime->Estimator().ResetPose(
+                    xMeters,
+                    yMeters,
+                    DirectionToYawRad(queueState.currentLocation->GetDirection())))
+            {
+                return FaultPhase(_runtime->Estimator().FaultReason());
+            }
         }
 
         queueState.nextIndex = static_cast<std::uint16_t>(queueState.activeIndex + 1U);

@@ -24,9 +24,6 @@ MMLOG_DEFINE_ROW(SharedRuntimeTestLogRow, SHARED_RUNTIME_TEST_LOG_FIELDS);
 
 namespace
 {
-    constexpr std::uint8_t kSharedRuntimeRightEncoderChannel = 1U;
-    constexpr std::uint8_t kSharedRuntimeLeftEncoderChannel = 2U;
-
     struct FaultCallbackState
     {
         unsigned int count = 0U;
@@ -73,9 +70,26 @@ namespace
         const float distancePerCountM = MazeMap::DistancePerEncoderCountMeters(params);
         const int32_t leftCounts = static_cast<int32_t>(std::round((leftWheelSpeedMps * dtSeconds) / distancePerCountM));
         const int32_t rightCounts = static_cast<int32_t>(std::round((rightWheelSpeedMps * dtSeconds) / distancePerCountM));
-        MazeMap::Platform::WriteEncoderCount(kSharedRuntimeLeftEncoderChannel, leftCounts);
-        MazeMap::Platform::WriteEncoderCount(kSharedRuntimeRightEncoderChannel, rightCounts);
-        UpdateDriveEstimator(runtime.Drive(), runtime.Estimator(), dtSeconds, BuildSharedRuntimeSensorSnapshot());
+        SensorSnapshot snapshot = BuildSharedRuntimeSensorSnapshot();
+        snapshot.encoderObservation.totalLeftCounts = leftCounts;
+        snapshot.encoderObservation.totalRightCounts = rightCounts;
+        snapshot.encoderObservation.leftDistanceDeltaM = static_cast<float>(leftCounts) * distancePerCountM;
+        snapshot.encoderObservation.rightDistanceDeltaM = static_cast<float>(rightCounts) * distancePerCountM;
+        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds) && (params.wheelRadiusM > 0.0f))
+        {
+            const float invWheelRadiusM = 1.0f / params.wheelRadiusM;
+            const float invDtSeconds = 1.0f / dtSeconds;
+            snapshot.encoderObservation.leftVelocityMps =
+                snapshot.encoderObservation.leftDistanceDeltaM * invDtSeconds;
+            snapshot.encoderObservation.rightVelocityMps =
+                snapshot.encoderObservation.rightDistanceDeltaM * invDtSeconds;
+            snapshot.encoderObservation.omegaLeftRadps =
+                snapshot.encoderObservation.leftVelocityMps * invWheelRadiusM;
+            snapshot.encoderObservation.omegaRightRadps =
+                snapshot.encoderObservation.rightVelocityMps * invWheelRadiusM;
+        }
+        snapshot.encoderObservationValid = true;
+        UpdateDriveEstimator(runtime.Drive(), runtime.Estimator(), dtSeconds, snapshot);
     }
 
     void CaptureFaultCallback(void* context, const char* reason) noexcept
@@ -169,16 +183,16 @@ namespace MazeMap::App
             return std::string(path);
         }
 
-        TEST_METHOD(SharedRuntime_SearchVehicleUsesConservativeSearchProfile)
+        TEST_METHOD(SharedRuntime_ProvidesOneCanonicalVehicle)
         {
             Internal::SharedRobotRuntime runtime;
 
-            const MazeMap::Vehicle& speedVehicle = runtime.SpeedVehicle();
-            const MazeMap::Vehicle& searchVehicle = runtime.SearchVehicle();
+            auto& first = runtime.Vehicle();
+            auto& second = runtime.Vehicle();
 
-            Assert::IsTrue(searchVehicle.GetMaxSpeed() < speedVehicle.GetMaxSpeed());
-            Assert::IsTrue(searchVehicle.GetMaxForwardAcceleration() < speedVehicle.GetMaxForwardAcceleration());
-            Assert::IsTrue(searchVehicle.GetMaxLateralAcceleration() < speedVehicle.GetMaxLateralAcceleration());
+            Assert::IsTrue(
+                static_cast<const void*>(&first) ==
+                static_cast<const void*>(&second));
         }
 
         TEST_METHOD(SharedRuntime_ProvidesOneCanonicalRuntimeSensorSuite)
@@ -318,7 +332,7 @@ namespace MazeMap::App
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
-                runtime.Drive().SetPose(0.0f, 0.0f, 0.20f);
+                Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.20f));
                 drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
 
                 bool done = false;
@@ -459,7 +473,7 @@ namespace MazeMap::App
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
-                runtime.Drive().SetPose(0.0f, 0.0f, 0.35f);
+                Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.35f));
                 drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
                 drive.SetLimits(limits);
                 drive.StartStraight(0.25f, 0.20f, 0.0f, headingOverride, nullptr);
@@ -498,7 +512,7 @@ namespace MazeMap::App
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
-                runtime.Drive().SetPose(0.0f, 0.0f, 0.35f);
+                Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.35f));
                 drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
                 drive.SetLimits(limits);
                 drive.StartStraight(0.25f, 0.20f, 0.0f, &headingOverride, nullptr);
@@ -549,7 +563,7 @@ namespace MazeMap::App
             {
                 runtime.Drive().Brake();
                 runtime.Drive().ResetControllers();
-                runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+                Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
                 drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
                 drive.SetLimits(limits);
                 drive.StartStraight(NAN, 0.20f, 0.0f, &headingOverride, &targetPositionOverride);
@@ -577,7 +591,7 @@ namespace MazeMap::App
         {
             Internal::SharedRobotRuntime runtime;
             Assert::IsTrue(runtime.Drive().Begin());
-            runtime.Drive().SetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
+            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up)));
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
@@ -603,7 +617,7 @@ namespace MazeMap::App
         {
             Internal::SharedRobotRuntime runtime;
             Assert::IsTrue(runtime.Drive().Begin());
-            runtime.Drive().SetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
+            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up)));
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
@@ -632,7 +646,7 @@ namespace MazeMap::App
             Assert::IsTrue(runtime.Drive().Begin());
 
             const float cellSizeM = MazeMap::Maze::GetCellDimension();
-            runtime.Drive().SetPose(1.5f * cellSizeM, 1.5f * cellSizeM, DirectionToYawRad(MazeMap::Up));
+            Assert::IsTrue(runtime.Estimator().ResetPose(1.5f * cellSizeM, 1.5f * cellSizeM, DirectionToYawRad(MazeMap::Up)));
 
             MazeMap::Maze& maze = runtime.Maze();
             const MazeMap::CellCoordinates cell(1U, 1U);
@@ -701,7 +715,7 @@ namespace MazeMap::App
         TEST_METHOD(SharedRuntime_DriveServicePreservesExplicitStraightDirectionAgainstSignedLimits)
         {
             Internal::SharedRobotRuntime runtime;
-            runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
             Internal::Drive& drive = runtime.DriveService();
 
             const Eigen::Vector2f targetHeadingUnit(1.0f, 0.0f);
@@ -747,10 +761,10 @@ namespace MazeMap::App
         {
             Internal::SharedRobotRuntime runtime;
             Assert::IsTrue(runtime.Drive().Begin());
-            runtime.Drive().SetPose(
+            Assert::IsTrue(runtime.Estimator().ResetPose(
                 1.5f * Config::kCellSizeM,
                 1.5f * Config::kCellSizeM,
-                DirectionToYawRad(MazeMap::Up));
+                DirectionToYawRad(MazeMap::Up)));
 
             MotionLimits limits{};
             limits.maxSpeedMps = 0.40f;
@@ -787,10 +801,10 @@ namespace MazeMap::App
         {
             Internal::SharedRobotRuntime runtime;
             Assert::IsTrue(runtime.Drive().Begin());
-            runtime.Drive().SetPose(
+            Assert::IsTrue(runtime.Estimator().ResetPose(
                 1.5f * Config::kCellSizeM,
                 1.5f * Config::kCellSizeM,
-                DirectionToYawRad(MazeMap::Up));
+                DirectionToYawRad(MazeMap::Up)));
 
             MotionLimits limits{};
             limits.maxSpeedMps = 0.40f;
@@ -828,7 +842,7 @@ namespace MazeMap::App
         {
             Internal::SharedRobotRuntime runtime;
             Assert::IsTrue(runtime.Drive().Begin());
-            runtime.Drive().SetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up));
+            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up)));
 
             MotionLimits limits{};
             limits.maxSpeedMps = 0.40f;
@@ -858,7 +872,7 @@ namespace MazeMap::App
         {
             Internal::SharedRobotRuntime runtime;
             Assert::IsTrue(runtime.Drive().Begin());
-            runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
 
             Internal::Drive& drive = runtime.DriveService();
             const auto sampleRecoveredLinearCommandMps =

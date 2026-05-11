@@ -206,11 +206,11 @@ namespace MazeMap::App::Internal
         _runtime = &runtime;
         _drive = &runtime.Drive();
         _driveService = &runtime.DriveService();
-        _limits.maxSpeedMps = runtime.SpeedVehicle().GetMaxSpeed();
-        _limits.accelMps2 = runtime.SpeedVehicle().GetMaxForwardAcceleration();
-        _limits.decelMps2 = runtime.SpeedVehicle().GetMaxForwardAcceleration();
-        _limits.maxAngularSpeedRadps = runtime.SpeedVehicle().GetMaxRotationalVelocity();
-        _limits.angularAccelRadps2 = runtime.SpeedVehicle().GetMaxAngularAcceleration();
+        _limits.maxSpeedMps = runtime.Vehicle().GetMaxSpeed();
+        _limits.accelMps2 = runtime.Vehicle().GetMaxForwardAcceleration();
+        _limits.decelMps2 = runtime.Vehicle().GetMaxForwardAcceleration();
+        _limits.maxAngularSpeedRadps = runtime.Vehicle().GetMaxRotationalVelocity();
+        _limits.angularAccelRadps2 = runtime.Vehicle().GetMaxAngularAcceleration();
     }
 
     bool WallTouch::CanStart() const noexcept
@@ -563,7 +563,12 @@ namespace MazeMap::App::Internal
             (phaseElapsedMs >= (holdDurationMs / 2UL)))
         {
             _state.poseResetApplied = true;
-            _drive->SetPose(_state.contactXMeters, _state.contactYMeters, _state.targetYawRad);
+            if (!_runtime->Estimator().ResetPose(_state.contactXMeters, _state.contactYMeters, _state.targetYawRad))
+            {
+                SetFault(_runtime->Estimator().FaultReason());
+                done = true;
+                return CommandVector::Brake();
+            }
         }
 
         if (phaseElapsedMs >= holdDurationMs)

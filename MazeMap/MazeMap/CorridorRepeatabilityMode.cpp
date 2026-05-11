@@ -35,7 +35,7 @@ namespace MazeMap::App::Internal
         explicit CorridorRepeatabilityMode(SharedRobotRuntime& runtime)
             : _runtime(runtime)
             , _loopController(runtime.ControlLoop())
-            , _vehicle(runtime.SpeedVehicle())
+            , _vehicle(runtime.Vehicle())
             , _drive(runtime.Drive())
             , _driveService(runtime.DriveService())
             , _startupCalibration(runtime.StartupCalibrationService())

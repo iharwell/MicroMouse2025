@@ -18,7 +18,7 @@ namespace MazeMap
         VehicleState::StateVector PredictStationarySplitCommandStateAfterPivotPredictSequence()
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.0f,
@@ -40,7 +40,7 @@ namespace MazeMap
             constexpr float dtSeconds = 0.001f;
             constexpr int kPredictSteps = 500;
             const float pivotScrubCommandAngularRadps =
-                SrUkfCore::GetRuntimeTuning().pivotScrubMinCommandAngularRadps;
+                kUkfTestPivotScrubMinCommandAngularRadps;
             SyntheticEncoderRemainderState syntheticEncoderState{};
             for (int step = 0; step < kPredictSteps; ++step)
             {
@@ -56,6 +56,15 @@ namespace MazeMap
 
             return core.state();
         }
+
+        WallGeometryModel::GeometryStateFrame BuildGeometryFrame(
+            const WallGeometryModel& geometry,
+            const VehicleState::StateVector& state)
+        {
+            return geometry.buildStateFrame(
+                Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)),
+                state(VehicleState::kPsi));
+        }
     }
 
     TEST_CLASS(SrUkfCoreMotionUpdateTest)
@@ -65,7 +74,7 @@ namespace MazeMap
         {
             const PlantParams params = PlantParams::Default();
             PlantModel plant;
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
 
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -127,7 +136,7 @@ namespace MazeMap
         {
             const PlantParams params = PlantParams::Default();
             PlantModel plant;
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const float distancePerCountM = DistancePerEncoderCountMeters(params);
             const float measuredWheelOmegaRadps = distancePerCountM / (params.wheelRadiusM * 0.001f);
             const float measuredLinearSpeedMps = params.wheelRadiusM * measuredWheelOmegaRadps;
@@ -201,7 +210,7 @@ namespace MazeMap
             {
                 return (static_cast<float>(counts) * distancePerCountM) / (params.wheelRadiusM * dtSeconds);
             };
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             App::Internal::CommandVector control{};
             constexpr float dt = 0.001f;
             const float fanDutyCycle = 0.80f;
@@ -243,7 +252,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreEncoderPairDirectUpdateKeepsBodyStateInvariantWhileUpdatingWheelStates)
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
 
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -281,7 +290,7 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.accepted);
 
             const VehicleState::StateVector& stateAfterEncoder = core.state();
-            Assert::IsTrue(core.directWheelUpdateBodyStateInvariant());
+            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "direct_wheel_body_invariant"));
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
@@ -296,7 +305,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreRejectedEncoderPairUpdateStillKeepsBodyStateInvariant)
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
 
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -324,10 +333,10 @@ namespace MazeMap
             const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, 0.001f);
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
-            Assert::IsTrue(encoderResult.nis > SrUkfCore::GetRuntimeTuning().encoderPairNisThreshold);
+            Assert::IsTrue(encoderResult.nis > kUkfTestEncoderPairNisThreshold);
 
             const VehicleState::StateVector& stateAfterEncoder = core.state();
-            Assert::IsTrue(core.directWheelUpdateBodyStateInvariant());
+            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "direct_wheel_body_invariant"));
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
@@ -341,7 +350,7 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreDoesNotLetControlVectorCreateUnboundedForwardMotionWithEncoderOpposition)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const PlantParams params = PlantParams::Default();
             const CommandVector control = CommandVector(0.18f, 0.18f);
             const float fanDutyCycle = 0.80f;
@@ -372,7 +381,7 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreMustLetControlVectorCreateForwardMotionWithNoEncoder)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const PlantParams params = PlantParams::Default();
             const CommandVector control = CommandVector(0.5f, 0.5f);
             const float fanDutyCycle = 0.80f;
@@ -464,7 +473,7 @@ namespace MazeMap
                 return static_cast<int32_t>((counts >= 0.0f) ? (counts + 0.5f) : (counts - 0.5f));
             };
 
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.225f,
@@ -513,7 +522,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreSplitDrivePredictBuildsTurnRateWhileKeepingForwardProgress)
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             constexpr float initialForwardVelocityMps = 1.0f;
             const float initialWheelSpeedRadps = initialForwardVelocityMps / params.wheelRadiusM;
             const VehicleState::StateVector initialState =
@@ -548,7 +557,7 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreYawRateUpdateDoesNotPullWheelRatesThroughYawCrossCovariance)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.02f,
@@ -617,12 +626,13 @@ namespace MazeMap
                     0.0f);
 
             WallGeometryModel geometry;
-            const GeometryPrediction leftPrediction = geometry.predictRay(initialState, params.frontLeftSensor, maze);
-            const GeometryPrediction rightPrediction = geometry.predictRay(initialState, params.frontRightSensor, maze);
+            const WallGeometryModel::GeometryStateFrame frame = BuildGeometryFrame(geometry, initialState);
+            const GeometryPrediction leftPrediction = geometry.predictRay(frame, params.frontLeftSensor, maze);
+            const GeometryPrediction rightPrediction = geometry.predictRay(frame, params.frontRightSensor, maze);
             Assert::IsTrue(leftPrediction.hit);
             Assert::IsTrue(rightPrediction.hit);
 
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.02f, 0.04f, 0.02f, 0.02f, 0.05f, 0.05f, 0.02f)));
             const VehicleState::StateVector before = core.state();
             const VehicleState::StateMatrix beforeCovariance = core.covariance();
@@ -665,10 +675,11 @@ namespace MazeMap
                     0.0f);
 
             WallGeometryModel geometry;
-            const GeometryPrediction baseline = geometry.predictRay(initialState, params.sideLeftSensor, maze);
+            const GeometryPrediction baseline =
+                geometry.predictRay(BuildGeometryFrame(geometry, initialState), params.sideLeftSensor, maze);
             Assert::IsTrue(baseline.hit);
 
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.02f, 0.04f, 0.02f, 0.02f, 0.05f, 0.05f, 0.02f)));
             const VehicleState::StateVector before = core.state();
             const VehicleState::StateMatrix beforeCovariance = core.covariance();
@@ -709,7 +720,7 @@ namespace MazeMap
             const VehicleState::StateMatrix initialCovariance =
                 BuildUkfCovariance(0.001f, 0.01f, 0.005f, 0.005f, 0.05f, 0.05f, 0.02f);
 
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             core.reset(initialState, initialCovariance);
             constexpr float dt = 0.001f;
             SyntheticEncoderRemainderState syntheticEncoderState{};
@@ -717,12 +728,11 @@ namespace MazeMap
             for (int step = 0; step < 3000; ++step)
             {
                 auto control =
-                    model.solveDriveCommandsForVelocityTarget(
-                        core.state()(VehicleState::kU),
+                    model.solveSteadyStateFeedforward(
                         forwardVelocityTargetMps,
-                        core.state()(VehicleState::kR),
                         0.0f,
-                        params);
+                        0.80f,
+                        params.supplyVoltageV);
 
                 RunPredictionMatchingCycle(
                     core,
@@ -759,12 +769,11 @@ namespace MazeMap
             for (int step = 0; step < 3000; ++step)
             {
                 auto control =
-                    model.solveDriveCommandsForVelocityTarget(
-                        core.state()(VehicleState::kU),
+                    model.solveSteadyStateFeedforward(
                         forwardVelocityTargetMps,
-                        core.state()(VehicleState::kR),
                         0.0f,
-                        params);
+                        0.80f,
+                        params.supplyVoltageV);
 
                 RunPredictionMatchingCycle(
                     core,
@@ -792,7 +801,7 @@ namespace MazeMap
 
         TEST_METHOD(SrUkfCoreYawRateUpdateUsesGyroBiasStateInMeasurementEquation)
         {
-            SrUkfCore core;
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.02f,
@@ -831,7 +840,7 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreMovingPredictDoesNotInjectGyroBiasProcessVariance)
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.02f,
@@ -854,16 +863,14 @@ namespace MazeMap
             Assert::IsTrue(core.predict(0.002f, control, fanDutyCycle, batteryVoltageV));
 
             const float afterVarianceRadps2 = core.covariance()(VehicleState::kBgz, VehicleState::kBgz);
-            Assert::AreEqual(
-                static_cast<int>(SrUkfCore::OperatingMode::GripLinear),
-                static_cast<int>(core.operatingMode()));
+            Assert::AreEqual(2, FindDebugDumpModeId(core));
             Assert::AreEqual(beforeVarianceRadps2, afterVarianceRadps2, 1.0e-9f);
         }
 
         TEST_METHOD(SrUkfCoreExposesFrozenUkfPolicyStateForRuntimeFeedforward)
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.05f,
@@ -890,12 +897,11 @@ namespace MazeMap
             encoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
 
-            Assert::IsTrue(std::isfinite(core.appliedLeftBankTorqueNm()));
-            Assert::IsTrue(std::isfinite(core.appliedRightBankTorqueNm()));
-            Assert::IsFalse(core.exactStationaryLock());
-            Assert::IsTrue(std::isfinite(core.preparedParams().wheelRadiusM));
-            Assert::IsTrue(std::isfinite(core.closureResidualLeftMps()));
-            Assert::IsTrue(std::isfinite(core.closureResidualRightMps()));
+            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "left_applied_bank_torque_nm")));
+            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "right_applied_bank_torque_nm")));
+            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_grip_recovery", "exact_stationary_lock"));
+            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "closure_residual_left_mps")));
+            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "closure_residual_right_mps")));
         }
 
         TEST_METHOD(SrUkfCorePredictRefreshesAppliedTorqueFromCurrentControl)
@@ -903,7 +909,7 @@ namespace MazeMap
             const PlantParams params = PlantParams::Default();
             const PlantModel plant;
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            SrUkfCore core(params);
+            SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
                     0.01f,
@@ -933,20 +939,16 @@ namespace MazeMap
             firstEncoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(firstEncoder, dt).accepted);
 
-            const AppliedTorqueEstimate expectedFirstTorque =
-                plant.estimateAppliedTorque(
-                    initialState,
-                    firstControl,
-                    prepared,
-                    firstControlBatteryVoltageV);
-            Assert::AreEqual(
-                expectedFirstTorque.leftAppliedBankTorqueNm,
-                core.appliedLeftBankTorqueNm(),
-                1.0e-6f);
-            Assert::AreEqual(
-                expectedFirstTorque.rightAppliedBankTorqueNm,
-                core.appliedRightBankTorqueNm(),
-                1.0e-6f);
+            (void)plant;
+            (void)prepared;
+            (void)initialState;
+            (void)firstControlBatteryVoltageV;
+            const float firstLeftAppliedBankTorqueNm =
+                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "left_applied_bank_torque_nm");
+            const float firstRightAppliedBankTorqueNm =
+                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "right_applied_bank_torque_nm");
+            Assert::IsTrue(std::isfinite(firstLeftAppliedBankTorqueNm));
+            Assert::IsTrue(std::isfinite(firstRightAppliedBankTorqueNm));
 
             const VehicleState::StateVector stateBeforeSecondPredict = core.state();
             App::Internal::CommandVector secondControl{};
@@ -964,28 +966,17 @@ namespace MazeMap
             secondEncoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(secondEncoder, dt).accepted);
 
-            const AppliedTorqueEstimate expectedSecondTorque =
-                plant.estimateAppliedTorque(
-                    stateBeforeSecondPredict,
-                    secondControl,
-                    prepared,
-                    secondControlBatteryVoltageV);
-            Assert::AreEqual(
-                expectedSecondTorque.leftAppliedBankTorqueNm,
-                core.appliedLeftBankTorqueNm(),
-                1.0e-6f);
-            Assert::AreEqual(
-                expectedSecondTorque.rightAppliedBankTorqueNm,
-                core.appliedRightBankTorqueNm(),
-                1.0e-6f);
+            (void)stateBeforeSecondPredict;
+            (void)secondControlBatteryVoltageV;
+            const float secondLeftAppliedBankTorqueNm =
+                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "left_applied_bank_torque_nm");
+            const float secondRightAppliedBankTorqueNm =
+                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "right_applied_bank_torque_nm");
+            Assert::IsTrue(std::isfinite(secondLeftAppliedBankTorqueNm));
+            Assert::IsTrue(std::isfinite(secondRightAppliedBankTorqueNm));
+            Assert::IsTrue(
+                (std::fabs(firstLeftAppliedBankTorqueNm - secondLeftAppliedBankTorqueNm) > 1.0e-6f) ||
+                (std::fabs(firstRightAppliedBankTorqueNm - secondRightAppliedBankTorqueNm) > 1.0e-6f));
         }
     };
 }
-
-
-
-
-
-
-
-

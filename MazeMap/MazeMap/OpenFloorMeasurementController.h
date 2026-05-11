@@ -88,7 +88,6 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint16_t, mode_flags)                   \
     X(std::uint16_t, saturation_flags)             \
     X(std::uint8_t,  ukf_mode_id)                  \
-    X(std::uint8_t,  ukf_yaw_valid_for_feedforward)\
     X(std::uint8_t,  bias_update_enabled)          \
     X(float,         ukf_state_px_m)               \
     X(float,         ukf_state_py_m)               \

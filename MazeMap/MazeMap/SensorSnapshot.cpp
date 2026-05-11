@@ -75,10 +75,18 @@ bool BuildEvidenceObservationSnapshot(
     MazeMap::WallDecisionAccumulator rightEvidence{};
     bool leftTransitionDetected = false;
     bool rightTransitionDetected = false;
+    bool encoderObservationValid = false;
+    MazeMap::EncoderObs encoderObservation{};
 
     for (uint8_t sampleIndex = 0U; sampleIndex < sampleCount; ++sampleIndex)
     {
         const SensorSnapshot& sample = samples[sampleIndex];
+        if (sample.encoderObservationValid)
+        {
+            encoderObservation = sample.encoderObservation;
+            encoderObservationValid = true;
+        }
+
         if (sample.frontWall)
         {
             ++voteSummary.frontWallVotes;
@@ -257,5 +265,7 @@ bool BuildEvidenceObservationSnapshot(
     combinedSnapshot.rightWallObservationWindowValid = rightDecision != MazeMap::WallSampleClassification::Unknown;
     combinedSnapshot.leftTransitionDetected = leftTransitionDetected;
     combinedSnapshot.rightTransitionDetected = rightTransitionDetected;
+    combinedSnapshot.encoderObservation = encoderObservation;
+    combinedSnapshot.encoderObservationValid = encoderObservationValid;
     return true;
 }

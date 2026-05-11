@@ -3,7 +3,7 @@
 
 #include "EstimatorTestSupport.h"
 
-#include "..\MazeMap\SrUkfCore.h"
+#include "..\MazeMap\Vehicle.h"
 
 #include <array>
 #include <cmath>
@@ -14,15 +14,8 @@ namespace MazeMap
 {
     namespace
     {
-        struct RuntimeTuningRestoreScope
-        {
-            SrUkfCore::RuntimeTuning original = SrUkfCore::GetRuntimeTuning();
-
-            ~RuntimeTuningRestoreScope()
-            {
-                SrUkfCore::SetRuntimeTuning(original);
-            }
-        };
+        constexpr float kStationaryEncoderVelocitySigmaMps = 0.002936f;
+        constexpr float kImuYawRateSigmaRadps = 0.0010954451f;
     }
 
     TEST_CLASS(VehicleStateTest)
@@ -32,7 +25,7 @@ namespace MazeMap
         {
             const PlantParams params = PlantParams::Default();
             const float wheelSpeedThresholdRadps =
-                SrUkfCore::kStationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
+                kStationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
 
             VehicleState stationaryState;
             SetVehicleStateFromUkfStateVector(stationaryState, BuildUkfState(
@@ -41,52 +34,23 @@ namespace MazeMap
                 0.35f,
                 0.0f,
                 0.0f,
-                0.5f * (3.0f * SrUkfCore::kImuYawRateSigmaRadps),
+                0.5f * (3.0f * kImuYawRateSigmaRadps),
                 0.5f * wheelSpeedThresholdRadps,
                 -0.5f * wheelSpeedThresholdRadps,
                 0.12f));
             Assert::IsTrue(stationaryState.IsStationary());
 
             VehicleState movingState = stationaryState;
-            movingState.SetVelocity(2.0f * SrUkfCore::kStationaryEncoderVelocitySigmaMps);
+            movingState.SetVelocity(2.0f * kStationaryEncoderVelocitySigmaMps);
             Assert::IsFalse(movingState.IsStationary());
 
             movingState = stationaryState;
-            movingState.SetRotationalVelocity(3.1f * SrUkfCore::kImuYawRateSigmaRadps);
+            movingState.SetRotationalVelocity(3.1f * kImuYawRateSigmaRadps);
             Assert::IsFalse(movingState.IsStationary());
 
             movingState = stationaryState;
             movingState.SetWheelSpeedLeft(1.1f * wheelSpeedThresholdRadps);
             Assert::IsFalse(movingState.IsStationary());
-        }
-
-        TEST_METHOD(VehicleStateIsStationaryTracksRuntimeTuningOverrides)
-        {
-            RuntimeTuningRestoreScope restore{};
-            SrUkfCore::RuntimeTuning tuned = SrUkfCore::BuildDefaultRuntimeTuning();
-            tuned.stationaryEncoderVelocitySigmaMps = 0.020f;
-            tuned.imuYawRateSigmaRadps = 0.10f;
-            SrUkfCore::SetRuntimeTuning(tuned);
-
-            const PlantParams params = PlantParams::Default();
-            const float wheelSpeedThresholdRadps =
-                tuned.stationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
-
-            VehicleState state;
-            SetVehicleStateFromUkfStateVector(state, BuildUkfState(
-                0.0f,
-                0.0f,
-                0.0f,
-                0.015f,
-                -0.015f,
-                0.25f,
-                0.5f * wheelSpeedThresholdRadps,
-                -0.5f * wheelSpeedThresholdRadps,
-                0.0f));
-            Assert::IsTrue(state.IsStationary());
-
-            state.SetRotationalVelocity(0.31f);
-            Assert::IsFalse(state.IsStationary());
         }
 
         TEST_METHOD(VehicleStateStationaryConstraintKeepsPoseReferenceAndCollapsesStationaryStates)

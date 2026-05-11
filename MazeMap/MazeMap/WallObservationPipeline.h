@@ -6,6 +6,8 @@
 
 namespace MazeMap
 {
+    inline constexpr float kDefaultWallObservationMaxRangeM = 0.30f;
+
     enum class WallSampleClassification : uint8_t
     {
         Unknown = 0U,

@@ -44,7 +44,7 @@ namespace MazeMap::App::Internal
         explicit TopSpeedMeasurementMode(SharedRobotRuntime& runtime)
             : _runtime(runtime)
             , _loopController(runtime.ControlLoop())
-            , _vehicle(runtime.SpeedVehicle())
+            , _vehicle(runtime.Vehicle())
             , _drive(runtime.Drive())
             , _driveService(runtime.DriveService())
             , _startupCalibration(runtime.StartupCalibrationService())
@@ -312,7 +312,7 @@ namespace MazeMap::App::Internal
 
         float ReadBatteryVoltage() const noexcept
         {
-            return MazeMap::MotorEncoderDrive::GetSharedPhysicalModel().supplyVoltageV;
+            return _drive.CurrentBatteryVoltageV();
         }
 
         SharedRobotRuntime& _runtime;

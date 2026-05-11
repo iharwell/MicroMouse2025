@@ -14,6 +14,7 @@
 #include "SharedRobotRuntime.h"
 #include "SigmaPointSetSimplex.h"
 #include "StartupCalibration.h"
+#include "Vehicle.h"
 
 #include <cmath>
 #include <cstdio>
@@ -94,8 +95,6 @@ namespace
 
     bool WriteOpenFloorV62Metadata(MazeMap::App::Internal::SharedRobotRuntime& runtime)
     {
-        const MazeMap::PlantModel::PreparedParams prepared =
-            MazeMap::PlantModel::Prepare(MazeMap::PlantParams::Default());
         return
             runtime.WriteUtilityDataLogMetadata("ukfver", "v6.2") &&
             runtime.WriteUtilityDataLogMetadata("ukfset", "splx") &&
@@ -107,11 +106,11 @@ namespace
                 static_cast<unsigned long>(
                     MazeMap::SigmaPointSetSimplex::ActiveSigmaCountForDimension(
                         MazeMap::VehicleState::kDimension))) &&
-            runtime.WriteUtilityDataLogMetadataFloat("re_m", prepared.wheelRadiusM, 6) &&
-            runtime.WriteUtilityDataLogMetadataFloat("we_m", prepared.trackWidthM, 6) &&
-            runtime.WriteUtilityDataLogMetadataFloat("imu_x", prepared.raw.backLeftImuMount.positionBodyM().x(), 6) &&
-            runtime.WriteUtilityDataLogMetadataFloat("imu_y", prepared.raw.backLeftImuMount.positionBodyM().y(), 6) &&
-            runtime.WriteUtilityDataLogMetadataFloat("jw_kgm2", prepared.wheelInertiaKgM2, 9);
+            runtime.Plant().WriteOpenFloorUkfMetadata(
+                [&runtime](const char* key, float value, std::uint8_t precision) -> bool
+                {
+                    return runtime.WriteUtilityDataLogMetadataFloat(key, value, precision);
+                });
     }
 
     void ApplyLoopTimingToTimingRow(
@@ -165,7 +164,7 @@ namespace MazeMap::App::Internal
     OpenFloorMeasurementController::OpenFloorMeasurementController(SharedRobotRuntime& runtime)
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
-        , _vehicle(runtime.SpeedVehicle())
+        , _vehicle(runtime.Vehicle())
         , _sensors(runtime.Sensors())
         , _drive(runtime.Drive())
         , _driveService(runtime.DriveService())
@@ -1417,24 +1416,18 @@ namespace MazeMap::App::Internal
     {
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
         const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
-        const MazeMap::PlantPreparedParams& prepared = _runtime.Estimator().ukf().preparedParams();
-        const float wheelRadiusM =
-            (std::isfinite(prepared.wheelRadiusM) && (prepared.wheelRadiusM > 0.0f)) ?
-                prepared.wheelRadiusM :
-                0.0f;
-        const float trackWidthM =
-            (std::isfinite(prepared.trackWidthM) && (prepared.trackWidthM > 0.0f)) ?
-                prepared.trackWidthM :
-                0.0f;
-        const float leftWheelVelocityMps = wheelRadiusM * state.GetWheelSpeedLeft();
-        const float rightWheelVelocityMps = wheelRadiusM * state.GetWheelSpeedRight();
-        const float measuredLinearSpeedMps = 0.5f * (leftWheelVelocityMps + rightWheelVelocityMps);
+        const float leftWheelVelocityMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedLeft());
+        const float rightWheelVelocityMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedRight());
+        const float measuredLinearSpeedMps =
+            MazeMap::Vehicle::BodyForwardVelocityFromWheelLinear(leftWheelVelocityMps, rightWheelVelocityMps);
+        const float measuredAngularSpeedFromWheelsRadps =
+            MazeMap::Vehicle::BodyYawRateFromWheelLinear(leftWheelVelocityMps, rightWheelVelocityMps);
         const float measuredAngularSpeedRadps =
             std::isfinite(sensors.gyroRadps) ?
                 sensors.gyroRadps :
-                ((trackWidthM > 0.0f) ?
-                    ((leftWheelVelocityMps - rightWheelVelocityMps) / trackWidthM) :
-                    0.0f);
+                measuredAngularSpeedFromWheelsRadps;
 
         row.phase_id = static_cast<std::uint8_t>(phaseId);
         row.primitive_id = static_cast<std::uint8_t>(primitiveCode);
@@ -1442,15 +1435,6 @@ namespace MazeMap::App::Internal
         row.repeat_index = repeatIndex;
         row.mode_flags = driveTelemetry.modeFlags;
         row.saturation_flags = driveTelemetry.saturationFlags;
-        row.ukf_mode_id = driveTelemetry.ukfModeId;
-        row.ukf_yaw_valid_for_feedforward = driveTelemetry.ukfYawValidForFeedforward;
-        row.bias_update_enabled = driveTelemetry.ukfBiasUpdateEnabled;
-        row.gyro_bias_anchor_radps = driveTelemetry.ukfGyroBiasAnchorRadps;
-        row.yaw_consistency_lp_radps = driveTelemetry.ukfYawConsistencyLowPassRadps;
-        row.yaw_window_mismatch_rad = driveTelemetry.ukfYawWindowMismatchRad;
-        row.nhc_sigma_mps = driveTelemetry.ukfNhcSigmaMps;
-        row.nhc_residual_mps = driveTelemetry.ukfNhcResidualMps;
-        row.nhc_residual_sigma = driveTelemetry.ukfNhcResidualSigma;
         row.ukf_state_px_m = state.GetPositionX();
         row.ukf_state_py_m = state.GetPositionY();
         row.ukf_state_psi_rad = state.GetOrientation();

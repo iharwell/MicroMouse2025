@@ -491,7 +491,6 @@ namespace MazeMap::Config
         /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.01f),
         /* longitudinalAccelerationStatePD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
         /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
-        /* wheelVelocityStatePD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, 0.01f),
         /* wheelVelocityEncoderPD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, 0.01f),
         /* yawAccelerationStatePD */ MazeMap::ProportionalDerivative(0.065f, 0.0f),
         /* yawAccelerationGyroPD */ MazeMap::ProportionalDerivative(0.015f, 0.0f),
@@ -500,7 +499,7 @@ namespace MazeMap::Config
     // resolve through one authoritative state-vs-sensor configuration instead of repeating ad hoc flags.
     inline constexpr MazeMap::CommandPD kDriveHeadingCommandPd = MazeMap::CommandPD::StateHeadingPD;
     inline constexpr MazeMap::CommandPD kDriveYawRateCommandPd = MazeMap::CommandPD::IMUYaw;
-    inline constexpr MazeMap::CommandPD kDriveVelocityCommandPd = MazeMap::CommandPD::StateWheelOmegaPD;
+    inline constexpr MazeMap::CommandPD kDriveVelocityCommandPd = MazeMap::CommandPD::EncoderVelocity;
     inline constexpr MazeMap::CommandPD kDriveDistanceCommandPd = MazeMap::CommandPD::RawCommand;
     inline constexpr MazeMap::CommandPD kManeuverTrackingCommandPd = kDriveYawRateCommandPd;
     inline constexpr MazeMap::CommandPD kWallTouchTrackingCommandPd = kDriveYawRateCommandPd;

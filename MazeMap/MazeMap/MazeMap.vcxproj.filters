@@ -156,9 +156,6 @@
     <ClInclude Include="EncoderProgressWatchdog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="AppliedTorqueEstimate.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="EncoderStallPolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>

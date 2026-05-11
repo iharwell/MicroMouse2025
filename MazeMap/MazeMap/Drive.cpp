@@ -1322,7 +1322,7 @@ namespace MazeMap::App::Internal
         {
             StartStraight(
                 maneuver.GetTravelDistanceMeters(Config::kCellSizeM),
-                ResolveManeuverSpeedMps(maneuver, _limits, _speedVehicle),
+                ResolveManeuverSpeedMps(maneuver, _limits, _vehicle),
                 maneuver.getExitSpeed());
             return;
         }
@@ -1338,7 +1338,7 @@ namespace MazeMap::App::Internal
             return;
         }
 
-        const float maneuverSpeedMps = ResolveManeuverSpeedMps(maneuver, _limits, _speedVehicle);
+        const float maneuverSpeedMps = ResolveManeuverSpeedMps(maneuver, _limits, _vehicle);
         const float totalDistanceM = maneuver.GetTravelDistanceMeters(Config::kCellSizeM);
 
         // Resolve the latest maneuver request into retained maneuver execution state now; later
@@ -1426,14 +1426,14 @@ namespace MazeMap::App::Internal
         _runtime = &runtime;
         _loopController = &runtime.ControlLoop();
         _drive = &runtime.Drive();
-        _speedVehicle = &runtime.SpeedVehicle();
+        _vehicle = &runtime.Vehicle();
         _maze = &runtime.Maze();
         MotionLimits runtimeLimits{};
-        runtimeLimits.maxSpeedMps = _speedVehicle->GetMaxSpeed();
-        runtimeLimits.accelMps2 = _speedVehicle->GetMaxForwardAcceleration();
-        runtimeLimits.decelMps2 = _speedVehicle->GetMaxForwardAcceleration();
-        runtimeLimits.maxAngularSpeedRadps = _speedVehicle->GetMaxRotationalVelocity();
-        runtimeLimits.angularAccelRadps2 = _speedVehicle->GetMaxAngularAcceleration();
+        runtimeLimits.maxSpeedMps = _vehicle->GetMaxSpeed();
+        runtimeLimits.accelMps2 = _vehicle->GetMaxForwardAcceleration();
+        runtimeLimits.decelMps2 = _vehicle->GetMaxForwardAcceleration();
+        runtimeLimits.maxAngularSpeedRadps = _vehicle->GetMaxRotationalVelocity();
+        runtimeLimits.angularAccelRadps2 = _vehicle->GetMaxAngularAcceleration();
         SetLimits(runtimeLimits);
     }
 
@@ -1580,7 +1580,7 @@ namespace MazeMap::App::Internal
             done = true;
             const float desiredYawRateRadps =
                 ResolveSignedCommandForDriveBase(
-                    turn.TurnDirection() * ResolveTurnCommandMagnitudeRadps(turn.RetainedYawRateRadps(), _limits, _speedVehicle),
+                    turn.TurnDirection() * ResolveTurnCommandMagnitudeRadps(turn.RetainedYawRateRadps(), _limits, _vehicle),
                     _limits.maxAngularSpeedRadps,
                     turn.TurnDirection() * turn.RetainedYawRateRadps());
             return MakePointControlVector(

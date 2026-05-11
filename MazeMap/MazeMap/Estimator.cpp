@@ -2,8 +2,11 @@
 #include "Estimator.h"
 
 #include "BootUtilityModeFramework.h"
+#include "Vehicle.h"
+#include "WallGeometryModel.h"
 
 #include <cmath>
+#include <cstdio>
 
 namespace MazeMap
 {
@@ -18,29 +21,36 @@ namespace MazeMap
         };
 
         MeasuredKinematics ResolveMeasuredKinematics(
-            const SrUkfCore& core,
             const EncoderObs& encoderObservation,
             float measuredYawRateRadps) noexcept
         {
             MeasuredKinematics measured{};
-            const PlantPreparedParams& prepared = core.preparedParams();
-            measured.leftVelocityMps = encoderObservation.omegaLeftRadps * prepared.wheelRadiusM;
-            measured.rightVelocityMps = encoderObservation.omegaRightRadps * prepared.wheelRadiusM;
-            measured.linearSpeedMps = 0.5f * (measured.leftVelocityMps + measured.rightVelocityMps);
+            measured.leftVelocityMps = Vehicle::WheelLinearVelocityFromOmega(encoderObservation.omegaLeftRadps);
+            measured.rightVelocityMps = Vehicle::WheelLinearVelocityFromOmega(encoderObservation.omegaRightRadps);
+            measured.linearSpeedMps =
+                Vehicle::BodyForwardVelocityFromWheelLinear(measured.leftVelocityMps, measured.rightVelocityMps);
             const float fallbackYawRateRadps =
-                (prepared.trackWidthM > 0.0f) ?
-                ((measured.leftVelocityMps - measured.rightVelocityMps) / prepared.trackWidthM) :
-                0.0f;
+                Vehicle::BodyYawRateFromWheelLinear(measured.leftVelocityMps, measured.rightVelocityMps);
             measured.angularSpeedRadps =
                 std::isfinite(measuredYawRateRadps) ?
                 measuredYawRateRadps :
                 fallbackYawRateRadps;
             return measured;
         }
+
+        WallGeometryModel::GeometryStateFrame BuildWallGeometryFrame(
+            const WallGeometryModel& geometryModel,
+            const VehicleState::StateVector& state) noexcept
+        {
+            return geometryModel.buildStateFrame(
+                Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)),
+                state(VehicleState::kPsi));
+        }
     }
 
-    Estimator::Estimator(const PlantParams& params, VehicleState* runtimeState) noexcept
-        : _core(params)
+    Estimator::Estimator(const PlantModel& plantModel, VehicleState* runtimeState) noexcept
+        : _plantModel(plantModel)
+        , _core(plantModel)
         , _mapEvidence()
         , _localRuntimeState()
         , _runtimeState((runtimeState != nullptr) ? runtimeState : &_localRuntimeState)
@@ -95,7 +105,8 @@ namespace MazeMap
         const VehicleState::StateVector& state) noexcept
     {
         const WallGeometryModel geometryModel{};
-        const Eigen::Vector2f directionWorld = geometryModel.sensorDirectionWorld(state, sensor);
+        const Eigen::Vector2f directionWorld =
+            geometryModel.sensorDirectionWorld(BuildWallGeometryFrame(geometryModel, state), sensor);
         const float x = directionWorld.x();
         const float y = directionWorld.y();
         if (std::fabs(x) >= std::fabs(y))
@@ -110,7 +121,8 @@ namespace MazeMap
         const VehicleState::StateVector& state) noexcept
     {
         const WallGeometryModel geometryModel{};
-        const Eigen::Vector2f sensorPositionWorld = geometryModel.sensorOriginWorld(state, sensor);
+        const Eigen::Vector2f sensorPositionWorld =
+            geometryModel.sensorOriginWorld(BuildWallGeometryFrame(geometryModel, state), sensor);
         return WallGeometryModel::WorldToCell(sensorPositionWorld.x(), sensorPositionWorld.y());
     }
 
@@ -124,11 +136,12 @@ namespace MazeMap
         FrontPairUpdateResult result = _core.updateFrontPair(left, right, maze);
         if (result.filter.accepted && !freezeMapMutation)
         {
-            const PlantParams& params = _core.params();
-            const Direction leftDirection = dominantDirectionForSensor(params.frontLeftSensor, _core.state());
-            const Direction rightDirection = dominantDirectionForSensor(params.frontRightSensor, _core.state());
-            const CellCoordinates leftCell = estimateSensorCell(params.frontLeftSensor, _core.state());
-            const CellCoordinates rightCell = estimateSensorCell(params.frontRightSensor, _core.state());
+            const SensorMount frontLeftSensor = Vehicle::GetFrontLeftSensorMount();
+            const SensorMount frontRightSensor = Vehicle::GetFrontRightSensorMount();
+            const Direction leftDirection = dominantDirectionForSensor(frontLeftSensor, _core.state());
+            const Direction rightDirection = dominantDirectionForSensor(frontRightSensor, _core.state());
+            const CellCoordinates leftCell = estimateSensorCell(frontLeftSensor, _core.state());
+            const CellCoordinates rightCell = estimateSensorCell(frontRightSensor, _core.state());
             _mapEvidence.Apply(leftCell, leftDirection, left, result.leftPrediction, evidenceConfig, freezeMapMutation);
             _mapEvidence.Apply(
                 rightCell,
@@ -151,9 +164,10 @@ namespace MazeMap
         WallUpdateResult result = _core.updateSideSensor(which, observation, maze);
         if (result.filter.accepted && !freezeMapMutation)
         {
-            const PlantParams& params = _core.params();
             const SensorMount& sensor =
-                (which == RelativeDirection::Left90) ? params.sideLeftSensor : params.sideRightSensor;
+                (which == RelativeDirection::Left90) ?
+                Vehicle::GetSideLeftSensorMount() :
+                Vehicle::GetSideRightSensorMount();
             const Direction direction = dominantDirectionForSensor(sensor, _core.state());
             const CellCoordinates cell = estimateSensorCell(sensor, _core.state());
             _mapEvidence.Apply(cell, direction, observation, result.prediction, evidenceConfig, freezeMapMutation);
@@ -194,10 +208,6 @@ namespace MazeMap
         float preservedGyroBiasRadps = currentState(VehicleState::kBgz);
         if (!std::isfinite(preservedGyroBiasRadps))
         {
-            preservedGyroBiasRadps = _core.gyroBiasAnchorRadps();
-        }
-        if (!std::isfinite(preservedGyroBiasRadps))
-        {
             preservedGyroBiasRadps = _runtimeState->GetGyroBiasZ();
         }
         state(VehicleState::kBgz) = std::isfinite(preservedGyroBiasRadps) ? preservedGyroBiasRadps : 0.0f;
@@ -215,20 +225,11 @@ namespace MazeMap
         return true;
     }
 
-    bool Estimator::SetStateCoordinate(int stateIndex, float coordinateM) noexcept
+    bool Estimator::RestoreSessionStartPhysicalState(float xMeters, float yMeters, float yawRad) noexcept
     {
-        VehicleState::StateVector state = _core.state();
-        const VehicleState::StateMatrix covariance = _core.covariance();
-        state(stateIndex) = coordinateM;
-        VehicleState::NormalizeStateVector(state);
-        const bool ok = _core.setState(state, covariance);
-        if (!ok)
-        {
-            TriggerFault("set_state_failed");
-            return false;
-        }
-        SyncRuntimeState();
-        return true;
+        // Sorting note: this owns only the estimator state restore. Encoder consumption,
+        // controller reset, and braking remain DriveBase concerns and are not translated here.
+        return ResetForSessionTransition(xMeters, yMeters, yawRad);
     }
 
     bool Estimator::SetGyroBiasZ(float gyroBiasRadps) noexcept
@@ -259,14 +260,9 @@ namespace MazeMap
 
         VehicleState::StateVector state = _core.state();
         const VehicleState::StateMatrix covariance = _core.covariance();
-        const PlantPreparedParams& prepared = _core.preparedParams();
-        if (!(prepared.wheelRadiusM > 0.0f) || !std::isfinite(prepared.wheelRadiusM))
-        {
-            SyncRuntimeState();
-            return;
-        }
 
-        const MeasuredKinematics measured = ResolveMeasuredKinematics(_core, encoderObservation, measuredYawRateRadps);
+        const MeasuredKinematics measured =
+            ResolveMeasuredKinematics(encoderObservation, measuredYawRateRadps);
         if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
         {
             const float midYawRad =

@@ -23,8 +23,6 @@ namespace MazeMap::App
     {
         using CommandVector = Internal::CommandVector;
 
-        constexpr std::uint8_t kDriveManeuverRightEncoderChannel = 1U;
-        constexpr std::uint8_t kDriveManeuverLeftEncoderChannel = 2U;
         constexpr float kSimulationDtSeconds = 0.001f;
         constexpr int kMaxSimulationSteps = 20000;
         constexpr float kSmoothEntrySpeedMps = 0.5f;
@@ -115,13 +113,30 @@ namespace MazeMap::App
             const int32_t rightCounts =
                 ConsumeWholeEncoderCounts(rightDistanceDeltaM / distancePerCountM, rightEncoderRemainderCounts);
 
-            MazeMap::Platform::WriteEncoderCount(kDriveManeuverLeftEncoderChannel, leftCounts);
-            MazeMap::Platform::WriteEncoderCount(kDriveManeuverRightEncoderChannel, rightCounts);
+            SensorSnapshot snapshot = BuildDriveManeuverSensorSnapshot(yawRateRadps);
+            snapshot.encoderObservation.totalLeftCounts = leftCounts;
+            snapshot.encoderObservation.totalRightCounts = rightCounts;
+            snapshot.encoderObservation.leftDistanceDeltaM = static_cast<float>(leftCounts) * distancePerCountM;
+            snapshot.encoderObservation.rightDistanceDeltaM = static_cast<float>(rightCounts) * distancePerCountM;
+            if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds) && (params.wheelRadiusM > 0.0f))
+            {
+                const float invWheelRadiusM = 1.0f / params.wheelRadiusM;
+                const float invDtSeconds = 1.0f / dtSeconds;
+                snapshot.encoderObservation.leftVelocityMps =
+                    snapshot.encoderObservation.leftDistanceDeltaM * invDtSeconds;
+                snapshot.encoderObservation.rightVelocityMps =
+                    snapshot.encoderObservation.rightDistanceDeltaM * invDtSeconds;
+                snapshot.encoderObservation.omegaLeftRadps =
+                    snapshot.encoderObservation.leftVelocityMps * invWheelRadiusM;
+                snapshot.encoderObservation.omegaRightRadps =
+                    snapshot.encoderObservation.rightVelocityMps * invWheelRadiusM;
+            }
+            snapshot.encoderObservationValid = true;
             UpdateDriveEstimator(
                 drive,
                 estimator,
                 dtSeconds,
-                BuildDriveManeuverSensorSnapshot(yawRateRadps));
+                snapshot);
         }
 
         void ApplyControlVector(DriveBase& drive, const CommandVector& control) noexcept
@@ -159,6 +174,19 @@ namespace MazeMap::App
             float& rightEncoderRemainderCounts)
         {
             truthState = BuildTruthState(kSmoothEntrySpeedMps);
+            const PlantParams params = PlantParams::Default();
+            const float distancePerCountM = DistancePerEncoderCountMeters(params);
+            float projectedLeftEncoderRemainderCounts = leftEncoderRemainderCounts;
+            float projectedRightEncoderRemainderCounts = rightEncoderRemainderCounts;
+            const int32_t projectedLeftCounts = ConsumeWholeEncoderCounts(
+                (kSmoothEntrySpeedMps * kSimulationDtSeconds) / distancePerCountM,
+                projectedLeftEncoderRemainderCounts);
+            const int32_t projectedRightCounts = ConsumeWholeEncoderCounts(
+                (kSmoothEntrySpeedMps * kSimulationDtSeconds) / distancePerCountM,
+                projectedRightEncoderRemainderCounts);
+            const float projectedForwardDistanceM =
+                0.5f * static_cast<float>(projectedLeftCounts + projectedRightCounts) * distancePerCountM;
+            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f));
             ApplyEncoderObservation(
                 runtime.Drive(),
                 runtime.Estimator(),
@@ -168,8 +196,6 @@ namespace MazeMap::App
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
                 kSimulationDtSeconds);
-            runtime.Drive().SetPoseXMeters(0.0f);
-            runtime.Drive().SetPoseYMeters(0.0f);
         }
 
         void SimulateRuntimeDriveCycle(
@@ -309,7 +335,7 @@ namespace MazeMap::App
                 return trace;
             }
 
-            runtime.Drive().SetPose(0.0f, 0.0f, 0.0f);
+            Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
             if (smoothTurn)
             {
                 PrimeDriveForSmoothEntry(

@@ -6,6 +6,7 @@
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementSpec.h"
 #include "PinPairStrap.h"
+#include "PlantModel.h"
 
 // Private application infrastructure helpers for the MazeMap runtime.
 
@@ -120,9 +121,8 @@ namespace MazeMap::App::Internal::Runtime
     }
 
     template <typename WriteEventFn>
-    inline bool WriteDiagnosticTuningEvents(WriteEventFn&& writeEvent)
+    inline bool WriteDiagnosticTuningEvents(const MazeMap::PlantModel& plantModel, WriteEventFn&& writeEvent)
     {
-        const auto& driveModel = MazeMap::MotorEncoderDrive::GetSharedPhysicalModel();
         const auto& vehicleModel = MazeMap::Vehicle::GetPhysicalModel();
         char message[256] = {};
         auto writeConfig = [&writeEvent, &message](const char* format, auto... args) -> bool
@@ -143,14 +143,7 @@ namespace MazeMap::App::Internal::Runtime
                 vehicleModel.arcTrackWidthInterpolation.tightTrackWidthM,
                 vehicleModel.arcTrackWidthInterpolation.wideRadiusM,
                 vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM) &&
-            writeConfig(
-                "motor_model:wheel_diam_m=%.6f;encoder_cpr=%lu;gear=%.6f;nom_v=%.3f;no_load_rpm=%.1f;supply_v=%.3f",
-                driveModel.wheelDiameterM,
-                static_cast<unsigned long>(driveModel.pulsesPerRev),
-                driveModel.gearRatio,
-                driveModel.nominalVoltageV,
-                driveModel.nominalNoLoadSpeedRpm,
-                driveModel.supplyVoltageV) &&
+            plantModel.WriteDriveModelDiagnosticConfig(writeConfig) &&
             writeConfig(
                 "wheel_control:static_ff=%.6f;vel_ff=%.6f;accel_gain=%.6f;vel_kp=%.6f;vel_ki=%.6f;i_lim=%.6f",
                 Config::kWheelStaticFeedforward,

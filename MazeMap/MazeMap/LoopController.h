@@ -290,26 +290,6 @@ namespace MazeMap::App::Internal
         friend class ::MazeMap::App::Application;
         friend class SharedRobotRuntime;
 
-        struct MotorPwmSink final
-        {
-            using SetMotorPwmFn = bool (*)(void* context, float leftMotorPwm, float rightMotorPwm) noexcept;
-
-            void* context{};
-            SetMotorPwmFn setMotorPwm{};
-
-            explicit operator bool() const noexcept
-            {
-                return setMotorPwm != nullptr;
-            }
-
-            bool Apply(const CommandVector& control) const noexcept
-            {
-                return
-                    (setMotorPwm != nullptr) &&
-                    setMotorPwm(context, control.LeftMotorPwm(), control.RightMotorPwm());
-            }
-        };
-
         static CommandVector RunApplicationModeTick(
             void* context,
             std::uint32_t loopEndTimeUs,
@@ -364,7 +344,6 @@ namespace MazeMap::App::Internal
         std::uint32_t _nextSyncTargetUs{}; // Absolute deadline for the current/next synchronized tick.
         CommandVector _queuedControl{};    // Command to apply at the start of the next tick.
         CommandVector _appliedControl{};   // Command applied at the start of the current tick.
-        MotorPwmSink _motorPwmSink{};      // Runtime-owned raw motor-PWM application hook.
         bool _sessionStartWallSensorAdcProbePending{}; // Deferred session-start ADC probe request.
         TimingDiagnostics _timingBuffers[2]{}; // Double-buffered published/working timing storage.
         std::uint8_t _publishedTimingIndex{ 0U }; // Index of the published completed-tick timing buffer.

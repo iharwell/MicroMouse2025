@@ -102,10 +102,12 @@ static bool ConfigureBackLeftImuForRuntime(
     return true;
 }
 
+template <typename CaptureEncoderCounts>
 static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
     MazeMap::Vehicle::ImuBackLeft& imu,
     unsigned long controlPeriodUs,
     const MazeMap::EncoderCountPair& startCounts,
+    CaptureEncoderCounts& captureEncoderCounts,
     MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
         MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
 {
@@ -117,7 +119,8 @@ static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
     using SelfTestMode = MazeMap::Vehicle::ImuBackLeft::SELF_TEST_MODE;
 
     imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
-    StationaryImuCalibrationResult settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
+    StationaryImuCalibrationResult settleResult =
+        WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs, captureEncoderCounts);
     if (settleResult != StationaryImuCalibrationResult::Success)
     {
         return settleResult;
@@ -125,14 +128,19 @@ static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
 
     AveragedBackLeftImuSample baseline{};
     StationaryImuCalibrationResult sampleResult =
-        AverageBackLeftImuSelfTestSample(imu, kImuSelfTestAverageSamples, startCounts, baseline);
+        AverageBackLeftImuSelfTestSample(
+            imu,
+            kImuSelfTestAverageSamples,
+            startCounts,
+            baseline,
+            captureEncoderCounts);
     if (sampleResult != StationaryImuCalibrationResult::Success)
     {
         return sampleResult;
     }
 
     imu.SetSelfTest(SelfTestMode::POSITIVE, SelfTestMode::POSITIVE);
-    settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
+    settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs, captureEncoderCounts);
     if (settleResult != StationaryImuCalibrationResult::Success)
     {
         imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
@@ -140,14 +148,19 @@ static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
     }
 
     AveragedBackLeftImuSample stimulated{};
-    sampleResult = AverageBackLeftImuSelfTestSample(imu, kImuSelfTestAverageSamples, startCounts, stimulated);
+    sampleResult = AverageBackLeftImuSelfTestSample(
+        imu,
+        kImuSelfTestAverageSamples,
+        startCounts,
+        stimulated,
+        captureEncoderCounts);
     imu.SetSelfTest(SelfTestMode::DISABLED, SelfTestMode::DISABLED);
     if (sampleResult != StationaryImuCalibrationResult::Success)
     {
         return sampleResult;
     }
 
-    settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs);
+    settleResult = WaitForImuCalibrationSettle(startCounts, kImuSelfTestSettleMs, captureEncoderCounts);
     if (settleResult != StationaryImuCalibrationResult::Success)
     {
         return settleResult;
@@ -184,14 +197,16 @@ static StationaryImuCalibrationResult RunStationaryBackLeftImuSelfTest(
 }
 #endif
 
+template <typename CaptureEncoderCounts>
 static bool CalibrateStationaryBackLeftGyroBias(
     MazeMap::Vehicle& vehicle,
     unsigned long controlPeriodUs,
     bool enableAccelRuntime,
     float& gyroBiasRadps,
-    float* accelBiasXG = nullptr,
-    float* accelBiasYG = nullptr,
-    bool* accelBiasInitialized = nullptr,
+    float* accelBiasXG,
+    float* accelBiasYG,
+    bool* accelBiasInitialized,
+    CaptureEncoderCounts& captureEncoderCounts,
     MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ accelFilterFreq =
         MazeMap::Vehicle::ImuBackLeft::ACCEL_FILTER_FREQ::FRAC_1_400)
 {
@@ -207,9 +222,15 @@ static bool CalibrateStationaryBackLeftGyroBias(
         (accelBiasYG != nullptr);
     while (true)
     {
-        const MazeMap::EncoderCountPair startCounts = CaptureDriveEncoderCounts();
+        (void)captureEncoderCounts();
+        const MazeMap::EncoderCountPair startCounts{};
         const StationaryImuCalibrationResult selfTestResult =
-            RunStationaryBackLeftImuSelfTest(vehicle.IMU_BL, controlPeriodUs, startCounts, accelFilterFreq);
+            RunStationaryBackLeftImuSelfTest(
+                vehicle.IMU_BL,
+                controlPeriodUs,
+                startCounts,
+                captureEncoderCounts,
+                accelFilterFreq);
         if (selfTestResult == StationaryImuCalibrationResult::RestartEncoderMotion)
         {
             (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
@@ -238,7 +259,7 @@ static bool CalibrateStationaryBackLeftGyroBias(
         while ((collectedSamples < requiredSamples) ||
             ((millis() - measurementStartMs) < static_cast<unsigned long>(MazeMap::Config::kGyroBiasMinimumAveragingWindowMs)))
         {
-            if (HaveDriveEncodersMovedSince(startCounts))
+            if (MazeMap::HaveEncoderCountsChanged(startCounts, captureEncoderCounts()))
             {
                 (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
                     "Encoder motion detected during gyro bias measurement; restarting IMU self-test");
@@ -263,7 +284,7 @@ static bool CalibrateStationaryBackLeftGyroBias(
             continue;
         }
 
-        if (HaveDriveEncodersMovedSince(startCounts))
+        if (MazeMap::HaveEncoderCountsChanged(startCounts, captureEncoderCounts()))
         {
             (void)MazeMap::App::Internal::GetSharedRobotRuntime().AppendTextLogLine(
                 "Encoder motion detected after gyro bias capture; restarting IMU self-test");
@@ -288,6 +309,7 @@ static bool CalibrateStationaryBackLeftGyroBias(
     (void)accelBiasXG;
     (void)accelBiasYG;
     (void)accelBiasInitialized;
+    (void)captureEncoderCounts;
     (void)accelFilterFreq;
     gyroBiasRadps = EstimateMissionGyroBiasRadps(vehicle);
     return true;
@@ -403,6 +425,12 @@ bool RuntimeSensorSuite::Begin(const unsigned long controlPeriodUs)
 
 bool RuntimeSensorSuite::CalibrateGyroBias(const unsigned long controlPeriodUs, const bool enableAccelRuntime)
 {
+    auto captureEncoderCounts = [this]() noexcept
+    {
+        const MazeMap::EncoderObs observation = _vehicle.CaptureEncoderObservation(0.0f);
+        return MazeMap::EncoderCountPair{ observation.totalLeftCounts, observation.totalRightCounts };
+    };
+
     return CalibrateStationaryBackLeftGyroBias(
         _vehicle,
         controlPeriodUs,
@@ -411,6 +439,7 @@ bool RuntimeSensorSuite::CalibrateGyroBias(const unsigned long controlPeriodUs, 
         &_accelBiasXG,
         &_accelBiasYG,
         &_accelBiasInitialized,
+        captureEncoderCounts,
         Config::kMissionRuntimeAccelFilterFreq);
 }
 
@@ -435,9 +464,16 @@ void RuntimeSensorSuite::Capture(
     const MazeMap::VehicleState& state,
     SensorSnapshot& snapshot,
     const CaptureHandler callback,
-    void* const callbackContext)
+    void* const callbackContext,
+    const bool captureEncoders,
+    const float encoderDtSeconds)
 {
     snapshot = SensorSnapshot{};
+    if (captureEncoders)
+    {
+        snapshot.encoderObservation = _vehicle.CaptureEncoderObservation(encoderDtSeconds);
+        snapshot.encoderObservationValid = true;
+    }
 
     AsyncWallSensorSweepRead wallRead{};
     StartAsyncWallSensorSweepRead(

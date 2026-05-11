@@ -1,86 +1,28 @@
 #pragma once
 
 #include "Defines.h"
-#include "MotorModelUnits.h"
+
+#include <cmath>
+#include <cstdint>
 
 namespace MazeMap
 {
+    class Vehicle;
+
     class MotorEncoderDrive
     {
     private:
-        struct PhysicalModel
-        {
-            float nominalVoltageV;
-            float nominalNoLoadSpeedRpm;
-            float supplyVoltageV;
-            float resistanceOhms;
-            float torqueConstantNmPerA;
-            float noLoadCurrentA;
-            float speedConstantRadpsPerVolt;
-            float gearRatio;
-            float wheelDiameterM;
-            float wheelYOffsetM;
-            uint16_t pulsesPerRev;
-        };
+        friend class Vehicle;
 
-        struct HardwareConfig
-        {
-            uint8_t motorOutPinA = Platform::kInvalidPin;
-            uint8_t motorOutPinB = Platform::kInvalidPin;
-            uint8_t encoderInPinA = Platform::kInvalidPin;
-            uint8_t encoderInPinB = Platform::kInvalidPin;
-            uint8_t encoderChannel = Platform::kInvalidEncoderChannel;
-            bool invertMotorDirection = false;
-            bool invertEncoderDirection = false;
-        };
-
-        inline static constexpr PhysicalModel kSharedPhysicalModel = {
-            6.0f,
-            14100.0f,
-            8.4f,
-            4.31f,
-            MilliNewtonMetersToNewtonMeters(3.96f),
-            MilliAmpsToAmps(45.9f),
-            ComputeMotorSpeedConstantRadpsPerVolt(
-                14100.0f,
-                6.0f,
-                MilliAmpsToAmps(45.9f),
-                4.31f),
-            56.0f / 17.0f,
-            // March 22, 2026 low-speed straight-audit fit: aux001-aux003 speed_idx 0 still over-reported outbound
-            // encoder distance by about 3.05 mm on the 0.72 m north-corridor run, so trim the shared wheel diameter
-            // down by 0.42% to keep the fixed-distance phases from finishing short.
-            // Investigation note: the supplied tire OD is 25.000 mm. Revisit this rolling-diameter correction after
-            // the post-UKF encoder-distance audit instead of treating this as physical wheel geometry.
-            0.025220f,
-            0.01475f,
-            4096U
-        };
-        inline static constexpr HardwareConfig kLeftHardwareConfig = {
-            24U,
-            25U,
-            2U,
-            3U,
-            2U,
-            true,
-            false
-        };
-        inline static constexpr HardwareConfig kRightHardwareConfig = {
-            5U,
-            6U,
-            7U,
-            8U,
-            1U,
-            true,
-            false
-        };
         static constexpr unsigned long kMinEncoderVelocitySampleMicros = 250UL;
         float _resistance = 1.0f;
         float _voltage = 0.0f;
         float _torqueConstant = 0.0f;
         float _speedConstant = 1.0f;
         float _noLoadCurrent = 0.0f;
+        float _currentLimit = 0.0f;
         float _gearRatio = 1.0f;
+        float _drivetrainEfficiency = 1.0f;
         float _wheelDiameter = 0.0f;
         uint16_t _pulsesPerRev = 1U;
         uint8_t _motorOutPinA = Platform::kInvalidPin;
@@ -151,6 +93,19 @@ namespace MazeMap
             return 0.0f;
         }
 
+        static float SignedDirection(float preferredValue, float fallbackValue) noexcept
+        {
+            constexpr float kSignEpsilon = 1.0e-6f;
+            const int preferredSign = (preferredValue > kSignEpsilon) - (preferredValue < -kSignEpsilon);
+            if (preferredSign != 0)
+            {
+                return static_cast<float>(preferredSign);
+            }
+
+            const int fallbackSign = (fallbackValue > kSignEpsilon) - (fallbackValue < -kSignEpsilon);
+            return static_cast<float>(fallbackSign);
+        }
+
         static uint16_t DriveCommandToPwmCode(float driveCommand) noexcept
         {
             const float magnitude = MazeMap::Math::Absf(ClampUnit(driveCommand));
@@ -210,23 +165,8 @@ namespace MazeMap
             _lastEncoderSampleMicros = nowMicros;
         }
 
-    public:
+    private:
         MotorEncoderDrive() = default;
-
-        static constexpr const PhysicalModel& GetSharedPhysicalModel() noexcept
-        {
-            return kSharedPhysicalModel;
-        }
-
-        static constexpr const HardwareConfig& GetLeftHardwareConfig() noexcept
-        {
-            return kLeftHardwareConfig;
-        }
-
-        static constexpr const HardwareConfig& GetRightHardwareConfig() noexcept
-        {
-            return kRightHardwareConfig;
-        }
 
         MotorEncoderDrive(
             float resistance,
@@ -243,13 +183,17 @@ namespace MazeMap
             uint8_t encoderInPinB,
             uint8_t encoderChannel = Platform::kInvalidEncoderChannel,
             bool invertMotorDirection = false,
-            bool invertEncoderDirection = false) noexcept
+            bool invertEncoderDirection = false,
+            float currentLimit = 0.0f,
+            float drivetrainEfficiency = 1.0f) noexcept
             : _resistance(resistance)
             , _voltage(voltage)
             , _torqueConstant(torqueConstant)
             , _speedConstant(speedConstant)
             , _noLoadCurrent(noLoadCurrent)
+            , _currentLimit(currentLimit)
             , _gearRatio(gearRatio)
+            , _drivetrainEfficiency(drivetrainEfficiency)
             , _wheelDiameter(wheelDiameter)
             , _pulsesPerRev(pulsesPerRev)
             , _motorOutPinA(motorOutPinA)
@@ -262,38 +206,7 @@ namespace MazeMap
         {
         }
 
-        MotorEncoderDrive(
-            const PhysicalModel& physicalModel,
-            const HardwareConfig& hardwareConfig) noexcept
-            : MotorEncoderDrive(
-                physicalModel.resistanceOhms,
-                physicalModel.supplyVoltageV,
-                physicalModel.torqueConstantNmPerA,
-                physicalModel.speedConstantRadpsPerVolt,
-                physicalModel.noLoadCurrentA,
-                physicalModel.gearRatio,
-                physicalModel.wheelDiameterM,
-                physicalModel.pulsesPerRev,
-                hardwareConfig.motorOutPinA,
-                hardwareConfig.motorOutPinB,
-                hardwareConfig.encoderInPinA,
-                hardwareConfig.encoderInPinB,
-                hardwareConfig.encoderChannel,
-                hardwareConfig.invertMotorDirection,
-                hardwareConfig.invertEncoderDirection)
-        {
-        }
-
-        static MotorEncoderDrive CreateDefaultLeftDrive() noexcept
-        {
-            return MotorEncoderDrive(GetSharedPhysicalModel(), GetLeftHardwareConfig());
-        }
-
-        static MotorEncoderDrive CreateDefaultRightDrive() noexcept
-        {
-            return MotorEncoderDrive(GetSharedPhysicalModel(), GetRightHardwareConfig());
-        }
-
+    public:
         bool begin()
         {
             bool ok = true;
@@ -318,6 +231,7 @@ namespace MazeMap
             return ok;
         }
 
+    private:
         float getResistance() const noexcept { return _resistance; }
         float getResistance() noexcept { return const_cast<const MotorEncoderDrive*>(this)->getResistance(); }
         void setResistance(float value) noexcept { _resistance = value; }
@@ -391,6 +305,7 @@ namespace MazeMap
             resetEncoderVelocityEstimate();
         }
 
+    public:
         float getDistancePerPulse() const noexcept
         {
             assert((_wheelDiameter > 0.0f) && (_gearRatio > 0.0f) && (_pulsesPerRev >= 0U));
@@ -502,6 +417,100 @@ namespace MazeMap
             return (speed > noLoadSpeed) ? noLoadSpeed : speed;
         }
 
+        // Converts a normalized drive command into wheel-bank torque, not
+        // motor-shaft torque, for this device at the supplied wheel-bank speed.
+        float getTorqueFromCommand(
+            float driveCommand,
+            float wheelBankSpeedRadps,
+            float batteryVoltageV = 0.0f) const noexcept
+        {
+            if (!((_resistance > 0.0f) &&
+                (_speedConstant > 0.0f) &&
+                (_torqueConstant > 0.0f) &&
+                (_gearRatio > 0.0f)))
+            {
+                return 0.0f;
+            }
+
+            const float resolvedBatteryVoltageV =
+                (std::isfinite(batteryVoltageV) && (batteryVoltageV > 0.0f)) ?
+                batteryVoltageV :
+                _voltage;
+            if (!(resolvedBatteryVoltageV > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            const float appliedVoltageV = ClampUnit(driveCommand) * resolvedBatteryVoltageV;
+            const float wheelSpeedToBackEmfVoltPerRadps = _gearRatio / _speedConstant;
+            const float armatureCurrentFromVoltageA = appliedVoltageV / _resistance;
+            const float armatureCurrentFromBackEmfA =
+                (wheelBankSpeedRadps * wheelSpeedToBackEmfVoltPerRadps) / _resistance;
+            float armatureCurrentA = armatureCurrentFromVoltageA - armatureCurrentFromBackEmfA;
+
+            if (_currentLimit > 0.0f)
+            {
+                armatureCurrentA = ClampSymmetric(armatureCurrentA, _currentLimit);
+            }
+
+            const float noLoadDirection = SignedDirection(armatureCurrentA, wheelBankSpeedRadps);
+            float loadCurrentA = armatureCurrentA - (noLoadDirection * _noLoadCurrent);
+            if ((noLoadDirection > 0.0f) && (loadCurrentA < 0.0f))
+            {
+                loadCurrentA = 0.0f;
+            }
+            else if ((noLoadDirection < 0.0f) && (loadCurrentA > 0.0f))
+            {
+                loadCurrentA = 0.0f;
+            }
+
+            return _torqueConstant * _gearRatio * _drivetrainEfficiency * loadCurrentA;
+        }
+
+        // Converts a requested wheel-bank torque, not motor-shaft torque, into the
+        // normalized drive command for this device at the supplied wheel-bank speed.
+        float getCommandFromTorque(
+            float wheelBankTorqueNm,
+            float wheelBankSpeedRadps,
+            float batteryVoltageV = 0.0f) const noexcept
+        {
+            if (!(std::isfinite(wheelBankTorqueNm) &&
+                std::isfinite(wheelBankSpeedRadps) &&
+                (_resistance > 0.0f) &&
+                (_speedConstant > 0.0f) &&
+                (_torqueConstant > 0.0f) &&
+                (_gearRatio > 0.0f) &&
+                (_drivetrainEfficiency > 0.0f)))
+            {
+                return 0.0f;
+            }
+
+            const float resolvedBatteryVoltageV =
+                (std::isfinite(batteryVoltageV) && (batteryVoltageV > 0.0f)) ?
+                batteryVoltageV :
+                _voltage;
+            if (!(resolvedBatteryVoltageV > 0.0f))
+            {
+                return 0.0f;
+            }
+
+            const float motorTorqueNm = wheelBankTorqueNm / (_gearRatio * _drivetrainEfficiency);
+            const float noLoadDirection = SignedDirection(motorTorqueNm, wheelBankSpeedRadps);
+            float armatureCurrentA =
+                (motorTorqueNm / _torqueConstant) +
+                (noLoadDirection * _noLoadCurrent);
+            if (_currentLimit > 0.0f)
+            {
+                armatureCurrentA = ClampSymmetric(armatureCurrentA, _currentLimit);
+            }
+
+            const float wheelSpeedToBackEmfVoltPerRadps = _gearRatio / _speedConstant;
+            const float backEmfVoltageV = wheelBankSpeedRadps * wheelSpeedToBackEmfVoltPerRadps;
+            const float appliedVoltageV = (armatureCurrentA * _resistance) + backEmfVoltageV;
+            return ClampUnit(appliedVoltageV / resolvedBatteryVoltageV);
+        }
+
+    private:
         void coast() noexcept
         {
             _lastDriveCommand = 0.0f;
