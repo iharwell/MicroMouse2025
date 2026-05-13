@@ -675,8 +675,8 @@ namespace MazeMap::App::Internal
         MazeMap::FloodFillPathFinder searchPathFinder;   // Production flood-fill owner.
         MazeMap::ManeuverPathFinder speedPathFinder;     // Production maneuver pathfinder owner.
         MazeMap::WallBeliefMap wallBeliefMap;            // Production wall-belief owner.
-        MazeMap::PlantModel plantModel;                  // Shared plant model owner.
         MazeMap::VehicleState runtimeState;              // Authoritative live runtime state.
+        MazeMap::PlantModel plantModel;                  // Shared plant model owner.
         MazeMap::Estimator estimator;                    // Shared estimator owner.
         DriveBase drive;                                 // Concrete low-level drive command owner.
         MazeMap::App::Internal::Drive driveService;      // Shared multi-tick Drive service.

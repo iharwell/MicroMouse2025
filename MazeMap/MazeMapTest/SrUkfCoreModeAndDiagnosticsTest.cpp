@@ -84,7 +84,8 @@ namespace MazeMap
         TEST_METHOD(PlantModelEncoderPairSqrtNoise_UsesGeneralSigmaMappingForNonZeroReadings)
         {
             const PlantParams params = PlantParams::Default();
-            const PlantModel plantModel{};
+            SrUkfCoreTestRuntime runtime;
+            const PlantModel& plantModel = runtime.plantModel;
             EncoderObs observation{};
             observation.omegaLeftRadps = 1.0f;
             observation.omegaRightRadps = 1.0f;
@@ -116,7 +117,8 @@ namespace MazeMap
         TEST_METHOD(PlantModelStationaryEncoderOmegaSigmaRadps_UsesRequestedZeroSpeedSigma)
         {
             const PlantParams params = PlantParams::Default();
-            const PlantModel plantModel{};
+            SrUkfCoreTestRuntime runtime;
+            const PlantModel& plantModel = runtime.plantModel;
             const float expectedSigmaRadps = kUkfTestStationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
             Assert::AreEqual(
                 expectedSigmaRadps,
@@ -500,7 +502,8 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreYawAndPlanarAccelUpdatesRemainCallableSeparately)
         {
             const PlantParams params = PlantParams::Default();
-            const PlantModel plant;
+            SrUkfCoreTestRuntime runtime;
+            const PlantModel& plant = runtime.plantModel;
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
             const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
@@ -560,7 +563,8 @@ namespace MazeMap
         TEST_METHOD(SrUkfCorePlanarAccelUpdateUsesForwardChannelAndIgnoresLateralOnlyPerturbation)
         {
             const PlantParams params = PlantParams::Default();
-            const PlantModel plant;
+            SrUkfCoreTestRuntime runtime;
+            const PlantModel& plant = runtime.plantModel;
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector initialState = BuildPlanarAccelUpdateTestState();
             const VehicleState::StateMatrix initialCovariance = BuildPlanarAccelUpdateTestCovariance();
@@ -653,6 +657,7 @@ namespace MazeMap
         }
     };
 }
+
 
 
 

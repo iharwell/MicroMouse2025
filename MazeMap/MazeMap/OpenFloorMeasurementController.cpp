@@ -1435,15 +1435,7 @@ namespace MazeMap::App::Internal
         row.repeat_index = repeatIndex;
         row.mode_flags = driveTelemetry.modeFlags;
         row.saturation_flags = driveTelemetry.saturationFlags;
-        row.ukf_state_px_m = state.GetPositionX();
-        row.ukf_state_py_m = state.GetPositionY();
-        row.ukf_state_psi_rad = state.GetOrientation();
-        row.ukf_state_u_mps = state.GetVelocity();
-        row.ukf_state_v_mps = state.GetLateralVelocity();
-        row.ukf_state_r_radps = state.GetRotationalVelocity();
-        row.ukf_state_omega_l_radps = state.GetWheelSpeedLeft();
-        row.ukf_state_omega_r_radps = state.GetWheelSpeedRight();
-        row.ukf_state_bgz_radps = state.GetGyroBiasZ();
+        row.SetVehicleState(state);
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;
         row.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;

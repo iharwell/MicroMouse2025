@@ -332,7 +332,8 @@ namespace MazeMap
             const VehicleState::StateMatrix covariance = core.covariance();
             const float finalYawRateVarianceRadps2 = covariance(VehicleState::kR, VehicleState::kR);
             const PlantParams params = PlantParams::Default();
-            const PlantModel plantModel{};
+            SrUkfCoreTestRuntime runtime;
+            const PlantModel& plantModel = runtime.plantModel;
             const float stationaryEncoderOmegaSigmaRadps =
                 plantModel.stationaryEncoderOmegaSigmaRadps(kUkfTestStationaryEncoderVelocitySigmaMps);
             const float stationaryYawRateSigmaRadps =
@@ -536,6 +537,7 @@ namespace MazeMap
 
     };
 }
+
 
 
 

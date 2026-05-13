@@ -2,6 +2,7 @@
 
 #include "Defines.h"
 #include "EigenCompat.h"
+#include "MmLog.h"
 #include "SensorSnapshot.h"
 
 #include <algorithm>
@@ -281,4 +282,33 @@ namespace MazeMap
         std::uint32_t _timestampUs;
         ::SensorSnapshot _sensorSnapshot;
     };
+
+#define VEHICLE_STATE_LOG_FIELDS(X) \
+    X(float, px_m) \
+    X(float, py_m) \
+    X(float, psi_rad) \
+    X(float, u_mps) \
+    X(float, v_mps) \
+    X(float, r_radps) \
+    X(float, omega_l_radps) \
+    X(float, omega_r_radps) \
+    X(float, bgz_radps)
+
+    MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(
+        VehicleStateLogEntry,
+        VEHICLE_STATE_LOG_FIELDS,
+        void Set(const VehicleState& state) noexcept
+        {
+            px_m = state.GetPositionX();
+            py_m = state.GetPositionY();
+            psi_rad = state.GetOrientation();
+            u_mps = state.GetVelocity();
+            v_mps = state.GetLateralVelocity();
+            r_radps = state.GetRotationalVelocity();
+            omega_l_radps = state.GetWheelSpeedLeft();
+            omega_r_radps = state.GetWheelSpeedRight();
+            bgz_radps = state.GetGyroBiasZ();
+        });
+
+#undef VEHICLE_STATE_LOG_FIELDS
 }

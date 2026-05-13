@@ -19,7 +19,6 @@ namespace
 {
     using MazeMap::ContactForce;
     using MazeMap::ContactForces;
-    using MazeMap::DriveCommandSolution;
     using MazeMap::MotorEncoderDrive;
     using MazeMap::MotionRegime;
     using MazeMap::PlantDerivatives;
@@ -31,6 +30,75 @@ namespace
     using CommandVector = MazeMap::App::Internal::CommandVector;
 
     using PreparedParams = PlantModel::PreparedParams;
+
+    struct DriveCommandSolution
+    {
+        CommandVector control{};
+        float fanDutyCycle = 0.80f;
+        float batteryVoltageV = 8.4f;
+        float requestedCommonForceN = 0.0f;
+        float requestedDifferentialForceN = 0.0f;
+        float commandedCommonForceN = 0.0f;
+        float commandedDifferentialForceN = 0.0f;
+        float leftForceLimitN = 0.0f;
+        float rightForceLimitN = 0.0f;
+        float leftTangentialCapacityN = 0.0f;
+        float rightTangentialCapacityN = 0.0f;
+        bool commonForceClamped = false;
+        bool differentialForceClamped = false;
+        bool closedLoopReserveMode = false;
+        float reserveUsage = 1.0f;
+        float slipSpeedFloorMps = 0.0f;
+        float leftSlipRatio = 0.0f;
+        float rightSlipRatio = 0.0f;
+        float leftWheelSpeedRadps = 0.0f;
+        float rightWheelSpeedRadps = 0.0f;
+        float leftRollingWheelSpeedRadps = 0.0f;
+        float rightRollingWheelSpeedRadps = 0.0f;
+        float leftWheelTorqueNm = 0.0f;
+        float rightWheelTorqueNm = 0.0f;
+        float leftWheelAccelRadps2 = 0.0f;
+        float rightWheelAccelRadps2 = 0.0f;
+        float leftContactForceN = 0.0f;
+        float rightContactForceN = 0.0f;
+        float leftContactTorqueNm = 0.0f;
+        float rightContactTorqueNm = 0.0f;
+        float tractionScale = 1.0f;
+        bool tractionLimited = false;
+        float commandedLongitudinalAccelMps2 = 0.0f;
+        float commandedYawAccelRadps2 = 0.0f;
+        float longitudinalAccelErrorMps2 = 0.0f;
+        float yawAccelErrorRadps2 = 0.0f;
+        bool converged = false;
+        bool valid = false;
+    };
+
+    struct FeedforwardSolveContext
+    {
+        float batteryVoltageV = 8.4f;
+        float fanDutyCycle = 0.80f;
+        float reserveUsage = 1.0f;
+        float slipSpeedFloorMps = 0.0f;
+    };
+
+    struct FeedforwardForceRequest
+    {
+        float commonForceRequestN = 0.0f;
+        float differentialForceRequestN = 0.0f;
+        float baselineLateralYawMomentNm = 0.0f;
+    };
+
+    struct FeedforwardForceAllocation
+    {
+        float commonForceCommandN = 0.0f;
+        float differentialForceCommandN = 0.0f;
+        float leftForceCommandN = 0.0f;
+        float rightForceCommandN = 0.0f;
+        float leftForceLimitN = 0.0f;
+        float rightForceLimitN = 0.0f;
+        bool commonForceClamped = false;
+        bool differentialForceClamped = false;
+    };
 
     constexpr uint8_t kFrontLeft = 0U;
     constexpr uint8_t kFrontRight = 1U;
@@ -649,39 +717,6 @@ namespace
         validationState(VehicleState::kOmegaR) = rightWheelSpeedRadps;
         VehicleState::NormalizeStateVector(validationState);
         return validationState;
-    }
-
-    inline PlantModel::StateVector BuildFeedforwardOperatingState(
-        const PlantModel::StateVector& currentState,
-        bool hasCurrentState,
-        float currentForwardSpeedMps,
-        float currentLateralSpeedMps,
-        float currentYawRateRadps,
-        float currentLeftWheelSpeedRadps,
-        float currentRightWheelSpeedRadps,
-        const PreparedParams& params) noexcept
-    {
-        if (hasCurrentState)
-        {
-            return BuildDriveCommandOperatingState(currentState, params);
-        }
-
-        PlantModel::StateVector state = PlantModel::StateVector::Zero();
-        state(VehicleState::kU) =
-            std::isfinite(currentForwardSpeedMps) ? currentForwardSpeedMps : 0.0f;
-        state(VehicleState::kV) =
-            std::isfinite(currentLateralSpeedMps) ? currentLateralSpeedMps : 0.0f;
-        state(VehicleState::kR) =
-            std::isfinite(currentYawRateRadps) ? currentYawRateRadps : 0.0f;
-        state(VehicleState::kOmegaL) =
-            std::isfinite(currentLeftWheelSpeedRadps) ?
-            currentLeftWheelSpeedRadps :
-            (std::numeric_limits<float>::quiet_NaN)();
-        state(VehicleState::kOmegaR) =
-            std::isfinite(currentRightWheelSpeedRadps) ?
-            currentRightWheelSpeedRadps :
-            (std::numeric_limits<float>::quiet_NaN)();
-        return BuildDriveCommandOperatingState(state, params);
     }
 
     inline bool UpdateVelocityTargetSolutionPrediction(
@@ -1792,21 +1827,27 @@ namespace
 
 namespace MazeMap
 {
-    PlantModel::PlantModel() noexcept
-        : _preparedParams(Prepare(BuildParamsFromVehicleFacts()))
-    {
-    }
+    static DriveCommandSolution SolveFeedforwardCanonical(
+        const PlantModel& plant,
+        const MotorEncoderDrive* leftDrive,
+        const MotorEncoderDrive* rightDrive,
+        float forwardVelocityMps,
+        float yawRateRadps,
+        float desiredLongitudinalAccelMps2,
+        float desiredYawAccelRadps2,
+        float fanDutyCycle,
+        float batteryVoltageV,
+        bool hasVelocityTargets,
+        float targetForwardVelocityMps,
+        float targetYawRateRadps,
+        const PreparedParams& prepared) noexcept;
 
-    PlantModel::PlantModel(const Vehicle& vehicle) noexcept
+    PlantModel::PlantModel(const Vehicle& vehicle, const VehicleState& runtimeState) noexcept
         : _preparedParams(Prepare(BuildParamsFromVehicleFacts()))
-        , _leftDrive(&vehicle.GetLeftMotorEncoderDrive())
-        , _rightDrive(&vehicle.GetRightMotorEncoderDrive())
+        , _runtimeState(runtimeState)
+        , _leftDrive(vehicle.GetLeftMotorEncoderDrive())
+        , _rightDrive(vehicle.GetRightMotorEncoderDrive())
     {
-    }
-
-    void PlantModel::AttachRuntimeState(const VehicleState& runtimeState) noexcept
-    {
-        _runtimeState = &runtimeState;
     }
 
     float PlantModel::wallObservationNoHitRangeM() const noexcept
@@ -1929,20 +1970,15 @@ namespace MazeMap
     PlantModel::StateVector PlantModel::BuildBoundStateVector() const noexcept
     {
         StateVector state = StateVector::Zero();
-        if (_runtimeState == nullptr)
-        {
-            return state;
-        }
-
-        state(VehicleState::kPx) = _runtimeState->GetPositionX();
-        state(VehicleState::kPy) = _runtimeState->GetPositionY();
-        state(VehicleState::kPsi) = _runtimeState->GetOrientation();
-        state(VehicleState::kU) = _runtimeState->GetVelocity();
-        state(VehicleState::kV) = _runtimeState->GetLateralVelocity();
-        state(VehicleState::kR) = _runtimeState->GetRotationalVelocity();
-        state(VehicleState::kOmegaL) = _runtimeState->GetWheelSpeedLeft();
-        state(VehicleState::kOmegaR) = _runtimeState->GetWheelSpeedRight();
-        state(VehicleState::kBgz) = _runtimeState->GetGyroBiasZ();
+        state(VehicleState::kPx) = _runtimeState.GetPositionX();
+        state(VehicleState::kPy) = _runtimeState.GetPositionY();
+        state(VehicleState::kPsi) = _runtimeState.GetOrientation();
+        state(VehicleState::kU) = _runtimeState.GetVelocity();
+        state(VehicleState::kV) = _runtimeState.GetLateralVelocity();
+        state(VehicleState::kR) = _runtimeState.GetRotationalVelocity();
+        state(VehicleState::kOmegaL) = _runtimeState.GetWheelSpeedLeft();
+        state(VehicleState::kOmegaR) = _runtimeState.GetWheelSpeedRight();
+        state(VehicleState::kBgz) = _runtimeState.GetGyroBiasZ();
         VehicleState::NormalizeStateVector(state);
         return state;
     }
@@ -1961,20 +1997,13 @@ namespace MazeMap
         const float leftMotorCommand = std::isfinite(control.LeftMotorPwm()) ? control.LeftMotorPwm() : 0.0f;
         const float rightMotorCommand = std::isfinite(control.RightMotorPwm()) ? control.RightMotorPwm() : 0.0f;
 
-        if ((_leftDrive == nullptr) || (_rightDrive == nullptr))
-        {
-            leftAppliedBankTorqueNm = 0.0f;
-            rightAppliedBankTorqueNm = 0.0f;
-            return;
-        }
-
         leftAppliedBankTorqueNm =
-            _leftDrive->getTorqueFromCommand(
+            _leftDrive.getTorqueFromCommand(
                 leftMotorCommand,
                 leftWheelSpeedRadps,
                 batteryVoltageV);
         rightAppliedBankTorqueNm =
-            _rightDrive->getTorqueFromCommand(
+            _rightDrive.getTorqueFromCommand(
                 rightMotorCommand,
                 rightWheelSpeedRadps,
                 batteryVoltageV);
@@ -2754,7 +2783,7 @@ namespace MazeMap
         return implicitState;
     }
 
-    DriveCommandSolution PlantModel::solveSteadyStateFeedforward(
+    App::Internal::CommandVector PlantModel::solveSteadyStateFeedforward(
         float desiredForwardVelocityMps,
         float desiredYawRateRadps,
         float fanDutyCycle,
@@ -2765,52 +2794,51 @@ namespace MazeMap
         const float resolvedYawRateRadps =
             std::isfinite(desiredYawRateRadps) ? desiredYawRateRadps : 0.0f;
 
-        FeedforwardRequest request{};
-        request.currentForwardSpeedMps = resolvedForwardVelocityMps;
-        request.currentLateralSpeedMps = 0.0f;
-        request.currentYawRateRadps = resolvedYawRateRadps;
-        request.currentLeftWheelSpeedRadps =
-            (resolvedForwardVelocityMps + (_preparedParams.halfTrackWidthM * resolvedYawRateRadps)) *
-            _preparedParams.invWheelRadiusM;
-        request.currentRightWheelSpeedRadps =
-            (resolvedForwardVelocityMps - (_preparedParams.halfTrackWidthM * resolvedYawRateRadps)) *
-            _preparedParams.invWheelRadiusM;
-        request.desiredLongitudinalAccelMps2 = 0.0f;
-        request.desiredYawAccelRadps2 = 0.0f;
-        request.fanDutyCycle = fanDutyCycle;
-        request.batteryVoltageV = batteryVoltageV;
-        request.reserveUsage = 1.0f;
-        request.closedLoopReserveMode = false;
-        request.hasVelocityTargets = true;
-        request.targetForwardVelocityMps = resolvedForwardVelocityMps;
-        request.targetYawRateRadps = resolvedYawRateRadps;
-        return solveFeedforwardCanonical(request, _preparedParams);
+        return SolveFeedforwardCanonical(
+            *this,
+            &_leftDrive,
+            &_rightDrive,
+            resolvedForwardVelocityMps,
+            resolvedYawRateRadps,
+            0.0f,
+            0.0f,
+            fanDutyCycle,
+            batteryVoltageV,
+            true,
+            resolvedForwardVelocityMps,
+            resolvedYawRateRadps,
+            _preparedParams).control;
     }
 
-    DriveCommandSolution PlantModel::solveAccelerationFeedforward(
+    App::Internal::CommandVector PlantModel::solveAccelerationFeedforward(
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2,
         float fanDutyCycle,
         float batteryVoltageV) const noexcept
     {
         const StateVector currentState = BuildBoundStateVector();
-        FeedforwardRequest request{};
-        request.currentState = currentState;
-        request.hasCurrentState = true;
-        request.currentForwardSpeedMps = currentState(VehicleState::kU);
-        request.currentLateralSpeedMps = currentState(VehicleState::kV);
-        request.currentYawRateRadps = currentState(VehicleState::kR);
-        request.currentLeftWheelSpeedRadps = currentState(VehicleState::kOmegaL);
-        request.currentRightWheelSpeedRadps = currentState(VehicleState::kOmegaR);
-        request.desiredLongitudinalAccelMps2 =
+        const float forwardVelocityMps =
+            std::isfinite(currentState(VehicleState::kU)) ? currentState(VehicleState::kU) : 0.0f;
+        const float yawRateRadps =
+            std::isfinite(currentState(VehicleState::kR)) ? currentState(VehicleState::kR) : 0.0f;
+        const float resolvedLongitudinalAccelMps2 =
             std::isfinite(desiredLongitudinalAccelMps2) ? desiredLongitudinalAccelMps2 : 0.0f;
-        request.desiredYawAccelRadps2 =
+        const float resolvedYawAccelRadps2 =
             std::isfinite(desiredYawAccelRadps2) ? desiredYawAccelRadps2 : 0.0f;
-        request.fanDutyCycle = fanDutyCycle;
-        request.batteryVoltageV = batteryVoltageV;
-        request.reserveUsage = 1.0f;
-        request.closedLoopReserveMode = false;
-        return solveFeedforwardCanonical(request, _preparedParams);
+        return SolveFeedforwardCanonical(
+            *this,
+            &_leftDrive,
+            &_rightDrive,
+            forwardVelocityMps,
+            yawRateRadps,
+            resolvedLongitudinalAccelMps2,
+            resolvedYawAccelRadps2,
+            fanDutyCycle,
+            batteryVoltageV,
+            false,
+            0.0f,
+            0.0f,
+            _preparedParams).control;
     }
 
     void PlantModel::ComputeBodyAction(
@@ -3244,21 +3272,20 @@ namespace MazeMap
         const auto solveLimitProbe =
             [&](float desiredLongitudinalAccelMps2, float desiredYawAccelRadps2) noexcept
         {
-            FeedforwardRequest request{};
-            request.currentState = operatingState;
-            request.hasCurrentState = true;
-            request.currentForwardSpeedMps = operatingState(VehicleState::kU);
-            request.currentLateralSpeedMps = operatingState(VehicleState::kV);
-            request.currentYawRateRadps = operatingState(VehicleState::kR);
-            request.currentLeftWheelSpeedRadps = operatingState(VehicleState::kOmegaL);
-            request.currentRightWheelSpeedRadps = operatingState(VehicleState::kOmegaR);
-            request.desiredLongitudinalAccelMps2 = desiredLongitudinalAccelMps2;
-            request.desiredYawAccelRadps2 = desiredYawAccelRadps2;
-            request.fanDutyCycle = fanDutyCycle;
-            request.batteryVoltageV = params.supplyVoltageV;
-            request.reserveUsage = 1.0f;
-            request.closedLoopReserveMode = false;
-            return solveFeedforwardCanonical(request, params);
+            return SolveFeedforwardCanonical(
+                *this,
+                &_leftDrive,
+                &_rightDrive,
+                operatingState(VehicleState::kU),
+                operatingState(VehicleState::kR),
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2,
+                fanDutyCycle,
+                params.supplyVoltageV,
+                false,
+                0.0f,
+                0.0f,
+                params);
         };
 
         const DriveCommandSolution positiveLongitudinal =
@@ -3325,26 +3352,29 @@ namespace MazeMap
             fanDutyCycle);
     }
 
-    PlantModel::FeedforwardSolveContext PlantModel::buildFeedforwardSolveContext(
-        const FeedforwardRequest& request,
-        const PreparedParams& prepared) const noexcept
+    static FeedforwardSolveContext BuildFeedforwardSolveContext(
+        float fanDutyCycle,
+        float batteryVoltageV,
+        const PreparedParams& prepared) noexcept
     {
         FeedforwardSolveContext solveContext{};
-        solveContext.batteryVoltageV = EffectiveBatteryVoltage(request.batteryVoltageV, prepared);
-        solveContext.fanDutyCycle = Clamp01(request.fanDutyCycle);
-        solveContext.reserveUsage =
-            request.closedLoopReserveMode ? ResolveTractionLimitedReserveScale(request.reserveUsage) : 1.0f;
+        solveContext.batteryVoltageV = EffectiveBatteryVoltage(batteryVoltageV, prepared);
+        solveContext.fanDutyCycle = Clamp01(fanDutyCycle);
+        solveContext.reserveUsage = 1.0f;
         solveContext.slipSpeedFloorMps = (std::max)(prepared.rollingRegularizationMps, 0.0f);
         return solveContext;
     }
 
-    float PlantModel::computeControllerPivotScrubYawMomentNm(
-        const FeedforwardRequest& request,
-        const StateVector& operatingState,
+    static float ComputeControllerPivotScrubYawMomentNm(
+        const PlantModel::StateVector& operatingState,
+        bool hasVelocityTargets,
+        float targetForwardVelocityMps,
+        float targetYawRateRadps,
+        float desiredYawAccelRadps2,
         float effectiveTrackWidthM,
-        const PreparedParams& prepared) const noexcept
+        const PreparedParams& prepared) noexcept
     {
-        if (!request.hasVelocityTargets)
+        if (!hasVelocityTargets)
         {
             return 0.0f;
         }
@@ -3358,7 +3388,7 @@ namespace MazeMap
             return 0.0f;
         }
 
-        const float commandYawRateAbsRadps = std::fabs(request.targetYawRateRadps);
+        const float commandYawRateAbsRadps = std::fabs(targetYawRateRadps);
         const float commandYawGate =
             SmoothStep(
                 prepared.pivotScrubMinCommandYawRateRadps,
@@ -3371,7 +3401,7 @@ namespace MazeMap
 
         const float pivotSpeedMarginMps =
             (0.5f * effectiveTrackWidthM * commandYawRateAbsRadps) -
-            std::fabs(request.targetForwardVelocityMps);
+            std::fabs(targetForwardVelocityMps);
         const float pivotRegimeBlendBandMps =
             (std::max)(prepared.pivotScrubMaxForwardSpeedMps, prepared.rollingRegularizationMps);
         const float pivotRegimeGate =
@@ -3397,7 +3427,7 @@ namespace MazeMap
             persistentScrubYawMomentNm +
             (breakawaySurplusBlend * breakawaySurplusYawMomentNm);
         const float commandDirection =
-            SignedDirectionFast(request.targetYawRateRadps, request.desiredYawAccelRadps2);
+            SignedDirectionFast(targetYawRateRadps, desiredYawAccelRadps2);
         return
             commandDirection *
             commandYawGate *
@@ -3405,36 +3435,32 @@ namespace MazeMap
             scrubYawMomentNm;
     }
 
-    PlantModel::FeedforwardForceRequest PlantModel::buildForceRequest(
-        const FeedforwardRequest& request,
+    static FeedforwardForceRequest BuildForceRequest(
+        const PlantModel& plant,
+        const PlantModel::StateVector& operatingState,
+        float desiredLongitudinalAccelMps2,
+        float desiredYawAccelRadps2,
+        bool hasVelocityTargets,
+        float targetForwardVelocityMps,
+        float targetYawRateRadps,
         const FeedforwardSolveContext& solveContext,
-        const PreparedParams& prepared) const noexcept
+        const PreparedParams& prepared) noexcept
     {
         FeedforwardForceRequest forceRequest{};
-        const StateVector operatingState =
-            BuildFeedforwardOperatingState(
-                request.currentState,
-                request.hasCurrentState,
-                request.currentForwardSpeedMps,
-                request.currentLateralSpeedMps,
-                request.currentYawRateRadps,
-                request.currentLeftWheelSpeedRadps,
-                request.currentRightWheelSpeedRadps,
-                prepared);
 
         const CommandVector neutralControl = CommandVector(0.0f, 0.0f);
         const PlantDerivatives baselineDerivatives =
-            forwardStep(
+            plant.forwardStep(
                 operatingState,
                 neutralControl,
                 solveContext.fanDutyCycle,
                 solveContext.batteryVoltageV,
                 prepared);
 
-        const float desiredLongitudinalAccelMps2 =
-            std::isfinite(request.desiredLongitudinalAccelMps2) ? request.desiredLongitudinalAccelMps2 : 0.0f;
-        const float desiredYawAccelRadps2 =
-            std::isfinite(request.desiredYawAccelRadps2) ? request.desiredYawAccelRadps2 : 0.0f;
+        const float resolvedLongitudinalAccelMps2 =
+            std::isfinite(desiredLongitudinalAccelMps2) ? desiredLongitudinalAccelMps2 : 0.0f;
+        const float resolvedYawAccelRadps2 =
+            std::isfinite(desiredYawAccelRadps2) ? desiredYawAccelRadps2 : 0.0f;
 
         const float frontRightForceN =
             baselineDerivatives.contactForces.contacts[kFrontLeft].rightForceN +
@@ -3445,21 +3471,24 @@ namespace MazeMap
         forceRequest.baselineLateralYawMomentNm =
             prepared.longitudinalOffsetM * (frontRightForceN - rearRightForceN);
         forceRequest.commonForceRequestN =
-            0.5f * prepared.longitudinalMassKg * desiredLongitudinalAccelMps2;
+            0.5f * prepared.longitudinalMassKg * resolvedLongitudinalAccelMps2;
 
         const float motionTrackWidthM =
             ResolveMotionTrackWidthM(
-                request.targetForwardVelocityMps,
-                request.targetYawRateRadps,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
                 prepared);
         const float controllerPivotScrubYawMomentNm =
-            computeControllerPivotScrubYawMomentNm(
-                request,
+            ComputeControllerPivotScrubYawMomentNm(
                 operatingState,
-                request.hasVelocityTargets ? motionTrackWidthM : prepared.trackWidthM,
+                hasVelocityTargets,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                resolvedYawAccelRadps2,
+                hasVelocityTargets ? motionTrackWidthM : prepared.trackWidthM,
                 prepared);
         const float effectiveTrackWidthM =
-            (request.hasVelocityTargets &&
+            (hasVelocityTargets &&
              (std::fabs(controllerPivotScrubYawMomentNm) > prepared.forceEpsilonN) &&
              std::isfinite(motionTrackWidthM) &&
              (motionTrackWidthM > prepared.forceEpsilonN)) ?
@@ -3468,7 +3497,7 @@ namespace MazeMap
         const float inverseTrackWidthPerM =
             (effectiveTrackWidthM > prepared.forceEpsilonN) ? (1.0f / effectiveTrackWidthM) : 0.0f;
         const float requestedYawMomentNm =
-            (prepared.yawInertiaKgM2 * desiredYawAccelRadps2) +
+            (prepared.yawInertiaKgM2 * resolvedYawAccelRadps2) +
             (prepared.yawDampingNmPerRadps * operatingState(VehicleState::kR)) -
             forceRequest.baselineLateralYawMomentNm +
             controllerPivotScrubYawMomentNm;
@@ -3476,11 +3505,11 @@ namespace MazeMap
         return forceRequest;
     }
 
-    PlantModel::FeedforwardForceAllocation PlantModel::allocateCommonAndDifferentialForces(
+    static FeedforwardForceAllocation AllocateCommonAndDifferentialForces(
         const FeedforwardForceRequest& request,
         float leftTangentialCapacityN,
         float rightTangentialCapacityN,
-        float reserveUsage) const noexcept
+        float reserveUsage) noexcept
     {
         FeedforwardForceAllocation allocation{};
         const float resolvedReserveUsage =
@@ -3524,29 +3553,43 @@ namespace MazeMap
         return allocation;
     }
 
-    DriveCommandSolution PlantModel::solveFeedforwardCanonical(
-        const FeedforwardRequest& request,
-        const PreparedParams& prepared) const noexcept
+    static DriveCommandSolution SolveFeedforwardCanonical(
+        const PlantModel& plant,
+        const MotorEncoderDrive* leftDrive,
+        const MotorEncoderDrive* rightDrive,
+        float forwardVelocityMps,
+        float yawRateRadps,
+        float desiredLongitudinalAccelMps2,
+        float desiredYawAccelRadps2,
+        float fanDutyCycle,
+        float batteryVoltageV,
+        bool hasVelocityTargets,
+        float targetForwardVelocityMps,
+        float targetYawRateRadps,
+        const PreparedParams& prepared) noexcept
     {
-        const StateVector operatingState =
-            BuildFeedforwardOperatingState(
-                request.currentState,
-                request.hasCurrentState,
-                request.currentForwardSpeedMps,
-                request.currentLateralSpeedMps,
-                request.currentYawRateRadps,
-                request.currentLeftWheelSpeedRadps,
-                request.currentRightWheelSpeedRadps,
+        const PlantModel::StateVector operatingState =
+            BuildReducedDriveCommandOperatingState(forwardVelocityMps, yawRateRadps, prepared);
+        const FeedforwardSolveContext solveContext =
+            BuildFeedforwardSolveContext(fanDutyCycle, batteryVoltageV, prepared);
+        const FeedforwardForceRequest forceRequest =
+            BuildForceRequest(
+                plant,
+                operatingState,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2,
+                hasVelocityTargets,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                solveContext,
                 prepared);
-        const FeedforwardSolveContext solveContext = buildFeedforwardSolveContext(request, prepared);
-        const FeedforwardForceRequest forceRequest = buildForceRequest(request, solveContext, prepared);
 
         DriveCommandSolution solution{};
         solution.fanDutyCycle = solveContext.fanDutyCycle;
         solution.batteryVoltageV = solveContext.batteryVoltageV;
         solution.requestedCommonForceN = forceRequest.commonForceRequestN;
         solution.requestedDifferentialForceN = forceRequest.differentialForceRequestN;
-        solution.closedLoopReserveMode = request.closedLoopReserveMode;
+        solution.closedLoopReserveMode = false;
         solution.reserveUsage = solveContext.reserveUsage;
         solution.slipSpeedFloorMps = solveContext.slipSpeedFloorMps;
 
@@ -3572,7 +3615,7 @@ namespace MazeMap
         solution.rightTangentialCapacityN = rightBaseTangentialCapacityN;
 
         const FeedforwardForceAllocation allocation =
-            allocateCommonAndDifferentialForces(
+            AllocateCommonAndDifferentialForces(
                 forceRequest,
                 solution.leftTangentialCapacityN,
                 solution.rightTangentialCapacityN,
@@ -3602,8 +3645,8 @@ namespace MazeMap
         solution.tractionScale = (std::clamp)(tractionScale, 0.0f, 1.0f);
 
         PopulateDriveCommandSolutionFromBankForces(
-            _leftDrive,
-            _rightDrive,
+            leftDrive,
+            rightDrive,
             operatingState(VehicleState::kU),
             operatingState(VehicleState::kR),
             forceRequest.baselineLateralYawMomentNm,
@@ -3614,10 +3657,10 @@ namespace MazeMap
 
         const bool predictionValid =
             UpdateVelocityTargetSolutionPrediction(
-                *this,
+                plant,
                 operatingState,
-                request.desiredLongitudinalAccelMps2,
-                request.desiredYawAccelRadps2,
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2,
                 prepared,
                 solution);
         solution.valid =

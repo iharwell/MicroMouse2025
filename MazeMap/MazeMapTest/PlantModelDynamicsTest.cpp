@@ -20,7 +20,8 @@ namespace MazeMap
     public:
         TEST_METHOD(PlantModelSymmetricDriveDoesNotCreateYawBias)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
 
             VehicleState::StateVector state = VehicleState::StateVector::Zero();
@@ -42,7 +43,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelTireForcesRetainPreProjectionUtilizationAboveUnity)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
 
@@ -59,7 +61,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelTireForcesPreservePreProjectionUtilizationAboveUnity)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
 
@@ -81,7 +84,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelPreparedOverloadsMatchRawOverloads)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             PlantParams params = PlantParams::Default();
             params.corneringStiffnessFrontNPerRad = 19.5f;
             params.corneringStiffnessRearNPerRad = 17.25f;
@@ -190,7 +194,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelExactRestHoldKeepsMotionStateAtZero)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const float zeroWheelSpeedToleranceRadps = kZeroLinearVelocityToleranceMps / params.wheelRadiusM;
@@ -234,7 +239,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelSmallStationaryPerturbationsSnapBackToRest)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const float zeroWheelSpeedToleranceRadps = kZeroLinearVelocityToleranceMps / params.wheelRadiusM;
@@ -273,7 +279,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelPreparedNearZeroLateralPerturbationsSnapBackToRest)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             const VehicleState::StateVector initialState = BuildUkfState(
@@ -315,7 +322,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelComputesFiniteAlgebraicSlipAndForces)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
 
             VehicleState::StateVector state = VehicleState::StateVector::Zero();
@@ -356,7 +364,8 @@ namespace MazeMap
 
         TEST_METHOD(ContactForcesExposeRawPreProjectionUtilization)
         {
-            const PlantModel plant;
+            PlantModelTestRuntime runtime;
+            const PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
 
@@ -394,7 +403,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelImuAccelerationIncludesLeverArmTerms)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             PlantParams zeroLeverParams = PlantParams::Default();
             zeroLeverParams.backLeftImuMount = SensorMount(Eigen::Vector2f::Zero(), Eigen::Matrix2f::Identity());
             PlantParams leverParams = zeroLeverParams;
@@ -437,7 +447,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelPredictsImuAccelerationInProjectBodyAxes)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             PlantParams params = PlantParams::Default();
 
             VehicleState::StateVector state = VehicleState::StateVector::Zero();
@@ -469,7 +480,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelSymmetricPositiveDriveFromRestMovesForward)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             VehicleState::StateVector state = BuildUkfState(
@@ -518,7 +530,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelStaticFrictionHoldsSubthresholdDriveAtRest)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const float staticWindowRadps = params.staticFrictionMaxSpeedMps / params.wheelRadiusM;
 
@@ -562,7 +575,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelIntegrateSingleLargeStepRemainsFiniteAndSymmetric)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
 
             VehicleState::StateVector state = BuildUkfState(
@@ -595,7 +609,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelIntegratePreservesHeadingNormalization)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             VehicleState::StateVector state = BuildUkfState(
                 0.0f,
@@ -618,6 +633,8 @@ namespace MazeMap
 
     };
 }
+
+
 
 
 

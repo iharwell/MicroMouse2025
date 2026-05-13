@@ -102,8 +102,9 @@ namespace
 
     int RunOpenFloorUkfStationaryBenchmark(uint32_t iterations)
     {
-        MazeMap::PlantModel plant(vehicle);
-        MazeMap::Estimator ukf(plant);
+        MazeMap::VehicleState runtimeState;
+        MazeMap::PlantModel plant(vehicle, runtimeState);
+        MazeMap::Estimator ukf(plant, runtimeState);
         ResetOpenFloorBenchmarkUkf(ukf);
 
         const MazeMap::App::Internal::CommandVector control =
@@ -168,7 +169,7 @@ namespace
             (iterations > 0U) ?
             ((elapsedMs.count() * 1000.0) / static_cast<double>(iterations)) :
             0.0;
-        const MazeMap::VehicleState& state = ukf.RuntimeState();
+        const MazeMap::VehicleState& state = runtimeState;
         const MazeMap::VehicleState::StateMatrix covariance = state.GetCovariance();
 
         std::cout << std::fixed << std::setprecision(6);

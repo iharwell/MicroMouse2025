@@ -384,7 +384,7 @@ namespace MazeMap
             const SensorMount& sensor,
             const Maze& maze) const noexcept;
 
-        PlantModel _plantModel;
+        const PlantModel& _plantModel;
         WallGeometryModel _geometryModel;
         UKF<VehicleState::kDimension, 3> _filter;
         float _frozenDtS = 0.0f;

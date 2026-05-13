@@ -4,11 +4,24 @@
 #include "TimeStepPropagationTestSupport.h"
 
 #include "..\MazeMap\PlantModel.h"
+#include "..\MazeMap\Vehicle.h"
 
 #include <cstddef>
 
 namespace MazeMap
 {
+    struct PlantModelTestRuntime final
+    {
+        Vehicle vehicle{};
+        VehicleState runtimeState{};
+        PlantModel plant;
+
+        PlantModelTestRuntime() noexcept
+            : plant(vehicle, runtimeState)
+        {
+        }
+    };
+
     inline void AssertStateVectorNear(
         const VehicleState::StateVector& expected,
         const VehicleState::StateVector& actual,
@@ -136,78 +149,6 @@ namespace MazeMap
             expected.maxContactUtilization,
             actual.maxContactUtilization,
             tolerance);
-    }
-
-    inline void AssertDriveCommandSolutionNear(
-        const DriveCommandSolution& expected,
-        const DriveCommandSolution& actual,
-        float tolerance)
-    {
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.LeftMotorPwm(),
-            actual.control.LeftMotorPwm(),
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.control.RightMotorPwm(),
-            actual.control.RightMotorPwm(),
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.fanDutyCycle,
-            actual.fanDutyCycle,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.batteryVoltageV,
-            actual.batteryVoltageV,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.leftSlipRatio, actual.leftSlipRatio, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.rightSlipRatio, actual.rightSlipRatio, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.leftWheelSpeedRadps, actual.leftWheelSpeedRadps, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.rightWheelSpeedRadps, actual.rightWheelSpeedRadps, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.leftRollingWheelSpeedRadps,
-            actual.leftRollingWheelSpeedRadps,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.rightRollingWheelSpeedRadps,
-            actual.rightRollingWheelSpeedRadps,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.leftWheelTorqueNm, actual.leftWheelTorqueNm, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.rightWheelTorqueNm, actual.rightWheelTorqueNm, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.leftWheelAccelRadps2,
-            actual.leftWheelAccelRadps2,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.rightWheelAccelRadps2,
-            actual.rightWheelAccelRadps2,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.leftContactForceN, actual.leftContactForceN, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.rightContactForceN, actual.rightContactForceN, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.leftContactTorqueNm, actual.leftContactTorqueNm, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.rightContactTorqueNm, actual.rightContactTorqueNm, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(expected.tractionScale, actual.tractionScale, tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            static_cast<int>(expected.tractionLimited),
-            static_cast<int>(actual.tractionLimited));
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.commandedLongitudinalAccelMps2,
-            actual.commandedLongitudinalAccelMps2,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.commandedYawAccelRadps2,
-            actual.commandedYawAccelRadps2,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.longitudinalAccelErrorMps2,
-            actual.longitudinalAccelErrorMps2,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            expected.yawAccelErrorRadps2,
-            actual.yawAccelErrorRadps2,
-            tolerance);
-        Microsoft::VisualStudio::CppUnitTestFramework::Assert::AreEqual(
-            static_cast<int>(expected.converged),
-            static_cast<int>(actual.converged));
     }
 
 }

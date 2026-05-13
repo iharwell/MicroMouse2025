@@ -99,6 +99,7 @@ namespace MazeMap::App
         void ApplyEncoderObservation(
             DriveBase& drive,
             Estimator& estimator,
+            VehicleState& runtimeState,
             const float leftDistanceDeltaM,
             const float rightDistanceDeltaM,
             const float yawRateRadps,
@@ -135,6 +136,7 @@ namespace MazeMap::App
             UpdateDriveEstimator(
                 drive,
                 estimator,
+                runtimeState,
                 dtSeconds,
                 snapshot);
         }
@@ -190,6 +192,7 @@ namespace MazeMap::App
             ApplyEncoderObservation(
                 runtime.Drive(),
                 runtime.Estimator(),
+                runtime.RuntimeState(),
                 kSmoothEntrySpeedMps * kSimulationDtSeconds,
                 kSmoothEntrySpeedMps * kSimulationDtSeconds,
                 0.0f,
@@ -230,6 +233,7 @@ namespace MazeMap::App
             ApplyEncoderObservation(
                 runtime.Drive(),
                 runtime.Estimator(),
+                runtime.RuntimeState(),
                 leftDistanceDeltaM,
                 rightDistanceDeltaM,
                 truthState(VehicleState::kR),
@@ -326,7 +330,7 @@ namespace MazeMap::App
             ScopedMissionFanDuty fanDuty(0.80f);
             ManeuverExecutionTrace trace{};
             Internal::SharedRobotRuntime runtime;
-            PlantModel plant;
+            PlantModel& plant = runtime.Plant();
             float leftEncoderRemainderCounts = 0.0f;
             float rightEncoderRemainderCounts = 0.0f;
 

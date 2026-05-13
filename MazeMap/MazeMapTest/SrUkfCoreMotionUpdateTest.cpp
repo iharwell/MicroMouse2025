@@ -73,7 +73,8 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreZeroVelocityEncoderUpdateKeepsYawRateVarianceBoundedAtRest)
         {
             const PlantParams params = PlantParams::Default();
-            PlantModel plant;
+            SrUkfCoreTestRuntime runtime;
+            PlantModel& plant = runtime.plantModel;
             SrUkfCore core = MakeDefaultSrUkfCore();
 
             const VehicleState::StateVector initialState =
@@ -135,7 +136,8 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreMovingEncoderUpdateKeepsYawRateVarianceLowAfterPredictAndUpdate)
         {
             const PlantParams params = PlantParams::Default();
-            PlantModel plant;
+            SrUkfCoreTestRuntime runtime;
+            PlantModel& plant = runtime.plantModel;
             SrUkfCore core = MakeDefaultSrUkfCore();
             const float distancePerCountM = DistancePerEncoderCountMeters(params);
             const float measuredWheelOmegaRadps = distancePerCountM / (params.wheelRadiusM * 0.001f);
@@ -703,7 +705,8 @@ namespace MazeMap
         }
         TEST_METHOD(SrUkfCoreControlDirectionsCorrect)
         {
-			PlantModel model = PlantModel();
+			SrUkfCoreTestRuntime runtime;
+			PlantModel& model = runtime.plantModel;
             const PlantParams& params = PlantParams::Default();
             constexpr float forwardVelocityTargetMps = 1.0f;
             const VehicleState::StateVector initialState =
@@ -727,7 +730,7 @@ namespace MazeMap
 
             for (int step = 0; step < 3000; ++step)
             {
-                auto control =
+                const App::Internal::CommandVector control =
                     model.solveSteadyStateFeedforward(
                         forwardVelocityTargetMps,
                         0.0f,
@@ -736,7 +739,7 @@ namespace MazeMap
 
                 RunPredictionMatchingCycle(
                     core,
-                    control.control,
+                    control,
                     params,
                     dt,
                     syntheticEncoderState,
@@ -759,7 +762,8 @@ namespace MazeMap
         }
         TEST_METHOD(SrUkfCoreControlDirectionsCorrectAfterStationary)
         {
-            PlantModel model = PlantModel();
+            SrUkfCoreTestRuntime runtime;
+            PlantModel& model = runtime.plantModel;
             const PlantParams& params = PlantParams::Default();
             constexpr float forwardVelocityTargetMps = 1.0f;
             constexpr float dt = 0.001f;
@@ -768,7 +772,7 @@ namespace MazeMap
 
             for (int step = 0; step < 3000; ++step)
             {
-                auto control =
+                const App::Internal::CommandVector control =
                     model.solveSteadyStateFeedforward(
                         forwardVelocityTargetMps,
                         0.0f,
@@ -777,7 +781,7 @@ namespace MazeMap
 
                 RunPredictionMatchingCycle(
                     core,
-                    control.control,
+                    control,
                     params,
                     dt,
                     syntheticEncoderState,
@@ -907,7 +911,8 @@ namespace MazeMap
         TEST_METHOD(SrUkfCorePredictRefreshesAppliedTorqueFromCurrentControl)
         {
             const PlantParams params = PlantParams::Default();
-            const PlantModel plant;
+            SrUkfCoreTestRuntime runtime;
+            const PlantModel& plant = runtime.plantModel;
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
@@ -980,3 +985,4 @@ namespace MazeMap
         }
     };
 }
+

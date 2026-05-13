@@ -48,12 +48,10 @@ namespace MazeMap
         }
     }
 
-    Estimator::Estimator(const PlantModel& plantModel, VehicleState* runtimeState) noexcept
-        : _plantModel(plantModel)
-        , _core(plantModel)
+    Estimator::Estimator(const PlantModel& plantModel, VehicleState& runtimeState) noexcept
+        : _core(plantModel)
         , _mapEvidence()
-        , _localRuntimeState()
-        , _runtimeState((runtimeState != nullptr) ? runtimeState : &_localRuntimeState)
+        , _runtimeState(runtimeState)
     {
         SyncRuntimeState();
     }
@@ -175,13 +173,6 @@ namespace MazeMap
         return result;
     }
 
-    void Estimator::AttachRuntimeState(VehicleState& runtimeState) noexcept
-    {
-        runtimeState = *_runtimeState;
-        _runtimeState = &runtimeState;
-        SyncRuntimeState();
-    }
-
     void Estimator::ClearFault() noexcept
     {
         _faulted = false;
@@ -208,7 +199,7 @@ namespace MazeMap
         float preservedGyroBiasRadps = currentState(VehicleState::kBgz);
         if (!std::isfinite(preservedGyroBiasRadps))
         {
-            preservedGyroBiasRadps = _runtimeState->GetGyroBiasZ();
+            preservedGyroBiasRadps = _runtimeState.GetGyroBiasZ();
         }
         state(VehicleState::kBgz) = std::isfinite(preservedGyroBiasRadps) ? preservedGyroBiasRadps : 0.0f;
 
@@ -290,15 +281,15 @@ namespace MazeMap
 
     void Estimator::ResetRuntimeMetadata() noexcept
     {
-        _runtimeState->SetTime(0.0f);
-        _runtimeState->SetTimestampUs(0U);
-        _runtimeState->SetSensorSnapshot(SensorSnapshot{});
+        _runtimeState.SetTime(0.0f);
+        _runtimeState.SetTimestampUs(0U);
+        _runtimeState.SetSensorSnapshot(SensorSnapshot{});
     }
 
     void Estimator::SyncRuntimeState() noexcept
     {
-        _runtimeState->SetStateVector(_core.state());
-        _runtimeState->SetCovariance(_core.covariance());
+        _runtimeState.SetStateVector(_core.state());
+        _runtimeState.SetCovariance(_core.covariance());
     }
 
     void Estimator::TriggerFault(const char* reason) noexcept

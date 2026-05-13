@@ -211,9 +211,6 @@
     </ClCompile>
     <ClCompile Include="SharedRuntimeTest.cpp" />
     <ClCompile Include="MmLogSchemaCompositionTest.cpp" />
-    <ClCompile Include="..\MazeMap\MmLog.cpp">
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-    </ClCompile>
     <ClCompile Include="ManeuverTest.cpp" />
     <ClCompile Include="WallMappingTest.cpp" />
     <ClCompile Include="MazeMaskTest.cpp" />

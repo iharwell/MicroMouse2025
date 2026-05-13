@@ -89,7 +89,7 @@ namespace
                 snapshot.encoderObservation.rightVelocityMps * invWheelRadiusM;
         }
         snapshot.encoderObservationValid = true;
-        UpdateDriveEstimator(runtime.Drive(), runtime.Estimator(), dtSeconds, snapshot);
+        UpdateDriveEstimator(runtime.Drive(), runtime.Estimator(), runtime.RuntimeState(), dtSeconds, snapshot);
     }
 
     void CaptureFaultCallback(void* context, const char* reason) noexcept

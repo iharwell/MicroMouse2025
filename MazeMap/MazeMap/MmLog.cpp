@@ -7,136 +7,29 @@
 namespace MazeMap {
     namespace mmlog {
 
-        namespace {
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+        DMAMEM alignas(32) std::uint8_t MmLogLogger::s_primaryStorage[MMLOG_PRIMARY_QUEUE_BYTES]{};
+        DMAMEM alignas(32) std::uint8_t MmLogLogger::s_sidecarStorage[MMLOG_SIDECAR_QUEUE_BYTES]{};
+        bool MmLogLogger::s_teensyStorageClaimed = false;
+#endif
 
-            constexpr std::size_t kLineBufferChars = 513u;
+        void MmLogLogger::copyTruncatedText(
+            char* const destination,
+            const std::size_t destinationSize,
+            const char* const source) noexcept {
 
-            void copyTextTruncated(char* const destination, const std::size_t destinationSize, const char* const source) noexcept {
-                if (destination == nullptr || destinationSize == 0u) {
-                    return;
-                }
+            if (destination == nullptr || destinationSize == 0u) {
+                return;
+            }
 
-                const char* const resolvedSource = (source == nullptr) ? "" : source;
+            const char* const resolvedSource = (source == nullptr) ? "" : source;
 #if defined(_MSC_VER)
-                (void)strncpy_s(destination, destinationSize, resolvedSource, _TRUNCATE);
+            (void)strncpy_s(destination, destinationSize, resolvedSource, _TRUNCATE);
 #else
-                std::strncpy(destination, resolvedSource, destinationSize - 1u);
-                destination[destinationSize - 1u] = '\0';
+            std::strncpy(destination, resolvedSource, destinationSize - 1u);
+            destination[destinationSize - 1u] = '\0';
 #endif
-            }
-
-            bool endsWith(const char* const text, const char* const suffix) noexcept {
-                const std::size_t textLen = std::strlen(text);
-                const std::size_t suffixLen = std::strlen(suffix);
-                if (suffixLen > textLen) {
-                    return false;
-                }
-                return std::strcmp(text + (textLen - suffixLen), suffix) == 0;
-            }
-
-            bool hasInvalidTextChar(const char* const text) noexcept {
-                if (text == nullptr || text[0] == '\0') {
-                    return true;
-                }
-
-                for (std::size_t i = 0u; text[i] != '\0'; ++i) {
-                    const char c = text[i];
-                    if (c == '=' || c == '\n' || c == '\r') {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            const char* findLastSlash(const char* const text) noexcept {
-                const char* last = nullptr;
-                for (const char* p = text; *p != '\0'; ++p) {
-                    if (*p == '/' || *p == '\\') {
-                        last = p;
-                    }
-                }
-                return last;
-            }
-
-            bool safeCopy(char* const dst, const std::size_t dstSize, const char* const src) noexcept {
-                if (dst == nullptr || src == nullptr || dstSize == 0u) {
-                    return false;
-                }
-
-                const std::size_t len = std::strlen(src);
-                if (len >= dstSize) {
-                    return false;
-                }
-
-                std::memcpy(dst, src, len + 1u);
-                return true;
-            }
-
-            bool safeAppend(char* const dst, const std::size_t dstSize, const char* const src) noexcept {
-                if (dst == nullptr || src == nullptr || dstSize == 0u) {
-                    return false;
-                }
-
-                const std::size_t dstLen = std::strlen(dst);
-                const std::size_t srcLen = std::strlen(src);
-                if ((dstLen + srcLen) >= dstSize) {
-                    return false;
-                }
-
-                std::memcpy(dst + dstLen, src, srcLen + 1u);
-                return true;
-            }
-
-            bool makeStemPath(char* const dst, const std::size_t dstSize, const char* const input) noexcept {
-                if (!safeCopy(dst, dstSize, input)) {
-                    return false;
-                }
-
-                const std::size_t len = std::strlen(dst);
-                if (len >= std::strlen(kPrimaryExtension) && endsWith(dst, kPrimaryExtension)) {
-                    dst[len - std::strlen(kPrimaryExtension)] = '\0';
-                }
-                return true;
-            }
-
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            DMAMEM alignas(32) static std::uint8_t g_primaryStorage[MMLOG_PRIMARY_QUEUE_BYTES];
-            DMAMEM alignas(32) static std::uint8_t g_sidecarStorage[MMLOG_SIDECAR_QUEUE_BYTES];
-            static bool g_teensyStorageClaimed = false;
-#endif
-
-            bool syncStorageFile(StorageFileHandle& file) noexcept {
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-                return file.sync();
-#elif defined(ARDUINO)
-                file.flush();
-                return static_cast<bool>(file);
-#else
-                return file.flush();
-#endif
-            }
-
-            bool finalizeStorageFileLength(StorageFileHandle& file) noexcept {
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-                if (!file) {
-                    return true;
-                }
-
-                const std::uint64_t logicalLength = file.curPosition();
-                if (!file.seekSet(logicalLength)) {
-                    return false;
-                }
-                if (!file.truncate()) {
-                    return false;
-                }
-                return syncStorageFile(file);
-#else
-                (void)file;
-                return true;
-#endif
-            }
-
-        } // namespace
+        }
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO || !defined(ARDUINO)
         MmLogLogger::MmLogLogger() noexcept {
@@ -164,16 +57,16 @@ namespace MazeMap {
             }
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            if (g_teensyStorageClaimed) {
+            if (s_teensyStorageClaimed) {
                 return false;
             }
-            g_teensyStorageClaimed = true;
-            if (!m_primaryQueue.attach(g_primaryStorage, sizeof(g_primaryStorage))) {
-                g_teensyStorageClaimed = false;
+            s_teensyStorageClaimed = true;
+            if (!m_primaryQueue.attach(s_primaryStorage, sizeof(s_primaryStorage))) {
+                s_teensyStorageClaimed = false;
                 return false;
             }
-            if (!m_sidecarQueue.attach(g_sidecarStorage, sizeof(g_sidecarStorage))) {
-                g_teensyStorageClaimed = false;
+            if (!m_sidecarQueue.attach(s_sidecarStorage, sizeof(s_sidecarStorage))) {
+                s_teensyStorageClaimed = false;
                 m_primaryQueue.attach(nullptr, 0u);
                 return false;
             }
@@ -199,7 +92,7 @@ namespace MazeMap {
             if (m_storageAttached) {
                 m_primaryQueue.attach(nullptr, 0u);
                 m_sidecarQueue.attach(nullptr, 0u);
-                g_teensyStorageClaimed = false;
+                s_teensyStorageClaimed = false;
                 m_storageAttached = false;
             }
 #else
@@ -232,10 +125,10 @@ namespace MazeMap {
                 return false;
             }
             bool sidecarReady = false;
-            if (!removePrimaryFileIfPresent(m_primaryPath)) {
+            if (!removeFileIfPresent(m_primaryPath)) {
                 sidecarReady = false;
             }
-            else if (!removeSidecarFileIfPresent(m_sidecarPath)) {
+            else if (!removeFileIfPresent(m_sidecarPath)) {
                 sidecarReady = false;
             }
             else {
@@ -259,13 +152,18 @@ namespace MazeMap {
             if (m_isBegun) {
                 return fail("writeMetadata() is only allowed before begin().");
             }
-            if (!validateMetadataToken(key) || value == nullptr || value[0] == '\0') {
+            bool invalidKey = (key == nullptr || key[0] == '\0');
+            for (std::size_t i = 0u; !invalidKey && key[i] != '\0'; ++i) {
+                const char c = key[i];
+                invalidKey = (c == '=' || c == '\n' || c == '\r');
+            }
+            if (invalidKey || value == nullptr || value[0] == '\0') {
                 return fail("Invalid metadata key or value.");
             }
             if (std::strchr(value, '\n') != nullptr || std::strchr(value, '\r') != nullptr) {
                 return fail("Metadata values may not contain newlines.");
             }
-            if (isReservedMetadataKey(key)) {
+            if (std::strcmp(key, "schema_version") == 0 || std::strcmp(key, "row_bytes") == 0) {
                 return fail("Reserved metadata key.");
             }
             const std::size_t keyLength = std::strlen(key);
@@ -303,7 +201,10 @@ namespace MazeMap {
             if (length <= 0 || length >= static_cast<int>(sizeof(line))) {
                 return fail("Metadata line too long.");
             }
-            if (!writeLineDirect(m_sidecarFile, line)) {
+            static constexpr std::uint8_t newline = '\n';
+            if (!m_sidecarFile ||
+                m_sidecarFile.write(reinterpret_cast<const std::uint8_t*>(line), static_cast<std::size_t>(length)) != static_cast<std::size_t>(length) ||
+                m_sidecarFile.write(&newline, 1u) != 1u) {
                 return fail("Failed to write metadata line.");
             }
             return true;
@@ -331,58 +232,23 @@ namespace MazeMap {
                 return fail("Sidecar file is not open.");
             }
 
-            {
-                char line[kLineBufferChars]{};
-                const char* sidecarHeaderError = nullptr;
-                auto queueSidecarLine = [this](const char* const text) -> bool
-                {
-                    if (text == nullptr) {
-                        return false;
-                    }
+            char line[kLineBufferChars]{};
+            std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
+            if (!queueSidecarLine(line)) {
+                return fail("Failed to queue schema_version.");
+            }
 
-                    const std::size_t len = std::strlen(text);
-                    static constexpr std::uint8_t newline = '\n';
-                    return
-                        pushSidecarQueue(reinterpret_cast<const std::uint8_t*>(text), len) &&
-                        pushSidecarQueue(&newline, 1u);
-                };
+            std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes));
+            if (!queueSidecarLine(line)) {
+                return fail("Failed to queue row_bytes.");
+            }
 
-                std::snprintf(line, sizeof(line), "schema_version=%lu", static_cast<unsigned long>(schemaVersion));
-                if (!queueSidecarLine(line)) {
-                    sidecarHeaderError = "Failed to queue schema_version.";
-                }
-
-                if (sidecarHeaderError == nullptr) {
-                    std::snprintf(line, sizeof(line), "row_bytes=%lu", static_cast<unsigned long>(rowBytes));
-                    if (!queueSidecarLine(line)) {
-                        sidecarHeaderError = "Failed to queue row_bytes.";
-                    }
-                }
-
-                if (sidecarHeaderError == nullptr && !queueSidecarLine(header)) {
-                    sidecarHeaderError = "Failed to queue header line.";
-                }
-
-                if (sidecarHeaderError != nullptr) {
-                    return fail(sidecarHeaderError);
-                }
+            if (!queueSidecarLine(header)) {
+                return fail("Failed to queue header line.");
             }
 
             {
                 const char* primaryError = nullptr;
-                auto queuePrimaryLine = [this](const char* const text) -> bool
-                {
-                    if (text == nullptr) {
-                        return false;
-                    }
-
-                    const std::size_t len = std::strlen(text);
-                    static constexpr std::uint8_t newline = '\n';
-                    return
-                        pushPrimaryQueue(reinterpret_cast<const std::uint8_t*>(text), len) &&
-                        pushPrimaryQueue(&newline, 1u);
-                };
-
                 if (!openPrimaryForWrite()) {
                     primaryError = (m_lastError[0] != '\0') ? m_lastError : "Failed to prepare primary file.";
                 }
@@ -391,8 +257,13 @@ namespace MazeMap {
                     if (std::snprintf(bindingLine, sizeof(bindingLine), "sidecar_file=%s", m_sidecarBinding) >= static_cast<int>(sizeof(bindingLine))) {
                         primaryError = "Sidecar binding line too long.";
                     }
-                    else if (!queuePrimaryLine(bindingLine)) {
-                        primaryError = "Failed to queue primary sidecar binding line.";
+                    else {
+                        const std::size_t bindingLineLength = std::strlen(bindingLine);
+                        static constexpr std::uint8_t newline = '\n';
+                        if (!queuePrimaryBytes(reinterpret_cast<const std::uint8_t*>(bindingLine), bindingLineLength) ||
+                            !queuePrimaryBytes(&newline, 1u)) {
+                            primaryError = "Failed to queue primary sidecar binding line.";
+                        }
                     }
                 }
 
@@ -405,6 +276,23 @@ namespace MazeMap {
             m_activeSchemaHash = schemaHash;
             m_isBegun = true;
             return true;
+        }
+
+        bool MmLogLogger::logImpl(
+            const void* const row,
+            const std::size_t rowBytes,
+            const std::uint32_t schemaHash) {
+
+            if (!m_isBegun) {
+                return fail("log() called before begin().");
+            }
+            if (row == nullptr) {
+                return fail("log() received a null row.");
+            }
+            if (rowBytes != m_activeRowBytes || schemaHash != m_activeSchemaHash) {
+                return fail("log() row type does not match active schema.");
+            }
+            return queuePrimaryBytes(static_cast<const std::uint8_t*>(row), rowBytes);
         }
 
         bool MmLogLogger::writeLabel(const char* const lookupString) {
@@ -434,28 +322,20 @@ namespace MazeMap {
             }
 
             if (!m_labelSectionStarted) {
-                if (!enqueueSidecar(reinterpret_cast<const std::uint8_t*>(kLabelsMarker), kLabelsMarkerBytes)) {
+                if (!queueSidecarBytes(reinterpret_cast<const std::uint8_t*>(kLabelsMarker), kLabelsMarkerBytes)) {
                     return false;
                 }
                 m_labelSectionStarted = true;
             }
 
-            if (!enqueueSidecar(reinterpret_cast<const std::uint8_t*>(lookupString), len)) {
-                return false;
-            }
-
-            static constexpr std::uint8_t newline = '\n';
-            return enqueueSidecar(&newline, 1u);
+            return queueSidecarLine(lookupString);
         }
 
         bool MmLogLogger::isTransferBusy() const noexcept {
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            auto fileBusy = [](const StorageFileHandle& file) noexcept -> bool {
-                return file && const_cast<StorageFileHandle&>(file).isBusy();
-            };
             return
-                fileBusy(m_primaryFile) ||
-                fileBusy(m_sidecarFile);
+                (m_primaryFile && const_cast<StorageFileHandle&>(m_primaryFile).isBusy()) ||
+                (m_sidecarFile && const_cast<StorageFileHandle&>(m_sidecarFile).isBusy());
 #else
             return false;
 #endif
@@ -496,7 +376,7 @@ namespace MazeMap {
             if (m_sidecarFile && (m_sidecarDirty || !m_sidecarQueue.empty())) {
                 const bool sidecarFlushed =
                     flushQueueToFile(m_sidecarFile, m_sidecarQueue, true) &&
-                    syncStorageFile(m_sidecarFile);
+                    syncFile(m_sidecarFile);
                 if (!sidecarFlushed) {
                     return fail("Failed to flush sidecar file.");
                 }
@@ -505,7 +385,7 @@ namespace MazeMap {
             if (m_primaryFile && !flushQueueToFile(m_primaryFile, m_primaryQueue, true)) {
                 return false;
             }
-            if (m_primaryFile && !syncStorageFile(m_primaryFile)) {
+            if (m_primaryFile && !syncFile(m_primaryFile)) {
                 return fail("Failed to flush primary file.");
             }
             return true;
@@ -522,7 +402,7 @@ namespace MazeMap {
 
                 const char* const source =
                     (m_lastError[0] != '\0') ? m_lastError : ((fallback != nullptr) ? fallback : "MmLog close failed.");
-                copyTextTruncated(savedError, sizeof(savedError), source);
+                copyTruncatedText(savedError, sizeof(savedError), source);
             };
 
             if (m_isOpen && !flush()) {
@@ -530,14 +410,14 @@ namespace MazeMap {
             }
 
             if (m_isOpen && m_primaryFile) {
-                const bool primaryFinalized = finalizeStorageFileLength(m_primaryFile);
+                const bool primaryFinalized = finalizeFileLength(m_primaryFile);
                 if (!primaryFinalized) {
                     (void)fail("Failed to finalize primary file length.");
                     captureCloseError("Failed to finalize primary file length.");
                 }
             }
             if (m_isOpen && m_sidecarFile) {
-                const bool sidecarFinalized = finalizeStorageFileLength(m_sidecarFile);
+                const bool sidecarFinalized = finalizeFileLength(m_sidecarFile);
                 if (!sidecarFinalized) {
                     (void)fail("Failed to finalize sidecar file length.");
                     captureCloseError("Failed to finalize sidecar file length.");
@@ -556,19 +436,19 @@ namespace MazeMap {
 
             resetAllState();
             if (savedError[0] != '\0') {
-                copyTextTruncated(m_lastError, sizeof(m_lastError), savedError);
+                copyTruncatedText(m_lastError, sizeof(m_lastError), savedError);
             }
             return ok;
         }
 
-        bool MmLogLogger::pushPrimaryQueue(const std::uint8_t* const data, const std::size_t len) {
+        bool MmLogLogger::queuePrimaryBytes(const std::uint8_t* const data, const std::size_t len) {
             if (!m_primaryQueue.push(data, len)) {
                 return fail("Primary queue overflow.");
             }
             return true;
         }
 
-        bool MmLogLogger::pushSidecarQueue(const std::uint8_t* const data, const std::size_t len) {
+        bool MmLogLogger::queueSidecarBytes(const std::uint8_t* const data, const std::size_t len) {
             if (!m_sidecarQueue.push(data, len)) {
                 return fail("Sidecar queue overflow.");
             }
@@ -576,18 +456,16 @@ namespace MazeMap {
             return true;
         }
 
-        bool MmLogLogger::enqueuePrimary(const std::uint8_t* const data, const std::size_t len) {
-            if (!m_isBegun) {
-                return fail("Primary queue used before begin().");
+        bool MmLogLogger::queueSidecarLine(const char* const text) {
+            if (text == nullptr) {
+                return false;
             }
-            return pushPrimaryQueue(data, len);
-        }
 
-        bool MmLogLogger::enqueueSidecar(const std::uint8_t* const data, const std::size_t len) {
-            if (!m_isBegun) {
-                return fail("Sidecar queue used before begin().");
-            }
-            return pushSidecarQueue(data, len);
+            const std::size_t len = std::strlen(text);
+            static constexpr std::uint8_t newline = '\n';
+            return
+                queueSidecarBytes(reinterpret_cast<const std::uint8_t*>(text), len) &&
+                queueSidecarBytes(&newline, 1u);
         }
 
         bool MmLogLogger::drainQueueToFile(
@@ -695,25 +573,35 @@ namespace MazeMap {
             return true;
         }
 
-        bool MmLogLogger::writeDirect(
-            StorageFileHandle& file,
-            const std::uint8_t* const data,
-            const std::size_t len) {
-
-            if (!file || (data == nullptr && len != 0u)) {
-                return false;
-            }
-            return file.write(data, len) == len;
+        bool MmLogLogger::syncFile(StorageFileHandle& file) noexcept {
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+            return file.sync();
+#elif defined(ARDUINO)
+            file.flush();
+            return static_cast<bool>(file);
+#else
+            return file.flush();
+#endif
         }
 
-        bool MmLogLogger::writeLineDirect(StorageFileHandle& file, const char* const text) {
-            if (!file || text == nullptr) {
-                return false;
+        bool MmLogLogger::finalizeFileLength(StorageFileHandle& file) noexcept {
+#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+            if (!file) {
+                return true;
             }
 
-            const std::size_t len = std::strlen(text);
-            static constexpr std::uint8_t newline = '\n';
-            return writeDirect(file, reinterpret_cast<const std::uint8_t*>(text), len) && writeDirect(file, &newline, 1u);
+            const std::uint64_t logicalLength = file.curPosition();
+            if (!file.seekSet(logicalLength)) {
+                return false;
+            }
+            if (!file.truncate()) {
+                return false;
+            }
+            return syncFile(file);
+#else
+            (void)file;
+            return true;
+#endif
         }
 
         bool MmLogLogger::openPrimaryForWrite() {
@@ -768,26 +656,7 @@ namespace MazeMap {
 #endif
         }
 
-        bool MmLogLogger::removePrimaryFileIfPresent(const char* const path) {
-#if MMLOG_ENABLE_TEENSY_FIFO_SDIO
-            if (SD.sdfs.exists(path) && !SD.sdfs.remove(path)) {
-                return fail("Failed to remove existing file.");
-            }
-            return true;
-#elif defined(ARDUINO)
-            if (m_fs.exists(path) && !m_fs.remove(path)) {
-                return fail("Failed to remove existing file.");
-            }
-            return true;
-#else
-            if (std::remove(path) != 0) {
-                return true;
-            }
-            return true;
-#endif
-        }
-
-        bool MmLogLogger::removeSidecarFileIfPresent(const char* const path) {
+        bool MmLogLogger::removeFileIfPresent(const char* const path) {
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
             if (SD.sdfs.exists(path) && !SD.sdfs.remove(path)) {
                 return fail("Failed to remove existing file.");
@@ -807,41 +676,57 @@ namespace MazeMap {
         }
 
         bool MmLogLogger::derivePaths(const char* const file_name) {
+            if (file_name == nullptr) {
+                return fail("open() requires a non-empty file name.");
+            }
+
             char stem[MMLOG_MAX_PATH_LENGTH + 1u]{};
-            if (!makeStemPath(stem, sizeof(stem), file_name)) {
+            const std::size_t inputLength = std::strlen(file_name);
+            const std::size_t primaryExtensionLength = std::strlen(kPrimaryExtension);
+            const std::size_t sidecarExtensionLength = std::strlen(kSidecarExtension);
+
+            std::size_t stemLength = inputLength;
+            if (inputLength >= primaryExtensionLength &&
+                std::strcmp(file_name + inputLength - primaryExtensionLength, kPrimaryExtension) == 0) {
+                stemLength -= primaryExtensionLength;
+            }
+            if (stemLength >= sizeof(stem)) {
                 return fail("File name is too long.");
             }
+            std::memcpy(stem, file_name, stemLength);
+            stem[stemLength] = '\0';
 
-            if (!safeCopy(m_primaryPath, sizeof(m_primaryPath), stem)) {
+            if (stemLength + primaryExtensionLength >= sizeof(m_primaryPath)) {
                 return fail("Primary path buffer overflow.");
             }
-            if (!safeAppend(m_primaryPath, sizeof(m_primaryPath), kPrimaryExtension)) {
-                return fail("Primary path buffer overflow.");
-            }
+            std::memcpy(m_primaryPath, stem, stemLength);
+            std::memcpy(m_primaryPath + stemLength, kPrimaryExtension, primaryExtensionLength + 1u);
 
-            if (!safeCopy(m_sidecarPath, sizeof(m_sidecarPath), stem)) {
+            if (stemLength + sidecarExtensionLength >= sizeof(m_sidecarPath)) {
                 return fail("Sidecar path buffer overflow.");
             }
-            if (!safeAppend(m_sidecarPath, sizeof(m_sidecarPath), kSidecarExtension)) {
-                return fail("Sidecar path buffer overflow.");
-            }
+            std::memcpy(m_sidecarPath, stem, stemLength);
+            std::memcpy(m_sidecarPath + stemLength, kSidecarExtension, sidecarExtensionLength + 1u);
 
-            const char* const base = findLastSlash(m_sidecarPath);
-            const char* const binding = (base == nullptr) ? m_sidecarPath : (base + 1);
-            if (!safeCopy(m_sidecarBinding, sizeof(m_sidecarBinding), binding)) {
+            // The primary file stores only the sidecar file name, not the full path.
+            const char* binding = m_sidecarPath;
+            for (const char* p = m_sidecarPath; *p != '\0'; ++p) {
+                if (*p == '/' || *p == '\\') {
+                    binding = p + 1;
+                }
+            }
+            const std::size_t bindingLength = std::strlen(binding);
+            if (bindingLength >= sizeof(m_sidecarBinding)) {
                 return fail("Sidecar binding buffer overflow.");
             }
+            std::memcpy(m_sidecarBinding, binding, bindingLength + 1u);
 
             return true;
         }
 
-        bool MmLogLogger::validateMetadataToken(const char* const text) const noexcept {
-            return !hasInvalidTextChar(text);
-        }
-
         bool MmLogLogger::fail(const char* const text) {
             const char* const message = (text == nullptr) ? "Unknown MmLog error." : text;
-            copyTextTruncated(m_lastError, sizeof(m_lastError), message);
+            copyTruncatedText(m_lastError, sizeof(m_lastError), message);
             return false;
         }
 
@@ -881,10 +766,6 @@ namespace MazeMap {
             resetSessionState();
             m_isOpen = false;
             clearError();
-        }
-
-        bool MmLogLogger::isReservedMetadataKey(const char* const key) const noexcept {
-            return std::strcmp(key, "schema_version") == 0 || std::strcmp(key, "row_bytes") == 0;
         }
 
     } // namespace mmlog

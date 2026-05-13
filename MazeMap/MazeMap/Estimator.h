@@ -27,14 +27,10 @@ namespace MazeMap
     public:
         explicit Estimator(
             const PlantModel& plantModel,
-            VehicleState* runtimeState = nullptr) noexcept;
-
-        void AttachRuntimeState(VehicleState& runtimeState) noexcept;
+            VehicleState& runtimeState) noexcept;
 
         MapEvidenceUpdater& mapEvidence() noexcept { return _mapEvidence; }
         const MapEvidenceUpdater& mapEvidence() const noexcept { return _mapEvidence; }
-        VehicleState& RuntimeState() noexcept { return *_runtimeState; }
-        const VehicleState& RuntimeState() const noexcept { return *_runtimeState; }
         void SyncRuntimeState() noexcept;
         bool HasFault() const noexcept { return _faulted; }
         const char* FaultReason() const noexcept
@@ -131,11 +127,9 @@ namespace MazeMap
         void ResetRuntimeMetadata() noexcept;
         void TriggerFault(const char* reason) noexcept;
 
-        const PlantModel& _plantModel;
         SrUkfCore _core;
         MapEvidenceUpdater _mapEvidence;
-        VehicleState _localRuntimeState{};
-        VehicleState* _runtimeState{};
+        VehicleState& _runtimeState;
         bool _faulted = false;
         char _faultReason[64] = {};
     };

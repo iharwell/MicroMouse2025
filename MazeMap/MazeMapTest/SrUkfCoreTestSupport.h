@@ -5,6 +5,7 @@
 #include "EstimatorTestSupport.h"
 
 #include "..\MazeMap\SrUkfCore.h"
+#include "..\MazeMap\Vehicle.h"
 
 #include <algorithm>
 #include <cstdarg>
@@ -35,10 +36,27 @@ namespace MazeMap
     constexpr std::uint16_t kUkfTestInitialStationaryGyroBiasSeedStartSample = 3U;
     constexpr std::uint16_t kUkfTestInitialStationaryGyroBiasSeedEndSample = 8U;
 
+    struct SrUkfCoreTestRuntime final
+    {
+        Vehicle vehicle{};
+        VehicleState runtimeState{};
+        PlantModel plantModel;
+
+        SrUkfCoreTestRuntime() noexcept
+            : plantModel(vehicle, runtimeState)
+        {
+        }
+    };
+
+    inline SrUkfCoreTestRuntime& GetSrUkfCoreTestRuntime() noexcept
+    {
+        static SrUkfCoreTestRuntime runtime;
+        return runtime;
+    }
+
     inline SrUkfCore MakeDefaultSrUkfCore() noexcept
     {
-        const PlantModel plantModel{};
-        return SrUkfCore(plantModel);
+        return SrUkfCore(GetSrUkfCoreTestRuntime().plantModel);
     }
 
     inline float StationaryGyroBiasMeasurementVarianceRadps2() noexcept

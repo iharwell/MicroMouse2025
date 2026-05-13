@@ -10,6 +10,7 @@
 #include "MazeMapRuntimeCore.h"
 #include "MazeMapRuntimeMmLog.h"
 #include "OpenFloorMeasurementSpec.h"
+#include "VehicleState.h"
 
 #include <array>
 #include <cstddef>
@@ -89,15 +90,7 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint16_t, saturation_flags)             \
     X(std::uint8_t,  ukf_mode_id)                  \
     X(std::uint8_t,  bias_update_enabled)          \
-    X(float,         ukf_state_px_m)               \
-    X(float,         ukf_state_py_m)               \
-    X(float,         ukf_state_psi_rad)            \
-    X(float,         ukf_state_u_mps)              \
-    X(float,         ukf_state_v_mps)              \
-    X(float,         ukf_state_r_radps)            \
-    X(float,         ukf_state_omega_l_radps)      \
-    X(float,         ukf_state_omega_r_radps)      \
-    X(float,         ukf_state_bgz_radps)          \
+    X(MazeMap::VehicleStateLogEntry, ukf_state) \
     X(float,         gyro_bias_anchor_radps)       \
     X(float,         yaw_consistency_lp_radps)     \
     X(float,         yaw_window_mismatch_rad)      \
@@ -147,7 +140,13 @@ namespace MazeMap::App::Internal::Runtime
     X(std::uint32_t, left_timestamp_us)            \
     X(std::uint32_t, right_timestamp_us)
 
-    MMLOG_DEFINE_ROW(OpenFloorMainRow, OPEN_FLOOR_MAIN_FIELDS);
+    MMLOG_DEFINE_ROW_WITH_BODY(
+        OpenFloorMainRow,
+        OPEN_FLOOR_MAIN_FIELDS,
+        void SetVehicleState(const MazeMap::VehicleState& state) noexcept
+        {
+            ukf_state.Set(state);
+        });
 
 #undef OPEN_FLOOR_MAIN_FIELDS
 #undef OPEN_FLOOR_TIMING_FIELDS

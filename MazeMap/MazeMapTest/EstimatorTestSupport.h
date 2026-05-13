@@ -112,6 +112,7 @@ namespace MazeMap
     inline void UpdateDriveEstimator(
         DriveBase& drive,
         Estimator& estimator,
+        VehicleState& runtimeState,
         float dtSeconds,
         const SensorSnapshot& snapshot,
         const Maze* map = nullptr)
@@ -119,7 +120,6 @@ namespace MazeMap
         const auto control = drive.CurrentControlVector();
         const float fanDutyCycle = GetMissionFanDutyCycle();
         const float batteryVoltageV = drive.CurrentBatteryVoltageV();
-        VehicleState& runtimeState = estimator.RuntimeState();
         runtimeState.SetSensorSnapshot(snapshot);
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {

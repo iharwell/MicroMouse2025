@@ -123,56 +123,6 @@ namespace MazeMap
         float maxContactUtilization = 0.0f;
     };
 
-    // Inverse-dynamics result for a requested body motion at the current operating point.
-    struct DriveCommandSolution
-    {
-        App::Internal::CommandVector control{};
-        float fanDutyCycle = 0.80f;
-        float batteryVoltageV = 8.4f;
-        float requestedCommonForceN = 0.0f;
-        float requestedDifferentialForceN = 0.0f;
-        float commandedCommonForceN = 0.0f;
-        float commandedDifferentialForceN = 0.0f;
-        float leftForceLimitN = 0.0f;
-        float rightForceLimitN = 0.0f;
-        float leftTangentialCapacityN = 0.0f;
-        float rightTangentialCapacityN = 0.0f;
-        bool commonForceClamped = false;
-        bool differentialForceClamped = false;
-        bool closedLoopReserveMode = false;
-        float reserveUsage = 1.0f;
-        float slipSpeedFloorMps = 0.0f;
-        float leftSlipRatio = 0.0f;
-        float rightSlipRatio = 0.0f;
-        // Slip-bearing wheel speeds implied by the solved contact-force balance at the current body rates.
-        float leftWheelSpeedRadps = 0.0f;
-        float rightWheelSpeedRadps = 0.0f;
-        // Pure rolling kinematic wheel speeds before adding the implied longitudinal slip offset.
-        float leftRollingWheelSpeedRadps = 0.0f;
-        float rightRollingWheelSpeedRadps = 0.0f;
-        // Required wheel-side drive torque, not just tire-contact torque.
-        float leftWheelTorqueNm = 0.0f;
-        float rightWheelTorqueNm = 0.0f;
-        // Algebraic bank angular-acceleration demand implied by the predicted achieved body
-        // accelerations and used in the inverse wheel-torque balance.
-        float leftWheelAccelRadps2 = 0.0f;
-        float rightWheelAccelRadps2 = 0.0f;
-        float leftContactForceN = 0.0f;
-        float rightContactForceN = 0.0f;
-        float leftContactTorqueNm = 0.0f;
-        float rightContactTorqueNm = 0.0f;
-        float tractionScale = 1.0f;
-        bool tractionLimited = false;
-        // Algebraically predicted achieved body accelerations at the returned operating point.
-        // Optional host/debug validation may overwrite these when inverse validation is enabled.
-        float commandedLongitudinalAccelMps2 = 0.0f;
-        float commandedYawAccelRadps2 = 0.0f;
-        float longitudinalAccelErrorMps2 = 0.0f;
-        float yawAccelErrorRadps2 = 0.0f;
-        bool converged = false;
-        bool valid = false;
-    };
-
     // Tunable physical parameters and fixed sensor-mount facts for the UKF plant model.
     struct PlantParams
     {
@@ -370,10 +320,7 @@ namespace MazeMap
         static constexpr float kDefaultVelocityTargetResponseTimeS = 0.025f;
         static constexpr float kTractionLimitedReserveScale = 0.90f;
 
-        PlantModel() noexcept;
-        explicit PlantModel(const Vehicle& vehicle) noexcept;
-
-        void AttachRuntimeState(const VehicleState& runtimeState) noexcept;
+        PlantModel(const Vehicle& vehicle, const VehicleState& runtimeState) noexcept;
         float wallObservationNoHitRangeM() const noexcept;
 
         static PreparedParams Prepare(const PlantParams& params) noexcept;
@@ -475,12 +422,12 @@ namespace MazeMap
             float dt,
             const PreparedParams& params) const noexcept;
 
-        DriveCommandSolution solveSteadyStateFeedforward(
+        App::Internal::CommandVector solveSteadyStateFeedforward(
             float desiredForwardVelocityMps,
             float desiredYawRateRadps,
             float fanDutyCycle = 0.80f,
             float batteryVoltageV = 0.0f) const noexcept;
-        DriveCommandSolution solveAccelerationFeedforward(
+        App::Internal::CommandVector solveAccelerationFeedforward(
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2,
             float fanDutyCycle = 0.80f,
@@ -675,76 +622,9 @@ namespace MazeMap
             const PlantDerivatives& evaluatedStep,
             float dtS) noexcept;
 
-        struct FeedforwardRequest
-        {
-            StateVector currentState = StateVector::Zero();
-            bool hasCurrentState = false;
-            float currentForwardSpeedMps = 0.0f;
-            float currentLateralSpeedMps = 0.0f;
-            float currentYawRateRadps = 0.0f;
-            float currentLeftWheelSpeedRadps = 0.0f;
-            float currentRightWheelSpeedRadps = 0.0f;
-            float desiredLongitudinalAccelMps2 = 0.0f;
-            float desiredYawAccelRadps2 = 0.0f;
-            float fanDutyCycle = 0.80f;
-            float batteryVoltageV = 8.4f;
-            float reserveUsage = 1.0f;
-            bool closedLoopReserveMode = false;
-            bool hasVelocityTargets = false;
-            float targetForwardVelocityMps = 0.0f;
-            float targetYawRateRadps = 0.0f;
-        };
-
-        struct FeedforwardSolveContext
-        {
-            float batteryVoltageV = 8.4f;
-            float fanDutyCycle = 0.80f;
-            float reserveUsage = 1.0f;
-            float slipSpeedFloorMps = 0.0f;
-        };
-
-        struct FeedforwardForceRequest
-        {
-            float commonForceRequestN = 0.0f;
-            float differentialForceRequestN = 0.0f;
-            float baselineLateralYawMomentNm = 0.0f;
-        };
-
-        struct FeedforwardForceAllocation
-        {
-            float commonForceCommandN = 0.0f;
-            float differentialForceCommandN = 0.0f;
-            float leftForceCommandN = 0.0f;
-            float rightForceCommandN = 0.0f;
-            float leftForceLimitN = 0.0f;
-            float rightForceLimitN = 0.0f;
-            bool commonForceClamped = false;
-            bool differentialForceClamped = false;
-        };
-
-        FeedforwardSolveContext buildFeedforwardSolveContext(
-            const FeedforwardRequest& request,
-            const PreparedParams& prepared) const noexcept;
-        float computeControllerPivotScrubYawMomentNm(
-            const FeedforwardRequest& request,
-            const StateVector& operatingState,
-            float effectiveTrackWidthM,
-            const PreparedParams& prepared) const noexcept;
-        FeedforwardForceRequest buildForceRequest(
-            const FeedforwardRequest& request,
-            const FeedforwardSolveContext& solveContext,
-            const PreparedParams& prepared) const noexcept;
-        FeedforwardForceAllocation allocateCommonAndDifferentialForces(
-            const FeedforwardForceRequest& request,
-            float leftTangentialCapacityN,
-            float rightTangentialCapacityN,
-            float reserveUsage) const noexcept;
-        DriveCommandSolution solveFeedforwardCanonical(
-            const FeedforwardRequest& request,
-            const PreparedParams& prepared) const noexcept;
         PreparedParams _preparedParams{};
-        const VehicleState* _runtimeState = nullptr;
-        const MotorEncoderDrive* _leftDrive = nullptr;
-        const MotorEncoderDrive* _rightDrive = nullptr;
+        const VehicleState& _runtimeState;
+        const MotorEncoderDrive& _leftDrive;
+        const MotorEncoderDrive& _rightDrive;
     };
 }

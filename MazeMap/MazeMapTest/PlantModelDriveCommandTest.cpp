@@ -2,6 +2,7 @@
 #include "CppUnitTest.h"
 
 #include "PlantModelTestSupport.h"
+#include "..\MazeMap\Vehicle.h"
 
 #include <cmath>
 
@@ -11,15 +12,16 @@ namespace MazeMap
 {
     namespace
     {
-        bool IsFiniteSolution(const DriveCommandSolution& solution) noexcept
+        bool IsFiniteControlVector(const App::Internal::CommandVector& control) noexcept
         {
             return
-                std::isfinite(solution.control.LeftMotorPwm()) &&
-                std::isfinite(solution.control.RightMotorPwm()) &&
-                std::isfinite(solution.fanDutyCycle) &&
-                std::isfinite(solution.batteryVoltageV) &&
-                std::isfinite(solution.leftContactForceN) &&
-                std::isfinite(solution.rightContactForceN);
+                std::isfinite(control.LeftMotorPwm()) &&
+                std::isfinite(control.RightMotorPwm());
+        }
+
+        float ControlVectorAverage(const App::Internal::CommandVector& control) noexcept
+        {
+            return 0.5f * (control.LeftMotorPwm() + control.RightMotorPwm());
         }
     }
 
@@ -28,50 +30,93 @@ namespace MazeMap
     public:
         TEST_METHOD(PlantModelAccelerationFeedforwardZeroRequestReturnsZeroCommand)
         {
-            PlantModel plant;
-            const DriveCommandSolution solution =
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+            const App::Internal::CommandVector control =
                 plant.solveAccelerationFeedforward(0.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
 
-            Assert::IsFalse(solution.tractionLimited);
-            Assert::IsTrue(solution.converged);
-            Assert::AreEqual(0.0f, solution.control.LeftMotorPwm(), 1.0e-6f);
-            Assert::AreEqual(0.0f, solution.control.RightMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(0.0f, control.LeftMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(0.0f, control.RightMotorPwm(), 1.0e-6f);
         }
 
         TEST_METHOD(PlantModelSteadyStateFeedforwardReturnsFiniteSymmetricCommandForForwardTarget)
         {
-            PlantModel plant;
-            const DriveCommandSolution solution =
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+            const App::Internal::CommandVector control =
                 plant.solveSteadyStateFeedforward(0.75f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
 
-            Assert::IsTrue(IsFiniteSolution(solution));
-            Assert::AreEqual(solution.control.LeftMotorPwm(), solution.control.RightMotorPwm(), 1.0e-5f);
+            Assert::IsTrue(IsFiniteControlVector(control));
+            Assert::AreEqual(control.LeftMotorPwm(), control.RightMotorPwm(), 1.0e-5f);
         }
 
         TEST_METHOD(PlantModelSteadyStateFeedforwardReturnsSplitCommandForYawTarget)
         {
-            PlantModel plant;
-            const DriveCommandSolution solution =
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+            const App::Internal::CommandVector control =
                 plant.solveSteadyStateFeedforward(0.0f, 2.0f, 0.80f, PlantParams::Default().supplyVoltageV);
 
-            Assert::IsTrue(IsFiniteSolution(solution));
-            Assert::IsTrue(std::fabs(solution.control.LeftMotorPwm() - solution.control.RightMotorPwm()) > 1.0e-4f);
+            Assert::IsTrue(IsFiniteControlVector(control));
+            Assert::IsTrue(std::fabs(control.LeftMotorPwm() - control.RightMotorPwm()) > 1.0e-4f);
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardReturnsFiniteOutputForCombinedRequest)
         {
-            PlantModel plant;
-            const DriveCommandSolution solution =
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+            const App::Internal::CommandVector control =
                 plant.solveAccelerationFeedforward(1.25f, 3.75f, 0.80f, PlantParams::Default().supplyVoltageV);
 
-            Assert::IsTrue(IsFiniteSolution(solution));
-            Assert::IsTrue(solution.fanDutyCycle > 0.0f);
-            Assert::IsTrue(solution.batteryVoltageV > 0.0f);
+            Assert::IsTrue(IsFiniteControlVector(control));
+        }
+
+        TEST_METHOD(PlantModelAccelerationFeedforwardIgnoresObservedWheelMismatchForForwardRequest)
+        {
+            Vehicle vehicle;
+            VehicleState state;
+            PlantModel plant(vehicle, state);
+            state.SetVelocity(0.35f);
+            state.SetRotationalVelocity(0.0f);
+            state.SetWheelSpeedLeft(-30.0f);
+            state.SetWheelSpeedRight(70.0f);
+
+            const App::Internal::CommandVector control =
+                plant.solveAccelerationFeedforward(4.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+
+            Assert::IsTrue(IsFiniteControlVector(control));
+            Assert::AreEqual(control.LeftMotorPwm(), control.RightMotorPwm(), 1.0e-5f);
+        }
+
+        TEST_METHOD(PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf)
+        {
+            Vehicle vehicle;
+            VehicleState restState;
+            PlantModel restPlant(vehicle, restState);
+            const App::Internal::CommandVector restControl =
+                restPlant.solveAccelerationFeedforward(4.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+
+            VehicleState movingState;
+            movingState.SetVelocity(0.75f);
+            movingState.SetWheelSpeedLeft(0.0f);
+            movingState.SetWheelSpeedRight(0.0f);
+            PlantModel movingPlant(vehicle, movingState);
+            const App::Internal::CommandVector movingControl =
+                movingPlant.solveAccelerationFeedforward(4.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+
+            Assert::IsTrue(IsFiniteControlVector(restControl));
+            Assert::IsTrue(IsFiniteControlVector(movingControl));
+            Assert::IsTrue(ControlVectorAverage(movingControl) > ControlVectorAverage(restControl));
         }
 
         TEST_METHOD(PlantModelComputeBodyActionUsesLongitudinalLimitForPureSpeedChange)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             float desiredLongitudinalAccelMps2 = 0.0f;
             plant.ComputeBodyAction(
                 0.20f,
@@ -86,7 +131,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelComputeBodyActionFromYawRateUsesYawAccelLimitWhenRelevant)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             float desiredYawAccelRadps2 = 0.0f;
             plant.ComputeBodyActionFromYawRate(
                 0.0f,
@@ -101,7 +147,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelResolveWheelMotionTargetsUsesEffectiveTrackWidthAndWheelRadius)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
 
@@ -133,7 +180,8 @@ namespace MazeMap
 
         TEST_METHOD(PlantModelVelocityTargetTechnicalLimitsReportFinitePositiveEnvelope)
         {
-            PlantModel plant;
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
             float maxLongitudinalAccelMps2 = 0.0f;
             float maxYawAccelRadps2 = 0.0f;
 

@@ -443,9 +443,9 @@ namespace MazeMap::App::Internal
         , searchPathFinder(maze, vehicle)
         , speedPathFinder(maze, vehicle)
         , wallBeliefMap()
-        , plantModel(vehicle)
         , runtimeState()
-        , estimator(plantModel, &runtimeState)
+        , plantModel(vehicle, runtimeState)
+        , estimator(plantModel, runtimeState)
         , drive(plantModel, runtimeState, MazeMap::Config::kDriveBasePDCluster)
         , driveService()
         , startupCalibrationService()
@@ -464,7 +464,6 @@ namespace MazeMap::App::Internal
         , modeFaultCleanupCallback(nullptr)
         , modeFaultCleanupContext(nullptr)
     {
-        plantModel.AttachRuntimeState(runtimeState);
         ResetUtilityLogIdentity(
             activeDataLogFileName,
             sizeof(activeDataLogFileName),

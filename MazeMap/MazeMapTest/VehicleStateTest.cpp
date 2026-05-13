@@ -7,6 +7,8 @@
 
 #include <array>
 #include <cmath>
+#include <cstring>
+#include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -16,6 +18,35 @@ namespace MazeMap
     {
         constexpr float kStationaryEncoderVelocitySigmaMps = 0.002936f;
         constexpr float kImuYawRateSigmaRadps = 0.0010954451f;
+
+#define VEHICLE_STATE_LOG_TEST_ROW_FIELDS(X) \
+    X(VehicleStateLogEntry, ukf_state)
+
+        MMLOG_DEFINE_PRIVATE_ROW_WITH_BODY(
+            VehicleStateLogTestRow,
+            VEHICLE_STATE_LOG_TEST_ROW_FIELDS,
+            void Set(const VehicleState& state) noexcept
+            {
+                ukf_state.Set(state);
+            });
+
+#define VEHICLE_STATE_LOG_TEST_FLATTENED_ROW_FIELDS(X) \
+    X(float, ukf_state_px_m) \
+    X(float, ukf_state_py_m) \
+    X(float, ukf_state_psi_rad) \
+    X(float, ukf_state_u_mps) \
+    X(float, ukf_state_v_mps) \
+    X(float, ukf_state_r_radps) \
+    X(float, ukf_state_omega_l_radps) \
+    X(float, ukf_state_omega_r_radps) \
+    X(float, ukf_state_bgz_radps)
+
+        MMLOG_DEFINE_ROW(
+            VehicleStateLogTestFlattenedRow,
+            VEHICLE_STATE_LOG_TEST_FLATTENED_ROW_FIELDS);
+
+#undef VEHICLE_STATE_LOG_TEST_FLATTENED_ROW_FIELDS
+#undef VEHICLE_STATE_LOG_TEST_ROW_FIELDS
     }
 
     TEST_CLASS(VehicleStateTest)
@@ -51,6 +82,48 @@ namespace MazeMap
             movingState = stationaryState;
             movingState.SetWheelSpeedLeft(1.1f * wheelSpeedThresholdRadps);
             Assert::IsFalse(movingState.IsStationary());
+        }
+
+        TEST_METHOD(VehicleStateLogEntryProjectsThroughDomainGetters)
+        {
+            VehicleState state;
+            state.SetPosition(Eigen::Vector2f(1.25f, -2.5f));
+            state.SetOrientation(3.75f);
+            state.SetVelocity(-4.125f);
+            state.SetLateralVelocity(5.5f);
+            state.SetRotationalVelocity(-6.625f);
+            state.SetWheelSpeedLeft(7.875f);
+            state.SetWheelSpeedRight(-8.25f);
+            state.SetGyroBiasZ(9.5f);
+
+            VehicleStateLogTestRow projected{};
+            projected.Set(state);
+
+            VehicleStateLogTestFlattenedRow flattened{};
+            flattened.ukf_state_px_m = state.GetPositionX();
+            flattened.ukf_state_py_m = state.GetPositionY();
+            flattened.ukf_state_psi_rad = state.GetOrientation();
+            flattened.ukf_state_u_mps = state.GetVelocity();
+            flattened.ukf_state_v_mps = state.GetLateralVelocity();
+            flattened.ukf_state_r_radps = state.GetRotationalVelocity();
+            flattened.ukf_state_omega_l_radps = state.GetWheelSpeedLeft();
+            flattened.ukf_state_omega_r_radps = state.GetWheelSpeedRight();
+            flattened.ukf_state_bgz_radps = state.GetGyroBiasZ();
+
+            const std::string expectedHeader =
+                "f32_ukf_state_px_m,f32_ukf_state_py_m,f32_ukf_state_psi_rad,"
+                "f32_ukf_state_u_mps,f32_ukf_state_v_mps,f32_ukf_state_r_radps,"
+                "f32_ukf_state_omega_l_radps,f32_ukf_state_omega_r_radps,"
+                "f32_ukf_state_bgz_radps";
+
+            Assert::AreEqual(expectedHeader, std::string(VehicleStateLogTestRow::header_cstr()));
+            Assert::AreEqual(sizeof(flattened), sizeof(projected));
+            Assert::AreEqual(
+                0,
+                std::memcmp(
+                    &flattened,
+                    &projected,
+                    sizeof(VehicleStateLogTestRow)));
         }
 
         TEST_METHOD(VehicleStateStationaryConstraintKeepsPoseReferenceAndCollapsesStationaryStates)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Defines.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +30,160 @@
 #  include <SdFat.h>
 #endif
 namespace MazeMap {
+
+    /**
+     * mmlog system guide
+     * ==================
+     *
+     * mmlog is the project logging format for high-rate structured robot data.
+     * It is intentionally split into two files:
+     *
+     * - The primary `.mmlog` file starts with one text binding line,
+     *   `sidecar_file=<name>.sidecar`, followed immediately by packed binary
+     *   rows. Each row has the exact byte layout of the schema type passed to
+     *   MmLogLogger::begin().
+     * - The `.sidecar` file is text. It contains user metadata written before
+     *   begin(), automatic schema metadata, the schema header line, and an
+     *   optional LABELS section for string lookup values.
+     *
+     * The sidecar schema header is a comma-separated list of leaf fields:
+     *
+     *     u32_tick_us,f32_state_px_m,f32_state_py_m,s32_phase
+     *
+     * Each token is `<mmlog-type>_<field-name>`. Nested entries are flattened
+     * by inserting the parent member name before each leaf name, so a row field
+     * declared as `X(StateVectorEntry, state)` with entry leaves `px_m` and
+     * `py_m` emits `f32_state_px_m,f32_state_py_m`. The binary row is not
+     * transformed; it stores the packed nested entry bytes in place.
+     *
+     * Supported scalar field types
+     * ----------------------------
+     *
+     *     std::uint8_t   -> u8
+     *     std::int8_t    -> i8
+     *     std::uint16_t  -> u16
+     *     std::int16_t   -> i16
+     *     std::uint32_t  -> u32
+     *     std::int32_t   -> i32
+     *     float          -> f32
+     *     mmlog::s8_t    -> s8   low 8 bits of the label FNV-1a hash
+     *     mmlog::s16_t   -> s16  low 16 bits of the label FNV-1a hash
+     *     mmlog::s32_t   -> s32  full 32-bit label FNV-1a hash
+     *
+     * The s8/s16/s32 types are numeric string-reference fields. Store
+     * hash8(), hash16(), or hash32() in the row and call writeLabel() with the
+     * original label text after begin() so host tools can recover the text.
+     * Labels are not deduplicated by the logger.
+     *
+     * Defining schemas
+     * ----------------
+     *
+     * A schema is written as one or more X(Type, Name) field-list macros. Use
+     * one of the entry macros for reusable fragments and one row macro for the
+     * top-level row passed to begin() and log().
+     *
+     * - MMLOG_DEFINE_ENTRY(EntryName, Fields) creates a reusable public-field
+     *   fragment. Entries may be nested in rows or other entries. Entries are
+     *   not logged directly.
+     * - MMLOG_DEFINE_ENTRY_WITH_BODY(EntryName, Fields, ...) is the same but
+     *   injects public methods after the generated public fields.
+     * - MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(EntryName, Fields, ...) makes the
+     *   generated storage fields private and injects public methods. Use this
+     *   when a fragment should be assigned through a domain method such as
+     *   Set(const StateVector&).
+     * - MMLOG_DEFINE_ROW(RowName, Fields) creates the top-level public-field
+     *   row type used with begin() and log().
+     * - MMLOG_DEFINE_ROW_WITH_BODY(RowName, Fields, ...) is the same but
+     *   injects public methods after the generated public fields.
+     * - MMLOG_DEFINE_PRIVATE_ROW_WITH_BODY(RowName, Fields, ...) makes the
+     *   generated storage fields private and injects public methods. Use this
+     *   for rows that should expose setters instead of raw field writes.
+     *
+     * The field identifier is part of the mmlog schema. If the desired output
+     * is `f32_vector_px_m`, declare the private entry member as
+     * `X(StateVectorEntry, vector)` and expose a public SetVector(...) method.
+     * Do not name the storage field `_vector` unless the sidecar schema should
+     * literally contain `_vector`.
+     *
+     * The generated types are packed, trivially copyable, standard-layout
+     * staging objects. The macros statically reject padding and rows larger
+     * than one 512-byte service block. Custom injected bodies should keep the
+     * type trivial: avoid virtual functions, owning containers, references,
+     * user-defined destructors, and non-trivial construction. Prefer ordinary
+     * zero-initialization plus explicit setters.
+     *
+     * Example hierarchical row
+     * ------------------------
+     *
+     *     struct StateVector { float pxM; float pyM; float yawRad; };
+     *
+     *     #define STATE_VECTOR_ENTRY_FIELDS(X) X(float, px_m) X(float, py_m) X(float, yaw_rad)
+     *
+     *     MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(
+     *         StateVectorEntry,
+     *         STATE_VECTOR_ENTRY_FIELDS,
+     *         void Set(const StateVector& v) noexcept
+     *         {
+     *             px_m = v.pxM;
+     *             py_m = v.pyM;
+     *             yaw_rad = v.yawRad;
+     *         });
+     *
+     *     #define OPEN_FLOOR_ROW_FIELDS(X) X(std::uint32_t, tick_us) X(StateVectorEntry, vector)
+     *
+     *     MMLOG_DEFINE_PRIVATE_ROW_WITH_BODY(
+     *         OpenFloorRow,
+     *         OPEN_FLOOR_ROW_FIELDS,
+     *         void SetTickUs(std::uint32_t tickUs) noexcept { tick_us = tickUs; }
+     *         void SetVectorEntry(const StateVector& v) noexcept { vector.Set(v); });
+     *
+     * The sidecar header for that row is:
+     *
+     *     u32_tick_us,f32_vector_px_m,f32_vector_py_m,f32_vector_yaw_rad
+     *
+     * The binary row layout is byte-for-byte equivalent to a manually flattened
+     * packed row with fields `tick_us`, `vector_px_m`, `vector_py_m`, and
+     * `vector_yaw_rad` in the same order.
+     *
+     * Logger lifecycle
+     * ----------------
+     *
+     *     MmLogLogger log;
+     *     OpenFloorRow row{};
+     *
+     *     log.open("open_floor_001");
+     *     log.writeMetadata("mode", "open_floor");
+     *     log.begin(row);
+     *
+     *     row.SetTickUs(tickUs);
+     *     row.SetVectorEntry(stateVector);
+     *     log.log(row);
+     *     log.service();
+     *
+     *     log.flush();
+     *     log.close();
+     *
+     * Call open() once per file pair. Call writeMetadata() only after open()
+     * and before begin(). Call begin() once per session; the row argument is
+     * used only for type deduction and its current values are ignored. After
+     * begin(), log() accepts only the exact row schema used by begin(). Call
+     * service() periodically in the control loop to drain bounded amounts of
+     * queued data. Use flush() or close() only at non-real-time boundaries.
+     *
+     * All public logger operations report failure with `false`; inspect
+     * lastError() for the latched diagnostic. The logger does not throw
+     * exceptions and does not allocate dynamically after construction.
+     *
+     * Production ownership
+     * --------------------
+     *
+     * Production runtime code should use the SharedRobotRuntime-owned
+     * MmLogLogger instance. The logger may be closed and reopened with a
+     * different schema for a later phase, but production code should not create
+     * additional logger instances. Host-side tests may construct a logger
+     * directly when testing mmlog behavior.
+     */
+
     /**
      * Application configuration knobs.
      *
@@ -589,12 +745,18 @@ namespace MazeMap {
  * The entry field-list macro uses the same X(Type, Name) shape as rows. When a
  * parent schema declares X(MyEntry, prefix), the sidecar header emits each leaf
  * as type_prefix_leaf while the binary row stores the packed MyEntry bytes in
- * place.
+ * place. Use the private-with-body variant when the fragment should preserve a
+ * domain abstraction and expose assignment through methods instead of public
+ * scalar fields.
  */
-#define MMLOG_DEFINE_ENTRY(EntryName, FieldListMacro)                                                                 \
+#define MMLOG_DETAIL_DEFINE_ENTRY(EntryName, FieldListMacro, FieldAccess, ...)                                       \
     MMLOG_PACKED_BEGIN                                                                                                \
     struct MMLOG_PACKED EntryName final {                                                                             \
+        FieldAccess:                                                                                                  \
         FieldListMacro(MMLOG_DETAIL_DECLARE_MEMBER)                                                                   \
+                                                                                                                      \
+    public:                                                                                                           \
+        __VA_ARGS__                                                                                                   \
                                                                                                                       \
         inline static constexpr bool mmlog_entry_marker = true;                                                       \
         inline static constexpr std::size_t member_count = 0u FieldListMacro(MMLOG_DETAIL_COUNT_MEMBER);             \
@@ -620,13 +782,24 @@ namespace MazeMap {
     static_assert(::std::is_standard_layout<EntryName>::value, #EntryName " must be standard layout.");             \
     static_assert(sizeof(EntryName) == EntryName::row_bytes, #EntryName " contains padding.")
 
+#define MMLOG_DEFINE_ENTRY(EntryName, FieldListMacro)                                                                 \
+    MMLOG_DETAIL_DEFINE_ENTRY(EntryName, FieldListMacro, public, )
+
+#define MMLOG_DEFINE_ENTRY_WITH_BODY(EntryName, FieldListMacro, ...)                                                  \
+    MMLOG_DETAIL_DEFINE_ENTRY(EntryName, FieldListMacro, public, __VA_ARGS__)
+
+#define MMLOG_DEFINE_PRIVATE_ENTRY_WITH_BODY(EntryName, FieldListMacro, ...)                                          \
+    MMLOG_DETAIL_DEFINE_ENTRY(EntryName, FieldListMacro, private, __VA_ARGS__)
+
 /**
  * Declares a packed row type and its compile-time schema metadata from a field-list macro.
  *
  * The field-list macro must expand as repeated invocations of X(Type, Name). Type may be an
- * allowed scalar field type or an MMLOG_DEFINE_ENTRY-generated entry type. The generated
- * structure is intended to act as a write-only staging object: application code assigns named
- * members, then passes the row to log(), which serializes the packed bytes in declaration order.
+ * allowed scalar field type or an MMLOG_DEFINE_ENTRY-generated entry type. The
+ * generated structure is a packed staging object. Public-field rows can be
+ * assigned directly; private-with-body rows should expose setters that populate
+ * the hidden fields and nested entries. log() serializes the packed bytes in
+ * declaration order.
  *
  * Example:
  *
@@ -637,13 +810,17 @@ namespace MazeMap {
  *
  *   MMLOG_DEFINE_ROW(MyRow, MY_ROW_FIELDS);
  *
- * The macro also emits compile-time checks that the row is packed, trivially copyable,
- * standard-layout, and no larger than one 512-byte service block.
+ * The macro also emits compile-time checks that the row is packed, trivially
+ * copyable, standard-layout, and no larger than one 512-byte service block.
  */
-#define MMLOG_DEFINE_ROW(RowName, FieldListMacro)                                                                     \
+#define MMLOG_DETAIL_DEFINE_ROW(RowName, FieldListMacro, FieldAccess, ...)                                           \
     MMLOG_PACKED_BEGIN                                                                                                \
     struct MMLOG_PACKED RowName final {                                                                               \
+        FieldAccess:                                                                                                  \
         FieldListMacro(MMLOG_DETAIL_DECLARE_MEMBER)                                                                   \
+                                                                                                                      \
+    public:                                                                                                           \
+        __VA_ARGS__                                                                                                   \
                                                                                                                       \
         inline static constexpr std::size_t member_count = 0u FieldListMacro(MMLOG_DETAIL_COUNT_MEMBER);             \
         inline static constexpr std::size_t field_count = 0u FieldListMacro(MMLOG_DETAIL_COUNT_FIELD);               \
@@ -672,6 +849,15 @@ namespace MazeMap {
     static_assert(RowName::row_bytes <= ::MazeMap::mmlog::kServiceBlockBytes,                                         \
                   #RowName " exceeds the 512-byte service block size. Split the schema across multiple log files.")
 
+#define MMLOG_DEFINE_ROW(RowName, FieldListMacro)                                                                     \
+    MMLOG_DETAIL_DEFINE_ROW(RowName, FieldListMacro, public, )
+
+#define MMLOG_DEFINE_ROW_WITH_BODY(RowName, FieldListMacro, ...)                                                      \
+    MMLOG_DETAIL_DEFINE_ROW(RowName, FieldListMacro, public, __VA_ARGS__)
+
+#define MMLOG_DEFINE_PRIVATE_ROW_WITH_BODY(RowName, FieldListMacro, ...)                                              \
+    MMLOG_DETAIL_DEFINE_ROW(RowName, FieldListMacro, private, __VA_ARGS__)
+
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
         using StorageFileHandle = FsFile;
 #elif defined(ARDUINO)
@@ -696,7 +882,7 @@ namespace MazeMap {
          *
          * The logger owns fixed-size queues only. It performs no dynamic allocation after construction.
          */
-        class MmLogLogger final {
+        class EXPORT MmLogLogger final {
         public:
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO || !defined(ARDUINO)
             /**
@@ -782,13 +968,7 @@ namespace MazeMap {
                 static_assert(Row::row_bytes <= kServiceBlockBytes,
                     "Logged row type exceeds the 512-byte service block size. Split the schema across multiple log files.");
 
-                if (!m_isBegun) {
-                    return fail("log() called before begin().");
-                }
-                if (Row::row_bytes != m_activeRowBytes || Row::schema_hash != m_activeSchemaHash) {
-                    return fail("log() row type does not match active schema.");
-                }
-                return enqueuePrimary(reinterpret_cast<const std::uint8_t*>(&row), Row::row_bytes);
+                return logImpl(&row, Row::row_bytes, Row::schema_hash);
             }
 
             /**
@@ -825,30 +1005,37 @@ namespace MazeMap {
             const char* lastError() const noexcept { return m_lastError; }
 
         private:
+            static constexpr std::size_t kLineBufferChars = 513u;
+
+            // These non-template sinks are the intentional thin-wrapper exception in MmLogLogger.
+            // Row schemas are template types by design; keeping runtime logic here avoids cloning
+            // open/begin/log behavior for every schema instantiation.
             bool beginImpl(const char* header, std::size_t rowBytes, std::uint32_t schemaVersion, std::uint32_t schemaHash);
+            bool logImpl(const void* row, std::size_t rowBytes, std::uint32_t schemaHash);
             bool attachStorage() noexcept;
             void releaseStorage() noexcept;
-            bool pushPrimaryQueue(const std::uint8_t* data, std::size_t len);
-            bool pushSidecarQueue(const std::uint8_t* data, std::size_t len);
-            bool enqueuePrimary(const std::uint8_t* data, std::size_t len);
-            bool enqueueSidecar(const std::uint8_t* data, std::size_t len);
+            bool queuePrimaryBytes(const std::uint8_t* data, std::size_t len);
+            bool queueSidecarBytes(const std::uint8_t* data, std::size_t len);
+            bool queueSidecarLine(const char* text);
             bool drainQueueToFile(StorageFileHandle& file, detail::ByteRing& queue, std::size_t budget, bool sectorAligned);
             bool flushQueueToFile(StorageFileHandle& file, detail::ByteRing& queue, bool sectorAligned);
-            bool writeDirect(StorageFileHandle& file, const std::uint8_t* data, std::size_t len);
-            bool writeLineDirect(StorageFileHandle& file, const char* text);
             bool openPrimaryForWrite();
             bool openSidecarForWrite();
-            bool removePrimaryFileIfPresent(const char* path);
-            bool removeSidecarFileIfPresent(const char* path);
+            bool removeFileIfPresent(const char* path);
             bool derivePaths(const char* file_name);
-            bool validateMetadataToken(const char* text) const noexcept;
+            bool syncFile(StorageFileHandle& file) noexcept;
+            bool finalizeFileLength(StorageFileHandle& file) noexcept;
             bool fail(const char* text);
             void clearError() noexcept;
             void resetSessionState() noexcept;
             void resetAllState() noexcept;
-            bool isReservedMetadataKey(const char* key) const noexcept;
+
+            static void copyTruncatedText(char* destination, std::size_t destinationSize, const char* source) noexcept;
 
 #if MMLOG_ENABLE_TEENSY_FIFO_SDIO
+            alignas(32) static std::uint8_t s_primaryStorage[MMLOG_PRIMARY_QUEUE_BYTES];
+            alignas(32) static std::uint8_t s_sidecarStorage[MMLOG_SIDECAR_QUEUE_BYTES];
+            static bool s_teensyStorageClaimed;
             bool m_storageAttached{ false };
 #elif defined(ARDUINO)
             fs::FS& m_fs;

@@ -89,9 +89,6 @@
     <ClCompile Include="MmLogSchemaCompositionTest.cpp">
       <Filter>Source Files\mmlog</Filter>
     </ClCompile>
-    <ClCompile Include="..\MazeMap\MmLog.cpp">
-      <Filter>Source Files\mmlog</Filter>
-    </ClCompile>
     <ClCompile Include="ManeuverTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

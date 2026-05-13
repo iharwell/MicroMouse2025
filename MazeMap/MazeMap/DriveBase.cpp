@@ -610,7 +610,7 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawAccelerationCommand(
     const bool isSteadyHoldRequest =
         (std::fabs(resolvedLongitudinalAccelMps2) <= 1.0e-5f) &&
         (std::fabs(resolvedYawAccelRadps2) <= 1.0e-5f);
-    const MazeMap::DriveCommandSolution solution =
+    const CommandVector rawCommand =
         isSteadyHoldRequest ?
         _plantModel.solveSteadyStateFeedforward(
             resolvedPresentLinearSpeedMps,
@@ -623,8 +623,8 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawAccelerationCommand(
             GetMissionFanDutyCycle(),
             batteryVoltageV);
     return MakeClampedDriveControlVector(
-        solution.control.LeftMotorPwm(),
-        solution.control.RightMotorPwm());
+        rawCommand.LeftMotorPwm(),
+        rawCommand.RightMotorPwm());
 }
 
 MazeMap::App::Internal::CommandVector DriveBase::ResolveRawVelocityTargetCommand(
@@ -632,15 +632,15 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawVelocityTargetCommand
     float desiredLinearSpeedMps,
     float desiredYawRateRadps) const
 {
-    const MazeMap::DriveCommandSolution solution =
+    const CommandVector rawCommand =
         _plantModel.solveSteadyStateFeedforward(
             desiredLinearSpeedMps,
             desiredYawRateRadps,
             GetMissionFanDutyCycle(),
             context.batteryVoltageV);
     return MakeClampedDriveControlVector(
-        solution.control.LeftMotorPwm(),
-        solution.control.RightMotorPwm());
+        rawCommand.LeftMotorPwm(),
+        rawCommand.RightMotorPwm());
 }
 
 MazeMap::App::Internal::CommandVector DriveBase::ResolveLongitudinalCorrectionCommand(
@@ -778,8 +778,13 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 targets.hasLongitudinalAccelTarget ?
                 targets.longitudinalAccelTargetMps2 :
                 context.imuForwardAccelMps2;
+            const MazeMap::ProportionalDerivative& accelerationPD =
+                GetProportionalDerivativeCluster().GetLongitudinalAccelerationPD(
+                    MazeMap::CommandPD::IMUForwardAccel);
             const float desiredAccelCorrectionMps2 =
-                targetAccelMps2 - context.imuForwardAccelMps2;
+                accelerationPD.Compute(
+                    targetAccelMps2 - context.imuForwardAccelMps2,
+                    0.0f);
             if (useVelocityTargetComposition)
             {
                 adjustedTargets.velocityTargetMps +=
@@ -854,14 +859,16 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 targets.hasYawRateTarget ?
                 targets.yawRateTargetRadps :
                 context.imuYawRateRadps;
-            const float yawRateGyroKp =
-                GetProportionalDerivativeCluster().GetYawRatePD(MazeMap::CommandPD::IMUYaw).GetProportionalGain();
-            const float desiredYawRateCorrectionRadps =
-                yawRateGyroKp * (targetYawRateRadps - context.imuYawRateRadps);
+            const MazeMap::ProportionalDerivative& yawRatePD =
+                GetProportionalDerivativeCluster().GetYawRatePD(MazeMap::CommandPD::IMUYaw);
+            const float desiredYawAccelCorrectionRadps2 =
+                yawRatePD.Compute(
+                    targetYawRateRadps - context.imuYawRateRadps,
+                    0.0f);
             if (useVelocityTargetComposition)
             {
                 adjustedTargets.yawRateTargetRadps +=
-                    ClampMagnitude(desiredYawRateCorrectionRadps, maxYawRateTargetDeltaRadps);
+                    ClampMagnitude(responseTimeS * desiredYawAccelCorrectionRadps2, maxYawRateTargetDeltaRadps);
                 targetCommandAdjusted = true;
             }
             else
@@ -869,7 +876,7 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 command +=
                     ResolveYawCorrectionCommand(
                         context,
-                        desiredYawRateCorrectionRadps / responseTimeS);
+                        desiredYawAccelCorrectionRadps2);
             }
         }
 
@@ -886,9 +893,14 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 context.presentLinearSpeedMps;
             if (std::fabs(speedReferenceMps) > 0.05f)
             {
+                const MazeMap::ProportionalDerivative& lateralAccelPD =
+                    GetProportionalDerivativeCluster().GetYawRatePD(
+                        MazeMap::CommandPD::IMULateralAccel);
                 const float desiredYawRateCorrectionRadps =
-                    (targetLateralAccelMps2 - context.imuLateralAccelMps2) /
-                    speedReferenceMps;
+                    lateralAccelPD.Compute(
+                        (targetLateralAccelMps2 - context.imuLateralAccelMps2) /
+                            speedReferenceMps,
+                        0.0f);
                 if (useVelocityTargetComposition)
                 {
                     adjustedTargets.yawRateTargetRadps +=
@@ -907,12 +919,16 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
 
         if (MazeMap::HasCommandPD(pd, MazeMap::CommandPD::EncoderVelocity))
         {
-            const float wheelVelocityEncoderKp =
+            const MazeMap::ProportionalDerivative& wheelVelocityEncoderPD =
+                GetProportionalDerivativeCluster()
+                    .GetWheelVelocityPD(MazeMap::CommandPD::EncoderVelocity);
+            const MazeMap::ProportionalDerivative scaledWheelVelocityEncoderPD(
                 MazeMap::ScaleWheelControlValue(
-                    GetProportionalDerivativeCluster()
-                        .GetWheelVelocityPD(MazeMap::CommandPD::EncoderVelocity)
-                        .GetProportionalGain(),
-                    _wheelControlProfile.velocityKpScale);
+                    wheelVelocityEncoderPD.GetProportionalGain(),
+                    _wheelControlProfile.velocityKpScale),
+                MazeMap::ScaleWheelControlValue(
+                    wheelVelocityEncoderPD.GetDerivativeGain(),
+                    _wheelControlProfile.velocityKpScale));
             const float leftTargetVelocityMps =
                 adjustedTargets.hasWheelLinearTargets ?
                 adjustedTargets.leftWheelLinearTargetMps :
@@ -934,15 +950,16 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 yawRateErrorRadps =
                     MazeMap::Vehicle::BodyYawRateFromWheelLinear(leftVelocityErrorMps, rightVelocityErrorMps);
                 adjustedTargets.velocityTargetMps +=
-                    wheelVelocityEncoderKp * forwardVelocityErrorMps;
-                adjustedTargets.yawRateTargetRadps += wheelVelocityEncoderKp * yawRateErrorRadps;
+                    scaledWheelVelocityEncoderPD.Compute(forwardVelocityErrorMps, 0.0f);
+                adjustedTargets.yawRateTargetRadps +=
+                    scaledWheelVelocityEncoderPD.Compute(yawRateErrorRadps, 0.0f);
                 targetCommandAdjusted = true;
             }
             else
             {
                 command += CommandVector(
-                    wheelVelocityEncoderKp * leftVelocityErrorMps,
-                    wheelVelocityEncoderKp * rightVelocityErrorMps);
+                    scaledWheelVelocityEncoderPD.Compute(leftVelocityErrorMps, 0.0f),
+                    scaledWheelVelocityEncoderPD.Compute(rightVelocityErrorMps, 0.0f));
             }
         }
 
