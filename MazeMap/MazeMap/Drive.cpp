@@ -513,8 +513,8 @@ namespace MazeMap::App::Internal
             float contextualAngleRad = 0.0f;
             const float preferredSign = ResolveSignedPreference({
                 signedDescriptorHint,
-                limits.maxAngularSpeedRadps,
-                limits.angularAccelRadps2 });
+                limits.GetMaxAngularSpeedRadps(),
+                limits.GetAngularAccelRadps2() });
             if (TryResolveContextualQuarterTurnAngleRad(
                     state,
                     sensors,
@@ -530,8 +530,8 @@ namespace MazeMap::App::Internal
 
             return ResolveRequestedDirection({
                 signedDescriptorHint,
-                limits.maxAngularSpeedRadps,
-                limits.angularAccelRadps2 }) * HALF_PI_F;
+                limits.GetMaxAngularSpeedRadps(),
+                limits.GetAngularAccelRadps2() }) * HALF_PI_F;
         }
 
         bool RecoverArcGeometry(
@@ -656,29 +656,13 @@ namespace MazeMap::App::Internal
             return (std::min)(magnitude, std::fabs(configuredLimit));
         }
 
-        bool WithinConfiguredTolerance(
-            const float error,
-            const float configuredTolerance,
-            const float fallbackTolerance) noexcept
-        {
-            const float tolerance =
-                std::isfinite(configuredTolerance) ?
-                std::fabs(configuredTolerance) :
-                std::fabs(std::isfinite(fallbackTolerance) ? fallbackTolerance : 0.0f);
-            return std::fabs(std::isfinite(error) ? error : std::numeric_limits<float>::infinity()) <= tolerance;
-        }
-
         bool IsTurnComplete(
             const float remainingRad,
-            const float measuredYawRateRadps,
             const MotionLimits& limits) noexcept
         {
             return
-                WithinConfiguredTolerance(remainingRad, limits.angleToleranceRad, Config::kAngleToleranceRad) &&
-                WithinConfiguredTolerance(
-                    measuredYawRateRadps,
-                    limits.angularSpeedToleranceRadps,
-                    Config::kAngularSpeedToleranceRadps);
+                std::fabs(std::isfinite(remainingRad) ? remainingRad : std::numeric_limits<float>::infinity()) <=
+                limits.GetEffectiveAngleToleranceRad();
         }
 
         bool IsMotionSettled(const SensorSnapshot& sensors, const DriveTelemetry& driveTelemetry) noexcept
@@ -843,9 +827,9 @@ namespace MazeMap::App::Internal
                 return retainedMagnitudeRadps;
             }
 
-            if (std::isfinite(limits.maxAngularSpeedRadps))
+            if (std::isfinite(limits.GetMaxAngularSpeedRadps()))
             {
-                return std::fabs(limits.maxAngularSpeedRadps);
+                return std::fabs(limits.GetMaxAngularSpeedRadps());
             }
 
             if ((vehicle != nullptr) && std::isfinite(vehicle->GetMaxRotationalVelocity()))
@@ -869,25 +853,25 @@ namespace MazeMap::App::Internal
             {
                 if ((baseCode >= MazeMap::S1) && (baseCode <= MazeMap::S31))
                 {
-                    if (std::isfinite(limits.maxSpeedMps))
+                    if (std::isfinite(limits.GetMaxSpeedMps()))
                     {
-                        speedLimitMps = std::fabs(limits.maxSpeedMps);
+                        speedLimitMps = std::fabs(limits.GetMaxSpeedMps());
                         hasSpeedLimit = true;
                     }
                 }
                 else if (vehicle != nullptr)
                 {
                     const float maneuverLimitMps = maneuver.GetSpeedLimit(*vehicle);
-                    const bool hasConfiguredLimit = std::isfinite(limits.maxSpeedMps);
+                    const bool hasConfiguredLimit = std::isfinite(limits.GetMaxSpeedMps());
                     const bool hasManeuverLimit = std::isfinite(maneuverLimitMps);
                     if (hasConfiguredLimit && hasManeuverLimit)
                     {
-                        speedLimitMps = (std::min)(std::fabs(limits.maxSpeedMps), std::fabs(maneuverLimitMps));
+                        speedLimitMps = (std::min)(std::fabs(limits.GetMaxSpeedMps()), std::fabs(maneuverLimitMps));
                         hasSpeedLimit = true;
                     }
                     else if (hasConfiguredLimit)
                     {
-                        speedLimitMps = std::fabs(limits.maxSpeedMps);
+                        speedLimitMps = std::fabs(limits.GetMaxSpeedMps());
                         hasSpeedLimit = true;
                     }
                     else if (hasManeuverLimit)
@@ -901,7 +885,7 @@ namespace MazeMap::App::Internal
             const float requestedDirection = ResolveRequestedDirection({
                 maneuver.getEntrySpeed(),
                 maneuver.getExitSpeed(),
-                limits.maxSpeedMps });
+                limits.GetMaxSpeedMps() });
             const float requestedMagnitudeMps = ResolveRequestedMagnitude(
                 maneuver.getEntrySpeed(),
                 maneuver.getExitSpeed(),
@@ -939,6 +923,170 @@ namespace MazeMap::App::Internal
             return LimitByConfiguredMagnitude(resolvedCommand, configuredLimit);
         }
 
+        float ResolveFiniteOr(const float value, const float fallback) noexcept
+        {
+            return std::isfinite(value) ? value : fallback;
+        }
+
+        float ResolvePositiveLimitMagnitude(const float configuredLimit) noexcept
+        {
+            return
+                std::isfinite(configuredLimit) ?
+                std::fabs(configuredLimit) :
+                (std::numeric_limits<float>::infinity)();
+        }
+
+        float ResolveNominalCommandDtSeconds(const float configuredCommandPeriodSeconds) noexcept
+        {
+            return
+                (std::isfinite(configuredCommandPeriodSeconds) && (configuredCommandPeriodSeconds > 0.0f)) ?
+                configuredCommandPeriodSeconds :
+                (static_cast<float>(Config::kControlPeriodUs) * 1.0e-6f);
+        }
+
+        float ResolveUsableDtSeconds(const float dtSeconds) noexcept
+        {
+            return
+                (std::isfinite(dtSeconds) && (dtSeconds > 0.0f)) ?
+                    dtSeconds :
+                    ResolveNominalCommandDtSeconds(0.0f);
+        }
+
+        bool IsSpeedMagnitudeIncreasing(const float presentSpeed, const float targetSpeed) noexcept
+        {
+            const float presentDirection = SignF(presentSpeed);
+            const float targetDirection = SignF(targetSpeed);
+            if (targetDirection == 0.0f)
+            {
+                return false;
+            }
+
+            if (presentDirection == 0.0f)
+            {
+                return true;
+            }
+
+            return
+                (presentDirection == targetDirection) &&
+                (std::fabs(targetSpeed) > std::fabs(presentSpeed));
+        }
+
+        float StepLinearSpeedByLimits(
+            const float presentSpeedMps,
+            const float targetSpeedMps,
+            const MotionLimits& limits,
+            const float dtSeconds) noexcept
+        {
+            const float resolvedPresentSpeedMps = ResolveFiniteOr(presentSpeedMps, 0.0f);
+            const float resolvedTargetSpeedMps =
+                ResolveSignedCommandForDriveBase(targetSpeedMps, limits.GetMaxSpeedMps(), resolvedPresentSpeedMps);
+            const float deltaMps = resolvedTargetSpeedMps - resolvedPresentSpeedMps;
+            if (deltaMps == 0.0f)
+            {
+                return resolvedPresentSpeedMps;
+            }
+
+            const float limitMps2 =
+                IsSpeedMagnitudeIncreasing(resolvedPresentSpeedMps, resolvedTargetSpeedMps) ?
+                ResolvePositiveLimitMagnitude(limits.GetAccelMps2()) :
+                ResolvePositiveLimitMagnitude(limits.GetDecelMps2());
+            const float maxDeltaMps = limitMps2 * ResolveUsableDtSeconds(dtSeconds);
+            if (!std::isfinite(maxDeltaMps) || (std::fabs(deltaMps) <= maxDeltaMps))
+            {
+                return resolvedTargetSpeedMps;
+            }
+
+            return resolvedPresentSpeedMps + (SignF(deltaMps) * maxDeltaMps);
+        }
+
+        float StepAngularRateByLimits(
+            const float presentYawRateRadps,
+            const float targetYawRateRadps,
+            const MotionLimits& limits,
+            const float dtSeconds) noexcept
+        {
+            const float resolvedPresentYawRateRadps = ResolveFiniteOr(presentYawRateRadps, 0.0f);
+            const float resolvedTargetYawRateRadps =
+                ResolveSignedCommandForDriveBase(
+                    targetYawRateRadps,
+                    limits.GetMaxAngularSpeedRadps(),
+                    resolvedPresentYawRateRadps);
+            const float deltaRadps = resolvedTargetYawRateRadps - resolvedPresentYawRateRadps;
+            if (deltaRadps == 0.0f)
+            {
+                return resolvedPresentYawRateRadps;
+            }
+
+            const float maxDeltaRadps =
+                ResolvePositiveLimitMagnitude(limits.GetAngularAccelRadps2()) *
+                ResolveUsableDtSeconds(dtSeconds);
+            if (!std::isfinite(maxDeltaRadps) || (std::fabs(deltaRadps) <= maxDeltaRadps))
+            {
+                return resolvedTargetYawRateRadps;
+            }
+
+            return resolvedPresentYawRateRadps + (SignF(deltaRadps) * maxDeltaRadps);
+        }
+
+        float ResolveAccelerationFromStep(
+            const float presentValue,
+            const float nextValue,
+            const float dtSeconds) noexcept
+        {
+            const float usableDtSeconds = ResolveUsableDtSeconds(dtSeconds);
+            return (ResolveFiniteOr(nextValue, 0.0f) - ResolveFiniteOr(presentValue, 0.0f)) / usableDtSeconds;
+        }
+
+        float ResolveHeadingYawRateTarget(
+            DriveBase* const drive,
+            const float targetYawRad,
+            const float measuredYawRad,
+            const float presentYawRateRadps,
+            const MazeMap::CommandPD headingPd) noexcept
+        {
+            if ((drive == nullptr) ||
+                !MazeMap::HasCommandPD(headingPd, MazeMap::CommandPD::StateHeadingPD) ||
+                !(std::isfinite(targetYawRad) && std::isfinite(measuredYawRad)))
+            {
+                return 0.0f;
+            }
+
+            const MazeMap::ProportionalDerivative& headingController =
+                drive->GetProportionalDerivativeCluster().GetHeadingPD(MazeMap::CommandPD::StateHeadingPD);
+            const float yawRateCommandRadps =
+                headingController.Compute(
+                    AngleErrorRad(targetYawRad, measuredYawRad),
+                    -ResolveFiniteOr(presentYawRateRadps, 0.0f));
+            return std::isfinite(yawRateCommandRadps) ? yawRateCommandRadps : 0.0f;
+        }
+
+        CommandVector MakeDeltaControlVector(
+            DriveBase* const drive,
+            const float presentSpeedMps,
+            const float nextSpeedMps,
+            const float presentYawRateRadps,
+            const float nextYawRateRadps,
+            const float dtSeconds) noexcept
+        {
+            if (drive == nullptr)
+            {
+                return CommandVector::Brake();
+            }
+
+            const float desiredLongitudinalAccelMps2 =
+                ResolveAccelerationFromStep(presentSpeedMps, nextSpeedMps, dtSeconds);
+            const float desiredYawAccelRadps2 =
+                ResolveAccelerationFromStep(presentYawRateRadps, nextYawRateRadps, dtSeconds);
+            const CommandVector command =
+                drive->DeltaCommand(
+                    ResolveFiniteOr(presentSpeedMps, 0.0f),
+                    desiredLongitudinalAccelMps2,
+                    ResolveFiniteOr(presentYawRateRadps, 0.0f),
+                    desiredYawAccelRadps2,
+                    MazeMap::CommandPD::RawCommand);
+            return command;
+        }
+
         float ResolveRecoveredTranslationSpeedMps(
             const float capturedSpeedMps,
             const float configuredLimit,
@@ -953,38 +1101,6 @@ namespace MazeMap::App::Internal
                 direction * magnitude,
                 configuredLimit,
                 capturedSpeedMps);
-        }
-
-        CommandVector MakePointControlVector(
-            DriveBase* drive,
-            const float desiredSpeedMps,
-            const float desiredYawRateRadps,
-            const MazeMap::CommandPD commandPd) noexcept
-        {
-            return (drive != nullptr) ?
-                drive->PointControlVector(
-                    std::isfinite(desiredSpeedMps) ? desiredSpeedMps : 0.0f,
-                    std::isfinite(desiredYawRateRadps) ? desiredYawRateRadps : 0.0f,
-                    commandPd) :
-                CommandVector::Brake();
-        }
-
-        CommandVector MakePointControlVectorWithHeadingTarget(
-            DriveBase* drive,
-            const float desiredSpeedMps,
-            const float desiredYawRateRadps,
-            const float targetYawRad,
-            const MazeMap::CommandPD velocityAndYawPd,
-            const MazeMap::CommandPD headingPd) noexcept
-        {
-            return (drive != nullptr) ?
-                drive->PointControlVectorWithHeadingTarget(
-                    std::isfinite(desiredSpeedMps) ? desiredSpeedMps : 0.0f,
-                    std::isfinite(desiredYawRateRadps) ? desiredYawRateRadps : 0.0f,
-                    std::isfinite(targetYawRad) ? targetYawRad : 0.0f,
-                    velocityAndYawPd,
-                    headingPd) :
-                CommandVector::Brake();
         }
 
         bool IsLinearMotionCompleteAtExit(
@@ -1003,37 +1119,46 @@ namespace MazeMap::App::Internal
         CommandVector MakeFiniteTurnToHeadingControls(
             DriveBase* drive,
             const MotionLimits& limits,
-            const Drive::CommandPDSettings& commandPdSettings,
             const MazeMap::VehicleState& state,
             const float targetYawRad,
+            const float dtSeconds,
             bool& done) noexcept
         {
             const float measuredYawRad = std::isfinite(state.GetOrientation()) ? state.GetOrientation() : 0.0f;
+            const float presentYawRateRadps = ResolveFiniteOr(state.GetRotationalVelocity(), 0.0f);
             const float remainingRad = AngleErrorRad(targetYawRad, measuredYawRad);
-            if (IsTurnComplete(remainingRad, state.GetRotationalVelocity(), limits))
+            if (IsTurnComplete(remainingRad, limits))
             {
                 done = true;
                 return CommandVector::Brake();
             }
 
             const float finiteRemainingRad = std::isfinite(remainingRad) ? remainingRad : 0.0f;
-            const float feedforwardYawRateRadps =
-                std::isfinite(limits.angularAccelRadps2) ?
+            const float targetYawRateRadps =
+                std::isfinite(limits.GetAngularAccelRadps2()) ?
                 (SignF(finiteRemainingRad) *
-                    ReachableSpeedWithBoundary(0.0f, std::fabs(finiteRemainingRad), std::fabs(limits.angularAccelRadps2))) :
+                    ReachableSpeedWithBoundary(0.0f, std::fabs(finiteRemainingRad), std::fabs(limits.GetAngularAccelRadps2()))) :
                 0.0f;
-            return MakePointControlVectorWithHeadingTarget(
+            const float desiredYawRateRadps =
+                StepAngularRateByLimits(presentYawRateRadps, targetYawRateRadps, limits, dtSeconds);
+            return MakeDeltaControlVector(
                 drive,
                 0.0f,
-                ResolveSignedCommandForDriveBase(feedforwardYawRateRadps, limits.maxAngularSpeedRadps),
-                targetYawRad,
-                commandPdSettings.yawRate,
-                commandPdSettings.heading);
+                0.0f,
+                presentYawRateRadps,
+                desiredYawRateRadps,
+                dtSeconds);
         }
 
     }
 
     Drive::Drive()
+        : Drive(ResolveNominalCommandDtSeconds(0.0f))
+    {
+    }
+
+    Drive::Drive(const float nominalCommandPeriodSeconds)
+        : _nominalCommandPeriodSeconds(ResolveNominalCommandDtSeconds(nominalCommandPeriodSeconds))
     {
         _commandPdSettings.heading = Config::kDriveHeadingCommandPd;
         _commandPdSettings.yawRate = Config::kDriveYawRateCommandPd;
@@ -1059,6 +1184,11 @@ namespace MazeMap::App::Internal
     const MotionLimits& Drive::GetLimits() const noexcept
     {
         return _limits;
+    }
+
+    float Drive::GetNominalCommandPeriodSeconds() const noexcept
+    {
+        return _nominalCommandPeriodSeconds;
     }
 
     void Drive::SetCommandPDSettings(const CommandPDSettings& settings) noexcept
@@ -1131,14 +1261,14 @@ namespace MazeMap::App::Internal
             cruiseSpeed,
             exitSpeed,
             commandedSpeedMps,
-            _limits.maxSpeedMps,
-            _limits.accelMps2,
-            _limits.decelMps2 });
+            _limits.GetMaxSpeedMps(),
+            _limits.GetAccelMps2(),
+            _limits.GetDecelMps2() });
         if (SignF(commandedSpeedMps) != direction)
         {
             commandedSpeedMps = 0.0f;
         }
-        const float cruiseMagnitudeMps = ResolveRequestedMagnitude(cruiseSpeed, exitSpeed, _limits.maxSpeedMps);
+        const float cruiseMagnitudeMps = ResolveRequestedMagnitude(cruiseSpeed, exitSpeed, _limits.GetMaxSpeedMps());
         const float exitMagnitudeMps = ResolveRequestedMagnitude(exitSpeed, cruiseSpeed, 0.0f);
         const float startDistanceM =
             // Latch wheel-average distance so primitive progress stays relative to this start point.
@@ -1181,8 +1311,8 @@ namespace MazeMap::App::Internal
                 ResolveRequestedDirection({
                     angleRad,
                     initialYawRateRadps,
-                    _limits.maxAngularSpeedRadps,
-                    _limits.angularAccelRadps2 });
+                    _limits.GetMaxAngularSpeedRadps(),
+                    _limits.GetAngularAccelRadps2() });
         const float resolvedAngleRad =
             hasFiniteStopCondition ?
                 (std::isfinite(angleRad) ?
@@ -1240,7 +1370,7 @@ namespace MazeMap::App::Internal
         const float resolvedCurvatureRate = std::isfinite(dCurvatureDs) ? dCurvatureDs : 0.0f;
         const float speedMps = ResolveRecoveredTranslationSpeedMps(
             initialSpeedMps,
-            _limits.maxSpeedMps,
+            _limits.GetMaxSpeedMps(),
             hasProgressObjective);
         const float startDistanceM =
             // Latch wheel-average distance so primitive progress stays relative to this start point.
@@ -1293,7 +1423,7 @@ namespace MazeMap::App::Internal
             (resolvedDistanceM > Config::kDistanceToleranceM);
         const float speedMps = ResolveRecoveredTranslationSpeedMps(
             initialSpeedMps,
-            _limits.maxSpeedMps,
+            _limits.GetMaxSpeedMps(),
             hasProgressObjective);
 
         ResetActivePrimitive();
@@ -1385,10 +1515,6 @@ namespace MazeMap::App::Internal
             (_runtime != nullptr) ? _runtime->RuntimeState() : MazeMap::VehicleState{};
         const SensorSnapshot& sensors = commandState.GetSensorSnapshot();
         const DriveTelemetry driveTelemetry = (_drive != nullptr) ? _drive->GetTelemetry() : DriveTelemetry{};
-        const float dtSeconds =
-            (_loopController != nullptr) ?
-                (static_cast<float>(_loopController->LastDiagnostics().dtUs) * 1.0e-6f) :
-                0.0f;
 
         CommandVector control = CommandVector::Brake();
         switch (_activePrimitive)
@@ -1397,7 +1523,7 @@ namespace MazeMap::App::Internal
             control = HoldControls(sensors, driveTelemetry, done);
             break;
         case ActivePrimitive::LinearMotion:
-            control = LinearMotionControls(commandState, sensors, driveTelemetry, dtSeconds, done);
+            control = LinearMotionControls(commandState, sensors, driveTelemetry, done);
             break;
         case ActivePrimitive::Turn:
             control = TurnControls(commandState, sensors, done);
@@ -1409,7 +1535,7 @@ namespace MazeMap::App::Internal
             control = ArcControls(commandState, sensors, driveTelemetry, done);
             break;
         case ActivePrimitive::Maneuver:
-            control = ManeuverControls(driveTelemetry, done);
+            control = ManeuverControls(commandState, driveTelemetry, done);
             break;
         default:
             done = true;
@@ -1423,17 +1549,16 @@ namespace MazeMap::App::Internal
     void Drive::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
-        _loopController = &runtime.ControlLoop();
         _drive = &runtime.Drive();
         _vehicle = &runtime.Vehicle();
         _maze = &runtime.Maze();
-        MotionLimits runtimeLimits{};
-        runtimeLimits.maxSpeedMps = _vehicle->GetMaxSpeed();
-        runtimeLimits.accelMps2 = _vehicle->GetMaxForwardAcceleration();
-        runtimeLimits.decelMps2 = _vehicle->GetMaxForwardAcceleration();
-        runtimeLimits.maxAngularSpeedRadps = _vehicle->GetMaxRotationalVelocity();
-        runtimeLimits.angularAccelRadps2 = _vehicle->GetMaxAngularAcceleration();
-        SetLimits(runtimeLimits);
+        MotionLimits motionCommandEnvelope{};
+        motionCommandEnvelope.SetMaxSpeedMps(_vehicle->GetMaxSpeed());
+        motionCommandEnvelope.SetAccelMps2(_vehicle->GetMaxForwardAcceleration());
+        motionCommandEnvelope.SetDecelMps2(_vehicle->GetMaxForwardAcceleration());
+        motionCommandEnvelope.SetMaxAngularSpeedRadps(_vehicle->GetMaxRotationalVelocity());
+        motionCommandEnvelope.SetAngularAccelRadps2(_vehicle->GetMaxAngularAcceleration());
+        SetLimits(motionCommandEnvelope);
     }
 
     void Drive::ResetActivePrimitive() noexcept
@@ -1481,7 +1606,6 @@ namespace MazeMap::App::Internal
         const MazeMap::VehicleState& state,
         const SensorSnapshot& sensors,
         const DriveTelemetry& driveTelemetry,
-        const float dtSeconds,
         bool& done)
     {
         auto& linear = *StorageAs<LinearMotionPrimitive>(_primitiveStorageWords);
@@ -1498,42 +1622,43 @@ namespace MazeMap::App::Internal
         const float cruiseMagnitudeMps =
             LimitMagnitudeByConfiguredMagnitude(
                 linear.CruiseMagnitudeMps(),
-                _limits.maxSpeedMps);
+                _limits.GetMaxSpeedMps());
         const float exitMagnitudeMps =
             LimitMagnitudeByConfiguredMagnitude(
                 linear.ExitMagnitudeMps(),
-                _limits.maxSpeedMps);
-        const float usableDtSeconds =
-            (std::isfinite(dtSeconds) && (dtSeconds > 0.0f)) ?
-                dtSeconds :
-                (static_cast<float>(Config::kControlPeriodUs) * 1.0e-6f);
+                _limits.GetMaxSpeedMps());
+        const float usableDtSeconds = GetNominalCommandPeriodSeconds();
+        const float presentSpeedMps =
+            ResolveFiniteOr(state.GetVelocity(), driveTelemetry.commandedLinearSpeedMps);
+        const float presentYawRateRadps =
+            ResolveFiniteOr(state.GetRotationalVelocity(), driveTelemetry.commandedAngularSpeedRadps);
 
-        float desiredSpeedMps = ResolveSignedCommandForDriveBase(linear.CommandedSpeedMps(), _limits.maxSpeedMps);
+        float targetSpeedMps = ResolveSignedCommandForDriveBase(linear.CommandedSpeedMps(), _limits.GetMaxSpeedMps());
         if (remainingM > Config::kDistanceToleranceM)
         {
-            const float accelLimitedSpeedMps = (std::min)(
-                cruiseMagnitudeMps,
-                std::isfinite(_limits.accelMps2) ?
-                    (std::fabs(std::isfinite(linear.CommandedSpeedMps()) ? linear.CommandedSpeedMps() : 0.0f) +
-                        (std::fabs(_limits.accelMps2) * usableDtSeconds)) :
-                    cruiseMagnitudeMps);
             // Only apply reachable-speed braking when the configured decel limit is usable.
             const float decelLimitedSpeedMps =
-                std::isfinite(_limits.decelMps2) ?
-                ReachableSpeedWithBoundary(exitMagnitudeMps, remainingM, std::fabs(_limits.decelMps2)) :
+                std::isfinite(_limits.GetDecelMps2()) ?
+                ReachableSpeedWithBoundary(exitMagnitudeMps, remainingM, std::fabs(_limits.GetDecelMps2())) :
                 cruiseMagnitudeMps;
-            desiredSpeedMps = ResolveSignedCommandForDriveBase(
-                direction * (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps),
-                _limits.maxSpeedMps,
+            targetSpeedMps = ResolveSignedCommandForDriveBase(
+                direction * (std::min)(cruiseMagnitudeMps, decelLimitedSpeedMps),
+                _limits.GetMaxSpeedMps(),
                 linear.CommandedSpeedMps());
-            linear.SetCommandedSpeedMps(desiredSpeedMps);
         }
         else
         {
-            desiredSpeedMps = ResolveSignedCommandForDriveBase(
+            targetSpeedMps = ResolveSignedCommandForDriveBase(
                 direction * exitMagnitudeMps,
-                _limits.maxSpeedMps,
+                _limits.GetMaxSpeedMps(),
                 direction * linear.CommandedSpeedMps());
+        }
+
+        const float desiredSpeedMps =
+            StepLinearSpeedByLimits(presentSpeedMps, targetSpeedMps, _limits, usableDtSeconds);
+        linear.SetCommandedSpeedMps(desiredSpeedMps);
+        if (remainingM <= Config::kDistanceToleranceM)
+        {
             done = IsLinearMotionCompleteAtExit(
                 state,
                 sensors,
@@ -1542,7 +1667,13 @@ namespace MazeMap::App::Internal
                 exitMagnitudeMps);
         }
 
-        float desiredYawRateRadps = 0.0f;
+        float targetYawRateRadps =
+            ResolveHeadingYawRateTarget(
+                _drive,
+                resolvedTargetYawRad,
+                state.GetOrientation(),
+                presentYawRateRadps,
+                _commandPdSettings.heading);
         if (!hasFiniteStopCondition)
         {
             done = true;
@@ -1550,20 +1681,21 @@ namespace MazeMap::App::Internal
         if ((_operationMode == OperationMode::Maze) &&
             IsApproximatelyDiagonalHeadingUnit(HeadingUnitFromYawRad(resolvedTargetYawRad)))
         {
-            desiredYawRateRadps += ComputeDiagonalWallCenterOmegaRadps(
+            targetYawRateRadps += ComputeDiagonalWallCenterOmegaRadps(
                 gWallDistanceCalibration,
                 sensors.sideLeftDifferentialLight,
                 sensors.sideRightDifferentialLight);
         }
-        desiredYawRateRadps = LimitByConfiguredMagnitude(desiredYawRateRadps, _limits.maxAngularSpeedRadps);
+        const float desiredYawRateRadps =
+            StepAngularRateByLimits(presentYawRateRadps, targetYawRateRadps, _limits, usableDtSeconds);
 
-        return MakePointControlVectorWithHeadingTarget(
+        return MakeDeltaControlVector(
             _drive,
+            presentSpeedMps,
             desiredSpeedMps,
+            presentYawRateRadps,
             desiredYawRateRadps,
-            resolvedTargetYawRad,
-            _commandPdSettings.velocity | _commandPdSettings.yawRate,
-            _commandPdSettings.heading);
+            usableDtSeconds);
     }
 
     CommandVector Drive::TurnControls(
@@ -1572,29 +1704,36 @@ namespace MazeMap::App::Internal
         bool& done)
     {
         auto& turn = *StorageAs<TurnPrimitive>(_primitiveStorageWords);
+        const float usableDtSeconds = GetNominalCommandPeriodSeconds();
         turn.ObserveWallStates(sensors);
 
         if (!turn.HasFiniteStopCondition())
         {
             done = true;
-            const float desiredYawRateRadps =
+            const float presentYawRateRadps =
+                ResolveFiniteOr(state.GetRotationalVelocity(), 0.0f);
+            const float targetYawRateRadps =
                 ResolveSignedCommandForDriveBase(
                     turn.TurnDirection() * ResolveTurnCommandMagnitudeRadps(turn.RetainedYawRateRadps(), _limits, _vehicle),
-                    _limits.maxAngularSpeedRadps,
+                    _limits.GetMaxAngularSpeedRadps(),
                     turn.TurnDirection() * turn.RetainedYawRateRadps());
-            return MakePointControlVector(
+            const float desiredYawRateRadps =
+                StepAngularRateByLimits(presentYawRateRadps, targetYawRateRadps, _limits, usableDtSeconds);
+            return MakeDeltaControlVector(
                 _drive,
                 0.0f,
+                0.0f,
+                presentYawRateRadps,
                 desiredYawRateRadps,
-                _commandPdSettings.yawRate);
+                usableDtSeconds);
         }
 
         return MakeFiniteTurnToHeadingControls(
             _drive,
             _limits,
-            _commandPdSettings,
             state,
             turn.TargetYawRad(),
+            usableDtSeconds,
             done);
     }
 
@@ -1616,10 +1755,10 @@ namespace MazeMap::App::Internal
         const float initialSpeedMps =
             ResolveSignedCommandForDriveBase(
                 transition.SpeedMps(),
-                _limits.maxSpeedMps,
+                _limits.GetMaxSpeedMps(),
                 transition.SpeedMps());
         const float initialYawRateRadps =
-            ResolveSignedCommandForDriveBase(transition.InitialYawRateRadps(), _limits.maxAngularSpeedRadps);
+            ResolveSignedCommandForDriveBase(transition.InitialYawRateRadps(), _limits.GetMaxAngularSpeedRadps());
         const float resolvedCurvatureRate = transition.CurvatureRatePerMeter();
         const float finalYawRateRadps =
             initialYawRateRadps +
@@ -1629,23 +1768,32 @@ namespace MazeMap::App::Internal
             (initialSpeedMps * resolvedCurvatureRate * progressM);
         done =
             hasFiniteStopCondition &&
-            (traveledM >= (distanceM - Config::kDistanceToleranceM)) &&
-            WithinConfiguredTolerance(
-                state.GetRotationalVelocity() - finalYawRateRadps,
-                _limits.angularSpeedToleranceRadps,
-                Config::kAngularSpeedToleranceRadps);
+            (traveledM >= (distanceM - Config::kDistanceToleranceM));
         if (!hasFiniteStopCondition)
         {
             done = true;
         }
-        return MakePointControlVector(
-            _drive,
-            initialSpeedMps,
+        const float presentSpeedMps =
+            ResolveFiniteOr(state.GetVelocity(), driveTelemetry.commandedLinearSpeedMps);
+        const float presentYawRateRadps =
+            ResolveFiniteOr(state.GetRotationalVelocity(), driveTelemetry.commandedAngularSpeedRadps);
+        const float targetSpeedMps =
+            ResolveSignedCommandForDriveBase(
+                initialSpeedMps,
+                _limits.GetMaxSpeedMps(),
+                presentSpeedMps);
+        const float targetYawRateRadps =
             ResolveSignedCommandForDriveBase(
                 done ? finalYawRateRadps : desiredYawRateRadps,
-                _limits.maxAngularSpeedRadps,
-                initialYawRateRadps),
-            _commandPdSettings.velocity | _commandPdSettings.yawRate);
+                _limits.GetMaxAngularSpeedRadps(),
+                initialYawRateRadps);
+        return MakeDeltaControlVector(
+            _drive,
+            presentSpeedMps,
+            StepLinearSpeedByLimits(presentSpeedMps, targetSpeedMps, _limits, GetNominalCommandPeriodSeconds()),
+            presentYawRateRadps,
+            StepAngularRateByLimits(presentYawRateRadps, targetYawRateRadps, _limits, GetNominalCommandPeriodSeconds()),
+            GetNominalCommandPeriodSeconds());
     }
 
     CommandVector Drive::ArcControls(
@@ -1654,7 +1802,6 @@ namespace MazeMap::App::Internal
         const DriveTelemetry& driveTelemetry,
         bool& done)
     {
-        (void)state;
         (void)sensors;
         auto& arc = *StorageAs<ArcPrimitive>(_primitiveStorageWords);
         // Measure primitive progress from the wheel-average distance latched when the primitive was armed.
@@ -1666,19 +1813,28 @@ namespace MazeMap::App::Internal
         const float initialSpeedMps =
             ResolveSignedCommandForDriveBase(
                 arc.SpeedMps(),
-                _limits.maxSpeedMps,
+                _limits.GetMaxSpeedMps(),
                 arc.SpeedMps());
         done = hasFiniteStopCondition ? (traveledM >= (distanceM - Config::kDistanceToleranceM)) : true;
-        return MakePointControlVector(
-            _drive,
-            initialSpeedMps,
+        const float presentSpeedMps =
+            ResolveFiniteOr(state.GetVelocity(), driveTelemetry.commandedLinearSpeedMps);
+        const float presentYawRateRadps =
+            ResolveFiniteOr(state.GetRotationalVelocity(), driveTelemetry.commandedAngularSpeedRadps);
+        const float targetYawRateRadps =
             ResolveSignedCommandForDriveBase(
                 initialSpeedMps * curvature,
-                _limits.maxAngularSpeedRadps),
-            _commandPdSettings.velocity | _commandPdSettings.yawRate);
+                _limits.GetMaxAngularSpeedRadps());
+        return MakeDeltaControlVector(
+            _drive,
+            presentSpeedMps,
+            StepLinearSpeedByLimits(presentSpeedMps, initialSpeedMps, _limits, GetNominalCommandPeriodSeconds()),
+            presentYawRateRadps,
+            StepAngularRateByLimits(presentYawRateRadps, targetYawRateRadps, _limits, GetNominalCommandPeriodSeconds()),
+            GetNominalCommandPeriodSeconds());
     }
 
     CommandVector Drive::ManeuverControls(
+        const MazeMap::VehicleState& state,
         const DriveTelemetry& driveTelemetry,
         bool& done)
     {
@@ -1693,33 +1849,53 @@ namespace MazeMap::App::Internal
         const float desiredSpeedMps =
             ResolveSignedCommandForDriveBase(
                 maneuverState.ManeuverSpeedMps(),
-                _limits.maxSpeedMps,
+                _limits.GetMaxSpeedMps(),
                 maneuverState.ManeuverSpeedMps());
 
         MazeMap::ManeuverPoint point{};
         if (maneuverState.TryGetTrackedPoint(traveledM, totalDistanceM, desiredSpeedMps, point))
         {
             done = !hasFiniteStopCondition || (traveledM >= (totalDistanceM - Config::kDistanceToleranceM));
-            return MakePointControlVector(
-                _drive,
+            const float presentSpeedMps =
+                ResolveFiniteOr(state.GetVelocity(), driveTelemetry.commandedLinearSpeedMps);
+            const float presentYawRateRadps =
+                ResolveFiniteOr(state.GetRotationalVelocity(), driveTelemetry.commandedAngularSpeedRadps);
+            const float targetSpeedMps =
                 ResolveSignedCommandForDriveBase(
                     point.Velocity,
-                    _limits.maxSpeedMps,
-                    desiredSpeedMps),
+                    _limits.GetMaxSpeedMps(),
+                    desiredSpeedMps);
+            const float targetYawRateRadps =
                 ResolveSignedCommandForDriveBase(
                     point.Omega,
-                    _limits.maxAngularSpeedRadps),
-                _commandPdSettings.velocity | _commandPdSettings.yawRate);
+                    _limits.GetMaxAngularSpeedRadps());
+            return MakeDeltaControlVector(
+                _drive,
+                presentSpeedMps,
+                StepLinearSpeedByLimits(presentSpeedMps, targetSpeedMps, _limits, GetNominalCommandPeriodSeconds()),
+                presentYawRateRadps,
+                StepAngularRateByLimits(presentYawRateRadps, targetYawRateRadps, _limits, GetNominalCommandPeriodSeconds()),
+                GetNominalCommandPeriodSeconds());
         }
 
         const float angleRad = static_cast<float>(MazeMap::CodeDegrees(code)) * DEG_TO_RAD_F;
         done = !hasFiniteStopCondition || (traveledM >= (totalDistanceM - Config::kDistanceToleranceM));
-        return MakePointControlVector(
-            _drive,
-            desiredSpeedMps,
+        const float presentSpeedMps =
+            ResolveFiniteOr(state.GetVelocity(), driveTelemetry.commandedLinearSpeedMps);
+        const float presentYawRateRadps =
+            ResolveFiniteOr(state.GetRotationalVelocity(), driveTelemetry.commandedAngularSpeedRadps);
+        const float targetYawRateRadps =
             ResolveSignedCommandForDriveBase(
-                desiredSpeedMps * (angleRad / totalDistanceM),
-                _limits.maxAngularSpeedRadps),
-            _commandPdSettings.velocity | _commandPdSettings.yawRate);
+                (std::fabs(totalDistanceM) > Config::kDistanceToleranceM) ?
+                    (desiredSpeedMps * (angleRad / totalDistanceM)) :
+                    0.0f,
+                _limits.GetMaxAngularSpeedRadps());
+        return MakeDeltaControlVector(
+            _drive,
+            presentSpeedMps,
+            StepLinearSpeedByLimits(presentSpeedMps, desiredSpeedMps, _limits, GetNominalCommandPeriodSeconds()),
+            presentYawRateRadps,
+            StepAngularRateByLimits(presentYawRateRadps, targetYawRateRadps, _limits, GetNominalCommandPeriodSeconds()),
+            GetNominalCommandPeriodSeconds());
     }
 }

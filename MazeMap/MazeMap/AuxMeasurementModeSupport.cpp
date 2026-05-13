@@ -203,29 +203,29 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
     MotionLimits CorridorRepeatabilityLimits(const float cruiseSpeedMps) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = (std::max)(0.0f, cruiseSpeedMps);
-        limits.accelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2;
-        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
-        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
+        limits.SetMaxSpeedMps((std::max)(0.0f, cruiseSpeedMps));
+        limits.SetAccelMps2(AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2);
+        limits.SetDecelMps2(AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2);
+        limits.SetMaxAngularSpeedRadps(Config::kSearchTurnMaxOmegaRadps);
+        limits.SetAngularAccelRadps2(Config::kSearchTurnAccelRadps2);
         return limits;
     }
 
     MotionLimits PositionAccuracyAuditStraightLimits(const float cruiseSpeedMps) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = (std::max)(0.0f, cruiseSpeedMps);
-        limits.accelMps2 = AuxMeasurementConfig::kPositionAuditAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kPositionAuditDecelMps2;
-        limits.maxAngularSpeedRadps = Config::kSearchTurnMaxOmegaRadps;
-        limits.angularAccelRadps2 = Config::kSearchTurnAccelRadps2;
+        limits.SetMaxSpeedMps((std::max)(0.0f, cruiseSpeedMps));
+        limits.SetAccelMps2(AuxMeasurementConfig::kPositionAuditAccelMps2);
+        limits.SetDecelMps2(AuxMeasurementConfig::kPositionAuditDecelMps2);
+        limits.SetMaxAngularSpeedRadps(Config::kSearchTurnMaxOmegaRadps);
+        limits.SetAngularAccelRadps2(Config::kSearchTurnAccelRadps2);
         return limits;
     }
 
     MotionLimits PositionAccuracyAuditTurnLimits() noexcept
     {
         MotionLimits limits = PositionAccuracyAuditStraightLimits(0.0f);
-        limits.maxSpeedMps = 0.0f;
+        limits.SetMaxSpeedMps(0.0f);
         return limits;
     }
 
@@ -235,7 +235,7 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
     {
         (void)nominalRadiusM;
         MotionLimits limits = PositionAccuracyAuditStraightLimits(cruiseSpeedMps);
-        limits.maxAngularSpeedRadps = AuxMeasurementConfig::kPositionAuditCornerMaxOmegaRadps;
+        limits.SetMaxAngularSpeedRadps(AuxMeasurementConfig::kPositionAuditCornerMaxOmegaRadps);
         return limits;
     }
 

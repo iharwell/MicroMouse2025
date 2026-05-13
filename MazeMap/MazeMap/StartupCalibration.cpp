@@ -23,11 +23,11 @@ namespace MazeMap::App::Internal
         MotionLimits BuildStartupTravelLimits() noexcept
         {
             MotionLimits limits{};
-            limits.maxSpeedMps = Config::kStartupWallCalibrationSpeedMps;
-            limits.accelMps2 = Config::kStartupWallCalibrationAccelMps2;
-            limits.decelMps2 = Config::kStartupWallCalibrationDecelMps2;
-            limits.maxAngularSpeedRadps = Config::kStartupWallCalibrationTurnMaxOmegaRadps;
-            limits.angularAccelRadps2 = Config::kStartupWallCalibrationTurnAccelRadps2;
+            limits.SetMaxSpeedMps(Config::kStartupWallCalibrationSpeedMps);
+            limits.SetAccelMps2(Config::kStartupWallCalibrationAccelMps2);
+            limits.SetDecelMps2(Config::kStartupWallCalibrationDecelMps2);
+            limits.SetMaxAngularSpeedRadps(Config::kStartupWallCalibrationTurnMaxOmegaRadps);
+            limits.SetAngularAccelRadps2(Config::kStartupWallCalibrationTurnAccelRadps2);
             return limits;
         }
 
@@ -454,7 +454,7 @@ namespace MazeMap::App::Internal
         _driveService->SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService->StartStraight(
             distanceM,
-            _travelLimits.maxSpeedMps,
+            _travelLimits.GetMaxSpeedMps(),
             0.0f,
             &heading,
             &targetPosition);

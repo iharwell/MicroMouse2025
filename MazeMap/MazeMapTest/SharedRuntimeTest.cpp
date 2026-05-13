@@ -233,23 +233,21 @@ namespace MazeMap::App
             Internal::Drive& drive = runtime.DriveService();
 
             MotionLimits limits{};
-            limits.maxSpeedMps = -0.50f;
-            limits.accelMps2 = -1.25f;
-            limits.decelMps2 = -2.50f;
-            limits.maxAngularSpeedRadps = -3.50f;
-            limits.angularAccelRadps2 = -4.50f;
-            limits.angleToleranceRad = -0.05f;
-            limits.angularSpeedToleranceRadps = -0.15f;
+            limits.SetMaxSpeedMps(-0.50f);
+            limits.SetAccelMps2(-1.25f);
+            limits.SetDecelMps2(-2.50f);
+            limits.SetMaxAngularSpeedRadps(-3.50f);
+            limits.SetAngularAccelRadps2(-4.50f);
+            limits.SetAngleToleranceRad(-0.05f);
             drive.SetLimits(limits);
 
             const MotionLimits& configured = drive.GetLimits();
-            Assert::AreEqual(limits.maxSpeedMps, configured.maxSpeedMps, 1.0e-6f);
-            Assert::AreEqual(limits.accelMps2, configured.accelMps2, 1.0e-6f);
-            Assert::AreEqual(limits.decelMps2, configured.decelMps2, 1.0e-6f);
-            Assert::AreEqual(limits.maxAngularSpeedRadps, configured.maxAngularSpeedRadps, 1.0e-6f);
-            Assert::AreEqual(limits.angularAccelRadps2, configured.angularAccelRadps2, 1.0e-6f);
-            Assert::AreEqual(limits.angleToleranceRad, configured.angleToleranceRad, 1.0e-6f);
-            Assert::AreEqual(limits.angularSpeedToleranceRadps, configured.angularSpeedToleranceRadps, 1.0e-6f);
+            Assert::AreEqual(limits.GetMaxSpeedMps(), configured.GetMaxSpeedMps(), 1.0e-6f);
+            Assert::AreEqual(limits.GetAccelMps2(), configured.GetAccelMps2(), 1.0e-6f);
+            Assert::AreEqual(limits.GetDecelMps2(), configured.GetDecelMps2(), 1.0e-6f);
+            Assert::AreEqual(limits.GetMaxAngularSpeedRadps(), configured.GetMaxAngularSpeedRadps(), 1.0e-6f);
+            Assert::AreEqual(limits.GetAngularAccelRadps2(), configured.GetAngularAccelRadps2(), 1.0e-6f);
+            Assert::AreEqual(limits.GetAngleToleranceRad(), configured.GetAngleToleranceRad(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveServiceProducesCommandsWithoutLoopModeState)
@@ -258,13 +256,12 @@ namespace MazeMap::App
             Internal::Drive& drive = runtime.DriveService();
 
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
 
             drive.StartStraight(0.25f, 0.20f, 0.0f);
@@ -284,19 +281,18 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
 
             const Internal::CommandVector expected =
                 runtime.Drive().PointControlVectorWithHeadingTarget(
                     0.0f,
-                    limits.maxAngularSpeedRadps,
+                    limits.GetMaxAngularSpeedRadps(),
                     HALF_PI_F,
                     drive.GetCommandPDSettings().yawRate,
                     drive.GetCommandPDSettings().heading);
@@ -317,13 +313,12 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 2000.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(2000.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
 
             const Eigen::Vector2f targetHeadingUnit(0.0f, 1.0f);
@@ -435,13 +430,12 @@ namespace MazeMap::App
             Internal::Drive& drive = runtime.DriveService();
 
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
 
             drive.StartStraight(NAN, INFINITY, NAN);
@@ -459,14 +453,12 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             const Eigen::Vector2f zeroHeading(0.0f, 0.0f);
             const auto sampleStraightControl =
                 [&runtime, &drive, &limits](const Eigen::Vector2f* headingOverride) -> Internal::CommandVector
@@ -499,14 +491,12 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             const auto sampleStraightControl =
                 [&runtime, &drive, &limits](const Eigen::Vector2f& headingOverride) -> Internal::CommandVector
             {
@@ -547,14 +537,12 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             const auto sampleStraightControl =
                 [&runtime, &drive, &limits](
                     const Eigen::Vector2f& headingOverride,
@@ -595,13 +583,12 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
             drive.StartTurn(INFINITY);
 
@@ -621,13 +608,12 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
             drive.StartArc(INFINITY, 4.0f);
 
@@ -656,14 +642,12 @@ namespace MazeMap::App
             maze.SetWall(cell, MazeMap::Down, MazeMap::WallState::NoWall);
 
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             Internal::Drive& drive = runtime.DriveService();
             drive.SetOperationMode(Internal::Drive::OperationMode::Maze);
             drive.SetLimits(limits);
@@ -685,13 +669,12 @@ namespace MazeMap::App
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
 
             drive.StartTurn(NAN);
@@ -734,23 +717,19 @@ namespace MazeMap::App
             };
 
             MotionLimits positiveLimits{};
-            positiveLimits.maxSpeedMps = 0.40f;
-            positiveLimits.accelMps2 = 2.0f;
-            positiveLimits.decelMps2 = 2.0f;
-            positiveLimits.maxAngularSpeedRadps = 6.0f;
-            positiveLimits.angularAccelRadps2 = 30.0f;
-            positiveLimits.angleToleranceRad = Config::kAngleToleranceRad;
-            positiveLimits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            positiveLimits.SetMaxSpeedMps(0.40f);
+            positiveLimits.SetAccelMps2(2.0f);
+            positiveLimits.SetDecelMps2(2.0f);
+            positiveLimits.SetMaxAngularSpeedRadps(6.0f);
+            positiveLimits.SetAngularAccelRadps2(30.0f);
+            positiveLimits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             MotionLimits signedLimits = positiveLimits;
-            signedLimits.maxSpeedMps = -positiveLimits.maxSpeedMps;
-            signedLimits.accelMps2 = -positiveLimits.accelMps2;
-            signedLimits.decelMps2 = -positiveLimits.decelMps2;
-            signedLimits.maxAngularSpeedRadps = -positiveLimits.maxAngularSpeedRadps;
-            signedLimits.angularAccelRadps2 = -positiveLimits.angularAccelRadps2;
-            signedLimits.angleToleranceRad = -positiveLimits.angleToleranceRad;
-            signedLimits.angularSpeedToleranceRadps = -positiveLimits.angularSpeedToleranceRadps;
-
+            signedLimits.SetMaxSpeedMps(-positiveLimits.GetMaxSpeedMps());
+            signedLimits.SetAccelMps2(-positiveLimits.GetAccelMps2());
+            signedLimits.SetDecelMps2(-positiveLimits.GetDecelMps2());
+            signedLimits.SetMaxAngularSpeedRadps(-positiveLimits.GetMaxAngularSpeedRadps());
+            signedLimits.SetAngularAccelRadps2(-positiveLimits.GetAngularAccelRadps2());
+            signedLimits.SetAngleToleranceRad(-positiveLimits.GetAngleToleranceRad());
             const Internal::CommandVector positiveControl = sampleStraightControl(positiveLimits);
             const Internal::CommandVector signedControl = sampleStraightControl(signedLimits);
             Assert::AreEqual(positiveControl.LeftMotorPwm(), signedControl.LeftMotorPwm(), 1.0e-6f);
@@ -767,14 +746,12 @@ namespace MazeMap::App
                 DirectionToYawRad(MazeMap::Up)));
 
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Up, MazeMap::Wall);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::Wall);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::NoWall);
@@ -785,7 +762,7 @@ namespace MazeMap::App
             drive.StartTurn(NAN);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::NoWall);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::Wall);
-            limits.maxAngularSpeedRadps = -limits.maxAngularSpeedRadps;
+            limits.SetMaxAngularSpeedRadps(-limits.GetMaxAngularSpeedRadps());
             drive.SetLimits(limits);
 
             bool done = false;
@@ -807,14 +784,12 @@ namespace MazeMap::App
                 DirectionToYawRad(MazeMap::Up)));
 
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Up, MazeMap::Wall);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::Wall);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::NoWall);
@@ -825,7 +800,7 @@ namespace MazeMap::App
             drive.StartArc(NAN, NAN);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Left, MazeMap::NoWall);
             runtime.Maze().SetWall(MazeMap::CellCoordinates(1U, 1U), MazeMap::Right, MazeMap::Wall);
-            limits.maxAngularSpeedRadps = -limits.maxAngularSpeedRadps;
+            limits.SetMaxAngularSpeedRadps(-limits.GetMaxAngularSpeedRadps());
             drive.SetLimits(limits);
 
             bool done = false;
@@ -845,14 +820,12 @@ namespace MazeMap::App
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up)));
 
             MotionLimits limits{};
-            limits.maxSpeedMps = 0.40f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 2.0f;
-            limits.maxAngularSpeedRadps = 6.0f;
-            limits.angularAccelRadps2 = 30.0f;
-            limits.angleToleranceRad = Config::kAngleToleranceRad;
-            limits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            limits.SetMaxSpeedMps(0.40f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(2.0f);
+            limits.SetMaxAngularSpeedRadps(6.0f);
+            limits.SetAngularAccelRadps2(30.0f);
+            limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             Internal::Drive& drive = runtime.DriveService();
             drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
             drive.SetLimits(limits);
@@ -882,7 +855,7 @@ namespace MazeMap::App
                 MazeMap::ManeuverInstance maneuver(MazeMap::S1, MazeMap::DirectionalLocation(), 0.0f, 0.0f);
                 drive.StartManeuver(maneuver);
                 MotionLimits changedLimits = limits;
-                changedLimits.maxSpeedMps = -changedLimits.maxSpeedMps;
+                changedLimits.SetMaxSpeedMps(-changedLimits.GetMaxSpeedMps());
                 drive.SetLimits(changedLimits);
 
                 bool done = false;
@@ -894,17 +867,14 @@ namespace MazeMap::App
             };
 
             MotionLimits forwardLimits{};
-            forwardLimits.maxSpeedMps = 0.40f;
-            forwardLimits.accelMps2 = 2.0f;
-            forwardLimits.decelMps2 = 2.0f;
-            forwardLimits.maxAngularSpeedRadps = 6.0f;
-            forwardLimits.angularAccelRadps2 = 30.0f;
-            forwardLimits.angleToleranceRad = Config::kAngleToleranceRad;
-            forwardLimits.angularSpeedToleranceRadps = Config::kAngularSpeedToleranceRadps;
-
+            forwardLimits.SetMaxSpeedMps(0.40f);
+            forwardLimits.SetAccelMps2(2.0f);
+            forwardLimits.SetDecelMps2(2.0f);
+            forwardLimits.SetMaxAngularSpeedRadps(6.0f);
+            forwardLimits.SetAngularAccelRadps2(30.0f);
+            forwardLimits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             MotionLimits reverseHintLimits = forwardLimits;
-            reverseHintLimits.maxSpeedMps = -forwardLimits.maxSpeedMps;
-
+            reverseHintLimits.SetMaxSpeedMps(-forwardLimits.GetMaxSpeedMps());
             const float forwardCommandMps = sampleRecoveredLinearCommandMps(forwardLimits);
             const float reverseCommandMps = sampleRecoveredLinearCommandMps(reverseHintLimits);
             Assert::IsTrue(forwardCommandMps > 1.0e-6f);

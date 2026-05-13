@@ -221,7 +221,6 @@ Then tune:
 - `kTurnHeadingKp`
 - `kTurnYawD`
 - `kAngleToleranceRad`
-- `kAngularSpeedToleranceRadps`
 
 What good turns look like:
 

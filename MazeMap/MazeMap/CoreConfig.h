@@ -234,8 +234,7 @@ namespace MazeMap::Config
     // or judge visibility; decrease only if race rules and stopping accuracy allow a shorter dwell.
     constexpr uint16_t kSpeedRunFinishPauseMs = 3000U;
     // [Medium] Active-high vacuum-fan duty during each racing run, including the finish hold before returning to
-    // start. Raise only if additional downforce is worth the power draw and thermal cost; lower if traction is already
-    // sufficient or the fan system runs too hot.
+    // start. Change this only when the intended racing downforce target changes.
     constexpr float kRacingFanDutyCycle = 0.8f;
     // [Medium] Soft-start time for the vacuum fan in diagnostic and racing modes. Increase if the drivetrain or power
     // rail reacts poorly to a full-step fan start; decrease if you need full downforce sooner.
@@ -486,14 +485,9 @@ namespace MazeMap::Config
     // [Medium] Linear-speed threshold used to declare motion settled. Lower it if the robot is still rolling when a
     // profile completes; raise it if noisy velocity estimates keep motions from ever finishing.
     constexpr float kSpeedToleranceMps = 0.05f;
-    // [Medium] Angular-speed threshold used to declare turns settled. Lower it if the robot is still rotating when turns
-    // finish; raise it if gyro noise keeps the turn controller waiting too long.
-    constexpr float kAngularSpeedToleranceRadps = 0.10f;
     // [Medium] Mapping/search in-place turns should settle more tightly than the generic default because they anchor
     // the maze solution. Keep this below one degree.
     constexpr float kMappingAngleToleranceRad = 0.50f * DEG_TO_RAD_F;
-    // [Medium] Mapping/search in-place turns should also be nearly stopped before they declare completion.
-    constexpr float kMappingAngularSpeedToleranceRadps = 0.03f;
     // [Medium] Smallest encoder distance change treated as real translation progress for the motion watchdog. Increase
     // if encoder quantization or noise causes false progress; decrease if low-speed moves stall without tripping it.
     constexpr float kEncoderProgressEpsilonM = 0.0015f;

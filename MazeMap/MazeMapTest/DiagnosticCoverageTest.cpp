@@ -160,7 +160,6 @@ namespace MazeMap
 				"kTurnHeadingKp",
 				"kTurnYawD",
 				"kAngleToleranceRad",
-				"kAngularSpeedToleranceRadps",
 				"kStraightHeadingKp",
 				"kStraightYawD",
 				"kDistanceToleranceM",

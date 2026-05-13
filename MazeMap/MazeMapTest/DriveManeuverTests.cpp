@@ -141,18 +141,6 @@ namespace MazeMap::App
                 snapshot);
         }
 
-        void ApplyControlVector(DriveBase& drive, const CommandVector& control) noexcept
-        {
-            if (std::isfinite(control.LeftMotorPwm()) && std::isfinite(control.RightMotorPwm()))
-            {
-                drive.CommandOpenLoopRaw(control);
-            }
-            else
-            {
-                drive.Brake();
-            }
-        }
-
         VehicleState::StateVector BuildTruthState(const float linearSpeedMps) noexcept
         {
             const PlantParams params = PlantParams::Default();
@@ -273,29 +261,7 @@ namespace MazeMap::App
             const float angleRad,
             const MotionLimits& limits) noexcept
         {
-            const float absoluteAngleRad = std::fabs(angleRad);
-            const float maxAngularSpeedRadps = limits.maxAngularSpeedRadps;
-            const float angularAccelRadps2 = limits.angularAccelRadps2;
-            if (!(absoluteAngleRad > 0.0f) || !(angularAccelRadps2 > 0.0f))
-            {
-                return 0.0f;
-            }
-
-            if (!(maxAngularSpeedRadps > 0.0f))
-            {
-                return 2.0f * std::sqrt(absoluteAngleRad / angularAccelRadps2);
-            }
-
-            const float accelAndDecelAngleRad =
-                (maxAngularSpeedRadps * maxAngularSpeedRadps) / angularAccelRadps2;
-            if (absoluteAngleRad <= accelAndDecelAngleRad)
-            {
-                return 2.0f * std::sqrt(absoluteAngleRad / angularAccelRadps2);
-            }
-
-            return
-                (2.0f * maxAngularSpeedRadps / angularAccelRadps2) +
-                ((absoluteAngleRad - accelAndDecelAngleRad) / maxAngularSpeedRadps);
+            return limits.ComputeMinimumTurnDurationSeconds(angleRad);
         }
 
         std::wstring CodeLabel(const ManeuverCode code)
@@ -329,7 +295,7 @@ namespace MazeMap::App
         {
             ScopedMissionFanDuty fanDuty(0.80f);
             ManeuverExecutionTrace trace{};
-            Internal::SharedRobotRuntime runtime;
+            Internal::SharedRobotRuntime runtime(kSimulationDtSeconds);
             PlantModel& plant = runtime.Plant();
             float leftEncoderRemainderCounts = 0.0f;
             float rightEncoderRemainderCounts = 0.0f;
@@ -385,7 +351,6 @@ namespace MazeMap::App
                         runtime.Drive().GetLastAngularCommandRadps()
                     });
 
-                ApplyControlVector(runtime.Drive(), control);
                 SimulateRuntimeDriveCycle(
                     runtime,
                     plant,

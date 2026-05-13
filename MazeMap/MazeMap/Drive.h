@@ -2,9 +2,8 @@
 
 #include "CommandVector.h"
 #include "CommandPD.h"
-#include "LoopController.h"
 #include "ManeuverInstance.h"
-#include "MazeMapRuntimeCore.h"
+#include "MotionLimits.h"
 #include "DriveTelemetry.h"
 #include "SensorSnapshot.h"
 #include "VehicleState.h"
@@ -88,12 +87,12 @@ namespace MazeMap::App::Internal
     // calls, produce coherent control proposals, and return to normal behavior once
     // coherent inputs are supplied.
     //
-    // Drive is not the vehicle safety owner. Its responsibility is to produce commands
+    // Drive is not a vehicle permission authority. Its responsibility is to produce commands
     // aligned with the best available interpretation of the caller's latest request.
-    // Supervisory safety logic, stop authority, and decision-level permission to move
+    // Permission logic, stop authority, and decision-level permission to move
     // belong outside this class. Drive respects finite and physically plausible
     // configured constraints because they are part of the interpreted request, not
-    // because Drive is a global safety envelope.
+    // because Drive owns a generic permission boundary.
     //
     // This contract assumes normal C++ validity: intact object storage, intact code,
     // valid non-null caller-owned pointers according to their documented lifetime
@@ -146,6 +145,7 @@ namespace MazeMap::App::Internal
         };
 
         Drive();
+        explicit Drive(float nominalCommandPeriodSeconds);
 
         // Drive-level configuration is retained and live.
         //
@@ -204,12 +204,14 @@ namespace MazeMap::App::Internal
         // behavior without requiring Drive to be reconstructed.
         //
         // These limits express the caller's requested motion envelope as interpreted by
-        // Drive. They are not a vehicle-safety boundary and do not make Drive responsible
+        // Drive. They are not a vehicle permission boundary and do not make Drive responsible
         // for deciding whether the vehicle should be allowed to move.
         void SetLimits(const MotionLimits& limits) noexcept;
 
         // Returns the current Drive-level live motion envelope exactly as retained by Drive.
         const MotionLimits& GetLimits() const noexcept;
+
+        float GetNominalCommandPeriodSeconds() const noexcept;
 
         // `SetCommandPDSettings(settings)`:
         // Installs the Drive-level live DriveBase feedback-selection flags.
@@ -387,7 +389,7 @@ namespace MazeMap::App::Internal
         // The returned proposal must respect every applicable finite and physically plausible limit
         // that Drive can coherently interpret. Uninterpretable limit fields remove only their own
         // constraint; they do not release other usable constraints or permit unrelated motion
-        // objectives. Drive's responsibility here is request alignment, not global vehicle safety.
+        // objectives. Drive's responsibility here is request alignment, not global move permission.
         //
         // Parameters:
         // `done`:
@@ -396,13 +398,13 @@ namespace MazeMap::App::Internal
         // condition, `done` is also reported as `true` so callers that assume commands normally
         // complete can still behave reasonably while Drive continues proposing motion for the
         // retained instruction. This observation is advisory and should not be treated as a
-        // validity signal, fault signal, safety signal, or implicit permission for Drive to revoke
+        // validity signal, fault signal, or implicit permission for Drive to revoke
         // or forget the installed instruction.
         //
         // Return value:
         // Proposed control vector for the present tick. The mode may return it directly to
         // LoopController, replace it, or ignore it. Drive does not inject an independent fault or
-        // "safe fallback" behavior into this command path.
+        // independent fallback behavior into this command path.
         CommandVector GetNextControls(bool& done);
 
     private:
@@ -433,7 +435,6 @@ namespace MazeMap::App::Internal
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
-            float dtSeconds,
             bool& done);
         CommandVector TurnControls(
             const MazeMap::VehicleState& state,
@@ -449,15 +450,16 @@ namespace MazeMap::App::Internal
             const DriveTelemetry& driveTelemetry,
             bool& done);
         CommandVector ManeuverControls(
+            const MazeMap::VehicleState& state,
             const DriveTelemetry& driveTelemetry,
             bool& done);
 
         SharedRobotRuntime* _runtime{};     // Canonical runtime owner for live state and services.
-        LoopController* _loopController{};  // LoopController queried internally for current tick timing.
         DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
         MazeMap::Vehicle* _vehicle{};       // Canonical vehicle facts used for limit derivation.
         MazeMap::Maze* _maze{};             // Maze facts used when maze-mode wall correction is enabled.
         MotionLimits _limits{};             // Drive-level live motion envelope, interpreted at use.
+        float _nominalCommandPeriodSeconds{}; // Next-tick command-shaping horizon for MotionLimits.
         CommandPDSettings _commandPdSettings{};              // Drive-level live CommandPD selections.
         OperationMode _operationMode{ OperationMode::Maze }; // Drive-level live wall-correction mode.
         ActivePrimitive _activePrimitive{ ActivePrimitive::None }; // Latest installed instruction kind.

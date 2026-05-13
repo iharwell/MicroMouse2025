@@ -5,7 +5,7 @@ namespace MazeMap::DiagnosticConfig
     // Likelihood tags for the diagnostic-only config:
     // [High] commonly adjusted to improve data quality or stress level during test sessions.
     // [Medium] sometimes adjusted as the diagnostic workflow matures.
-    // [Low] usually fixed by wiring, safety limits, or operator workflow.
+    // [Low] usually fixed by wiring, hardware constraints, or operator workflow.
 
     // [Low] One half-step in the open-floor measurement workspace, in millimeters.
     constexpr float kHalfStepMm = 90.0f;

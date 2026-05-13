@@ -18,11 +18,11 @@ namespace
     MotionLimits BuildCorridorMotionLimits(const MazeMap::Vehicle& vehicle, const float maxSpeedMps) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = maxSpeedMps;
-        limits.accelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2;
-        limits.decelMps2 = AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2;
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        limits.SetMaxSpeedMps(maxSpeedMps);
+        limits.SetAccelMps2(AuxMeasurementConfig::kCorridorRepeatabilityAccelMps2);
+        limits.SetDecelMps2(AuxMeasurementConfig::kCorridorRepeatabilityDecelMps2);
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
         return limits;
     }
 }

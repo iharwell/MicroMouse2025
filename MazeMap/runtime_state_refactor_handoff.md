@@ -305,7 +305,7 @@ One useful set of suggestions from the agents was to narrow helper signatures ba
 For `Drive`, current-use narrowing proposed:
 - `HoldControls(const SensorSnapshot&, const DriveTelemetry&, bool&)`
 - `LinearMotionControls(const VehicleState&, const SensorSnapshot&, const DriveTelemetry&, float dtSeconds, bool&)`
-- `TurnControls(const VehicleState&, const SensorSnapshot&, bool&)`
+- `TurnControls(const VehicleState&, const SensorSnapshot&, float dtSeconds, bool&)`
 - `TurnTransitionControls(const VehicleState&, const DriveTelemetry&, bool&)`
 - `ArcControls(const DriveTelemetry&, bool&)`
 - `ManeuverControls(const VehicleState&, const SensorSnapshot&, const DriveTelemetry&, bool&)`

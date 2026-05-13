@@ -88,6 +88,7 @@ namespace MazeMap::App::Internal
         // - Creates the canonical production subsystem owners.
         // - Attaches internal services that need a SharedRobotRuntime back-reference.
         SharedRobotRuntime();
+        explicit SharedRobotRuntime(float nominalCommandPeriodSeconds);
 
         // Best-effort final cleanup for runtime-owned logs during object destruction.
         //

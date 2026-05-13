@@ -31,7 +31,6 @@ private:
     static constexpr float kDefaultCommandVelocityAsapYawAccelLimitRadps2 = 400.0f;
 public:
     static constexpr uint16_t kModeClosedLoop = 1u << 0;
-    static constexpr uint16_t kModeRawOpenLoop = 1u << 2;
     static constexpr uint16_t kModeBraking = 1u << 3;
     static constexpr uint16_t kModeLaunchAssistLeft = 1u << 4;
     static constexpr uint16_t kModeLaunchAssistRight = 1u << 5;
@@ -193,14 +192,6 @@ public:
     EXPORT MazeMap::App::Internal::CommandVector FeedbackCommand(
         float setpoint,
         MazeMap::CommandPD pd) const;
-
-    EXPORT void CommandGenerated(
-        const MazeMap::App::Internal::CommandVector& command,
-        float linearSpeedMps,
-        float angularSpeedRadps,
-        bool applyLaunchAssist = true);
-
-    EXPORT void CommandOpenLoopRaw(const MazeMap::App::Internal::CommandVector& command);
 
     void Brake()
     {
@@ -501,7 +492,7 @@ private:
         return angularCommandRadps;
     }
 
-    void ResolveDefaultVelocityTargetOperatingEnvelope(
+    void ResolveDefaultVelocityTargetCommandEnvelope(
         float& maxLongitudinalAccelMps2,
         float& maxYawAccelRadps2) const
     {

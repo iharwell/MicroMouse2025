@@ -1523,11 +1523,11 @@ private:
     static MotionLimits DiagnosticLimits(float maxSpeedMps)
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = maxSpeedMps;
-        limits.accelMps2 = DiagnosticConfig::kStraightAccelMps2;
-        limits.decelMps2 = DiagnosticConfig::kStraightDecelMps2;
-        limits.maxAngularSpeedRadps = DiagnosticConfig::kTurnMaxOmegaRadps;
-        limits.angularAccelRadps2 = DiagnosticConfig::kTurnAccelRadps2;
+        limits.SetMaxSpeedMps(maxSpeedMps);
+        limits.SetAccelMps2(DiagnosticConfig::kStraightAccelMps2);
+        limits.SetDecelMps2(DiagnosticConfig::kStraightDecelMps2);
+        limits.SetMaxAngularSpeedRadps(DiagnosticConfig::kTurnMaxOmegaRadps);
+        limits.SetAngularAccelRadps2(DiagnosticConfig::kTurnAccelRadps2);
         return limits;
     }
 
@@ -1647,10 +1647,10 @@ private:
         }
 
         const float accelLimitedSpeedMps = (std::min)(
-            limits.maxSpeedMps,
+            limits.GetMaxSpeedMps(),
             _straightPhaseState.commandedSpeedMps +
-            (limits.accelMps2 * (static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f)));
-        const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.decelMps2);
+            (limits.GetAccelMps2() * (static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f)));
+        const float decelLimitedSpeedMps = ReachableSpeedWithBoundary(0.0f, remainingM, limits.GetDecelMps2());
         _straightPhaseState.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
         const float headingErrorRad = HeadingErrorRad(_straightPhaseState.targetHeading, state.GetHeadingUnit());
@@ -1662,8 +1662,8 @@ private:
             (Config::kStraightYawD * state.GetRotationalVelocity());
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
-            -limits.maxAngularSpeedRadps,
-            limits.maxAngularSpeedRadps);
+            -limits.GetMaxAngularSpeedRadps(),
+            limits.GetMaxAngularSpeedRadps());
 
         return _drive.PointControlVector(
             _straightPhaseState.commandedSpeedMps,
@@ -1965,9 +1965,9 @@ private:
         const float accelLimitedSpeedMps = (std::min)(
             _arcPhaseState.cruiseSpeedMps,
             _arcPhaseState.commandedSpeedMps +
-            (_arcPhaseState.limits.accelMps2 * (static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f)));
+            (_arcPhaseState.limits.GetAccelMps2() * (static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f)));
         const float decelLimitedSpeedMps =
-            ReachableSpeedWithBoundary(0.0f, remainingM, _arcPhaseState.limits.decelMps2);
+            ReachableSpeedWithBoundary(0.0f, remainingM, _arcPhaseState.limits.GetDecelMps2());
         _arcPhaseState.commandedSpeedMps = (std::min)(accelLimitedSpeedMps, decelLimitedSpeedMps);
 
         const float progress = (std::clamp)(_arcPhaseState.traveledM / _arcPhaseState.distanceM, 0.0f, 1.0f);
@@ -1982,8 +1982,8 @@ private:
             (Config::kArcYawD * state.GetRotationalVelocity());
         angularCommandRadps = (std::clamp)(
             angularCommandRadps,
-            -_arcPhaseState.limits.maxAngularSpeedRadps,
-            _arcPhaseState.limits.maxAngularSpeedRadps);
+            -_arcPhaseState.limits.GetMaxAngularSpeedRadps(),
+            _arcPhaseState.limits.GetMaxAngularSpeedRadps());
 
         return _drive.PointControlVector(
             _arcPhaseState.commandedSpeedMps,

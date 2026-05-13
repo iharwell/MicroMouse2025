@@ -9,6 +9,7 @@
 #include "ImuCalibrationPolicy.h"
 #include "Maze.h"
 #include "MissionStartPolicy.h"
+#include "MotionLimits.h"
 #include "ProportionalDerivativeCluster.h"
 #include "RollingAverageWindow.h"
 #include "Vehicle.h"
@@ -60,17 +61,6 @@ inline bool SetupHardware()
 #include "FrontWallCharacterizationConfig.h"
 #include "LedCalibrationConfig.h"
 #include "EigenCompat.h"
-
-struct MotionLimits
-{
-    float maxSpeedMps;
-    float accelMps2;
-    float decelMps2;
-    float maxAngularSpeedRadps;
-    float angularAccelRadps2;
-    float angleToleranceRad = MazeMap::Config::kAngleToleranceRad;
-    float angularSpeedToleranceRadps = MazeMap::Config::kAngularSpeedToleranceRadps;
-};
 
 struct RawWallSensorSample
 {

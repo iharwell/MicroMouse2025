@@ -251,6 +251,7 @@
     <ClInclude Include="OpenFloorMeasurementSpec.h" />
     <ClInclude Include="MissionMazeExport.h" />
     <ClInclude Include="MissionStartPolicy.h" />
+    <ClInclude Include="MotionLimits.h" />
     <ClInclude Include="MmLog.h" />
     <ClInclude Include="LoopController.h" />
     <ClInclude Include="MotionTargetProjection.h" />
@@ -336,6 +337,7 @@
     <ClCompile Include="MazeMapApplication.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="MotionLimits.cpp" />
     <ClCompile Include="MmLog.cpp" />
     <ClCompile Include="Estimator.cpp" />
     <ClCompile Include="AuxMeasurementModeSupport.cpp" />

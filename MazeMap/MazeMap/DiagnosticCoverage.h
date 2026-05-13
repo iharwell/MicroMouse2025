@@ -16,7 +16,7 @@ namespace MazeMap
         { "kickoff_ff", "kickoff_* -> motor-model wheel FF, kWheelStaticFeedforward trim, kWheelRestLaunchDriveCommand." },
         { "kickoff_thresholds", "kickoff_* -> kWheelRestLaunchSpeedThresholdMps, kWheelRestLaunchDriveThreshold, kWheelRestLaunchMaxDriveCommand, kWheelRestLaunchRampMs." },
         { "forward", "forward_* -> motor-model wheel FF, kWheelVelocityKp, kWheelVelocityKd." },
-        { "turn", "turn_* -> kTurnHeadingKp, kTurnYawD, kAngleToleranceRad, kAngularSpeedToleranceRadps; use turn_result peak/final yaw error." },
+        { "turn", "turn_* -> kTurnHeadingKp, kTurnYawD, kAngleToleranceRad; use turn_result peak/final yaw error." },
         { "straight", "straight_* -> kStraightHeadingKp, kStraightYawD, kDistanceToleranceM, kSpeedToleranceMps; use straight_result heading and stop error." },
         { "watchdog", "straight_* faults -> kEncoderProgressEpsilonM, kEncoderStallCommandThresholdMps, kEncoderStallTimeoutMs, kEncoderStallStartupGraceMs." },
         { "arc", "arc_* -> kArcHeadingKp, kArcYawD; use arc_result and arc_circle_result heading/closure error." },

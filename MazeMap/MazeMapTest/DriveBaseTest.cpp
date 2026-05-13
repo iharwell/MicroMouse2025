@@ -145,7 +145,8 @@ namespace MazeMap
             Estimator& estimator,
             VehicleState& runtimeState,
             const float dtSeconds,
-            const SensorSnapshot& snapshot)
+            const SensorSnapshot& snapshot,
+            const CommandVector* const appliedControl = nullptr)
         {
             runtimeState.SetSensorSnapshot(snapshot);
             if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
@@ -162,9 +163,11 @@ namespace MazeMap
 
             if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
             {
+                const CommandVector& predictionControl =
+                    (appliedControl != nullptr) ? *appliedControl : drive.CurrentControlVector();
                 if (!estimator.predict(
                     dtSeconds,
-                    drive.CurrentControlVector(),
+                    predictionControl,
                     GetMissionFanDutyCycle(),
                     drive.CurrentBatteryVoltageV()))
                 {
@@ -211,14 +214,15 @@ namespace MazeMap
             const SensorSnapshot& snapshot,
             const int32_t leftCounts = 0,
             const int32_t rightCounts = 0,
-            const float dtSeconds = 0.001f)
+            const float dtSeconds = 0.001f,
+            const CommandVector* const appliedControl = nullptr)
         {
             const PlantParams& params = PlantParams::Default();
             SensorSnapshot updatedSnapshot = snapshot;
             updatedSnapshot.encoderObservation =
                 BuildDriveBaseEncoderObservation(leftCounts, rightCounts, dtSeconds, params);
             updatedSnapshot.encoderObservationValid = true;
-            UpdateDriveEstimator(drive, estimator, runtimeState, dtSeconds, updatedSnapshot);
+            UpdateDriveEstimator(drive, estimator, runtimeState, dtSeconds, updatedSnapshot, appliedControl);
         }
 
         void SimulateDriveBaseCycle(
@@ -229,13 +233,16 @@ namespace MazeMap
             PlantModel::StateVector& truthState,
             float& leftEncoderRemainderCounts,
             float& rightEncoderRemainderCounts,
-            float dtSeconds)
+            float dtSeconds,
+            const CommandVector* const appliedControlOverride = nullptr)
         {
             const PlantParams& params = PlantParams::Default();
             const DriveTelemetry telemetry = drive.GetTelemetry();
-            const CommandVector control = CommandVector(
+            const CommandVector telemetryControl = CommandVector(
                 telemetry.leftDriveCommand,
                 telemetry.rightDriveCommand);
+            const CommandVector& control =
+                (appliedControlOverride != nullptr) ? *appliedControlOverride : telemetryControl;
 
             const PlantModel::StateVector previousTruthState = truthState;
             truthState = plant.integrate(truthState, control, 0.80f, params.supplyVoltageV, dtSeconds, params);
@@ -263,7 +270,8 @@ namespace MazeMap
                 BuildDriveBaseSensorSnapshot(truthState(VehicleState::kR)),
                 leftCounts,
                 rightCounts,
-                dtSeconds);
+                dtSeconds,
+                &control);
         }
 
         void AssertDriveBaseStateNearTarget(
@@ -1112,12 +1120,6 @@ namespace MazeMap
                         driveHarness.runtimeState,
                         pairingKind,
                         setpoint);
-                drive.CommandGenerated(
-                    generatedCommand.command,
-                    generatedCommand.linearCommandTargetMps,
-                    generatedCommand.angularCommandTargetRadps,
-                    true);
-
                 const DriveTelemetry appliedTelemetry = drive.GetTelemetry();
                 const CommandVector control = CommandVector(
                     appliedTelemetry.leftDriveCommand,
@@ -1420,18 +1422,16 @@ namespace MazeMap
         TEST_METHOD(MotionLimitsProvideDefaultTurnEnvelopeAndBoundaryReachability)
         {
             MotionLimits limits{};
-            limits.maxSpeedMps = 1.0f;
-            limits.accelMps2 = 2.0f;
-            limits.decelMps2 = 3.0f;
-            limits.maxAngularSpeedRadps = 9.0f;
-            limits.angularAccelRadps2 = 45.0f;
+            limits.SetMaxSpeedMps(1.0f);
+            limits.SetAccelMps2(2.0f);
+            limits.SetDecelMps2(3.0f);
+            limits.SetMaxAngularSpeedRadps(9.0f);
+            limits.SetAngularAccelRadps2(45.0f);
+            Assert::AreEqual(0.75f * DEG_TO_RAD_F, limits.GetAngleToleranceRad(), 1.0e-6f);
 
-            Assert::AreEqual(0.75f * DEG_TO_RAD_F, limits.angleToleranceRad, 1.0e-6f);
-            Assert::AreEqual(0.10f, limits.angularSpeedToleranceRadps, 1.0e-6f);
-
-            const float brakingRateRadps = ReachableSpeedWithBoundary(0.0f, 0.01f, limits.angularAccelRadps2);
+            const float brakingRateRadps = ReachableSpeedWithBoundary(0.0f, 0.01f, limits.GetAngularAccelRadps2());
             Assert::AreEqual(
-                sqrtf(2.0f * limits.angularAccelRadps2 * 0.01f),
+                sqrtf(2.0f * limits.GetAngularAccelRadps2() * 0.01f),
                 brakingRateRadps,
                 1.0e-6f);
         }
@@ -1952,7 +1952,6 @@ namespace MazeMap
             CommandVector appliedCommand{};
             appliedCommand.SetLeftMotorPwm(0.80f);
             appliedCommand.SetRightMotorPwm(0.80f);
-            drive.CommandGenerated(appliedCommand, 0.0f, 0.0f, false);
             for (int cycleIndex = 0; cycleIndex < ScaleLegacyLoopSteps(24); ++cycleIndex)
             {
                 SimulateDriveBaseCycle(
@@ -1963,7 +1962,8 @@ namespace MazeMap
                     truthState,
                     leftEncoderRemainderCounts,
                     rightEncoderRemainderCounts,
-                    kDriveBaseLoopDtSeconds);
+                    kDriveBaseLoopDtSeconds,
+                    &appliedCommand);
             }
             const float presentLinearSpeedMps = driveHarness.runtimeState.GetVelocity();
 

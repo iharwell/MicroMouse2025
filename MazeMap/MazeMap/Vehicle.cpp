@@ -10,8 +10,8 @@
 
 namespace
 {
-    // Forward acceleration and max speed remain intentionally conservative until the direct forward-traction and
-    // top-speed characterization runs are completed. The maneuver planner only uses the shared lateral limit here;
+    // Forward acceleration and max speed remain provisional until the direct forward-traction and top-speed
+    // characterization runs are completed. The maneuver planner only uses the shared lateral limit here;
     // runtime yaw-rate ceilings are applied separately by the motion controller.
     constexpr float kVehiclePeakForwardAccelerationMps2 = 15.0f;
     constexpr float kVehiclePeakRotationalVelocityRadps = 9.0f;

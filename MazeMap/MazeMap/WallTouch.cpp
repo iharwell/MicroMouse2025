@@ -206,11 +206,11 @@ namespace MazeMap::App::Internal
         _runtime = &runtime;
         _drive = &runtime.Drive();
         _driveService = &runtime.DriveService();
-        _limits.maxSpeedMps = runtime.Vehicle().GetMaxSpeed();
-        _limits.accelMps2 = runtime.Vehicle().GetMaxForwardAcceleration();
-        _limits.decelMps2 = runtime.Vehicle().GetMaxForwardAcceleration();
-        _limits.maxAngularSpeedRadps = runtime.Vehicle().GetMaxRotationalVelocity();
-        _limits.angularAccelRadps2 = runtime.Vehicle().GetMaxAngularAcceleration();
+        _limits.SetMaxSpeedMps(runtime.Vehicle().GetMaxSpeed());
+        _limits.SetAccelMps2(runtime.Vehicle().GetMaxForwardAcceleration());
+        _limits.SetDecelMps2(runtime.Vehicle().GetMaxForwardAcceleration());
+        _limits.SetMaxAngularSpeedRadps(runtime.Vehicle().GetMaxRotationalVelocity());
+        _limits.SetAngularAccelRadps2(runtime.Vehicle().GetMaxAngularAcceleration());
     }
 
     bool WallTouch::CanStart() const noexcept
@@ -281,9 +281,9 @@ namespace MazeMap::App::Internal
         }
 
         float returnCruiseSpeedMps = Config::kWallTouchReverseSpeedMps;
-        if (std::isfinite(_limits.maxSpeedMps) && (_limits.maxSpeedMps > 0.0f))
+        if (std::isfinite(_limits.GetMaxSpeedMps()) && (_limits.GetMaxSpeedMps() > 0.0f))
         {
-            returnCruiseSpeedMps = (std::min)(returnCruiseSpeedMps, _limits.maxSpeedMps);
+            returnCruiseSpeedMps = (std::min)(returnCruiseSpeedMps, _limits.GetMaxSpeedMps());
         }
         if (!(returnCruiseSpeedMps > 0.0f))
         {
@@ -314,21 +314,21 @@ namespace MazeMap::App::Internal
         }
 
         float clampedSpeedMps = desiredSpeedMps;
-        if (std::isfinite(_limits.maxSpeedMps) && (_limits.maxSpeedMps > 0.0f))
+        if (std::isfinite(_limits.GetMaxSpeedMps()) && (_limits.GetMaxSpeedMps() > 0.0f))
         {
-            clampedSpeedMps = (std::clamp)(clampedSpeedMps, -_limits.maxSpeedMps, _limits.maxSpeedMps);
+            clampedSpeedMps = (std::clamp)(clampedSpeedMps, -_limits.GetMaxSpeedMps(), _limits.GetMaxSpeedMps());
         }
 
         float angularCommandRadps =
             (Config::kStraightHeadingKp * AngleErrorRad(_state.targetYawRad, state.GetOrientation())) -
             (Config::kStraightYawD * state.GetRotationalVelocity()) +
             yawRateBiasRadps;
-        if (std::isfinite(_limits.maxAngularSpeedRadps) && (_limits.maxAngularSpeedRadps > 0.0f))
+        if (std::isfinite(_limits.GetMaxAngularSpeedRadps()) && (_limits.GetMaxAngularSpeedRadps() > 0.0f))
         {
             angularCommandRadps = (std::clamp)(
                 angularCommandRadps,
-                -_limits.maxAngularSpeedRadps,
-                _limits.maxAngularSpeedRadps);
+                -_limits.GetMaxAngularSpeedRadps(),
+                _limits.GetMaxAngularSpeedRadps());
         }
 
         return _drive->PointControlVector(clampedSpeedMps, angularCommandRadps, _trackingCommandPd);
@@ -501,9 +501,9 @@ namespace MazeMap::App::Internal
 
         float seatSpeedMps =
             Config::kWallTouchMaxSeatEncoderSpeedMps * Config::kWallTouchSeatWiggleRetainedForwardFraction;
-        if (std::isfinite(_limits.maxSpeedMps) && (_limits.maxSpeedMps > 0.0f))
+        if (std::isfinite(_limits.GetMaxSpeedMps()) && (_limits.GetMaxSpeedMps() > 0.0f))
         {
-            seatSpeedMps = (std::min)(seatSpeedMps, _limits.maxSpeedMps);
+            seatSpeedMps = (std::min)(seatSpeedMps, _limits.GetMaxSpeedMps());
         }
 
         const float headingErrorRad = AngleErrorRad(_state.targetYawRad, state.GetOrientation());

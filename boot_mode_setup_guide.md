@@ -274,7 +274,7 @@ The file-level rules from `AGENTS.md` apply directly to mode work:
 - Do not create a new public `Params`, `State`, `Context`, `Data`, or similar companion bag just to make the mode easier to wire.
 - Keep mode-local helpers private, nested, or file-local.
 - Reuse typed shared config owners instead of cloning a config namespace or constant block.
-- Put shared limits in `SoftwareLimits` or another existing authoritative typed owner, not in a new mode-local constant dump.
+- Do not create a generic software safety-limit owner or renamed substitute. Use `MotionLimits` only for requested motion-command envelope values, and keep explicit measurement geometry, capture cadence, repetitions, workspace dimensions, timeout behavior, and phase completion criteria in the mode owner when they are part of that mode's actual procedure.
 
 For new mode structure specifically:
 

@@ -267,6 +267,9 @@
     <ClInclude Include="MazeMapRuntimeMmLog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="MotionLimits.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="MazeMapRuntimeSignalHelpers.h">
       <Filter>Header Files\App\Internal\Runtime</Filter>
     </ClInclude>
@@ -483,6 +486,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DriveTelemetry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MotionLimits.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="EncoderProgressWatchdog.cpp">

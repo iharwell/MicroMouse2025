@@ -27,11 +27,11 @@ namespace
     MotionLimits BuildTopSpeedLimits(const MazeMap::Vehicle& vehicle) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = vehicle.GetMaxSpeed();
-        limits.accelMps2 = kTopSpeedMeasurementAccelMps2;
-        limits.decelMps2 = kTopSpeedMeasurementDecelMps2;
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        limits.SetMaxSpeedMps(vehicle.GetMaxSpeed());
+        limits.SetAccelMps2(kTopSpeedMeasurementAccelMps2);
+        limits.SetDecelMps2(kTopSpeedMeasurementDecelMps2);
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
         return limits;
     }
 }

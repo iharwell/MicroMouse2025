@@ -67,11 +67,11 @@ namespace
         const float maxSpeedMps) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = maxSpeedMps;
-        limits.accelMps2 = DiagnosticConfig::kStraightAccelMps2;
-        limits.decelMps2 = DiagnosticConfig::kStraightDecelMps2;
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        limits.SetMaxSpeedMps(maxSpeedMps);
+        limits.SetAccelMps2(DiagnosticConfig::kStraightAccelMps2);
+        limits.SetDecelMps2(DiagnosticConfig::kStraightDecelMps2);
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
         return limits;
     }
 
@@ -510,7 +510,7 @@ namespace MazeMap::App::Internal
             if (_donesDetected == 0U)
             {
                 MotionLimits limits = BuildOpenFloorMeasurementLimits(controller._vehicle, 0.0f);
-                limits.maxAngularSpeedRadps = SpeedBinValue(primitiveIndex, speedIndex);
+                limits.SetMaxAngularSpeedRadps(SpeedBinValue(primitiveIndex, speedIndex));
                 driveService.SetLimits(limits);
                 driveService.StartTurn(MazeMap::kOpenFloorYawNominalAnglesRad[primitiveIndex]);
             }

@@ -32,11 +32,11 @@ namespace
     MotionLimits BuildReverseCaptureLimits(const MazeMap::Vehicle& vehicle) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = FrontWallCharacterizationConfig::kReverseSpeedMps;
-        limits.accelMps2 = FrontWallCharacterizationConfig::kReverseAccelMps2;
-        limits.decelMps2 = FrontWallCharacterizationConfig::kReverseAccelMps2;
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        limits.SetMaxSpeedMps(FrontWallCharacterizationConfig::kReverseSpeedMps);
+        limits.SetAccelMps2(FrontWallCharacterizationConfig::kReverseAccelMps2);
+        limits.SetDecelMps2(FrontWallCharacterizationConfig::kReverseAccelMps2);
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
         return limits;
     }
 }

@@ -40,7 +40,7 @@ Relevant lessons-learned references:
    Refs: `MazeMap/MazeMap/DriveBase.cpp:454`, `MazeMap/MazeMap/DriveBase.h:551`, `MazeMap/MazeMap/SrUkfCore.cpp:597`.
 
 5. Velocity-target technical-limit selection is also UKF-owned today.
-   `DriveBase::ResolveDefaultVelocityTargetOperatingEnvelope(...)` calls `SrUkfCore::alignedVelocityTargetTechnicalLimits(...)`, so `DriveBase` depends on UKF-conditioned plant policy rather than a plant-owned technical-limits capability.
+   `DriveBase::ResolveDefaultVelocityTargetCommandEnvelope(...)` calls `SrUkfCore::alignedVelocityTargetTechnicalLimits(...)`, so `DriveBase` depends on UKF-conditioned plant policy rather than a plant-owned technical-limits capability.
    Refs: `MazeMap/MazeMap/DriveBase.h:884`, `MazeMap/MazeMap/SrUkfCore.h:345`, `MazeMap/MazeMap/SrUkfCore.cpp:732`.
 
 6. `DriveBase` rebuilds raw `VehicleState::StateVector` values instead of staying on `VehicleState` getters.

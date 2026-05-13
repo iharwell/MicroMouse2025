@@ -438,6 +438,11 @@ static bool FlushTextLogQueueToFile(
 namespace MazeMap::App::Internal
 {
     SharedRobotRuntime::SharedRobotRuntime()
+        : SharedRobotRuntime(static_cast<float>(MazeMap::Config::kControlPeriodUs) * 1.0e-6f)
+    {
+    }
+
+    SharedRobotRuntime::SharedRobotRuntime(const float nominalCommandPeriodSeconds)
         : vehicle()
         , maze()
         , searchPathFinder(maze, vehicle)
@@ -447,7 +452,7 @@ namespace MazeMap::App::Internal
         , plantModel(vehicle, runtimeState)
         , estimator(plantModel, runtimeState)
         , drive(plantModel, runtimeState, MazeMap::Config::kDriveBasePDCluster)
-        , driveService()
+        , driveService(nominalCommandPeriodSeconds)
         , startupCalibrationService()
         , wallTouchService()
         , maneuverExecutor()

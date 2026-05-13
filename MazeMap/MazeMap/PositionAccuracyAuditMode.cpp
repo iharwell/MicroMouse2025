@@ -22,8 +22,8 @@ namespace
         MotionLimits limits =
             MazeMap::App::Internal::AuxMeasurementModeSupport::PositionAccuracyAuditStraightLimits(
                 kPositionAuditWallTouchSpeedMps);
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
         return limits;
     }
 }

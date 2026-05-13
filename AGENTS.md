@@ -83,13 +83,6 @@ Working junk is still junk. Do not keep it just because replacing it touches man
 - Shared setup/teardown, runtime access, logging lifecycle, failure handling, control-tick capture, and recovery helpers belong here once they are truly shared.
 - Until it exists in acceptable form, keep boot-mode logic direct and local rather than inventing temporary shared layers.
 
-### SoftwareLimits
-
-- Software-induced limits belong in `SoftwareLimits` or in one typed configuration object owned by `SoftwareLimits` and shared across modes.
-- Safety bounds, stop conditions, and shared runtime limits must use this typed ownership rather than scattered `stop if X` directives or mode-local constant bags.
-
----
-
 ## Cross-Build Boundary
 
 - This project has one dual-build boundary: host testing and Teensy deployment.
@@ -152,7 +145,7 @@ They are **not** acceptable for peeled-off internals, parameter bags, cache expo
 
 ---
 
-## Configuration and Limits
+## Configuration and Motion Command Envelopes
 
 Configuration must have one authoritative ownership hierarchy.
 
@@ -160,7 +153,13 @@ Configuration must have one authoritative ownership hierarchy.
 - Shared settings must be owned once as typed configuration objects.
 - Mode-specific settings must be compact profiles or explicit overrides.
 - New modes must reuse shared typed groups and define only real deltas.
-- Mode-specific safety bounds must use the shared typed `SoftwareLimits` ownership.
+- No generic software safety-limit owner exists. Do **not** create a software-owned safety-limit type, namespace, config object, helper, wrapper, policy, facade, or renamed substitute.
+- `Vehicle` owns physical robot facts and hardware capability facts. `MotionLimits` owns requested motion-command envelope values used by motion code. Control-loop mechanics belong to the control subsystem.
+- Mode owners may define explicit measurement geometry, capture cadence, repetitions, workspace dimensions, timeout behavior, and phase completion criteria only when those values are part of that mode's actual procedure.
+- Hardware protection that is explicitly requested belongs to the relevant hardware owner, not to a generic software-limit abstraction.
+- Watchdog, fault, and recovery behavior must be specific, logged, and tied to a real failure condition.
+- Do **not** add arbitrary stop conditions, generic conservative bounds, cooldown rules, derating, run suppressors, fan-use reductions, or broad motion rejection merely because they sound safer.
+- If a limit cannot be derived from `Vehicle`, an explicit mode procedure, `MotionLimits`, an existing hardware/control owner, or a direct project-owner instruction, stop and ask instead of inventing it.
 - Boot selector pins, jumper conditions, and startup-entry hardware conditions belong to `BootModeRegistry` or the platform pin map, not to mode tuning or config ownership.
 
 Reject any configuration architecture in which the production parameter set cannot be instantiated, inspected, and validated directly in unit tests through its authoritative typed owner.
@@ -229,7 +228,7 @@ and, when genuinely needed:
 
 - the mode's unit test file,
 - mode-local `mmlog` schema declarations in the mode header,
-- shared typed tuning or `SoftwareLimits`,
+- shared typed tuning or `MotionLimits` when the mode is explicitly choosing a requested motion-command envelope,
 - shared framework-owned descriptor or context types when genuinely reused,
 - build metadata or non-code assets the mode or tooling genuinely consumes.
 
@@ -289,7 +288,7 @@ Introduce or extend shared boot-mode/session infrastructure only when it replace
 - Separate phase schemas are allowed only through the designated macros and only when bound through the one runtime-owned `MmLogLogger` instance by closing/reopening or otherwise reconfiguring that same logger according to the shared runtime logging architecture.
 - Boot-selected modes may **not** own additional `MmLogLogger` instances, export objects, file-export objects, event-log objects, or alternate logging subsystems directly.
 - Boot-selected modes should use shared runtime tuning by default.
-- Allowed mode-specific parameters are limited to geometry, repetition counts, workspace limits, capture cadence, labels/metadata, safety bounds expressed through `SoftwareLimits`, and explicit documented experimental overrides.
+- Allowed mode-specific parameters are limited to geometry, repetition counts, workspace dimensions, capture cadence, labels/metadata, timeout behavior, phase completion criteria, explicit requested `MotionLimits` motion-command envelopes, and explicit documented experimental overrides.
 - Any tuning override must be explicit, minimal, local, and documented with why shared mission/runtime tuning is insufficient.
 
 ---
@@ -371,6 +370,7 @@ Reject the design and revise it if any of the following are true:
 - shared tuning diverges without explicit experimental justification,
 - the architecture implies runtime switching between top-level modes,
 - a new host/Teensy redirection is scattered outside the centralized build boundary,
+- a generic software safety-limit owner, renamed substitute, or generic conservative stop/clamp/derating policy is introduced,
 - public fields are introduced outside domain vocabulary or designated `mmlog` row schemas,
 - inheritance grows where composition or a flatter contract would suffice,
 - production code creates another `MmLogLogger` instance or another production pathfinder instance outside `SharedRobotRuntime`,
@@ -435,7 +435,7 @@ Reject the design and revise it if any of the following are true:
 - Prefer recovery over fail-fast behavior.
 - When runtime behavior deviates from expectation, log the condition before attempting recovery.
 - The robot can sustain approximately `16.5 m/s^2` of lateral acceleration when the fan is running at `80%`.
-- Plan strategies with the high-performance operating envelope in mind.
+- Plan strategies for the robot's high-performance competition behavior.
 - Use the Decimus 5A project as guidance for intended style and performance envelope.
 - Directional code must respect `+X = right`, `+Y = forward/up`, and `+Yaw = clockwise`.
 - Do **not** introduce alternate access patterns, public fields, or companion structs based on presumed performance benefit. First establish correctness, ownership, and clean architecture. Optimize representation only when the hot path is known and the simpler encapsulated form is materially insufficient.

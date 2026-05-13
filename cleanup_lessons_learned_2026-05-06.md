@@ -493,7 +493,7 @@ The stronger questions are:
 - did it make a sanctioned simplification layer more complete and singular?
 - did it remove or merely relocate the smell?
 
-## Lesson 10: The repo’s strict local rules are not arbitrary style; they are guardrails against recurring failure modes
+## Lesson 10: The repo's strict local rules are not arbitrary style; they are checks against recurring failure modes
 
 ### Bad reasoning
 

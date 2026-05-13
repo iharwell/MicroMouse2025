@@ -60,11 +60,11 @@ namespace
     MotionLimits BuildShowcasingDonutLimits(const MazeMap::Vehicle& vehicle) noexcept
     {
         MotionLimits limits{};
-        limits.maxSpeedMps = (std::min)(vehicle.GetMaxSpeed(), kShowcasingDonutSpeedCapMps);
-        limits.accelMps2 = vehicle.GetMaxForwardAcceleration();
-        limits.decelMps2 = vehicle.GetMaxForwardAcceleration();
-        limits.maxAngularSpeedRadps = vehicle.GetMaxRotationalVelocity();
-        limits.angularAccelRadps2 = vehicle.GetMaxAngularAcceleration();
+        limits.SetMaxSpeedMps((std::min)(vehicle.GetMaxSpeed(), kShowcasingDonutSpeedCapMps));
+        limits.SetAccelMps2(vehicle.GetMaxForwardAcceleration());
+        limits.SetDecelMps2(vehicle.GetMaxForwardAcceleration());
+        limits.SetMaxAngularSpeedRadps(vehicle.GetMaxRotationalVelocity());
+        limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
         return limits;
     }
 

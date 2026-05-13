@@ -252,91 +252,6 @@ MazeMap::App::Internal::CommandVector DriveBase::FeedbackCommand(
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
 }
 
-void DriveBase::CommandGenerated(
-    const MazeMap::App::Internal::CommandVector& command,
-    float linearSpeedMps,
-    float angularSpeedRadps,
-    bool applyLaunchAssist)
-{
-    RefreshSensorSnapshotDerivedState();
-    const float leftMeasuredMps = _leftEncoderVelocityMps;
-    const float rightMeasuredMps = _rightEncoderVelocityMps;
-    float leftDriveCommand = command.LeftMotorPwm();
-    float rightDriveCommand = command.RightMotorPwm();
-    const unsigned long nowMs = millis();
-    if (applyLaunchAssist &&
-        UpdateWheelLaunchAssistState(
-            _leftLaunchAssist,
-            leftMeasuredMps,
-            leftDriveCommand,
-            _lastProposedCommand.LeftMotorPwm(),
-            nowMs))
-    {
-        _lastLeftLaunchAssistFloor = GetWheelLaunchAssistFloor(_leftLaunchAssist, nowMs);
-        leftDriveCommand = ApplyLaunchAssistFloor(
-            leftDriveCommand,
-            leftDriveCommand,
-            _lastLeftLaunchAssistFloor);
-    }
-    else
-    {
-        ResetWheelLaunchAssistState(_leftLaunchAssist, nowMs);
-        _lastLeftLaunchAssistFloor = 0.0f;
-    }
-    if (applyLaunchAssist &&
-        UpdateWheelLaunchAssistState(
-            _rightLaunchAssist,
-            rightMeasuredMps,
-            rightDriveCommand,
-            _lastProposedCommand.RightMotorPwm(),
-            nowMs))
-    {
-        _lastRightLaunchAssistFloor = GetWheelLaunchAssistFloor(_rightLaunchAssist, nowMs);
-        rightDriveCommand = ApplyLaunchAssistFloor(
-            rightDriveCommand,
-            rightDriveCommand,
-            _lastRightLaunchAssistFloor);
-    }
-    else
-    {
-        ResetWheelLaunchAssistState(_rightLaunchAssist, nowMs);
-        _lastRightLaunchAssistFloor = 0.0f;
-    }
-
-    _lastLinearCommandMps = linearSpeedMps;
-    _lastAngularCommandRadps = angularSpeedRadps;
-    _lastFeedforwardCommand = {};
-    _lastFeedbackCommand = CommandVector(leftDriveCommand, rightDriveCommand);
-    _lastLeftTargetVelocityMps = 0.0f;
-    _lastRightTargetVelocityMps = 0.0f;
-    _lastModeFlags = kModeClosedLoop |
-        ((_lastLeftLaunchAssistFloor > 0.0f) ? kModeLaunchAssistLeft : 0u) |
-        ((_lastRightLaunchAssistFloor > 0.0f) ? kModeLaunchAssistRight : 0u);
-    _lastSaturationFlags =
-        ((std::fabs(leftDriveCommand) >= 0.999f) ? 0x1u : 0u) |
-        ((std::fabs(rightDriveCommand) >= 0.999f) ? 0x2u : 0u);
-    _lastProposedCommand = MakeClampedDriveControlVector(leftDriveCommand, rightDriveCommand);
-}
-
-void DriveBase::CommandOpenLoopRaw(
-    const MazeMap::App::Internal::CommandVector& command)
-{
-    _lastLinearCommandMps = 0.0f;
-    _lastAngularCommandRadps = 0.0f;
-    ResetLaunchAssist();
-    _lastFeedforwardCommand = {};
-    _lastFeedbackCommand = command;
-    _lastLeftTargetVelocityMps = 0.0f;
-    _lastRightTargetVelocityMps = 0.0f;
-    _lastLeftLaunchAssistFloor = 0.0f;
-    _lastRightLaunchAssistFloor = 0.0f;
-    _lastModeFlags = kModeRawOpenLoop;
-    _lastSaturationFlags =
-        ((std::fabs(command.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-        ((std::fabs(command.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-    _lastProposedCommand = MakeClampedDriveControlVector(command.LeftMotorPwm(), command.RightMotorPwm());
-}
-
 void DriveBase::GetVelocityCommandOperatingPoint(
     float& presentLinearSpeedMps,
     float& presentYawRateRadps,
@@ -502,7 +417,7 @@ DriveBase::CommandContext DriveBase::CaptureCommandContext() const
         _lastImuAccelBodyXMps2 :
         context.stateImuLateralAccelMps2;
 
-    ResolveDefaultVelocityTargetOperatingEnvelope(
+    ResolveDefaultVelocityTargetCommandEnvelope(
         context.maxLongitudinalAccelMps2,
         context.maxYawAccelRadps2);
     return context;
@@ -982,6 +897,7 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
     _lastSaturationFlags =
         ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
         ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
+    _lastProposedCommand = clampedCommand;
     return clampedCommand;
 }
 
