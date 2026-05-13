@@ -851,7 +851,6 @@ namespace MazeMap::App::Internal
         timing.ukfTotalDurationUs =
             timing.ukfPredictDurationUs + timing.ukfUpdateDurationUs;
 
-        estimator.SyncRuntimeState();
         runtimeState.SetTimestampUs(tickStartUs);
         return true;
     }

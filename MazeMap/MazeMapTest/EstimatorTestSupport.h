@@ -128,7 +128,6 @@ namespace MazeMap
 
         if (estimator.HasFault())
         {
-            estimator.SyncRuntimeState();
             return;
         }
 
@@ -136,7 +135,6 @@ namespace MazeMap
         {
             if (!estimator.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
             {
-                estimator.SyncRuntimeState();
                 return;
             }
         }
@@ -152,7 +150,6 @@ namespace MazeMap
             const MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
             if (!yawUpdate.accepted)
             {
-                estimator.SyncRuntimeState();
                 return;
             }
         }
@@ -209,7 +206,6 @@ namespace MazeMap
             }
         }
 
-        estimator.SyncRuntimeState();
     }
 }
 

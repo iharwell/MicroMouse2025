@@ -48,15 +48,10 @@ namespace MazeMap
         }
     };
 
-    inline SrUkfCoreTestRuntime& GetSrUkfCoreTestRuntime() noexcept
-    {
-        static SrUkfCoreTestRuntime runtime;
-        return runtime;
-    }
-
     inline SrUkfCore MakeDefaultSrUkfCore() noexcept
     {
-        return SrUkfCore(GetSrUkfCoreTestRuntime().plantModel);
+        SrUkfCoreTestRuntime* const runtime = new SrUkfCoreTestRuntime();
+        return SrUkfCore(runtime->plantModel, runtime->runtimeState);
     }
 
     inline float StationaryGyroBiasMeasurementVarianceRadps2() noexcept
@@ -387,13 +382,13 @@ namespace MazeMap
         (void)saturationFlags;
         (void)leftLaunchAssistFloor;
         (void)rightLaunchAssistFloor;
-        const VehicleState::StateVector stateBeforePredict = core.state();
+        const VehicleState::StateVector stateBeforePredict = core.workingState();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
             core.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV));
         ApplyPredictionMatchingEncoderAndYawUpdates(
             core,
             stateBeforePredict,
-            core.state(),
+            core.workingState(),
             params,
             dtSeconds,
             remainderState);

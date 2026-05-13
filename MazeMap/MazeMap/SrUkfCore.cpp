@@ -368,10 +368,10 @@ namespace
 
 namespace MazeMap
 {
-    SrUkfCore::SrUkfCore(const PlantModel& plantModel) noexcept
+    SrUkfCore::SrUkfCore(const PlantModel& plantModel, VehicleState& runtimeState) noexcept
         : _plantModel(plantModel)
         , _geometryModel()
-        , _filter()
+        , _workingFilter(runtimeState._state, runtimeState._sqrtCovariance)
         , _frozenLeftAppliedBankTorqueNm(0.0f)
         , _frozenRightAppliedBankTorqueNm(0.0f)
         , _frozenGripUtilization()
@@ -463,16 +463,11 @@ namespace MazeMap
         , _yawWindowSize(0U)
         , _yawWindowSpanS(0.0f)
     {
-        _filter.setStateNormalizer(&VehicleState::NormalizeStateVector);
-        _filter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
-
-        StateVector initialState = StateVector::Zero();
-        const StateMatrix initialCovariance = BuildDefaultInitialCovariance();
-        _filter.setState(initialState, initialCovariance);
+        _workingFilter.setStateNormalizer(&VehicleState::NormalizeStateVector);
+        _workingFilter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
 
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
-        _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
-        _prePredictState = initialState;
+        _workingFilter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
 
         _sqrtImuNoise(0, 0) = kImuYawRateSigmaRadps;
         _sqrtImuNoise(1, 1) = kImuAccelSigmaMps2;
@@ -480,14 +475,10 @@ namespace MazeMap
         _sqrtFrontNoise(0, 0) = 0.010f;
         _sqrtFrontNoise(1, 1) = 0.010f;
         _sqrtSideNoise(0, 0) = 0.012f;
-        const ModeProcessNoise& initialModeNoise =
-            GetModeProcessNoise(static_cast<std::uint8_t>(_operatingMode));
-        (void)_filter.floorVariance(VehicleState::kR, initialModeNoise.StdRMin() * initialModeNoise.StdRMin());
-        (void)_filter.floorVariance(VehicleState::kV, initialModeNoise.StdVMin() * initialModeNoise.StdVMin());
-        (void)_filter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
-        _gyroBiasAnchorRadps = initialState(VehicleState::kBgz);
-        _gyroBiasAnchorVarianceRadps2 = _filter.variance(VehicleState::kBgz);
-        _prePredictCovariance = _filter.covariance();
+        _gyroBiasAnchorRadps = _workingFilter.state()(VehicleState::kBgz);
+        _gyroBiasAnchorVarianceRadps2 = _workingFilter.variance(VehicleState::kBgz);
+        _prePredictState = _workingFilter.state();
+        _prePredictCovariance = _workingFilter.covariance();
         refreshFrozenPolicyState(
             0.0f,
             App::Internal::CommandVector(0.0f, 0.0f),
@@ -915,13 +906,13 @@ namespace MazeMap
                 kUkfStateFieldNames,
                 [&](const std::size_t index) noexcept
                 {
-                    return _filter.state()(static_cast<int>(index));
+                    return _workingFilter.state()(static_cast<int>(index));
                 }))
         {
             return false;
         }
 
-        const StateMatrix covariance = _filter.covariance();
+        const StateMatrix covariance = _workingFilter.covariance();
         for (int row = 0; row < VehicleState::kDimension; ++row)
         {
             if (!EmitNamedMatrixRowLine(
@@ -1199,7 +1190,7 @@ namespace MazeMap
             return false;
         }
 
-        const StateMatrix covarianceDiagonal = _filter.covariance();
+        const StateMatrix covarianceDiagonal = _workingFilter.covariance();
         return EmitDebugTextLine(
             context,
             sink,
@@ -1215,13 +1206,7 @@ namespace MazeMap
 
     SrUkfCore::StateMatrix SrUkfCore::BuildDefaultInitialCovariance() noexcept
     {
-        StateMatrix covariance = StateMatrix::Identity() * 1.0e-3f;
-        covariance(VehicleState::kPx, VehicleState::kPx) = 1.0e-5f;
-        covariance(VehicleState::kPy, VehicleState::kPy) = 1.0e-5f;
-        covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = 0.25f;
-        covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = 0.25f;
-        covariance(VehicleState::kBgz, VehicleState::kBgz) = kGyroBiasInitialVarianceUnseededRadps2;
-        return covariance;
+        return VehicleState::DefaultInitialCovariance();
     }
 
     SrUkfCore::StateMatrix SrUkfCore::BuildProcessNoiseSquareRootForMode(const OperatingMode mode) noexcept
@@ -1243,8 +1228,8 @@ namespace MazeMap
 
     bool SrUkfCore::reset(const StateVector& state, const StateMatrix& covariance) noexcept
     {
-        _filter.setState(state, covariance);
-        _filter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
+        _workingFilter.setState(state, covariance);
+        _workingFilter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
         _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
         _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
         _initialStationaryGyroBiasPhaseExited = false;
@@ -1260,8 +1245,8 @@ namespace MazeMap
         _accelBodyXMps2 = 0.0f;
         _accelBodyYMps2 = 0.0f;
         _stationaryCandidateDwellS = 0.0f;
-        _stationaryCandidatePoseReferenceState = _filter.state();
-        _stationaryCandidatePoseReferenceCovariance = _filter.covariance();
+        _stationaryCandidatePoseReferenceState = _workingFilter.state();
+        _stationaryCandidatePoseReferenceCovariance = _workingFilter.covariance();
         _stationaryCandidatePoseReferenceValid = false;
         _stationaryCertified = false;
         _timeSinceStationaryExitS = std::numeric_limits<float>::infinity();
@@ -1307,115 +1292,22 @@ namespace MazeMap
         _sqrtImuNoise(1, 1) = kImuAccelSigmaMps2;
         _sqrtImuNoise(2, 2) = kImuAccelSigmaMps2;
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
-        _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
+        _workingFilter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastControl = App::Internal::CommandVector(0.0f, 0.0f);
         _lastFanDutyCycle = 0.80f;
         _lastBatteryVoltageV = 0.0f;
         _lastEncoderObs = EncoderObs{};
         _lastEncoderDtSeconds = 0.0f;
-        _prePredictState = _filter.state();
+        _prePredictState = _workingFilter.state();
         _havePredictionReference = false;
         _acceptedEncoderUpdateSincePredict = false;
         const ModeProcessNoise& resetModeNoise =
             GetModeProcessNoise(static_cast<std::uint8_t>(_operatingMode));
-        (void)_filter.floorVariance(VehicleState::kR, resetModeNoise.StdRMin() * resetModeNoise.StdRMin());
-        (void)_filter.floorVariance(VehicleState::kV, resetModeNoise.StdVMin() * resetModeNoise.StdVMin());
-        (void)_filter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
-        _gyroBiasAnchorVarianceRadps2 = _filter.variance(VehicleState::kBgz);
-        _stationaryCandidatePoseReferenceCovariance = _filter.covariance();
-        _prePredictCovariance = _stationaryCandidatePoseReferenceCovariance;
-        _transientContactMemory = {};
-        _regripRecovery = {};
-        refreshFrozenPolicyState(
-            0.0f,
-            App::Internal::CommandVector(0.0f, 0.0f),
-            0.80f,
-            0.0f);
-        return true;
-    }
-
-    bool SrUkfCore::setState(const StateVector& state, const StateMatrix& covariance) noexcept
-    {
-        _filter.setState(state, covariance);
-        _filter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
-        _gyroBiasAnchorRadps = std::isfinite(state(VehicleState::kBgz)) ? state(VehicleState::kBgz) : 0.0f;
-        _gyroBiasAnchorVarianceRadps2 = covariance(VehicleState::kBgz, VehicleState::kBgz);
-        _initialStationaryGyroBiasPhaseExited = false;
-        _initialStationaryGyroBiasSeedApplied = false;
-        _initialStationaryGyroBiasSampleOrdinal = 0U;
-        _initialStationaryGyroBiasCollectedSeedSamples = 0U;
-        _initialStationaryGyroBiasSeedAccumRadps = 0.0;
-        _commandedLinearMps = 0.0f;
-        _commandedAngularRadps = 0.0f;
-        _saturationFlags = 0U;
-        _leftLaunchAssistFloor = 0.0f;
-        _rightLaunchAssistFloor = 0.0f;
-        _accelBodyXMps2 = 0.0f;
-        _accelBodyYMps2 = 0.0f;
-        _stationaryCandidateDwellS = 0.0f;
-        _stationaryCandidatePoseReferenceState = _filter.state();
-        _stationaryCandidatePoseReferenceCovariance = _filter.covariance();
-        _stationaryCandidatePoseReferenceValid = false;
-        _stationaryCertified = false;
-        _timeSinceStationaryExitS = std::numeric_limits<float>::infinity();
-        _timeSinceCommandSignFlipS = std::numeric_limits<float>::infinity();
-        _previousAverageDriveCommandSign = 0.0f;
-        _launchHoldRemainingS = 0.0f;
-        _inconsistentHoldRemainingS = 0.0f;
-        _nhcReenableDelayRemainingS = 0.0f;
-        _yawConsistencyLowPassRadps = 0.0f;
-        _yawWindowMismatchRad = 0.0f;
-        _yawConsistencyExceedDwellS = 0.0f;
-        _nhcSigmaMps = ComputeNonholonomicSigmaMps(std::fabs(state(VehicleState::kU)));
-        _nhcResidualMps = state(VehicleState::kV);
-        _nhcResidualSigma = 0.0f;
-        _nonholonomicConstraintEnabled = false;
-        _operatingMode = OperatingMode::GripLinear;
-        _biasUpdateEnabled = false;
-        _yawWindowDtSeconds.fill(0.0f);
-        _yawWindowUkfIntegralRad.fill(0.0f);
-        _yawWindowGyroIntegralRad.fill(0.0f);
-        _yawWindowHead = 0U;
-        _yawWindowSize = 0U;
-        _yawWindowSpanS = 0.0f;
-        resetPivotScrubTelemetry();
-        _directWheelUpdateBodyStateInvariant = false;
-        _releaseInflationApplied = false;
-        _lastClosureResidualLeftMps = 0.0f;
-        _lastClosureResidualRightMps = 0.0f;
-        _lastGyroMeasurementRadps = 0.0f;
-        _lastGyroInnovationRadps = 0.0f;
-        _lastGyroNis = 0.0f;
-        _lastForwardAccelInnovationMps2 = 0.0f;
-        _lastForwardAccelNis = 0.0f;
-        _lastLateralAccelInnovationMps2 = 0.0f;
-        _lastLateralAccelNis = 0.0f;
-        _lastClosureLeftInnovationMps = 0.0f;
-        _lastClosureLeftNis = 0.0f;
-        _lastClosureRightInnovationMps = 0.0f;
-        _lastClosureRightNis = 0.0f;
-        _lastLateralPseudoInnovationMps = 0.0f;
-        _lastLateralPseudoNis = 0.0f;
-        _sqrtImuNoise(0, 0) = kImuYawRateSigmaRadps;
-        _sqrtImuNoise(1, 1) = kImuAccelSigmaMps2;
-        _sqrtImuNoise(2, 2) = kImuAccelSigmaMps2;
-        _lastControl = App::Internal::CommandVector(0.0f, 0.0f);
-        _lastFanDutyCycle = 0.80f;
-        _lastBatteryVoltageV = 0.0f;
-        _lastEncoderObs = EncoderObs{};
-        _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
-        _filter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
-        _lastEncoderDtSeconds = 0.0f;
-        _prePredictState = _filter.state();
-        _havePredictionReference = false;
-        _acceptedEncoderUpdateSincePredict = false;
-        const ModeProcessNoise& setStateModeNoise =
-            GetModeProcessNoise(static_cast<std::uint8_t>(_operatingMode));
-        (void)_filter.floorVariance(VehicleState::kR, setStateModeNoise.StdRMin() * setStateModeNoise.StdRMin());
-        (void)_filter.floorVariance(VehicleState::kV, setStateModeNoise.StdVMin() * setStateModeNoise.StdVMin());
-        (void)_filter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
-        _gyroBiasAnchorVarianceRadps2 = _filter.variance(VehicleState::kBgz);
-        _stationaryCandidatePoseReferenceCovariance = _filter.covariance();
+        (void)_workingFilter.floorVariance(VehicleState::kR, resetModeNoise.StdRMin() * resetModeNoise.StdRMin());
+        (void)_workingFilter.floorVariance(VehicleState::kV, resetModeNoise.StdVMin() * resetModeNoise.StdVMin());
+        (void)_workingFilter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
+        _gyroBiasAnchorVarianceRadps2 = _workingFilter.variance(VehicleState::kBgz);
+        _stationaryCandidatePoseReferenceCovariance = _workingFilter.covariance();
         _prePredictCovariance = _stationaryCandidatePoseReferenceCovariance;
         _transientContactMemory = {};
         _regripRecovery = {};
@@ -1769,7 +1661,7 @@ namespace MazeMap
         float fanDutyCycle,
         float batteryVoltageV) noexcept
     {
-        const StateVector& currentState = _filter.state();
+        const StateVector& currentState = _workingFilter.state();
         const StateVector& torqueEstimateState =
             _havePredictionReference ?
             _prePredictState :
@@ -1895,7 +1787,7 @@ namespace MazeMap
             Eigen::Matrix<float, 1, 1> measurement;
             measurement << measuredLinearSpeedMps;
             const Eigen::Vector2f predictedWheelVelocityMps =
-                _plantModel.wheelLinearVelocityFromBodyState(_filter.state());
+                _plantModel.wheelLinearVelocityFromBodyState(_workingFilter.state());
             innovationStorageMps =
                 measuredLinearSpeedMps -
                 predictedWheelVelocityMps(wheelIndex);
@@ -1903,7 +1795,7 @@ namespace MazeMap
             sqrtNoise(0, 0) =
                 baseSigmaMps *
                 MazeMap::Math::Sqrtf((std::max)(covarianceScale, 0.25f));
-            const bool accepted = _filter.Update<1>(
+            const bool accepted = _workingFilter.Update<1>(
                 measurement,
                 sqrtNoise,
                 25.0f,
@@ -1914,7 +1806,7 @@ namespace MazeMap
                     return prediction;
                 },
                 invokeLoop);
-            nisStorage = _filter.lastNis();
+            nisStorage = _workingFilter.lastNis();
             return accepted;
         };
 
@@ -1962,16 +1854,16 @@ namespace MazeMap
 
         Eigen::Matrix<float, 1, 1> measurement;
         measurement << 0.0f;
-        _lastLateralPseudoInnovationMps = -_filter.state()(VehicleState::kV);
+        _lastLateralPseudoInnovationMps = -_workingFilter.state()(VehicleState::kV);
         Eigen::Matrix<float, 1, 1> sqrtNoise;
         sqrtNoise(0, 0) =
-            ComputeNonholonomicSigmaMps(std::fabs(_filter.state()(VehicleState::kU))) *
+            ComputeNonholonomicSigmaMps(std::fabs(_workingFilter.state()(VehicleState::kU))) *
             MazeMap::Math::Sqrtf((std::max)(covarianceScale, 0.25f));
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
             InvokeLoopHook(loopHookContext, loopHook);
         };
-        const bool accepted = _filter.Update<1>(
+        const bool accepted = _workingFilter.Update<1>(
             measurement,
             sqrtNoise,
             25.0f,
@@ -1982,7 +1874,7 @@ namespace MazeMap
                 return prediction;
             },
             invokeLoop);
-        _lastLateralPseudoNis = _filter.lastNis();
+        _lastLateralPseudoNis = _workingFilter.lastNis();
         updateNonholonomicDiagnostics(accepted);
         return accepted;
     }
@@ -2012,8 +1904,8 @@ namespace MazeMap
             return true;
         }
 
-        _prePredictState = _filter.state();
-        _prePredictCovariance = _filter.covariance();
+        _prePredictState = _workingFilter.state();
+        _prePredictCovariance = _workingFilter.covariance();
         _havePredictionReference = true;
         _acceptedEncoderUpdateSincePredict = false;
         _lastEncoderDtSeconds = dt;
@@ -2048,17 +1940,17 @@ namespace MazeMap
             const float forwardVarianceFloorMps2 =
                 kGeneralEncoderLinearSpeedSigmaMps * kGeneralEncoderLinearSpeedSigmaMps;
             const float lateralSigmaFloorMps =
-                ComputeNonholonomicSigmaMps(std::fabs(_filter.state()(VehicleState::kU)));
+                ComputeNonholonomicSigmaMps(std::fabs(_workingFilter.state()(VehicleState::kU)));
             const float lateralVarianceFloorMps2 = lateralSigmaFloorMps * lateralSigmaFloorMps;
             const float yawSigmaFloorRadps =
                 (std::max)(kGeneralEncoderYawRateSigmaRadps, kRecoveryYawRateStdFloorRadps);
             const float yawVarianceFloorRadps2 = yawSigmaFloorRadps * yawSigmaFloorRadps;
 
-            (void)_filter.floorVariance(VehicleState::kU, forwardVarianceFloorMps2);
-            (void)_filter.floorVariance(VehicleState::kV, lateralVarianceFloorMps2);
-            (void)_filter.floorVariance(VehicleState::kR, yawVarianceFloorRadps2);
-            (void)_filter.floorVariance(VehicleState::kOmegaL, wheelVarianceFloorRadps2);
-            (void)_filter.floorVariance(VehicleState::kOmegaR, wheelVarianceFloorRadps2);
+            (void)_workingFilter.floorVariance(VehicleState::kU, forwardVarianceFloorMps2);
+            (void)_workingFilter.floorVariance(VehicleState::kV, lateralVarianceFloorMps2);
+            (void)_workingFilter.floorVariance(VehicleState::kR, yawVarianceFloorRadps2);
+            (void)_workingFilter.floorVariance(VehicleState::kOmegaL, wheelVarianceFloorRadps2);
+            (void)_workingFilter.floorVariance(VehicleState::kOmegaR, wheelVarianceFloorRadps2);
             _releaseInflationApplied = true;
         }
         updateProcessNoiseForMode();
@@ -2076,14 +1968,14 @@ namespace MazeMap
         // `kBgz` follows the explicit per-sample author tuning, not the density-scaled mode table.
         predictProcessNoiseSquareRoot(VehicleState::kBgz, VehicleState::kBgz) =
             GyroBiasProcessSquareRootForMode(static_cast<std::uint8_t>(_operatingMode));
-        _filter.setProcessNoiseSquareRoot(predictProcessNoiseSquareRoot);
+        _workingFilter.setProcessNoiseSquareRoot(predictProcessNoiseSquareRoot);
         Eigen::Matrix<float, 3, 1> filterCommandVector;
         filterCommandVector << control.LeftMotorPwm(), control.RightMotorPwm(), fanDutyCycle;
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
             InvokeLoopHook(loopHookContext, loopHook);
         };
-        const bool predicted = _filter.Predict(
+        const bool predicted = _workingFilter.Predict(
             dt,
             filterCommandVector,
             [this](const StateVector& sigmaPoint, const Eigen::Matrix<float, 3, 1>&, float sigmaDt) noexcept
@@ -2105,11 +1997,11 @@ namespace MazeMap
         {
             const ModeProcessNoise& modeNoise =
                 GetModeProcessNoise(static_cast<std::uint8_t>(_operatingMode));
-            (void)_filter.floorVariance(VehicleState::kR, modeNoise.StdRMin() * modeNoise.StdRMin());
-            (void)_filter.floorVariance(VehicleState::kV, modeNoise.StdVMin() * modeNoise.StdVMin());
-            (void)_filter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
-            _gyroBiasAnchorRadps = _filter.state()(VehicleState::kBgz);
-            _gyroBiasAnchorVarianceRadps2 = _filter.variance(VehicleState::kBgz);
+            (void)_workingFilter.floorVariance(VehicleState::kR, modeNoise.StdRMin() * modeNoise.StdRMin());
+            (void)_workingFilter.floorVariance(VehicleState::kV, modeNoise.StdVMin() * modeNoise.StdVMin());
+            (void)_workingFilter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
+            _gyroBiasAnchorRadps = _workingFilter.state()(VehicleState::kBgz);
+            _gyroBiasAnchorVarianceRadps2 = _workingFilter.variance(VehicleState::kBgz);
         }
         return predicted;
     }
@@ -2134,8 +2026,8 @@ namespace MazeMap
         result.attempted = true;
 
         const EncoderObs measured = observation;
-        const StateVector priorState = _filter.state();
-        const StateMatrix priorSqrtCovariance = _filter.sqrtCovariance();
+        const StateVector priorState = _workingFilter.state();
+        const StateMatrix priorSqrtCovariance = _workingFilter.sqrtCovariance();
         const float measuredWheelVarianceRadps2 =
             _plantModel.measuredWheelVarianceRadps2(
                 measured,
@@ -2168,17 +2060,17 @@ namespace MazeMap
             const float forwardVarianceFloorMps2 =
                 kGeneralEncoderLinearSpeedSigmaMps * kGeneralEncoderLinearSpeedSigmaMps;
             const float lateralSigmaFloorMps =
-                ComputeNonholonomicSigmaMps(std::fabs(_filter.state()(VehicleState::kU)));
+                ComputeNonholonomicSigmaMps(std::fabs(_workingFilter.state()(VehicleState::kU)));
             const float lateralVarianceFloorMps2 = lateralSigmaFloorMps * lateralSigmaFloorMps;
             const float yawSigmaFloorRadps =
                 (std::max)(kGeneralEncoderYawRateSigmaRadps, kRecoveryYawRateStdFloorRadps);
             const float yawVarianceFloorRadps2 = yawSigmaFloorRadps * yawSigmaFloorRadps;
 
-            (void)_filter.floorVariance(VehicleState::kU, forwardVarianceFloorMps2);
-            (void)_filter.floorVariance(VehicleState::kV, lateralVarianceFloorMps2);
-            (void)_filter.floorVariance(VehicleState::kR, yawVarianceFloorRadps2);
-            (void)_filter.floorVariance(VehicleState::kOmegaL, wheelVarianceFloorRadps2);
-            (void)_filter.floorVariance(VehicleState::kOmegaR, wheelVarianceFloorRadps2);
+            (void)_workingFilter.floorVariance(VehicleState::kU, forwardVarianceFloorMps2);
+            (void)_workingFilter.floorVariance(VehicleState::kV, lateralVarianceFloorMps2);
+            (void)_workingFilter.floorVariance(VehicleState::kR, yawVarianceFloorRadps2);
+            (void)_workingFilter.floorVariance(VehicleState::kOmegaL, wheelVarianceFloorRadps2);
+            (void)_workingFilter.floorVariance(VehicleState::kOmegaR, wheelVarianceFloorRadps2);
             _releaseInflationApplied = true;
         }
 
@@ -2194,7 +2086,7 @@ namespace MazeMap
         {
             InvokeLoopHook(loopHookContext, loopHook);
         };
-        result.accepted = _filter.Update<2>(
+        result.accepted = _workingFilter.Update<2>(
             z,
             sqrtEncoderNoise,
             ComputeEncoderPairNisThreshold(measured),
@@ -2205,7 +2097,7 @@ namespace MazeMap
                 return prediction;
             },
             invokeLoop);
-        const float encoderMeasurementNis = _filter.lastNis();
+        const float encoderMeasurementNis = _workingFilter.lastNis();
         if (result.accepted)
         {
             _acceptedEncoderUpdateSincePredict = true;
@@ -2215,8 +2107,8 @@ namespace MazeMap
                     VehicleState::kOmegaL,
                     VehicleState::kOmegaR
                 };
-                const StateVector updatedState = _filter.state();
-                const StateMatrix updatedSqrtCovariance = _filter.sqrtCovariance();
+                const StateVector updatedState = _workingFilter.state();
+                const StateMatrix updatedSqrtCovariance = _workingFilter.sqrtCovariance();
                 StateVector projectedState = priorState;
                 StateMatrix projectedSqrtCovariance = priorSqrtCovariance;
                 ProjectMaskedStateAndSquareRootCovariance(
@@ -2228,10 +2120,10 @@ namespace MazeMap
                     kWheelOnlyIndices.size(),
                     projectedState,
                     projectedSqrtCovariance);
-                _filter.setStateSquareRootCovariance(projectedState, projectedSqrtCovariance);
+                _workingFilter.setStateSquareRootCovariance(projectedState, projectedSqrtCovariance);
                 applyWheelSpeedConstraint(measured, measuredWheelVarianceRadps2);
             }
-            const StateVector& postEncoderState = _filter.state();
+            const StateVector& postEncoderState = _workingFilter.state();
             _pivotScrubEncoderWheelDeltaPsiRad =
                 postEncoderState(VehicleState::kPsi) - priorState(VehicleState::kPsi);
             _pivotScrubEncoderWheelDeltaRRadps =
@@ -2257,7 +2149,7 @@ namespace MazeMap
         {
             applyStationaryZeroMotionConstraint(_lastGyroMeasurementRadps);
         }
-        const StateVector& constrainedState = _filter.state();
+        const StateVector& constrainedState = _workingFilter.state();
         _directWheelUpdateBodyStateInvariant =
             _frozenSchedule.exactStationaryLock ||
             ((std::fabs(constrainedState(VehicleState::kPx) - priorState(VehicleState::kPx)) <= 1.0e-6f) &&
@@ -2277,16 +2169,16 @@ namespace MazeMap
             (_operatingMode != OperatingMode::LaunchOrReversalTransient) &&
             (_saturationFlags == 0U))
         {
-            (void)_filter.floorVariance(
+            (void)_workingFilter.floorVariance(
                 VehicleState::kR,
                 kRecoveryYawRateStdFloorRadps * kRecoveryYawRateStdFloorRadps);
             _nhcReenableDelayRemainingS = kRecoveryNhcReenableDelayS;
         }
         const ModeProcessNoise& encoderModeNoise =
             GetModeProcessNoise(static_cast<std::uint8_t>(_operatingMode));
-        (void)_filter.floorVariance(VehicleState::kR, encoderModeNoise.StdRMin() * encoderModeNoise.StdRMin());
-        (void)_filter.floorVariance(VehicleState::kV, encoderModeNoise.StdVMin() * encoderModeNoise.StdVMin());
-        (void)_filter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
+        (void)_workingFilter.floorVariance(VehicleState::kR, encoderModeNoise.StdRMin() * encoderModeNoise.StdRMin());
+        (void)_workingFilter.floorVariance(VehicleState::kV, encoderModeNoise.StdVMin() * encoderModeNoise.StdVMin());
+        (void)_workingFilter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
         result.nis = encoderMeasurementNis;
         return result;
     }
@@ -2308,8 +2200,8 @@ namespace MazeMap
             return result;
         }
 
-        const StateVector priorState = _filter.state();
-        const StateMatrix priorSqrtCovariance = _filter.sqrtCovariance();
+        const StateVector priorState = _workingFilter.state();
+        const StateMatrix priorSqrtCovariance = _workingFilter.sqrtCovariance();
         _lastGyroMeasurementRadps = yawRateRadps;
         _lastGyroInnovationRadps =
             yawRateRadps - (priorState(VehicleState::kR) + priorState(VehicleState::kBgz));
@@ -2324,7 +2216,7 @@ namespace MazeMap
         {
             InvokeLoopHook(loopHookContext, loopHook);
         };
-        result.accepted = _filter.Update<1>(
+        result.accepted = _workingFilter.Update<1>(
             z,
             sqrtNoise,
             std::numeric_limits<float>::infinity(),
@@ -2335,12 +2227,12 @@ namespace MazeMap
                 return prediction;
             },
             invokeLoop);
-        const float yawMeasurementNis = _filter.lastNis();
+        const float yawMeasurementNis = _workingFilter.lastNis();
         _lastGyroNis = yawMeasurementNis;
         if (result.accepted)
         {
-            const StateVector updatedState = _filter.state();
-            const StateMatrix updatedSqrtCovariance = _filter.sqrtCovariance();
+            const StateVector updatedState = _workingFilter.state();
+            const StateMatrix updatedSqrtCovariance = _workingFilter.sqrtCovariance();
             StateVector projectedState = priorState;
             StateMatrix projectedSqrtCovariance = priorSqrtCovariance;
             constexpr std::array<int, 7> kAllowedIndices = {
@@ -2362,7 +2254,7 @@ namespace MazeMap
                 kAllowedIndices.size(),
                 projectedState,
                 projectedSqrtCovariance);
-            _filter.setStateSquareRootCovariance(projectedState, projectedSqrtCovariance);
+            _workingFilter.setStateSquareRootCovariance(projectedState, projectedSqrtCovariance);
 
             updateInitialStationaryGyroBias(yawRateRadps, shouldApplyStationaryConstraint);
             updateStationaryCertification(yawRateRadps);
@@ -2377,16 +2269,16 @@ namespace MazeMap
                 (_operatingMode != OperatingMode::LaunchOrReversalTransient) &&
                 (_saturationFlags == 0U))
             {
-                (void)_filter.floorVariance(
+                (void)_workingFilter.floorVariance(
                     VehicleState::kR,
                     kRecoveryYawRateStdFloorRadps * kRecoveryYawRateStdFloorRadps);
                 _nhcReenableDelayRemainingS = kRecoveryNhcReenableDelayS;
             }
             const ModeProcessNoise& yawModeNoise =
                 GetModeProcessNoise(static_cast<std::uint8_t>(_operatingMode));
-            (void)_filter.floorVariance(VehicleState::kR, yawModeNoise.StdRMin() * yawModeNoise.StdRMin());
-            (void)_filter.floorVariance(VehicleState::kV, yawModeNoise.StdVMin() * yawModeNoise.StdVMin());
-            (void)_filter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
+            (void)_workingFilter.floorVariance(VehicleState::kR, yawModeNoise.StdRMin() * yawModeNoise.StdRMin());
+            (void)_workingFilter.floorVariance(VehicleState::kV, yawModeNoise.StdVMin() * yawModeNoise.StdVMin());
+            (void)_workingFilter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
         }
         result.nis = yawMeasurementNis;
         return result;
@@ -2417,13 +2309,13 @@ namespace MazeMap
             _lastForwardAccelInnovationMps2 =
                 observation.accelBodyYMps2 -
                 _plantModel.imuPlanarAcceleration(
-                    _filter.state(),
+                    _workingFilter.state(),
                     _lastControl,
                     _lastFanDutyCycle,
                     _lastBatteryVoltageV)(1);
             Eigen::Matrix<float, 1, 1> sqrtNoise;
             sqrtNoise(0, 0) = _sqrtImuNoise(2, 2);
-            const bool forwardAccelAccepted = _filter.Update<1>(
+            const bool forwardAccelAccepted = _workingFilter.Update<1>(
                 measurement,
                 sqrtNoise,
                 25.0f,
@@ -2438,7 +2330,7 @@ namespace MazeMap
                     return prediction;
                 },
                 invokeLoop);
-            _lastForwardAccelNis = _filter.lastNis();
+            _lastForwardAccelNis = _workingFilter.lastNis();
             accelAccepted = forwardAccelAccepted || accelAccepted;
         }
 
@@ -2451,13 +2343,13 @@ namespace MazeMap
             _lastLateralAccelInnovationMps2 =
                 observation.accelBodyXMps2 -
                 _plantModel.imuPlanarAcceleration(
-                    _filter.state(),
+                    _workingFilter.state(),
                     _lastControl,
                     _lastFanDutyCycle,
                     _lastBatteryVoltageV)(0);
             Eigen::Matrix<float, 1, 1> sqrtNoise;
             sqrtNoise(0, 0) = _sqrtImuNoise(1, 1);
-            const bool lateralAccelAccepted = _filter.Update<1>(
+            const bool lateralAccelAccepted = _workingFilter.Update<1>(
                 measurement,
                 sqrtNoise,
                 25.0f,
@@ -2472,7 +2364,7 @@ namespace MazeMap
                     return prediction;
                 },
                 invokeLoop);
-            _lastLateralAccelNis = _filter.lastNis();
+            _lastLateralAccelNis = _workingFilter.lastNis();
             accelAccepted = lateralAccelAccepted || accelAccepted;
         }
 
@@ -2491,18 +2383,18 @@ namespace MazeMap
             (_operatingMode != OperatingMode::LaunchOrReversalTransient) &&
             (_saturationFlags == 0U))
         {
-            (void)_filter.floorVariance(
+            (void)_workingFilter.floorVariance(
                 VehicleState::kR,
                 kRecoveryYawRateStdFloorRadps * kRecoveryYawRateStdFloorRadps);
             _nhcReenableDelayRemainingS = kRecoveryNhcReenableDelayS;
         }
         const ModeProcessNoise& accelModeNoise =
             GetModeProcessNoise(static_cast<std::uint8_t>(_operatingMode));
-        (void)_filter.floorVariance(VehicleState::kR, accelModeNoise.StdRMin() * accelModeNoise.StdRMin());
-        (void)_filter.floorVariance(VehicleState::kV, accelModeNoise.StdVMin() * accelModeNoise.StdVMin());
-        (void)_filter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
-        _gyroBiasAnchorRadps = _filter.state()(VehicleState::kBgz);
-        _gyroBiasAnchorVarianceRadps2 = _filter.variance(VehicleState::kBgz);
+        (void)_workingFilter.floorVariance(VehicleState::kR, accelModeNoise.StdRMin() * accelModeNoise.StdRMin());
+        (void)_workingFilter.floorVariance(VehicleState::kV, accelModeNoise.StdVMin() * accelModeNoise.StdVMin());
+        (void)_workingFilter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
+        _gyroBiasAnchorRadps = _workingFilter.state()(VehicleState::kBgz);
+        _gyroBiasAnchorVarianceRadps2 = _workingFilter.variance(VehicleState::kBgz);
         result.accepted = accelAccepted || closureAccepted || lateralAccepted || stationaryApplied;
         return result;
     }
@@ -2539,7 +2431,7 @@ namespace MazeMap
         {
             InvokeLoopHook(loopHookContext, loopHook);
         };
-        const bool accepted = _filter.Update<1>(
+        const bool accepted = _workingFilter.Update<1>(
             z,
             sqrtNoise,
             std::numeric_limits<float>::infinity(),
@@ -2557,8 +2449,8 @@ namespace MazeMap
     void SrUkfCore::updateNonholonomicDiagnostics(bool constraintEnabled) noexcept
     {
         _nonholonomicConstraintEnabled = constraintEnabled;
-        _nhcSigmaMps = ComputeNonholonomicSigmaMps(std::fabs(_filter.state()(VehicleState::kU)));
-        _nhcResidualMps = _filter.state()(VehicleState::kV);
+        _nhcSigmaMps = ComputeNonholonomicSigmaMps(std::fabs(_workingFilter.state()(VehicleState::kU)));
+        _nhcResidualMps = _workingFilter.state()(VehicleState::kV);
         _nhcResidualSigma =
             (_nhcSigmaMps > 0.0f) ?
             (_nhcResidualMps / _nhcSigmaMps) :
@@ -2572,12 +2464,12 @@ namespace MazeMap
             return;
         }
 
-        StateVector constrainedState = _filter.state();
+        StateVector constrainedState = _workingFilter.state();
         constrainedState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
         constrainedState(VehicleState::kOmegaR) = measured.omegaRightRadps;
         VehicleState::NormalizeStateVector(constrainedState);
 
-        StateMatrix constrainedCovariance = _filter.covariance();
+        StateMatrix constrainedCovariance = _workingFilter.covariance();
         constrainedCovariance.row(VehicleState::kOmegaL).setZero();
         constrainedCovariance.col(VehicleState::kOmegaL).setZero();
         constrainedCovariance.row(VehicleState::kOmegaR).setZero();
@@ -2585,7 +2477,7 @@ namespace MazeMap
         const float constrainedVariance = (std::max)(wheelVarianceRadps2, 1.0e-12f);
         constrainedCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) = constrainedVariance;
         constrainedCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) = constrainedVariance;
-        _filter.setState(constrainedState, constrainedCovariance);
+        _workingFilter.setState(constrainedState, constrainedCovariance);
     }
 
     void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
@@ -2600,15 +2492,15 @@ namespace MazeMap
             _prePredictState;
         const StateMatrix& poseReferenceCovariance = _prePredictCovariance;
         VehicleState constrainedState;
-        constrainedState.SetPosition(Eigen::Vector2f(_filter.state()(VehicleState::kPx), _filter.state()(VehicleState::kPy)));
-        constrainedState.SetOrientation(_filter.state()(VehicleState::kPsi));
-        constrainedState.SetVelocity(_filter.state()(VehicleState::kU));
-        constrainedState.SetLateralVelocity(_filter.state()(VehicleState::kV));
-        constrainedState.SetRotationalVelocity(_filter.state()(VehicleState::kR));
-        constrainedState.SetWheelSpeedLeft(_filter.state()(VehicleState::kOmegaL));
-        constrainedState.SetWheelSpeedRight(_filter.state()(VehicleState::kOmegaR));
-        constrainedState.SetGyroBiasZ(_filter.state()(VehicleState::kBgz));
-        constrainedState.SetCovariance(_filter.covariance());
+        constrainedState.SetPosition(Eigen::Vector2f(_workingFilter.state()(VehicleState::kPx), _workingFilter.state()(VehicleState::kPy)));
+        constrainedState.SetOrientation(_workingFilter.state()(VehicleState::kPsi));
+        constrainedState.SetVelocity(_workingFilter.state()(VehicleState::kU));
+        constrainedState.SetLateralVelocity(_workingFilter.state()(VehicleState::kV));
+        constrainedState.SetRotationalVelocity(_workingFilter.state()(VehicleState::kR));
+        constrainedState.SetWheelSpeedLeft(_workingFilter.state()(VehicleState::kOmegaL));
+        constrainedState.SetWheelSpeedRight(_workingFilter.state()(VehicleState::kOmegaR));
+        constrainedState.SetGyroBiasZ(_workingFilter.state()(VehicleState::kBgz));
+        constrainedState.SetCovariance(_workingFilter.covariance());
         constrainedState.ApplyStationaryZeroMotionConstraint(
             true,
             hasPoseReference,
@@ -2625,7 +2517,7 @@ namespace MazeMap
         constrainedStateVector(VehicleState::kOmegaR) = constrainedState.GetWheelSpeedRight();
         constrainedStateVector(VehicleState::kBgz) = constrainedState.GetGyroBiasZ();
         VehicleState::NormalizeStateVector(constrainedStateVector);
-        _filter.setStateSquareRootCovariance(
+        _workingFilter.setStateSquareRootCovariance(
             constrainedStateVector,
             constrainedState.GetSqrtCovariance());
         updateNonholonomicDiagnostics(false);
@@ -2732,7 +2624,7 @@ namespace MazeMap
         const float comparisonYawRateRadps =
             std::isfinite(ukfYawRateRadps) ?
             ukfYawRateRadps :
-            _filter.state()(VehicleState::kR);
+            _workingFilter.state()(VehicleState::kR);
         const float yawResidualRadps = std::fabs(comparisonYawRateRadps - correctedGyroRadps);
         const float alpha =
             (std::isfinite(_lastEncoderDtSeconds) && (_lastEncoderDtSeconds > 0.0f)) ?
@@ -2772,7 +2664,7 @@ namespace MazeMap
         const bool recentStationaryExit =
             (_timeSinceStationaryExitS <= kStationaryExitLaunchWindowS);
         const bool launchTrigger = HasLaunchOrReversalTrigger(
-            _filter.state()(VehicleState::kU),
+            _workingFilter.state()(VehicleState::kU),
             _lastControl.LeftMotorPwm(),
             _lastControl.RightMotorPwm(),
             _leftLaunchAssistFloor,
@@ -2826,7 +2718,7 @@ namespace MazeMap
 
     bool SrUkfCore::shouldEnableNonholonomicConstraint() const noexcept
     {
-        const float forwardSpeedMps = std::fabs(_filter.state()(VehicleState::kU));
+        const float forwardSpeedMps = std::fabs(_workingFilter.state()(VehicleState::kU));
         const float driveDelta = 2.0f * std::fabs(_lastControl.Differential());
         return
             !_stationaryCertified &&
@@ -2846,8 +2738,8 @@ namespace MazeMap
         }
 
         const float gyroBiasZRadps =
-            std::isfinite(_filter.state()(VehicleState::kBgz)) ?
-            _filter.state()(VehicleState::kBgz) :
+            std::isfinite(_workingFilter.state()(VehicleState::kBgz)) ?
+            _workingFilter.state()(VehicleState::kBgz) :
             _gyroBiasAnchorRadps;
         return yawRateRawRadps - gyroBiasZRadps;
     }
@@ -2981,7 +2873,7 @@ namespace MazeMap
         const float noHitRangeM = _plantModel.wallObservationNoHitRangeM();
         const SensorMount frontLeftSensor = Vehicle::GetFrontLeftSensorMount();
         const SensorMount frontRightSensor = Vehicle::GetFrontRightSensorMount();
-        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(_geometryModel, _filter.state());
+        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(_geometryModel, _workingFilter.state());
         result.leftPrediction = _geometryModel.predictRay(frame, frontLeftSensor, maze, noHitRangeM);
         result.rightPrediction = _geometryModel.predictRay(frame, frontRightSensor, maze, noHitRangeM);
         result.filter.attempted = left.valid && right.valid;
@@ -2996,7 +2888,7 @@ namespace MazeMap
 
         Eigen::Matrix<float, 2, 1> z;
         z << left.rho, right.rho;
-        result.filter.accepted = _filter.Update<2>(
+        result.filter.accepted = _workingFilter.Update<2>(
             z,
             sqrtNoise,
             9.21034f,
@@ -3004,7 +2896,7 @@ namespace MazeMap
             {
                 return frontPairPredictionForState(sigmaPoint, maze);
             });
-        result.filter.nis = _filter.lastNis();
+        result.filter.nis = _workingFilter.lastNis();
         return result;
     }
 
@@ -3024,7 +2916,7 @@ namespace MazeMap
         const float noHitRangeM = _plantModel.wallObservationNoHitRangeM();
         const SensorMount sensor = isLeft ? Vehicle::GetSideLeftSensorMount() : Vehicle::GetSideRightSensorMount();
         result.prediction = _geometryModel.predictRay(
-            BuildWallGeometryFrame(_geometryModel, _filter.state()),
+            BuildWallGeometryFrame(_geometryModel, _workingFilter.state()),
             sensor,
             maze,
             noHitRangeM);
@@ -3039,7 +2931,7 @@ namespace MazeMap
 
         Eigen::Matrix<float, 1, 1> z;
         z << observation.rho;
-        result.filter.accepted = _filter.Update<1>(
+        result.filter.accepted = _workingFilter.Update<1>(
             z,
             sqrtNoise,
             7.87944f,
@@ -3049,7 +2941,7 @@ namespace MazeMap
                 prediction(0) = wallPredictionForSensor(sigmaPoint, sensor, maze);
                 return prediction;
             });
-        result.filter.nis = _filter.lastNis();
+        result.filter.nis = _workingFilter.lastNis();
         return result;
     }
 }

@@ -51,8 +51,8 @@ namespace MazeMap
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
             }
 
-            const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
+            const VehicleState::StateVector& state = core.workingState();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
             Assert::AreEqual(0, FindDebugDumpModeId(core));
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < params.stopEnterSpeedMps);
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < params.stopEnterSpeedMps);
@@ -109,7 +109,7 @@ namespace MazeMap
                 Assert::IsTrue(core.updateYawRate(0.0f).accepted);
             }
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::AreEqual(0, FindDebugDumpModeId(core));
             Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_grip_recovery", "exact_stationary_lock"));
             Assert::AreEqual(initialState(VehicleState::kPx), state(VehicleState::kPx), kStationaryPoseDriftToleranceM);
@@ -140,7 +140,7 @@ namespace MazeMap
                 AdvanceInitialStationaryGyroBiasExpectation(expected, rawStationaryGyroRadps, dt);
             }
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(expected.seedApplied);
             Assert::IsTrue(std::fabs(state(VehicleState::kR)) < kStationaryBiasSeedYawRateTolerance);
             Assert::IsTrue(state(VehicleState::kBgz) > 0.04f);
@@ -156,7 +156,7 @@ namespace MazeMap
             constexpr float dt = 0.0005f;
             constexpr float rawStationaryGyroRadps = 0.04f;
 
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            const VehicleState::StateMatrix beforeCovariance = core.workingCovariance();
             Assert::IsTrue(
                 beforeCovariance(VehicleState::kBgz, VehicleState::kBgz) >
                 0.0f);
@@ -168,7 +168,7 @@ namespace MazeMap
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
             }
 
-            const VehicleState::StateMatrix covariance = core.covariance();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kBgz, VehicleState::kBgz)));
             Assert::IsTrue(covariance(VehicleState::kBgz, VehicleState::kBgz) > 0.0f);
             Assert::IsTrue(
@@ -192,28 +192,28 @@ namespace MazeMap
         {
 			SrUkfCore core = RunUKFCycles(2000);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < kStationaryPoseDriftToleranceM);
 
 
 			// If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
-			const auto covariance = core.covariance();
+			const auto covariance = core.workingCovariance();
             Assert::IsTrue(covariance(VehicleState::kPx, VehicleState::kPx) < 10.0f, L"Final x position variance was too high");
         }
         TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsPoseY)
         {
             SrUkfCore core = RunUKFCycles(2000);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kPy)) < kStationaryPoseDriftToleranceM);
 
 
             // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
-            const auto covariance = core.covariance();
+            const auto covariance = core.workingCovariance();
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kPy, VehicleState::kPy)));
             Assert::IsTrue(covariance(VehicleState::kPy, VehicleState::kPy) < 100.0f, L"Final y position variance was too high");
         }
@@ -221,14 +221,14 @@ namespace MazeMap
         {
             SrUkfCore core = RunUKFCycles(2000);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 1.0e-4f);
 
 
             // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
-            const auto covariance = core.covariance();
+            const auto covariance = core.workingCovariance();
             Assert::IsTrue(covariance(VehicleState::kU, VehicleState::kU) < 0.0001f, L"Final forward velocity variance was too high");
         }
 
@@ -236,7 +236,7 @@ namespace MazeMap
         {
             SrUkfCore core = RunUKFCycles(2000);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 1.0e-5f,
                 (L"Final lateral velocity was too high:\n" +
                     std::to_wstring((state(VehicleState::kV)))).c_str());
@@ -245,7 +245,7 @@ namespace MazeMap
             // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
-            const auto covariance = core.covariance();
+            const auto covariance = core.workingCovariance();
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) < 0.0001f,
                 (L"Final lateral velocity variance was too high:\n" +
                 std::to_wstring((covariance(VehicleState::kV,VehicleState::kV)))).c_str());
@@ -254,7 +254,7 @@ namespace MazeMap
         {
             SrUkfCore core = RunUKFCycles(2000);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kR)) < 1.0e-4f,
                 (L"Final yaw rate was too high:\n" +
                     std::to_wstring((state(VehicleState::kR)))).c_str());
@@ -263,7 +263,7 @@ namespace MazeMap
             // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
-            const auto covariance = core.covariance();
+            const auto covariance = core.workingCovariance();
             Assert::IsTrue(covariance(VehicleState::kR, VehicleState::kR) <= kStationaryYawVarianceToleranceRadps2,
                 (L"Final yaw rate variance was too high:\n" +
                     std::to_wstring((covariance(VehicleState::kR, VehicleState::kR)))).c_str());
@@ -272,28 +272,28 @@ namespace MazeMap
         {
             SrUkfCore core = RunUKFCycles(2000);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 1.0e-4f);
 
 
             // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
-            const auto covariance = core.covariance();
+            const auto covariance = core.workingCovariance();
             Assert::IsTrue(covariance(VehicleState::kOmegaL, VehicleState::kOmegaL) < 0.0001f, L"Final left wheel speed variance was too high");
         }
         TEST_METHOD(SrUkfCoreDoesNotDriftOrLoseCertaintyUnderRepeatedZeroMotionMeasurementsOmegaR)
         {
             SrUkfCore core = RunUKFCycles(2000);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-4f);
 
 
             // If the robot is stationary, we grow increasingly sure that the velocity, yaw rate, and wheel speeds are all near zero.
             // We should still have some uncertainty about the exact position and heading, but it shouldn't grow without bound.
             // The gyro bias should be allowed to absorb the stationary measurements, as this is when it's most appropriate to update that value.
-            const auto covariance = core.covariance();
+            const auto covariance = core.workingCovariance();
             Assert::IsTrue(covariance(VehicleState::kOmegaR, VehicleState::kOmegaR) < 0.0001f, L"Final left wheel speed variance was too high");
         }
         TEST_METHOD(SrUkfCoreRepeatedZeroEncoderUpdatesDriveYawRateVarianceExtremelyLow)
@@ -329,7 +329,7 @@ namespace MazeMap
                 Assert::IsTrue(encoderResult.accepted);
             }
 
-            const VehicleState::StateMatrix covariance = core.covariance();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
             const float finalYawRateVarianceRadps2 = covariance(VehicleState::kR, VehicleState::kR);
             const PlantParams params = PlantParams::Default();
             SrUkfCoreTestRuntime runtime;
@@ -367,7 +367,7 @@ namespace MazeMap
             SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            const float initialLateralVelocityVarianceMps2 = core.covariance()(VehicleState::kV, VehicleState::kV);
+            const float initialLateralVelocityVarianceMps2 = core.workingCovariance()(VehicleState::kV, VehicleState::kV);
             Assert::AreEqual(1.0f, initialLateralVelocityVarianceMps2, 1.0e-6f);
 
             App::Internal::CommandVector control{};
@@ -384,7 +384,7 @@ namespace MazeMap
                 Assert::IsTrue(encoderResult.accepted);
             }
 
-            const VehicleState::StateMatrix covariance = core.covariance();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
             const float finalLateralVelocityVarianceMps2 = covariance(VehicleState::kV, VehicleState::kV);
             Assert::IsTrue(std::isfinite(finalLateralVelocityVarianceMps2));
             Assert::IsTrue(
@@ -432,13 +432,13 @@ namespace MazeMap
                 if (!capturedFirstCertifiedCovariance &&
                     (FindDebugDumpModeId(core) == 0))
                 {
-                    firstCertifiedCovariance = core.covariance();
+                    firstCertifiedCovariance = core.workingCovariance();
                     capturedFirstCertifiedCovariance = true;
                 }
             }
 
-            const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
+            const VehicleState::StateVector& state = core.workingState();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
 
             Assert::IsTrue(capturedFirstCertifiedCovariance);
             Assert::AreEqual(0, FindDebugDumpModeId(core));
@@ -499,7 +499,7 @@ namespace MazeMap
             }
 
             Assert::IsTrue(FindDebugDumpModeId(core) != 3);
-            const VehicleState::StateMatrix stationaryCovariance = core.covariance();
+            const VehicleState::StateMatrix stationaryCovariance = core.workingCovariance();
 
             App::Internal::CommandVector launchControl{};
             launchControl.SetLeftMotorPwm(0.30f);
@@ -515,7 +515,7 @@ namespace MazeMap
             launchEncoder.omegaRightRadps = 8.0f;
             Assert::IsTrue(core.updateEncoderPair(launchEncoder, dt).accepted);
 
-            const VehicleState::StateMatrix releasedCovariance = core.covariance();
+            const VehicleState::StateMatrix releasedCovariance = core.workingCovariance();
             Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "release_inflation_applied"));
             Assert::IsTrue(FindDebugDumpModeId(core) != 0);
             Assert::IsTrue(

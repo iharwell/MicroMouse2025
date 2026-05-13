@@ -164,7 +164,7 @@ namespace MazeMap
                 accelObservation.accelBodyYMps2 = sample.accelBodyYMps2;
                 (void)core.updatePlanarAccel(accelObservation);
 
-                const float currentXM = core.state()(VehicleState::kPx);
+                const float currentXM = core.workingState()(VehicleState::kPx);
                 maxStepDxM = (std::max)(maxStepDxM, std::fabs(currentXM - previousXM));
                 maxAbsDxFromStartM = (std::max)(maxAbsDxFromStartM, std::fabs(currentXM - first.poseXM));
                 previousXM = currentXM;
@@ -173,8 +173,8 @@ namespace MazeMap
                     0.5f * static_cast<float>(sample.leftEncoderCount + sample.rightEncoderCount) * distancePerCountM);
             }
 
-            const float finalXM = core.state()(VehicleState::kPx);
-            const float finalYM = core.state()(VehicleState::kPy);
+            const float finalXM = core.workingState()(VehicleState::kPx);
+            const float finalYM = core.workingState()(VehicleState::kPy);
 
             Assert::IsTrue(maxStepDxM < 0.01f);
             Assert::IsTrue(maxAbsDxFromStartM < 0.01f);

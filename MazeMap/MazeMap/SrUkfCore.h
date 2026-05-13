@@ -1,5 +1,5 @@
 #pragma once
-// Declares the square-root UKF core that owns the process model and measurement updates.
+// Declares the square-root UKF calculation cache used by Estimator.
 
 #include "Maze.h"
 #include "EncoderObs.h"
@@ -42,7 +42,7 @@ namespace MazeMap
         GeometryPrediction rightPrediction{};
     };
 
-    // Owns the square-root UKF state, process model, and direct measurement updates.
+    // Caches UKF calculation support around the authoritative external VehicleState storage.
     class EXPORT SrUkfCore
     {
     private:
@@ -97,16 +97,16 @@ namespace MazeMap
         using StateMatrix = VehicleState::StateMatrix;
         using DebugTextSink = bool (*)(void* context, const char* type, const char* format, std::va_list args) noexcept;
 
-        explicit SrUkfCore(const PlantModel& plantModel) noexcept;
+        explicit SrUkfCore(const PlantModel& plantModel, VehicleState& runtimeState) noexcept;
 
-        const StateVector& state() const noexcept
+        const StateVector& workingState() const noexcept
         {
-            return _filter.state();
+            return _workingFilter.state();
         }
 
-        StateMatrix covariance() const noexcept
+        StateMatrix workingCovariance() const noexcept
         {
-            return _filter.covariance();
+            return _workingFilter.covariance();
         }
 
         bool WriteDebugTextDump(void* context, DebugTextSink sink) const noexcept;
@@ -124,7 +124,6 @@ namespace MazeMap
         }
 
         bool reset(const StateVector& state, const StateMatrix& covariance) noexcept;
-        bool setState(const StateVector& state, const StateMatrix& covariance) noexcept;
         static StateMatrix BuildDefaultInitialCovariance() noexcept;
 
         bool predict(
@@ -386,7 +385,7 @@ namespace MazeMap
 
         const PlantModel& _plantModel;
         WallGeometryModel _geometryModel;
-        UKF<VehicleState::kDimension, 3> _filter;
+        UKF<VehicleState::kDimension, 3> _workingFilter;
         float _frozenDtS = 0.0f;
         float _frozenLeftAppliedBankTorqueNm = 0.0f;
         float _frozenRightAppliedBankTorqueNm = 0.0f;

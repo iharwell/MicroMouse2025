@@ -13,6 +13,7 @@
 namespace MazeMap
 {
     class Estimator;
+    class SrUkfCore;
 
     class EXPORT VehicleState
     {
@@ -38,12 +39,24 @@ namespace MazeMap
         };
 
 
+        static StateMatrix DefaultInitialCovariance() noexcept
+        {
+            StateMatrix covariance = StateMatrix::Identity() * 1.0e-3f;
+            covariance(kPx, kPx) = 1.0e-5f;
+            covariance(kPy, kPy) = 1.0e-5f;
+            covariance(kOmegaL, kOmegaL) = 0.25f;
+            covariance(kOmegaR, kOmegaR) = 0.25f;
+            covariance(kBgz, kBgz) = 3.05e-4f;
+            return covariance;
+        }
+
         VehicleState() noexcept
             : _state(StateVector::Zero())
-            , _sqrtCovariance(StateMatrix::Identity() * 1.0e-3f)
+            , _sqrtCovariance(StateMatrix::Zero())
             , _time(0.0f)
             , _timestampUs(0U)
         {
+            SetCovariance(DefaultInitialCovariance());
         }
 
         const StateMatrix& GetSqrtCovariance() const noexcept { return _sqrtCovariance; }
@@ -262,6 +275,7 @@ namespace MazeMap
 
     private:
         friend class Estimator;
+        friend class SrUkfCore;
 
         const StateVector& GetStateVector() const noexcept { return _state; }
 

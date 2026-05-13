@@ -53,8 +53,8 @@ namespace MazeMap
             EncoderObs encoder{};
             encoder.totalLeftCounts = 0;
             encoder.totalRightCounts = 0;
-            encoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
-            encoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            encoder.omegaLeftRadps = core.workingState()(VehicleState::kOmegaL);
+            encoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(encoder, kPlanarAccelUpdateTestDtSeconds).accepted);
         }
 
@@ -395,7 +395,7 @@ namespace MazeMap
             Assert::IsTrue(yawResult.attempted);
             Assert::IsTrue(yawResult.accepted);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::AreEqual(
                 1,
                 FindDebugDumpModeId(core));
@@ -436,16 +436,16 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
 
-            const float initialLateralVelocityMps = core.state()(VehicleState::kV);
-            const float initialLateralVarianceMps2 = core.covariance()(VehicleState::kV, VehicleState::kV);
+            const float initialLateralVelocityMps = core.workingState()(VehicleState::kV);
+            const float initialLateralVarianceMps2 = core.workingCovariance()(VehicleState::kV, VehicleState::kV);
             const float expectedSigmaMps = UkfTestNonholonomicSigmaMps(forwardVelocityMps);
 
             const MeasurementUpdateResult yawResult = core.updateYawRate(yawRateRadps);
             Assert::IsTrue(yawResult.attempted);
             Assert::IsTrue(yawResult.accepted);
 
-            const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
+            const VehicleState::StateVector& state = core.workingState();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
             Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_mode", "nhc_enabled"));
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 0.02f);
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < std::fabs(initialLateralVelocityMps));
@@ -491,8 +491,8 @@ namespace MazeMap
             Assert::IsTrue(yawResult.accepted);
 
             const float expectedSigmaMps = UkfTestNonholonomicSigmaMps(forwardVelocityMps);
-            const VehicleState::StateVector& state = core.state();
-            const VehicleState::StateMatrix covariance = core.covariance();
+            const VehicleState::StateVector& state = core.workingState();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
             Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_mode", "nhc_enabled"));
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) > 0.10f);
             Assert::AreEqual(expectedSigmaMps, FindDebugDumpFloat(core, "ukf_dump_consistency", "nhc_sigma_mps"), 1.0e-6f);
@@ -529,7 +529,7 @@ namespace MazeMap
             const ImuAccelObs accelObservation =
                 BuildPlanarAccelObservation(
                     plant,
-                    mergedCore.state(),
+                    mergedCore.workingState(),
                     control,
                     prepared,
                     0.80f,
@@ -537,8 +537,8 @@ namespace MazeMap
                     0.35f,
                     -0.55f);
             const float gyroObservation =
-                mergedCore.state()(VehicleState::kR) +
-                mergedCore.state()(VehicleState::kBgz) +
+                mergedCore.workingState()(VehicleState::kR) +
+                mergedCore.workingState()(VehicleState::kBgz) +
                 0.08f;
 
             const MeasurementUpdateResult yawResult = sequentialCore.updateYawRate(gyroObservation);
@@ -555,9 +555,9 @@ namespace MazeMap
             Assert::IsTrue(mergedAccelResult.attempted);
             Assert::IsTrue(mergedAccelResult.accepted);
             Assert::IsTrue(
-                (mergedCore.state() - sequentialCore.state()).cwiseAbs().maxCoeff() <= 1.0e-6f);
+                (mergedCore.workingState() - sequentialCore.workingState()).cwiseAbs().maxCoeff() <= 1.0e-6f);
             Assert::IsTrue(
-                (mergedCore.covariance() - sequentialCore.covariance()).cwiseAbs().maxCoeff() <= 1.0e-6f);
+                (mergedCore.workingCovariance() - sequentialCore.workingCovariance()).cwiseAbs().maxCoeff() <= 1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCorePlanarAccelUpdateUsesForwardChannelAndIgnoresLateralOnlyPerturbation)
@@ -598,7 +598,7 @@ namespace MazeMap
             const ImuAccelObs baselineObservation =
                 BuildPlanarAccelObservation(
                     plant,
-                    baselineCore.state(),
+                    baselineCore.workingState(),
                     control,
                     prepared,
                     0.80f,
@@ -608,7 +608,7 @@ namespace MazeMap
             const ImuAccelObs lateralPerturbedObservation =
                 BuildPlanarAccelObservation(
                     plant,
-                    lateralPerturbedCore.state(),
+                    lateralPerturbedCore.workingState(),
                     control,
                     prepared,
                     0.80f,
@@ -618,7 +618,7 @@ namespace MazeMap
             const ImuAccelObs forwardPerturbedObservation =
                 BuildPlanarAccelObservation(
                     plant,
-                    forwardPerturbedCore.state(),
+                    forwardPerturbedCore.workingState(),
                     control,
                     prepared,
                     0.80f,
@@ -640,9 +640,9 @@ namespace MazeMap
             Assert::IsTrue(forwardResult.accepted);
 
             Assert::IsTrue(
-                (baselineCore.state() - lateralPerturbedCore.state()).cwiseAbs().maxCoeff() <= 1.0e-6f);
+                (baselineCore.workingState() - lateralPerturbedCore.workingState()).cwiseAbs().maxCoeff() <= 1.0e-6f);
             Assert::IsTrue(
-                (baselineCore.covariance() - lateralPerturbedCore.covariance()).cwiseAbs().maxCoeff() <= 1.0e-6f);
+                (baselineCore.workingCovariance() - lateralPerturbedCore.workingCovariance()).cwiseAbs().maxCoeff() <= 1.0e-6f);
             Assert::AreEqual(
                 FindDebugDumpFloat(baselineCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2"),
                 FindDebugDumpFloat(lateralPerturbedCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2"),
@@ -653,7 +653,7 @@ namespace MazeMap
                     FindDebugDumpFloat(baselineCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2") -
                     FindDebugDumpFloat(forwardPerturbedCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2")) > 0.5f);
             Assert::IsTrue(
-                (baselineCore.state() - forwardPerturbedCore.state()).cwiseAbs().maxCoeff() > 1.0e-6f);
+                (baselineCore.workingState() - forwardPerturbedCore.workingState()).cwiseAbs().maxCoeff() > 1.0e-6f);
         }
     };
 }

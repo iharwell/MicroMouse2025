@@ -156,7 +156,6 @@ namespace MazeMap
 
             if (estimator.HasFault())
             {
-                estimator.SyncRuntimeState();
                 runtimeState.SetSensorSnapshot(snapshot);
                 return;
             }
@@ -171,7 +170,6 @@ namespace MazeMap
                     GetMissionFanDutyCycle(),
                     drive.CurrentBatteryVoltageV()))
                 {
-                    estimator.SyncRuntimeState();
                     runtimeState.SetSensorSnapshot(snapshot);
                     return;
                 }
@@ -188,7 +186,6 @@ namespace MazeMap
                 const MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
                 if (!yawUpdate.accepted)
                 {
-                    estimator.SyncRuntimeState();
                     runtimeState.SetSensorSnapshot(snapshot);
                     return;
                 }
@@ -203,7 +200,6 @@ namespace MazeMap
             accelObservation.accelBodyYMps2 = snapshot.accelBodyYMps2;
             (void)estimator.updatePlanarAccel(accelObservation);
 
-            estimator.SyncRuntimeState();
             runtimeState.SetSensorSnapshot(snapshot);
         }
 
@@ -1434,6 +1430,66 @@ namespace MazeMap
                 sqrtf(2.0f * limits.GetAngularAccelRadps2() * 0.01f),
                 brakingRateRadps,
                 1.0e-6f);
+        }
+
+        TEST_METHOD(EstimatorConstructionPreservesExternalRuntimeState)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            runtimeState.SetPosition(Eigen::Vector2f(1.20f, 2.30f));
+            runtimeState.SetOrientation(0.40f);
+            runtimeState.SetVelocity(0.50f);
+            runtimeState.SetLateralVelocity(0.06f);
+            runtimeState.SetRotationalVelocity(0.70f);
+            runtimeState.SetWheelSpeedLeft(8.0f);
+            runtimeState.SetWheelSpeedRight(9.0f);
+            runtimeState.SetGyroBiasZ(0.012f);
+            PlantModel plant(vehicle, runtimeState);
+
+            Estimator estimator(plant, runtimeState);
+            (void)estimator;
+
+            Assert::AreEqual(1.20f, runtimeState.GetPositionX(), 1.0e-6f);
+            Assert::AreEqual(2.30f, runtimeState.GetPositionY(), 1.0e-6f);
+            Assert::AreEqual(0.40f, runtimeState.GetOrientation(), 1.0e-6f);
+            Assert::AreEqual(0.50f, runtimeState.GetVelocity(), 1.0e-6f);
+            Assert::AreEqual(0.06f, runtimeState.GetLateralVelocity(), 1.0e-6f);
+            Assert::AreEqual(0.70f, runtimeState.GetRotationalVelocity(), 1.0e-6f);
+            Assert::AreEqual(8.0f, runtimeState.GetWheelSpeedLeft(), 1.0e-6f);
+            Assert::AreEqual(9.0f, runtimeState.GetWheelSpeedRight(), 1.0e-6f);
+            Assert::AreEqual(0.012f, runtimeState.GetGyroBiasZ(), 1.0e-6f);
+        }
+
+        TEST_METHOD(EstimatorMeasuredKinematicsStartsFromExternalRuntimeState)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+            Estimator estimator(plant, runtimeState);
+
+            runtimeState.SetPosition(Eigen::Vector2f(1.20f, 2.30f));
+            runtimeState.SetOrientation(0.40f);
+            runtimeState.SetVelocity(0.50f);
+            runtimeState.SetLateralVelocity(0.06f);
+            runtimeState.SetRotationalVelocity(0.70f);
+            runtimeState.SetWheelSpeedLeft(8.0f);
+            runtimeState.SetWheelSpeedRight(9.0f);
+            runtimeState.SetGyroBiasZ(0.012f);
+
+            EncoderObs observation{};
+            observation.omegaLeftRadps = 0.0f;
+            observation.omegaRightRadps = 0.0f;
+            estimator.ProjectMeasuredKinematics(0.001f, observation, 0.0f);
+
+            Assert::AreEqual(1.20f, runtimeState.GetPositionX(), 1.0e-6f);
+            Assert::AreEqual(2.30f, runtimeState.GetPositionY(), 1.0e-6f);
+            Assert::AreEqual(0.40f, runtimeState.GetOrientation(), 1.0e-6f);
+            Assert::AreEqual(0.0f, runtimeState.GetVelocity(), 1.0e-6f);
+            Assert::AreEqual(0.0f, runtimeState.GetLateralVelocity(), 1.0e-6f);
+            Assert::AreEqual(0.0f, runtimeState.GetRotationalVelocity(), 1.0e-6f);
+            Assert::AreEqual(0.0f, runtimeState.GetWheelSpeedLeft(), 1.0e-6f);
+            Assert::AreEqual(0.0f, runtimeState.GetWheelSpeedRight(), 1.0e-6f);
+            Assert::AreEqual(0.012f, runtimeState.GetGyroBiasZ(), 1.0e-6f);
         }
 
         TEST_METHOD(DriveBaseDeltaCommandStaysSymmetricAcrossWheelSpeedMismatch)

@@ -54,7 +54,7 @@ namespace MazeMap
                     pivotScrubCommandAngularRadps);
             }
 
-            return core.state();
+            return core.workingState();
         }
 
         WallGeometryModel::GeometryStateFrame BuildGeometryFrame(
@@ -101,7 +101,7 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(lowForceContacts.SumForwardForceN()) < 1.0e-4f);
             Assert::IsTrue(std::fabs(lowForceContacts.SumRightForceN()) < 1.0e-4f);
 
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            const VehicleState::StateMatrix beforeCovariance = core.workingCovariance();
             const float initialYawRateVarianceRadps2 =
                 beforeCovariance(VehicleState::kR, VehicleState::kR);
             const float initialLeftWheelVarianceRadps2 =
@@ -115,7 +115,7 @@ namespace MazeMap
             constexpr float dt = 0.001f;
             Assert::IsTrue(core.predict(dt, control, controlFanDutyCycle, controlBatteryVoltageV));
 
-            const VehicleState::StateMatrix predictedCovariance = core.covariance();
+            const VehicleState::StateMatrix predictedCovariance = core.workingCovariance();
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kR, VehicleState::kR)));
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL)));
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR)));
@@ -125,7 +125,7 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
 
-            const VehicleState::StateMatrix afterCovariance = core.covariance();
+            const VehicleState::StateMatrix afterCovariance = core.workingCovariance();
             Assert::IsTrue(
                 afterCovariance(VehicleState::kR, VehicleState::kR) <
                 initialYawRateVarianceRadps2);
@@ -167,7 +167,7 @@ namespace MazeMap
             Assert::IsTrue(std::fabs(lowForceContacts.SumForwardForceN()) < 1.0e-4f);
             Assert::IsTrue(std::fabs(lowForceContacts.SumRightForceN()) < 1.0e-4f);
 
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            const VehicleState::StateMatrix beforeCovariance = core.workingCovariance();
             const float initialYawRateVarianceRadps2 =
                 beforeCovariance(VehicleState::kR, VehicleState::kR);
             Assert::IsTrue(
@@ -180,7 +180,7 @@ namespace MazeMap
             constexpr float dt = 0.001f;
             Assert::IsTrue(core.predict(dt, control, controlFanDutyCycle, controlBatteryVoltageV));
 
-            const VehicleState::StateMatrix predictedCovariance = core.covariance();
+            const VehicleState::StateMatrix predictedCovariance = core.workingCovariance();
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kR, VehicleState::kR)));
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL)));
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR)));
@@ -188,13 +188,13 @@ namespace MazeMap
             EncoderObs encoder{};
             encoder.totalLeftCounts = 1;
             encoder.totalRightCounts = 1;
-            encoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
-            encoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            encoder.omegaLeftRadps = core.workingState()(VehicleState::kOmegaL);
+            encoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
             const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
 
-            const VehicleState::StateMatrix afterCovariance = core.covariance();
+            const VehicleState::StateMatrix afterCovariance = core.workingCovariance();
             Assert::IsTrue(
                 afterCovariance(VehicleState::kR, VehicleState::kR) <=
                 (predictedCovariance(VehicleState::kR, VehicleState::kR) + 1.0e-9f));
@@ -238,7 +238,7 @@ namespace MazeMap
             Assert::IsTrue(secondResult.attempted);
             Assert::IsTrue(secondResult.accepted);
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::isfinite(state(VehicleState::kOmegaL)));
             Assert::IsTrue(std::isfinite(state(VehicleState::kOmegaR)));
             Assert::IsTrue(state(VehicleState::kOmegaL) > 0.0f);
@@ -279,7 +279,7 @@ namespace MazeMap
             initialCovariance(VehicleState::kOmegaR, VehicleState::kR) = -0.010f;
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            const VehicleState::StateVector stateBeforeEncoder = core.state();
+            const VehicleState::StateVector stateBeforeEncoder = core.workingState();
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 8;
@@ -291,7 +291,7 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
 
-            const VehicleState::StateVector& stateAfterEncoder = core.state();
+            const VehicleState::StateVector& stateAfterEncoder = core.workingState();
             Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "direct_wheel_body_invariant"));
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
@@ -324,7 +324,7 @@ namespace MazeMap
                 BuildUkfCovariance(0.02f, 0.04f, 0.10f, 0.08f, 0.10f, 0.08f, 0.03f);
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            const VehicleState::StateVector stateBeforeEncoder = core.state();
+            const VehicleState::StateVector stateBeforeEncoder = core.workingState();
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 40;
@@ -337,7 +337,7 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.accepted);
             Assert::IsTrue(encoderResult.nis > kUkfTestEncoderPairNisThreshold);
 
-            const VehicleState::StateVector& stateAfterEncoder = core.state();
+            const VehicleState::StateVector& stateAfterEncoder = core.workingState();
             Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "direct_wheel_body_invariant"));
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
@@ -373,7 +373,7 @@ namespace MazeMap
                 Assert::IsTrue(yawResult.accepted);
             }
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < 1.0e-3f);
             Assert::IsTrue(std::fabs(state(VehicleState::kPy)) < 1.0e-3f);
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 1.0e-4f);
@@ -400,7 +400,7 @@ namespace MazeMap
                 Assert::IsTrue(yawResult.accepted);
             }
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(std::fabs(state(VehicleState::kPy)) > 1.0e-2f);
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) > 1.0e-2f);
         }
@@ -510,7 +510,7 @@ namespace MazeMap
                     (std::wstring(L"Launch encoder update rejected at sample ") +
                         std::to_wstring(index)).c_str());
 
-                const VehicleState::StateVector& encoderConstrainedState = core.state();
+                const VehicleState::StateVector& encoderConstrainedState = core.workingState();
                 Assert::IsTrue(std::isfinite(encoderConstrainedState(VehicleState::kU)));
                 Assert::AreEqual(sample.leftOmegaRadps, encoderConstrainedState(VehicleState::kOmegaL), 1.0e-5f);
                 Assert::AreEqual(sample.rightOmegaRadps, encoderConstrainedState(VehicleState::kOmegaR), 1.0e-5f);
@@ -550,7 +550,7 @@ namespace MazeMap
                 Assert::IsTrue(core.predict(dt, control, fanDutyCycle, batteryVoltageV));
             }
 
-            const VehicleState::StateVector& state = core.state();
+            const VehicleState::StateVector& state = core.workingState();
             Assert::IsTrue(state(VehicleState::kPy) > initialState(VehicleState::kPy));
             Assert::IsTrue(state(VehicleState::kU) > 0.0f);
             Assert::IsTrue(state(VehicleState::kPsi) < 0.0f);
@@ -579,8 +579,8 @@ namespace MazeMap
             initialCovariance(VehicleState::kOmegaR, VehicleState::kR) = -0.012f;
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            const VehicleState::StateVector before = core.state();
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            const VehicleState::StateVector before = core.workingState();
+            const VehicleState::StateMatrix beforeCovariance = core.workingCovariance();
             constexpr float observedYawRateRadps = 0.45f;
             const float beforeError =
                 std::fabs((before(VehicleState::kR) + before(VehicleState::kBgz)) - observedYawRateRadps);
@@ -589,8 +589,8 @@ namespace MazeMap
             Assert::IsTrue(result.attempted);
             Assert::IsTrue(result.accepted);
 
-            const VehicleState::StateVector& after = core.state();
-            const VehicleState::StateMatrix afterCovariance = core.covariance();
+            const VehicleState::StateVector& after = core.workingState();
+            const VehicleState::StateMatrix afterCovariance = core.workingCovariance();
             const float afterError =
                 std::fabs((after(VehicleState::kR) + after(VehicleState::kBgz)) - observedYawRateRadps);
 
@@ -636,8 +636,8 @@ namespace MazeMap
 
             SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.02f, 0.04f, 0.02f, 0.02f, 0.05f, 0.05f, 0.02f)));
-            const VehicleState::StateVector before = core.state();
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            const VehicleState::StateVector before = core.workingState();
+            const VehicleState::StateMatrix beforeCovariance = core.workingCovariance();
 
             WallObs leftObservation{};
             leftObservation.valid = true;
@@ -652,8 +652,8 @@ namespace MazeMap
             Assert::IsTrue(result.filter.attempted);
             Assert::IsTrue(result.filter.accepted);
 
-            const VehicleState::StateVector& after = core.state();
-            const VehicleState::StateMatrix afterCovariance = core.covariance();
+            const VehicleState::StateVector& after = core.workingState();
+            const VehicleState::StateMatrix afterCovariance = core.workingCovariance();
             Assert::IsTrue(after(VehicleState::kPy) > (before(VehicleState::kPy) + 0.002f));
             Assert::IsTrue(std::fabs(after(VehicleState::kPx) - before(VehicleState::kPx)) < 0.004f);
             Assert::IsTrue(afterCovariance(VehicleState::kPy, VehicleState::kPy) <
@@ -683,8 +683,8 @@ namespace MazeMap
 
             SrUkfCore core = MakeDefaultSrUkfCore();
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.02f, 0.04f, 0.02f, 0.02f, 0.05f, 0.05f, 0.02f)));
-            const VehicleState::StateVector before = core.state();
-            const VehicleState::StateMatrix beforeCovariance = core.covariance();
+            const VehicleState::StateVector before = core.workingState();
+            const VehicleState::StateMatrix beforeCovariance = core.workingCovariance();
 
             WallObs observation{};
             observation.valid = true;
@@ -696,8 +696,8 @@ namespace MazeMap
             Assert::IsTrue(result.filter.attempted);
             Assert::IsTrue(result.filter.accepted);
 
-            const VehicleState::StateVector& after = core.state();
-            const VehicleState::StateMatrix afterCovariance = core.covariance();
+            const VehicleState::StateVector& after = core.workingState();
+            const VehicleState::StateMatrix afterCovariance = core.workingCovariance();
             Assert::IsTrue(after(VehicleState::kPx) < (before(VehicleState::kPx) - 0.002f));
             Assert::IsTrue(std::fabs(after(VehicleState::kPy) - before(VehicleState::kPy)) < 0.004f);
             Assert::IsTrue(afterCovariance(VehicleState::kPx, VehicleState::kPx) <
@@ -745,7 +745,7 @@ namespace MazeMap
                     0.0f);
             }
 
-			auto state = core.state();
+			auto state = core.workingState();
             Assert::IsTrue(state(VehicleState::kU) > 0.8f,
                 (std::wstring(L"Forward velocity was too low: ") +
                     std::to_wstring(state(VehicleState::kU))).c_str());
@@ -785,7 +785,7 @@ namespace MazeMap
                     0.0f);
             }
 
-            auto state = core.state();
+            auto state = core.workingState();
             Assert::IsTrue(state(VehicleState::kU) > 0.8f,
                 (std::wstring(L"Forward velocity was too low: ") +
                     std::to_wstring(state(VehicleState::kU))).c_str());
@@ -819,7 +819,7 @@ namespace MazeMap
             initialCovariance(VehicleState::kBgz, VehicleState::kR) = 0.0f;
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
-            const VehicleState::StateVector before = core.state();
+            const VehicleState::StateVector before = core.workingState();
             constexpr float observedYawRateRadps = 0.27f;
             const float beforeError =
                 std::fabs((before(VehicleState::kR) + before(VehicleState::kBgz)) - observedYawRateRadps);
@@ -828,7 +828,7 @@ namespace MazeMap
             Assert::IsTrue(result.attempted);
             Assert::IsTrue(result.accepted);
 
-            const VehicleState::StateVector& after = core.state();
+            const VehicleState::StateVector& after = core.workingState();
             const float afterError =
                 std::fabs((after(VehicleState::kR) + after(VehicleState::kBgz)) - observedYawRateRadps);
 
@@ -854,7 +854,7 @@ namespace MazeMap
                     0.01f);
             Assert::IsTrue(core.reset(initialState, SrUkfCore::BuildDefaultInitialCovariance()));
 
-            const float beforeVarianceRadps2 = core.covariance()(VehicleState::kBgz, VehicleState::kBgz);
+            const float beforeVarianceRadps2 = core.workingCovariance()(VehicleState::kBgz, VehicleState::kBgz);
 
             const CommandVector control = CommandVector(0.16f, 0.16f);
             const float fanDutyCycle = 0.80f;
@@ -862,7 +862,7 @@ namespace MazeMap
 
             Assert::IsTrue(core.predict(0.002f, control, fanDutyCycle, batteryVoltageV));
 
-            const float afterVarianceRadps2 = core.covariance()(VehicleState::kBgz, VehicleState::kBgz);
+            const float afterVarianceRadps2 = core.workingCovariance()(VehicleState::kBgz, VehicleState::kBgz);
             Assert::AreEqual(2, FindDebugDumpModeId(core));
             Assert::AreEqual(beforeVarianceRadps2, afterVarianceRadps2, 1.0e-9f);
         }
@@ -893,8 +893,8 @@ namespace MazeMap
             EncoderObs encoder{};
             encoder.totalLeftCounts = 1;
             encoder.totalRightCounts = 0;
-            encoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
-            encoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            encoder.omegaLeftRadps = core.workingState()(VehicleState::kOmegaL);
+            encoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
 
             Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "left_applied_bank_torque_nm")));
@@ -936,8 +936,8 @@ namespace MazeMap
             EncoderObs firstEncoder{};
             firstEncoder.totalLeftCounts = 0;
             firstEncoder.totalRightCounts = 0;
-            firstEncoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
-            firstEncoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            firstEncoder.omegaLeftRadps = core.workingState()(VehicleState::kOmegaL);
+            firstEncoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(firstEncoder, dt).accepted);
 
             (void)plant;
@@ -951,7 +951,7 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(firstLeftAppliedBankTorqueNm));
             Assert::IsTrue(std::isfinite(firstRightAppliedBankTorqueNm));
 
-            const VehicleState::StateVector stateBeforeSecondPredict = core.state();
+            const VehicleState::StateVector stateBeforeSecondPredict = core.workingState();
             App::Internal::CommandVector secondControl{};
             secondControl.SetLeftMotorPwm(0.31f);
             secondControl.SetRightMotorPwm(0.27f);
@@ -963,8 +963,8 @@ namespace MazeMap
             EncoderObs secondEncoder{};
             secondEncoder.totalLeftCounts = 0;
             secondEncoder.totalRightCounts = 0;
-            secondEncoder.omegaLeftRadps = core.state()(VehicleState::kOmegaL);
-            secondEncoder.omegaRightRadps = core.state()(VehicleState::kOmegaR);
+            secondEncoder.omegaLeftRadps = core.workingState()(VehicleState::kOmegaL);
+            secondEncoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(secondEncoder, dt).accepted);
 
             (void)stateBeforeSecondPredict;

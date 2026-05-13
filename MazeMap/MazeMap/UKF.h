@@ -411,9 +411,31 @@ namespace MazeMap
         using WeightVec = Eigen::Matrix<float, kSigmaCount, 1>;
 
         UKF() noexcept
-            : _weights()
-            , _state(StateVec::Zero())
-            , _sqrtCovariance(StateMat::Identity() * 1.0e-3f)
+            : _ownedState(StateVec::Zero())
+            , _ownedSqrtCovariance(StateMat::Identity() * 1.0e-3f)
+            , _weights()
+            , _state(_ownedState)
+            , _sqrtCovariance(_ownedSqrtCovariance)
+            , _sqrtProcessNoise(StateMat::Identity() * 1.0e-3f)
+            , _sigmaPoints(SigmaMat::Zero())
+            , _sigmaMean(StateVec::Zero())
+            , _predictionCacheValid(false)
+            , _lastNis(0.0f)
+            , _stateNormalizer(nullptr)
+            , _sigmaPointStrategy(SigmaPointStrategy::Simplex)
+            , _activeSigmaCount(kSigmaCount)
+            , _meanWeights(WeightVec::Zero())
+            , _covarianceWeights(WeightVec::Zero())
+        {
+            refreshSigmaPointWeights();
+        }
+
+        UKF(StateVec& externalState, StateMat& externalSqrtCovariance) noexcept
+            : _ownedState(StateVec::Zero())
+            , _ownedSqrtCovariance(StateMat::Identity() * 1.0e-3f)
+            , _weights()
+            , _state(externalState)
+            , _sqrtCovariance(externalSqrtCovariance)
             , _sqrtProcessNoise(StateMat::Identity() * 1.0e-3f)
             , _sigmaPoints(SigmaMat::Zero())
             , _sigmaMean(StateVec::Zero())
@@ -732,8 +754,8 @@ namespace MazeMap
                 return false;
             }
 
-            _state += kalmanGain * innovation;
-            normalizeState(_state);
+            StateVec updatedState = _state + (kalmanGain * innovation);
+            normalizeState(updatedState);
 
             StateMat updatedSqrt = _sqrtCovariance;
             const detail::UkfMatrix<NState, M> updateColumns =
@@ -752,6 +774,7 @@ namespace MazeMap
                 }
             }
 
+            _state = updatedState;
             _sqrtCovariance = updatedSqrt;
             _predictionCacheValid = false;
             return true;
@@ -927,9 +950,11 @@ namespace MazeMap
             }
         }
 
+        StateVec _ownedState;
+        StateMat _ownedSqrtCovariance;
         SrUkfWeights<NState> _weights;
-        StateVec _state;
-        StateMat _sqrtCovariance;
+        StateVec& _state;
+        StateMat& _sqrtCovariance;
         StateMat _sqrtProcessNoise;
         SigmaMat _sigmaPoints;
         StateVec _sigmaMean;

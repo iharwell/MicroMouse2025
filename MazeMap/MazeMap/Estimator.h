@@ -31,7 +31,6 @@ namespace MazeMap
 
         MapEvidenceUpdater& mapEvidence() noexcept { return _mapEvidence; }
         const MapEvidenceUpdater& mapEvidence() const noexcept { return _mapEvidence; }
-        void SyncRuntimeState() noexcept;
         bool HasFault() const noexcept { return _faulted; }
         const char* FaultReason() const noexcept
         {
@@ -62,7 +61,12 @@ namespace MazeMap
             float batteryVoltageV,
             LoopHook&& loopHook) noexcept
         {
-            return _core.predict(dt, control, fanDutyCycle, batteryVoltageV, static_cast<LoopHook&&>(loopHook));
+            return _core.predict(
+                dt,
+                control,
+                fanDutyCycle,
+                batteryVoltageV,
+                static_cast<LoopHook&&>(loopHook));
         }
 
         MeasurementUpdateResult updateEncoderPair(
@@ -119,7 +123,7 @@ namespace MazeMap
             const VehicleState::StateVector& state) noexcept;
         static VehicleState::StateMatrix BuildInitialCovariance() noexcept
         {
-            return SrUkfCore::BuildDefaultInitialCovariance();
+            return VehicleState::DefaultInitialCovariance();
         }
         bool reset(
             const SrUkfCore::StateVector& state,

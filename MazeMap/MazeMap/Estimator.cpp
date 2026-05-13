@@ -49,11 +49,10 @@ namespace MazeMap
     }
 
     Estimator::Estimator(const PlantModel& plantModel, VehicleState& runtimeState) noexcept
-        : _core(plantModel)
+        : _core(plantModel, runtimeState)
         , _mapEvidence()
         , _runtimeState(runtimeState)
     {
-        SyncRuntimeState();
     }
 
     bool Estimator::predict(
@@ -94,7 +93,6 @@ namespace MazeMap
             TriggerFault("reset_failed");
             return false;
         }
-        SyncRuntimeState();
         return true;
     }
 
@@ -136,10 +134,10 @@ namespace MazeMap
         {
             const SensorMount frontLeftSensor = Vehicle::GetFrontLeftSensorMount();
             const SensorMount frontRightSensor = Vehicle::GetFrontRightSensorMount();
-            const Direction leftDirection = dominantDirectionForSensor(frontLeftSensor, _core.state());
-            const Direction rightDirection = dominantDirectionForSensor(frontRightSensor, _core.state());
-            const CellCoordinates leftCell = estimateSensorCell(frontLeftSensor, _core.state());
-            const CellCoordinates rightCell = estimateSensorCell(frontRightSensor, _core.state());
+            const Direction leftDirection = dominantDirectionForSensor(frontLeftSensor, _core.workingState());
+            const Direction rightDirection = dominantDirectionForSensor(frontRightSensor, _core.workingState());
+            const CellCoordinates leftCell = estimateSensorCell(frontLeftSensor, _core.workingState());
+            const CellCoordinates rightCell = estimateSensorCell(frontRightSensor, _core.workingState());
             _mapEvidence.Apply(leftCell, leftDirection, left, result.leftPrediction, evidenceConfig, freezeMapMutation);
             _mapEvidence.Apply(
                 rightCell,
@@ -166,8 +164,8 @@ namespace MazeMap
                 (which == RelativeDirection::Left90) ?
                 Vehicle::GetSideLeftSensorMount() :
                 Vehicle::GetSideRightSensorMount();
-            const Direction direction = dominantDirectionForSensor(sensor, _core.state());
-            const CellCoordinates cell = estimateSensorCell(sensor, _core.state());
+            const Direction direction = dominantDirectionForSensor(sensor, _core.workingState());
+            const CellCoordinates cell = estimateSensorCell(sensor, _core.workingState());
             _mapEvidence.Apply(cell, direction, observation, result.prediction, evidenceConfig, freezeMapMutation);
         }
         return result;
@@ -195,11 +193,10 @@ namespace MazeMap
         state(VehicleState::kPx) = std::isfinite(xMeters) ? xMeters : 0.0f;
         state(VehicleState::kPy) = std::isfinite(yMeters) ? yMeters : 0.0f;
         state(VehicleState::kPsi) = WrapAngleRad(yawRad);
-        const VehicleState::StateVector currentState = _core.state();
-        float preservedGyroBiasRadps = currentState(VehicleState::kBgz);
+        float preservedGyroBiasRadps = _runtimeState.GetGyroBiasZ();
         if (!std::isfinite(preservedGyroBiasRadps))
         {
-            preservedGyroBiasRadps = _runtimeState.GetGyroBiasZ();
+            preservedGyroBiasRadps = 0.0f;
         }
         state(VehicleState::kBgz) = std::isfinite(preservedGyroBiasRadps) ? preservedGyroBiasRadps : 0.0f;
 
@@ -211,7 +208,6 @@ namespace MazeMap
             return false;
         }
 
-        SyncRuntimeState();
         ResetRuntimeMetadata();
         return true;
     }
@@ -225,17 +221,7 @@ namespace MazeMap
 
     bool Estimator::SetGyroBiasZ(float gyroBiasRadps) noexcept
     {
-        VehicleState::StateVector state = _core.state();
-        const VehicleState::StateMatrix covariance = _core.covariance();
-        state(VehicleState::kBgz) = std::isfinite(gyroBiasRadps) ? gyroBiasRadps : 0.0f;
-        VehicleState::NormalizeStateVector(state);
-        const bool ok = _core.setState(state, covariance);
-        if (!ok)
-        {
-            TriggerFault("set_gyro_bias_failed");
-            return false;
-        }
-        SyncRuntimeState();
+        _runtimeState.SetGyroBiasZ(std::isfinite(gyroBiasRadps) ? gyroBiasRadps : 0.0f);
         return true;
     }
 
@@ -249,34 +235,24 @@ namespace MazeMap
             return;
         }
 
-        VehicleState::StateVector state = _core.state();
-        const VehicleState::StateMatrix covariance = _core.covariance();
-
         const MeasuredKinematics measured =
             ResolveMeasuredKinematics(encoderObservation, measuredYawRateRadps);
         if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
         {
             const float midYawRad =
-                WrapAngleRad(state(VehicleState::kPsi) + (0.5f * measured.angularSpeedRadps * dtSeconds));
+                WrapAngleRad(_runtimeState.GetOrientation() + (0.5f * measured.angularSpeedRadps * dtSeconds));
             const Eigen::Vector2f midHeading = HeadingUnitFromYawRad(midYawRad);
-            state(VehicleState::kPx) += measured.linearSpeedMps * midHeading.x() * dtSeconds;
-            state(VehicleState::kPy) += measured.linearSpeedMps * midHeading.y() * dtSeconds;
-            state(VehicleState::kPsi) =
-                WrapAngleRad(state(VehicleState::kPsi) + (measured.angularSpeedRadps * dtSeconds));
+            _runtimeState.SetPosition(Eigen::Vector2f(
+                _runtimeState.GetPositionX() + (measured.linearSpeedMps * midHeading.x() * dtSeconds),
+                _runtimeState.GetPositionY() + (measured.linearSpeedMps * midHeading.y() * dtSeconds)));
+            _runtimeState.SetOrientation(_runtimeState.GetOrientation() + (measured.angularSpeedRadps * dtSeconds));
         }
 
-        state(VehicleState::kU) = measured.linearSpeedMps;
-        state(VehicleState::kV) = 0.0f;
-        state(VehicleState::kR) = measured.angularSpeedRadps;
-        state(VehicleState::kOmegaL) = encoderObservation.omegaLeftRadps;
-        state(VehicleState::kOmegaR) = encoderObservation.omegaRightRadps;
-        VehicleState::NormalizeStateVector(state);
-        if (!_core.setState(state, covariance))
-        {
-            TriggerFault("project_measured_kinematics_failed");
-            return;
-        }
-        SyncRuntimeState();
+        _runtimeState.SetVelocity(measured.linearSpeedMps);
+        _runtimeState.SetLateralVelocity(0.0f);
+        _runtimeState.SetRotationalVelocity(measured.angularSpeedRadps);
+        _runtimeState.SetWheelSpeedLeft(encoderObservation.omegaLeftRadps);
+        _runtimeState.SetWheelSpeedRight(encoderObservation.omegaRightRadps);
     }
 
     void Estimator::ResetRuntimeMetadata() noexcept
@@ -284,12 +260,6 @@ namespace MazeMap
         _runtimeState.SetTime(0.0f);
         _runtimeState.SetTimestampUs(0U);
         _runtimeState.SetSensorSnapshot(SensorSnapshot{});
-    }
-
-    void Estimator::SyncRuntimeState() noexcept
-    {
-        _runtimeState.SetStateVector(_core.state());
-        _runtimeState.SetCovariance(_core.covariance());
     }
 
     void Estimator::TriggerFault(const char* reason) noexcept
