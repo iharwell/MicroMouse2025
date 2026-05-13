@@ -77,16 +77,32 @@ namespace MazeMap::App::Internal
         // homogeneous plan here, and LoopController derives capture participation, estimator input
         // participation, and wall-update participation from this one plan rather than from
         // separate ad hoc sensor-usage flags.
-        struct SensorWorkPlan final
+        class SensorWorkPlan final
         {
-            WallMask wallMask{ WallMask::All }; // Wall-sensor groups to include in the session work.
-            bool readEncoders{ true };         // Whether encoder capture is part of the session work.
-            bool readImuBundle{ true };        // Whether IMU bundle capture is part of the session work.
-            bool useEncoderUpdate{ true };     // Whether estimator encoder updates are enabled.
-            bool useGyroUpdate{ true };        // Whether estimator gyro updates are enabled.
-            bool useAccelUpdate{ true };       // Whether estimator accel updates are enabled.
-            bool useWallUpdates{ true };       // Whether maze/wall observation updates are enabled.
+            enum : std::uint8_t { kWalls = 0x07U, kEncoder = 0x08U, kGyro = 0x10U, kAccel = 0x20U, kWallUpdate = 0x40U };
+
+        public:
+            bool UsesFrontWallSensors() const noexcept { return (_bits & static_cast<std::uint8_t>(WallMask::Front)) != 0U; }
+            bool UsesLeftWallSensors() const noexcept { return (_bits & static_cast<std::uint8_t>(WallMask::Left)) != 0U; }
+            bool UsesRightWallSensors() const noexcept { return (_bits & static_cast<std::uint8_t>(WallMask::Right)) != 0U; }
+            bool ReadEncoders() const noexcept { return UseEncoderUpdate(); }
+            bool ReadImuBundle() const noexcept { return UseGyroUpdate() || UseAccelUpdate(); }
+            bool UseEncoderUpdate() const noexcept { return (_bits & kEncoder) != 0U; }
+            bool UseGyroUpdate() const noexcept { return (_bits & kGyro) != 0U; }
+            bool UseAccelUpdate() const noexcept { return (_bits & kAccel) != 0U; }
+            bool UseWallUpdates() const noexcept { return (_bits & kWallUpdate) != 0U; }
+            void SetWallMask(const WallMask wallMask) noexcept { _bits = static_cast<std::uint8_t>((_bits & static_cast<std::uint8_t>(~kWalls)) | (static_cast<std::uint8_t>(wallMask) & kWalls)); }
+            void SetUseEncoderUpdate(const bool enabled) noexcept { Set(kEncoder, enabled); }
+            void SetUseGyroUpdate(const bool enabled) noexcept { Set(kGyro, enabled); }
+            void SetUseAccelUpdate(const bool enabled) noexcept { Set(kAccel, enabled); }
+            void SetUseWallUpdates(const bool enabled) noexcept { Set(kWallUpdate, enabled); }
+
+        private:
+            void Set(const std::uint8_t bit, const bool enabled) noexcept { _bits = enabled ? static_cast<std::uint8_t>(_bits | bit) : static_cast<std::uint8_t>(_bits & static_cast<std::uint8_t>(~bit)); }
+            std::uint8_t _bits{ kWalls | kEncoder | kGyro | kAccel | kWallUpdate };
         };
+
+        static_assert(sizeof(SensorWorkPlan) == sizeof(std::uint8_t));
 
         // Fixed startup state for one session.
         //

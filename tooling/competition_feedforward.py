@@ -31,11 +31,8 @@ class CurrentFeedforwardSetup:
     wheel_rest_launch_ramp_ms: int
     wheel_rest_launch_speed_threshold_mps: float
     wheel_rest_launch_drive_threshold: float
-    wheel_velocity_feedforward: float
-    wheel_acceleration_response_gain_per_mps2: float
     wheel_velocity_kp: float
-    wheel_velocity_ki: float
-    wheel_integral_limit: float
+    wheel_velocity_kd: float
     plant_breakaway_drive_command: float
 
 
@@ -236,11 +233,8 @@ def load_current_feedforward_setup(repo_root: Path) -> CurrentFeedforwardSetup:
     wheel_rest_launch_ramp_ms = load_named_int(runtime_core, "kWheelRestLaunchRampMs")
     wheel_rest_launch_speed_threshold_mps = load_named_float(runtime_core, "kWheelRestLaunchSpeedThresholdMps")
     wheel_rest_launch_drive_threshold = load_named_float(runtime_core, "kWheelRestLaunchDriveThreshold")
-    wheel_velocity_feedforward = load_named_float(runtime_core, "kWheelVelocityFeedforward")
-    wheel_acceleration_response_gain_per_mps2 = load_named_float(runtime_core, "kWheelAccelerationResponseGainPerMps2")
     wheel_velocity_kp = load_named_float(runtime_core, "kWheelVelocityKp")
-    wheel_velocity_ki = load_named_float(runtime_core, "kWheelVelocityKi")
-    wheel_integral_limit = load_named_float(runtime_core, "kWheelIntegralLimit")
+    wheel_velocity_kd = load_named_float(runtime_core, "kWheelVelocityKd")
 
     equivalent_wheel_inertia_kg_m2 = load_named_float(plant_header, "equivalentWheelInertiaKgM2")
     drivetrain_efficiency = load_named_float(plant_header, "drivetrainEfficiency")
@@ -288,11 +282,8 @@ def load_current_feedforward_setup(repo_root: Path) -> CurrentFeedforwardSetup:
         wheel_rest_launch_ramp_ms=wheel_rest_launch_ramp_ms,
         wheel_rest_launch_speed_threshold_mps=wheel_rest_launch_speed_threshold_mps,
         wheel_rest_launch_drive_threshold=wheel_rest_launch_drive_threshold,
-        wheel_velocity_feedforward=wheel_velocity_feedforward,
-        wheel_acceleration_response_gain_per_mps2=wheel_acceleration_response_gain_per_mps2,
         wheel_velocity_kp=wheel_velocity_kp,
-        wheel_velocity_ki=wheel_velocity_ki,
-        wheel_integral_limit=wheel_integral_limit,
+        wheel_velocity_kd=wheel_velocity_kd,
         plant_breakaway_drive_command=plant_breakaway_drive_command,
     )
 

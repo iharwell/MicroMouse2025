@@ -191,10 +191,8 @@ Run the primary diagnostic battery on open floor and use the CSV. Start with the
 Tune in this order:
 
 1. `kWheelStaticFeedforward`
-2. `kWheelVelocityFeedforward`
-3. `kWheelVelocityKp`
-4. `kWheelVelocityKi`
-5. `kWheelIntegralLimit`
+2. `kWheelVelocityKp`
+3. `kWheelVelocityKd`
 
 What to inspect in the log:
 
@@ -202,15 +200,13 @@ What to inspect in the log:
 - `left_drive_cmd` and `right_drive_cmd`
 - whether low-speed commands break stiction cleanly
 - whether cruise speed needs large steady-state error to hold target
-- whether braking and restart cause slow recovery from integrator windup
 
 Typical symptoms:
 
 - Robot twitches around zero: lower `kWheelStaticFeedforward`.
 - Robot will not start moving at low command: raise `kWheelStaticFeedforward`.
-- Cruise speed is low even with modest feedback action: raise `kWheelVelocityFeedforward`.
 - Speed oscillates or chatters: lower `kWheelVelocityKp`.
-- Long slow surging after transients: lower `kWheelVelocityKi`.
+- Speed corrections chatter on encoder noise: lower `kWheelVelocityKd`.
 
 ### 5. Tune Gyro Bias And Turn Control
 

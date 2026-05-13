@@ -1487,7 +1487,6 @@ namespace MazeMap
             DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             Assert::IsTrue(driveHarness.estimator.ResetPose(0.0f, 0.0f, 0.0f));
-            const PlantParams params = PlantParams::Default();
 
             const CommandVector command =
                 drive.DeltaCommand(
@@ -1495,7 +1494,7 @@ namespace MazeMap
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
             const CommandVector feedforwardCommand =
-                plant.solveSteadyStateFeedforward(0.20f, 0.0f, 0.80f, params.supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.20f, 0.0f);
 
             AssertDriveCommandsEqual(feedforwardCommand, command, 1.0e-6f);
         }
@@ -1509,7 +1508,6 @@ namespace MazeMap
             DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             Assert::IsTrue(driveHarness.estimator.ResetPose(0.0f, 0.0f, 0.0f));
-            const PlantParams params = PlantParams::Default();
 
             const CommandVector command =
                 drive.DeltaCommand(
@@ -1519,7 +1517,7 @@ namespace MazeMap
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
             const CommandVector feedforwardCommand =
-                plant.solveSteadyStateFeedforward(0.20f, 0.40f, 0.80f, params.supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.20f, 0.40f);
 
             AssertDriveCommandsEqual(feedforwardCommand, command, 1.0e-6f);
         }
@@ -1533,7 +1531,6 @@ namespace MazeMap
             DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             Assert::IsTrue(driveHarness.estimator.ResetPose(0.0f, 0.0f, 0.0f));
-            const PlantParams params = PlantParams::Default();
 
             const CommandVector command =
                 drive.DeltaYawRateCommand(
@@ -1541,7 +1538,7 @@ namespace MazeMap
                     0.0f,
                     MazeMap::CommandPD::RawCommand);
             const CommandVector feedforwardCommand =
-                plant.solveSteadyStateFeedforward(0.0f, 0.40f, 0.80f, params.supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.0f, 0.40f);
 
             AssertDriveCommandsEqual(feedforwardCommand, command, 1.0e-6f);
         }
@@ -1555,14 +1552,13 @@ namespace MazeMap
             DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             Assert::IsTrue(driveHarness.estimator.ResetPose(0.0f, 0.0f, 0.0f));
-            const PlantParams params = PlantParams::Default();
 
             const CommandVector command =
                 drive.PointCommand(
                     0.20f,
                     MazeMap::CommandPD::RawCommand);
             const CommandVector feedforwardCommand =
-                plant.solveSteadyStateFeedforward(0.20f, 0.0f, 0.80f, params.supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.20f, 0.0f);
 
             AssertDriveCommandsEqual(feedforwardCommand, command, 1.0e-6f);
         }
@@ -1576,7 +1572,6 @@ namespace MazeMap
             DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             Assert::IsTrue(driveHarness.estimator.ResetPose(0.0f, 0.0f, 0.0f));
-            const PlantParams params = PlantParams::Default();
 
             const CommandVector command =
                 drive.PointCommand(
@@ -1584,7 +1579,7 @@ namespace MazeMap
                     0.40f,
                     MazeMap::CommandPD::RawCommand);
             const CommandVector feedforwardCommand =
-                plant.solveSteadyStateFeedforward(0.20f, 0.40f, 0.80f, params.supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.20f, 0.40f);
 
             AssertDriveCommandsEqual(feedforwardCommand, command, 1.0e-6f);
         }
@@ -1598,14 +1593,13 @@ namespace MazeMap
             DriveBase& drive = driveHarness.drive;
             Assert::IsTrue(drive.Begin());
             Assert::IsTrue(driveHarness.estimator.ResetPose(0.0f, 0.0f, 0.0f));
-            const PlantParams params = PlantParams::Default();
 
             const CommandVector command =
                 drive.PointYawRateCommand(
                     0.40f,
                     MazeMap::CommandPD::RawCommand);
             const CommandVector feedforwardCommand =
-                plant.solveSteadyStateFeedforward(0.0f, 0.40f, 0.80f, params.supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.0f, 0.40f);
 
             AssertDriveCommandsEqual(feedforwardCommand, command, 1.0e-6f);
         }
@@ -1692,13 +1686,10 @@ namespace MazeMap
             Assert::IsTrue(drive.Begin());
             Assert::IsTrue(driveHarness.estimator.ResetPose(0.0f, 0.0f, 0.0f));
 
-            const PlantParams params = PlantParams::Default();
             const CommandVector feedforwardCommand =
                 plant.solveSteadyStateFeedforward(
                     0.20f,
-                    driveHarness.runtimeState.GetRotationalVelocity(),
-                    GetMissionFanDutyCycle(),
-                    drive.CurrentBatteryVoltageV());
+                    driveHarness.runtimeState.GetRotationalVelocity());
             const CommandVector command =
                 drive.PointCommand(
                     0.20f,

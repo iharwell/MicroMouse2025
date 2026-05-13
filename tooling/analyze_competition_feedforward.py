@@ -97,11 +97,8 @@ def main() -> int:
         f"kWheelStaticFeedforward={setup.wheel_static_feedforward:.6f}, "
         f"kWheelRestLaunchDriveCommand={setup.wheel_rest_launch_drive_command:.6f}, "
         f"plant_breakaway_drive_command={setup.plant_breakaway_drive_command:.6f}, "
-        f"kWheelVelocityFeedforward={setup.wheel_velocity_feedforward:.6f}, "
-        f"kWheelAccelerationResponseGainPerMps2={setup.wheel_acceleration_response_gain_per_mps2:.6f}, "
         f"kWheelVelocityKp={setup.wheel_velocity_kp:.6f}, "
-        f"kWheelVelocityKi={setup.wheel_velocity_ki:.6f}, "
-        f"kWheelIntegralLimit={setup.wheel_integral_limit:.6f}"
+        f"kWheelVelocityKd={setup.wheel_velocity_kd:.6f}"
     )
     print(
         "estimated plant: "

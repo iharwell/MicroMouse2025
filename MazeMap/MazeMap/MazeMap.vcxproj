@@ -302,7 +302,6 @@
     <ClInclude Include="WallSensor.h" />
     <ClInclude Include="WallSensorCalibration.h" />
     <ClInclude Include="WallSensorPreprocessor.h" />
-    <ClInclude Include="WheelControlProfile.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Cell.cpp" />

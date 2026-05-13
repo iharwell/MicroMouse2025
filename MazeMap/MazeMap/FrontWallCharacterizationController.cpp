@@ -84,7 +84,6 @@ public:
         _startupCalibration.Cancel();
         _startupCalibration.SetIsInMaze(false);
         const bool sensorsOk = _startupCalibration.BringUp();
-        _drive.UseNominalWheelControlProfile();
 
         MazeMap::FrontWallCharacterizationStorage storedCurve{};
         if (TryReadPersistedFrontWallCharacterization(storedCurve))

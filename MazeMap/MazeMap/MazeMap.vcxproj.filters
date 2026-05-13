@@ -450,9 +450,6 @@
     <ClInclude Include="WallSensorPreprocessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="WheelControlProfile.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Cell.cpp">

@@ -733,9 +733,7 @@ namespace MazeMap
                 const App::Internal::CommandVector control =
                     model.solveSteadyStateFeedforward(
                         forwardVelocityTargetMps,
-                        0.0f,
-                        0.80f,
-                        params.supplyVoltageV);
+                        0.0f);
 
                 RunPredictionMatchingCycle(
                     core,
@@ -775,9 +773,7 @@ namespace MazeMap
                 const App::Internal::CommandVector control =
                     model.solveSteadyStateFeedforward(
                         forwardVelocityTargetMps,
-                        0.0f,
-                        0.80f,
-                        params.supplyVoltageV);
+                        0.0f);
 
                 RunPredictionMatchingCycle(
                     core,

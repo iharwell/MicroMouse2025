@@ -8,7 +8,6 @@
 #include "MotionTargetProjection.h"
 #include "TurnWallEdgeTracker.h"
 #include "WallDistanceCalibration.h"
-#include "WheelControlProfile.h"
 
 #include <algorithm>
 #include <cmath>

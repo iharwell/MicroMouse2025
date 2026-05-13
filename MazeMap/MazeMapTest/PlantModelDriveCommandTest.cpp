@@ -34,7 +34,7 @@ namespace MazeMap
             VehicleState runtimeState;
             PlantModel plant(vehicle, runtimeState);
             const App::Internal::CommandVector control =
-                plant.solveAccelerationFeedforward(0.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+                plant.solveAccelerationFeedforward(0.0f, 0.0f);
 
             Assert::AreEqual(0.0f, control.LeftMotorPwm(), 1.0e-6f);
             Assert::AreEqual(0.0f, control.RightMotorPwm(), 1.0e-6f);
@@ -46,7 +46,7 @@ namespace MazeMap
             VehicleState runtimeState;
             PlantModel plant(vehicle, runtimeState);
             const App::Internal::CommandVector control =
-                plant.solveSteadyStateFeedforward(0.75f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.75f, 0.0f);
 
             Assert::IsTrue(IsFiniteControlVector(control));
             Assert::AreEqual(control.LeftMotorPwm(), control.RightMotorPwm(), 1.0e-5f);
@@ -58,7 +58,7 @@ namespace MazeMap
             VehicleState runtimeState;
             PlantModel plant(vehicle, runtimeState);
             const App::Internal::CommandVector control =
-                plant.solveSteadyStateFeedforward(0.0f, 2.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+                plant.solveSteadyStateFeedforward(0.0f, 2.0f);
 
             Assert::IsTrue(IsFiniteControlVector(control));
             Assert::IsTrue(std::fabs(control.LeftMotorPwm() - control.RightMotorPwm()) > 1.0e-4f);
@@ -70,7 +70,7 @@ namespace MazeMap
             VehicleState runtimeState;
             PlantModel plant(vehicle, runtimeState);
             const App::Internal::CommandVector control =
-                plant.solveAccelerationFeedforward(1.25f, 3.75f, 0.80f, PlantParams::Default().supplyVoltageV);
+                plant.solveAccelerationFeedforward(1.25f, 3.75f);
 
             Assert::IsTrue(IsFiniteControlVector(control));
         }
@@ -86,7 +86,7 @@ namespace MazeMap
             state.SetWheelSpeedRight(70.0f);
 
             const App::Internal::CommandVector control =
-                plant.solveAccelerationFeedforward(4.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+                plant.solveAccelerationFeedforward(4.0f, 0.0f);
 
             Assert::IsTrue(IsFiniteControlVector(control));
             Assert::AreEqual(control.LeftMotorPwm(), control.RightMotorPwm(), 1.0e-5f);
@@ -98,7 +98,7 @@ namespace MazeMap
             VehicleState restState;
             PlantModel restPlant(vehicle, restState);
             const App::Internal::CommandVector restControl =
-                restPlant.solveAccelerationFeedforward(4.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+                restPlant.solveAccelerationFeedforward(4.0f, 0.0f);
 
             VehicleState movingState;
             movingState.SetVelocity(0.75f);
@@ -106,7 +106,7 @@ namespace MazeMap
             movingState.SetWheelSpeedRight(0.0f);
             PlantModel movingPlant(vehicle, movingState);
             const App::Internal::CommandVector movingControl =
-                movingPlant.solveAccelerationFeedforward(4.0f, 0.0f, 0.80f, PlantParams::Default().supplyVoltageV);
+                movingPlant.solveAccelerationFeedforward(4.0f, 0.0f);
 
             Assert::IsTrue(IsFiniteControlVector(restControl));
             Assert::IsTrue(IsFiniteControlVector(movingControl));

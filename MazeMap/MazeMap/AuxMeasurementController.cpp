@@ -133,7 +133,6 @@ public:
 
         if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
         {
-            _drive.SetWheelControlProfile(BuildTurningTractionWheelControlProfile());
             _startupCalibration.SetIsInMaze(false);
             if (!_runtime.Estimator().ResetPose(
                     0.5f * Config::kCellSizeM,
@@ -146,7 +145,6 @@ public:
         }
         else
         {
-            _drive.UseNominalWheelControlProfile();
             _startupCalibration.SetIsInMaze(true);
         }
 
@@ -328,7 +326,6 @@ private:
                     self->_logFileName);
                 self->_startupCalibration.Cancel();
                 self->_drive.Brake();
-                self->_drive.UseNominalWheelControlProfile();
                 self->SetFanEnabled(false);
                 self->_phase = Phase::Idle;
                 boundaryLoopController.HaltExecutionEndProgram();
@@ -519,11 +516,6 @@ private:
             _runtime.FailActiveMode("Auxiliary measurement phase was not initialized");
             return CommandVector::Brake();
         }
-    }
-
-    static MazeMap::WheelControlProfile BuildTurningTractionWheelControlProfile()
-    {
-        return BuildNominalWheelControlProfile();
     }
 
     SharedRobotRuntime& _runtime;

@@ -42,6 +42,7 @@ namespace MazeMap
         float trackWidthM;
         float trackWidthPhysicalMinM;
         float trackWidthPhysicalMaxM;
+        float driveWheelLongitudinalOffsetM;
         ArcTrackWidthInterpolation arcTrackWidthInterpolation;
     };
 
@@ -71,6 +72,7 @@ namespace MazeMap
             // scrub dynamics, so these remain informational rather than hard bounds.
             0.07004f,
             0.07868f,
+            0.01475f,
             // Investigation note: PlantParams still places tire contacts from the effective track width. Keep the
             // kinematic fit here authoritative until physical contact geometry is split explicitly.
             // April 20, 2026 post-fan-swap open-floor smooth card `12:10:58` is the current hardware baseline and
@@ -97,7 +99,6 @@ namespace MazeMap
         // Investigation note: the supplied tire OD is 25.000 mm. Revisit this rolling-diameter correction after
         // the post-UKF encoder-distance audit instead of treating this as physical wheel geometry.
         inline static constexpr float kDriveWheelDiameterM = 0.025220f;
-        inline static constexpr float kDriveWheelYOffsetM = 0.01475f;
         inline static constexpr std::uint16_t kDriveEncoderPulsesPerRev = 4096U;
 
         inline static constexpr std::uint8_t kLeftDriveMotorOutPinA = 24U;

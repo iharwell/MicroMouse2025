@@ -128,7 +128,6 @@ MazeMap\MazeMap\PlantModel.h,32,SlipTargets,4,0,0,True,True,False,accepted
 MazeMap\MazeMap\PlantModel.h,40,ContactForce,4,0,0,True,True,False,accepted
 MazeMap\MazeMap\PlantModel.h,49,ContactForces,2,4,0,True,False,False,accepted
 MazeMap\MazeMap\PlantModel.h,92,PlantDerivatives,11,3,0,True,False,False,accepted
-MazeMap\MazeMap\PlantModel.h,108,DriveCommandSolution,23,0,0,False,True,False,accepted
 MazeMap\MazeMap\RuntimeSensorSuite.cpp,213,CaptureContext,10,0,4,True,True,True,cleaned
 MazeMap\MazeMap\RuntimeSensorSuite.h,28,CaptureCallback,4,1,2,True,False,True,cleaned
 MazeMap\MazeMap\RuntimeSensorSuite.h,72,FilteredIrChannel,3,0,0,True,True,False,accepted
@@ -169,4 +168,3 @@ MazeMap\MazeMap\WallSensorPreprocessor.h,11,WallPreprocessorInput,7,0,0,True,Tru
 MazeMap\MazeMap\WallSensorPreprocessor.h,23,WallSensorPreprocessorConfig,13,0,0,True,True,False,cleaned
 MazeMap\MazeMap\WallTouchRoutine.h,23,Hooks,4,1,1,True,False,True,accepted
 MazeMap\MazeMap\WallTouchRoutine.h,70,SettleRoutineState,16,0,1,False,True,True,accepted
-MazeMap\MazeMap\WheelControlProfile.h,8,WheelControlProfile,4,0,0,True,True,False,accepted

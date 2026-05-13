@@ -44,7 +44,6 @@ namespace MazeMap::App::Internal
             {
                 _runtime.FailActiveMode("Mission drive base init failed");
             }
-            _drive.UseNominalWheelControlProfile();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
@@ -154,7 +153,6 @@ namespace MazeMap::App::Internal
                 (void)_runtime.AppendTextLogLine("Mission startup audit complete");
                 _startupCalibration.Cancel();
                 _drive.Brake();
-                _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
                 return CommandVector::Brake();

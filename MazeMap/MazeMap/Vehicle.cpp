@@ -114,7 +114,6 @@ namespace MazeMap
             kLeftDriveEncoderChannel,
             kLeftDriveInvertMotorDirection,
             kLeftDriveInvertEncoderDirection,
-            kDriveSupplyVoltageV / kDriveResistanceOhms,
             1.0f)
         , _rightMotor(
             kDriveResistanceOhms,
@@ -132,7 +131,6 @@ namespace MazeMap
             kRightDriveEncoderChannel,
             kRightDriveInvertMotorDirection,
             kRightDriveInvertEncoderDirection,
-            kDriveSupplyVoltageV / kDriveResistanceOhms,
             1.0f)
         , _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
         , _peakLateralAcceleration(GetSustainedLateralAccelerationReferenceMps2())
@@ -163,8 +161,8 @@ namespace MazeMap
 
     void Vehicle::ResetDriveEncoders() noexcept
     {
-        _leftMotor.resetEncoderDistanceMeters();
-        _rightMotor.resetEncoderDistanceMeters();
+        _leftMotor.resetEncoderCount();
+        _rightMotor.resetEncoderCount();
     }
 
     EncoderObs Vehicle::CaptureEncoderObservation(const float dtSeconds) noexcept

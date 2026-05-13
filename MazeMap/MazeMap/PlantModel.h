@@ -424,14 +424,10 @@ namespace MazeMap
 
         App::Internal::CommandVector solveSteadyStateFeedforward(
             float desiredForwardVelocityMps,
-            float desiredYawRateRadps,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f) const noexcept;
+            float desiredYawRateRadps) const noexcept;
         App::Internal::CommandVector solveAccelerationFeedforward(
             float desiredLongitudinalAccelMps2,
-            float desiredYawAccelRadps2,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f) const noexcept;
+            float desiredYawAccelRadps2) const noexcept;
 
         void ComputeBodyAction(
             float currentForwardVelocityMps,
@@ -564,7 +560,7 @@ namespace MazeMap
         friend struct PlantParams;
         friend class SrUkfCore;
 
-        static PlantParams BuildParamsFromVehicleFacts() noexcept;
+        static PlantParams BuildParamsFromVehicle(const Vehicle& vehicle) noexcept;
         StateVector BuildBoundStateVector() const noexcept;
         void resolveAppliedBankTorques(
             const StateVector& currentState,
@@ -623,6 +619,7 @@ namespace MazeMap
             float dtS) noexcept;
 
         PreparedParams _preparedParams{};
+        const Vehicle& _vehicle;
         const VehicleState& _runtimeState;
         const MotorEncoderDrive& _leftDrive;
         const MotorEncoderDrive& _rightDrive;

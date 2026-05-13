@@ -16,8 +16,8 @@ namespace
         }
 
         return CommandVector(
-            MazeMap::ClampWheelDriveCommand(leftMotorPwm),
-            MazeMap::ClampWheelDriveCommand(rightMotorPwm));
+            (std::clamp)(leftMotorPwm, -1.0f, 1.0f),
+            (std::clamp)(rightMotorPwm, -1.0f, 1.0f));
     }
 }
 
@@ -94,7 +94,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointCommand(
 
     const CommandVector baseCommand =
         ResolveRawVelocityTargetCommand(
-            context,
             desiredLinearSpeedMps,
             context.presentYawRateRadps);
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
@@ -115,7 +114,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointCommand(
 
     const CommandVector baseCommand =
         ResolveRawVelocityTargetCommand(
-            context,
             desiredLinearSpeedMps,
             desiredYawRateRadps);
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
@@ -143,7 +141,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointCommandWithHeadingTarget(
 
     const CommandVector baseCommand =
         ResolveRawVelocityTargetCommand(
-            context,
             desiredLinearSpeedMps,
             desiredYawRateRadps);
     return ComposeGeneratedCommand(baseCommand, context, targets, pointPd | headingPd);
@@ -206,7 +203,6 @@ MazeMap::App::Internal::CommandVector DriveBase::PointYawRateCommand(
 
     const CommandVector baseCommand =
         ResolveRawVelocityTargetCommand(
-            context,
             context.presentLinearSpeedMps,
             desiredYawRateRadps);
     return ComposeGeneratedCommand(baseCommand, context, targets, pd);
@@ -588,8 +584,6 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawAccelerationCommand(
     float desiredLongitudinalAccelMps2,
     float desiredYawAccelRadps2) const
 {
-    const float batteryVoltageV = CurrentBatteryVoltageV();
-
     const float resolvedPresentLinearSpeedMps =
         std::isfinite(presentLinearSpeedMps) ?
         presentLinearSpeedMps :
@@ -614,30 +608,23 @@ MazeMap::App::Internal::CommandVector DriveBase::ResolveRawAccelerationCommand(
         isSteadyHoldRequest ?
         _plantModel.solveSteadyStateFeedforward(
             resolvedPresentLinearSpeedMps,
-            resolvedPresentYawRateRadps,
-            GetMissionFanDutyCycle(),
-            batteryVoltageV) :
+            resolvedPresentYawRateRadps) :
         _plantModel.solveAccelerationFeedforward(
             resolvedLongitudinalAccelMps2,
-            resolvedYawAccelRadps2,
-            GetMissionFanDutyCycle(),
-            batteryVoltageV);
+            resolvedYawAccelRadps2);
     return MakeClampedDriveControlVector(
         rawCommand.LeftMotorPwm(),
         rawCommand.RightMotorPwm());
 }
 
 MazeMap::App::Internal::CommandVector DriveBase::ResolveRawVelocityTargetCommand(
-    const CommandContext& context,
     float desiredLinearSpeedMps,
     float desiredYawRateRadps) const
 {
     const CommandVector rawCommand =
         _plantModel.solveSteadyStateFeedforward(
             desiredLinearSpeedMps,
-            desiredYawRateRadps,
-            GetMissionFanDutyCycle(),
-            context.batteryVoltageV);
+            desiredYawRateRadps);
     return MakeClampedDriveControlVector(
         rawCommand.LeftMotorPwm(),
         rawCommand.RightMotorPwm());
@@ -922,13 +909,6 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
             const MazeMap::ProportionalDerivative& wheelVelocityEncoderPD =
                 GetProportionalDerivativeCluster()
                     .GetWheelVelocityPD(MazeMap::CommandPD::EncoderVelocity);
-            const MazeMap::ProportionalDerivative scaledWheelVelocityEncoderPD(
-                MazeMap::ScaleWheelControlValue(
-                    wheelVelocityEncoderPD.GetProportionalGain(),
-                    _wheelControlProfile.velocityKpScale),
-                MazeMap::ScaleWheelControlValue(
-                    wheelVelocityEncoderPD.GetDerivativeGain(),
-                    _wheelControlProfile.velocityKpScale));
             const float leftTargetVelocityMps =
                 adjustedTargets.hasWheelLinearTargets ?
                 adjustedTargets.leftWheelLinearTargetMps :
@@ -950,16 +930,16 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 yawRateErrorRadps =
                     MazeMap::Vehicle::BodyYawRateFromWheelLinear(leftVelocityErrorMps, rightVelocityErrorMps);
                 adjustedTargets.velocityTargetMps +=
-                    scaledWheelVelocityEncoderPD.Compute(forwardVelocityErrorMps, 0.0f);
+                    wheelVelocityEncoderPD.Compute(forwardVelocityErrorMps, 0.0f);
                 adjustedTargets.yawRateTargetRadps +=
-                    scaledWheelVelocityEncoderPD.Compute(yawRateErrorRadps, 0.0f);
+                    wheelVelocityEncoderPD.Compute(yawRateErrorRadps, 0.0f);
                 targetCommandAdjusted = true;
             }
             else
             {
                 command += CommandVector(
-                    scaledWheelVelocityEncoderPD.Compute(leftVelocityErrorMps, 0.0f),
-                    scaledWheelVelocityEncoderPD.Compute(rightVelocityErrorMps, 0.0f));
+                    wheelVelocityEncoderPD.Compute(leftVelocityErrorMps, 0.0f),
+                    wheelVelocityEncoderPD.Compute(rightVelocityErrorMps, 0.0f));
             }
         }
 
@@ -971,7 +951,6 @@ MazeMap::App::Internal::CommandVector DriveBase::ComposeGeneratedCommand(
                 adjustedTargets);
             command =
                 ResolveRawVelocityTargetCommand(
-                    context,
                     adjustedTargets.velocityTargetMps,
                     adjustedTargets.yawRateTargetRadps);
         }
@@ -1012,15 +991,5 @@ void DriveBase::CacheGeneratedCommandTelemetry(
 {
     _lastFeedforwardCommand = feedforwardCommand;
     _lastFeedbackCommand = feedbackCommand;
-}
-
-float DriveBase::GetWheelVelocityKp() const
-{
-    return MazeMap::ScaleWheelControlValue(Config::kWheelVelocityKp, _wheelControlProfile.velocityKpScale);
-}
-
-float DriveBase::GetWheelIntegralLimit() const
-{
-    return MazeMap::ScaleWheelControlValue(Config::kWheelIntegralLimit, _wheelControlProfile.integralLimitScale);
 }
 

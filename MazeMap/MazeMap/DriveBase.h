@@ -13,29 +13,11 @@
 #include "ProportionalDerivativeCluster.h"
 #include "SensorSnapshot.h"
 #include "VehicleState.h"
-#include "WheelControlProfile.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
-
-// Private drive runtime implementation for the MazeMap application runtime.
-inline MazeMap::WheelControlProfile BuildNominalWheelControlProfile()
-{
-    MazeMap::WheelControlProfile profile{};
-    profile.velocityKpScale = Config::kNominalWheelVelocityKpScale;
-    profile.velocityKiScale = Config::kNominalWheelVelocityKiScale;
-    profile.integralLimitScale = Config::kNominalWheelIntegralLimitScale;
-    return profile;
-}
-
-inline MazeMap::WheelControlProfile BuildMappingWheelControlProfile()
-{
-    MazeMap::WheelControlProfile profile = BuildNominalWheelControlProfile();
-    profile.accelerationResponseScale = Config::kMappingWheelAccelerationResponseScale;
-    return profile;
-}
 
 // Serves as the concrete drive command-proposal subsystem for the MazeMap application. It should not become
 // the owner of hardware application, sensor capture, higher-level maneuver scheduling, or shared
@@ -61,11 +43,8 @@ public:
         : _runtimeState(runtimeState)
         , _plantModel(plantModel)
         , _proportionalDerivativeCluster(&proportionalDerivativeCluster)
-        , _leftIntegral(0.0f)
-        , _rightIntegral(0.0f)
         , _lastLinearCommandMps(0.0f)
         , _lastAngularCommandRadps(0.0f)
-        , _wheelControlProfile(BuildNominalWheelControlProfile())
     {
     }
 
@@ -87,22 +66,7 @@ public:
 
     void ResetControllers()
     {
-        _leftIntegral = 0.0f;
-        _rightIntegral = 0.0f;
         ResetLaunchAssist();
-    }
-
-    void SetWheelControlProfile(const MazeMap::WheelControlProfile& profile)
-    {
-        _wheelControlProfile = MazeMap::NormalizeWheelControlProfile(profile);
-        const float integralLimit = GetWheelIntegralLimit();
-        _leftIntegral = (std::clamp)(_leftIntegral, -integralLimit, integralLimit);
-        _rightIntegral = (std::clamp)(_rightIntegral, -integralLimit, integralLimit);
-    }
-
-    void UseNominalWheelControlProfile()
-    {
-        SetWheelControlProfile(BuildNominalWheelControlProfile());
     }
 
     MazeMap::App::Internal::CommandVector CurrentControlVector() const noexcept
@@ -369,8 +333,6 @@ private:
     const MazeMap::VehicleState& _runtimeState;
     const MazeMap::PlantModel& _plantModel;
     const MazeMap::ProportionalDerivativeCluster* _proportionalDerivativeCluster;
-    float _leftIntegral;
-    float _rightIntegral;
     mutable float _lastLinearCommandMps;
     mutable float _lastAngularCommandRadps;
     mutable MazeMap::App::Internal::CommandVector _lastFeedforwardCommand{};
@@ -398,7 +360,6 @@ private:
     mutable bool _hasProcessedEncoderSnapshot = false;
     mutable bool _lastImuYawRateValid = false;
     mutable bool _lastImuAccelValid = false;
-    MazeMap::WheelControlProfile _wheelControlProfile;
     struct CommandContext
     {
         MazeMap::PlantDerivatives presentDerivatives{};
@@ -490,7 +451,6 @@ private:
         float desiredYawAccelRadps2) const;
 
     MazeMap::App::Internal::CommandVector ResolveRawVelocityTargetCommand(
-        const CommandContext& context,
         float desiredLinearSpeedMps,
         float desiredYawRateRadps) const;
 
@@ -565,60 +525,6 @@ private:
             maxYawAccelRadps2 =
                 (std::min)(maxYawAccelRadps2, technicalYawAccelRadps2);
         }
-    }
-
-    float ComputeVelocityCommandFromErrorUnclamped(
-        float feedforwardCommand,
-        float targetSpeedMps,
-        float targetAccelMps2,
-        float errorMps,
-        float integral) const
-    {
-        float command = feedforwardCommand;
-        if (std::fabs(targetSpeedMps) > 0.01f)
-        {
-            command += SignF(targetSpeedMps) * Config::kWheelStaticFeedforward;
-        }
-        command += Config::kWheelVelocityFeedforward * targetSpeedMps;
-        command += ComputeWheelAccelerationResponseCommand(targetAccelMps2, errorMps);
-        command += GetWheelVelocityKp() * errorMps;
-        command += GetWheelVelocityKi() * integral;
-        return command;
-    }
-
-    float ComputeWheelAccelerationResponseCommand(float targetAccelMps2, float errorMps) const
-    {
-        const float accelerationResponseScale = GetWheelAccelerationResponseScale();
-        if (!(accelerationResponseScale > 0.0f) ||
-            !std::isfinite(targetAccelMps2) ||
-            !std::isfinite(errorMps) ||
-            ((targetAccelMps2 * errorMps) <= 0.0f))
-        {
-            return 0.0f;
-        }
-
-        const float deltaWindowMps = Config::kWheelAccelerationResponseDeltaWindowMps;
-        if (!(deltaWindowMps > 0.0f) || !std::isfinite(deltaWindowMps))
-        {
-            return 0.0f;
-        }
-
-        const float closenessScale = (std::clamp)(std::fabs(errorMps) / deltaWindowMps, 0.0f, 1.0f);
-        return Config::kWheelAccelerationResponseGainPerMps2 * accelerationResponseScale * targetAccelMps2 * closenessScale;
-    }
-
-    float GetWheelVelocityKp() const;
-
-    float GetWheelVelocityKi() const
-    {
-        return MazeMap::ScaleWheelControlValue(Config::kWheelVelocityKi, _wheelControlProfile.velocityKiScale);
-    }
-
-    float GetWheelIntegralLimit() const;
-
-    float GetWheelAccelerationResponseScale() const
-    {
-        return _wheelControlProfile.accelerationResponseScale;
     }
 
     void ResetLaunchAssist()

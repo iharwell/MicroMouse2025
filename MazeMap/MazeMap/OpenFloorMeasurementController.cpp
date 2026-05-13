@@ -1321,7 +1321,6 @@ namespace MazeMap::App::Internal
         {
             _runtime.FailActiveMode("Open-floor measurement drive base init failed");
         }
-        _drive.UseNominalWheelControlProfile();
 
         _startupCalibration.Cancel();
         _startupCalibration.SetIsInMaze(false);
@@ -1374,7 +1373,7 @@ namespace MazeMap::App::Internal
     {
         LoopController::SessionOptions options{};
         options.controlPeriodUs = DiagnosticConfig::kControlPeriodUs;
-        options.workPlan.useWallUpdates = false;
+        options.workPlan.SetUseWallUpdates(false);
         options.SessionStartPointX = _sessionStartPointX;
         options.SessionStartPointY = _sessionStartPointY;
         return options;

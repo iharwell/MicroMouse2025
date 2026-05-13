@@ -152,7 +152,6 @@ namespace MazeMap::App::Internal
             {
                 _runtime.FailActiveMode("Maneuver file test drive base init failed");
             }
-            _drive.UseNominalWheelControlProfile();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
@@ -315,7 +314,6 @@ namespace MazeMap::App::Internal
                 (void)_runtime.AppendTextLogLine("Maneuver file test complete");
                 _startupCalibration.Cancel();
                 _drive.Brake();
-                _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
                 return CommandVector::Brake();
@@ -371,7 +369,6 @@ namespace MazeMap::App::Internal
             auto* const self = static_cast<ManeuverFileTestMode*>(context);
             self->_startupCalibration.Cancel();
             self->_drive.Brake();
-            self->_drive.UseNominalWheelControlProfile();
         }
 
         SharedRobotRuntime& _runtime;

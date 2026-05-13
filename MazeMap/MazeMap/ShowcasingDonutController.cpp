@@ -155,7 +155,6 @@ namespace MazeMap::App::Internal
         {
             _runtime.FailActiveMode("Showcasing donut drive base init failed");
         }
-        _drive.UseNominalWheelControlProfile();
 
         ConfigureSelectorMonitor();
         if (!_selectorMonitorArmed)
@@ -200,7 +199,6 @@ namespace MazeMap::App::Internal
         self->ReleaseSelectorMonitor();
         self->_phase = Phase::Idle;
         self->_drive.Brake();
-        self->_drive.UseNominalWheelControlProfile();
         SetMissionLevelFanEnabled(false);
     }
 
@@ -209,7 +207,7 @@ namespace MazeMap::App::Internal
         LoopController::SessionOptions options{};
         const auto& runtimeState = _runtime.RuntimeState();
         options.controlPeriodUs = DiagnosticConfig::kControlPeriodUs;
-        options.workPlan.useWallUpdates = false;
+        options.workPlan.SetUseWallUpdates(false);
         options.SessionStartPointX = runtimeState.GetPositionX();
         options.SessionStartPointY = runtimeState.GetPositionY();
         return options;
@@ -807,7 +805,6 @@ namespace MazeMap::App::Internal
                     }
                     self->ReleaseSelectorMonitor();
                     self->_drive.Brake();
-                    self->_drive.UseNominalWheelControlProfile();
                     SetMissionLevelFanEnabled(false);
                     (void)self->_runtime.AppendTextLogFormatted(
                         "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",

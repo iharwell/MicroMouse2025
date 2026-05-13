@@ -42,7 +42,6 @@
 #include "WallBeliefMap.h"
 #include "WallDetectionThresholds.h"
 #include "WallObservationPipeline.h"
-#include "WheelControlProfile.h"
 
 #if defined(ARDUINO_TEENSY41)
 #include <EEPROM.h>

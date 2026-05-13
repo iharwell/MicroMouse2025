@@ -475,6 +475,7 @@ Reject the design and revise it if any of the following are true:
 
 - When building, use `build_and_verify_latest.cmd` or `build_and_verify_latest.ps1`.
 - When testing the current binaries without building, use `test_latest_binaries.cmd`.
+- Builds and release test runs in this repository commonly take longer than 2 minutes. Never assume a 120-second timeout is enough. Use a long tool timeout, at least 20 minutes for incremental build/test commands and longer for full verification, unless you are intentionally running a quick metadata/timestamp check.
 - If `build_and_verify_latest` reports `HOST_INTERMEDIATE_STATE_BROKEN`, stop immediately. Treat missing host-side Release intermediates as a broken incremental build state caused by prior artifact deletion; do not "fix" it with `Clean`, `Rebuild`, or more deletion. Human intervention is required.
 
 ---

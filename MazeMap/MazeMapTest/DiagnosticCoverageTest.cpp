@@ -28,7 +28,6 @@
 #include "..\MazeMap\Vehicle.h"
 #include "..\MazeMap\DiagonalWallCentering.h"
 #include "..\MazeMap\WallDetectionThresholds.h"
-#include "..\MazeMap\WheelControlProfile.h"
 #include "..\MazeMap\ManeuverSet.h"
 
 #include "..\MazeMap\CoreConfig.h"
@@ -156,13 +155,8 @@ namespace MazeMap
 				"kWheelRestLaunchRampMs",
 				"kWheelRestLaunchSpeedThresholdMps",
 				"kWheelRestLaunchDriveThreshold",
-				"kWheelVelocityFeedforward",
 				"kWheelVelocityKp",
-				"kWheelVelocityKi",
-				"kWheelIntegralLimit",
-				"kDiagnosticWheelVelocityKpScale",
-				"kDiagnosticWheelVelocityKiScale",
-				"kDiagnosticWheelIntegralLimitScale",
+				"kWheelVelocityKd",
 				"kTurnHeadingKp",
 				"kTurnYawD",
 				"kAngleToleranceRad",
@@ -1915,45 +1909,6 @@ namespace MazeMap
 			clean.planarCoherence = 0.82f;
 			Assert::IsFalse(IsTurningTractionLossDetected(clean, 0.25f, 1.00f, 0.70f, 0.65f));
 			Assert::IsFalse(IsTurningTractionLossDetected(slipping, 0.25f, 3.00f, 0.70f, 0.65f));
-		}
-
-		TEST_METHOD(NormalizeWheelControlProfileFallsBackToNominalScales)
-		{
-			WheelControlProfile requested{};
-			requested.velocityKpScale = 0.0f;
-			requested.velocityKiScale = std::numeric_limits<float>::quiet_NaN();
-			requested.integralLimitScale = -2.0f;
-
-			const WheelControlProfile normalized = NormalizeWheelControlProfile(requested);
-			Assert::IsTrue(std::fabs(normalized.velocityKpScale - 1.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(normalized.velocityKiScale - 1.0f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(normalized.integralLimitScale - 1.0f) < 1.0e-6f);
-		}
-
-		TEST_METHOD(ScaleWheelControlValueUsesPositiveFiniteScales)
-		{
-			Assert::IsTrue(std::fabs(ScaleWheelControlValue(1.10f, 2.0f) - 2.20f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ScaleWheelControlValue(1.50f, 0.0f) - 1.50f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ScaleWheelControlValue(0.25f, -1.0f) - 0.25f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ScaleWheelControlValue(std::numeric_limits<float>::quiet_NaN(), 2.0f)) < 1.0e-6f);
-		}
-
-		TEST_METHOD(ClampWheelDriveCommandUsesFiniteUnitRange)
-		{
-			Assert::AreEqual(0.40f, ClampWheelDriveCommand(0.40f), 1.0e-6f);
-			Assert::AreEqual(1.0f, ClampWheelDriveCommand(1.40f), 1.0e-6f);
-			Assert::AreEqual(-1.0f, ClampWheelDriveCommand(-1.40f), 1.0e-6f);
-			Assert::AreEqual(0.0f, ClampWheelDriveCommand(std::numeric_limits<float>::quiet_NaN()), 1.0e-6f);
-		}
-
-		TEST_METHOD(ShouldAccumulateWheelVelocityIntegralOnlyAllowsUnwindingAtSaturation)
-		{
-			Assert::IsTrue(ShouldAccumulateWheelVelocityIntegral(0.80f, 0.80f, 0.10f));
-			Assert::IsFalse(ShouldAccumulateWheelVelocityIntegral(1.20f, 1.0f, 0.10f));
-			Assert::IsTrue(ShouldAccumulateWheelVelocityIntegral(1.20f, 1.0f, -0.10f));
-			Assert::IsFalse(ShouldAccumulateWheelVelocityIntegral(-1.20f, -1.0f, -0.10f));
-			Assert::IsTrue(ShouldAccumulateWheelVelocityIntegral(-1.20f, -1.0f, 0.10f));
-			Assert::IsFalse(ShouldAccumulateWheelVelocityIntegral(std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.10f));
 		}
 
 		TEST_METHOD(MotorModelUnitConversionsMatch1717T006SRDatasheet)

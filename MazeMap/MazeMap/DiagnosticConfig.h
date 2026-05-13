@@ -52,11 +52,6 @@ namespace MazeMap::DiagnosticConfig
     // [High] Turn acceleration for diagnostic turn sweeps. Increase to excite sharper turn entry/exit dynamics;
     // decrease if the robot cannot reach those ramps repeatably without slipping.
     constexpr float kTurnAccelRadps2 = 350.0f;
-    // Diagnostics now reuse the same wheel profile as mission and startup calibration so any turn or straight behavior
-    // seen here matches the controller the robot will use elsewhere.
-    constexpr float kDiagnosticWheelVelocityKpScale = Config::kNominalWheelVelocityKpScale;
-    constexpr float kDiagnosticWheelVelocityKiScale = Config::kNominalWheelVelocityKiScale;
-    constexpr float kDiagnosticWheelIntegralLimitScale = Config::kNominalWheelIntegralLimitScale;
     // [Medium] Brake-and-settle window after each characterization sample. This now tracks the measured diagnostic
     // settling time instead of the earlier optimistic estimate.
     constexpr uint16_t kCharacterizationSettleMs = 350U;

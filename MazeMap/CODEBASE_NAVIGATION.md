@@ -113,7 +113,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `WallSensorCalibration.h`: wall-sensor calibration curve and supporting point definitions.
 - `WallSensorPreprocessor.h` / `WallSensorPreprocessor.cpp`: convert raw wall-sensor LED samples into typed UKF wall observations.
 - `WallSensorLedCalibrationPhase.h`: phase enum for LED calibration workflows.
-- `WheelControlProfile.h`: wheel-control gain scaling bundle used by the runtime drive subsystem.
 - `dllmain.cpp`: Windows DLL entrypoint for the library target.
 
 ## MazeSimulation

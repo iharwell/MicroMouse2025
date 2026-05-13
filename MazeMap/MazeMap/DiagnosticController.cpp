@@ -86,7 +86,6 @@ public:
         {
             _runtime.FailActiveMode("Drive base init failed");
         }
-        _drive.SetWheelControlProfile(BuildDiagnosticWheelControlProfile());
         SetMissionLevelFanEnabled(true);
         gWallDistanceCalibration.Clear();
         if (!_sensors.Begin(DiagnosticConfig::kControlPeriodUs))
@@ -517,7 +516,6 @@ private:
 
         _phaseFn = nullptr;
         _drive.Brake();
-        _drive.UseNominalWheelControlProfile();
         CloseLog();
         SetMissionLevelFanEnabled(false);
         _cleanupComplete = true;
@@ -1537,11 +1535,6 @@ private:
     {
         const unsigned drivePercent = static_cast<unsigned>((100.0f * driveCommand) + 0.5f);
         snprintf(buffer, bufferSize, "%s_%03u", (prefix != nullptr) ? prefix : "cmd", drivePercent);
-    }
-
-    static MazeMap::WheelControlProfile BuildDiagnosticWheelControlProfile()
-    {
-        return BuildNominalWheelControlProfile();
     }
 
     bool WriteEventOrFail(const char* type, const char* message, const char* failMessage)

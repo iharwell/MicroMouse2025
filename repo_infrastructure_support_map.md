@@ -223,7 +223,6 @@ The auxiliary selector entry can resolve to:
   - Motor + encoder hardware wrapper with shared physical-model and hardware-config access.
 - `MazeMap/MazeMap/DriveTelemetry.h`
   - Per-tick drive telemetry payload returned by `DriveBase`.
-- `MazeMap/MazeMap/WheelControlProfile.h`
   - Wheel-control scaling bundle used by runtime motion control.
 
 ### Logging support

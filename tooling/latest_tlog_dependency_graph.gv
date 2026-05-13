@@ -97,7 +97,6 @@ digraph LatestTlogSymbolDependencyGraph {
     n_ContactForce [label="ContactForce\nPlantModel.h", shape=ellipse, fillcolor="#f4cccc", color="#333333"];
     n_ContactForces [label="ContactForces\nPlantModel.h", shape=ellipse, fillcolor="#f4cccc", color="#333333"];
     n_ContactKinematics [label="ContactKinematics\nPlantModel.h", shape=ellipse, fillcolor="#f4cccc", color="#333333"];
-    n_DriveCommandSolution [label="DriveCommandSolution\nPlantModel.h", shape=ellipse, fillcolor="#f4cccc", color="#333333"];
     n_FeedforwardAuditResult [label="FeedforwardAuditResult\nPlantModel.h", shape=ellipse, fillcolor="#f4cccc", color="#333333"];
     n_MotionRegime [label="MotionRegime\nPlantModel.h", shape=ellipse, fillcolor="#f4cccc", color="#333333"];
     n_PlantDerivatives [label="PlantDerivatives\nPlantModel.h", shape=ellipse, fillcolor="#f4cccc", color="#333333"];
@@ -177,7 +176,6 @@ digraph LatestTlogSymbolDependencyGraph {
   n_DoubleMaskQueue -> n_DoubleMazeMask [color="#2ca02c", penwidth=1.4];
   n_DoubleMaskQueue -> n_MazeLocation [color="#7a7a7a", style=dashed, constraint=false];
   n_DoubleMazeMask -> n_MazeLocation [color="#7a7a7a", style=dashed, constraint=false];
-  n_DriveCommandSolution -> n_ControlInput [color="#2ca02c", penwidth=1.4];
   n_Estimator -> n_MapEvidenceUpdater [color="#2ca02c", penwidth=1.4];
   n_Estimator -> n_ModelCycleContext [color="#7a7a7a", style=dashed, constraint=false];
   n_Estimator -> n_PoseEstimate [color="#2ca02c", penwidth=1.4];
@@ -189,7 +187,6 @@ digraph LatestTlogSymbolDependencyGraph {
   n_ExecuteOpenFloorCycle -> n_EncoderObs [color="#7a7a7a", style=dashed, constraint=false];
   n_ExecuteOpenFloorCycle -> n_ImuAccelObs [color="#7a7a7a", style=dashed, constraint=false];
   n_ExecuteOpenFloorCycle -> n_MeasurementUpdateResult [color="#7a7a7a", style=dashed, constraint=false];
-  n_FeedforwardAuditResult -> n_DriveCommandSolution [color="#2ca02c", penwidth=1.4];
   n_FeedforwardAuditResult -> n_PlantDerivatives [color="#2ca02c", penwidth=1.4];
   n_FloodFillPathFinder -> n_CellCoordinates [color="#7a7a7a", style=dashed, constraint=false];
   n_FloodFillPathFinder -> n_Direction [color="#7a7a7a", style=dashed, constraint=false];
@@ -242,7 +239,6 @@ digraph LatestTlogSymbolDependencyGraph {
   n_PlantDerivatives -> n_SlipTargets [color="#2ca02c", penwidth=1.4];
   n_PlantDerivatives -> n_WheelKinematics [color="#2ca02c", penwidth=1.4];
   n_PlantModel -> n_ContactForces [color="#7a7a7a", style=dashed, constraint=false];
-  n_PlantModel -> n_DriveCommandSolution [color="#7a7a7a", style=dashed, constraint=false];
   n_PlantModel -> n_EstimatorPredictModel [color="#2ca02c", penwidth=1.4];
   n_PlantModel -> n_FeedforwardAuditResult [color="#7a7a7a", style=dashed, constraint=false];
   n_PlantModel -> n_PlantDerivatives [color="#7a7a7a", style=dashed, constraint=false];

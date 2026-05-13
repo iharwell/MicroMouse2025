@@ -64,7 +64,6 @@ namespace MazeMap::App::Internal
             {
                 _runtime.FailActiveMode("Corridor repeatability drive base init failed");
             }
-            _drive.UseNominalWheelControlProfile();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
@@ -112,7 +111,6 @@ namespace MazeMap::App::Internal
             self->_wallTouch.Cancel();
             self->_startupCalibration.Cancel();
             self->_drive.Brake();
-            self->_drive.UseNominalWheelControlProfile();
         }
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept
@@ -365,7 +363,6 @@ namespace MazeMap::App::Internal
                 _wallTouch.Cancel();
                 _startupCalibration.Cancel();
                 _drive.Brake();
-                _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
                 return CommandVector::Brake();

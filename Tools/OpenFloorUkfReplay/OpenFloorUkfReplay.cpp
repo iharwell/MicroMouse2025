@@ -195,31 +195,18 @@ namespace
         float predictedNextYawRateRadps = std::numeric_limits<float>::quiet_NaN();
         float predictedForwardTargetErrorMps = std::numeric_limits<float>::quiet_NaN();
         float predictedYawTargetErrorRadps = std::numeric_limits<float>::quiet_NaN();
-        bool tractionLimited = false;
-        bool commonForceClamped = false;
-        bool differentialForceClamped = false;
     };
 
     enum class FeedforwardPathId : std::size_t
     {
-        StateOpenAccel = 0U,
-        StateClosedAccel,
-        StateTractionAccel,
-        StateOpenVelocity,
-        StateClosedVelocity,
-        StateTractionVelocity,
-        ScalarOpenAccel,
-        ScalarClosedAccel,
-        ScalarTractionAccel,
-        ScalarOpenVelocity,
-        ScalarClosedVelocity,
-        ScalarTractionVelocity,
+        Acceleration = 0U,
+        SteadyState,
         Count
     };
 
     struct FeedforwardPathDefinition
     {
-        FeedforwardPathId id = FeedforwardPathId::StateOpenAccel;
+        FeedforwardPathId id = FeedforwardPathId::Acceleration;
         const char* pathId = "";
         const char* label = "";
         const char* category = "";
@@ -370,7 +357,7 @@ namespace
 
     struct FeedforwardPathSummary
     {
-        FeedforwardPathId id = FeedforwardPathId::StateOpenAccel;
+        FeedforwardPathId id = FeedforwardPathId::Acceleration;
         std::string pathId;
         std::string label;
         std::string category;
@@ -518,18 +505,8 @@ namespace
     {
         static const std::array<FeedforwardPathDefinition, kFeedforwardPathCount> definitions =
         {{
-            { FeedforwardPathId::StateOpenAccel, "state_open_accel", "PlantModel state-vector acceleration solve", "plant_model_state" },
-            { FeedforwardPathId::StateClosedAccel, "state_closed_accel", "PlantModel state-vector closed-loop acceleration solve", "plant_model_state" },
-            { FeedforwardPathId::StateTractionAccel, "state_traction_accel", "PlantModel state-vector traction-limited acceleration wrapper", "plant_model_state" },
-            { FeedforwardPathId::StateOpenVelocity, "state_open_velocity", "PlantModel state-vector velocity-target solve", "plant_model_state" },
-            { FeedforwardPathId::StateClosedVelocity, "state_closed_velocity", "PlantModel state-vector closed-loop velocity-target solve", "plant_model_state" },
-            { FeedforwardPathId::StateTractionVelocity, "state_traction_velocity", "PlantModel state-vector traction-limited velocity-target wrapper", "plant_model_state" },
-            { FeedforwardPathId::ScalarOpenAccel, "scalar_open_accel", "PlantModel scalar operating-point acceleration solve", "plant_model_scalar" },
-            { FeedforwardPathId::ScalarClosedAccel, "scalar_closed_accel", "PlantModel scalar closed-loop acceleration solve", "plant_model_scalar" },
-            { FeedforwardPathId::ScalarTractionAccel, "scalar_traction_accel", "PlantModel scalar traction-limited acceleration wrapper", "plant_model_scalar" },
-            { FeedforwardPathId::ScalarOpenVelocity, "scalar_open_velocity", "PlantModel scalar operating-point velocity-target solve", "plant_model_scalar" },
-            { FeedforwardPathId::ScalarClosedVelocity, "scalar_closed_velocity", "PlantModel scalar closed-loop velocity-target solve", "plant_model_scalar" },
-            { FeedforwardPathId::ScalarTractionVelocity, "scalar_traction_velocity", "PlantModel scalar traction-limited velocity-target wrapper", "plant_model_scalar" }
+            { FeedforwardPathId::Acceleration, "acceleration", "PlantModel acceleration feedforward", "plant_model" },
+            { FeedforwardPathId::SteadyState, "steady_state", "PlantModel steady-state feedforward", "plant_model" }
         }};
         return definitions;
     }
@@ -1906,149 +1883,22 @@ namespace
         const FeedforwardPathId pathId,
         const FeedforwardTransitionInputs& inputs,
         const MazeMap::PlantModel::PreparedParams& prepared,
-        MazeMap::DriveCommandSolution& solution) noexcept
+        MazeMap::App::Internal::CommandVector& command) noexcept
     {
+        (void)prepared;
         switch (pathId)
         {
-        case FeedforwardPathId::StateOpenAccel:
-            solution =
-                plantModel.solveDriveCommands(
-                    inputs.currentState,
-                    inputs.desiredStateLongitudinalAccelMps2,
-                    inputs.desiredStateYawAccelRadps2,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV);
-            return true;
-        case FeedforwardPathId::StateClosedAccel:
-            solution =
-                plantModel.solveClosedLoopDriveCommands(
-                    inputs.currentState,
-                    inputs.desiredStateLongitudinalAccelMps2,
-                    inputs.desiredStateYawAccelRadps2,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.reserveUsage);
-            return true;
-        case FeedforwardPathId::StateTractionAccel:
-            solution =
-                plantModel.solveTractionLimitedDriveCommands(
-                    inputs.currentState,
-                    inputs.desiredStateLongitudinalAccelMps2,
-                    inputs.desiredStateYawAccelRadps2,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.reserveUsage);
-            return true;
-        case FeedforwardPathId::StateOpenVelocity:
-            solution =
-                plantModel.solveDriveCommandsForVelocityTarget(
-                    inputs.currentState,
-                    inputs.targetForwardSensorMps,
-                    inputs.targetYawRateSensorRadps,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.responseTimeS);
-            return true;
-        case FeedforwardPathId::StateClosedVelocity:
-            solution =
-                plantModel.solveClosedLoopDriveCommandsForVelocityTarget(
-                    inputs.currentState,
-                    inputs.targetForwardSensorMps,
-                    inputs.targetYawRateSensorRadps,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.responseTimeS,
-                    inputs.reserveUsage);
-            return true;
-        case FeedforwardPathId::StateTractionVelocity:
-            solution =
-                plantModel.solveTractionLimitedDriveCommandsForVelocityTarget(
-                    inputs.currentState,
-                    inputs.targetForwardSensorMps,
-                    inputs.targetYawRateSensorRadps,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.responseTimeS,
-                    inputs.reserveUsage);
-            return true;
-        case FeedforwardPathId::ScalarOpenAccel:
-            solution =
-                plantModel.solveDriveCommands(
-                    inputs.currentForwardSensorMps,
+        case FeedforwardPathId::Acceleration:
+            command =
+                plantModel.solveAccelerationFeedforward(
                     inputs.desiredScalarLongitudinalAccelMps2,
-                    inputs.currentYawRateSensorRadps,
-                    inputs.desiredScalarYawAccelRadps2,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV);
+                    inputs.desiredScalarYawAccelRadps2);
             return true;
-        case FeedforwardPathId::ScalarClosedAccel:
-            solution =
-                plantModel.solveClosedLoopDriveCommands(
-                    inputs.currentForwardSensorMps,
-                    inputs.desiredScalarLongitudinalAccelMps2,
-                    inputs.currentYawRateSensorRadps,
-                    inputs.desiredScalarYawAccelRadps2,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.reserveUsage);
-            return true;
-        case FeedforwardPathId::ScalarTractionAccel:
-            solution =
-                plantModel.solveTractionLimitedDriveCommands(
-                    inputs.currentForwardSensorMps,
-                    inputs.desiredScalarLongitudinalAccelMps2,
-                    inputs.currentYawRateSensorRadps,
-                    inputs.desiredScalarYawAccelRadps2,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.reserveUsage);
-            return true;
-        case FeedforwardPathId::ScalarOpenVelocity:
-            solution =
-                plantModel.solveDriveCommandsForVelocityTarget(
-                    inputs.currentForwardSensorMps,
+        case FeedforwardPathId::SteadyState:
+            command =
+                plantModel.solveSteadyStateFeedforward(
                     inputs.targetForwardSensorMps,
-                    inputs.currentYawRateSensorRadps,
-                    inputs.targetYawRateSensorRadps,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.responseTimeS);
-            return true;
-        case FeedforwardPathId::ScalarClosedVelocity:
-            solution =
-                plantModel.solveClosedLoopDriveCommandsForVelocityTarget(
-                    inputs.currentForwardSensorMps,
-                    inputs.targetForwardSensorMps,
-                    inputs.currentYawRateSensorRadps,
-                    inputs.targetYawRateSensorRadps,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.responseTimeS,
-                    inputs.reserveUsage);
-            return true;
-        case FeedforwardPathId::ScalarTractionVelocity:
-            solution =
-                plantModel.solveTractionLimitedDriveCommandsForVelocityTarget(
-                    inputs.currentForwardSensorMps,
-                    inputs.targetForwardSensorMps,
-                    inputs.currentYawRateSensorRadps,
-                    inputs.targetYawRateSensorRadps,
-                    prepared,
-                    inputs.fanDutyCycle,
-                    inputs.batteryVoltageV,
-                    inputs.responseTimeS,
-                    inputs.reserveUsage);
+                    inputs.targetYawRateSensorRadps);
             return true;
         default:
             return false;
@@ -2103,26 +1953,26 @@ namespace
                                     continue;
                                 }
 
-                                MazeMap::DriveCommandSolution solution{};
+                                MazeMap::App::Internal::CommandVector command{};
                                 if (!TrySolveFeedforwardPath(
                                     plantModel,
                                     pathId,
                                     perturbedInputs,
                                     prepared,
-                                    solution))
+                                    command))
                                 {
                                     continue;
                                 }
-                                if (!solution.valid)
+                                if (!command.IsFinite())
                                 {
                                     continue;
                                 }
 
                                 envelope.valid = true;
-                                envelope.leftMin = (std::min)(envelope.leftMin, solution.control.leftMotorCommand);
-                                envelope.leftMax = (std::max)(envelope.leftMax, solution.control.leftMotorCommand);
-                                envelope.rightMin = (std::min)(envelope.rightMin, solution.control.rightMotorCommand);
-                                envelope.rightMax = (std::max)(envelope.rightMax, solution.control.rightMotorCommand);
+                                envelope.leftMin = (std::min)(envelope.leftMin, command.LeftMotorPwm());
+                                envelope.leftMax = (std::max)(envelope.leftMax, command.LeftMotorPwm());
+                                envelope.rightMin = (std::min)(envelope.rightMin, command.RightMotorPwm());
+                                envelope.rightMax = (std::max)(envelope.rightMax, command.RightMotorPwm());
                             }
                         }
                     }
@@ -2179,17 +2029,17 @@ namespace
             return false;
         }
 
-        MazeMap::DriveCommandSolution solution{};
+        MazeMap::App::Internal::CommandVector command{};
         if (!TrySolveFeedforwardPath(
             plantModel,
             pathId,
             inputs,
             prepared,
-            solution))
+            command))
         {
             return false;
         }
-        if (!solution.valid)
+        if (!command.IsFinite())
         {
             return false;
         }
@@ -2204,7 +2054,13 @@ namespace
                 batteryVoltageV);
 
         const MazeMap::VehicleState::StateVector predictedNextState =
-            plantModel.integrate(inputs.currentState, solution.control, inputs.responseTimeS, prepared);
+            plantModel.integrate(
+                inputs.currentState,
+                command,
+                inputs.fanDutyCycle,
+                inputs.batteryVoltageV,
+                inputs.responseTimeS,
+                prepared);
 
         exportRow = {};
         exportRow.masterTimeUs = currentRow.masterTimeUs;
@@ -2231,8 +2087,8 @@ namespace
         exportRow.targetLeftVelocityMps = nextRow.leftEncoderVelocityMps;
         exportRow.targetRightVelocityMps = nextRow.rightEncoderVelocityMps;
         exportRow.targetYawRateSensorRadps = inputs.targetYawRateSensorRadps;
-        exportRow.nominalLeftCommand = solution.control.leftMotorCommand;
-        exportRow.nominalRightCommand = solution.control.rightMotorCommand;
+        exportRow.nominalLeftCommand = command.LeftMotorPwm();
+        exportRow.nominalRightCommand = command.RightMotorPwm();
         exportRow.nominalAverageCommand =
             CommandAverage(exportRow.nominalLeftCommand, exportRow.nominalRightCommand);
         exportRow.nominalDeltaCommand =
@@ -2265,9 +2121,6 @@ namespace
         exportRow.predictedNextYawRateRadps = predictedNextState(MazeMap::VehicleState::kR);
         exportRow.predictedForwardTargetErrorMps = exportRow.predictedNextForwardMps - inputs.targetForwardSensorMps;
         exportRow.predictedYawTargetErrorRadps = exportRow.predictedNextYawRateRadps - inputs.targetYawRateSensorRadps;
-        exportRow.tractionLimited = solution.tractionLimited;
-        exportRow.commonForceClamped = solution.commonForceClamped;
-        exportRow.differentialForceClamped = solution.differentialForceClamped;
         if (envelope.valid)
         {
             exportRow.envelopeLeftMin = envelope.leftMin;
@@ -2908,7 +2761,7 @@ namespace
             << "delta_feedforward_command_error,envelope_left_min,envelope_left_max,envelope_right_min,"
             << "envelope_right_max,logged_drive_within_envelope,logged_feedforward_within_envelope,"
             << "predicted_next_forward_mps,predicted_next_yaw_rate_radps,predicted_forward_target_error_mps,"
-            << "predicted_yaw_target_error_radps,traction_limited,common_force_clamped,differential_force_clamped\n";
+            << "predicted_yaw_target_error_radps\n";
 
         for (const FeedforwardSampleExportRow& row : runIt->feedforwardSampleExportRows)
         {
@@ -2966,10 +2819,7 @@ namespace
                 << FormatDouble(row.predictedNextForwardMps) << ','
                 << FormatDouble(row.predictedNextYawRateRadps) << ','
                 << FormatDouble(row.predictedForwardTargetErrorMps) << ','
-                << FormatDouble(row.predictedYawTargetErrorRadps) << ','
-                << (row.tractionLimited ? "true" : "false") << ','
-                << (row.commonForceClamped ? "true" : "false") << ','
-                << (row.differentialForceClamped ? "true" : "false") << '\n';
+                << FormatDouble(row.predictedYawTargetErrorRadps) << '\n';
         }
 
         std::cout

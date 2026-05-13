@@ -71,10 +71,7 @@ if (-not (Test-Path $mazeMapLibPath)) {
     throw "MazeMap.lib was not found at '$mazeMapLibPath'. Build MazeMap separately before running this tool."
 }
 
-$mazeMapBinaryTimeUtc = @(
-    (Get-Item -LiteralPath $mazeMapDllPath).LastWriteTimeUtc,
-    (Get-Item -LiteralPath $mazeMapLibPath).LastWriteTimeUtc
-) | Sort-Object | Select-Object -First 1
+$mazeMapBinaryTimeUtc = (Get-Item -LiteralPath $mazeMapDllPath).LastWriteTimeUtc
 
 $staleSources = @(
     $mazeMapFreshnessInputs |

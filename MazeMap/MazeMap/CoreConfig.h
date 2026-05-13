@@ -78,21 +78,6 @@ namespace MazeMap::Config
     // [Medium] Angular-acceleration limit for startup wall calibration. Keep this close to the mission search turn ramp
     // so the calibration turns break static friction reliably without jumping all the way to the more aggressive test envelope.
     constexpr float kStartupWallCalibrationTurnAccelRadps2 = 45.0f;
-    // [High] Shared wheel-speed proportional gain multiplier used by all motion modes. This is the profile that
-    // startup calibration proved out, and it is now the nominal wheel controller everywhere so turn behavior stays
-    // consistent between calibration, corridor tests, mapping, and racing transitions.
-    constexpr float kNominalWheelVelocityKpScale = 2.10f;
-    // [High] Shared wheel-speed integral gain multiplier used by all motion modes.
-    constexpr float kNominalWheelVelocityKiScale = 1.70f;
-    // [High] Shared wheel-speed integral limit multiplier used by all motion modes.
-    constexpr float kNominalWheelIntegralLimitScale = 2.10f;
-    // [Medium] Mapping-only transient wheel-response multiplier. This is kept out of racing so mapping can feel more
-    // decisive without changing the high-speed run behavior.
-    constexpr float kMappingWheelAccelerationResponseScale = 1.0f;
-    // Startup calibration now reuses the common wheel profile instead of carrying a separate controller regime.
-    constexpr float kStartupWallCalibrationWheelVelocityKpScale = kNominalWheelVelocityKpScale;
-    constexpr float kStartupWallCalibrationWheelVelocityKiScale = kNominalWheelVelocityKiScale;
-    constexpr float kStartupWallCalibrationWheelIntegralLimitScale = kNominalWheelIntegralLimitScale;
     // [Medium] Cruise speed for the short centering moves during startup calibration. Keep this below the main startup
     // calibration cruise so the robot can pull cleanly off touched walls without running past the intended center pose.
     constexpr float kStartupWallCalibrationCenteringSpeedMps = 0.16f;
@@ -413,24 +398,12 @@ namespace MazeMap::Config
     // [Medium] Prior-drive threshold for treating the previous cycle as effectively stopped before applying the launch
     // assist. Increase it if very small commands should still count as "at rest"; decrease it if the assist retriggers.
     constexpr float kWheelRestLaunchDriveThreshold = 0.05f;
-    // [High] Residual speed-proportional trim on top of the motor-model wheel feedforward. Keep this at zero unless
-    // the physical motor model still leaves a repeatable speed-dependent bias under measured load.
-    constexpr float kWheelVelocityFeedforward = 0.0f;
-    // [Medium] Extra drive-command trim per wheel-target acceleration used only when the wheel is still chasing the
-    // commanded speed. Raise it if mapping still feels lazy; lower it if mapping starts to snap too hard.
-    constexpr float kWheelAccelerationResponseGainPerMps2 = 0.20f;
-    // [Medium] Speed-delta window over which the acceleration-response trim fades out near target. Increase it if the
-    // trim falls away too early; decrease it if the approach to target speed gets too punchy.
-    constexpr float kWheelAccelerationResponseDeltaWindowMps = 0.08f;
-    // [High] Wheel-speed proportional gain. Increase for tighter speed tracking; decrease if motor commands chatter
-    // or the chassis oscillates in speed on straight segments.
-    constexpr float kWheelVelocityKp = 1.10f;
-    // [High] Wheel-speed integral gain. Increase if steady-state speed error remains under load; decrease if the loop
-    // winds up and produces slow surging or long recovery after a stop or saturation.
-    constexpr float kWheelVelocityKi = 1.50f;
-    // [Medium] Clamp on the wheel-speed integrator. Increase only if the loop needs more integral authority to overcome
-    // repeatable bias; decrease if recovery from saturation is sluggish or overshoots badly.
-    constexpr float kWheelIntegralLimit = 0.25f;
+    // [High] Wheel-speed proportional gain used directly by the wheel-velocity PD setup. Increase for tighter speed
+    // tracking; decrease if motor commands chatter or the chassis oscillates in speed on straight segments.
+    constexpr float kWheelVelocityKp = 2.31f;
+    // [Medium] Wheel-speed derivative gain used directly by the wheel-velocity PD setup. Increase to damp speed
+    // corrections; decrease if encoder noise leaks into wheel command changes.
+    constexpr float kWheelVelocityKd = 0.021f;
     // [High] Straight-line heading proportional gain. Increase if the robot drifts off heading in open corridors;
     // decrease if it snakes left-right while trying to stay on course.
     constexpr float kStraightHeadingKp = 18.0f;
@@ -491,7 +464,7 @@ namespace MazeMap::Config
         /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.01f),
         /* longitudinalAccelerationStatePD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
         /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
-        /* wheelVelocityEncoderPD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, 0.01f),
+        /* wheelVelocityEncoderPD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, kWheelVelocityKd),
         /* yawAccelerationStatePD */ MazeMap::ProportionalDerivative(0.065f, 0.0f),
         /* yawAccelerationGyroPD */ MazeMap::ProportionalDerivative(0.015f, 0.0f),
         /* yawAccelerationEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.001f, 0.0f));

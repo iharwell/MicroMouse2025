@@ -72,7 +72,6 @@ namespace MazeMap::App::Internal
             {
                 _runtime.FailActiveMode("Top speed measurement drive base init failed");
             }
-            _drive.UseNominalWheelControlProfile();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(false);
@@ -118,7 +117,6 @@ namespace MazeMap::App::Internal
             self->_phase = Phase::Idle;
             self->_startupCalibration.Cancel();
             self->_drive.Brake();
-            self->_drive.UseNominalWheelControlProfile();
         }
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept
@@ -126,7 +124,7 @@ namespace MazeMap::App::Internal
             LoopController::SessionOptions options{};
             const auto& runtimeState = _runtime.RuntimeState();
             options.controlPeriodUs = DiagnosticConfig::kControlPeriodUs;
-            options.workPlan.useWallUpdates = false;
+            options.workPlan.SetUseWallUpdates(false);
             options.SessionStartPointX = runtimeState.GetPositionX();
             options.SessionStartPointY = runtimeState.GetPositionY();
             return options;
@@ -298,7 +296,6 @@ namespace MazeMap::App::Internal
                 ReleaseSelectorMonitor();
                 _startupCalibration.Cancel();
                 _drive.Brake();
-                _drive.UseNominalWheelControlProfile();
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
                 return CommandVector::Brake();

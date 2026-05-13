@@ -43,18 +43,12 @@ namespace MazeMap::App::Internal
             }
         }
 
-        bool WallMaskIncludes(
-            const LoopController::WallMask workMask,
-            const LoopController::WallMask includedMask) noexcept
-        {
-            return
-                (static_cast<std::uint8_t>(workMask) & static_cast<std::uint8_t>(includedMask)) ==
-                static_cast<std::uint8_t>(includedMask);
-        }
-
         bool WorkPlanRequestsWallSensors(const LoopController::SensorWorkPlan& workPlan) noexcept
         {
-            return workPlan.wallMask != LoopController::WallMask::None;
+            return
+                workPlan.UsesFrontWallSensors() ||
+                workPlan.UsesLeftWallSensors() ||
+                workPlan.UsesRightWallSensors();
         }
 
         void ClearFrontWallSnapshot(SensorSnapshot& snapshot) noexcept
@@ -120,22 +114,22 @@ namespace MazeMap::App::Internal
             SensorSnapshot& snapshot,
             const float expectedSideWallDistanceM) noexcept
         {
-            if (!workPlan.readImuBundle)
+            if (!workPlan.ReadImuBundle())
             {
                 ClearImuSnapshot(snapshot);
             }
 
-            if (!WallMaskIncludes(workPlan.wallMask, LoopController::WallMask::Front))
+            if (!workPlan.UsesFrontWallSensors())
             {
                 ClearFrontWallSnapshot(snapshot);
             }
 
-            if (!WallMaskIncludes(workPlan.wallMask, LoopController::WallMask::Left))
+            if (!workPlan.UsesLeftWallSensors())
             {
                 ClearLeftWallSnapshot(snapshot);
             }
 
-            if (!WallMaskIncludes(workPlan.wallMask, LoopController::WallMask::Right))
+            if (!workPlan.UsesRightWallSensors())
             {
                 ClearRightWallSnapshot(snapshot);
             }
@@ -663,24 +657,7 @@ namespace MazeMap::App::Internal
 
     bool LoopController::SupportsSensorWorkPlan(const SensorWorkPlan& workPlan) const noexcept
     {
-        const std::uint8_t maskBits = static_cast<std::uint8_t>(workPlan.wallMask);
-        const std::uint8_t allowedMaskBits = static_cast<std::uint8_t>(WallMask::All);
-        if ((maskBits & static_cast<std::uint8_t>(~allowedMaskBits)) != 0U)
-        {
-            return false;
-        }
-
-        if (workPlan.useEncoderUpdate && !workPlan.readEncoders)
-        {
-            return false;
-        }
-
-        if ((workPlan.useGyroUpdate || workPlan.useAccelUpdate) && !workPlan.readImuBundle)
-        {
-            return false;
-        }
-
-        if (workPlan.useWallUpdates && !WorkPlanRequestsWallSensors(workPlan))
+        if (workPlan.UseWallUpdates() && !WorkPlanRequestsWallSensors(workPlan))
         {
             return false;
         }
@@ -722,8 +699,8 @@ namespace MazeMap::App::Internal
         timing.encoderLatchUs = static_cast<std::uint32_t>(micros());
         SensorSnapshot snapshot{};
         if (WorkPlanRequestsWallSensors(_options.workPlan) ||
-            _options.workPlan.readImuBundle ||
-            _options.workPlan.readEncoders)
+            _options.workPlan.ReadImuBundle() ||
+            _options.workPlan.ReadEncoders())
         {
             _runtime->Sensors().Capture(
                 stationaryHint,
@@ -731,7 +708,7 @@ namespace MazeMap::App::Internal
                 snapshot,
                 nullptr,
                 nullptr,
-                _options.workPlan.readEncoders,
+                _options.workPlan.ReadEncoders(),
                 dtSeconds);
         }
 
@@ -786,19 +763,19 @@ namespace MazeMap::App::Internal
 
         timing.ukfUpdateStartUs = static_cast<std::uint32_t>(micros());
 
-        if (_options.workPlan.readEncoders &&
-            _options.workPlan.useEncoderUpdate &&
+        if (_options.workPlan.ReadEncoders() &&
+            _options.workPlan.UseEncoderUpdate() &&
             snapshot.encoderObservationValid)
         {
             const bool updateYawFromEncoder =
-                !_options.workPlan.readImuBundle ||
-                !_options.workPlan.useGyroUpdate ||
+                !_options.workPlan.ReadImuBundle() ||
+                !_options.workPlan.UseGyroUpdate() ||
                 !std::isfinite(snapshot.gyroRawRadps);
             (void)estimator.updateEncoderPair(snapshot.encoderObservation, dtSeconds, updateYawFromEncoder);
         }
 
-        if (_options.workPlan.readImuBundle &&
-            _options.workPlan.useGyroUpdate &&
+        if (_options.workPlan.ReadImuBundle() &&
+            _options.workPlan.UseGyroUpdate() &&
             std::isfinite(snapshot.gyroRawRadps))
         {
             const MazeMap::MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
@@ -813,7 +790,7 @@ namespace MazeMap::App::Internal
             }
         }
 
-        if (_options.workPlan.readImuBundle && _options.workPlan.useAccelUpdate)
+        if (_options.workPlan.ReadImuBundle() && _options.workPlan.UseAccelUpdate())
         {
             MazeMap::ImuAccelObs accelObservation{};
             accelObservation.valid =
@@ -825,10 +802,10 @@ namespace MazeMap::App::Internal
             (void)estimator.updatePlanarAccel(accelObservation);
         }
 
-        if (_options.workPlan.useWallUpdates)
+        if (_options.workPlan.UseWallUpdates())
         {
             MazeMap::Maze& maze = _runtime->Maze();
-            if (WallMaskIncludes(_options.workPlan.wallMask, WallMask::Front))
+            if (_options.workPlan.UsesFrontWallSensors())
             {
                 MazeMap::WallObs frontLeftObservation{};
                 MazeMap::WallObs frontRightObservation{};
@@ -845,7 +822,7 @@ namespace MazeMap::App::Internal
                 (void)estimator.updateFrontPair(frontLeftObservation, frontRightObservation, maze, true);
             }
 
-            if (WallMaskIncludes(_options.workPlan.wallMask, WallMask::Left))
+            if (_options.workPlan.UsesLeftWallSensors())
             {
                 const MazeMap::WallObs leftObservation = MazeMap::BuildSideWallObservation(
                     snapshot.leftDistanceValidForControl,
@@ -856,7 +833,7 @@ namespace MazeMap::App::Internal
                 (void)estimator.updateSideSensor(MazeMap::RelativeDirection::Left90, leftObservation, maze, true);
             }
 
-            if (WallMaskIncludes(_options.workPlan.wallMask, WallMask::Right))
+            if (_options.workPlan.UsesRightWallSensors())
             {
                 const MazeMap::WallObs rightObservation = MazeMap::BuildSideWallObservation(
                     snapshot.rightDistanceValidForControl,

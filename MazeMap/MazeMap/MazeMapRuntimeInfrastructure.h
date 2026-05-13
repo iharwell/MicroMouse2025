@@ -145,13 +145,10 @@ namespace MazeMap::App::Internal::Runtime
                 vehicleModel.arcTrackWidthInterpolation.wideTrackWidthM) &&
             plantModel.WriteDriveModelDiagnosticConfig(writeConfig) &&
             writeConfig(
-                "wheel_control:static_ff=%.6f;vel_ff=%.6f;accel_gain=%.6f;vel_kp=%.6f;vel_ki=%.6f;i_lim=%.6f",
+                "wheel_control:static_ff=%.6f;vel_kp=%.6f;vel_kd=%.6f",
                 Config::kWheelStaticFeedforward,
-                Config::kWheelVelocityFeedforward,
-                Config::kWheelAccelerationResponseGainPerMps2,
                 Config::kWheelVelocityKp,
-                Config::kWheelVelocityKi,
-                Config::kWheelIntegralLimit) &&
+                Config::kWheelVelocityKd) &&
             writeConfig(
                 "launch_fan:racing_duty=%.6f;fan_ramp_ms=%lu;launch_cmd=%.6f;launch_max=%.6f;launch_ramp_ms=%lu",
                 Config::kRacingFanDutyCycle,
@@ -176,13 +173,11 @@ namespace MazeMap::App::Internal::Runtime
                 Config::kDistanceToleranceM,
                 Config::kAngleToleranceRad) &&
             writeConfig(
-                "stall_diag:stall_ms=%lu;stall_grace_ms=%lu;stall_eps_m=%.6f;stall_cmd_mps=%.6f;diag_kp_scale=%.6f;diag_ki_scale=%.6f",
+                "stall_diag:stall_ms=%lu;stall_grace_ms=%lu;stall_eps_m=%.6f;stall_cmd_mps=%.6f",
                 static_cast<unsigned long>(Config::kEncoderStallTimeoutMs),
                 static_cast<unsigned long>(Config::kEncoderStallStartupGraceMs),
                 Config::kEncoderProgressEpsilonM,
-                Config::kEncoderStallCommandThresholdMps,
-                DiagnosticConfig::kDiagnosticWheelVelocityKpScale,
-                DiagnosticConfig::kDiagnosticWheelVelocityKiScale) &&
+                Config::kEncoderStallCommandThresholdMps) &&
             writeConfig(
                 "routine_cfg:startup_ms=%lu;baseline_ms=%lu;inter_ms=%lu;flush_ms=%lu;static_ms=%lu;recovery_v=%.3f",
                 static_cast<unsigned long>(DiagnosticConfig::kStartupSettleMs),
