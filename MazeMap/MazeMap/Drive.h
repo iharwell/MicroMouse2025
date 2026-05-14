@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CommandVector.h"
-#include "CommandPD.h"
+#include "FeedbackAxis.h"
 #include "ManeuverInstance.h"
 #include "MotionLimits.h"
 #include "DriveTelemetry.h"
@@ -112,38 +112,6 @@ namespace MazeMap::App::Internal
             OpenFloor
         };
 
-        // Drive-level live DriveBase feedback-selection settings.
-        //
-        // These settings select which DriveBase CommandPD feedback terms Drive uses when
-        // generating standard primitive control proposals. They are retained on Drive,
-        // reused across primitive starts, and may be changed while a primitive is active.
-        // Active primitives observe the current selections on later GetNextControls(...)
-        // calls when they request the corresponding feedback objective.
-        //
-        // This intentionally borrows DriveBase's CommandPD flag vocabulary instead of
-        // introducing another control-settings dialect, local feedback owner, or separate
-        // configuration bag inside Drive.
-        //
-        // `heading`:
-        // Flags used when a primitive is correcting a heading target.
-        //
-        // `yawRate`:
-        // Flags used when a primitive is commanding yaw-rate or alpha-driven yaw motion.
-        //
-        // `distance`:
-        // Flags used when a primitive is interpreting translation-placement or distance-style
-        // correction terms.
-        //
-        // `velocity`:
-        // Flags used for forward-speed target tracking.
-        struct CommandPDSettings final
-        {
-            MazeMap::CommandPD heading{};  // Used when holding or correcting a heading target.
-            MazeMap::CommandPD yawRate{};  // Used when commanding yaw-rate or alpha-driven turn motion.
-            MazeMap::CommandPD distance{}; // Used when correcting distance or placement error.
-            MazeMap::CommandPD velocity{}; // Used when tracking forward-speed targets.
-        };
-
         Drive();
         explicit Drive(float nominalCommandPeriodSeconds);
 
@@ -212,19 +180,6 @@ namespace MazeMap::App::Internal
         const MotionLimits& GetLimits() const noexcept;
 
         float GetNominalCommandPeriodSeconds() const noexcept;
-
-        // `SetCommandPDSettings(settings)`:
-        // Installs the Drive-level live DriveBase feedback-selection flags.
-        //
-        // Parameters:
-        // `settings`:
-        // Per-objective CommandPD flag selections consulted until changed. These selections
-        // define Drive's standard feedback topology for ordinary primitives; they are not
-        // latched by Start... calls.
-        void SetCommandPDSettings(const CommandPDSettings& settings) noexcept;
-
-        // Returns the current Drive-level live feedback-selection settings.
-        const CommandPDSettings& GetCommandPDSettings() const noexcept;
 
         // Convenience completion query.
         //
@@ -460,7 +415,10 @@ namespace MazeMap::App::Internal
         MazeMap::Maze* _maze{};             // Maze facts used when maze-mode wall correction is enabled.
         MotionLimits _limits{};             // Drive-level live motion envelope, interpreted at use.
         float _nominalCommandPeriodSeconds{}; // Next-tick command-shaping horizon for MotionLimits.
-        CommandPDSettings _commandPdSettings{};              // Drive-level live CommandPD selections.
+        MazeMap::FeedbackSource _headingFeedbackSources{};   // Drive-level heading feedback sources.
+        MazeMap::FeedbackSource _yawRateFeedbackSources{};   // Drive-level yaw-rate feedback sources.
+        MazeMap::FeedbackSource _distanceFeedbackSources{};  // Drive-level distance feedback sources.
+        MazeMap::FeedbackSource _velocityFeedbackSources{};  // Drive-level velocity feedback sources.
         OperationMode _operationMode{ OperationMode::Maze }; // Drive-level live wall-correction mode.
         ActivePrimitive _activePrimitive{ ActivePrimitive::None }; // Latest installed instruction kind.
         bool _effectivelyComplete{ true };  // Latest completion observation, defaulting to the no-command hold-like state.

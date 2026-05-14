@@ -42,7 +42,6 @@ This document is a navigation index for the first-party source tree under `MazeM
 - `ImuSamplingProfile.h`: UI-facing IMU sampling profile selection.
 - `InPlaceTurnProfile.h`: parameter bundle for in-place turn behavior.
 - `Kinematics.h` / `Kinematics.cpp`: linear and rotational kinematics primitives.
-- `LaunchAssistProfile.h`: launch-assist tuning used to overcome wheel rest friction.
 - `LedCalibrationConfig.h`: LED and wall-sensor calibration constants.
 - `LSV6DSV16X_IMU.h`: IMU driver, register abstractions, and status helpers for the LSV6DSV16X device.
 - `Maneuver.h` / `Maneuver.cpp`: maneuver catalogue and maneuver-owned execution geometry/target helpers; do not re-express maneuver execution through parallel smooth-turn profile structs.

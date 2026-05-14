@@ -221,6 +221,10 @@ bool BuildEvidenceObservationSnapshot(
     }
 
     const SensorSnapshot& lastSample = samples[sampleCount - 1U];
+    combinedSnapshot.leftEncoderTotalCounts = lastSample.leftEncoderTotalCounts;
+    combinedSnapshot.rightEncoderTotalCounts = lastSample.rightEncoderTotalCounts;
+    combinedSnapshot.leftEncoderDistanceM = lastSample.leftEncoderDistanceM;
+    combinedSnapshot.rightEncoderDistanceM = lastSample.rightEncoderDistanceM;
     combinedSnapshot.frontLeftDistanceM =
         AverageFiniteObservationValue(frontLeftDistanceSum, frontLeftDistanceCount, lastSample.frontLeftDistanceM);
     combinedSnapshot.frontRightDistanceM =

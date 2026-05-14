@@ -3,14 +3,13 @@
 // state for closed-loop command generation. Hardware application and sensor capture belong to the
 // runtime vehicle/sensor owners.
 #include "CommandVector.h"
-#include "CommandPD.h"
 #include "DriveTelemetry.h"
 #include "EncoderObs.h"
-#include "LaunchAssistProfile.h"
+#include "FeedbackAxis.h"
 #include "Maneuver.h"
 #include "MazeMapRuntimeCore.h"
 #include "PlantModel.h"
-#include "ProportionalDerivativeCluster.h"
+#include "PDCluster.h"
 #include "SensorSnapshot.h"
 #include "VehicleState.h"
 
@@ -22,24 +21,27 @@
 // Serves as the concrete drive command-proposal subsystem for the MazeMap application. It should not become
 // the owner of hardware application, sensor capture, higher-level maneuver scheduling, or shared
 // multi-tick motion-routine orchestration.
+//
+// Numeric contract:
+// DriveBase command APIs expect finite scalar targets, operating points, and PlantModel feedforward
+// outputs unless an overload explicitly documents stronger input recovery. Passing NaN or infinity is
+// a caller/owner contract violation; DriveBase does not scrub those values at the output boundary.
 class DriveBase
 {
 private:
-    struct CommandContext;
-    struct CommandTargets;
     static constexpr float kDefaultCommandVelocityAsapLongitudinalAccelLimitMps2 = 9.0f;
     static constexpr float kDefaultCommandVelocityAsapYawAccelLimitRadps2 = 400.0f;
 public:
     static constexpr uint16_t kModeClosedLoop = 1u << 0;
     static constexpr uint16_t kModeBraking = 1u << 3;
-    static constexpr uint16_t kModeLaunchAssistLeft = 1u << 4;
-    static constexpr uint16_t kModeLaunchAssistRight = 1u << 5;
 
     explicit DriveBase(
         const MazeMap::PlantModel& plantModel,
         const MazeMap::VehicleState& runtimeState,
-        const MazeMap::ProportionalDerivativeCluster& proportionalDerivativeCluster)
+        const MazeMap::PDCluster& proportionalDerivativeCluster)
         : _runtimeState(runtimeState)
+        , _linearFeedback(&runtimeState, false)
+        , _rotationalFeedback(&runtimeState, true)
         , _plantModel(plantModel)
         , _proportionalDerivativeCluster(&proportionalDerivativeCluster)
         , _lastLinearCommandMps(0.0f)
@@ -47,14 +49,17 @@ public:
     {
     }
 
-    void SetProportionalDerivativeCluster(const MazeMap::ProportionalDerivativeCluster& proportionalDerivativeCluster) noexcept
+    void SetProportionalDerivativeCluster(const MazeMap::PDCluster& proportionalDerivativeCluster) noexcept
     {
         _proportionalDerivativeCluster = &proportionalDerivativeCluster;
     }
 
-    const MazeMap::ProportionalDerivativeCluster& GetProportionalDerivativeCluster() noexcept { return *_proportionalDerivativeCluster; }
-    const MazeMap::ProportionalDerivativeCluster& GetProportionalDerivativeCluster() const noexcept { return *_proportionalDerivativeCluster; }
+    const MazeMap::PDCluster& GetProportionalDerivativeCluster() noexcept { return *_proportionalDerivativeCluster; }
+    const MazeMap::PDCluster& GetProportionalDerivativeCluster() const noexcept { return *_proportionalDerivativeCluster; }
 
+    // Retained startup/session reset hook. DriveBase lifetime is runtime-owned, so this does not
+    // construct hardware; it clears drive-local measurement caches, command telemetry, and braking
+    // state before a mode starts issuing commands.
     bool Begin()
     {
         ResetEncoderTracking();
@@ -63,80 +68,73 @@ public:
         return true;
     }
 
+    // Clears controller memory that must not carry across a new command session.
     void ResetControllers()
     {
-        ResetLaunchAssist();
     }
 
+    // Returns the last generated command after PWM saturation.
     MazeMap::App::Internal::CommandVector CurrentControlVector() const noexcept
     {
         return _lastProposedCommand;
     }
 
-    float CurrentBatteryVoltageV() const noexcept
-    {
-        return 0.0f;
-    }
-
     // DeltaCommand resolves a feedforward command from an explicit operating point and an explicit
     // longitudinal acceleration request. The result is symmetric by construction.
-    // Supported `pd` flags here: `StateAccelerationPD`, `IMUForwardAccel`.
-    // Any heading, yaw-rate, wheel-speed, encoder, or lateral-accel selection has no explicit target
-    // on this overload and therefore defaults to hold/no-op behavior.
+    // FeedbackSource selections here apply to the longitudinal acceleration target.
     EXPORT MazeMap::App::Internal::CommandVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource linearSources = MazeMap::FeedbackSource::None) const;
 
     // DeltaCommand resolves the fully coupled plant feedforward from an explicit body-speed operating
     // point and explicit longitudinal/yaw acceleration requests. This is the canonical "delta from the
     // current state" entry point when both translation and rotation matter at once.
-    // Supported `pd` flags here: `StateAccelerationPD`, `IMUForwardAccel`.
-    // This overload does not expose a separate yaw-acceleration feedback-source selector, so heading,
-    // yaw-rate, wheel-speed, encoder, and lateral-accel flags remain hold/no-op selections.
+    // FeedbackSource selections here apply to the longitudinal and rotational acceleration targets.
     EXPORT MazeMap::App::Internal::CommandVector DeltaCommand(
         float presentLinearSpeedMps,
         float desiredLongitudinalAccelMps2,
         float presentYawRateRadps,
         float desiredYawAccelRadps2,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource linearSources = MazeMap::FeedbackSource::None,
+        MazeMap::FeedbackSource rotationalSources = MazeMap::FeedbackSource::None) const;
 
     // DeltaYawRateCommand resolves a zero-mean command from the present yaw rate and a desired yaw
     // acceleration. This is the single-axis rotational variant of `DeltaCommand`.
-    // No additional `pd` feedback target is currently exposed on this overload; every flag presently
-    // behaves the same as `RawCommand`.
+    // FeedbackSource selections here apply to the rotational acceleration target.
     EXPORT MazeMap::App::Internal::CommandVector DeltaYawRateCommand(
         float presentYawRateRadps,
         float desiredYawAccelRadps2,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource rotationalSources = MazeMap::FeedbackSource::None) const;
 
-    // PointCommand resolves a symmetric command that drives the present forward speed toward the requested
-    // forward speed over the canonical roll-off horizon while respecting the plant-reported acceleration
-    // envelope. Wheel-speed or other optional loops use `desiredLinearSpeedMps` as their setpoint when
-    // that association is meaningful; all unrelated loops hold their present values.
-    // Supported `pd` flags here: `StateVelocityPD`, `EncoderVelocity`.
+    // PointCommand drives the present forward speed toward the requested forward speed while preserving
+    // the current yaw rate in feedforward. Encoder feedback uses the encoder-average signal for the
+    // forward-velocity target only; yaw-rate feedback is not active on this overload.
+    // FeedbackSource selections here apply to the forward velocity target.
     // This overload does not set a new heading, yaw-rate, longitudinal-acceleration, or
     // lateral-acceleration target.
     EXPORT MazeMap::App::Internal::CommandVector PointCommand(
         float desiredLinearSpeedMps,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource linearSources = MazeMap::FeedbackSource::None) const;
 
     // PointCommand resolves the fully coupled command that drives the present forward speed and yaw rate
     // toward the requested targets over the canonical roll-off horizon while respecting the plant envelope.
     // This replaces the old ambiguous "velocity command" entry point.
-    // Supported `pd` flags here: `StateVelocityPD`, `StateYawPD`, `EncoderVelocity`, `IMUYaw`.
+    // FeedbackSource selections here apply to the forward velocity and yaw-rate targets.
     // This overload does not set a heading, longitudinal-acceleration, or lateral-acceleration target.
     EXPORT MazeMap::App::Internal::CommandVector PointCommand(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource linearSources = MazeMap::FeedbackSource::None,
+        MazeMap::FeedbackSource rotationalSources = MazeMap::FeedbackSource::None) const;
 
-    // PointControlVector resolves the same coupled target as `PointCommand`. It remains as the
-    // stable entry point for loop-controller call sites that already operate in control-vector space.
+    // PointControlVector forwards to `PointCommand`. It remains as the stable entry point for
+    // loop-controller call sites that already operate in control-vector space.
     EXPORT MazeMap::App::Internal::CommandVector PointControlVector(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource linearSources = MazeMap::FeedbackSource::None,
+        MazeMap::FeedbackSource rotationalSources = MazeMap::FeedbackSource::None) const;
 
     // PointCommandWithHeadingTarget resolves the same coupled velocity/yaw-rate target as
     // `PointCommand`, but it also lets the caller add DriveBase-owned heading correction in the
@@ -145,70 +143,69 @@ public:
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         float targetYawRad,
-        MazeMap::CommandPD pointPd,
-        MazeMap::CommandPD headingPd) const;
+        MazeMap::FeedbackSource linearSources,
+        MazeMap::FeedbackSource rotationalSources,
+        MazeMap::FeedbackSource headingSources) const;
 
-    // PointControlVectorWithHeadingTarget is the stable control-vector-space wrapper for
-    // `PointCommandWithHeadingTarget`.
+    // PointControlVectorWithHeadingTarget forwards to `PointCommandWithHeadingTarget` as the stable
+    // control-vector-space entry point.
     EXPORT MazeMap::App::Internal::CommandVector PointControlVectorWithHeadingTarget(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
         float targetYawRad,
-        MazeMap::CommandPD pointPd,
-        MazeMap::CommandPD headingPd) const;
+        MazeMap::FeedbackSource linearSources,
+        MazeMap::FeedbackSource rotationalSources,
+        MazeMap::FeedbackSource headingSources) const;
 
     // PointCommand consumes the drive-relevant target fields from a maneuver point. Higher-level
     // maneuver execution should target this overload instead of rebuilding scalar command bridges.
-    // It exposes the same `pd` selections as the scalar `(desiredLinearSpeedMps, desiredYawRateRadps)`
+    // It exposes the same feedback selections as the scalar `(desiredLinearSpeedMps, desiredYawRateRadps)`
     // overload because it forwards directly to that entry point.
     EXPORT MazeMap::App::Internal::CommandVector PointCommand(
         const MazeMap::ManeuverPoint& point,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource linearSources = MazeMap::FeedbackSource::None,
+        MazeMap::FeedbackSource rotationalSources = MazeMap::FeedbackSource::None) const;
 
-    // PointControlVector resolves the same maneuver-point target as `PointCommand`. It remains as the
-    // stable entry point for loop-controller call sites that already operate in control-vector space.
+    // PointControlVector forwards to the maneuver-point `PointCommand`. It remains as the stable entry
+    // point for loop-controller call sites that already operate in control-vector space.
     EXPORT MazeMap::App::Internal::CommandVector PointControlVector(
         const MazeMap::ManeuverPoint& point,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource linearSources = MazeMap::FeedbackSource::None,
+        MazeMap::FeedbackSource rotationalSources = MazeMap::FeedbackSource::None) const;
 
-    // PointYawRateCommand resolves a zero-mean command that drives the present yaw rate toward the
-    // requested yaw-rate target over the canonical roll-off horizon while respecting the yaw-acceleration
-    // limit reported by the plant.
-    // Supported `pd` flags here: `StateYawPD`, `EncoderVelocity`, `IMUYaw`.
-    // This overload does not set a new linear-speed, heading, longitudinal-acceleration, or
-    // lateral-acceleration target.
+    // PointYawRateCommand drives the present yaw rate toward the requested target while preserving the
+    // current linear speed in feedforward. Encoder feedback uses the encoder-delta signal for the
+    // yaw-rate target only; forward-velocity feedback is not active on this overload.
+    // FeedbackSource selections here apply to the yaw-rate target.
     EXPORT MazeMap::App::Internal::CommandVector PointYawRateCommand(
         float desiredYawRateRadps,
-        MazeMap::CommandPD pd = MazeMap::CommandPD::RawCommand) const;
+        MazeMap::FeedbackSource rotationalSources = MazeMap::FeedbackSource::None) const;
 
-    // FeedbackCommand produces a pure feedback command cluster. Each selected loop uses `setpoint` as
-    // its target. Unselected loops contribute nothing. The returned command starts from the plant command
-    // that preserves the present motion state, then layers the requested feedback objectives on top.
-    // Supported `pd` flags here: `StateHeadingPD`, `StateYawPD`, `StateVelocityPD`,
-    // `StateAccelerationPD`, `EncoderVelocity`, `IMUYaw`,
-    // `IMUForwardAccel`, `IMULateralAccel`.
-    // `IMULateralAccel` still requires a nonzero present or target speed so the requested lateral
-    // acceleration can be converted into a yaw-rate correction.
-    EXPORT MazeMap::App::Internal::CommandVector FeedbackCommand(
-        float setpoint,
-        MazeMap::CommandPD pd) const;
+    EXPORT MazeMap::App::Internal::CommandVector GetFeedbackCommand(
+        std::uint8_t linearDerivativeOrder,
+        float linearTarget,
+        MazeMap::FeedbackSource linearSources,
+        std::uint8_t rotationalDerivativeOrder,
+        float rotationalTarget,
+        MazeMap::FeedbackSource rotationalSources) const;
 
+    // Puts DriveBase's retained command state into an explicit brake/zero-output condition. This is
+    // also a telemetry cache reset for generated commands, targets, saturation, and the last proposed
+    // command; it does not directly apply hardware output.
     void Brake()
     {
         _lastLinearCommandMps = 0.0f;
         _lastAngularCommandRadps = 0.0f;
-        ResetLaunchAssist();
         _lastFeedforwardCommand = {};
         _lastFeedbackCommand = {};
         _lastLeftTargetVelocityMps = 0.0f;
         _lastRightTargetVelocityMps = 0.0f;
-        _lastLeftLaunchAssistFloor = 0.0f;
-        _lastRightLaunchAssistFloor = 0.0f;
         _lastModeFlags = kModeBraking;
         _lastSaturationFlags = 0u;
         _lastProposedCommand = {};
     }
 
+    // Returns the average wheel distance since DriveBase's current encoder reference point.
     float GetAverageDistanceMeters() const
     {
         RefreshSensorSnapshotDerivedState();
@@ -230,16 +227,6 @@ public:
         return _lastSaturationFlags;
     }
 
-    float GetLastLeftLaunchAssistFloor() const noexcept
-    {
-        return _lastLeftLaunchAssistFloor;
-    }
-
-    float GetLastRightLaunchAssistFloor() const noexcept
-    {
-        return _lastRightLaunchAssistFloor;
-    }
-
     // The generated-command decomposition is cached at the point where DriveBase still owns both
     // the plant-model feedforward command and the PD-only correction.
     MazeMap::App::Internal::CommandVector GetLastFeedforward() const noexcept
@@ -252,6 +239,8 @@ public:
         return _lastFeedbackCommand;
     }
 
+    // Packages command-generation telemetry for a caller-supplied command without refreshing sensor
+    // state. Use GetTelemetry() when encoder fields and current proposed command are needed.
     DriveTelemetry GetGeneratedTelemetry(
         const MazeMap::App::Internal::CommandVector& command) const noexcept
     {
@@ -266,13 +255,13 @@ public:
         telemetry.rightFeedbackCommand = _lastFeedbackCommand.RightMotorPwm();
         telemetry.leftTargetVelocityMps = _lastLeftTargetVelocityMps;
         telemetry.rightTargetVelocityMps = _lastRightTargetVelocityMps;
-        telemetry.leftLaunchAssistFloor = _lastLeftLaunchAssistFloor;
-        telemetry.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
         telemetry.modeFlags = _lastModeFlags;
         telemetry.saturationFlags = _lastSaturationFlags;
         return telemetry;
     }
 
+    // Refreshes sensor-derived cache from runtime state and returns the full DriveBase telemetry
+    // snapshot, including encoder accumulation, command decomposition, targets, and mode flags.
     DriveTelemetry GetTelemetry() const
     {
         RefreshSensorSnapshotDerivedState();
@@ -288,8 +277,6 @@ public:
         telemetry.rightFeedbackCommand = _lastFeedbackCommand.RightMotorPwm();
         telemetry.leftTargetVelocityMps = _lastLeftTargetVelocityMps;
         telemetry.rightTargetVelocityMps = _lastRightTargetVelocityMps;
-        telemetry.leftLaunchAssistFloor = _lastLeftLaunchAssistFloor;
-        telemetry.rightLaunchAssistFloor = _lastRightLaunchAssistFloor;
         telemetry.leftEncoderCount = _leftEncoderCountTotal;
         telemetry.rightEncoderCount = _rightEncoderCountTotal;
         telemetry.leftDistanceM = _leftEncoderDistanceMeters;
@@ -305,8 +292,14 @@ public:
     }
 
 private:
+    // Clears DriveBase's cached view of current encoder telemetry and anchors future telemetry to
+    // the currently published runtime sensor totals.
     void ResetEncoderTracking() noexcept
     {
+        const SensorSnapshot& snapshot = _runtimeState.GetSensorSnapshot();
+        _leftEncoderReferenceCounts = snapshot.leftEncoderTotalCounts;
+        _rightEncoderReferenceCounts = snapshot.rightEncoderTotalCounts;
+        _encoderReferenceInitialized = true;
         _leftEncoderCountTotal = 0;
         _rightEncoderCountTotal = 0;
         _leftEncoderDistanceMeters = 0.0f;
@@ -315,15 +308,16 @@ private:
         _rightEncoderVelocityMps = 0.0f;
         _lastEncoderObservation = MazeMap::EncoderObs{};
         _encoderObservationValid = false;
-        _hasProcessedEncoderSnapshot = false;
-        _lastEncoderSnapshotTimeS = std::numeric_limits<float>::quiet_NaN();
     }
 
+    // Copies the latest runtime sensor snapshot into DriveBase's mutable measurement cache.
     EXPORT void RefreshSensorSnapshotDerivedState() const noexcept;
 
     const MazeMap::VehicleState& _runtimeState;
+    MazeMap::FeedbackAxis _linearFeedback;
+    MazeMap::FeedbackAxis _rotationalFeedback;
     const MazeMap::PlantModel& _plantModel;
-    const MazeMap::ProportionalDerivativeCluster* _proportionalDerivativeCluster;
+    const MazeMap::PDCluster* _proportionalDerivativeCluster;
     mutable float _lastLinearCommandMps;
     mutable float _lastAngularCommandRadps;
     mutable MazeMap::App::Internal::CommandVector _lastFeedforwardCommand{};
@@ -331,10 +325,10 @@ private:
     mutable MazeMap::App::Internal::CommandVector _lastProposedCommand{};
     mutable float _lastLeftTargetVelocityMps = 0.0f;
     mutable float _lastRightTargetVelocityMps = 0.0f;
-    mutable float _lastLeftLaunchAssistFloor = 0.0f;
-    mutable float _lastRightLaunchAssistFloor = 0.0f;
-    mutable int32_t _leftEncoderCountTotal = 0;
-    mutable int32_t _rightEncoderCountTotal = 0;
+    mutable std::int64_t _leftEncoderReferenceCounts = 0;
+    mutable std::int64_t _rightEncoderReferenceCounts = 0;
+    mutable std::int64_t _leftEncoderCountTotal = 0;
+    mutable std::int64_t _rightEncoderCountTotal = 0;
     mutable float _leftEncoderDistanceMeters = 0.0f;
     mutable float _rightEncoderDistanceMeters = 0.0f;
     mutable float _leftEncoderVelocityMps = 0.0f;
@@ -346,152 +340,75 @@ private:
     mutable MazeMap::EncoderObs _lastEncoderObservation{};
     mutable uint16_t _lastModeFlags = kModeBraking;
     mutable uint16_t _lastSaturationFlags = 0u;
-    mutable float _lastEncoderSnapshotTimeS = std::numeric_limits<float>::quiet_NaN();
     mutable bool _encoderObservationValid = false;
-    mutable bool _hasProcessedEncoderSnapshot = false;
+    mutable bool _encoderReferenceInitialized = false;
     mutable bool _lastImuYawRateValid = false;
     mutable bool _lastImuAccelValid = false;
-    struct CommandContext
-    {
-        MazeMap::PlantDerivatives presentDerivatives{};
-        float batteryVoltageV = 0.0f;
-        float presentYawRad = 0.0f;
-        float presentLinearSpeedMps = 0.0f;
-        float presentYawRateRadps = 0.0f;
-        float stateLongitudinalAccelMps2 = 0.0f;
-        float stateImuForwardAccelMps2 = 0.0f;
-        float stateImuLateralAccelMps2 = 0.0f;
-        float imuYawRateRadps = 0.0f;
-        float imuForwardAccelMps2 = 0.0f;
-        float imuLateralAccelMps2 = 0.0f;
-        float encoderLeftVelocityMps = 0.0f;
-        float encoderRightVelocityMps = 0.0f;
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-    };
-
-    struct CommandTargets
-    {
-        bool hasHeadingTarget = false;
-        float headingTargetYawRad = 0.0f;
-        bool hasVelocityTarget = false;
-        float velocityTargetMps = 0.0f;
-        bool hasYawRateTarget = false;
-        float yawRateTargetRadps = 0.0f;
-        bool hasLongitudinalAccelTarget = false;
-        float longitudinalAccelTargetMps2 = 0.0f;
-        bool hasYawAccelTarget = false;
-        float yawAccelTargetRadps2 = 0.0f;
-        bool hasLateralAccelTarget = false;
-        float lateralAccelTargetMps2 = 0.0f;
-        bool hasWheelLinearTargets = false;
-        float leftWheelLinearTargetMps = 0.0f;
-        float rightWheelLinearTargetMps = 0.0f;
-    };
-
-    struct WheelLaunchAssistState
-    {
-        bool active = false;
-        unsigned long startMs = 0UL;
-        float requestedDirection = 0.0f;
-    };
-    WheelLaunchAssistState _leftLaunchAssist;
-    WheelLaunchAssistState _rightLaunchAssist;
-
+    // Resolves the command operating speed from runtime state first, then sensor-derived wheel/IMU
+    // measurements, then zero. The battery-voltage output is retained for plant-model call shape;
+    // this function currently leaves it at the caller-provided value.
     void GetVelocityCommandOperatingPoint(
         float& presentLinearSpeedMps,
         float& presentYawRateRadps,
         float& batteryVoltageV) const;
 
+    // Central response horizon used when converting velocity/yaw-rate target error into requested
+    // acceleration. Falls back to one second if the PlantModel constant is invalid.
     static float ResolveCommandResponseTimeS() noexcept;
 
+    // Returns positive finite values unchanged and maps all other inputs to zero.
     static float ResolvePositiveOrZero(float value) noexcept;
 
+    // Clamps value to +/-limit when limit is positive and finite; otherwise returns zero.
     static float ClampMagnitude(float value, float limit) noexcept;
 
-    CommandTargets BuildHoldTargets(const CommandContext& context) const noexcept;
-
-    CommandContext CaptureCommandContext() const;
-
+    // Converts body linear/yaw targets into left/right wheel linear targets for encoder feedback and
+    // command telemetry.
     void ResolveWheelTargets(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps,
-        CommandTargets& targets) const;
+        float& leftWheelLinearTargetMps,
+        float& rightWheelLinearTargetMps) const;
 
-    void ResolveVelocityPointAcceleration(
-        const CommandContext& context,
-        float desiredLinearSpeedMps,
-        float& desiredLongitudinalAccelMps2) const noexcept;
-
-    void ResolveYawPointAcceleration(
-        const CommandContext& context,
-        float desiredYawRateRadps,
-        float& desiredYawAccelRadps2) const noexcept;
-
-    void ResolveVelocityPointAccelerations(
-        const CommandContext& context,
-        float desiredLinearSpeedMps,
-        float desiredYawRateRadps,
-        float& desiredLongitudinalAccelMps2,
-        float& desiredYawAccelRadps2) const noexcept;
-
+    // Asks PlantModel for feedforward PWM for the requested acceleration. A near-zero acceleration
+    // request is treated as a steady-state hold at the supplied operating speed. PlantModel owns
+    // finite feedforward output; DriveBase only clamps to its PWM command envelope.
     MazeMap::App::Internal::CommandVector ResolveRawAccelerationCommand(
         float presentLinearSpeedMps,
         float presentYawRateRadps,
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2) const;
 
+    // Asks PlantModel for steady-state feedforward PWM for a body velocity/yaw-rate target. PlantModel
+    // owns finite feedforward output; DriveBase only clamps to its PWM command envelope.
     MazeMap::App::Internal::CommandVector ResolveRawVelocityTargetCommand(
         float desiredLinearSpeedMps,
         float desiredYawRateRadps) const;
 
+    // Converts a requested longitudinal acceleration correction into the incremental PWM difference
+    // from the steady-state command at the current operating point.
     MazeMap::App::Internal::CommandVector ResolveLongitudinalCorrectionCommand(
-        const CommandContext& context,
+        float presentLinearSpeedMps,
+        float presentYawRateRadps,
+        float maxLongitudinalAccelMps2,
         float desiredLongitudinalAccelCorrectionMps2) const;
 
+    // Converts a requested yaw acceleration correction into the incremental PWM difference from the
+    // steady-state command at the current operating point.
     MazeMap::App::Internal::CommandVector ResolveYawCorrectionCommand(
-        const CommandContext& context,
+        float presentLinearSpeedMps,
+        float presentYawRateRadps,
+        float maxYawAccelRadps2,
         float desiredYawAccelCorrectionRadps2) const;
 
-    MazeMap::App::Internal::CommandVector ComposeGeneratedCommand(
-        const MazeMap::App::Internal::CommandVector& baseCommand,
-        const CommandContext& context,
-        const CommandTargets& targets,
-        MazeMap::CommandPD pd) const;
-
+    // Records the feedforward/feedback split from the last generated command for telemetry. The
+    // feedback value is the pre-final-clamp difference between the composed command and base command.
     void CacheGeneratedCommandTelemetry(
         const MazeMap::App::Internal::CommandVector& feedforwardCommand,
         const MazeMap::App::Internal::CommandVector& feedbackCommand) const noexcept;
 
-    float ResolveStraightHeadingYawRateCommand(
-        float targetYawRad,
-        float measuredYawRad,
-        float estimatedYawRateRadps) const noexcept
-    {
-        if (!(std::isfinite(targetYawRad) && std::isfinite(measuredYawRad)))
-        {
-            return 0.0f;
-        }
-
-        const float resolvedEstimatedYawRateRadps =
-            std::isfinite(estimatedYawRateRadps) ?
-            estimatedYawRateRadps :
-            0.0f;
-        const float headingErrorRad =
-            HeadingErrorRad(
-                HeadingUnitFromYawRad(targetYawRad),
-                HeadingUnitFromYawRad(measuredYawRad));
-        const MazeMap::ProportionalDerivative& headingPD =
-            GetProportionalDerivativeCluster().GetHeadingPD(MazeMap::CommandPD::StateHeadingPD);
-        const float angularCommandRadps =
-            headingPD.Compute(headingErrorRad, -resolvedEstimatedYawRateRadps);
-        if (!std::isfinite(angularCommandRadps))
-        {
-            return 0.0f;
-        }
-        return angularCommandRadps;
-    }
-
+    // Resolves the default acceleration envelopes used when turning a velocity/yaw target into a
+    // reachable command. The hardcoded DriveBase defaults are capped by PlantModel's technical limits.
     void ResolveDefaultVelocityTargetCommandEnvelope(
         float& maxLongitudinalAccelMps2,
         float& maxYawAccelRadps2) const
@@ -516,93 +433,6 @@ private:
             maxYawAccelRadps2 =
                 (std::min)(maxYawAccelRadps2, technicalYawAccelRadps2);
         }
-    }
-
-    void ResetLaunchAssist()
-    {
-        _leftLaunchAssist = WheelLaunchAssistState{};
-        _rightLaunchAssist = WheelLaunchAssistState{};
-    }
-
-    static void ResetWheelLaunchAssistState(WheelLaunchAssistState& state, unsigned long nowMs)
-    {
-        state.active = false;
-        state.startMs = nowMs;
-        state.requestedDirection = 0.0f;
-    }
-
-    static bool UpdateWheelLaunchAssistState(
-        WheelLaunchAssistState& state,
-        float measuredMps,
-        float requestedDirection,
-        float priorDriveCommand,
-        unsigned long nowMs)
-    {
-        if ((std::fabs(requestedDirection) <= 0.01f) ||
-            (std::fabs(measuredMps) > Config::kWheelRestLaunchSpeedThresholdMps))
-        {
-            ResetWheelLaunchAssistState(state, nowMs);
-            return false;
-        }
-
-        if (!state.active)
-        {
-            if (std::fabs(priorDriveCommand) > Config::kWheelRestLaunchDriveThreshold)
-            {
-                return false;
-            }
-
-            state.active = true;
-            state.startMs = nowMs;
-            state.requestedDirection = SignF(requestedDirection);
-            return true;
-        }
-
-        const float requestedSign = SignF(requestedDirection);
-        if ((requestedSign != 0.0f) &&
-            (state.requestedDirection != 0.0f) &&
-            (requestedSign != state.requestedDirection))
-        {
-            state.startMs = nowMs;
-            state.requestedDirection = requestedSign;
-        }
-        else if ((state.requestedDirection == 0.0f) && (requestedSign != 0.0f))
-        {
-            state.startMs = nowMs;
-            state.requestedDirection = requestedSign;
-        }
-
-        return true;
-    }
-
-    static float GetWheelLaunchAssistFloor(const WheelLaunchAssistState& state, unsigned long nowMs)
-    {
-        if (!state.active)
-        {
-            return 0.0f;
-        }
-
-        return MazeMap::ComputeLaunchAssistDriveFloor(
-            Config::kWheelRestLaunchDriveCommand,
-            Config::kWheelRestLaunchMaxDriveCommand,
-            nowMs - state.startMs,
-            Config::kWheelRestLaunchRampMs);
-    }
-
-    static float ApplyLaunchAssistFloor(float command, float requestedDirection, float launchFloor)
-    {
-        if ((std::fabs(requestedDirection) <= 0.01f) || !(launchFloor > 0.0f))
-        {
-            return command;
-        }
-
-        const float magnitude = std::fabs(command);
-        if (magnitude >= launchFloor)
-        {
-            return command;
-        }
-
-        return SignF(requestedDirection) * launchFloor;
     }
 
 };

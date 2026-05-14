@@ -18,11 +18,6 @@ namespace MazeMap
                 std::isfinite(control.LeftMotorPwm()) &&
                 std::isfinite(control.RightMotorPwm());
         }
-
-        float ControlVectorAverage(const App::Internal::CommandVector& control) noexcept
-        {
-            return 0.5f * (control.LeftMotorPwm() + control.RightMotorPwm());
-        }
     }
 
     TEST_CLASS(PlantModelDriveCommandTest)
@@ -102,15 +97,17 @@ namespace MazeMap
 
             VehicleState movingState;
             movingState.SetVelocity(0.75f);
-            movingState.SetWheelSpeedLeft(0.0f);
-            movingState.SetWheelSpeedRight(0.0f);
+			float L_omega, R_omega;
+			vehicle.WheelOmegasFromBodyVelocity(0.75f, 0.0f, L_omega, R_omega);
+			movingState.SetWheelSpeedLeft(L_omega);
+			movingState.SetWheelSpeedRight(R_omega);
             PlantModel movingPlant(vehicle, movingState);
             const App::Internal::CommandVector movingControl =
                 movingPlant.solveAccelerationFeedforward(4.0f, 0.0f);
 
             Assert::IsTrue(IsFiniteControlVector(restControl));
             Assert::IsTrue(IsFiniteControlVector(movingControl));
-            Assert::IsTrue(ControlVectorAverage(movingControl) > ControlVectorAverage(restControl));
+            Assert::IsTrue(movingControl.Average() > restControl.Average());
         }
 
         TEST_METHOD(PlantModelComputeBodyActionUsesLongitudinalLimitForPureSpeedChange)

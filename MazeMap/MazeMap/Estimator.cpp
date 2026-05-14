@@ -251,6 +251,9 @@ namespace MazeMap
         _runtimeState.SetVelocity(measured.linearSpeedMps);
         _runtimeState.SetLateralVelocity(0.0f);
         _runtimeState.SetRotationalVelocity(measured.angularSpeedRadps);
+        _runtimeState.SetLongitudinalAcceleration(0.0f);
+        _runtimeState.SetLateralAcceleration(0.0f);
+        _runtimeState.SetYawAcceleration(0.0f);
         _runtimeState.SetWheelSpeedLeft(encoderObservation.omegaLeftRadps);
         _runtimeState.SetWheelSpeedRight(encoderObservation.omegaRightRadps);
     }
@@ -259,6 +262,9 @@ namespace MazeMap
     {
         _runtimeState.SetTime(0.0f);
         _runtimeState.SetTimestampUs(0U);
+        _runtimeState.SetLongitudinalAcceleration(0.0f);
+        _runtimeState.SetLateralAcceleration(0.0f);
+        _runtimeState.SetYawAcceleration(0.0f);
         _runtimeState.SetSensorSnapshot(SensorSnapshot{});
     }
 

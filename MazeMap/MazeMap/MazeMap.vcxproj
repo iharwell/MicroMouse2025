@@ -184,7 +184,6 @@
     <ClInclude Include="CellCoordinates.h" />
     <ClInclude Include="CircularBuffer.h" />
     <ClInclude Include="CommandVector.h" />
-    <ClInclude Include="CommandPD.h" />
     <ClInclude Include="CompactPath.h" />
     <ClInclude Include="CoreConfig.h" />
     <ClInclude Include="CruiseSpeedFloor.h" />
@@ -215,7 +214,6 @@
     <ClInclude Include="ImuCalibrationPolicy.h" />
     <ClInclude Include="ImuSamplingProfile.h" />
     <ClInclude Include="Kinematics.h" />
-    <ClInclude Include="LaunchAssistProfile.h" />
     <ClInclude Include="LedCalibrationConfig.h" />
     <ClInclude Include="LSM6DSV16X_IMU.h" />
     <ClInclude Include="Maneuver.h" />
@@ -267,11 +265,11 @@
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="EncoderObs.h" />
+    <ClInclude Include="FeedbackAxis.h" />
     <ClInclude Include="ImuAccelObs.h" />
     <ClInclude Include="PlanarAccelLateralUpdate.h" />
-    <ClInclude Include="PredictorSubstepPolicy.h" />
     <ClInclude Include="ProportionalDerivative.h" />
-    <ClInclude Include="ProportionalDerivativeCluster.h" />
+    <ClInclude Include="PDCluster.h" />
     <ClInclude Include="RollingAverageWindow.h" />
     <ClInclude Include="RuntimeSensorSuite.h" />
     <ClInclude Include="ShowcasingDonutController.h" />
@@ -316,6 +314,7 @@
     <ClCompile Include="Drive.cpp" />
     <ClCompile Include="DriveBase.cpp" />
     <ClCompile Include="DriveTelemetry.cpp" />
+    <ClCompile Include="FeedbackAxis.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="EncoderProgressWatchdog.cpp" />
     <ClCompile Include="Fresnel.cpp" />
@@ -394,9 +393,8 @@
     </ClCompile>
     <ClCompile Include="PlantModel.cpp" />
     <ClCompile Include="PlanarAccelLateralUpdate.cpp" />
-    <ClCompile Include="PredictorSubstepPolicy.cpp" />
     <ClCompile Include="ProportionalDerivative.cpp" />
-    <ClCompile Include="ProportionalDerivativeCluster.cpp" />
+    <ClCompile Include="PDCluster.cpp" />
     <ClCompile Include="SigmaPointSetSimplex.cpp" />
     <ClCompile Include="SoftOdometryAid.cpp" />
     <ClCompile Include="SrUkfCore.cpp" />

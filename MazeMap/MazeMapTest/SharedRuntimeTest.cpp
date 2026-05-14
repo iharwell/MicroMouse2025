@@ -89,6 +89,16 @@ namespace
                 snapshot.encoderObservation.rightVelocityMps * invWheelRadiusM;
         }
         snapshot.encoderObservationValid = true;
+        snapshot.leftEncoderTotalCounts =
+            runtime.RuntimeState().GetSensorSnapshot().leftEncoderTotalCounts +
+            static_cast<std::int64_t>(leftCounts);
+        snapshot.rightEncoderTotalCounts =
+            runtime.RuntimeState().GetSensorSnapshot().rightEncoderTotalCounts +
+            static_cast<std::int64_t>(rightCounts);
+        snapshot.leftEncoderDistanceM =
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.leftEncoderTotalCounts);
+        snapshot.rightEncoderDistanceM =
+            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.rightEncoderTotalCounts);
         UpdateDriveEstimator(runtime.Drive(), runtime.Estimator(), runtime.RuntimeState(), dtSeconds, snapshot);
     }
 
@@ -294,8 +304,9 @@ namespace MazeMap::App
                     0.0f,
                     limits.GetMaxAngularSpeedRadps(),
                     HALF_PI_F,
-                    drive.GetCommandPDSettings().yawRate,
-                    drive.GetCommandPDSettings().heading);
+                    Config::kDriveVelocityFeedbackSources,
+                    Config::kDriveYawRateFeedbackSources,
+                    Config::kDriveHeadingFeedbackSources);
 
             drive.StartTurn(HALF_PI_F);
 
@@ -336,9 +347,9 @@ namespace MazeMap::App
                 return control;
             };
 
-            const MazeMap::ProportionalDerivativeCluster baselineCluster =
+            const MazeMap::PDCluster baselineCluster =
                 runtime.Drive().GetProportionalDerivativeCluster();
-            MazeMap::ProportionalDerivativeCluster zeroHeadingCluster = baselineCluster;
+            MazeMap::PDCluster zeroHeadingCluster = baselineCluster;
             zeroHeadingCluster.HeadingStatePD = MazeMap::ProportionalDerivative(0.0f, 0.0f);
 
             runtime.Drive().SetProportionalDerivativeCluster(baselineCluster);

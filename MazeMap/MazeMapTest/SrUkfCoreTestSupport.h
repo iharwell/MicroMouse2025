@@ -373,15 +373,11 @@ namespace MazeMap
         float commandedAngularRadps,
         float fanDutyCycle = 0.80f,
         float batteryVoltageV = 0.0f,
-        std::uint16_t saturationFlags = 0U,
-        float leftLaunchAssistFloor = 0.0f,
-        float rightLaunchAssistFloor = 0.0f)
+        std::uint16_t saturationFlags = 0U)
     {
         (void)commandedLinearMps;
         (void)commandedAngularRadps;
         (void)saturationFlags;
-        (void)leftLaunchAssistFloor;
-        (void)rightLaunchAssistFloor;
         const VehicleState::StateVector stateBeforePredict = core.workingState();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
             core.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV));

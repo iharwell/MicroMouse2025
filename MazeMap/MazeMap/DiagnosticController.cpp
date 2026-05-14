@@ -192,8 +192,8 @@ private:
         _logRow.cmd_angular_radps = driveTelemetry.commandedAngularSpeedRadps;
         _logRow.left_drive_cmd = driveTelemetry.leftDriveCommand;
         _logRow.right_drive_cmd = driveTelemetry.rightDriveCommand;
-        _logRow.left_encoder_count = driveTelemetry.leftEncoderCount;
-        _logRow.right_encoder_count = driveTelemetry.rightEncoderCount;
+        _logRow.left_encoder_count = static_cast<std::int32_t>(driveTelemetry.leftEncoderCount);
+        _logRow.right_encoder_count = static_cast<std::int32_t>(driveTelemetry.rightEncoderCount);
         _logRow.left_distance_m = driveTelemetry.leftDistanceM;
         _logRow.right_distance_m = driveTelemetry.rightDistanceM;
         _logRow.left_velocity_mps = driveTelemetry.leftVelocityMps;
@@ -1668,7 +1668,8 @@ private:
         return _drive.PointControlVector(
             _straightPhaseState.commandedSpeedMps,
             angularCommandRadps,
-            MazeMap::CommandPD::EncoderVelocity);
+            MazeMap::FeedbackSource::Encoder,
+            MazeMap::FeedbackSource::Encoder);
     }
 
     CommandVector KickoffCharacterizationTick(
@@ -1988,7 +1989,8 @@ private:
         return _drive.PointControlVector(
             _arcPhaseState.commandedSpeedMps,
             angularCommandRadps,
-            MazeMap::CommandPD::EncoderVelocity);
+            MazeMap::FeedbackSource::Encoder,
+            MazeMap::FeedbackSource::Encoder);
     }
 
 };

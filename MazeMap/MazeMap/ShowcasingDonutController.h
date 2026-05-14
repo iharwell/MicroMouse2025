@@ -76,8 +76,6 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(float, right_feedback_command) \
     FIELD(float, left_target_velocity_mps) \
     FIELD(float, right_target_velocity_mps) \
-    FIELD(float, left_launch_assist_floor) \
-    FIELD(float, right_launch_assist_floor) \
     FIELD(std::uint32_t, encoder_timestamp_us) \
     FIELD(std::int32_t, left_encoder_count) \
     FIELD(std::int32_t, right_encoder_count) \

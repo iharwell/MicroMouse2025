@@ -42,6 +42,10 @@ struct SensorSnapshot
     bool leftTransitionDetected = false;
     bool rightTransitionDetected = false;
     bool encoderObservationValid = false;
+    std::int64_t leftEncoderTotalCounts = 0;
+    std::int64_t rightEncoderTotalCounts = 0;
+    float leftEncoderDistanceM = 0.0f;
+    float rightEncoderDistanceM = 0.0f;
 
     MazeMap::EncoderObs encoderObservation{};
     WallSensorTelemetry frontLeft{};

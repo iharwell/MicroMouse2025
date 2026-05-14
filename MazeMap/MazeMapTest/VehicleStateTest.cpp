@@ -52,6 +52,40 @@ namespace MazeMap
     TEST_CLASS(VehicleStateTest)
     {
     public:
+        TEST_METHOD(VehicleWheelOmegasFromBodyVelocityMatchesBodyKinematics)
+        {
+            constexpr float forwardMps = 0.72f;
+            constexpr float yawRateRadps = 1.35f;
+
+            float leftOmegaRadps = 0.0f;
+            float rightOmegaRadps = 0.0f;
+            Vehicle::WheelOmegasFromBodyVelocity(
+                forwardMps,
+                yawRateRadps,
+                leftOmegaRadps,
+                rightOmegaRadps);
+
+            const float leftWheelMps = Vehicle::WheelLinearVelocityFromOmega(leftOmegaRadps);
+            const float rightWheelMps = Vehicle::WheelLinearVelocityFromOmega(rightOmegaRadps);
+
+            Assert::AreEqual(
+                Vehicle::LeftWheelLinearVelocityFromBody(forwardMps, yawRateRadps),
+                leftWheelMps,
+                1.0e-6f);
+            Assert::AreEqual(
+                Vehicle::RightWheelLinearVelocityFromBody(forwardMps, yawRateRadps),
+                rightWheelMps,
+                1.0e-6f);
+            Assert::AreEqual(
+                forwardMps,
+                Vehicle::BodyForwardVelocityFromWheelLinear(leftWheelMps, rightWheelMps),
+                1.0e-6f);
+            Assert::AreEqual(
+                yawRateRadps,
+                Vehicle::BodyYawRateFromWheelLinear(leftWheelMps, rightWheelMps),
+                1.0e-6f);
+        }
+
         TEST_METHOD(VehicleStateIsStationaryUsesCurrentUkfThresholds)
         {
             const PlantParams params = PlantParams::Default();

@@ -37,11 +37,6 @@ class CompetitionFeedforwardTest(unittest.TestCase):
         return CurrentFeedforwardSetup(
             launch_fit=launch_fit,
             wheel_static_feedforward=0.0,
-            wheel_rest_launch_drive_command=0.30,
-            wheel_rest_launch_max_drive_command=0.55,
-            wheel_rest_launch_ramp_ms=250,
-            wheel_rest_launch_speed_threshold_mps=0.02,
-            wheel_rest_launch_drive_threshold=0.05,
             wheel_velocity_feedforward=0.0,
             wheel_acceleration_response_gain_per_mps2=0.20,
             wheel_velocity_kp=1.10,

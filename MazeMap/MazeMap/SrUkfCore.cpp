@@ -370,6 +370,7 @@ namespace MazeMap
 {
     SrUkfCore::SrUkfCore(const PlantModel& plantModel, VehicleState& runtimeState) noexcept
         : _plantModel(plantModel)
+        , _runtimeState(runtimeState)
         , _geometryModel()
         , _workingFilter(runtimeState._state, runtimeState._sqrtCovariance)
         , _frozenLeftAppliedBankTorqueNm(0.0f)
@@ -400,8 +401,6 @@ namespace MazeMap
         , _commandedLinearMps(0.0f)
         , _commandedAngularRadps(0.0f)
         , _saturationFlags(0U)
-        , _leftLaunchAssistFloor(0.0f)
-        , _rightLaunchAssistFloor(0.0f)
         , _accelBodyXMps2(0.0f)
         , _accelBodyYMps2(0.0f)
         , _stationaryCandidateDwellS(0.0f)
@@ -490,8 +489,6 @@ namespace MazeMap
         float commandedLinearMps,
         float commandedAngularRadps,
         std::uint16_t saturationFlags,
-        float leftLaunchAssistFloor,
-        float rightLaunchAssistFloor,
         bool accelBiasValid,
         float accelBodyXMps2,
         float accelBodyYMps2) noexcept
@@ -499,8 +496,6 @@ namespace MazeMap
         _commandedLinearMps = commandedLinearMps;
         _commandedAngularRadps = commandedAngularRadps;
         _saturationFlags = saturationFlags;
-        _leftLaunchAssistFloor = leftLaunchAssistFloor;
-        _rightLaunchAssistFloor = rightLaunchAssistFloor;
         _accelBodyXMps2 = accelBiasValid ? accelBodyXMps2 : std::numeric_limits<float>::quiet_NaN();
         _accelBodyYMps2 = accelBiasValid ? accelBodyYMps2 : std::numeric_limits<float>::quiet_NaN();
     }
@@ -577,15 +572,11 @@ namespace MazeMap
         float forwardSpeedMps,
         float leftDriveCommand,
         float rightDriveCommand,
-        float leftLaunchAssistFloor,
-        float rightLaunchAssistFloor,
         bool recentCommandSignFlip,
         bool recentStationaryExit) noexcept
     {
         return
             recentCommandSignFlip ||
-            (leftLaunchAssistFloor > 0.0f) ||
-            (rightLaunchAssistFloor > 0.0f) ||
             (std::isfinite(forwardSpeedMps) &&
                 (std::fabs(forwardSpeedMps) < kLaunchLowSpeedThresholdMps) &&
                 std::isfinite(leftDriveCommand) &&
@@ -1240,10 +1231,11 @@ namespace MazeMap
         _commandedLinearMps = 0.0f;
         _commandedAngularRadps = 0.0f;
         _saturationFlags = 0U;
-        _leftLaunchAssistFloor = 0.0f;
-        _rightLaunchAssistFloor = 0.0f;
         _accelBodyXMps2 = 0.0f;
         _accelBodyYMps2 = 0.0f;
+        _runtimeState.SetLongitudinalAcceleration(0.0f);
+        _runtimeState.SetLateralAcceleration(0.0f);
+        _runtimeState.SetYawAcceleration(0.0f);
         _stationaryCandidateDwellS = 0.0f;
         _stationaryCandidatePoseReferenceState = _workingFilter.state();
         _stationaryCandidatePoseReferenceCovariance = _workingFilter.covariance();
@@ -1906,6 +1898,11 @@ namespace MazeMap
 
         _prePredictState = _workingFilter.state();
         _prePredictCovariance = _workingFilter.covariance();
+        const PlantDerivatives presentDerivatives =
+            _plantModel.forwardStep(control, fanDutyCycle, batteryVoltageV);
+        _runtimeState.SetLongitudinalAcceleration(presentDerivatives.longitudinalAccelMps2);
+        _runtimeState.SetLateralAcceleration(presentDerivatives.lateralAccelMps2);
+        _runtimeState.SetYawAcceleration(presentDerivatives.yawAccelRadps2);
         _havePredictionReference = true;
         _acceptedEncoderUpdateSincePredict = false;
         _lastEncoderDtSeconds = dt;
@@ -2667,8 +2664,6 @@ namespace MazeMap
             _workingFilter.state()(VehicleState::kU),
             _lastControl.LeftMotorPwm(),
             _lastControl.RightMotorPwm(),
-            _leftLaunchAssistFloor,
-            _rightLaunchAssistFloor,
             recentCommandSignFlip,
             recentStationaryExit);
         if (launchTrigger)

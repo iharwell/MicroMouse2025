@@ -1037,29 +1037,6 @@ namespace MazeMap::App::Internal
             return (ResolveFiniteOr(nextValue, 0.0f) - ResolveFiniteOr(presentValue, 0.0f)) / usableDtSeconds;
         }
 
-        float ResolveHeadingYawRateTarget(
-            DriveBase* const drive,
-            const float targetYawRad,
-            const float measuredYawRad,
-            const float presentYawRateRadps,
-            const MazeMap::CommandPD headingPd) noexcept
-        {
-            if ((drive == nullptr) ||
-                !MazeMap::HasCommandPD(headingPd, MazeMap::CommandPD::StateHeadingPD) ||
-                !(std::isfinite(targetYawRad) && std::isfinite(measuredYawRad)))
-            {
-                return 0.0f;
-            }
-
-            const MazeMap::ProportionalDerivative& headingController =
-                drive->GetProportionalDerivativeCluster().GetHeadingPD(MazeMap::CommandPD::StateHeadingPD);
-            const float yawRateCommandRadps =
-                headingController.Compute(
-                    AngleErrorRad(targetYawRad, measuredYawRad),
-                    -ResolveFiniteOr(presentYawRateRadps, 0.0f));
-            return std::isfinite(yawRateCommandRadps) ? yawRateCommandRadps : 0.0f;
-        }
-
         CommandVector MakeDeltaControlVector(
             DriveBase* const drive,
             const float presentSpeedMps,
@@ -1083,7 +1060,8 @@ namespace MazeMap::App::Internal
                     desiredLongitudinalAccelMps2,
                     ResolveFiniteOr(presentYawRateRadps, 0.0f),
                     desiredYawAccelRadps2,
-                    MazeMap::CommandPD::RawCommand);
+                    MazeMap::FeedbackSource::None,
+                    MazeMap::FeedbackSource::None);
             return command;
         }
 
@@ -1135,6 +1113,8 @@ namespace MazeMap::App::Internal
 
             const float finiteRemainingRad = std::isfinite(remainingRad) ? remainingRad : 0.0f;
             const float targetYawRateRadps =
+                IsTurnComplete(finiteRemainingRad, limits) ?
+                0.0f :
                 std::isfinite(limits.GetAngularAccelRadps2()) ?
                 (SignF(finiteRemainingRad) *
                     ReachableSpeedWithBoundary(0.0f, std::fabs(finiteRemainingRad), std::fabs(limits.GetAngularAccelRadps2()))) :
@@ -1159,11 +1139,11 @@ namespace MazeMap::App::Internal
 
     Drive::Drive(const float nominalCommandPeriodSeconds)
         : _nominalCommandPeriodSeconds(ResolveNominalCommandDtSeconds(nominalCommandPeriodSeconds))
+        , _headingFeedbackSources(Config::kDriveHeadingFeedbackSources)
+        , _yawRateFeedbackSources(Config::kDriveYawRateFeedbackSources)
+        , _distanceFeedbackSources(Config::kDriveDistanceFeedbackSources)
+        , _velocityFeedbackSources(Config::kDriveVelocityFeedbackSources)
     {
-        _commandPdSettings.heading = Config::kDriveHeadingCommandPd;
-        _commandPdSettings.yawRate = Config::kDriveYawRateCommandPd;
-        _commandPdSettings.velocity = Config::kDriveVelocityCommandPd;
-        _commandPdSettings.distance = Config::kDriveDistanceCommandPd;
     }
 
     void Drive::SetOperationMode(const OperationMode mode) noexcept
@@ -1189,16 +1169,6 @@ namespace MazeMap::App::Internal
     float Drive::GetNominalCommandPeriodSeconds() const noexcept
     {
         return _nominalCommandPeriodSeconds;
-    }
-
-    void Drive::SetCommandPDSettings(const CommandPDSettings& settings) noexcept
-    {
-        _commandPdSettings = settings;
-    }
-
-    const Drive::CommandPDSettings& Drive::GetCommandPDSettings() const noexcept
-    {
-        return _commandPdSettings;
     }
 
     bool Drive::IsEffectivelyComplete() const noexcept
@@ -1668,12 +1638,15 @@ namespace MazeMap::App::Internal
         }
 
         float targetYawRateRadps =
-            ResolveHeadingYawRateTarget(
-                _drive,
+            (_drive != nullptr) ?
+            _drive->GetFeedbackCommand(
+                0U,
+                0.0f,
+                MazeMap::FeedbackSource::None,
+                0U,
                 resolvedTargetYawRad,
-                state.GetOrientation(),
-                presentYawRateRadps,
-                _commandPdSettings.heading);
+                _headingFeedbackSources).Differential() :
+            0.0f;
         if (!hasFiniteStopCondition)
         {
             done = true;

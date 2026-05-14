@@ -18,7 +18,7 @@ namespace MazeMap::App::Internal
     }
 
     WallTouch::WallTouch()
-        : _trackingCommandPd(Config::kWallTouchTrackingCommandPd)
+        : _trackingFeedbackSources(Config::kWallTouchTrackingFeedbackSources)
     {
     }
 
@@ -331,7 +331,11 @@ namespace MazeMap::App::Internal
                 _limits.GetMaxAngularSpeedRadps());
         }
 
-        return _drive->PointControlVector(clampedSpeedMps, angularCommandRadps, _trackingCommandPd);
+        return _drive->PointControlVector(
+            clampedSpeedMps,
+            angularCommandRadps,
+            MazeMap::FeedbackSource::None,
+            _trackingFeedbackSources);
     }
 
     CommandVector WallTouch::SeekControls(

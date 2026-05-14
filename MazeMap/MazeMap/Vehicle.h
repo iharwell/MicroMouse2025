@@ -164,6 +164,17 @@ namespace MazeMap
             return wheelLinearMps / GetDriveWheelRadiusM();
         }
 
+        static constexpr float DriveEncoderDistanceFromCounts(std::int64_t counts) noexcept
+        {
+            static_assert(kDriveWheelDiameterM > 0.0f, "Drive wheel diameter must be positive.");
+            static_assert(kDriveGearRatio > 0.0f, "Drive gear ratio must be positive.");
+            static_assert(kDriveEncoderPulsesPerRev > 0U, "Drive encoder resolution must be positive.");
+            return
+                static_cast<float>(counts) *
+                ((PI_F * kDriveWheelDiameterM) /
+                    (kDriveGearRatio * static_cast<float>(kDriveEncoderPulsesPerRev)));
+        }
+
         static constexpr float LeftWheelLinearVelocityFromBody(float forwardMps, float yawRateRadps) noexcept
         {
             static_assert(kPhysicalModel.trackWidthM > 0.0f, "Vehicle track width must be positive.");
@@ -174,6 +185,16 @@ namespace MazeMap
         {
             static_assert(kPhysicalModel.trackWidthM > 0.0f, "Vehicle track width must be positive.");
             return forwardMps - (0.5f * GetPhysicalModel().trackWidthM * yawRateRadps);
+        }
+
+        static constexpr void WheelOmegasFromBodyVelocity(
+            float forward,
+            float yawRate,
+            float& l_omega,
+            float& r_omega) noexcept
+        {
+            l_omega = WheelOmegaFromLinearVelocity(LeftWheelLinearVelocityFromBody(forward, yawRate));
+            r_omega = WheelOmegaFromLinearVelocity(RightWheelLinearVelocityFromBody(forward, yawRate));
         }
 
         static constexpr float BodyForwardVelocityFromWheelLinear(float leftMps, float rightMps) noexcept

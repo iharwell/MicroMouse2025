@@ -1,7 +1,8 @@
 #pragma once
 #include "Defines.h"
 #include "Maze.h"
-#include "ProportionalDerivativeCluster.h"
+#include "FeedbackAxis.h"
+#include "PDCluster.h"
 #include "Vehicle.h"
 
 namespace MazeMap::Config
@@ -380,35 +381,20 @@ namespace MazeMap::Config
     constexpr float kWallBeliefSaturationMagnitude = 3.50f;
 
     // [High] Residual static trim on top of the motor-model wheel feedforward. Keep this at zero unless the shared
-    // motor model still leaves a repeatable low-speed bias after launch assist has already done its job.
+    // motor model still leaves a repeatable low-speed bias.
     constexpr float kWheelStaticFeedforward = 0.0f;
-    // [High] Minimum motor command used only on the first control update of a move from rest. Raise it if launches still
-    // stall against static friction; decrease it if the robot kicks too hard when starting a move.
-    constexpr float kWheelRestLaunchDriveCommand = 0.30f;
-    // [High] Maximum motor command the launch assist may reach if the encoders still report no wheel motion after the
-    // initial launch floor. Raise it if starts still hang on static friction; decrease it if launches hit too hard.
-    constexpr float kWheelRestLaunchMaxDriveCommand = 0.55f;
-    // [Medium] Time for the launch assist to ramp from the initial floor to the max launch command while the encoders
-    // still show the wheel at rest. Shorten it for a harder snap off the line; lengthen it for a softer launch.
-    constexpr unsigned long kWheelRestLaunchRampMs = 250UL;
-    // [Medium] Wheel-speed threshold for considering the robot stationary for the one-shot launch assist. Increase it if
-    // encoder quantization keeps the assist from triggering at rest; decrease it if the assist retriggers after motion.
-    constexpr float kWheelRestLaunchSpeedThresholdMps = 0.02f;
-    // [Medium] Prior-drive threshold for treating the previous cycle as effectively stopped before applying the launch
-    // assist. Increase it if very small commands should still count as "at rest"; decrease it if the assist retriggers.
-    constexpr float kWheelRestLaunchDriveThreshold = 0.05f;
-    // [High] Wheel-speed proportional gain used directly by the wheel-velocity PD setup. Increase for tighter speed
-    // tracking; decrease if motor commands chatter or the chassis oscillates in speed on straight segments.
-    constexpr float kWheelVelocityKp = 2.31f;
-    // [Medium] Wheel-speed derivative gain used directly by the wheel-velocity PD setup. Increase to damp speed
+    // [High] Proportional gain for encoder-derived wheel-pair velocity feedback. Increase for tighter speed
+    // tracking; decrease if motor commands chatter or the chassis oscillates on straight segments.
+    constexpr float kEncoderVelocityKp = 2.31f;
+    // [Medium] Derivative gain for encoder-derived wheel-pair velocity feedback. Increase to damp speed
     // corrections; decrease if encoder noise leaks into wheel command changes.
-    constexpr float kWheelVelocityKd = 0.021f;
+    constexpr float kEncoderVelocityKd = 0.021f;
     // [High] Straight-line heading proportional gain. Increase if the robot drifts off heading in open corridors;
     // decrease if it snakes left-right while trying to stay on course.
-    constexpr float kStraightHeadingKp = 18.0f;
+    constexpr float kStraightHeadingKp = 29.0f;
     // [High] Straight-line yaw damping. Increase if heading correction oscillates; decrease if heading correction feels
     // lazy and the robot lets errors build before responding.
-    constexpr float kStraightYawD = 0.3f;
+    constexpr float kStraightYawD = 0.0f;
     // [High] Wall-centering gain used when side walls are available. Increase if the robot does not recenter in a
     // corridor; decrease if wall following hunts or bounces between walls.
     constexpr float kWallCenterGain = 135.0f;
@@ -442,39 +428,27 @@ namespace MazeMap::Config
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
     constexpr float kSmoothTurnYawRateKd = 0.05f;
-    // [High] In-place turn proportional gain. Increase if the robot consistently stops short of target heading;
-    // decrease if it overshoots or rings at the end of turns.
-    constexpr float kTurnHeadingKp = 7.5f;
-    // [High] In-place turn damping. Increase if turn-stop oscillation remains; decrease if in-place turns feel too
-    // sluggish to settle on target heading.
-    constexpr float kTurnYawD = 2.4f;
     // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
     // current DriveBase PD setup family, with concrete starting values for every supported
     // control/signal pairing already represented by the new naming scheme.
-    inline constexpr MazeMap::ProportionalDerivativeCluster kDriveBasePDCluster(
+    inline constexpr MazeMap::PDCluster kDriveBasePDCluster(
         /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
-        /* headingGyroPD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
-        /* headingEncoderDeltaPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kArcYawD),
         /* velocityStatePD */ MazeMap::ProportionalDerivative(2.5f, 0.01f),
-        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(2.5f, 0.01f),
+        /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(kEncoderVelocityKp, kEncoderVelocityKd),
         /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.01f),
         /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.01f),
         /* longitudinalAccelerationStatePD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
-        /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
-        /* wheelVelocityEncoderPD */ MazeMap::ProportionalDerivative(kWheelVelocityKp, kWheelVelocityKd),
-        /* yawAccelerationStatePD */ MazeMap::ProportionalDerivative(0.065f, 0.0f),
-        /* yawAccelerationGyroPD */ MazeMap::ProportionalDerivative(0.015f, 0.0f),
-        /* yawAccelerationEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.001f, 0.0f));
+        /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f));
     // Shared Drive/DriveBase signal hookup. Keep these selections here so maneuver-tracking users all
     // resolve through one authoritative state-vs-sensor configuration instead of repeating ad hoc flags.
-    inline constexpr MazeMap::CommandPD kDriveHeadingCommandPd = MazeMap::CommandPD::StateHeadingPD;
-    inline constexpr MazeMap::CommandPD kDriveYawRateCommandPd = MazeMap::CommandPD::IMUYaw;
-    inline constexpr MazeMap::CommandPD kDriveVelocityCommandPd = MazeMap::CommandPD::EncoderVelocity;
-    inline constexpr MazeMap::CommandPD kDriveDistanceCommandPd = MazeMap::CommandPD::RawCommand;
-    inline constexpr MazeMap::CommandPD kManeuverTrackingCommandPd = kDriveYawRateCommandPd;
-    inline constexpr MazeMap::CommandPD kWallTouchTrackingCommandPd = kDriveYawRateCommandPd;
+    inline constexpr MazeMap::FeedbackSource kDriveHeadingFeedbackSources = MazeMap::FeedbackSource::State;
+    inline constexpr MazeMap::FeedbackSource kDriveYawRateFeedbackSources = MazeMap::FeedbackSource::Imu;
+    inline constexpr MazeMap::FeedbackSource kDriveVelocityFeedbackSources = MazeMap::FeedbackSource::Encoder;
+    inline constexpr MazeMap::FeedbackSource kDriveDistanceFeedbackSources = MazeMap::FeedbackSource::None;
+    inline constexpr MazeMap::FeedbackSource kManeuverTrackingFeedbackSources = kDriveYawRateFeedbackSources;
+    inline constexpr MazeMap::FeedbackSource kWallTouchTrackingFeedbackSources = kDriveYawRateFeedbackSources;
 
     // [Medium] Position tolerance used to declare straight and arc profiles complete. Tighten it if stop error is too
     // large and the robot can settle cleanly; loosen it if profiles dither near the endpoint.
@@ -499,7 +473,7 @@ namespace MazeMap::Config
     // Policy: no watchdog timer in this codebase may trigger in under 90 seconds.
     constexpr unsigned long kEncoderStallTimeoutMs = 90000UL;
     // [Medium] Minimum time a translation profile must spend commanding real motion before the encoder-progress
-    // watchdog can trip. This should cover the launch-assist ramp so high-strung starts do not false-fault.
+    // watchdog can trip. This covers ordinary command-to-motion latency at the beginning of a move.
     constexpr unsigned long kEncoderStallStartupGraceMs = 250UL;
 }
 

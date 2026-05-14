@@ -95,10 +95,9 @@ def main() -> int:
     print(
         "current feedforward: "
         f"kWheelStaticFeedforward={setup.wheel_static_feedforward:.6f}, "
-        f"kWheelRestLaunchDriveCommand={setup.wheel_rest_launch_drive_command:.6f}, "
         f"plant_breakaway_drive_command={setup.plant_breakaway_drive_command:.6f}, "
-        f"kWheelVelocityKp={setup.wheel_velocity_kp:.6f}, "
-        f"kWheelVelocityKd={setup.wheel_velocity_kd:.6f}"
+        f"kEncoderVelocityKp={setup.wheel_velocity_kp:.6f}, "
+        f"kEncoderVelocityKd={setup.wheel_velocity_kd:.6f}"
     )
     print(
         "estimated plant: "

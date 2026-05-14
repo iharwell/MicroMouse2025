@@ -133,6 +133,16 @@ namespace MazeMap::App
                     snapshot.encoderObservation.rightVelocityMps * invWheelRadiusM;
             }
             snapshot.encoderObservationValid = true;
+            snapshot.leftEncoderTotalCounts =
+                runtimeState.GetSensorSnapshot().leftEncoderTotalCounts +
+                static_cast<std::int64_t>(leftCounts);
+            snapshot.rightEncoderTotalCounts =
+                runtimeState.GetSensorSnapshot().rightEncoderTotalCounts +
+                static_cast<std::int64_t>(rightCounts);
+            snapshot.leftEncoderDistanceM =
+                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.leftEncoderTotalCounts);
+            snapshot.rightEncoderDistanceM =
+                MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.rightEncoderTotalCounts);
             UpdateDriveEstimator(
                 drive,
                 estimator,

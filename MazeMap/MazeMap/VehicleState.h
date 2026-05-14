@@ -120,6 +120,27 @@ namespace MazeMap
         float GetRotationalVelocity() const noexcept { return _state(kR); }
         float GetRotationalVelocity() noexcept { return const_cast<const VehicleState*>(this)->GetRotationalVelocity(); }
 
+        void SetLongitudinalAcceleration(float accelerationMps2) noexcept
+        {
+            _longitudinalAccelerationMps2 = accelerationMps2;
+        }
+        float GetLongitudinalAcceleration() const noexcept { return _longitudinalAccelerationMps2; }
+        float GetLongitudinalAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetLongitudinalAcceleration(); }
+
+        void SetLateralAcceleration(float accelerationMps2) noexcept
+        {
+            _lateralAccelerationMps2 = accelerationMps2;
+        }
+        float GetLateralAcceleration() const noexcept { return _lateralAccelerationMps2; }
+        float GetLateralAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetLateralAcceleration(); }
+
+        void SetYawAcceleration(float accelerationRadps2) noexcept
+        {
+            _yawAccelerationRadps2 = accelerationRadps2;
+        }
+        float GetYawAcceleration() const noexcept { return _yawAccelerationRadps2; }
+        float GetYawAcceleration() noexcept { return const_cast<const VehicleState*>(this)->GetYawAcceleration(); }
+
         void SetWheelSpeedLeft(float wheelSpeedRadps) noexcept { _state(kOmegaL) = wheelSpeedRadps; }
         float GetWheelSpeedLeft() const noexcept { return _state(kOmegaL); }
         float GetWheelSpeedLeft() noexcept { return const_cast<const VehicleState*>(this)->GetWheelSpeedLeft(); }
@@ -292,6 +313,9 @@ namespace MazeMap
 
         StateVector _state;
         StateMatrix _sqrtCovariance;
+        float _longitudinalAccelerationMps2 = 0.0f;
+        float _lateralAccelerationMps2 = 0.0f;
+        float _yawAccelerationRadps2 = 0.0f;
         float _time;
         std::uint32_t _timestampUs;
         ::SensorSnapshot _sensorSnapshot;

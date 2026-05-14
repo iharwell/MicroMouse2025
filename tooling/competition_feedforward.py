@@ -26,11 +26,6 @@ KICKOFF_PROBE_PATTERN = re.compile(r"^kickoff_(\d{3})_probe$")
 class CurrentFeedforwardSetup:
     launch_fit: LaunchFitParameters
     wheel_static_feedforward: float
-    wheel_rest_launch_drive_command: float
-    wheel_rest_launch_max_drive_command: float
-    wheel_rest_launch_ramp_ms: int
-    wheel_rest_launch_speed_threshold_mps: float
-    wheel_rest_launch_drive_threshold: float
     wheel_velocity_kp: float
     wheel_velocity_kd: float
     plant_breakaway_drive_command: float
@@ -193,14 +188,6 @@ def load_named_float(path: Path, name: str) -> float:
     return float(match.group(1))
 
 
-def load_named_int(path: Path, name: str) -> int:
-    text = strip_cpp_comments(path.read_text(encoding="utf-8"))
-    match = re.search(rf"\b{name}\b\s*=\s*(\d+)(?:UL|U|L)?", text, flags=re.IGNORECASE)
-    if match is None:
-        raise ValueError(f"could not find {name} in {path}")
-    return int(match.group(1))
-
-
 def load_current_feedforward_setup(repo_root: Path) -> CurrentFeedforwardSetup:
     vehicle_header = repo_root / "MazeMap" / "MazeMap" / "Vehicle.h"
     drive_header = repo_root / "MazeMap" / "MazeMap" / "MotorEncoderDrive.h"
@@ -228,13 +215,8 @@ def load_current_feedforward_setup(repo_root: Path) -> CurrentFeedforwardSetup:
     wheel_diameter_m = evaluate_cpp_expr(drive_entries[8])
 
     wheel_static_feedforward = load_named_float(runtime_core, "kWheelStaticFeedforward")
-    wheel_rest_launch_drive_command = load_named_float(runtime_core, "kWheelRestLaunchDriveCommand")
-    wheel_rest_launch_max_drive_command = load_named_float(runtime_core, "kWheelRestLaunchMaxDriveCommand")
-    wheel_rest_launch_ramp_ms = load_named_int(runtime_core, "kWheelRestLaunchRampMs")
-    wheel_rest_launch_speed_threshold_mps = load_named_float(runtime_core, "kWheelRestLaunchSpeedThresholdMps")
-    wheel_rest_launch_drive_threshold = load_named_float(runtime_core, "kWheelRestLaunchDriveThreshold")
-    wheel_velocity_kp = load_named_float(runtime_core, "kWheelVelocityKp")
-    wheel_velocity_kd = load_named_float(runtime_core, "kWheelVelocityKd")
+    wheel_velocity_kp = load_named_float(runtime_core, "kEncoderVelocityKp")
+    wheel_velocity_kd = load_named_float(runtime_core, "kEncoderVelocityKd")
 
     equivalent_wheel_inertia_kg_m2 = load_named_float(plant_header, "equivalentWheelInertiaKgM2")
     drivetrain_efficiency = load_named_float(plant_header, "drivetrainEfficiency")
@@ -277,11 +259,6 @@ def load_current_feedforward_setup(repo_root: Path) -> CurrentFeedforwardSetup:
             motor_current_limit_a=motor_current_limit_a,
         ),
         wheel_static_feedforward=wheel_static_feedforward,
-        wheel_rest_launch_drive_command=wheel_rest_launch_drive_command,
-        wheel_rest_launch_max_drive_command=wheel_rest_launch_max_drive_command,
-        wheel_rest_launch_ramp_ms=wheel_rest_launch_ramp_ms,
-        wheel_rest_launch_speed_threshold_mps=wheel_rest_launch_speed_threshold_mps,
-        wheel_rest_launch_drive_threshold=wheel_rest_launch_drive_threshold,
         wheel_velocity_kp=wheel_velocity_kp,
         wheel_velocity_kd=wheel_velocity_kd,
         plant_breakaway_drive_command=plant_breakaway_drive_command,

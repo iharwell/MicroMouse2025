@@ -109,8 +109,6 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         right_feedback_command)       \
     X(float,         left_target_velocity_mps)     \
     X(float,         right_target_velocity_mps)    \
-    X(float,         left_launch_assist_floor)     \
-    X(float,         right_launch_assist_floor)    \
     X(std::uint32_t, encoder_timestamp_us)         \
     X(std::int32_t,  left_encoder_count)           \
     X(std::int32_t,  right_encoder_count)          \

@@ -13,9 +13,8 @@ namespace MazeMap
     inline constexpr DiagnosticSummaryInstruction kDiagnosticSummaryInstructions[] = {
         { "meta", "Active diagnostic tunables are emitted as # meta lines near the top of the log." },
         { "gyro", "baseline_idle/final_idle -> kGyroBiasSamples, kGyroBiasUpdateMaxAbsRateRadps; inspect gyro_raw_radps drift and bias convergence." },
-        { "kickoff_ff", "kickoff_* -> motor-model wheel FF, kWheelStaticFeedforward trim, kWheelRestLaunchDriveCommand." },
-        { "kickoff_thresholds", "kickoff_* -> kWheelRestLaunchSpeedThresholdMps, kWheelRestLaunchDriveThreshold, kWheelRestLaunchMaxDriveCommand, kWheelRestLaunchRampMs." },
-        { "forward", "forward_* -> motor-model wheel FF, kWheelVelocityKp, kWheelVelocityKd." },
+        { "kickoff_ff", "kickoff_* -> motor-model wheel FF and kWheelStaticFeedforward trim." },
+        { "forward", "forward_* -> motor-model wheel FF, kEncoderVelocityKp, kEncoderVelocityKd." },
         { "turn", "turn_* -> kTurnHeadingKp, kTurnYawD, kAngleToleranceRad; use turn_result peak/final yaw error." },
         { "straight", "straight_* -> kStraightHeadingKp, kStraightYawD, kDistanceToleranceM, kSpeedToleranceMps; use straight_result heading and stop error." },
         { "watchdog", "straight_* faults -> kEncoderProgressEpsilonM, kEncoderStallCommandThresholdMps, kEncoderStallTimeoutMs, kEncoderStallStartupGraceMs." },

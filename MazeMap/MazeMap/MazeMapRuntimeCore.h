@@ -10,7 +10,7 @@
 #include "Maze.h"
 #include "MissionStartPolicy.h"
 #include "MotionLimits.h"
-#include "ProportionalDerivativeCluster.h"
+#include "PDCluster.h"
 #include "RollingAverageWindow.h"
 #include "Vehicle.h"
 #include "VehicleState.h"

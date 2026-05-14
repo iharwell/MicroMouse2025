@@ -17,10 +17,8 @@ struct DriveTelemetry
     float rightFeedbackCommand = 0.0f;
     float leftTargetVelocityMps = 0.0f;
     float rightTargetVelocityMps = 0.0f;
-    float leftLaunchAssistFloor = 0.0f;
-    float rightLaunchAssistFloor = 0.0f;
-    int32_t leftEncoderCount = 0;
-    int32_t rightEncoderCount = 0;
+    std::int64_t leftEncoderCount = 0;
+    std::int64_t rightEncoderCount = 0;
     float leftDistanceM = 0.0f;
     float rightDistanceM = 0.0f;
     float leftVelocityMps = 0.0f;

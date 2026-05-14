@@ -95,8 +95,6 @@ namespace
         float rightDriveCommand = 0.0f;
         float leftFeedforwardCommand = 0.0f;
         float rightFeedforwardCommand = 0.0f;
-        float leftLaunchAssistFloor = 0.0f;
-        float rightLaunchAssistFloor = 0.0f;
         std::int32_t leftEncoderCount = 0;
         std::int32_t rightEncoderCount = 0;
         float leftEncoderOmegaRadps = 0.0f;
@@ -1662,8 +1660,6 @@ namespace
                 !ParseField(tokens, indices, "right_drive_command", row.rightDriveCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_feedforward_command", row.leftFeedforwardCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_feedforward_command", row.rightFeedforwardCommand, ParseFloat, error) ||
-                !ParseField(tokens, indices, "left_launch_assist_floor", row.leftLaunchAssistFloor, ParseFloat, error) ||
-                !ParseField(tokens, indices, "right_launch_assist_floor", row.rightLaunchAssistFloor, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_encoder_count", row.leftEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "right_encoder_count", row.rightEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "left_encoder_omega_radps", row.leftEncoderOmegaRadps, ParseFloat, error) ||
@@ -2384,8 +2380,6 @@ namespace
                 row.commandedLinearMps,
                 row.commandedAngularRadps,
                 row.saturationFlags,
-                row.leftLaunchAssistFloor,
-                row.rightLaunchAssistFloor,
                 row.accelBiasValid,
                 row.accelBodyXMps2,
                 row.accelBodyYMps2);

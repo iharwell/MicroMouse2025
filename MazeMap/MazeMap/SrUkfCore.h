@@ -236,8 +236,6 @@ namespace MazeMap
             float commandedLinearMps,
             float commandedAngularRadps,
             std::uint16_t saturationFlags,
-            float leftLaunchAssistFloor,
-            float rightLaunchAssistFloor,
             bool accelBiasValid,
             float accelBodyXMps2,
             float accelBodyYMps2) noexcept;
@@ -256,8 +254,6 @@ namespace MazeMap
             float forwardSpeedMps,
             float leftDriveCommand,
             float rightDriveCommand,
-            float leftLaunchAssistFloor,
-            float rightLaunchAssistFloor,
             bool recentCommandSignFlip,
             bool recentStationaryExit) noexcept;
         static bool HasInconsistentOrSaturatedTrigger(
@@ -384,6 +380,7 @@ namespace MazeMap
             const Maze& maze) const noexcept;
 
         const PlantModel& _plantModel;
+        VehicleState& _runtimeState;
         WallGeometryModel _geometryModel;
         UKF<VehicleState::kDimension, 3> _workingFilter;
         float _frozenDtS = 0.0f;
@@ -417,8 +414,6 @@ namespace MazeMap
         float _commandedLinearMps;
         float _commandedAngularRadps;
         std::uint16_t _saturationFlags;
-        float _leftLaunchAssistFloor;
-        float _rightLaunchAssistFloor;
         float _accelBodyXMps2;
         float _accelBodyYMps2;
         float _stationaryCandidateDwellS;

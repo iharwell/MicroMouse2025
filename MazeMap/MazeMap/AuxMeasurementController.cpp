@@ -57,8 +57,8 @@ namespace
         row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
         row.left_drive_cmd = driveTelemetry.leftDriveCommand;
         row.right_drive_cmd = driveTelemetry.rightDriveCommand;
-        row.left_encoder_count = driveTelemetry.leftEncoderCount;
-        row.right_encoder_count = driveTelemetry.rightEncoderCount;
+        row.left_encoder_count = static_cast<std::int32_t>(driveTelemetry.leftEncoderCount);
+        row.right_encoder_count = static_cast<std::int32_t>(driveTelemetry.rightEncoderCount);
         row.left_distance_m = driveTelemetry.leftDistanceM;
         row.right_distance_m = driveTelemetry.rightDistanceM;
         row.left_velocity_mps = driveTelemetry.leftVelocityMps;
@@ -382,7 +382,8 @@ private:
         return _drive.PointControlVector(
             _turningTractionCommandedSpeedMps,
             yawRateRadps,
-            MazeMap::CommandPD::EncoderVelocity);
+            MazeMap::FeedbackSource::Encoder,
+            MazeMap::FeedbackSource::Encoder);
     }
 
     CommandVector RunTick(

@@ -102,9 +102,6 @@
     <ClInclude Include="CommandVector.h">
       <Filter>Header Files\App\Internal</Filter>
     </ClInclude>
-    <ClInclude Include="CommandPD.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="CompactPath.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -193,9 +190,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Kinematics.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="LaunchAssistProfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="LedCalibrationConfig.h">
@@ -354,13 +348,13 @@
     <ClInclude Include="EncoderObs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="FeedbackAxis.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ImuAccelObs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PlanarAccelLateralUpdate.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="PredictorSubstepPolicy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="RollingAverageWindow.h">
@@ -453,6 +447,12 @@
     <ClInclude Include="WallSensorPreprocessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ProportionalDerivative.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PDCluster.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Cell.cpp">
@@ -486,6 +486,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DriveTelemetry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FeedbackAxis.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MotionLimits.cpp">
@@ -635,9 +638,6 @@
     <ClCompile Include="PlanarAccelLateralUpdate.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PredictorSubstepPolicy.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="SigmaPointSetSimplex.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -660,6 +660,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="WallDistanceCalibration.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProportionalDerivative.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PDCluster.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -386,6 +386,8 @@ bool RuntimeSensorSuite::Begin(const unsigned long controlPeriodUs)
     _accelBiasXG = 0.0f;
     _accelBiasYG = 0.0f;
     _accelBiasInitialized = false;
+    _leftEncoderTotalCounts = 0;
+    _rightEncoderTotalCounts = 0;
     InitializeWallSensorLedOffState();
 
     bool ok = true;
@@ -427,7 +429,7 @@ bool RuntimeSensorSuite::CalibrateGyroBias(const unsigned long controlPeriodUs, 
 {
     auto captureEncoderCounts = [this]() noexcept
     {
-        const MazeMap::EncoderObs observation = _vehicle.CaptureEncoderObservation(0.0f);
+        const MazeMap::EncoderObs observation = CaptureEncoderObservation(0.0f);
         return MazeMap::EncoderCountPair{ observation.totalLeftCounts, observation.totalRightCounts };
     };
 
@@ -469,10 +471,10 @@ void RuntimeSensorSuite::Capture(
     const float encoderDtSeconds)
 {
     snapshot = SensorSnapshot{};
+    PublishEncoderTotals(snapshot);
     if (captureEncoders)
     {
-        snapshot.encoderObservation = _vehicle.CaptureEncoderObservation(encoderDtSeconds);
-        snapshot.encoderObservationValid = true;
+        CaptureEncoderSnapshot(snapshot, encoderDtSeconds);
     }
 
     AsyncWallSensorSweepRead wallRead{};
@@ -794,6 +796,33 @@ float RuntimeSensorSuite::GetAccelBiasXG() const noexcept
 float RuntimeSensorSuite::GetAccelBiasYG() const noexcept
 {
     return _accelBiasYG;
+}
+
+MazeMap::EncoderObs RuntimeSensorSuite::CaptureEncoderObservation(const float dtSeconds) noexcept
+{
+    MazeMap::EncoderObs observation = _vehicle.CaptureEncoderObservation(dtSeconds);
+    _leftEncoderTotalCounts += static_cast<std::int64_t>(observation.totalLeftCounts);
+    _rightEncoderTotalCounts += static_cast<std::int64_t>(observation.totalRightCounts);
+    return observation;
+}
+
+void RuntimeSensorSuite::PublishEncoderTotals(SensorSnapshot& snapshot) const noexcept
+{
+    snapshot.leftEncoderTotalCounts = _leftEncoderTotalCounts;
+    snapshot.rightEncoderTotalCounts = _rightEncoderTotalCounts;
+    snapshot.leftEncoderDistanceM =
+        MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_leftEncoderTotalCounts);
+    snapshot.rightEncoderDistanceM =
+        MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_rightEncoderTotalCounts);
+}
+
+void RuntimeSensorSuite::CaptureEncoderSnapshot(
+    SensorSnapshot& snapshot,
+    const float dtSeconds) noexcept
+{
+    snapshot.encoderObservation = CaptureEncoderObservation(dtSeconds);
+    snapshot.encoderObservationValid = true;
+    PublishEncoderTotals(snapshot);
 }
 
 void RuntimeSensorSuite::InitializeWallSensorLedOffState() noexcept

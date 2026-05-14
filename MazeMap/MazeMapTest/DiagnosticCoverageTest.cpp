@@ -9,7 +9,6 @@
 #include "..\MazeMap\GyroBiasUpdatePolicy.h"
 #include "..\MazeMap\ImuCalibrationPolicy.h"
 #include "..\MazeMap\ImuSamplingProfile.h"
-#include "..\MazeMap\LaunchAssistProfile.h"
 #include "..\MazeMap\Maze.h"
 #include "..\MazeMap\MissionMazeExport.h"
 #include "..\MazeMap\MissionStartPolicy.h"
@@ -150,13 +149,8 @@ namespace MazeMap
 				"kGyroBiasSamples",
 				"kGyroBiasUpdateMaxAbsRateRadps",
 				"kWheelStaticFeedforward",
-				"kWheelRestLaunchDriveCommand",
-				"kWheelRestLaunchMaxDriveCommand",
-				"kWheelRestLaunchRampMs",
-				"kWheelRestLaunchSpeedThresholdMps",
-				"kWheelRestLaunchDriveThreshold",
-				"kWheelVelocityKp",
-				"kWheelVelocityKd",
+				"kEncoderVelocityKp",
+				"kEncoderVelocityKd",
 				"kTurnHeadingKp",
 				"kTurnYawD",
 				"kAngleToleranceRad",
@@ -216,21 +210,6 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(0.80f, 0UL, 2000UL)) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(0.80f, 2000UL, 2000UL) - 0.80f) < 1.0e-6f);
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(0.80f, 3000UL, 2000UL) - 0.80f) < 1.0e-6f);
-		}
-
-		TEST_METHOD(ComputeLaunchAssistDriveFloorRampsFromBaseToMaxCommand)
-		{
-			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.30f, 0.55f, 0UL, 250UL) - 0.30f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.30f, 0.55f, 125UL, 250UL) - 0.425f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.30f, 0.55f, 250UL, 250UL) - 0.55f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.30f, 0.55f, 500UL, 250UL) - 0.55f) < 1.0e-6f);
-		}
-
-		TEST_METHOD(ComputeLaunchAssistDriveFloorClampsInvalidInputs)
-		{
-			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(std::numeric_limits<float>::quiet_NaN(), 0.55f, 125UL, 250UL)) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.60f, 0.55f, 125UL, 250UL) - 0.60f) < 1.0e-6f);
-			Assert::IsTrue(std::fabs(ComputeLaunchAssistDriveFloor(0.30f, 1.20f, 0UL, 0UL) - 1.0f) < 1.0e-6f);
 		}
 
 		TEST_METHOD(PlantParamsDefaultUsesVehicleDriveModel)

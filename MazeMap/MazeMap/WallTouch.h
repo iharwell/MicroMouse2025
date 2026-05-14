@@ -2,7 +2,7 @@
 
 #include "CommandVector.h"
 #include "CellCoordinates.h"
-#include "CommandPD.h"
+#include "FeedbackAxis.h"
 #include "Direction.h"
 #include "MazeMapRuntimeCore.h"
 #include "SensorSnapshot.h"
@@ -97,7 +97,7 @@ namespace MazeMap::App::Internal
         DriveBase* _drive{};
         Drive* _driveService{};
         MotionLimits _limits{};
-        MazeMap::CommandPD _trackingCommandPd{};
+        MazeMap::FeedbackSource _trackingFeedbackSources{};
         bool _allowPassThroughNoWall{};
         bool _faulted{};
         ActivePhase _activePhase{ ActivePhase::None };

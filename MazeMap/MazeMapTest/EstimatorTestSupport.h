@@ -104,11 +104,6 @@ namespace MazeMap
         return 0.80f;
     }
 
-    inline float DefaultBatteryVoltageV(const PlantParams& params) noexcept
-    {
-        return params.supplyVoltageV;
-    }
-
     inline void UpdateDriveEstimator(
         DriveBase& drive,
         Estimator& estimator,
@@ -119,7 +114,6 @@ namespace MazeMap
     {
         const auto control = drive.CurrentControlVector();
         const float fanDutyCycle = GetMissionFanDutyCycle();
-        const float batteryVoltageV = drive.CurrentBatteryVoltageV();
         runtimeState.SetSensorSnapshot(snapshot);
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
@@ -133,7 +127,7 @@ namespace MazeMap
 
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
-            if (!estimator.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
+            if (!estimator.predict(dtSeconds, control, fanDutyCycle))
             {
                 return;
             }

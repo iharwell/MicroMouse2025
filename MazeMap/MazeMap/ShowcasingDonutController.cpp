@@ -570,10 +570,8 @@ namespace MazeMap::App::Internal
         row.right_feedback_command = driveTelemetry.rightFeedbackCommand;
         row.left_target_velocity_mps = driveTelemetry.leftTargetVelocityMps;
         row.right_target_velocity_mps = driveTelemetry.rightTargetVelocityMps;
-        row.left_launch_assist_floor = driveTelemetry.leftLaunchAssistFloor;
-        row.right_launch_assist_floor = driveTelemetry.rightLaunchAssistFloor;
-        row.left_encoder_count = driveTelemetry.leftEncoderCount;
-        row.right_encoder_count = driveTelemetry.rightEncoderCount;
+        row.left_encoder_count = static_cast<std::int32_t>(driveTelemetry.leftEncoderCount);
+        row.right_encoder_count = static_cast<std::int32_t>(driveTelemetry.rightEncoderCount);
         row.left_encoder_omega_radps = driveTelemetry.leftEncoderOmegaRadps;
         row.right_encoder_omega_radps = driveTelemetry.rightEncoderOmegaRadps;
         row.left_encoder_distance_m = driveTelemetry.leftDistanceM;
@@ -758,7 +756,8 @@ namespace MazeMap::App::Internal
             const CommandVector control = _drive.PointControlVector(
                 _commandedSpeedMps,
                 CommandedYawRateRadps(),
-                MazeMap::CommandPD::EncoderVelocity);
+                MazeMap::FeedbackSource::Encoder,
+                MazeMap::FeedbackSource::Encoder);
             return control;
         }
 

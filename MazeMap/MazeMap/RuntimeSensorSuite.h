@@ -72,6 +72,9 @@ private:
     };
 
     void InitializeWallSensorLedOffState() noexcept;
+    MazeMap::EncoderObs CaptureEncoderObservation(float dtSeconds) noexcept;
+    void PublishEncoderTotals(SensorSnapshot& snapshot) const noexcept;
+    void CaptureEncoderSnapshot(SensorSnapshot& snapshot, float dtSeconds) noexcept;
     void CaptureInertialSnapshot(bool stationary, SensorSnapshot& snapshot);
     bool TryComputeSideSignalMetrics(
         WallSensorId sensorId,
@@ -132,6 +135,8 @@ private:
     float _sideRightWallSignalFiltered;
     float _accelBiasXG;
     float _accelBiasYG;
+    std::int64_t _leftEncoderTotalCounts = 0;
+    std::int64_t _rightEncoderTotalCounts = 0;
     std::uint32_t _frontLeftLedOffCommandUs = 0UL;
     std::uint32_t _frontRightLedOffCommandUs = 0UL;
     std::uint32_t _sideLeftLedOffCommandUs = 0UL;

@@ -59,8 +59,8 @@ Typical use:
 1. Run the script on a fresh capture.
 2. Compare the suggested sigmas to the canonical owners in `SrUkfCore.h`.
 3. Use the recovery-turn summary to check the actual raw-sensor turn angle before trusting any nominal `180 deg` assumption.
-4. Use the per-command launch summary to decide whether a plant or launch-assist change is actually supported, or whether the run only justifies estimator-noise changes.
-5. Use the launch-floor section when you need a backlash-safe breakaway estimate; if the tool flags nonmonotonic clear motion, treat the reported floor as provisional and prefer another clean card before retuning launch thresholds.
+4. Use the per-command launch summary to decide whether a plant feedforward change is actually supported, or whether the run only justifies estimator-noise changes.
+5. Use the launch-floor section when you need a backlash-safe breakaway estimate; if the tool flags nonmonotonic clear motion, treat the reported floor as provisional and prefer another clean card before retuning plant breakaway.
 6. Use the tire-plant section only to update parameters that the current card actually excites; treat any output marked unstable or not identifiable as diagnostic-only.
 
 ## `analyze_open_floor_turn_bias.py`
@@ -207,7 +207,7 @@ Method notes:
 
 - The competition analyzer intentionally uses the current repo setup, not the old `# meta` feedforward constants in the legacy logs.
 - `forward_*_probe` phases are split by the actual logged drive command so the steady hold segment is analyzed separately from the kickoff pulse and zero-command settle.
-- The current static-friction torque used by the inverse model is derived from the current plant breakaway command in `PlantModel.cpp`, while the runtime launch-assist settings from `MazeMapRuntimeCore.h` are reported beside it so mismatches are visible.
+- The current static-friction torque used by the inverse model is derived from the current plant breakaway command in `PlantModel.cpp`.
 
 ## `build_feedforward_tensor.py`
 

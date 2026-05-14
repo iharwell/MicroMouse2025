@@ -147,15 +147,12 @@ namespace MazeMap::App::Internal::Runtime
             writeConfig(
                 "wheel_control:static_ff=%.6f;vel_kp=%.6f;vel_kd=%.6f",
                 Config::kWheelStaticFeedforward,
-                Config::kWheelVelocityKp,
-                Config::kWheelVelocityKd) &&
+                Config::kEncoderVelocityKp,
+                Config::kEncoderVelocityKd) &&
             writeConfig(
-                "launch_fan:racing_duty=%.6f;fan_ramp_ms=%lu;launch_cmd=%.6f;launch_max=%.6f;launch_ramp_ms=%lu",
+                "launch_fan:racing_duty=%.6f;fan_ramp_ms=%lu",
                 Config::kRacingFanDutyCycle,
-                static_cast<unsigned long>(Config::kRacingFanRampMs),
-                Config::kWheelRestLaunchDriveCommand,
-                Config::kWheelRestLaunchMaxDriveCommand,
-                static_cast<unsigned long>(Config::kWheelRestLaunchRampMs)) &&
+                static_cast<unsigned long>(Config::kRacingFanRampMs)) &&
             writeConfig(
                 "heading_wall:straight_kp=%.6f;straight_d=%.6f;wall_kp=%.6f;wall_d=%.6f;arc_kp=%.6f;arc_d=%.6f",
                 Config::kStraightHeadingKp,
@@ -165,9 +162,7 @@ namespace MazeMap::App::Internal::Runtime
                 Config::kArcHeadingKp,
                 Config::kArcYawD) &&
             writeConfig(
-                "turn_tol:turn_kp=%.6f;turn_d=%.6f;smooth_kp=%.6f;smooth_kd=%.6f;dist_tol_m=%.6f;ang_tol_rad=%.6f",
-                Config::kTurnHeadingKp,
-                Config::kTurnYawD,
+                "turn_tol:smooth_kp=%.6f;smooth_kd=%.6f;dist_tol_m=%.6f;ang_tol_rad=%.6f",
                 Config::kSmoothTurnYawRateKp,
                 Config::kSmoothTurnYawRateKd,
                 Config::kDistanceToleranceM,

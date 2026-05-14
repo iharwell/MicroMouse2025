@@ -86,7 +86,6 @@ namespace MazeMap::App::Internal
                 _runtime.FailActiveMode(kTopSpeedMeasurementSelectorRemovedReason);
             }
 
-            _batteryVoltageStart = ReadBatteryVoltage();
             _phase = Phase::LaunchPrelaunchHold;
             _loopController.StageNextSessionState(BuildLoopOptions());
         }
@@ -305,11 +304,6 @@ namespace MazeMap::App::Internal
                 _runtime.FailActiveMode("Top speed measurement phase was not initialized");
                 return CommandVector::Brake();
             }
-        }
-
-        float ReadBatteryVoltage() const noexcept
-        {
-            return _drive.CurrentBatteryVoltageV();
         }
 
         SharedRobotRuntime& _runtime;
