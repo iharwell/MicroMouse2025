@@ -340,20 +340,14 @@ namespace MazeMap
         bool WriteUkfPlantDebugTextDump(void* context, DebugTextSink sink) const noexcept;
 
         PlantDerivatives forwardStep(
-            const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV) const noexcept;
+            const App::Internal::CommandVector& control) const noexcept;
         PlantDerivatives forwardStep(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             const PlantParams& params) const noexcept;
         PlantDerivatives forwardStep(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             const PreparedParams& params) const noexcept;
 
         WheelKinematics wheelKinematics(const StateVector& state, const PlantParams& params) const noexcept;
@@ -375,39 +369,29 @@ namespace MazeMap
         ContactForces tireForces(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
             const PlantParams& params) const noexcept;
         ContactForces tireForces(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
             const PreparedParams& params) const noexcept;
 
         Eigen::Vector2f imuPlanarAcceleration(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             const PlantParams& params) const noexcept;
         Eigen::Vector2f imuPlanarAcceleration(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             const PreparedParams& params) const noexcept;
 
         StateVector integrate(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             float dt,
             const PlantParams& params) const noexcept;
         StateVector integrate(
             const StateVector& state,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             float dt,
             const PreparedParams& params) const noexcept;
 
@@ -496,34 +480,29 @@ namespace MazeMap
 
         void velocityTargetTechnicalLimits(
             float& maxLongitudinalAccelMps2,
-            float& maxYawAccelRadps2,
-            float fanDutyCycle = 0.80f) const noexcept;
+            float& maxYawAccelRadps2) const noexcept;
         void velocityTargetTechnicalLimits(
             const StateVector& currentState,
             const PlantParams& params,
             float& maxLongitudinalAccelMps2,
-            float& maxYawAccelRadps2,
-            float fanDutyCycle = 0.80f) const noexcept;
+            float& maxYawAccelRadps2) const noexcept;
         void velocityTargetTechnicalLimits(
             const StateVector& currentState,
             const PreparedParams& params,
             float& maxLongitudinalAccelMps2,
-            float& maxYawAccelRadps2,
-            float fanDutyCycle = 0.80f) const noexcept;
+            float& maxYawAccelRadps2) const noexcept;
         void velocityTargetTechnicalLimits(
             float forwardVelocityMps,
             float yawRateRadps,
             const PlantParams& params,
             float& maxLongitudinalAccelMps2,
-            float& maxYawAccelRadps2,
-            float fanDutyCycle = 0.80f) const noexcept;
+            float& maxYawAccelRadps2) const noexcept;
         void velocityTargetTechnicalLimits(
             float forwardVelocityMps,
             float yawRateRadps,
             const PreparedParams& params,
             float& maxLongitudinalAccelMps2,
-            float& maxYawAccelRadps2,
-            float fanDutyCycle = 0.80f) const noexcept;
+            float& maxYawAccelRadps2) const noexcept;
 
         float driveFrictionTorque(
             float wheelBankSpeedRadps,
@@ -537,13 +516,10 @@ namespace MazeMap
         PlantDerivatives forwardStepFromAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
-            float rightAppliedBankTorqueNm,
-            float fanDutyCycle = 0.80f) const noexcept;
+            float rightAppliedBankTorqueNm) const noexcept;
         Eigen::Vector2f imuPlanarAcceleration(
             const StateVector& state,
-            const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV) const noexcept;
+            const App::Internal::CommandVector& control) const noexcept;
 
     private:
         friend struct PlantParams;
@@ -554,10 +530,8 @@ namespace MazeMap
         void resolveAppliedBankTorques(
             const StateVector& currentState,
             const App::Internal::CommandVector& control,
-            float batteryVoltageV,
             float& leftAppliedBankTorqueNm,
             float& rightAppliedBankTorqueNm) const noexcept;
-
         struct WheelOnlyMeasurementPrediction
         {
             float leftWheelSpeedRadps = 0.0f;
@@ -574,33 +548,28 @@ namespace MazeMap
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
-            const PlantParams& params,
-            float fanDutyCycle = 0.80f) const noexcept;
+            const PlantParams& params) const noexcept;
         PlantDerivatives forwardStepFromAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
-            const PreparedParams& params,
-            float fanDutyCycle = 0.80f) const noexcept;
+            const PreparedParams& params) const noexcept;
         PlantDerivatives evaluateAppliedBankTorqueStep(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             float activityNorm,
-            const PreparedParams& params,
-            float fanDutyCycle) const noexcept;
+            const PreparedParams& params) const noexcept;
         StateVector integrateAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
-            float fanDutyCycle,
             float dtS) const noexcept;
         StateVector integrateAppliedBankTorques(
             const StateVector& state,
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             const PreparedParams& params,
-            float fanDutyCycle,
             float dtS) const noexcept;
         static StateVector advanceStateFromDerivatives(
             const StateVector& currentState,

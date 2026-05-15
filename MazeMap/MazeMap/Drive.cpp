@@ -665,14 +665,17 @@ namespace MazeMap::App::Internal
                 limits.GetEffectiveAngleToleranceRad();
         }
 
-        bool IsMotionSettled(const SensorSnapshot& sensors, const DriveTelemetry& driveTelemetry) noexcept
+        bool IsMotionSettled(
+            const SensorSnapshot& sensors,
+            const DriveTelemetry& driveTelemetry,
+            const float fanDuty) noexcept
         {
             const float baseThresholdMps = Config::kMotionSettleSpeedThresholdMps;
             return MazeMap::IsMissionStartupStationaryFromSensors(
                 driveTelemetry.leftVelocityMps,
                 driveTelemetry.rightVelocityMps,
                 sensors.gyroRadps,
-                (GetMissionFanDutyCycle() > 0.0f) ? (baseThresholdMps * 5.0f) : baseThresholdMps,
+                (fanDuty > 0.0f) ? (baseThresholdMps * 5.0f) : baseThresholdMps,
                 Config::kMotionSettleAngularSpeedThresholdRadps);
         }
 
@@ -1086,10 +1089,11 @@ namespace MazeMap::App::Internal
             const SensorSnapshot& sensors,
             const DriveTelemetry& driveTelemetry,
             const float desiredSpeedMps,
-            const float exitMagnitudeMps) noexcept
+            const float exitMagnitudeMps,
+            const float fanDuty) noexcept
         {
             return (exitMagnitudeMps <= Config::kSpeedToleranceMps) ?
-                IsMotionSettled(sensors, driveTelemetry) :
+                IsMotionSettled(sensors, driveTelemetry, fanDuty) :
                 (std::fabs((std::isfinite(state.GetVelocity()) ? state.GetVelocity() : desiredSpeedMps) - desiredSpeedMps) <=
                     Config::kSpeedToleranceMps);
         }
@@ -1567,7 +1571,10 @@ namespace MazeMap::App::Internal
         bool& done)
     {
         auto& hold = *StorageAs<HoldPrimitive>(_primitiveStorageWords);
-        hold.ObserveStationaryState(IsMotionSettled(sensors, driveTelemetry));
+        hold.ObserveStationaryState(IsMotionSettled(
+            sensors,
+            driveTelemetry,
+            (_vehicle != nullptr) ? _vehicle->GetFanDuty() : 0.0f));
         done = hold.IsComplete();
         return CommandVector::Brake();
     }
@@ -1634,7 +1641,8 @@ namespace MazeMap::App::Internal
                 sensors,
                 driveTelemetry,
                 desiredSpeedMps,
-                exitMagnitudeMps);
+                exitMagnitudeMps,
+                (_vehicle != nullptr) ? _vehicle->GetFanDuty() : 0.0f);
         }
 
         float targetYawRateRadps =

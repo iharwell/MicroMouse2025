@@ -118,6 +118,25 @@ namespace MazeMap
             Assert::IsFalse(movingState.IsStationary());
         }
 
+        TEST_METHOD(VehicleStateCurrentCommandRoundTripsAppliedCommand)
+        {
+            VehicleState state;
+            const App::Internal::CommandVector command(0.25f, -0.125f);
+
+            state.SetCurrentCommand(command);
+
+            Assert::AreEqual(command.LeftMotorPwm(), state.GetCurrentCommand().LeftMotorPwm(), 0.0f);
+            Assert::AreEqual(command.RightMotorPwm(), state.GetCurrentCommand().RightMotorPwm(), 0.0f);
+        }
+
+        TEST_METHOD(VehicleBatteryVoltageMatchesPlantModelSupplyVoltage)
+        {
+            const Vehicle vehicle;
+            const PlantParams params = PlantParams::Default();
+
+            Assert::AreEqual(params.supplyVoltageV, vehicle.GetBatteryVoltage(), 0.0f);
+        }
+
         TEST_METHOD(VehicleStateLogEntryProjectsThroughDomainGetters)
         {
             VehicleState state;

@@ -19,6 +19,7 @@ namespace MazeMap
         PlantModelTestRuntime() noexcept
             : plant(vehicle, runtimeState)
         {
+            vehicle.SetFanDuty(0.80f);
         }
     };
 

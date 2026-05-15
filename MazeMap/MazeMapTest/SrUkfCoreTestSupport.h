@@ -45,6 +45,7 @@ namespace MazeMap
         SrUkfCoreTestRuntime() noexcept
             : plantModel(vehicle, runtimeState)
         {
+            vehicle.SetFanDuty(0.80f);
         }
     };
 
@@ -371,8 +372,6 @@ namespace MazeMap
         SyntheticEncoderRemainderState& remainderState,
         float commandedLinearMps,
         float commandedAngularRadps,
-        float fanDutyCycle = 0.80f,
-        float batteryVoltageV = 0.0f,
         std::uint16_t saturationFlags = 0U)
     {
         (void)commandedLinearMps;
@@ -380,7 +379,7 @@ namespace MazeMap
         (void)saturationFlags;
         const VehicleState::StateVector stateBeforePredict = core.workingState();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
-            core.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV));
+            core.predict(dtSeconds, control));
         ApplyPredictionMatchingEncoderAndYawUpdates(
             core,
             stateBeforePredict,
@@ -414,9 +413,7 @@ namespace MazeMap
     inline SrUkfCore RunUKFCycles(
         int numCycles,
         App::Internal::CommandVector control =
-            App::Internal::CommandVector(0.0f, 0.0f),
-        float fanDutyCycle = 0.80f,
-        float batteryVoltageV = 0.0f)
+            App::Internal::CommandVector(0.0f, 0.0f))
     {
         const VehicleState::StateVector initialState =
             BuildUkfState(
@@ -440,7 +437,7 @@ namespace MazeMap
         for (int step = 0; step < numCycles; ++step)
         {
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(
-                core.predict(dt, control, fanDutyCycle, batteryVoltageV));
+                core.predict(dt, control));
 
             const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
             Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.attempted);

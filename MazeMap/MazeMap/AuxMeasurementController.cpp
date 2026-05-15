@@ -291,7 +291,7 @@ namespace MazeMap
             }
 
             _fanEnabled = enabled;
-            SetMissionLevelFanEnabled(enabled);
+            _vehicle.SetFanDuty(enabled ? Config::kRacingFanDutyCycle : 0.0f);
         }
 
         CommandVector FinishMode(LoopController& loopController)

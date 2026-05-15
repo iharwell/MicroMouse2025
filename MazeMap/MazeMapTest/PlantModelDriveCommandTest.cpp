@@ -196,8 +196,7 @@ namespace MazeMap
 
             plant.velocityTargetTechnicalLimits(
                 maxLongitudinalAccelMps2,
-                maxYawAccelRadps2,
-                0.80f);
+                maxYawAccelRadps2);
 
             Assert::IsTrue(std::isfinite(maxLongitudinalAccelMps2));
             Assert::IsTrue(std::isfinite(maxYawAccelRadps2));

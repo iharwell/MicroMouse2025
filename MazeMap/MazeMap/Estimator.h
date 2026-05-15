@@ -49,23 +49,17 @@ namespace MazeMap
 
         bool predict(
             float dt,
-            const App::Internal::CommandVector& control,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f) noexcept;
+            const App::Internal::CommandVector& control) noexcept;
 
         template <typename LoopHook>
         bool predict(
             float dt,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             LoopHook&& loopHook) noexcept
         {
             return _core.predict(
                 dt,
                 control,
-                fanDutyCycle,
-                batteryVoltageV,
                 static_cast<LoopHook&&>(loopHook));
         }
 

@@ -38,17 +38,19 @@ namespace
 
     struct ScopedMissionFanDuty final
     {
-        explicit ScopedMissionFanDuty(const float dutyCycle) noexcept
-            : previousDutyCycle(GetMissionFanDutyCycle())
+        explicit ScopedMissionFanDuty(MazeMap::Vehicle& vehicle, const float dutyCycle) noexcept
+            : targetVehicle(vehicle)
+            , previousDutyCycle(vehicle.GetFanDuty())
         {
-            WriteFanDutyCycle(dutyCycle);
+            targetVehicle.SetFanDuty(dutyCycle);
         }
 
         ~ScopedMissionFanDuty() noexcept
         {
-            WriteFanDutyCycle(previousDutyCycle);
+            targetVehicle.SetFanDuty(previousDutyCycle);
         }
 
+        MazeMap::Vehicle& targetVehicle;
         float previousDutyCycle = 0.0f;
     };
 
@@ -368,7 +370,7 @@ namespace MazeMap::App
             Internal::SharedRobotRuntime runtime;
             Assert::IsTrue(runtime.DriveBase().Begin());
             PrimeSharedRuntimeDriveWheelSpeed(runtime, 0.06f, 0.06f);
-            ScopedMissionFanDuty fanDuty(0.0f);
+            ScopedMissionFanDuty fanDuty(runtime.Vehicle(), 0.0f);
 
             Internal::Drive& drive = runtime.DriveService();
             drive.StartHold(1U, true);

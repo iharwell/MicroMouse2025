@@ -345,12 +345,10 @@ namespace MazeMap
         mutable bool _lastImuYawRateValid = false;
         mutable bool _lastImuAccelValid = false;
         // Resolves the command operating speed from runtime state first, then sensor-derived wheel/IMU
-        // measurements, then zero. The battery-voltage output is retained for plant-model call shape;
-        // this function currently leaves it at the caller-provided value.
+        // measurements, then zero.
         void GetVelocityCommandOperatingPoint(
             float& presentLinearSpeedMps,
-            float& presentYawRateRadps,
-            float& batteryVoltageV) const;
+            float& presentYawRateRadps) const;
 
         // Central response horizon used when converting velocity/yaw-rate target error into requested
         // acceleration. Falls back to one second if the PlantModel constant is invalid.
@@ -420,8 +418,7 @@ namespace MazeMap
             float technicalYawAccelRadps2 = 0.0f;
             _plantModel.velocityTargetTechnicalLimits(
                 technicalLongitudinalAccelMps2,
-                technicalYawAccelRadps2,
-                GetMissionFanDutyCycle());
+                technicalYawAccelRadps2);
 
             if (std::isfinite(technicalLongitudinalAccelMps2) && (technicalLongitudinalAccelMps2 > 0.0f))
             {

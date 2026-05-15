@@ -93,11 +93,9 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
             App::Internal::CommandVector control{};
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const ContactForces lowForceContacts =
-                plant.tireForces(initialState, control, controlFanDutyCycle, params);
+                plant.tireForces(initialState, control, params);
             Assert::IsTrue(std::fabs(lowForceContacts.SumForwardForceN()) < 1.0e-4f);
             Assert::IsTrue(std::fabs(lowForceContacts.SumRightForceN()) < 1.0e-4f);
 
@@ -113,7 +111,7 @@ namespace MazeMap
             Assert::IsTrue(initialRightWheelVarianceRadps2 < (0.01f * initialYawRateVarianceRadps2));
 
             constexpr float dt = 0.001f;
-            Assert::IsTrue(core.predict(dt, control, controlFanDutyCycle, controlBatteryVoltageV));
+            Assert::IsTrue(core.predict(dt, control));
 
             const VehicleState::StateMatrix predictedCovariance = core.workingCovariance();
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kR, VehicleState::kR)));
@@ -159,11 +157,9 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
             App::Internal::CommandVector control{};
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const ContactForces lowForceContacts =
-                plant.tireForces(initialState, control, controlFanDutyCycle, params);
+                plant.tireForces(initialState, control, params);
             Assert::IsTrue(std::fabs(lowForceContacts.SumForwardForceN()) < 1.0e-4f);
             Assert::IsTrue(std::fabs(lowForceContacts.SumRightForceN()) < 1.0e-4f);
 
@@ -178,7 +174,7 @@ namespace MazeMap
                 (0.01f * initialYawRateVarianceRadps2));
 
             constexpr float dt = 0.001f;
-            Assert::IsTrue(core.predict(dt, control, controlFanDutyCycle, controlBatteryVoltageV));
+            Assert::IsTrue(core.predict(dt, control));
 
             const VehicleState::StateMatrix predictedCovariance = core.workingCovariance();
             Assert::IsTrue(std::isfinite(predictedCovariance(VehicleState::kR, VehicleState::kR)));
@@ -215,10 +211,8 @@ namespace MazeMap
             SrUkfCore core = MakeDefaultSrUkfCore();
             App::Internal::CommandVector control{};
             constexpr float dt = 0.001f;
-            const float fanDutyCycle = 0.80f;
-            const float batteryVoltageV = params.supplyVoltageV;
 
-            Assert::IsTrue(core.predict(dt, control, fanDutyCycle, batteryVoltageV));
+            Assert::IsTrue(core.predict(dt, control));
             EncoderObs first{};
             first.totalLeftCounts = 2;
             first.totalRightCounts = -1;
@@ -228,7 +222,7 @@ namespace MazeMap
             Assert::IsTrue(firstResult.attempted);
             Assert::IsTrue(firstResult.accepted);
 
-            Assert::IsTrue(core.predict(dt, control, fanDutyCycle, batteryVoltageV));
+            Assert::IsTrue(core.predict(dt, control));
             EncoderObs second{};
             second.totalLeftCounts = 5;
             second.totalRightCounts = -3;
@@ -355,14 +349,12 @@ namespace MazeMap
             SrUkfCore core = MakeDefaultSrUkfCore();
             const PlantParams params = PlantParams::Default();
             const CommandVector control = CommandVector(0.18f, 0.18f);
-            const float fanDutyCycle = 0.80f;
-            const float batteryVoltageV = params.supplyVoltageV;
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
 
             for (int step = 0; step < 200; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, fanDutyCycle, batteryVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
                 Assert::IsTrue(encoderResult.attempted);
@@ -386,14 +378,12 @@ namespace MazeMap
             SrUkfCore core = MakeDefaultSrUkfCore();
             const PlantParams params = PlantParams::Default();
             const CommandVector control = CommandVector(0.5f, 0.5f);
-            const float fanDutyCycle = 0.80f;
-            const float batteryVoltageV = params.supplyVoltageV;
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
 
             for (int step = 0; step < 200; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, fanDutyCycle, batteryVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
 
                 const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
                 Assert::IsTrue(yawResult.attempted);
@@ -489,13 +479,11 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
             const CommandVector control = CommandVector(0.08f, 0.08f);
-            const float fanDutyCycle = 0.80f;
-            const float batteryVoltageV = params.supplyVoltageV;
 
             for (int index = 0; index < static_cast<int>(sizeof(samples) / sizeof(samples[0])); ++index)
             {
                 const LaunchEncoderSample& sample = samples[index];
-                Assert::IsTrue(core.predict(sample.dtSeconds, control, fanDutyCycle, batteryVoltageV));
+                Assert::IsTrue(core.predict(sample.dtSeconds, control));
 
                 EncoderObs encoder{};
                 encoder.totalLeftCounts = countsFromOmega(sample.leftOmegaRadps, sample.dtSeconds);
@@ -540,14 +528,12 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
             const CommandVector control = CommandVector(0.30f, 0.60f);
-            const float fanDutyCycle = 0.80f;
-            const float batteryVoltageV = params.supplyVoltageV;
 
             constexpr float dt = 0.002f;
             constexpr int kSteps = 75;
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, fanDutyCycle, batteryVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
             }
 
             const VehicleState::StateVector& state = core.workingState();
@@ -857,10 +843,8 @@ namespace MazeMap
             const float beforeVarianceRadps2 = core.workingCovariance()(VehicleState::kBgz, VehicleState::kBgz);
 
             const CommandVector control = CommandVector(0.16f, 0.16f);
-            const float fanDutyCycle = 0.80f;
-            const float batteryVoltageV = params.supplyVoltageV;
 
-            Assert::IsTrue(core.predict(0.002f, control, fanDutyCycle, batteryVoltageV));
+            Assert::IsTrue(core.predict(0.002f, control));
 
             const float afterVarianceRadps2 = core.workingCovariance()(VehicleState::kBgz, VehicleState::kBgz);
             Assert::AreEqual(2, FindDebugDumpModeId(core));
@@ -885,10 +869,8 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.002f, 0.002f, 0.003f, 0.003f, 0.003f, 0.003f, 0.002f)));
 
             const CommandVector control = CommandVector(0.19f, 0.17f);
-            const float fanDutyCycle = 0.80f;
-            const float batteryVoltageV = params.supplyVoltageV;
             constexpr float dt = 0.002f;
-            Assert::IsTrue(core.predict(dt, control, fanDutyCycle, batteryVoltageV));
+            Assert::IsTrue(core.predict(dt, control));
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 1;
@@ -931,7 +913,7 @@ namespace MazeMap
             const float firstControlBatteryVoltageV = params.supplyVoltageV;
 
             constexpr float dt = 0.002f;
-            Assert::IsTrue(core.predict(dt, firstControl, firstControlFanDutyCycle, firstControlBatteryVoltageV));
+            Assert::IsTrue(core.predict(dt, firstControl));
 
             EncoderObs firstEncoder{};
             firstEncoder.totalLeftCounts = 0;
@@ -958,7 +940,7 @@ namespace MazeMap
             const float secondControlFanDutyCycle = 0.80f;
             const float secondControlBatteryVoltageV = params.supplyVoltageV;
 
-            Assert::IsTrue(core.predict(dt, secondControl, secondControlFanDutyCycle, secondControlBatteryVoltageV));
+            Assert::IsTrue(core.predict(dt, secondControl));
 
             EncoderObs secondEncoder{};
             secondEncoder.totalLeftCounts = 0;

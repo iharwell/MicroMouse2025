@@ -480,9 +480,7 @@ namespace MazeMap
         _prePredictCovariance = _workingFilter.covariance();
         refreshFrozenPolicyState(
             0.0f,
-            App::Internal::CommandVector(0.0f, 0.0f),
-            0.80f,
-            0.0f);
+            App::Internal::CommandVector(0.0f, 0.0f));
     }
 
     void SrUkfCore::setRuntimeContext(
@@ -1286,8 +1284,8 @@ namespace MazeMap
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
         _workingFilter.setProcessNoiseSquareRoot(_sqrtProcessNoiseDensity);
         _lastControl = App::Internal::CommandVector(0.0f, 0.0f);
-        _lastFanDutyCycle = 0.80f;
-        _lastBatteryVoltageV = 0.0f;
+        _lastFanDutyCycle = runtimeFanDuty();
+        _lastBatteryVoltageV = runtimeBatteryVoltage();
         _lastEncoderObs = EncoderObs{};
         _lastEncoderDtSeconds = 0.0f;
         _prePredictState = _workingFilter.state();
@@ -1305,9 +1303,7 @@ namespace MazeMap
         _regripRecovery = {};
         refreshFrozenPolicyState(
             0.0f,
-            App::Internal::CommandVector(0.0f, 0.0f),
-            0.80f,
-            0.0f);
+            App::Internal::CommandVector(0.0f, 0.0f));
         return true;
     }
 
@@ -1334,16 +1330,14 @@ namespace MazeMap
         float leftAppliedBankTorqueNm,
         float rightAppliedBankTorqueNm,
         float leftClosureResidualMps,
-        float rightClosureResidualMps,
-        float fanDutyCycle) const noexcept
+        float rightClosureResidualMps) const noexcept
     {
         GripUtilizationSnapshot snapshot{};
         const PlantDerivatives derivatives =
             _plantModel.forwardStepFromAppliedBankTorques(
                 currentState,
                 leftAppliedBankTorqueNm,
-                rightAppliedBankTorqueNm,
-                fanDutyCycle);
+                rightAppliedBankTorqueNm);
         snapshot.leftBankPreProjectionUtilization =
             (std::max)(
                 0.0f,
@@ -1649,9 +1643,7 @@ namespace MazeMap
 
     void SrUkfCore::refreshFrozenPolicyState(
         float dtSeconds,
-        const App::Internal::CommandVector& control,
-        float fanDutyCycle,
-        float batteryVoltageV) noexcept
+        const App::Internal::CommandVector& control) noexcept
     {
         const StateVector& currentState = _workingFilter.state();
         const StateVector& torqueEstimateState =
@@ -1663,7 +1655,6 @@ namespace MazeMap
         _plantModel.resolveAppliedBankTorques(
             torqueEstimateState,
             control,
-            batteryVoltageV,
             leftAppliedBankTorqueNm,
             rightAppliedBankTorqueNm);
 
@@ -1685,8 +1676,7 @@ namespace MazeMap
                 leftAppliedBankTorqueNm,
                 rightAppliedBankTorqueNm,
                 leftClosureResidualMps,
-                rightClosureResidualMps,
-                fanDutyCycle);
+                rightClosureResidualMps);
         TransientContactMemoryState memory =
             AdvanceTransientContactMemory(
                 _transientContactMemory,
@@ -1873,21 +1863,29 @@ namespace MazeMap
 
     bool SrUkfCore::predict(
         float dt,
-        const App::Internal::CommandVector& control,
-        float fanDutyCycle,
-        float batteryVoltageV) noexcept
+        const App::Internal::CommandVector& control) noexcept
     {
-        return predictImpl(dt, control, fanDutyCycle, batteryVoltageV, nullptr, nullptr);
+        return predictImpl(dt, control, nullptr, nullptr);
+    }
+
+    float SrUkfCore::runtimeFanDuty() const noexcept
+    {
+        return _plantModel._vehicle.GetFanDuty();
+    }
+
+    float SrUkfCore::runtimeBatteryVoltage() const noexcept
+    {
+        return _plantModel._vehicle.GetBatteryVoltage();
     }
 
     bool SrUkfCore::predictImpl(
         float dt,
         const App::Internal::CommandVector& control,
-        float fanDutyCycle,
-        float batteryVoltageV,
         void* loopHookContext,
         LoopHookInvoker loopHook) noexcept
     {
+        const float fanDutyCycle = runtimeFanDuty();
+        const float batteryVoltageV = runtimeBatteryVoltage();
         _lastControl = control;
         _lastFanDutyCycle = fanDutyCycle;
         _lastBatteryVoltageV = batteryVoltageV;
@@ -1899,7 +1897,7 @@ namespace MazeMap
         _prePredictState = _workingFilter.state();
         _prePredictCovariance = _workingFilter.covariance();
         const PlantDerivatives presentDerivatives =
-            _plantModel.forwardStep(control, fanDutyCycle, batteryVoltageV);
+            _plantModel.forwardStep(control);
         _runtimeState.SetLongitudinalAcceleration(presentDerivatives.longitudinalAccelMps2);
         _runtimeState.SetLateralAcceleration(presentDerivatives.lateralAccelMps2);
         _runtimeState.SetYawAcceleration(presentDerivatives.yawAccelRadps2);
@@ -1925,7 +1923,7 @@ namespace MazeMap
         updateCommandSignFlipWindow(dt);
         updateOperatingMode(dt);
         const bool wasExactStationaryLock = _frozenSchedule.exactStationaryLock;
-        refreshFrozenPolicyState(dt, control, fanDutyCycle, batteryVoltageV);
+        refreshFrozenPolicyState(dt, control);
         if (wasExactStationaryLock && !_frozenSchedule.exactStationaryLock)
         {
             const Eigen::Matrix<float, 2, 2> encoderCovariance =
@@ -1986,7 +1984,6 @@ namespace MazeMap
                     sigmaPoint,
                     _frozenLeftAppliedBankTorqueNm,
                     _frozenRightAppliedBankTorqueNm,
-                    _lastFanDutyCycle,
                     sigmaDt);
             },
             invokeLoop);
@@ -2045,7 +2042,7 @@ namespace MazeMap
         _pivotScrubEncoderBodyUpdateSkipped = _pivotScrubMode;
         _lastEncoderObs = measured;
         const bool wasExactStationaryLock = _frozenSchedule.exactStationaryLock;
-        refreshFrozenPolicyState(_lastEncoderDtSeconds, _lastControl, _lastFanDutyCycle, _lastBatteryVoltageV);
+        refreshFrozenPolicyState(_lastEncoderDtSeconds, _lastControl);
         if (wasExactStationaryLock && !_frozenSchedule.exactStationaryLock)
         {
             const Eigen::Matrix<float, 2, 2> encoderCovariance =
@@ -2307,9 +2304,7 @@ namespace MazeMap
                 observation.accelBodyYMps2 -
                 _plantModel.imuPlanarAcceleration(
                     _workingFilter.state(),
-                    _lastControl,
-                    _lastFanDutyCycle,
-                    _lastBatteryVoltageV)(1);
+                    _lastControl)(1);
             Eigen::Matrix<float, 1, 1> sqrtNoise;
             sqrtNoise(0, 0) = _sqrtImuNoise(2, 2);
             const bool forwardAccelAccepted = _workingFilter.Update<1>(
@@ -2321,9 +2316,7 @@ namespace MazeMap
                     Eigen::Matrix<float, 1, 1> prediction;
                     prediction << _plantModel.imuPlanarAcceleration(
                         sigmaPoint,
-                        _lastControl,
-                        _lastFanDutyCycle,
-                        _lastBatteryVoltageV)(1);
+                        _lastControl)(1);
                     return prediction;
                 },
                 invokeLoop);
@@ -2341,9 +2334,7 @@ namespace MazeMap
                 observation.accelBodyXMps2 -
                 _plantModel.imuPlanarAcceleration(
                     _workingFilter.state(),
-                    _lastControl,
-                    _lastFanDutyCycle,
-                    _lastBatteryVoltageV)(0);
+                    _lastControl)(0);
             Eigen::Matrix<float, 1, 1> sqrtNoise;
             sqrtNoise(0, 0) = _sqrtImuNoise(1, 1);
             const bool lateralAccelAccepted = _workingFilter.Update<1>(
@@ -2355,9 +2346,7 @@ namespace MazeMap
                     Eigen::Matrix<float, 1, 1> prediction;
                     prediction << _plantModel.imuPlanarAcceleration(
                         sigmaPoint,
-                        _lastControl,
-                        _lastFanDutyCycle,
-                        _lastBatteryVoltageV)(0);
+                        _lastControl)(0);
                     return prediction;
                 },
                 invokeLoop);

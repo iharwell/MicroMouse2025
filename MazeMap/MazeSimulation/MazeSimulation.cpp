@@ -46,13 +46,11 @@ namespace
         MazeMap::Estimator& ukf,
         float dtSeconds,
         const MazeMap::App::Internal::CommandVector& control,
-        float fanDutyCycle,
-        float batteryVoltageV,
         const MazeMap::EncoderObs& encoderObservation,
         const MazeMap::ImuAccelObs& accelObservation,
         float rawGyroRadps)
     {
-        if (!ukf.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
+        if (!ukf.predict(dtSeconds, control))
         {
             return false;
         }
@@ -110,7 +108,7 @@ namespace
         const MazeMap::App::Internal::CommandVector control =
             MazeMap::App::Internal::CommandVector(0.0f, 0.0f);
         constexpr float fanDutyCycle = 0.80f;
-        constexpr float batteryVoltageV = 0.0f;
+        vehicle.SetFanDuty(fanDutyCycle);
 
         MazeMap::EncoderObs encoderObservation{};
         encoderObservation.totalLeftCounts = 0;
@@ -129,8 +127,6 @@ namespace
                     ukf,
                     kOpenFloorUkfBenchmarkDtSeconds,
                     control,
-                    fanDutyCycle,
-                    batteryVoltageV,
                     encoderObservation,
                     accelObservation,
                     kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
@@ -152,8 +148,6 @@ namespace
                     ukf,
                     kOpenFloorUkfBenchmarkDtSeconds,
                     control,
-                    fanDutyCycle,
-                    batteryVoltageV,
                     encoderObservation,
                     accelObservation,
                     kOpenFloorUkfBenchmarkStationaryGyroRawRadps))
@@ -177,7 +171,7 @@ namespace
         std::cout << "  measurement_set: " << kOpenFloorUkfBenchmarkMeasurementSet << "\n";
         std::cout << "  iterations: " << iterations << "\n";
         std::cout << "  dt_seconds: " << kOpenFloorUkfBenchmarkDtSeconds << "\n";
-        std::cout << "  fan_duty: " << fanDutyCycle << "\n";
+        std::cout << "  fan_duty: " << vehicle.GetFanDuty() << "\n";
         std::cout << "  raw_gyro_radps: " << kOpenFloorUkfBenchmarkStationaryGyroRawRadps << "\n";
         std::cout << "  elapsed_ms: " << elapsedMs.count() << "\n";
         std::cout << "  us_per_iteration: " << microsecondsPerIteration << "\n";

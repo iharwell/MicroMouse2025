@@ -84,7 +84,7 @@ namespace MazeMap
             {
                 _runtime.FailActiveMode("Drive base init failed");
             }
-            SetMissionLevelFanEnabled(true);
+            _vehicle.SetFanDuty(Config::kRacingFanDutyCycle);
             gWallDistanceCalibration.Clear();
             if (!_sensors.Begin(DiagnosticConfig::kControlPeriodUs))
             {
@@ -515,7 +515,7 @@ namespace MazeMap
             _phaseFn = nullptr;
             _drive.Brake();
             CloseLog();
-            SetMissionLevelFanEnabled(false);
+            _vehicle.SetFanDuty(0.0f);
             _cleanupComplete = true;
         }
 

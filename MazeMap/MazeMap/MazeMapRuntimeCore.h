@@ -4,7 +4,6 @@
 #include "Defines.h"
 #include "DiagonalWallCentering.h"
 #include "EncoderStallPolicy.h"
-#include "FanRampProfile.h"
 #include "HardwareConfig.h"
 #include "ImuCalibrationPolicy.h"
 #include "Maze.h"
@@ -409,83 +408,6 @@ inline float HeadingErrorRad(const Eigen::Vector2f& targetHeading, const Eigen::
 }
 
 inline constexpr float kStandardGravityMps2 = 9.80665f;
-inline constexpr unsigned long kFanRampStepMs = 20UL;
-inline float gMissionFanDutyCycle = 0.0f;
-
-inline uint16_t FanPwmCode(float dutyCycle)
-{
-#if defined(ARDUINO_TEENSY41)
-    const float clampedDutyCycle = (std::clamp)(dutyCycle, 0.0f, 1.0f);
-    const uint32_t maxPwmCode = (1UL << HardwareConfig::kPwmBits) - 1UL;
-    return static_cast<uint16_t>(clampedDutyCycle * static_cast<float>(maxPwmCode) + 0.5f);
-#else
-    (void)dutyCycle;
-    return 0U;
-#endif
-}
-
-inline void WriteFanDutyCycle(float dutyCycle)
-{
-    gMissionFanDutyCycle = (std::clamp)(dutyCycle, 0.0f, 1.0f);
-#if defined(ARDUINO_TEENSY41)
-    analogWrite(Pins::Fan_CTRL, FanPwmCode(dutyCycle));
-#else
-    (void)dutyCycle;
-#endif
-}
-
-inline float GetMissionFanDutyCycle()
-{
-    return gMissionFanDutyCycle;
-}
-
-inline void RampFanDutyCycle(float targetDutyCycle)
-{
-#if defined(ARDUINO_TEENSY41)
-    const unsigned long rampDurationMs = static_cast<unsigned long>(MazeMap::Config::kRacingFanRampMs);
-    const float clampedTargetDutyCycle = MazeMap::ComputeFanRampDutyCycle(targetDutyCycle, rampDurationMs, rampDurationMs);
-    if (clampedTargetDutyCycle <= 0.0f)
-    {
-        WriteFanDutyCycle(0.0f);
-        return;
-    }
-
-    if (rampDurationMs == 0UL)
-    {
-        WriteFanDutyCycle(clampedTargetDutyCycle);
-        return;
-    }
-
-    WriteFanDutyCycle(0.0f);
-    const unsigned long startMs = millis();
-    while (true)
-    {
-        const unsigned long elapsedMs = millis() - startMs;
-        if (elapsedMs >= rampDurationMs)
-        {
-            break;
-        }
-
-        WriteFanDutyCycle(MazeMap::ComputeFanRampDutyCycle(clampedTargetDutyCycle, elapsedMs, rampDurationMs));
-        delay((std::min)(kFanRampStepMs, rampDurationMs - elapsedMs));
-    }
-
-    WriteFanDutyCycle(clampedTargetDutyCycle);
-#else
-    (void)targetDutyCycle;
-#endif
-}
-
-inline void SetMissionLevelFanEnabled(bool enabled)
-{
-    if (enabled)
-    {
-        RampFanDutyCycle(MazeMap::Config::kRacingFanDutyCycle);
-        return;
-    }
-
-    WriteFanDutyCycle(0.0f);
-}
 
 inline float ReachableSpeedWithBoundary(float boundarySpeed, float distance, float accel)
 {

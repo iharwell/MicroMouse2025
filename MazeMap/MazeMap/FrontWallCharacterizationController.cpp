@@ -77,7 +77,7 @@ public:
         delay(FrontWallCharacterizationConfig::kPostSdReadyDelayMs);
         AppendStartupTrace("front_wall_characterization:sd_ready_wait_complete");
 
-        SetMissionLevelFanEnabled(false);
+        _vehicle.SetFanDuty(0.0f);
 
         const bool driveOk = _drive.Begin();
         _startupCalibration.Cancel();
@@ -145,7 +145,7 @@ private:
         self->_pauseAction = PauseAction::None;
         self->_startupCalibration.Cancel();
         self->_drive.Brake();
-        SetMissionLevelFanEnabled(false);
+        self->_vehicle.SetFanDuty(0.0f);
     }
 
     void FinalizeSuccessfulRun() noexcept
@@ -154,7 +154,7 @@ private:
         _drive.Brake();
         _phase = Phase::Idle;
         _pauseAction = PauseAction::None;
-        SetMissionLevelFanEnabled(false);
+        _vehicle.SetFanDuty(0.0f);
         (void)_runtime.AppendTextLogLine("Front wall characterization complete and persisted.");
     }
 

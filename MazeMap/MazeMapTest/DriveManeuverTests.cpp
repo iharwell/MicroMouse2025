@@ -39,17 +39,19 @@ namespace MazeMap::App
 
         struct ScopedMissionFanDuty final
         {
-            explicit ScopedMissionFanDuty(const float dutyCycle) noexcept
-                : previousDutyCycle(GetMissionFanDutyCycle())
+            explicit ScopedMissionFanDuty(Vehicle& vehicle, const float dutyCycle) noexcept
+                : targetVehicle(vehicle)
+                , previousDutyCycle(vehicle.GetFanDuty())
             {
-                WriteFanDutyCycle(dutyCycle);
+                targetVehicle.SetFanDuty(dutyCycle);
             }
 
             ~ScopedMissionFanDuty() noexcept
             {
-                WriteFanDutyCycle(previousDutyCycle);
+                targetVehicle.SetFanDuty(previousDutyCycle);
             }
 
+            Vehicle& targetVehicle;
             float previousDutyCycle = 0.0f;
         };
 
@@ -215,7 +217,7 @@ namespace MazeMap::App
                 telemetry.rightDriveCommand);
 
             const VehicleState::StateVector previousTruthState = truthState;
-            truthState = plant.integrate(truthState, control, 0.80f, params.supplyVoltageV, dtSeconds, params);
+            truthState = plant.integrate(truthState, control, dtSeconds, params);
 
             const float leftDistanceDeltaM =
                 0.5f *
@@ -303,9 +305,9 @@ namespace MazeMap::App
             const ManeuverCode code,
             const bool smoothTurn)
         {
-            ScopedMissionFanDuty fanDuty(0.80f);
             ManeuverExecutionTrace trace{};
             Internal::SharedRobotRuntime runtime(kSimulationDtSeconds);
+            ScopedMissionFanDuty fanDuty(runtime.Vehicle(), 0.80f);
             PlantModel& plant = runtime.Plant();
             float leftEncoderRemainderCounts = 0.0f;
             float rightEncoderRemainderCounts = 0.0f;

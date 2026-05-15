@@ -684,6 +684,7 @@ namespace MazeMap::App::Internal
         }
 
         _runtime->Vehicle().ApplyMotorCommand(control);
+        _runtime->RuntimeState().SetCurrentCommand(control);
         return true;
     }
 
@@ -718,8 +719,6 @@ namespace MazeMap::App::Internal
             MazeMap::Config::kExpectedSideWallDistanceM);
 
         const CommandVector control = _appliedControl;
-        const float fanDutyCycle = GetMissionFanDutyCycle();
-        const float batteryVoltageV = 0.0f;
         timing.encoderReadDoneUs = static_cast<std::uint32_t>(micros());
 
         MazeMap::Estimator& estimator = _runtime->Estimator();
@@ -738,7 +737,7 @@ namespace MazeMap::App::Internal
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
             timing.ukfPredictStartUs = static_cast<std::uint32_t>(micros());
-            if (!estimator.predict(dtSeconds, control, fanDutyCycle, batteryVoltageV))
+            if (!estimator.predict(dtSeconds, control))
             {
                 timing.ukfPredictEndUs = static_cast<std::uint32_t>(micros());
                 timing.ukfPredictDurationUs =

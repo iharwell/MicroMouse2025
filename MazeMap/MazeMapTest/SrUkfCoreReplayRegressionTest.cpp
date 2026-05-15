@@ -143,7 +143,7 @@ namespace MazeMap
                     App::Internal::CommandVector(
                         sample.leftDriveCommand,
                         sample.rightDriveCommand);
-                Assert::IsTrue(core.predict(sample.dtSeconds, control, 0.80f, params.supplyVoltageV));
+                Assert::IsTrue(core.predict(sample.dtSeconds, control));
 
                 EncoderObs encoderObservation{};
                 encoderObservation.totalLeftCounts = sample.leftEncoderCount;

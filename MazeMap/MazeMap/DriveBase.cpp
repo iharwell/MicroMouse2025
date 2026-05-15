@@ -169,8 +169,7 @@ namespace MazeMap {
     {
         float presentLinearSpeedMps = 0.0f;
         float presentYawRateRadps = 0.0f;
-        float batteryVoltageV = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
 
         const CommandVector baseCommand =
             ResolveRawVelocityTargetCommand(
@@ -230,8 +229,7 @@ namespace MazeMap {
     {
         float presentLinearSpeedMps = 0.0f;
         float presentYawRateRadps = 0.0f;
-        float batteryVoltageV = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
 
         const CommandVector baseCommand =
             ResolveRawVelocityTargetCommand(
@@ -308,8 +306,7 @@ namespace MazeMap {
     {
         float presentLinearSpeedMps = 0.0f;
         float presentYawRateRadps = 0.0f;
-        float batteryVoltageV = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
 
         const CommandVector baseCommand =
             ResolveRawVelocityTargetCommand(
@@ -444,8 +441,7 @@ namespace MazeMap {
     {
         float presentLinearSpeedMps = 0.0f;
         float presentYawRateRadps = 0.0f;
-        float batteryVoltageV = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps, batteryVoltageV);
+        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
 
         const CommandVector baseCommand =
             ResolveRawVelocityTargetCommand(
@@ -524,8 +520,7 @@ namespace MazeMap {
 
     void DriveBase::GetVelocityCommandOperatingPoint(
         float& presentLinearSpeedMps,
-        float& presentYawRateRadps,
-        float& batteryVoltageV) const
+        float& presentYawRateRadps) const
     {
         RefreshSensorSnapshotDerivedState();
         const float measuredLeftVelocityMps = _leftEncoderVelocityMps;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Defines.h"
+#include "CommandVector.h"
 #include "EigenCompat.h"
 #include "MmLog.h"
 #include "SensorSnapshot.h"
@@ -165,6 +166,10 @@ namespace MazeMap
         const ::SensorSnapshot& GetSensorSnapshot() const noexcept { return _sensorSnapshot; }
         ::SensorSnapshot& GetSensorSnapshot() noexcept { return _sensorSnapshot; }
 
+        void SetCurrentCommand(const App::Internal::CommandVector& currentCommand) noexcept { _currentCommand = currentCommand; }
+        const App::Internal::CommandVector& GetCurrentCommand() const noexcept { return _currentCommand; }
+        App::Internal::CommandVector& GetCurrentCommand() noexcept { return _currentCommand; }
+
         VehicleState ProjectConstantVelocity(float dtSeconds) const noexcept
         {
             VehicleState projected = *this;
@@ -319,6 +324,7 @@ namespace MazeMap
         float _time;
         std::uint32_t _timestampUs;
         ::SensorSnapshot _sensorSnapshot;
+        App::Internal::CommandVector _currentCommand{};
     };
 
 #define VEHICLE_STATE_LOG_FIELDS(X) \

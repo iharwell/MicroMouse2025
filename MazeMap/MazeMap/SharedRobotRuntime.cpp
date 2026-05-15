@@ -892,7 +892,7 @@ namespace MazeMap::App::Internal
         }
 
         modeFaulted = true;
-        SetMissionLevelFanEnabled(false);
+        vehicle.SetFanDuty(0.0f);
         (void)controlLoop.ApplyControlAtTickStart(CommandVector::Brake());
         (void)WriteTextLogEntry(
             (activeModeFaultSource[0] != '\0') ? activeModeFaultSource : nullptr,

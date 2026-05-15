@@ -176,7 +176,7 @@ namespace MazeMap::App::Internal
         }
 
         _phase = Phase::DonutSweep;
-        SetMissionLevelFanEnabled(true);
+        _vehicle.SetFanDuty(Config::kRacingFanDutyCycle);
         (void)_runtime.AppendTextLogFormatted(
             "Showcasing donut sweep: radius=%.3f start_speed=%.3f ramp=%.3f speed_cap=%.3f center_limit=%.3f",
             kShowcasingDonutRadiusM,
@@ -199,7 +199,7 @@ namespace MazeMap::App::Internal
         self->ReleaseSelectorMonitor();
         self->_phase = Phase::Idle;
         self->_drive.Brake();
-        SetMissionLevelFanEnabled(false);
+        self->_vehicle.SetFanDuty(0.0f);
     }
 
     LoopController::SessionOptions ShowcasingDonutController::BuildLoopOptions() const noexcept
@@ -610,7 +610,7 @@ namespace MazeMap::App::Internal
         row.front_right_obs_confidence = frontRightObs.confidence;
         row.left_obs_confidence = leftObs.confidence;
         row.right_obs_confidence = rightObs.confidence;
-        row.fan_duty_cycle = GetMissionFanDutyCycle();
+        row.fan_duty_cycle = _vehicle.GetFanDuty();
         row.measurement_flags = BuildOpenFloorMeasurementFlags(
             abortMarker,
             _runtime.Estimator().HasFault(),
@@ -804,7 +804,7 @@ namespace MazeMap::App::Internal
                     }
                     self->ReleaseSelectorMonitor();
                     self->_drive.Brake();
-                    SetMissionLevelFanEnabled(false);
+                    self->_vehicle.SetFanDuty(0.0f);
                     (void)self->_runtime.AppendTextLogFormatted(
                         "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",
                         self->EndReasonText(self->_endReason),

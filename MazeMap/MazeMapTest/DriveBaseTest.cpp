@@ -166,8 +166,7 @@ namespace MazeMap
                     (appliedControl != nullptr) ? *appliedControl : drive.CurrentControlVector();
                 if (!estimator.predict(
                     dtSeconds,
-                    predictionControl,
-                    GetMissionFanDutyCycle()))
+                    predictionControl))
                 {
                     runtimeState.SetSensorSnapshot(snapshot);
                     return;
@@ -250,7 +249,7 @@ namespace MazeMap
                 (appliedControlOverride != nullptr) ? *appliedControlOverride : telemetryControl;
 
             const PlantModel::StateVector previousTruthState = truthState;
-            truthState = plant.integrate(truthState, control, 0.80f, params.supplyVoltageV, dtSeconds, params);
+            truthState = plant.integrate(truthState, control, dtSeconds, params);
 
             const float leftDistanceDeltaM =
                 0.5f *
@@ -426,8 +425,6 @@ namespace MazeMap
                     plant.integrate(
                         truthState,
                         command,
-                        GetMissionFanDutyCycle(),
-                        params.supplyVoltageV,
                         kDriveBaseLoopDtSeconds,
                         params);
             }
@@ -1203,12 +1200,10 @@ namespace MazeMap
                 truthState = plant.integrate(
                     truthState,
                     control,
-                    0.80f,
-                    params.supplyVoltageV,
                     scenario.dtSeconds,
                     params);
                 const MazeMap::PlantDerivatives truthDerivatives =
-                    plant.forwardStep(truthState, control, 0.80f, params.supplyVoltageV, params);
+                    plant.forwardStep(truthState, control, params);
 
                 const float leftDistanceDeltaM =
                     0.5f *
@@ -1270,7 +1265,7 @@ namespace MazeMap
                 const PlantModel::StateVector estimatorState =
                     BuildDriveBaseStateVector(driveHarness.runtimeState);
                 const MazeMap::PlantDerivatives estimatorDerivatives =
-                    plant.forwardStep(estimatorState, control, 0.80f, params.supplyVoltageV, params);
+                    plant.forwardStep(estimatorState, control, params);
 
                 OscillationPairingTraceSample sample{};
                 sample.targetSignal = generatedCommand.targetSignal;
@@ -1533,6 +1528,7 @@ namespace MazeMap
         TEST_METHOD(EstimatorMeasuredKinematicsStartsFromExternalRuntimeState)
         {
             Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
             VehicleState runtimeState;
             PlantModel plant(vehicle, runtimeState);
             Estimator estimator(plant, runtimeState);
@@ -2555,4 +2551,6 @@ namespace MazeMap
 
     };
 }
+
+
 

@@ -113,7 +113,6 @@ namespace MazeMap
         const Maze* map = nullptr)
     {
         const auto control = drive.CurrentControlVector();
-        const float fanDutyCycle = GetMissionFanDutyCycle();
         runtimeState.SetSensorSnapshot(snapshot);
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
@@ -127,7 +126,7 @@ namespace MazeMap
 
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
-            if (!estimator.predict(dtSeconds, control, fanDutyCycle))
+            if (!estimator.predict(dtSeconds, control))
             {
                 return;
             }

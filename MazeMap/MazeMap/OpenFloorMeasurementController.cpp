@@ -1117,7 +1117,7 @@ namespace MazeMap::App::Internal
         if (!controller._runtime.WriteUtilityDataLogMetadata("endianness", MazeMap::kOpenFloorEndianness)) return false;
         if (!controller._runtime.WriteUtilityDataLogMetadataUnsigned("control_period_us", DiagnosticConfig::kControlPeriodUs)) return false;
         if (!WriteOpenFloorV62Metadata(controller._runtime)) return false;
-        if (!controller._runtime.WriteUtilityDataLogMetadataFloat("fan_duty_cycle", GetMissionFanDutyCycle(), 3)) return false;
+        if (!controller._runtime.WriteUtilityDataLogMetadataFloat("fan_duty_cycle", controller._vehicle.GetFanDuty(), 3)) return false;
         if (!controller._runtime.WriteUtilityDataLogMetadataFloat("imu_gyro_mdps_per_lsb", controller._sensors.GetGyroSensitivityMdpsPerLsb(), 3)) return false;
         if (!controller._runtime.WriteUtilityDataLogMetadataFloat("imu_accel_mg_per_lsb", controller._sensors.GetAccelSensitivityMgPerLsb(), 3)) return false;
         if (!controller._runtime.WriteUtilityDataLogMetadataFloat("mission_gyro_bias_estimate_radps", controller._sensors.GetGyroBiasRadps(), 6)) return false;
@@ -1328,7 +1328,7 @@ namespace MazeMap::App::Internal
         {
             _runtime.FailActiveMode("Open-floor measurement startup bring-up failed");
         }
-        SetMissionLevelFanEnabled(true);
+        _vehicle.SetFanDuty(Config::kRacingFanDutyCycle);
         _driveService.SetOperationMode(Drive::OperationMode::OpenFloor);
         _driveService.SetLimits(BuildOpenFloorMeasurementModeLimits(_vehicle));
 

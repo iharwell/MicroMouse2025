@@ -2,8 +2,11 @@
 #include "Vehicle.h"
 #include "CommandVector.h"
 #include "EncoderObs.h"
+#include "HardwareConfig.h"
+#include "Pins.h"
 #include "VehicleState.h"
 #include "PlantModel.h"
+#include <algorithm>
 #include <array>
 #include <limits>
 #include "math.h"
@@ -28,6 +31,18 @@ namespace
     constexpr uint8_t kSideLeftWallSensorLedPin = 16U;
     constexpr float kArcTrackWidthLinearSpeedEpsilonMps = 1.0e-4f;
     constexpr float kArcTrackWidthAngularSpeedEpsilonRadps = 1.0e-4f;
+
+    uint16_t FanPwmCode(float dutyCycle) noexcept
+    {
+#if defined(ARDUINO_TEENSY41)
+        const float clampedDutyCycle = (std::clamp)(dutyCycle, 0.0f, 1.0f);
+        const uint32_t maxPwmCode = (1UL << MazeMap::HardwareConfig::kPwmBits) - 1UL;
+        return static_cast<uint16_t>(clampedDutyCycle * static_cast<float>(maxPwmCode) + 0.5f);
+#else
+        (void)dutyCycle;
+        return 0U;
+#endif
+    }
 
     const std::array<float, 8>& GetDefaultWallSensorAdcToLightTable()
     {
@@ -132,6 +147,7 @@ namespace MazeMap
             kRightDriveInvertMotorDirection,
             kRightDriveInvertEncoderDirection,
             1.0f)
+        , _fanDuty(0.0f)
         , _peakForwardAcceleration(kVehiclePeakForwardAccelerationMps2)
         , _peakLateralAcceleration(GetSustainedLateralAccelerationReferenceMps2())
         , _peakRotationalVelocity(kVehiclePeakRotationalVelocityRadps)
@@ -351,6 +367,15 @@ namespace MazeMap
     float Vehicle::GetMass() const { return GetPhysicalModel().massKg; }
     float Vehicle::GetTrackWidth() const { return GetPhysicalModel().trackWidthM; }
     float Vehicle::GetYawInertia() const { return GetPhysicalModel().yawInertiaKgM2; }
+    float Vehicle::GetBatteryVoltage() const noexcept { return kDriveSupplyVoltageV; }
+    void Vehicle::SetFanDuty(float dutyCycle) noexcept
+    {
+        _fanDuty = (std::clamp)(dutyCycle, 0.0f, 1.0f);
+#if defined(ARDUINO_TEENSY41)
+        analogWrite(Pins::Fan_CTRL, FanPwmCode(_fanDuty));
+#endif
+    }
+    float Vehicle::GetFanDuty() const noexcept { return _fanDuty; }
     float Vehicle::GetArcEffectiveTrackWidth(float turningRadiusM) noexcept
     {
         const ArcTrackWidthInterpolation& interpolation = GetPhysicalModel().arcTrackWidthInterpolation;

@@ -128,24 +128,18 @@ namespace MazeMap
 
         bool predict(
             float dt,
-            const App::Internal::CommandVector& control,
-            float fanDutyCycle = 0.80f,
-            float batteryVoltageV = 0.0f) noexcept;
+            const App::Internal::CommandVector& control) noexcept;
 
         template <typename LoopHook>
         bool predict(
             float dt,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             LoopHook&& loopHook) noexcept
         {
             using HookType = std::remove_reference_t<LoopHook>;
             return predictImpl(
                 dt,
                 control,
-                fanDutyCycle,
-                batteryVoltageV,
                 const_cast<void*>(static_cast<const void*>(&loopHook)),
                 [](void* context) noexcept
                 {
@@ -298,8 +292,7 @@ namespace MazeMap
             float leftAppliedBankTorqueNm,
             float rightAppliedBankTorqueNm,
             float leftClosureResidualMps,
-            float rightClosureResidualMps,
-            float fanDutyCycle) const noexcept;
+            float rightClosureResidualMps) const noexcept;
         static TransientContactMemoryState AdvanceTransientContactMemory(
             const TransientContactMemoryState& previousState,
             const GripUtilizationSnapshot& utilization,
@@ -321,12 +314,12 @@ namespace MazeMap
             bool inconsistencyWindowActive) const noexcept;
         float closurePseudoMeasurementScale(RelativeDirection side) const noexcept;
         float lateralPseudoMeasurementScale() const noexcept;
+        float runtimeFanDuty() const noexcept;
+        float runtimeBatteryVoltage() const noexcept;
 
         bool predictImpl(
             float dt,
             const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV,
             void* loopHookContext,
             LoopHookInvoker loopHook) noexcept;
         MeasurementUpdateResult updateEncoderPairImpl(
@@ -366,9 +359,7 @@ namespace MazeMap
         float correctedYawRateRadps(float yawRateRawRadps) const noexcept;
         void refreshFrozenPolicyState(
             float dtSeconds,
-            const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV) noexcept;
+            const App::Internal::CommandVector& control) noexcept;
         bool applyClosurePseudoMeasurements(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         bool applyAdaptiveLateralPseudoMeasurement(void* loopHookContext, LoopHookInvoker loopHook) noexcept;
         Eigen::Matrix<float, 2, 1> frontPairPredictionForState(

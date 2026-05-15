@@ -120,6 +120,7 @@ namespace MazeMap
         MotorEncoderDrive _leftMotor;
         MotorEncoderDrive _rightMotor;
 
+        float _fanDuty;
         float _peakForwardAcceleration;
         float _peakLateralAcceleration;
         float _peakRotationalVelocity;
@@ -253,6 +254,9 @@ namespace MazeMap
         float GetMass() const;
         float GetTrackWidth() const;
         float GetYawInertia() const;
+        float GetBatteryVoltage() const noexcept;
+        void SetFanDuty(float dutyCycle) noexcept;
+        float GetFanDuty() const noexcept;
         static float GetArcEffectiveTrackWidth(float turningRadiusM) noexcept;
         static float GetEffectiveTrackWidthForMotion(float linearSpeedMps, float angularSpeedRadps) noexcept;
         float GetLength() const;

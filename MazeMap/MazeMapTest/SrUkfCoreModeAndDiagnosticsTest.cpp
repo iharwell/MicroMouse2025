@@ -43,12 +43,10 @@ namespace MazeMap
             SrUkfCore& core,
             const VehicleState::StateVector& initialState,
             const VehicleState::StateMatrix& initialCovariance,
-            const App::Internal::CommandVector& control,
-            float fanDutyCycle,
-            float batteryVoltageV)
+            const App::Internal::CommandVector& control)
         {
             Assert::IsTrue(core.reset(initialState, initialCovariance));
-            Assert::IsTrue(core.predict(kPlanarAccelUpdateTestDtSeconds, control, fanDutyCycle, batteryVoltageV));
+            Assert::IsTrue(core.predict(kPlanarAccelUpdateTestDtSeconds, control));
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 0;
@@ -63,13 +61,11 @@ namespace MazeMap
             const VehicleState::StateVector& state,
             const App::Internal::CommandVector& control,
             const PlantModel::PreparedParams& prepared,
-            float fanDutyCycle,
-            float batteryVoltageV,
             float lateralAccelDeltaMps2,
             float forwardAccelDeltaMps2) noexcept
         {
             const Eigen::Vector2f predicted =
-                plant.imuPlanarAcceleration(state, control, fanDutyCycle, batteryVoltageV, prepared);
+                plant.imuPlanarAcceleration(state, control, prepared);
             ImuAccelObs observation{};
             observation.valid = true;
             observation.accelBodyXMps2 = predicted.x() + lateralAccelDeltaMps2;
@@ -163,8 +159,6 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftMotorPwm(0.60f);
             control.SetRightMotorPwm(-0.60f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             struct PivotTickResults
             {
@@ -183,7 +177,7 @@ namespace MazeMap
                     float yawRateRawRadps) -> PivotTickResults
             {
                 PivotTickResults results{};
-                results.predictAccepted = core.predict(kPivotDtSeconds, control, controlFanDutyCycle, controlBatteryVoltageV);
+                results.predictAccepted = core.predict(kPivotDtSeconds, control);
 
                 EncoderObs encoder{};
                 encoder.totalLeftCounts = totalLeftCounts;
@@ -294,10 +288,8 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftMotorPwm(0.60f);
             control.SetRightMotorPwm(-0.60f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
-            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
+            Assert::IsTrue(core.predict(0.001f, control));
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 10;
@@ -331,10 +323,8 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftMotorPwm(0.25f);
             control.SetRightMotorPwm(0.25f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
-            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
+            Assert::IsTrue(core.predict(0.001f, control));
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 6;
@@ -376,13 +366,11 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftMotorPwm(0.20f);
             control.SetRightMotorPwm(0.20f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
-            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
+            Assert::IsTrue(core.predict(0.001f, control));
 
             control.SetLeftMotorPwm(-0.20f);
             control.SetRightMotorPwm(-0.20f);
-            Assert::IsTrue(core.predict(0.001f, control, controlFanDutyCycle, controlBatteryVoltageV));
+            Assert::IsTrue(core.predict(0.001f, control));
 
             EncoderObs encoder{};
             encoder.omegaLeftRadps = 2.0f;
@@ -515,16 +503,12 @@ namespace MazeMap
                 mergedCore,
                 initialState,
                 initialCovariance,
-                control,
-                0.80f,
-                params.supplyVoltageV);
+                control);
             PrimeCoreForPlanarAccelUpdate(
                 sequentialCore,
                 initialState,
                 initialCovariance,
-                control,
-                0.80f,
-                params.supplyVoltageV);
+                control);
 
             const ImuAccelObs accelObservation =
                 BuildPlanarAccelObservation(
@@ -532,8 +516,6 @@ namespace MazeMap
                     mergedCore.workingState(),
                     control,
                     prepared,
-                    0.80f,
-                    params.supplyVoltageV,
                     0.35f,
                     -0.55f);
             const float gyroObservation =
@@ -577,23 +559,17 @@ namespace MazeMap
                 baselineCore,
                 initialState,
                 initialCovariance,
-                control,
-                0.80f,
-                params.supplyVoltageV);
+                control);
             PrimeCoreForPlanarAccelUpdate(
                 lateralPerturbedCore,
                 initialState,
                 initialCovariance,
-                control,
-                0.80f,
-                params.supplyVoltageV);
+                control);
             PrimeCoreForPlanarAccelUpdate(
                 forwardPerturbedCore,
                 initialState,
                 initialCovariance,
-                control,
-                0.80f,
-                params.supplyVoltageV);
+                control);
 
             const ImuAccelObs baselineObservation =
                 BuildPlanarAccelObservation(
@@ -601,8 +577,6 @@ namespace MazeMap
                     baselineCore.workingState(),
                     control,
                     prepared,
-                    0.80f,
-                    params.supplyVoltageV,
                     0.0f,
                     0.35f);
             const ImuAccelObs lateralPerturbedObservation =
@@ -611,8 +585,6 @@ namespace MazeMap
                     lateralPerturbedCore.workingState(),
                     control,
                     prepared,
-                    0.80f,
-                    params.supplyVoltageV,
                     25.0f,
                     0.35f);
             const ImuAccelObs forwardPerturbedObservation =
@@ -621,8 +593,6 @@ namespace MazeMap
                     forwardPerturbedCore.workingState(),
                     control,
                     prepared,
-                    0.80f,
-                    params.supplyVoltageV,
                     0.0f,
                     -0.35f);
 

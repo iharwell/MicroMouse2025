@@ -48,11 +48,9 @@ namespace MazeMap
             App::Internal::CommandVector control;
             control.SetLeftMotorPwm(0.55f);
             control.SetRightMotorPwm(0.55f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const PlantDerivatives derivatives =
-                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, params);
+                plant.forwardStep(state, control, params);
             Assert::IsTrue(std::isfinite(derivatives.stateDot(VehicleState::kR)));
             Assert::AreEqual(0.0f, derivatives.stateDot(VehicleState::kR), 1.0e-4f);
         }
@@ -123,7 +121,7 @@ namespace MazeMap
             control.SetLeftMotorPwm(0.38f);
             control.SetRightMotorPwm(0.23f);
             const float controlFanDutyCycle = 0.72f;
-            const float controlBatteryVoltageV = params.supplyVoltageV - 0.35f;
+            runtime.vehicle.SetFanDuty(controlFanDutyCycle);
 
             const WheelKinematics rawKinematics = plant.wheelKinematics(state, params);
             const WheelKinematics preparedKinematics = plant.wheelKinematics(state, prepared);
@@ -139,27 +137,27 @@ namespace MazeMap
                 plant.tireForces(state, prepared),
                 1.0e-6f);
             AssertContactForcesNear(
-                plant.tireForces(state, control, controlFanDutyCycle, params),
-                plant.tireForces(state, control, controlFanDutyCycle, prepared),
+                plant.tireForces(state, control, params),
+                plant.tireForces(state, control, prepared),
                 1.0e-6f);
 
             AssertPlantDerivativesNear(
-                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, params),
-                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, prepared),
+                plant.forwardStep(state, control, params),
+                plant.forwardStep(state, control, prepared),
                 1.0e-6f);
 
             Assert::AreEqual(
-                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, params).x(),
-                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, prepared).x(),
+                plant.imuPlanarAcceleration(state, control, params).x(),
+                plant.imuPlanarAcceleration(state, control, prepared).x(),
                 1.0e-6f);
             Assert::AreEqual(
-                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, params).y(),
-                plant.imuPlanarAcceleration(state, control, controlFanDutyCycle, controlBatteryVoltageV, prepared).y(),
+                plant.imuPlanarAcceleration(state, control, params).y(),
+                plant.imuPlanarAcceleration(state, control, prepared).y(),
                 1.0e-6f);
 
             AssertStateVectorNear(
-                plant.integrate(state, control, controlFanDutyCycle, controlBatteryVoltageV, 0.0015f, params),
-                plant.integrate(state, control, controlFanDutyCycle, controlBatteryVoltageV, 0.0015f, prepared),
+                plant.integrate(state, control, 0.0015f, params),
+                plant.integrate(state, control, 0.0015f, prepared),
                 1.0e-6f);
 
             float rawMaxLongitudinalAccelMps2 = 0.0f;
@@ -170,14 +168,12 @@ namespace MazeMap
                 state,
                 params,
                 rawMaxLongitudinalAccelMps2,
-                rawMaxYawAccelRadps2,
-                controlFanDutyCycle);
+                rawMaxYawAccelRadps2);
             plant.velocityTargetTechnicalLimits(
                 state,
                 prepared,
                 preparedMaxLongitudinalAccelMps2,
-                preparedMaxYawAccelRadps2,
-                controlFanDutyCycle);
+                preparedMaxYawAccelRadps2);
             Assert::AreEqual(rawMaxLongitudinalAccelMps2, preparedMaxLongitudinalAccelMps2, 1.0e-6f);
             Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
 
@@ -190,15 +186,13 @@ namespace MazeMap
                 state(VehicleState::kR),
                 params,
                 rawMaxLongitudinalAccelMps2,
-                rawMaxYawAccelRadps2,
-                controlFanDutyCycle);
+                rawMaxYawAccelRadps2);
             plant.velocityTargetTechnicalLimits(
                 state(VehicleState::kU),
                 state(VehicleState::kR),
                 prepared,
                 preparedMaxLongitudinalAccelMps2,
-                preparedMaxYawAccelRadps2,
-                controlFanDutyCycle);
+                preparedMaxYawAccelRadps2);
             Assert::AreEqual(rawMaxLongitudinalAccelMps2, preparedMaxLongitudinalAccelMps2, 1.0e-6f);
             Assert::AreEqual(rawMaxYawAccelRadps2, preparedMaxYawAccelRadps2, 1.0e-6f);
 
@@ -213,8 +207,6 @@ namespace MazeMap
             PlantModelTestRuntime runtime;
             PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
             constexpr float dtSeconds = 0.001f;
 
             App::Internal::CommandVector control{};
@@ -243,8 +235,6 @@ namespace MazeMap
                             plant.forwardStep(
                                 state,
                                 control,
-                                controlFanDutyCycle,
-                                controlBatteryVoltageV,
                                 params);
                         maxObservedAbsAccelMps2 =
                             (std::max)(maxObservedAbsAccelMps2, std::fabs(derivatives.lateralAccelMps2));
@@ -252,8 +242,6 @@ namespace MazeMap
                             plant.integrate(
                                 state,
                                 control,
-                                controlFanDutyCycle,
-                                controlBatteryVoltageV,
                                 dtSeconds,
                                 params);
                     }
@@ -299,8 +287,6 @@ namespace MazeMap
                     plant.forwardStep(
                         state,
                         control,
-                        0.80f,
-                        params.supplyVoltageV,
                         params);
                 if (state(VehicleState::kR) <= params.stopEnterYawRateRadps)
                 {
@@ -315,8 +301,6 @@ namespace MazeMap
                     plant.integrate(
                         state,
                         control,
-                        0.80f,
-                        params.supplyVoltageV,
                         dtSeconds,
                         params);
             }
@@ -348,8 +332,6 @@ namespace MazeMap
                 0.12f);
 
             App::Internal::CommandVector control{};
-            const float controlBatteryVoltageV = params.supplyVoltageV;
-            const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
             for (int step = 0; step < 1000; ++step)
             {
@@ -357,10 +339,7 @@ namespace MazeMap
                     plant,
                     prepared,
                     state,
-                    control,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV,
-                    dt);
+                    control, dt);
             }
 
             Assert::AreEqual(0.03f, state(VehicleState::kPx), 1.0e-7f);
@@ -392,8 +371,6 @@ namespace MazeMap
                 -0.7f);
 
             App::Internal::CommandVector control{};
-            const float controlBatteryVoltageV = params.supplyVoltageV;
-            const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
             for (int step = 0; step < 250; ++step)
             {
@@ -401,10 +378,7 @@ namespace MazeMap
                     plant,
                     prepared,
                     state,
-                    control,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV,
-                    dt);
+                    control, dt);
             }
 
             Assert::AreEqual(0.0f, state(VehicleState::kU), kZeroLinearVelocityToleranceMps);
@@ -432,8 +406,6 @@ namespace MazeMap
             VehicleState::StateVector state = initialState;
 
             App::Internal::CommandVector control{};
-            const float controlBatteryVoltageV = params.supplyVoltageV;
-            const float controlFanDutyCycle = 0.80f;
             constexpr float dt = 0.001f;
             for (int step = 0; step < 25; ++step)
             {
@@ -441,10 +413,7 @@ namespace MazeMap
                     plant,
                     prepared,
                     state,
-                    control,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV,
-                    dt);
+                    control, dt);
             }
 
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < params.stopEnterSpeedMps);
@@ -473,12 +442,10 @@ namespace MazeMap
             App::Internal::CommandVector control;
             control.SetLeftMotorPwm(0.65f);
             control.SetRightMotorPwm(0.60f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const WheelKinematics kinematics = plant.wheelKinematics(state, params);
             const SlipTargets slip = plant.slipTargets(state, kinematics, params);
-            const ContactForces forces = plant.tireForces(state, control, controlFanDutyCycle, params);
+            const ContactForces forces = plant.tireForces(state, control, params);
 
             Assert::IsTrue(std::isfinite(slip.kappaLeft));
             Assert::IsTrue(std::isfinite(slip.kappaRight));
@@ -557,13 +524,11 @@ namespace MazeMap
             App::Internal::CommandVector control;
             control.SetLeftMotorPwm(0.30f);
             control.SetRightMotorPwm(0.55f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = zeroLeverParams.supplyVoltageV;
 
             const PlantDerivatives zeroLever =
-                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, zeroLeverParams);
+                plant.forwardStep(state, control, zeroLeverParams);
             const PlantDerivatives withLever =
-                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, leverParams);
+                plant.forwardStep(state, control, leverParams);
 
             const float expectedDeltaX =
                 (withLever.stateDot(VehicleState::kR) * leverParams.backLeftImuMount.positionBodyM().y()) -
@@ -598,17 +563,13 @@ namespace MazeMap
             App::Internal::CommandVector control;
             control.SetLeftMotorPwm(0.25f);
             control.SetRightMotorPwm(0.45f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const PlantDerivatives derivatives =
-                plant.forwardStep(state, control, controlFanDutyCycle, controlBatteryVoltageV, params);
+                plant.forwardStep(state, control, params);
             const Eigen::Vector2f predictedMeasurement =
                 plant.imuPlanarAcceleration(
                     state,
                     control,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV,
                     params);
 
             Assert::AreEqual(derivatives.imuAccelBodyMps2.x(), predictedMeasurement.x(), 1.0e-5f);
@@ -634,8 +595,6 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftMotorPwm(0.50f);
             control.SetRightMotorPwm(0.50f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             constexpr float dt = 0.002f;
             constexpr int kSteps = 25;
@@ -645,10 +604,7 @@ namespace MazeMap
                     plant,
                     prepared,
                     state,
-                    control,
-                    controlFanDutyCycle,
-                    controlBatteryVoltageV,
-                    dt);
+                    control, dt);
             }
 
             const float totalTimeS = dt * static_cast<float>(kSteps);
@@ -675,8 +631,6 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftMotorPwm(0.25f);
             control.SetRightMotorPwm(0.25f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             const VehicleState::StateVector atRest = BuildUkfState(
                 0.0f,
@@ -688,7 +642,7 @@ namespace MazeMap
                 0.0f,
                 0.0f);
             const PlantDerivatives derivativesAtRest =
-                plant.forwardStep(atRest, control, controlFanDutyCycle, controlBatteryVoltageV, params);
+                plant.forwardStep(atRest, control, params);
             Assert::AreEqual(0.0f, derivativesAtRest.stateDot(VehicleState::kOmegaL), 1.0e-6f);
             Assert::AreEqual(0.0f, derivativesAtRest.stateDot(VehicleState::kOmegaR), 1.0e-6f);
 
@@ -728,12 +682,10 @@ namespace MazeMap
             App::Internal::CommandVector control{};
             control.SetLeftMotorPwm(0.45f);
             control.SetRightMotorPwm(0.45f);
-            const float controlFanDutyCycle = 0.80f;
-            const float controlBatteryVoltageV = params.supplyVoltageV;
 
             constexpr float dt = 0.004f;
             const VehicleState::StateVector integrated =
-                plant.integrate(state, control, controlFanDutyCycle, controlBatteryVoltageV, dt, params);
+                plant.integrate(state, control, dt, params);
 
             Assert::IsTrue(std::isfinite(integrated.sum()));
             Assert::IsTrue(std::isfinite(integrated(VehicleState::kU)));
@@ -760,9 +712,8 @@ namespace MazeMap
                 0.5f / params.wheelRadiusM);
 
             App::Internal::CommandVector control{};
-            const float controlBatteryVoltageV = params.supplyVoltageV;
             const VehicleState::StateVector integrated =
-                plant.integrate(state, control, 0.80f, controlBatteryVoltageV, 0.01f, params);
+                plant.integrate(state, control, 0.01f, params);
 
             Assert::IsTrue(integrated(VehicleState::kPsi) <= PI_F);
             Assert::IsTrue(integrated(VehicleState::kPsi) >= -PI_F);

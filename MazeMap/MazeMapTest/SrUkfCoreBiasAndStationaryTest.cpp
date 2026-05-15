@@ -46,7 +46,7 @@ namespace MazeMap
                 static_cast<int>(std::ceil(kUkfTestStationaryCertificationDwellS / dt)) + 10;
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
             }
@@ -104,7 +104,7 @@ namespace MazeMap
 
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(0.0f).accepted);
             }
@@ -134,7 +134,7 @@ namespace MazeMap
                 const float rawStationaryGyroRadps =
                     (step < 49) ? 0.01f :
                     ((step < 150) ? 0.04f : 0.07f);
-                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
                 AdvanceInitialStationaryGyroBiasExpectation(expected, rawStationaryGyroRadps, dt);
@@ -163,7 +163,7 @@ namespace MazeMap
 
             for (int step = 0; step < 200; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
                 Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
                 Assert::IsTrue(core.updateYawRate(rawStationaryGyroRadps).accepted);
             }
@@ -322,7 +322,7 @@ namespace MazeMap
 
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
                 Assert::IsTrue(encoderResult.attempted);
@@ -377,7 +377,7 @@ namespace MazeMap
 
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
                 Assert::IsTrue(encoderResult.attempted);
@@ -420,7 +420,7 @@ namespace MazeMap
 
             for (int step = 0; step < kSteps; ++step)
             {
-                Assert::IsTrue(core.predict(dt, control, 0.80f, PlantParams::Default().supplyVoltageV));
+                Assert::IsTrue(core.predict(dt, control));
 
                 const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dt);
                 Assert::IsTrue(encoderResult.attempted);
@@ -504,9 +504,7 @@ namespace MazeMap
             App::Internal::CommandVector launchControl{};
             launchControl.SetLeftMotorPwm(0.30f);
             launchControl.SetRightMotorPwm(0.30f);
-            const float launchControlFanDutyCycle = 0.80f;
-            const float launchControlBatteryVoltageV = params.supplyVoltageV;
-            Assert::IsTrue(core.predict(dt, launchControl, launchControlFanDutyCycle, launchControlBatteryVoltageV));
+            Assert::IsTrue(core.predict(dt, launchControl));
 
             EncoderObs launchEncoder{};
             launchEncoder.totalLeftCounts = 2;

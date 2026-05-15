@@ -57,11 +57,9 @@ namespace MazeMap
 
     bool Estimator::predict(
         float dt,
-        const App::Internal::CommandVector& control,
-        float fanDutyCycle,
-        float batteryVoltageV) noexcept
+        const App::Internal::CommandVector& control) noexcept
     {
-        return _core.predict(dt, control, fanDutyCycle, batteryVoltageV);
+        return _core.predict(dt, control);
     }
 
     MeasurementUpdateResult Estimator::updateEncoderPair(
