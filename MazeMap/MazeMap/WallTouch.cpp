@@ -204,7 +204,7 @@ namespace MazeMap::App::Internal
     void WallTouch::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
-        _drive = &runtime.Drive();
+        _drive = &runtime.DriveBase();
         _driveService = &runtime.DriveService();
         _limits.SetMaxSpeedMps(runtime.Vehicle().GetMaxSpeed());
         _limits.SetAccelMps2(runtime.Vehicle().GetMaxForwardAcceleration());

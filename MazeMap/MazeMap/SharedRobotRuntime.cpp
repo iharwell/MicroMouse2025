@@ -451,7 +451,7 @@ namespace MazeMap::App::Internal
         , runtimeState()
         , plantModel(vehicle, runtimeState)
         , estimator(plantModel, runtimeState)
-        , drive(plantModel, runtimeState, MazeMap::Config::kDriveBasePDCluster)
+        , driveBase(plantModel, runtimeState, MazeMap::Config::kDriveBasePDCluster)
         , driveService(nominalCommandPeriodSeconds)
         , startupCalibrationService()
         , wallTouchService()
@@ -1075,9 +1075,9 @@ namespace MazeMap::App::Internal
         Runtime::CaptureMmLogFailure(UtilityDataLogger(), overflowed, writeFailed);
     }
 
-    DriveBase& SharedRobotRuntime::Drive() noexcept
+    MazeMap::DriveBase& SharedRobotRuntime::DriveBase() noexcept
     {
-        return drive;
+        return driveBase;
     }
 
     MazeMap::Estimator& SharedRobotRuntime::Estimator() noexcept

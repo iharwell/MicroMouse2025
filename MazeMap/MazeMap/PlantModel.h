@@ -133,9 +133,7 @@ namespace MazeMap
         float trackWidthM;
         float contactPatchLongitudinalOffsetM;
         float wheelRadiusM;
-        // April 20, 2026 SEC_40_YAW FFT high-frequency wheel-side recommendation from the latest usable yaw
-        // oscillation card. This excludes the rigid-body yaw term that PlantModel already handles separately.
-        float equivalentWheelInertiaKgM2 = 2.4e-7f;
+        float equivalentWheelInertiaKgM2 = 0.0f;
 
         float supplyVoltageV;
         float driveResistanceOhms;
@@ -157,20 +155,14 @@ namespace MazeMap
         float staticFrictionTorqueNm = 0.0f;
         float staticFrictionMaxSpeedMps = 0.005f;
         float viscousFrictionNmPerRadps = 0.0f;
-        // Archival competition pivot logs showed that the controller-side velocity-target inverse
-        // needs a persistent in-place scrub yaw moment through the pivot regime, with only an
-        // optional small near-zero surplus. Keep these defaults aligned with
-        // tooling/fit_competition_pivot_scrub.py.
-        float pivotScrubBreakawayYawMomentNm = 0.11f;
+        // In-place tire scrub applies as a persistent resisting yaw moment while the chassis is
+        // effectively not translating forward.
         float pivotScrubRollingYawMomentNm = 0.11f;
         float pivotScrubMaxForwardSpeedMps = 0.12f;
-        float pivotScrubMinCommandYawRateRadps = 0.75f;
-        float pivotScrubBreakawayYawRateRadps = 1.5f;
-        float pivotScrubBreakawayYawRateBandRadps = 1.0f;
 
-        float longitudinalTireStiffnessN = 6.0f;
-        float corneringStiffnessFrontNPerRad = 18.0f;
-        float corneringStiffnessRearNPerRad = 16.0f;
+        float longitudinalTireStiffnessN = 0.0f;
+        float corneringStiffnessFrontNPerRad = 0.0f;
+        float corneringStiffnessRearNPerRad = 0.0f;
         float lateralVelocityDampingNsPerM = 0.0f;
         float yawRateDampingNmsPerRad = 0.0f;
         float muFront = 1.65f;
@@ -286,6 +278,7 @@ namespace MazeMap
         bool useEnvelopeMuFront = false;
         bool useEnvelopeMuRear = false;
         float combinedAccelPeakTimesMass = 0.0f;
+        float lateralForceSustainedLimitN = 0.0f;
 
         float combinedAccelNominalMps2 = 0.0f;
         float combinedAccelNominalSq = 0.0f;
@@ -293,12 +286,8 @@ namespace MazeMap
         float supplyVoltageV = 0.0f;
         float rollingFrictionTorqueNm = 0.0f;
         float viscousFrictionNmPerRadps = 0.0f;
-        float pivotScrubBreakawayYawMomentNm = 0.0f;
         float pivotScrubRollingYawMomentNm = 0.0f;
         float pivotScrubMaxForwardSpeedMps = 0.0f;
-        float pivotScrubMinCommandYawRateRadps = 0.0f;
-        float pivotScrubBreakawayYawRateRadps = 0.0f;
-        float pivotScrubBreakawayYawRateBandRadps = 0.0f;
 
         float stopEnterSpeedMps = 0.0f;
         float stopExitSpeedMps = 0.0f;

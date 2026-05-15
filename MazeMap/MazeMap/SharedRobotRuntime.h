@@ -590,13 +590,13 @@ namespace MazeMap::App::Internal
         // Receives whether the logger recorded a write failure condition.
         void CaptureUtilityDataLogFailure(bool& overflowed, bool& writeFailed) const noexcept;
 
-        // `Drive()`:
+        // `DriveBase()`:
         // Returns the concrete low-level DriveBase owner used for raw command application and
         // measurement interpretation.
         //
         // Behavior:
         // Exposes the canonical low-level drive helper rather than a duplicate actuation owner.
-        DriveBase& Drive() noexcept;
+        DriveBase& DriveBase() noexcept;
 
         // `Estimator()`:
         // Returns the production estimator owner.
@@ -679,7 +679,7 @@ namespace MazeMap::App::Internal
         MazeMap::VehicleState runtimeState;              // Authoritative live runtime state.
         MazeMap::PlantModel plantModel;                  // Shared plant model owner.
         MazeMap::Estimator estimator;                    // Shared estimator owner.
-        DriveBase drive;                                 // Concrete low-level drive command owner.
+        MazeMap::DriveBase driveBase;                    // Concrete low-level drive command owner.
         MazeMap::App::Internal::Drive driveService;      // Shared multi-tick Drive service.
         StartupCalibration startupCalibrationService;    // Shared startup-calibration service.
         WallTouch wallTouchService;                      // Shared wall-touch service.

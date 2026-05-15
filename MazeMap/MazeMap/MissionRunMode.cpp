@@ -22,7 +22,7 @@ namespace MazeMap::App::Internal
         explicit MissionRunMode(SharedRobotRuntime& runtime)
             : _runtime(runtime)
             , _loopController(runtime.ControlLoop())
-            , _drive(runtime.Drive())
+            , _drive(runtime.DriveBase())
             , _driveService(runtime.DriveService())
             , _startupCalibration(runtime.StartupCalibrationService())
         {

@@ -353,6 +353,15 @@ namespace
         return requestedSign * reservedMagnitude;
     }
 
+    inline float ClampMagnitudeFast(float value, float limit) noexcept
+    {
+        const float magnitudeLimit =
+            (std::isfinite(limit) && (limit > 0.0f)) ? limit : 0.0f;
+        return (magnitudeLimit > 0.0f) ?
+            (std::clamp)(value, -magnitudeLimit, magnitudeLimit) :
+            value;
+    }
+
     inline ContactForce BuildClampedContactForce(
         float rawForwardForceN,
         float rawRightForceN,
@@ -408,9 +417,17 @@ namespace
         const float fxFrRaw = params.lambdaFront * rightBankForwardForceRawN;
         const float fxRrRaw = params.lambdaRear * rightBankForwardForceRawN;
 
-        const float fyFlRaw = 0.5f * frontAxleRightForceRawN;
+        const float frontAxleRightForceN =
+            ClampMagnitudeFast(
+                frontAxleRightForceRawN,
+                params.frontLoadFraction * params.lateralForceSustainedLimitN);
+        const float rearAxleRightForceN =
+            ClampMagnitudeFast(
+                rearAxleRightForceRawN,
+                params.rearLoadFraction * params.lateralForceSustainedLimitN);
+        const float fyFlRaw = 0.5f * frontAxleRightForceN;
         const float fyFrRaw = fyFlRaw;
-        const float fyRlRaw = 0.5f * rearAxleRightForceRawN;
+        const float fyRlRaw = 0.5f * rearAxleRightForceN;
         const float fyRrRaw = fyRlRaw;
 
         ContactForce& fl = evaluation.forces.contacts[kFrontLeft];
@@ -686,105 +703,10 @@ namespace
         return coulombTorqueNm + viscousFrictionTorqueNm;
     }
 
-    inline CommandVector ResolveBankForceFeedforwardCommand(
-        const MotorEncoderDrive* leftDrive,
-        const MotorEncoderDrive* rightDrive,
-        float forwardVelocityMps,
-        float yawRateRadps,
-        float leftBankForceCommandN,
-        float rightBankForceCommandN,
-        float batteryVoltageV,
-        const PreparedParams& params,
-        bool& valid) noexcept
-    {
-        valid = false;
-        const float leftBankForwardVelocityMps = forwardVelocityMps + (params.halfTrackWidthM * yawRateRadps);
-        const float rightBankForwardVelocityMps = forwardVelocityMps - (params.halfTrackWidthM * yawRateRadps);
-
-        const float achievedLongitudinalAccelMps2 =
-            (leftBankForceCommandN + rightBankForceCommandN) * params.invLongitudinalMassKg;
-        const float achievedYawMomentNm =
-            params.halfTrackWidthM * (leftBankForceCommandN - rightBankForceCommandN);
-        const float achievedYawAccelRadps2 =
-            (achievedYawMomentNm - (params.yawDampingNmPerRadps * yawRateRadps)) * params.invYawInertiaKgM2;
-        const float leftWheelAccelRadps2 =
-            (achievedLongitudinalAccelMps2 + (params.halfTrackWidthM * achievedYawAccelRadps2)) *
-            params.invWheelRadiusM;
-        const float rightWheelAccelRadps2 =
-            (achievedLongitudinalAccelMps2 - (params.halfTrackWidthM * achievedYawAccelRadps2)) *
-            params.invWheelRadiusM;
-
-        const float leftContactTorqueNm = params.wheelRadiusM * leftBankForceCommandN;
-        const float rightContactTorqueNm = params.wheelRadiusM * rightBankForceCommandN;
-
-        const float leftSlipRatio = leftBankForceCommandN * params.invLongitudinalTireStiffnessN;
-        const float rightSlipRatio = rightBankForceCommandN * params.invLongitudinalTireStiffnessN;
-        const float leftRegularizedForwardSpeedMps =
-            ComputeRegularizedLongitudinalSpeedMps(
-                leftBankForwardVelocityMps,
-                params.rollingRegularizationMps);
-        const float rightRegularizedForwardSpeedMps =
-            ComputeRegularizedLongitudinalSpeedMps(
-                rightBankForwardVelocityMps,
-                params.rollingRegularizationMps);
-        const float leftWheelSpeedRadps =
-            (leftBankForwardVelocityMps +
-             (leftSlipRatio * leftRegularizedForwardSpeedMps)) *
-            params.invWheelRadiusM;
-        const float rightWheelSpeedRadps =
-            (rightBankForwardVelocityMps +
-             (rightSlipRatio * rightRegularizedForwardSpeedMps)) *
-            params.invWheelRadiusM;
-
-        const float leftWheelTorqueRequestNm =
-            leftContactTorqueNm + (params.wheelInertiaKgM2 * leftWheelAccelRadps2);
-        const float rightWheelTorqueRequestNm =
-            rightContactTorqueNm + (params.wheelInertiaKgM2 * rightWheelAccelRadps2);
-        const float leftWheelTorqueNm =
-            leftWheelTorqueRequestNm +
-            DriveFrictionTorqueFast(leftWheelSpeedRadps, leftWheelTorqueRequestNm, params);
-        const float rightWheelTorqueNm =
-            rightWheelTorqueRequestNm +
-            DriveFrictionTorqueFast(rightWheelSpeedRadps, rightWheelTorqueRequestNm, params);
-
-        CommandVector command{};
-        command.SetLeftMotorPwm(
-            (leftDrive != nullptr) ?
-            leftDrive->getCommandFromTorque(
-                leftWheelTorqueNm,
-                leftWheelSpeedRadps,
-                batteryVoltageV) :
-            0.0f);
-        command.SetRightMotorPwm(
-            (rightDrive != nullptr) ?
-            rightDrive->getCommandFromTorque(
-                rightWheelTorqueNm,
-                rightWheelSpeedRadps,
-                batteryVoltageV) :
-            0.0f);
-        valid =
-            std::isfinite(command.LeftMotorPwm()) &&
-            std::isfinite(command.RightMotorPwm()) &&
-            std::isfinite(leftWheelTorqueNm) &&
-            std::isfinite(rightWheelTorqueNm) &&
-            std::isfinite(leftWheelSpeedRadps) &&
-            std::isfinite(rightWheelSpeedRadps);
-        return valid ? command : ZeroControlVector();
-    }
-
 } // namespace
 
 namespace MazeMap
 {
-    static CommandVector SolveFeedforwardCanonical(
-        const MotorEncoderDrive* leftDrive,
-        const MotorEncoderDrive* rightDrive,
-        float forwardVelocityMps,
-        float yawRateRadps,
-        float desiredLongitudinalAccelMps2,
-        float desiredYawAccelRadps2,
-        const PreparedParams& prepared) noexcept;
-
     PlantModel::PlantModel(const Vehicle& vehicle, const VehicleState& runtimeState) noexcept
         : _preparedParams(Prepare(BuildParamsFromVehicle(vehicle)))
         , _vehicle(vehicle)
@@ -958,9 +880,9 @@ namespace MazeMap
         PlantParams params{};
         constexpr float kReliableLaunchDriveCommand = 0.30f;
         const MotorEncoderDrive& leftDrive = vehicle._leftMotor;
+        const MotorEncoderDrive& rightDrive = vehicle._rightMotor;
         const VehiclePhysicalModel& physical = vehicle.GetPhysicalModel();
         params.massKg = vehicle.GetMass();
-        params.effectiveLongitudinalMassKg = params.massKg;
         params.yawInertiaKgM2 = vehicle.GetYawInertia();
         params.trackWidthM = vehicle.GetTrackWidth();
         params.wheelRadiusM = leftDrive.getWheelRadius();
@@ -971,6 +893,14 @@ namespace MazeMap
         params.noLoadCurrentA = leftDrive.getNoLoadCurrent();
         params.gearRatio = leftDrive.getGearRatio();
         params.encoderCountsPerMotorRev = leftDrive.getPulsesPerRev();
+        params.equivalentWheelInertiaKgM2 =
+            0.5f * (leftDrive.getEquivalentWheelInertiaKgM2() + rightDrive.getEquivalentWheelInertiaKgM2());
+        params.effectiveLongitudinalMassKg = params.massKg;
+        params.longitudinalTireStiffnessN =
+            0.5f * (leftDrive.getLongitudinalTireStiffnessN() + rightDrive.getLongitudinalTireStiffnessN());
+        params.corneringStiffnessFrontNPerRad =
+            0.5f * (leftDrive.getCorneringStiffnessNPerRad() + rightDrive.getCorneringStiffnessNPerRad());
+        params.corneringStiffnessRearNPerRad = params.corneringStiffnessFrontNPerRad;
         params.contactPatchLongitudinalOffsetM = physical.driveWheelLongitudinalOffsetM;
         params.motorCurrentLimitA =
             (leftDrive.getResistance() > 0.0f) ?
@@ -1108,6 +1038,13 @@ namespace MazeMap
             (std::max)(0.0f, params.muRear);
         prepared.combinedAccelPeakTimesMass =
             haveCombinedPeak ? (params.combinedAccelPeakMps2 * params.massKg) : 0.0f;
+        prepared.lateralForceSustainedLimitN =
+            (std::isfinite(params.combinedAccelSustainedMps2) &&
+             (params.combinedAccelSustainedMps2 > 0.0f) &&
+             std::isfinite(params.massKg) &&
+             (params.massKg > 0.0f)) ?
+            (params.combinedAccelSustainedMps2 * params.massKg) :
+            0.0f;
 
         prepared.combinedAccelNominalMps2 =
             (std::isfinite(params.combinedAccelNominalMps2) && (params.combinedAccelNominalMps2 > 0.0f)) ?
@@ -1123,13 +1060,8 @@ namespace MazeMap
         prepared.supplyVoltageV = params.supplyVoltageV;
         prepared.rollingFrictionTorqueNm = params.rollingFrictionTorqueNm;
         prepared.viscousFrictionNmPerRadps = params.viscousFrictionNmPerRadps;
-        prepared.pivotScrubBreakawayYawMomentNm = SafePositive(params.pivotScrubBreakawayYawMomentNm, 0.0f);
         prepared.pivotScrubRollingYawMomentNm = SafePositive(params.pivotScrubRollingYawMomentNm, 0.0f);
         prepared.pivotScrubMaxForwardSpeedMps = SafePositive(params.pivotScrubMaxForwardSpeedMps, 0.0f);
-        prepared.pivotScrubMinCommandYawRateRadps = SafePositive(params.pivotScrubMinCommandYawRateRadps, 0.0f);
-        prepared.pivotScrubBreakawayYawRateRadps = SafePositive(params.pivotScrubBreakawayYawRateRadps, 0.0f);
-        prepared.pivotScrubBreakawayYawRateBandRadps =
-            SafePositive(params.pivotScrubBreakawayYawRateBandRadps, 0.0f);
 
         prepared.stopEnterSpeedMps = params.stopEnterSpeedMps;
         prepared.stopExitSpeedMps = params.stopExitSpeedMps;
@@ -1327,15 +1259,70 @@ namespace MazeMap
         const float yawMomentNm =
             (params.halfTrackWidthM * (rollingForces.leftBankForwardForceN - rollingForces.rightBankForwardForceN)) +
             (params.longitudinalOffsetM * (rollingForces.frontRightForceN - rollingForces.rearRightForceN));
-
+        const int yawRateScrubSign =
+            (yawRateRadps > kSignEpsilon) -
+            (yawRateRadps < -kSignEpsilon);
+        const int yawMomentScrubSign =
+            (yawMomentNm > kSignEpsilon) -
+            (yawMomentNm < -kSignEpsilon);
+        const int scrubSignRaw =
+            (yawRateScrubSign != 0) ? yawRateScrubSign : yawMomentScrubSign;
+        const float pivotScrubYawMomentNm =
+            ((scrubSignRaw != 0) &&
+             (params.pivotScrubRollingYawMomentNm > params.forceEpsilonN) &&
+             (params.pivotScrubMaxForwardSpeedMps > params.forceEpsilonN) &&
+             (std::fabs(forwardVelocityMps) <= params.pivotScrubMaxForwardSpeedMps)) ?
+            (static_cast<float>(scrubSignRaw) * params.pivotScrubRollingYawMomentNm) :
+            0.0f;
         const float leftPreFrictionWheelTorqueNm =
             leftAppliedBankTorqueNm - (params.wheelRadiusM * rollingForces.leftBankForwardForceN);
         const float rightPreFrictionWheelTorqueNm =
             rightAppliedBankTorqueNm - (params.wheelRadiusM * rollingForces.rightBankForwardForceN);
-        const float leftFrictionTorqueNm =
-            DriveFrictionTorqueFast(omegaLeftRadps, leftPreFrictionWheelTorqueNm, params);
-        const float rightFrictionTorqueNm =
-            DriveFrictionTorqueFast(omegaRightRadps, rightPreFrictionWheelTorqueNm, params);
+        const float leftViscousFrictionTorqueNm =
+            params.viscousFrictionNmPerRadps * omegaLeftRadps;
+        const float rightViscousFrictionTorqueNm =
+            params.viscousFrictionNmPerRadps * omegaRightRadps;
+        float leftFrictionTorqueNm = leftViscousFrictionTorqueNm;
+        float rightFrictionTorqueNm = rightViscousFrictionTorqueNm;
+        if ((std::fabs(omegaLeftRadps) <= params.staticFrictionSpeedThresholdRadps) &&
+            (std::fabs(omegaRightRadps) <= params.staticFrictionSpeedThresholdRadps))
+        {
+            const float commonPreFrictionWheelTorqueNm =
+                0.5f * (leftPreFrictionWheelTorqueNm + rightPreFrictionWheelTorqueNm);
+            const int commonTorqueSign =
+                (commonPreFrictionWheelTorqueNm > kSignEpsilon) -
+                (commonPreFrictionWheelTorqueNm < -kSignEpsilon);
+            const float commonWheelSpeedRadps = 0.5f * (omegaLeftRadps + omegaRightRadps);
+            const int commonSpeedSign =
+                (commonWheelSpeedRadps > kSignEpsilon) -
+                (commonWheelSpeedRadps < -kSignEpsilon);
+            const float commonStictionSign =
+                static_cast<float>((commonTorqueSign != 0) ? commonTorqueSign : commonSpeedSign);
+            leftFrictionTorqueNm += params.staticFrictionTorqueNm * commonStictionSign;
+            rightFrictionTorqueNm += params.staticFrictionTorqueNm * commonStictionSign;
+        }
+        else
+        {
+            const int leftSpeedSign =
+                (omegaLeftRadps > kSignEpsilon) -
+                (omegaLeftRadps < -kSignEpsilon);
+            const int leftTorqueSign =
+                (leftPreFrictionWheelTorqueNm > kSignEpsilon) -
+                (leftPreFrictionWheelTorqueNm < -kSignEpsilon);
+            leftFrictionTorqueNm +=
+                params.rollingFrictionTorqueNm *
+                static_cast<float>((leftSpeedSign != 0) ? leftSpeedSign : leftTorqueSign);
+
+            const int rightSpeedSign =
+                (omegaRightRadps > kSignEpsilon) -
+                (omegaRightRadps < -kSignEpsilon);
+            const int rightTorqueSign =
+                (rightPreFrictionWheelTorqueNm > kSignEpsilon) -
+                (rightPreFrictionWheelTorqueNm < -kSignEpsilon);
+            rightFrictionTorqueNm +=
+                params.rollingFrictionTorqueNm *
+                static_cast<float>((rightSpeedSign != 0) ? rightSpeedSign : rightTorqueSign);
+        }
 
         float leftNetWheelTorqueNm = leftPreFrictionWheelTorqueNm - leftFrictionTorqueNm;
         float rightNetWheelTorqueNm = rightPreFrictionWheelTorqueNm - rightFrictionTorqueNm;
@@ -1371,7 +1358,7 @@ namespace MazeMap
              (params.lateralDampingOverMass * rightVelocityMps)) *
             motionWeight;
         const float rDot =
-            ((yawMomentNm * params.invYawInertiaKgM2) -
+            (((yawMomentNm - pivotScrubYawMomentNm) * params.invYawInertiaKgM2) -
              (params.yawDampingOverInertia * yawRateRadps)) *
             motionWeight;
         const float omegaLDot = (leftNetWheelTorqueNm * params.invWheelInertiaKgM2) * motionWeight;
@@ -1733,42 +1720,275 @@ namespace MazeMap
         float desiredForwardVelocityMps,
         float desiredYawRateRadps) const noexcept
     {
-        const float resolvedForwardVelocityMps =
-            std::isfinite(desiredForwardVelocityMps) ? desiredForwardVelocityMps : 0.0f;
-        const float resolvedYawRateRadps =
-            std::isfinite(desiredYawRateRadps) ? desiredYawRateRadps : 0.0f;
+        const PreparedParams& params = _preparedParams;
+        const float leftBankVelocityMps =
+            desiredForwardVelocityMps + (params.halfTrackWidthM * desiredYawRateRadps);
+        const float rightBankVelocityMps =
+            desiredForwardVelocityMps - (params.halfTrackWidthM * desiredYawRateRadps);
+        const float uRefLeft =
+            MazeMap::Math::Sqrtf(
+                (leftBankVelocityMps * leftBankVelocityMps) +
+                (params.rollingRegularizationMps * params.rollingRegularizationMps));
+        const float uRefRight =
+            MazeMap::Math::Sqrtf(
+                (rightBankVelocityMps * rightBankVelocityMps) +
+                (params.rollingRegularizationMps * params.rollingRegularizationMps));
+        const float uRefBody =
+            MazeMap::Math::Sqrtf(
+                (desiredForwardVelocityMps * desiredForwardVelocityMps) +
+                (params.rollingRegularizationMps * params.rollingRegularizationMps));
 
-        return SolveFeedforwardCanonical(
-            &_leftDrive,
-            &_rightDrive,
-            resolvedForwardVelocityMps,
-            resolvedYawRateRadps,
-            0.0f,
-            0.0f,
-            _preparedParams);
+        const float frontLateralVelocityMps = params.longitudinalOffsetM * desiredYawRateRadps;
+        const float rearLateralVelocityMps = -params.longitudinalOffsetM * desiredYawRateRadps;
+        const float alphaFront = std::atan(frontLateralVelocityMps / uRefBody);
+        const float alphaRear = std::atan(rearLateralVelocityMps / uRefBody);
+        const float frontAxleRightForceRawN =
+            -params.frontCorneringStiffnessAxleNPerRad * alphaFront;
+        const float rearAxleRightForceRawN =
+            -params.rearCorneringStiffnessAxleNPerRad * alphaRear;
+        const float frontAxleRightForceLimitN =
+            params.frontLoadFraction * params.lateralForceSustainedLimitN;
+        const float rearAxleRightForceLimitN =
+            params.rearLoadFraction * params.lateralForceSustainedLimitN;
+        const float frontAxleRightForceN =
+            (frontAxleRightForceLimitN > params.forceEpsilonN) ?
+            (std::clamp)(
+                frontAxleRightForceRawN,
+                -frontAxleRightForceLimitN,
+                frontAxleRightForceLimitN) :
+            frontAxleRightForceRawN;
+        const float rearAxleRightForceN =
+            (rearAxleRightForceLimitN > params.forceEpsilonN) ?
+            (std::clamp)(
+                rearAxleRightForceRawN,
+                -rearAxleRightForceLimitN,
+                rearAxleRightForceLimitN) :
+            rearAxleRightForceRawN;
+        const float lateralYawMomentNm =
+            params.longitudinalOffsetM * (frontAxleRightForceN - rearAxleRightForceN);
+
+        const int scrubSignRaw =
+            (desiredYawRateRadps > kSignEpsilon) -
+            (desiredYawRateRadps < -kSignEpsilon);
+        const float pivotScrubYawMomentNm =
+            ((scrubSignRaw != 0) &&
+             (params.pivotScrubRollingYawMomentNm > params.forceEpsilonN) &&
+             (params.pivotScrubMaxForwardSpeedMps > params.forceEpsilonN) &&
+             (std::fabs(desiredForwardVelocityMps) <= params.pivotScrubMaxForwardSpeedMps)) ?
+            (static_cast<float>(scrubSignRaw) * params.pivotScrubRollingYawMomentNm) :
+            0.0f;
+        const float requestedYawMomentNm =
+            (params.yawDampingNmPerRadps * desiredYawRateRadps) +
+            pivotScrubYawMomentNm -
+            lateralYawMomentNm;
+        const float differentialForceRequestN =
+            -requestedYawMomentNm * params.invTrackWidthM;
+        const float leftForceCommandN = -differentialForceRequestN;
+        const float rightForceCommandN = differentialForceRequestN;
+
+        const float leftKappa =
+            leftForceCommandN * params.invLongitudinalTireStiffnessN;
+        const float rightKappa =
+            rightForceCommandN * params.invLongitudinalTireStiffnessN;
+        const float leftWheelSpeedRadps =
+            (leftBankVelocityMps + (leftKappa * uRefLeft)) * params.invWheelRadiusM;
+        const float rightWheelSpeedRadps =
+            (rightBankVelocityMps + (rightKappa * uRefRight)) * params.invWheelRadiusM;
+
+        const float leftWheelTorqueRequestNm =
+            params.wheelRadiusM * leftForceCommandN;
+        const float rightWheelTorqueRequestNm =
+            params.wheelRadiusM * rightForceCommandN;
+
+        const float leftViscousFrictionTorqueNm =
+            params.viscousFrictionNmPerRadps * leftWheelSpeedRadps;
+        const int leftSpeedSign =
+            (leftWheelSpeedRadps > kSignEpsilon) -
+            (leftWheelSpeedRadps < -kSignEpsilon);
+        const int leftTorqueSign =
+            (leftWheelTorqueRequestNm > kSignEpsilon) -
+            (leftWheelTorqueRequestNm < -kSignEpsilon);
+        const float leftFrictionTorqueNm =
+            leftViscousFrictionTorqueNm +
+            (params.rollingFrictionTorqueNm *
+             static_cast<float>((leftSpeedSign != 0) ? leftSpeedSign : leftTorqueSign));
+
+        const float rightViscousFrictionTorqueNm =
+            params.viscousFrictionNmPerRadps * rightWheelSpeedRadps;
+        const int rightSpeedSign =
+            (rightWheelSpeedRadps > kSignEpsilon) -
+            (rightWheelSpeedRadps < -kSignEpsilon);
+        const int rightTorqueSign =
+            (rightWheelTorqueRequestNm > kSignEpsilon) -
+            (rightWheelTorqueRequestNm < -kSignEpsilon);
+        const float rightFrictionTorqueNm =
+            rightViscousFrictionTorqueNm +
+            (params.rollingFrictionTorqueNm *
+             static_cast<float>((rightSpeedSign != 0) ? rightSpeedSign : rightTorqueSign));
+
+        return CommandVector(
+            _leftDrive.getCommandFromTorque(
+                leftWheelTorqueRequestNm + leftFrictionTorqueNm,
+                leftWheelSpeedRadps,
+                params.supplyVoltageV),
+            _rightDrive.getCommandFromTorque(
+                rightWheelTorqueRequestNm + rightFrictionTorqueNm,
+                rightWheelSpeedRadps,
+                params.supplyVoltageV));
     }
 
     App::Internal::CommandVector PlantModel::solveAccelerationFeedforward(
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2) const noexcept
     {
-        const StateVector currentState = BuildBoundStateVector();
-        const float forwardVelocityMps =
-            std::isfinite(currentState(VehicleState::kU)) ? currentState(VehicleState::kU) : 0.0f;
-        const float yawRateRadps =
-            std::isfinite(currentState(VehicleState::kR)) ? currentState(VehicleState::kR) : 0.0f;
-        const float resolvedLongitudinalAccelMps2 =
-            std::isfinite(desiredLongitudinalAccelMps2) ? desiredLongitudinalAccelMps2 : 0.0f;
-        const float resolvedYawAccelRadps2 =
-            std::isfinite(desiredYawAccelRadps2) ? desiredYawAccelRadps2 : 0.0f;
-        return SolveFeedforwardCanonical(
-            &_leftDrive,
-            &_rightDrive,
-            forwardVelocityMps,
-            yawRateRadps,
-            resolvedLongitudinalAccelMps2,
-            resolvedYawAccelRadps2,
-            _preparedParams);
+        const PreparedParams& params = _preparedParams;
+        const float forwardVelocityMps = _runtimeState.GetVelocity();
+        const float rightVelocityMps = _runtimeState.GetLateralVelocity();
+        const float yawRateRadps = _runtimeState.GetRotationalVelocity();
+        const float leftBankVelocityMps =
+            forwardVelocityMps + (params.halfTrackWidthM * yawRateRadps);
+        const float rightBankVelocityMps =
+            forwardVelocityMps - (params.halfTrackWidthM * yawRateRadps);
+        const float uRefBody =
+            MazeMap::Math::Sqrtf(
+                (forwardVelocityMps * forwardVelocityMps) +
+                (params.rollingRegularizationMps * params.rollingRegularizationMps));
+
+        const float wheelInertiaOverRadiusSqKg =
+            params.wheelInertiaKgM2 * params.invWheelRadiusM * params.invWheelRadiusM;
+        const float leftBankAccelMps2 =
+            desiredLongitudinalAccelMps2 + (params.halfTrackWidthM * desiredYawAccelRadps2);
+        const float rightBankAccelMps2 =
+            desiredLongitudinalAccelMps2 - (params.halfTrackWidthM * desiredYawAccelRadps2);
+        const float commonForceRequestN =
+            0.5f *
+            params.longitudinalMassKg *
+            (desiredLongitudinalAccelMps2 - (yawRateRadps * rightVelocityMps));
+        const float frontLateralVelocityMps =
+            rightVelocityMps + (params.longitudinalOffsetM * yawRateRadps);
+        const float rearLateralVelocityMps =
+            rightVelocityMps - (params.longitudinalOffsetM * yawRateRadps);
+        const float alphaFront = std::atan(frontLateralVelocityMps / uRefBody);
+        const float alphaRear = std::atan(rearLateralVelocityMps / uRefBody);
+        const float frontAxleRightForceRawN =
+            -params.frontCorneringStiffnessAxleNPerRad * alphaFront;
+        const float rearAxleRightForceRawN =
+            -params.rearCorneringStiffnessAxleNPerRad * alphaRear;
+        const float frontAxleRightForceLimitN =
+            params.frontLoadFraction * params.lateralForceSustainedLimitN;
+        const float rearAxleRightForceLimitN =
+            params.rearLoadFraction * params.lateralForceSustainedLimitN;
+        const float frontAxleRightForceN =
+            (frontAxleRightForceLimitN > params.forceEpsilonN) ?
+            (std::clamp)(
+                frontAxleRightForceRawN,
+                -frontAxleRightForceLimitN,
+                frontAxleRightForceLimitN) :
+            frontAxleRightForceRawN;
+        const float rearAxleRightForceN =
+            (rearAxleRightForceLimitN > params.forceEpsilonN) ?
+            (std::clamp)(
+                rearAxleRightForceRawN,
+                -rearAxleRightForceLimitN,
+                rearAxleRightForceLimitN) :
+            rearAxleRightForceRawN;
+        const float lateralYawMomentNm =
+            params.longitudinalOffsetM * (frontAxleRightForceN - rearAxleRightForceN);
+        const int yawRateScrubSign =
+            (yawRateRadps > kSignEpsilon) -
+            (yawRateRadps < -kSignEpsilon);
+        const int yawAccelScrubSign =
+            (desiredYawAccelRadps2 > kSignEpsilon) -
+            (desiredYawAccelRadps2 < -kSignEpsilon);
+        const int scrubSignRaw =
+            (yawRateScrubSign != 0) ? yawRateScrubSign : yawAccelScrubSign;
+        const float pivotScrubYawMomentNm =
+            ((scrubSignRaw != 0) &&
+             (params.pivotScrubRollingYawMomentNm > params.forceEpsilonN) &&
+             (params.pivotScrubMaxForwardSpeedMps > params.forceEpsilonN) &&
+             (std::fabs(forwardVelocityMps) <= params.pivotScrubMaxForwardSpeedMps)) ?
+            (static_cast<float>(scrubSignRaw) * params.pivotScrubRollingYawMomentNm) :
+            0.0f;
+        const float requestedYawMomentNm =
+            (params.yawInertiaKgM2 * desiredYawAccelRadps2) +
+            (params.yawDampingNmPerRadps * yawRateRadps) +
+            pivotScrubYawMomentNm -
+            lateralYawMomentNm;
+        const float differentialForceRequestN = -requestedYawMomentNm * params.invTrackWidthM;
+        const float leftForceCommandN =
+            commonForceRequestN - differentialForceRequestN;
+        const float rightForceCommandN =
+            commonForceRequestN + differentialForceRequestN;
+
+        const float leftMotorSpeedRadps =
+            leftBankVelocityMps * params.invWheelRadiusM;
+        const float rightMotorSpeedRadps =
+            rightBankVelocityMps * params.invWheelRadiusM;
+        const float leftWheelInertiaForceN =
+            wheelInertiaOverRadiusSqKg * leftBankAccelMps2;
+        const float rightWheelInertiaForceN =
+            wheelInertiaOverRadiusSqKg * rightBankAccelMps2;
+        const float leftWheelTorqueRequestNm =
+            params.wheelRadiusM * (leftForceCommandN + leftWheelInertiaForceN);
+        const float rightWheelTorqueRequestNm =
+            params.wheelRadiusM * (rightForceCommandN + rightWheelInertiaForceN);
+
+        const float leftViscousFrictionTorqueNm =
+            params.viscousFrictionNmPerRadps * leftMotorSpeedRadps;
+        const float rightViscousFrictionTorqueNm =
+            params.viscousFrictionNmPerRadps * rightMotorSpeedRadps;
+        float leftFrictionTorqueNm = leftViscousFrictionTorqueNm;
+        float rightFrictionTorqueNm = rightViscousFrictionTorqueNm;
+        if ((std::fabs(leftMotorSpeedRadps) <= params.staticFrictionSpeedThresholdRadps) &&
+            (std::fabs(rightMotorSpeedRadps) <= params.staticFrictionSpeedThresholdRadps))
+        {
+            const float commonWheelTorqueRequestNm =
+                0.5f * (leftWheelTorqueRequestNm + rightWheelTorqueRequestNm);
+            const int commonTorqueSign =
+                (commonWheelTorqueRequestNm > kSignEpsilon) -
+                (commonWheelTorqueRequestNm < -kSignEpsilon);
+            const float commonBankSpeedRadps =
+                0.5f * (leftMotorSpeedRadps + rightMotorSpeedRadps);
+            const int commonSpeedSign =
+                (commonBankSpeedRadps > kSignEpsilon) -
+                (commonBankSpeedRadps < -kSignEpsilon);
+            const float commonStictionSign =
+                static_cast<float>((commonTorqueSign != 0) ? commonTorqueSign : commonSpeedSign);
+            leftFrictionTorqueNm += params.staticFrictionTorqueNm * commonStictionSign;
+            rightFrictionTorqueNm += params.staticFrictionTorqueNm * commonStictionSign;
+        }
+        else
+        {
+            const int leftSpeedSign =
+                (leftMotorSpeedRadps > kSignEpsilon) -
+                (leftMotorSpeedRadps < -kSignEpsilon);
+            const int leftTorqueSign =
+                (leftWheelTorqueRequestNm > kSignEpsilon) -
+                (leftWheelTorqueRequestNm < -kSignEpsilon);
+            leftFrictionTorqueNm +=
+                params.rollingFrictionTorqueNm *
+                static_cast<float>((leftSpeedSign != 0) ? leftSpeedSign : leftTorqueSign);
+
+            const int rightSpeedSign =
+                (rightMotorSpeedRadps > kSignEpsilon) -
+                (rightMotorSpeedRadps < -kSignEpsilon);
+            const int rightTorqueSign =
+                (rightWheelTorqueRequestNm > kSignEpsilon) -
+                (rightWheelTorqueRequestNm < -kSignEpsilon);
+            rightFrictionTorqueNm +=
+                params.rollingFrictionTorqueNm *
+                static_cast<float>((rightSpeedSign != 0) ? rightSpeedSign : rightTorqueSign);
+        }
+
+        return CommandVector(
+            _leftDrive.getCommandFromTorque(
+                leftWheelTorqueRequestNm + leftFrictionTorqueNm,
+                leftMotorSpeedRadps,
+                params.supplyVoltageV),
+            _rightDrive.getCommandFromTorque(
+                rightWheelTorqueRequestNm + rightFrictionTorqueNm,
+                rightMotorSpeedRadps,
+                params.supplyVoltageV));
     }
 
     void PlantModel::ComputeBodyAction(
@@ -2273,81 +2493,6 @@ namespace MazeMap
             fanDutyCycle);
     }
 
-    static CommandVector SolveFeedforwardCanonical(
-        const MotorEncoderDrive* leftDrive,
-        const MotorEncoderDrive* rightDrive,
-        float forwardVelocityMps,
-        float yawRateRadps,
-        float desiredLongitudinalAccelMps2,
-        float desiredYawAccelRadps2,
-        const PreparedParams& prepared) noexcept
-    {
-        const PlantModel::StateVector operatingState =
-            BuildReducedDriveCommandOperatingState(forwardVelocityMps, yawRateRadps, prepared);
-        const float resolvedLongitudinalAccelMps2 =
-            std::isfinite(desiredLongitudinalAccelMps2) ? desiredLongitudinalAccelMps2 : 0.0f;
-        const float resolvedYawAccelRadps2 =
-            std::isfinite(desiredYawAccelRadps2) ? desiredYawAccelRadps2 : 0.0f;
-        const float commonForceRequestN =
-            0.5f * prepared.longitudinalMassKg * resolvedLongitudinalAccelMps2;
-        float pivotScrubYawMomentNm = 0.0f;
-        if (((prepared.pivotScrubBreakawayYawMomentNm > prepared.forceEpsilonN) ||
-             (prepared.pivotScrubRollingYawMomentNm > prepared.forceEpsilonN)) &&
-            (prepared.trackWidthM > prepared.forceEpsilonN))
-        {
-            const float yawRateAbsRadps = std::fabs(operatingState(VehicleState::kR));
-            const float yawGate =
-                SmoothStep(
-                    prepared.pivotScrubMinCommandYawRateRadps,
-                    prepared.pivotScrubMinCommandYawRateRadps + prepared.pivotScrubMinCommandYawRateRadps,
-                    yawRateAbsRadps);
-            const float pivotSpeedMarginMps =
-                (0.5f * prepared.trackWidthM * yawRateAbsRadps) -
-                std::fabs(operatingState(VehicleState::kU));
-            const float pivotRegimeGate =
-                SmoothStep(
-                    0.0f,
-                    (std::max)(prepared.pivotScrubMaxForwardSpeedMps, prepared.rollingRegularizationMps),
-                    pivotSpeedMarginMps);
-            const float persistentScrubYawMomentNm = prepared.pivotScrubRollingYawMomentNm;
-            const float breakawaySurplusYawMomentNm =
-                (std::max)(0.0f, prepared.pivotScrubBreakawayYawMomentNm - persistentScrubYawMomentNm);
-            const float breakawaySurplusBlend =
-                1.0f -
-                SmoothStep(
-                    prepared.pivotScrubBreakawayYawRateRadps,
-                    prepared.pivotScrubBreakawayYawRateRadps + prepared.pivotScrubBreakawayYawRateBandRadps,
-                    yawRateAbsRadps);
-            pivotScrubYawMomentNm =
-                SignedDirectionFast(operatingState(VehicleState::kR), resolvedYawAccelRadps2) *
-                yawGate *
-                pivotRegimeGate *
-                (persistentScrubYawMomentNm + (breakawaySurplusBlend * breakawaySurplusYawMomentNm));
-        }
-        const float requestedYawMomentNm =
-            (prepared.yawInertiaKgM2 * resolvedYawAccelRadps2) +
-            (prepared.yawDampingNmPerRadps * operatingState(VehicleState::kR)) +
-            pivotScrubYawMomentNm;
-        const float inverseTrackWidthPerM =
-            (prepared.trackWidthM > prepared.forceEpsilonN) ? prepared.invTrackWidthM : 0.0f;
-        const float differentialForceRequestN = -requestedYawMomentNm * inverseTrackWidthPerM;
-        const float leftForceCommandN =
-            commonForceRequestN - differentialForceRequestN;
-        const float rightForceCommandN =
-            commonForceRequestN + differentialForceRequestN;
-
-        bool valid = false;
-        return ResolveBankForceFeedforwardCommand(
-            leftDrive,
-            rightDrive,
-            operatingState(VehicleState::kU),
-            operatingState(VehicleState::kR),
-            leftForceCommandN,
-            rightForceCommandN,
-            EffectiveBatteryVoltage(prepared.supplyVoltageV, prepared),
-            prepared,
-            valid);
-    }
     float PlantModel::driveFrictionTorque(
         float wheelBankSpeedRadps,
         float wheelTorqueRequestNm,

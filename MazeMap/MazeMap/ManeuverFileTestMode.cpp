@@ -124,7 +124,7 @@ namespace MazeMap::App::Internal
             : _runtime(runtime)
             , _loopController(runtime.ControlLoop())
             , _vehicle(runtime.Vehicle())
-            , _drive(runtime.Drive())
+            , _drive(runtime.DriveBase())
             , _driveService(runtime.DriveService())
             , _startupCalibration(runtime.StartupCalibrationService())
         {

@@ -23,12 +23,12 @@ namespace MazeMap::App
     struct BootModeDescriptor;
 }
 
-class DriveBase;
-class RuntimeSensorSuite;
-
 namespace MazeMap
 {
     class ManeuverQueue;
+
+    class DriveBase;
+    class RuntimeSensorSuite;
 }
 
 namespace MazeMap::App::Internal
@@ -564,7 +564,7 @@ namespace MazeMap::App::Internal
         LoopController& _loopController;
         MazeMap::Vehicle& _vehicle;
         RuntimeSensorSuite& _sensors;
-        ::DriveBase& _drive;
+        DriveBase& _drive;
         Drive& _driveService;
         StartupCalibration& _startupCalibration;
         StageTick _activeStageTick{ &OpenFloorMeasurementController::TimingStageTick };

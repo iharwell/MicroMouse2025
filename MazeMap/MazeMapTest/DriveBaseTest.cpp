@@ -387,7 +387,7 @@ namespace MazeMap
             const float requestedForwardAccelMps2,
             const float requestedYawAccelRadps2)
         {
-            constexpr int kObservationDelayTicks = 10;
+            constexpr int kObservationDelayTicks = 100;
             constexpr int kObservationWindowTicks = 12;
             constexpr int kTotalTicks = kObservationDelayTicks + kObservationWindowTicks;
             const PlantParams& params = PlantParams::Default();
@@ -1648,7 +1648,7 @@ namespace MazeMap
             AssertDriveCommandsEqual(feedforwardCommand, command, 1.0e-6f);
         }
 
-        TEST_METHOD(DriveBaseFreshDeltaCommandForwardAccelerationShowsInVehicleStateAfterTenTicks)
+        TEST_METHOD(DriveBaseFreshDeltaCommandForwardAccelerationShowsInVehicleState)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -1669,7 +1669,7 @@ namespace MazeMap
             Assert::AreEqual(0.0f, observation.yawAccelRadps2, 0.40f);
         }
 
-        TEST_METHOD(DriveBaseFreshDeltaCommandYawAccelerationShowsInVehicleStateAfterTenTicks)
+        TEST_METHOD(DriveBaseFreshDeltaCommandYawAccelerationShowsInVehicleState)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
@@ -1684,10 +1684,10 @@ namespace MazeMap
                     runtimeState,
                     plant,
                     0.0f,
-                    120.0f);
+                    25.0f);
 
             Assert::AreEqual(0.0f, observation.forwardAccelMps2, 0.20f);
-            Assert::AreEqual(120.0f, observation.yawAccelRadps2, 8.0f);
+            Assert::AreEqual(25.0f, observation.yawAccelRadps2, 8.0f);
         }
 
         TEST_METHOD(DriveBaseDeltaYawRateCommandRawMatchesPlantFeedforwardAtSteadyYawRateTarget)

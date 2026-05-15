@@ -11,13 +11,13 @@
 #include <cstddef>
 #include <cstdint>
 
-class DriveBase;
 
 namespace MazeMap
 {
     class Maze;
     struct TurnWallEdgeTracker;
     class Vehicle;
+    class DriveBase;
 }
 
 namespace MazeMap::App::Internal
@@ -410,7 +410,7 @@ namespace MazeMap::App::Internal
             bool& done);
 
         SharedRobotRuntime* _runtime{};     // Canonical runtime owner for live state and services.
-        DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
+        MazeMap::DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
         MazeMap::Vehicle* _vehicle{};       // Canonical vehicle facts used for limit derivation.
         MazeMap::Maze* _maze{};             // Maze facts used when maze-mode wall correction is enabled.
         MotionLimits _limits{};             // Drive-level live motion envelope, interpreted at use.

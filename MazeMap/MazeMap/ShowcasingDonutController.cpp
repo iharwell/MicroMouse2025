@@ -21,7 +21,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace
+namespace MazeMap
 {
     constexpr const char* kShowcasingDonutStableId = "showcasing_donut";
     constexpr const char* kShowcasingDonutModeVariant = "showcasing_donut";
@@ -130,7 +130,7 @@ namespace MazeMap::App::Internal
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
         , _vehicle(runtime.Vehicle())
-        , _drive(runtime.Drive())
+        , _drive(runtime.DriveBase())
         , _driveService(runtime.DriveService())
     {
     }

@@ -91,23 +91,35 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState restState;
-            PlantModel restPlant(vehicle, restState);
-            const App::Internal::CommandVector restControl =
-                restPlant.solveAccelerationFeedforward(4.0f, 0.0f);
+            restState.SetVelocity(0.25f);
+
+            // We deliberately set the wheel speeds higher on the slow state to ensure back-emf is not looking at the wheel speeds.
+			float s_left = 0.0f, s_right = 0.0f;
+            
+			vehicle.WheelOmegasFromBodyVelocity(
+				restState.GetVelocity(),
+				restState.GetRotationalVelocity(),
+				s_left,
+				s_right);
+            restState.SetWheelSpeedLeft(s_left);
+            restState.SetWheelSpeedRight(s_right);
+            PlantModel slowPlant(vehicle, restState);
+            const App::Internal::CommandVector slowControl =
+                slowPlant.solveAccelerationFeedforward(4.0f, 0.0f);
 
             VehicleState movingState;
             movingState.SetVelocity(0.75f);
-			float L_omega, R_omega;
-			vehicle.WheelOmegasFromBodyVelocity(0.75f, 0.0f, L_omega, R_omega);
-			movingState.SetWheelSpeedLeft(L_omega);
-			movingState.SetWheelSpeedRight(R_omega);
+			movingState.SetWheelSpeedLeft(0.0f);
+			movingState.SetWheelSpeedRight(0.0f);
             PlantModel movingPlant(vehicle, movingState);
             const App::Internal::CommandVector movingControl =
                 movingPlant.solveAccelerationFeedforward(4.0f, 0.0f);
 
-            Assert::IsTrue(IsFiniteControlVector(restControl));
+            Assert::IsTrue(IsFiniteControlVector(slowControl));
             Assert::IsTrue(IsFiniteControlVector(movingControl));
-            Assert::IsTrue(movingControl.Average() > restControl.Average());
+			Assert::AreNotEqual(slowControl.LeftMotorPwm(), movingControl.LeftMotorPwm(), 1.0e-5f);
+            Assert::AreNotEqual(slowControl.RightMotorPwm(), movingControl.RightMotorPwm(), 1.0e-5f);
+            Assert::IsTrue(movingControl.Average() > slowControl.Average());
         }
 
         TEST_METHOD(PlantModelComputeBodyActionUsesLongitudinalLimitForPureSpeedChange)

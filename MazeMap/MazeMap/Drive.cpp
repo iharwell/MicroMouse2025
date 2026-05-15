@@ -1519,7 +1519,7 @@ namespace MazeMap::App::Internal
     void Drive::AttachRuntime(SharedRobotRuntime& runtime) noexcept
     {
         _runtime = &runtime;
-        _drive = &runtime.Drive();
+        _drive = &runtime.DriveBase();
         _vehicle = &runtime.Vehicle();
         _maze = &runtime.Maze();
         MotionLimits motionCommandEnvelope{};

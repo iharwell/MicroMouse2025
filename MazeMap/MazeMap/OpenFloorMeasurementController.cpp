@@ -20,7 +20,7 @@
 #include <cstdio>
 #include <limits>
 
-namespace
+namespace MazeMap
 {
     using MazeMap::App::Internal::CommandVector;
     using MazeMap::App::Internal::Drive;
@@ -166,7 +166,7 @@ namespace MazeMap::App::Internal
         , _loopController(runtime.ControlLoop())
         , _vehicle(runtime.Vehicle())
         , _sensors(runtime.Sensors())
-        , _drive(runtime.Drive())
+        , _drive(runtime.DriveBase())
         , _driveService(runtime.DriveService())
         , _startupCalibration(runtime.StartupCalibrationService())
         , _mainStage(BuildRegisteredMainStage())

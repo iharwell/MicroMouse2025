@@ -4,6 +4,7 @@
 #include "EstimatorTestSupport.h"
 #include "PlantModelTestSupport.h"
 
+#include <algorithm>
 #include <cmath>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -18,6 +19,21 @@ namespace MazeMap
     TEST_CLASS(PlantModelDynamicsTest)
     {
     public:
+        TEST_METHOD(PlantModelDefaultParamsUseDriveWheelConstructionValues)
+        {
+            const PlantParams params = PlantParams::Default();
+            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
+
+            Assert::AreEqual(2.4e-7f, params.equivalentWheelInertiaKgM2, 1.0e-10f);
+            Assert::AreEqual(4.12f, params.longitudinalTireStiffnessN, 0.01f);
+            Assert::AreEqual(0.223f, params.corneringStiffnessFrontNPerRad, 0.001f);
+            Assert::AreEqual(0.223f, params.corneringStiffnessRearNPerRad, 0.001f);
+            Assert::AreEqual(params.equivalentWheelInertiaKgM2, prepared.wheelInertiaKgM2, 1.0e-10f);
+            Assert::AreEqual(params.longitudinalTireStiffnessN, prepared.longitudinalTireStiffnessN, 0.01f);
+            Assert::AreEqual(2.0f * params.corneringStiffnessFrontNPerRad, prepared.frontCorneringStiffnessAxleNPerRad, 0.01f);
+            Assert::AreEqual(2.0f * params.corneringStiffnessRearNPerRad, prepared.rearCorneringStiffnessAxleNPerRad, 0.01f);
+        }
+
         TEST_METHOD(PlantModelSymmetricDriveDoesNotCreateYawBias)
         {
             PlantModelTestRuntime runtime;
@@ -190,6 +206,127 @@ namespace MazeMap
                 plant.driveFrictionTorque(state(VehicleState::kOmegaL), 0.018f, params),
                 plant.driveFrictionTorque(state(VehicleState::kOmegaL), 0.018f, prepared),
                 1.0e-6f);
+        }
+
+        TEST_METHOD(PlantModelLateralTireForcePlateausAtSustainedLimitAcrossTicks)
+        {
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
+            const PlantParams params = PlantParams::Default();
+            const float controlFanDutyCycle = 0.80f;
+            const float controlBatteryVoltageV = params.supplyVoltageV;
+            constexpr float dtSeconds = 0.001f;
+
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.0f);
+            control.SetRightMotorPwm(0.0f);
+
+            auto buildState = [&params](const float lateralVelocityMps) {
+                return BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    1.0f,
+                    lateralVelocityMps,
+                    0.0f,
+                    1.0f / params.wheelRadiusM,
+                    1.0f / params.wheelRadiusM,
+                    0.0f);
+            };
+
+            auto maxLateralAccelAcrossTicks =
+                [&](VehicleState::StateVector state) {
+                    float maxObservedAbsAccelMps2 = 0.0f;
+                    for (int tick = 0; tick < 5; ++tick)
+                    {
+                        const PlantDerivatives derivatives =
+                            plant.forwardStep(
+                                state,
+                                control,
+                                controlFanDutyCycle,
+                                controlBatteryVoltageV,
+                                params);
+                        maxObservedAbsAccelMps2 =
+                            (std::max)(maxObservedAbsAccelMps2, std::fabs(derivatives.lateralAccelMps2));
+                        state =
+                            plant.integrate(
+                                state,
+                                control,
+                                controlFanDutyCycle,
+                                controlBatteryVoltageV,
+                                dtSeconds,
+                                params);
+                    }
+                    return maxObservedAbsAccelMps2;
+                };
+
+            const float highSlipAccelMps2 = maxLateralAccelAcrossTicks(buildState(1.25f));
+            const float extremeSlipAccelMps2 = maxLateralAccelAcrossTicks(buildState(3.50f));
+
+            Assert::IsTrue(highSlipAccelMps2 <= params.combinedAccelSustainedMps2 + 0.20f);
+            Assert::IsTrue(extremeSlipAccelMps2 <= params.combinedAccelSustainedMps2 + 0.20f);
+            Assert::IsTrue(extremeSlipAccelMps2 >= highSlipAccelMps2 - 0.40f);
+        }
+
+        TEST_METHOD(PlantModelInPlacePivotScrubStopsYawFromYawInertiaAcrossTicks)
+        {
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
+            PlantParams params = PlantParams::Default();
+            params.longitudinalTireStiffnessN = 0.0f;
+            params.corneringStiffnessFrontNPerRad = 0.0f;
+            params.corneringStiffnessRearNPerRad = 0.0f;
+            params.yawRateDampingNmsPerRad = 0.0f;
+            params.pivotScrubRollingYawMomentNm = 0.11f;
+
+            App::Internal::CommandVector control{};
+            control.SetLeftMotorPwm(0.0f);
+            control.SetRightMotorPwm(0.0f);
+
+            constexpr float dtSeconds = 0.001f;
+            constexpr float initialYawRateRadps = 3.0f;
+            VehicleState::StateVector state = VehicleState::StateVector::Zero();
+            state(VehicleState::kR) = initialYawRateRadps;
+
+            const float expectedYawDecelRadps2 =
+                params.pivotScrubRollingYawMomentNm / params.yawInertiaKgM2;
+            const int expectedStopTicks =
+                static_cast<int>(std::ceil(initialYawRateRadps / (expectedYawDecelRadps2 * dtSeconds)));
+            int observedStopTicks = 0;
+            for (; observedStopTicks < 10; ++observedStopTicks)
+            {
+                const PlantDerivatives derivatives =
+                    plant.forwardStep(
+                        state,
+                        control,
+                        0.80f,
+                        params.supplyVoltageV,
+                        params);
+                if (state(VehicleState::kR) <= params.stopEnterYawRateRadps)
+                {
+                    break;
+                }
+
+                Assert::AreEqual(
+                    -expectedYawDecelRadps2,
+                    derivatives.yawAccelRadps2,
+                    1.0e-3f);
+                state =
+                    plant.integrate(
+                        state,
+                        control,
+                        0.80f,
+                        params.supplyVoltageV,
+                        dtSeconds,
+                        params);
+            }
+
+            const int stopTickError =
+                (observedStopTicks > expectedStopTicks) ?
+                (observedStopTicks - expectedStopTicks) :
+                (expectedStopTicks - observedStopTicks);
+            Assert::IsTrue(stopTickError <= 1);
+            Assert::IsTrue(std::fabs(state(VehicleState::kR)) <= params.stopEnterYawRateRadps);
         }
 
         TEST_METHOD(PlantModelExactRestHoldKeepsMotionStateAtZero)

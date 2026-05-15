@@ -218,7 +218,7 @@ def load_current_feedforward_setup(repo_root: Path) -> CurrentFeedforwardSetup:
     wheel_velocity_kp = load_named_float(runtime_core, "kEncoderVelocityKp")
     wheel_velocity_kd = load_named_float(runtime_core, "kEncoderVelocityKd")
 
-    equivalent_wheel_inertia_kg_m2 = load_named_float(plant_header, "equivalentWheelInertiaKgM2")
+    equivalent_wheel_inertia_kg_m2 = load_named_float(drive_header, "kDefaultWheelBankEquivalentInertiaKgM2")
     drivetrain_efficiency = load_named_float(plant_header, "drivetrainEfficiency")
     rolling_friction_torque_nm = load_named_float(plant_header, "rollingFrictionTorqueNm")
     static_friction_max_speed_mps = load_named_float(plant_header, "staticFrictionMaxSpeedMps")

@@ -11,12 +11,12 @@
 #include <cmath>
 #include <cstdint>
 
-class RuntimeSensorSuite;
 
 namespace MazeMap
 {
     struct EncoderObs;
     class PlantModel;
+    class RuntimeSensorSuite;
 
     namespace App::Internal
     {
@@ -56,7 +56,7 @@ namespace MazeMap
     private:
         friend class PlantModel;
         friend class App::Internal::LoopController;
-        friend class ::RuntimeSensorSuite;
+        friend class RuntimeSensorSuite;
 
         inline static constexpr VehiclePhysicalModel kPhysicalModel = {
             0.14f, //Mass

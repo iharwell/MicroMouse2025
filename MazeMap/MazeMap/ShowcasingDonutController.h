@@ -212,7 +212,7 @@ namespace MazeMap::App::Internal
         SharedRobotRuntime& _runtime;
         LoopController& _loopController;
         MazeMap::Vehicle& _vehicle;
-        ::DriveBase& _drive;
+        DriveBase& _drive;
         Drive& _driveService;
         Phase _phase{ Phase::Idle };
         EndReason _endReason{ EndReason::None };

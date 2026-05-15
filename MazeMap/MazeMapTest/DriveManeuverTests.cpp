@@ -188,7 +188,7 @@ namespace MazeMap::App
                 0.5f * static_cast<float>(projectedLeftCounts + projectedRightCounts) * distancePerCountM;
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f));
             ApplyEncoderObservation(
-                runtime.Drive(),
+                runtime.DriveBase(),
                 runtime.Estimator(),
                 runtime.RuntimeState(),
                 kSmoothEntrySpeedMps * kSimulationDtSeconds,
@@ -208,7 +208,7 @@ namespace MazeMap::App
             const float dtSeconds)
         {
             const PlantParams params = PlantParams::Default();
-            const DriveTelemetry telemetry = runtime.Drive().GetTelemetry();
+            const DriveTelemetry telemetry = runtime.DriveBase().GetTelemetry();
 
             const CommandVector control = CommandVector(
                 telemetry.leftDriveCommand,
@@ -229,7 +229,7 @@ namespace MazeMap::App
                 dtSeconds;
 
             ApplyEncoderObservation(
-                runtime.Drive(),
+                runtime.DriveBase(),
                 runtime.Estimator(),
                 runtime.RuntimeState(),
                 leftDistanceDeltaM,
@@ -310,7 +310,7 @@ namespace MazeMap::App
             float leftEncoderRemainderCounts = 0.0f;
             float rightEncoderRemainderCounts = 0.0f;
 
-            if (!runtime.Drive().Begin())
+            if (!runtime.DriveBase().Begin())
             {
                 return trace;
             }
@@ -357,8 +357,8 @@ namespace MazeMap::App
                 trace.samples.push_back(
                     CommandSample{
                         trace.elapsedSeconds,
-                        runtime.Drive().GetLastLinearCommandMps(),
-                        runtime.Drive().GetLastAngularCommandRadps()
+                        runtime.DriveBase().GetLastLinearCommandMps(),
+                        runtime.DriveBase().GetLastAngularCommandRadps()
                     });
 
                 SimulateRuntimeDriveCycle(

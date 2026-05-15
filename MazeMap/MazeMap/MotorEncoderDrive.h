@@ -17,6 +17,18 @@ namespace MazeMap
         friend class Vehicle;
 
         static constexpr unsigned long kMinEncoderVelocitySampleMicros = 250UL;
+        static constexpr float kDefaultWheelBankEquivalentInertiaKgM2 = 240.0e-9f;
+        // Drive-owned tire parameters. Keep these here because they describe the motor/encoder wheel bank:
+        // 25.0 mm wheel OD, 17.2 mm hub, solid 20A rubber, and two wheels per bank.
+        // The measured contact span gives one tire contact width:
+        // (78.68 mm outside span - 70.04 mm inside span) / 2 = 4.32 mm.
+        // Measured tire stiffness from solid-rubber contact data:
+        // normal per tire = (0.138 kg * 9.80665 m/s^2 + 0.56 N fan downforce) / 4 = 0.4783 N,
+        // contact length ~= 2.71 mm, K_tire ~= 164.6 N/m, K_bank ~= 329.2 N/m.
+        // That maps to C_alpha ~= 0.223 N/rad per tire and C_kappa ~= 2.06 N per tire.
+        // The plant stores longitudinal slip stiffness per two-wheel bank and cornering stiffness per tire.
+        static constexpr float kDefaultLongitudinalTireStiffnessN = 4.12f;
+        static constexpr float kDefaultCorneringStiffnessNPerRad = 0.223f;
         float _resistance = 1.0f;
         float _voltage = 0.0f;
         float _torqueConstant = 0.0f;
@@ -25,6 +37,9 @@ namespace MazeMap
         float _gearRatio = 1.0f;
         float _drivetrainEfficiency = 1.0f;
         float _wheelDiameter = 0.0f;
+        float _equivalentWheelInertiaKgM2 = 0.0f;
+        float _longitudinalTireStiffnessN = 0.0f;
+        float _corneringStiffnessNPerRad = 0.0f;
         uint16_t _pulsesPerRev = 1U;
         uint8_t _motorOutPinA = Platform::kInvalidPin;
         uint8_t _motorOutPinB = Platform::kInvalidPin;
@@ -108,7 +123,10 @@ namespace MazeMap
             uint8_t encoderChannel = Platform::kInvalidEncoderChannel,
             bool invertMotorDirection = false,
             bool invertEncoderDirection = false,
-            float drivetrainEfficiency = 1.0f) noexcept
+            float drivetrainEfficiency = 1.0f,
+            float equivalentWheelInertiaKgM2 = kDefaultWheelBankEquivalentInertiaKgM2,
+            float longitudinalTireStiffnessN = kDefaultLongitudinalTireStiffnessN,
+            float corneringStiffnessNPerRad = kDefaultCorneringStiffnessNPerRad) noexcept
             : _resistance(resistance)
             , _voltage(voltage)
             , _torqueConstant(torqueConstant)
@@ -117,6 +135,9 @@ namespace MazeMap
             , _gearRatio(gearRatio)
             , _drivetrainEfficiency(drivetrainEfficiency)
             , _wheelDiameter(wheelDiameter)
+            , _equivalentWheelInertiaKgM2(equivalentWheelInertiaKgM2)
+            , _longitudinalTireStiffnessN(longitudinalTireStiffnessN)
+            , _corneringStiffnessNPerRad(corneringStiffnessNPerRad)
             , _pulsesPerRev(pulsesPerRev)
             , _motorOutPinA(motorOutPinA)
             , _motorOutPinB(motorOutPinB)
@@ -170,6 +191,12 @@ namespace MazeMap
 
         float getWheelRadius() const noexcept { return 0.5f * _wheelDiameter; }
         float getWheelCircumference() const noexcept { return PI_F * _wheelDiameter; }
+
+        float getEquivalentWheelInertiaKgM2() const noexcept { return _equivalentWheelInertiaKgM2; }
+
+        float getLongitudinalTireStiffnessN() const noexcept { return _longitudinalTireStiffnessN; }
+
+        float getCorneringStiffnessNPerRad() const noexcept { return _corneringStiffnessNPerRad; }
 
         uint16_t getPulsesPerRev() const noexcept { return _pulsesPerRev; }
 
@@ -241,22 +268,6 @@ namespace MazeMap
             assert(_voltage > 0.0f);
 
             return getMotorVoltageForGroundForce(groundForceNewtons, groundSpeedMetersPerSecond) / _voltage;
-        }
-
-        float getMaxForceAtVelocity(float velocityMetersPerSecond) const noexcept
-        {
-            const float groundSpeed = MazeMap::Math::Absf(velocityMetersPerSecond);
-            assert((_wheelDiameter > 0.0f) && (_gearRatio > 0.0f) && (_resistance > 0.0f) && (_speedConstant > 0.0f) && (_torqueConstant > 0.0f) && (_voltage > 0.0f));
-
-            const float wheelRadius = getWheelRadius();
-            const float motorAngularVelocity = (groundSpeed / wheelRadius) * _gearRatio;
-            const float motorCurrent = ((_voltage - (motorAngularVelocity / _speedConstant)) / _resistance) - _noLoadCurrent;
-            if (motorCurrent <= 0.0f)
-            {
-                return 0.0f;
-            }
-
-            return (_torqueConstant * motorCurrent * _gearRatio) / wheelRadius;
         }
 
         float getSpeedAtForceLimit(float maxTractiveForce) const noexcept
@@ -340,6 +351,24 @@ namespace MazeMap
             }
 
             return _torqueConstant * _gearRatio * _drivetrainEfficiency * loadCurrentA;
+        }
+
+        float getForwardForceFromCommand(
+            float driveCommand,
+            float wheelBankSpeedRadps,
+            float batteryVoltageV = 0.0f) const noexcept
+        {
+            const float wheelRadius = getWheelRadius();
+            return (wheelRadius > 0.0f) ?
+                (getTorqueFromCommand(driveCommand, wheelBankSpeedRadps, batteryVoltageV) / wheelRadius) :
+                0.0f;
+        }
+
+        float getPeakForwardForceAtBankSpeed(
+            float wheelBankSpeedRadps,
+            float batteryVoltageV = 0.0f) const noexcept
+        {
+            return getForwardForceFromCommand(1.0f, wheelBankSpeedRadps, batteryVoltageV);
         }
 
         // Converts a requested wheel-bank torque, not motor-shaft torque, into the

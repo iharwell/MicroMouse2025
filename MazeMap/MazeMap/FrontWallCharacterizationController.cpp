@@ -27,7 +27,7 @@ using MazeMap::App::Internal::StartupCalibration;
 
 MMLOG_DEFINE_ROW(FrontWallCharacterizationLogRow, FRONT_WALL_CHARACTERIZATION_LOG_FIELDS);
 
-namespace
+namespace MazeMap
 {
     MotionLimits BuildReverseCaptureLimits(const MazeMap::Vehicle& vehicle) noexcept
     {
@@ -39,7 +39,6 @@ namespace
         limits.SetAngularAccelRadps2(vehicle.GetMaxAngularAcceleration());
         return limits;
     }
-}
 
 class FrontWallCharacterizationController : public IApplicationMode
 {
@@ -48,7 +47,7 @@ public:
         : _runtime(runtime)
         , _loopController(runtime.ControlLoop())
         , _vehicle(runtime.Vehicle())
-        , _drive(runtime.Drive())
+        , _drive(runtime.DriveBase())
         , _driveService(runtime.DriveService())
         , _startupCalibration(runtime.StartupCalibrationService())
     {
@@ -168,7 +167,7 @@ private:
     FrontWallCharacterizationLogRow _logRow{};
     Phase _phase{ Phase::Idle };
     PauseAction _pauseAction{ PauseAction::None };
-    MazeMap::FrontWallCharacterizationStorage _captureStorage{};
+    FrontWallCharacterizationStorage _captureStorage{};
     Eigen::Vector2f _captureTargetHeading = Eigen::Vector2f(0.0f, 1.0f);
     float _captureStartDistanceM = 0.0f;
     float _captureNextStoredDistanceM = 0.0f;
@@ -477,7 +476,7 @@ private:
     }
 
     static void StoreCurveSample(
-        MazeMap::FrontWallCharacterizationStorage& storage,
+        FrontWallCharacterizationStorage& storage,
         float traveledDistanceM,
         const SensorSnapshot& snapshot)
     {
@@ -499,7 +498,7 @@ private:
         ++storage.sampleCount;
     }
 
-    bool PersistCurve(const MazeMap::FrontWallCharacterizationStorage& storage)
+    bool PersistCurve(const FrontWallCharacterizationStorage& storage)
     {
         if (!WritePersistedFrontWallCharacterization(storage))
         {
@@ -507,7 +506,7 @@ private:
             return false;
         }
 
-        MazeMap::FrontWallCharacterizationStorage verify{};
+        FrontWallCharacterizationStorage verify{};
         if (!TryReadPersistedFrontWallCharacterization(verify))
         {
             _runtime.FailActiveMode("Failed to verify persisted front wall characterization");
@@ -526,9 +525,9 @@ private:
         return true;
     }
 
-    bool ExportCurveToSd(const MazeMap::FrontWallCharacterizationStorage& storage)
+    bool ExportCurveToSd(const FrontWallCharacterizationStorage& storage)
     {
-        if (!MazeMap::IsValidFrontWallCharacterizationStorage(storage))
+        if (!IsValidFrontWallCharacterizationStorage(storage))
         {
             _runtime.FailActiveMode("Invalid front wall characterization cannot be exported");
             return false;
@@ -632,7 +631,7 @@ private:
 
 };
 
-namespace MazeMap::App::Internal
+namespace App::Internal
 {
     IApplicationMode& GetFrontWallCharacterizationMode();
 
@@ -662,3 +661,5 @@ namespace MazeMap::App::Internal
     }
 }
 
+
+}
