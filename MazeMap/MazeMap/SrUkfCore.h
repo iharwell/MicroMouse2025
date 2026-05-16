@@ -260,14 +260,6 @@ namespace MazeMap
             bool stationaryCertified,
             bool launchOrReversalActive,
             bool inconsistentOrSaturatedActive) noexcept;
-        static void ComputeVelocityTargetBodyAction(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            float responseTimeS,
-            float& desiredLongitudinalAccelMps2,
-            float& desiredYawAccelRadps2) noexcept;
         static float ComputeEncoderPairNisThreshold(const EncoderObs& observation) noexcept;
         static StateVector IntegrateStationaryHoldState(const StateVector& currentState, float dtS) noexcept;
         bool IsPivotScrubCandidate(

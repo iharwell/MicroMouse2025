@@ -85,6 +85,31 @@ namespace MazeMap
                 Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)),
                 state(VehicleState::kPsi));
         }
+
+        void PublishStateToRuntime(
+            VehicleState& runtimeState,
+            const VehicleState::StateVector& state) noexcept
+        {
+            runtimeState.SetPosition(Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)));
+            runtimeState.SetOrientation(state(VehicleState::kPsi));
+            runtimeState.SetVelocity(state(VehicleState::kU));
+            runtimeState.SetLateralVelocity(state(VehicleState::kV));
+            runtimeState.SetRotationalVelocity(state(VehicleState::kR));
+            runtimeState.SetWheelSpeedLeft(state(VehicleState::kOmegaL));
+            runtimeState.SetWheelSpeedRight(state(VehicleState::kOmegaR));
+            runtimeState.SetGyroBiasZ(state(VehicleState::kBgz));
+        }
+
+        App::Internal::CommandVector ComputeForwardVelocityCorrection(
+            PlantModel& model,
+            VehicleState& runtimeState,
+            const VehicleState::StateVector& state,
+            const float targetForwardMps) noexcept
+        {
+            PublishStateToRuntime(runtimeState, state);
+            const float accelRequestMps2 = 4.0f * (targetForwardMps - state(VehicleState::kU));
+            return model.ComputeFeedforward(accelRequestMps2, 0.0f);
+        }
     }
 
     TEST_CLASS(SrUkfCoreMotionUpdateTest)
@@ -743,9 +768,11 @@ namespace MazeMap
             for (int step = 0; step < 3000; ++step)
             {
                 const App::Internal::CommandVector control =
-                    model.solveSteadyStateFeedforward(
-                        forwardVelocityTargetMps,
-                        0.0f);
+                    ComputeForwardVelocityCorrection(
+                        model,
+                        runtime.runtimeState,
+                        core.workingState(),
+                        forwardVelocityTargetMps);
 
                 RunPredictionMatchingCycle(
                     core,
@@ -783,9 +810,11 @@ namespace MazeMap
             for (int step = 0; step < 3000; ++step)
             {
                 const App::Internal::CommandVector control =
-                    model.solveSteadyStateFeedforward(
-                        forwardVelocityTargetMps,
-                        0.0f);
+                    ComputeForwardVelocityCorrection(
+                        model,
+                        runtime.runtimeState,
+                        core.workingState(),
+                        forwardVelocityTargetMps);
 
                 RunPredictionMatchingCycle(
                     core,

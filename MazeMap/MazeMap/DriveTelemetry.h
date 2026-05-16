@@ -8,7 +8,6 @@
 struct DriveTelemetry
 {
     std::uint32_t proposalSequenceId = 0U;
-    std::uint32_t plantEvaluationId = 0U;
     std::uint32_t feedbackTuningRevisionId = 0U;
     std::uint32_t feedbackStrategyRevisionId = 0U;
 
@@ -59,7 +58,6 @@ struct DriveTelemetry
     static constexpr std::uint16_t kFeedbackYawSuppressedForMaximize = 1U << 4;
 
     static constexpr std::uint16_t kTelemetryProposalSequenceValid = 1U << 0;
-    static constexpr std::uint16_t kTelemetryPlantEvaluationValid = 1U << 1;
     static constexpr std::uint16_t kTelemetryFeedbackTuningRevisionValid = 1U << 2;
     static constexpr std::uint16_t kTelemetryFeedbackStrategyRevisionValid = 1U << 3;
     static constexpr std::uint16_t kTelemetryCommandEvidenceValid = 1U << 4;

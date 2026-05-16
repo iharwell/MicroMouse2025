@@ -34,6 +34,15 @@ namespace
     {
         return std::isinf(value);
     }
+
+    float AddFeedbackAccel(float accumulatedAccel, float feedbackAccel) noexcept
+    {
+        if (!std::isfinite(feedbackAccel))
+        {
+            return accumulatedAccel;
+        }
+        return std::isfinite(accumulatedAccel) ? (accumulatedAccel + feedbackAccel) : feedbackAccel;
+    }
 }
 
 namespace MazeMap
@@ -76,26 +85,30 @@ namespace MazeMap
         const float observedYawRateRadps = stateSnapshot(VehicleState::kR);
         const float observedYawRad = stateSnapshot(VehicleState::kPsi);
 
-        float forwardFeedbackAccelMps2 = 0.0f;
+        float forwardFeedbackAccelMps2 = (std::numeric_limits<float>::quiet_NaN)();
         if (std::isfinite(targetForwardMps) && std::isfinite(observedForwardMps))
         {
             forwardFeedbackAccelMps2 =
-                ComputeForwardVelocityFeedbackAccelMps2(
-                    _feedbackTuning,
-                    targetForwardMps - observedForwardMps);
+                AddFeedbackAccel(
+                    forwardFeedbackAccelMps2,
+                    ComputeForwardVelocityFeedbackAccelMps2(
+                        _feedbackTuning,
+                        targetForwardMps - observedForwardMps));
         }
         else
         {
             telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackForwardVelocityInactive;
         }
 
-        float yawFeedbackAccelRadps2 = 0.0f;
+        float yawFeedbackAccelRadps2 = (std::numeric_limits<float>::quiet_NaN)();
         if (std::isfinite(targetYawRateRadps) && std::isfinite(observedYawRateRadps))
         {
-            yawFeedbackAccelRadps2 +=
-                ComputeYawRateFeedbackAccelRadps2(
-                    _feedbackTuning,
-                    targetYawRateRadps - observedYawRateRadps);
+            yawFeedbackAccelRadps2 =
+                AddFeedbackAccel(
+                    yawFeedbackAccelRadps2,
+                    ComputeYawRateFeedbackAccelRadps2(
+                        _feedbackTuning,
+                        targetYawRateRadps - observedYawRateRadps));
         }
         else
         {
@@ -104,10 +117,19 @@ namespace MazeMap
 
         if (std::isfinite(targetYawRad) && std::isfinite(observedYawRad))
         {
-            yawFeedbackAccelRadps2 +=
-                ComputeHeadingFeedbackAccelRadps2(
-                    _feedbackTuning,
-                    NormalizeClockwiseYawError(targetYawRad - observedYawRad));
+            const float headingTargetYawRateRadps =
+                std::isfinite(targetYawRateRadps) ? targetYawRateRadps : 0.0f;
+            const float headingErrorRateRadps =
+                std::isfinite(observedYawRateRadps) ?
+                (headingTargetYawRateRadps - observedYawRateRadps) :
+                0.0f;
+            yawFeedbackAccelRadps2 =
+                AddFeedbackAccel(
+                    yawFeedbackAccelRadps2,
+                    ComputeHeadingFeedbackAccelRadps2(
+                        _feedbackTuning,
+                        NormalizeClockwiseYawError(targetYawRad - observedYawRad),
+                        headingErrorRateRadps));
         }
         else
         {
@@ -136,26 +158,24 @@ namespace MazeMap
                 ComposeAccelerationObjective(targetYawAccelRadps2, yawFeedbackAccelRadps2);
         }
 
-        const PlantModelBodyActionSolveResult solve =
-            _plant.SolveBodyActionInverse(
-                stateSnapshot,
-                targetForwardMps,
-                targetYawRateRadps,
-                targetForwardAccelMps2,
-                targetYawAccelRadps2,
-                telemetry.composedForwardAccelMps2,
-                telemetry.composedYawAccelRadps2);
+        float maxLongitudinalAccelMps2 = 0.0f;
+        float maxYawAccelRadps2 = 0.0f;
+        _plant.velocityTargetTechnicalLimits(maxLongitudinalAccelMps2, maxYawAccelRadps2);
 
-        telemetry.plantEvaluationId = solve.plantEvaluationId;
-        telemetry.leftPlantCommand = solve.command.LeftCommand();
-        telemetry.rightPlantCommand = solve.command.RightCommand();
-        telemetry.telemetryValidFlags |= DriveTelemetry::kTelemetryPlantEvaluationValid;
-        telemetry.solverFailureFlags |= MapPlantFailureFlagsToDriveTelemetry(solve.failureFlags);
+        const float feedforwardForwardAccelMps2 =
+            ResolveComposedAccelerationObjective(telemetry.composedForwardAccelMps2, maxLongitudinalAccelMps2);
+        const float feedforwardYawAccelRadps2 =
+            ResolveComposedAccelerationObjective(telemetry.composedYawAccelRadps2, maxYawAccelRadps2);
+        const CommandVector plantCommand =
+            _plant.ComputeFeedforward(feedforwardForwardAccelMps2, feedforwardYawAccelRadps2);
+
+        telemetry.leftPlantCommand = plantCommand.LeftCommand();
+        telemetry.rightPlantCommand = plantCommand.RightCommand();
 
         CommandVector finalCommand(
-            ClampCommandComponent(solve.command.LeftCommand()),
-            ClampCommandComponent(solve.command.RightCommand()));
-        if (!solve.command.IsFinite())
+            ClampCommandComponent(plantCommand.LeftCommand()),
+            ClampCommandComponent(plantCommand.RightCommand()));
+        if (!plantCommand.IsFinite())
         {
             finalCommand = CommandVector(0.0f, 0.0f);
             telemetry.commandKindFlags |= DriveTelemetry::kCommandKindSolverFailureEvidence;
@@ -201,7 +221,7 @@ namespace MazeMap
     float DriveBase::ComposeAccelerationObjective(float requestedAccel, float feedbackAccel) noexcept
     {
         const bool hasRequestedAccel = std::isfinite(requestedAccel);
-        const bool hasFeedbackAccel = std::isfinite(feedbackAccel) && (feedbackAccel != 0.0f);
+        const bool hasFeedbackAccel = std::isfinite(feedbackAccel);
         if (hasRequestedAccel)
         {
             return requestedAccel + (hasFeedbackAccel ? feedbackAccel : 0.0f);
@@ -234,26 +254,27 @@ namespace MazeMap
 
     float DriveBase::ComputeHeadingFeedbackAccelRadps2(
         const MazeMap::PDCluster& feedbackTuning,
-        float headingErrorRad) noexcept
+        float headingErrorRad,
+        float headingErrorRateRadps) noexcept
     {
-        // The heading proportional gain is interpreted as (rad/s^2)/rad. No sampled derivative
-        // or generic feedback-axis state participates in DriveBase feedback.
-        return feedbackTuning.HeadingStatePD.Compute(headingErrorRad, 0.0f);
+        // Heading PD contributes acceleration-domain correction directly before PlantModel
+        // inverse dynamics. The derivative term is the requested minus observed yaw rate.
+        return feedbackTuning.HeadingStatePD.Compute(headingErrorRad, headingErrorRateRadps);
     }
 
-    std::uint16_t DriveBase::MapPlantFailureFlagsToDriveTelemetry(
-        std::uint16_t plantFailureFlags) noexcept
+    float DriveBase::ResolveComposedAccelerationObjective(float composedAccel, float maximizeLimit) noexcept
     {
-        std::uint16_t telemetryFlags = 0U;
-        if ((plantFailureFlags & PlantModelBodyActionSolveResult::kFailureNonFiniteCommand) != 0U)
+        if (std::isnan(composedAccel))
         {
-            telemetryFlags |= DriveTelemetry::kSolverFailurePlantNonFinite;
+            return 0.0f;
         }
-        if ((plantFailureFlags & PlantModelBodyActionSolveResult::kFailureUnsupportedScalarIntent) != 0U)
+        if (std::isinf(composedAccel))
         {
-            telemetryFlags |= DriveTelemetry::kSolverFailureUnsupportedScalarIntent;
+            const float resolvedLimit =
+                (std::isfinite(maximizeLimit) && (maximizeLimit > 0.0f)) ? maximizeLimit : 0.0f;
+            return std::signbit(composedAccel) ? -resolvedLimit : resolvedLimit;
         }
-        return telemetryFlags;
+        return std::isfinite(composedAccel) ? composedAccel : 0.0f;
     }
 
     std::uint16_t DriveBase::DecodeScalarIntentFlags(
@@ -289,7 +310,10 @@ namespace MazeMap
 
     std::uint16_t DriveBase::DecodeUnsupportedScalarIntentFlags(float targetYawRad) noexcept
     {
-        return std::isinf(targetYawRad) ? DriveTelemetry::kSolverFailureUnsupportedScalarIntent : 0U;
+        return
+            std::isinf(targetYawRad) ?
+            DriveTelemetry::kSolverFailureUnsupportedScalarIntent :
+            0U;
     }
 
     DriveTelemetry DriveBase::BuildBaseTelemetry(
@@ -318,7 +342,8 @@ namespace MazeMap
         telemetry.telemetryValidFlags =
             DriveTelemetry::kTelemetryProposalSequenceValid |
             DriveTelemetry::kTelemetryPlantCommandValid;
-        telemetry.solverFailureFlags = DecodeUnsupportedScalarIntentFlags(targetYawRad);
+        telemetry.solverFailureFlags =
+            DecodeUnsupportedScalarIntentFlags(targetYawRad);
         return telemetry;
     }
 }

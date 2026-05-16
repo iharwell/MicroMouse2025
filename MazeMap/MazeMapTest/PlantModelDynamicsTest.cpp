@@ -6,6 +6,7 @@
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -227,14 +228,18 @@ namespace MazeMap
                     1.0f / params.wheelRadiusM,
                     1.0f / params.wheelRadiusM,
                     0.0f);
+            float forwardStepAccumulator = 0.0f;
+            float feedforwardAccumulator = 0.0f;
+
 			auto startTime1 = std::chrono::high_resolution_clock::now();
             for (int tick = 0; tick < numForwardStep; ++tick)
             {
-                PlantDerivatives derivatives =
+                const PlantDerivatives derivatives =
                     plant.forwardStep(
                         state,
                         control,
                         params);
+                forwardStepAccumulator += derivatives.longitudinalAccelMps2 + derivatives.yawAccelRadps2;
             }
 			auto durationForwardStep = std::chrono::high_resolution_clock::now() - startTime1;
 
@@ -252,11 +257,14 @@ namespace MazeMap
             startTime1 = std::chrono::high_resolution_clock::now();
             for (int tick = 0; tick < numFeedforward; ++tick)
             {
-				auto command = plant.SolveBodyActionInverse(state, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+				const App::Internal::CommandVector command = plant.ComputeFeedforward(0.0f, 0.0f);
+                feedforwardAccumulator += command.LeftCommand() + command.RightCommand();
             }
             auto durationFeedforward = std::chrono::high_resolution_clock::now() - startTime1;
             auto ss = std::wstringstream();
             ss << "feedforward: " << durationFeedforward.count() << "  integrate: " << durationIntegrate.count() << "  forwardstep: " << durationForwardStep.count();
+            Assert::IsTrue(std::isfinite(forwardStepAccumulator));
+            Assert::IsTrue(std::isfinite(feedforwardAccumulator));
             Assert::IsTrue(durationFeedforward < durationIntegrate, ss.str().c_str());
             Assert::IsTrue(durationIntegrate < durationForwardStep, ss.str().c_str());
         }

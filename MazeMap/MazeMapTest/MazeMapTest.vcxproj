@@ -202,6 +202,13 @@
     <ClCompile Include="DirectionalPathFinderTest.cpp" />
     <ClCompile Include="DiagnosticCoverageTest.cpp" />
     <ClCompile Include="FresnelTest.cpp" />
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryTest.cpp" />
+    <ClCompile Include="DriveStack_DriveManeuverProfileTest.cpp" />
+    <ClCompile Include="DriveStack_DrivePrimitiveClosedLoopTest.cpp" />
+    <ClCompile Include="DriveStack_EstimatorReplayTest.cpp" />
+    <ClCompile Include="DriveStack_ManeuverGeometryTest.cpp" />
+    <ClCompile Include="DriveStack_PlantModelPhysicsTest.cpp" />
+    <ClCompile Include="DriveStack_VehiclePlantBoundaryTest.cpp" />
     <ClCompile Include="HistoricalMazePathFinderTest.cpp" />
     <ClCompile Include="LoopControllerTest.cpp" />
     <ClCompile Include="ManeuverPathFinderTest.cpp" />

@@ -198,7 +198,6 @@ namespace
     enum class FeedforwardPathId : std::size_t
     {
         Acceleration = 0U,
-        SteadyState,
         Count
     };
 
@@ -503,8 +502,7 @@ namespace
     {
         static const std::array<FeedforwardPathDefinition, kFeedforwardPathCount> definitions =
         {{
-            { FeedforwardPathId::Acceleration, "acceleration", "PlantModel acceleration feedforward", "plant_model" },
-            { FeedforwardPathId::SteadyState, "steady_state", "PlantModel steady-state feedforward", "plant_model" }
+            { FeedforwardPathId::Acceleration, "acceleration", "PlantModel acceleration feedforward", "plant_model" }
         }};
         return definitions;
     }
@@ -1815,16 +1813,42 @@ namespace
 
         float desiredStateLongitudinalAccelMps2 = 0.0f;
         float desiredStateYawAccelRadps2 = 0.0f;
-        plantModel.ComputeBodyAction(
-            currentForwardVelocityMps,
-            targetForwardVelocityMps,
-            currentYawRateRadps,
-            targetYawRateRadps,
-            maxStateLongitudinalAccelMps2,
-            maxStateYawAccelRadps2,
-            responseTimeS,
-            desiredStateLongitudinalAccelMps2,
-            desiredStateYawAccelRadps2);
+        const float stateLongitudinalAccelLimitMps2 =
+            (std::isfinite(maxStateLongitudinalAccelMps2) && (maxStateLongitudinalAccelMps2 > 0.0f)) ?
+            maxStateLongitudinalAccelMps2 :
+            0.0f;
+        const float stateYawAccelLimitRadps2 =
+            (std::isfinite(maxStateYawAccelRadps2) && (maxStateYawAccelRadps2 > 0.0f)) ?
+            maxStateYawAccelRadps2 :
+            0.0f;
+        desiredStateLongitudinalAccelMps2 =
+            (stateLongitudinalAccelLimitMps2 > 0.0f) ?
+            ((targetForwardVelocityMps - currentForwardVelocityMps) / responseTimeS) :
+            0.0f;
+        desiredStateYawAccelRadps2 =
+            (stateYawAccelLimitRadps2 > 0.0f) ?
+            ((targetYawRateRadps - currentYawRateRadps) / responseTimeS) :
+            0.0f;
+        const float stateLongitudinalDemand =
+            (stateLongitudinalAccelLimitMps2 > 0.0f) ?
+            (std::fabs(desiredStateLongitudinalAccelMps2) / stateLongitudinalAccelLimitMps2) :
+            0.0f;
+        const float stateYawDemand =
+            (stateYawAccelLimitRadps2 > 0.0f) ?
+            (std::fabs(desiredStateYawAccelRadps2) / stateYawAccelLimitRadps2) :
+            0.0f;
+        const float stateBalanceScale =
+            (std::max)(1.0f, (std::max)(stateLongitudinalDemand, stateYawDemand));
+        desiredStateLongitudinalAccelMps2 =
+            (std::clamp)(
+                desiredStateLongitudinalAccelMps2 / stateBalanceScale,
+                -stateLongitudinalAccelLimitMps2,
+                stateLongitudinalAccelLimitMps2);
+        desiredStateYawAccelRadps2 =
+            (std::clamp)(
+                desiredStateYawAccelRadps2 / stateBalanceScale,
+                -stateYawAccelLimitRadps2,
+                stateYawAccelLimitRadps2);
 
         float maxScalarLongitudinalAccelMps2 = 0.0f;
         float maxScalarYawAccelRadps2 = 0.0f;
@@ -1838,16 +1862,42 @@ namespace
 
         float desiredScalarLongitudinalAccelMps2 = 0.0f;
         float desiredScalarYawAccelRadps2 = 0.0f;
-        plantModel.ComputeBodyAction(
-            currentForwardVelocityMps,
-            targetForwardVelocityMps,
-            currentYawRateRadps,
-            targetYawRateRadps,
-            maxScalarLongitudinalAccelMps2,
-            maxScalarYawAccelRadps2,
-            responseTimeS,
-            desiredScalarLongitudinalAccelMps2,
-            desiredScalarYawAccelRadps2);
+        const float scalarLongitudinalAccelLimitMps2 =
+            (std::isfinite(maxScalarLongitudinalAccelMps2) && (maxScalarLongitudinalAccelMps2 > 0.0f)) ?
+            maxScalarLongitudinalAccelMps2 :
+            0.0f;
+        const float scalarYawAccelLimitRadps2 =
+            (std::isfinite(maxScalarYawAccelRadps2) && (maxScalarYawAccelRadps2 > 0.0f)) ?
+            maxScalarYawAccelRadps2 :
+            0.0f;
+        desiredScalarLongitudinalAccelMps2 =
+            (scalarLongitudinalAccelLimitMps2 > 0.0f) ?
+            ((targetForwardVelocityMps - currentForwardVelocityMps) / responseTimeS) :
+            0.0f;
+        desiredScalarYawAccelRadps2 =
+            (scalarYawAccelLimitRadps2 > 0.0f) ?
+            ((targetYawRateRadps - currentYawRateRadps) / responseTimeS) :
+            0.0f;
+        const float scalarLongitudinalDemand =
+            (scalarLongitudinalAccelLimitMps2 > 0.0f) ?
+            (std::fabs(desiredScalarLongitudinalAccelMps2) / scalarLongitudinalAccelLimitMps2) :
+            0.0f;
+        const float scalarYawDemand =
+            (scalarYawAccelLimitRadps2 > 0.0f) ?
+            (std::fabs(desiredScalarYawAccelRadps2) / scalarYawAccelLimitRadps2) :
+            0.0f;
+        const float scalarBalanceScale =
+            (std::max)(1.0f, (std::max)(scalarLongitudinalDemand, scalarYawDemand));
+        desiredScalarLongitudinalAccelMps2 =
+            (std::clamp)(
+                desiredScalarLongitudinalAccelMps2 / scalarBalanceScale,
+                -scalarLongitudinalAccelLimitMps2,
+                scalarLongitudinalAccelLimitMps2);
+        desiredScalarYawAccelRadps2 =
+            (std::clamp)(
+                desiredScalarYawAccelRadps2 / scalarBalanceScale,
+                -scalarYawAccelLimitRadps2,
+                scalarYawAccelLimitRadps2);
 
         if (!(std::isfinite(desiredStateLongitudinalAccelMps2) &&
             std::isfinite(desiredStateYawAccelRadps2) &&
@@ -1886,15 +1936,9 @@ namespace
         {
         case FeedforwardPathId::Acceleration:
             command =
-                plantModel.solveAccelerationFeedforward(
+                plantModel.ComputeFeedforward(
                     inputs.desiredScalarLongitudinalAccelMps2,
                     inputs.desiredScalarYawAccelRadps2);
-            return true;
-        case FeedforwardPathId::SteadyState:
-            command =
-                plantModel.solveSteadyStateFeedforward(
-                    inputs.targetForwardSensorMps,
-                    inputs.targetYawRateSensorRadps);
             return true;
         default:
             return false;
@@ -2941,7 +2985,7 @@ namespace
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"
             << "- Post-update replay deltas compare the replayed UKF state against the logged UKF state from the capture; they are consistency checks, not external ground truth.\n"
             << "- Feedforward validation uses the present row's wheel-side velocities plus debiased gyro as the current state, the following row's wheel-side velocities plus debiased gyro as the target state, the following row's `dt_us` as the response horizon, and never uses logged UKF state for that validation.\n"
-            << "- Feedforward path coverage: " << corpus.feedforwardPaths.size() << " canonical PlantModel public paths evaluated.\n"
+            << "- Feedforward path coverage: " << corpus.feedforwardPaths.size() << " canonical PlantModel public feedforward path evaluated.\n"
             << "- Feedforward audit sensor bounds: each wheel-side velocity is treated as a `+/- 0.06 m/s` sensor and debiased yaw rate as a `+/- 0.03 rad/s` sensor when computing per-path command envelopes.\n"
             << "- Feedforward evaluations completed: " << totalFeedforwardEvaluations << "\n"
             << "- Phase analysis uses canonical `section_id` + `phase_id` buckets from the open-floor schema.\n"

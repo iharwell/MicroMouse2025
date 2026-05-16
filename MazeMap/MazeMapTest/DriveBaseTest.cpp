@@ -39,22 +39,6 @@ namespace MazeMap
             }
         };
 
-        VehicleState::StateVector CaptureRuntimeState(const VehicleState& runtimeState)
-        {
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
-            state(VehicleState::kPx) = runtimeState.GetPositionX();
-            state(VehicleState::kPy) = runtimeState.GetPositionY();
-            state(VehicleState::kPsi) = runtimeState.GetOrientation();
-            state(VehicleState::kU) = runtimeState.GetVelocity();
-            state(VehicleState::kV) = runtimeState.GetLateralVelocity();
-            state(VehicleState::kR) = runtimeState.GetRotationalVelocity();
-            state(VehicleState::kOmegaL) = runtimeState.GetWheelSpeedLeft();
-            state(VehicleState::kOmegaR) = runtimeState.GetWheelSpeedRight();
-            state(VehicleState::kBgz) = runtimeState.GetGyroBiasZ();
-            VehicleState::NormalizeStateVector(state);
-            return state;
-        }
-
         void AssertFlagSet(const std::uint16_t flags, const std::uint16_t flag)
         {
             Assert::IsTrue((flags & flag) != 0U);
@@ -79,25 +63,42 @@ namespace MazeMap
             Assert::AreEqual(telemetry.rightDriveCommand, command.RightCommand(), 1.0e-6f);
         }
 
-        void AssertMatchesPlantSolve(
-            const DriveBaseHarness& harness,
-            const DriveTelemetry& telemetry,
-            const VehicleState::StateVector& stateAtProposal)
+        float ResolveFeedforwardObjective(
+            const PlantModel& plant,
+            const float composedAccel,
+            const bool yawObjective) noexcept
         {
-            const PlantModelBodyActionSolveResult expected =
-                harness.plant.SolveBodyActionInverse(
-                    stateAtProposal,
-                    telemetry.requestedForwardMps,
-                    telemetry.requestedYawRateRadps,
-                    telemetry.requestedForwardAccelMps2,
-                    telemetry.requestedYawAccelRadps2,
-                    telemetry.composedForwardAccelMps2,
-                    telemetry.composedYawAccelRadps2);
+            if (std::isnan(composedAccel))
+            {
+                return 0.0f;
+            }
 
-            Assert::AreEqual(expected.plantEvaluationId, telemetry.plantEvaluationId);
-            Assert::AreEqual(expected.command.LeftCommand(), telemetry.leftPlantCommand, 1.0e-6f);
-            Assert::AreEqual(expected.command.RightCommand(), telemetry.rightPlantCommand, 1.0e-6f);
+            if (std::isinf(composedAccel))
+            {
+                float maxLongitudinalAccelMps2 = 0.0f;
+                float maxYawAccelRadps2 = 0.0f;
+                plant.velocityTargetTechnicalLimits(maxLongitudinalAccelMps2, maxYawAccelRadps2);
+                const float limit = yawObjective ? maxYawAccelRadps2 : maxLongitudinalAccelMps2;
+                return std::signbit(composedAccel) ? -limit : limit;
+            }
+
+            return composedAccel;
         }
+
+        void AssertMatchesPlantFeedforward(
+            const DriveBaseHarness& harness,
+            const DriveTelemetry& telemetry)
+        {
+            const CommandVector expected =
+                harness.plant.ComputeFeedforward(
+                    ResolveFeedforwardObjective(harness.plant, telemetry.composedForwardAccelMps2, false),
+                    ResolveFeedforwardObjective(harness.plant, telemetry.composedYawAccelRadps2, true));
+
+            AssertFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryPlantCommandValid);
+            Assert::AreEqual(expected.LeftCommand(), telemetry.leftPlantCommand, 1.0e-6f);
+            Assert::AreEqual(expected.RightCommand(), telemetry.rightPlantCommand, 1.0e-6f);
+        }
+
     }
 
     TEST_CLASS(DriveBaseTest)
@@ -121,7 +122,6 @@ namespace MazeMap
         TEST_METHOD(ProposeBodyTickPublishesFreshCommandEvidence)
         {
             DriveBaseHarness harness;
-            const VehicleState::StateVector stateAtProposal = CaptureRuntimeState(harness.runtimeState);
 
             const CommandVector command =
                 harness.drive.ProposeBodyTick(0.40f, 0.25f, 1.5f, 2.0f, 0.10f);
@@ -132,14 +132,13 @@ namespace MazeMap
             AssertFlagSet(telemetry.commandKindFlags, DriveTelemetry::kCommandKindBodyProposal);
             AssertFlagClear(telemetry.commandKindFlags, DriveTelemetry::kCommandKindStaleEvidence);
             AssertFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryProposalSequenceValid);
-            AssertFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryPlantEvaluationValid);
             AssertFlagSet(telemetry.telemetryValidFlags, DriveTelemetry::kTelemetryCommandEvidenceValid);
             Assert::AreEqual(0.40f, telemetry.requestedForwardMps, 1.0e-6f);
             Assert::AreEqual(0.25f, telemetry.requestedYawRateRadps, 1.0e-6f);
             Assert::AreEqual(1.5f, telemetry.requestedForwardAccelMps2, 1.0e-6f);
             Assert::AreEqual(2.0f, telemetry.requestedYawAccelRadps2, 1.0e-6f);
             Assert::AreEqual(0.10f, telemetry.requestedYawRad, 1.0e-6f);
-            AssertMatchesPlantSolve(harness, telemetry, stateAtProposal);
+            AssertMatchesPlantFeedforward(harness, telemetry);
         }
 
         TEST_METHOD(NaNObjectivesDisableFeedbackAndRemainInactiveInTelemetry)
@@ -152,7 +151,6 @@ namespace MazeMap
             harness.runtimeState.SetVelocity(0.5f);
             harness.runtimeState.SetRotationalVelocity(1.0f);
             harness.runtimeState.SetOrientation(0.25f);
-            const VehicleState::StateVector stateAtProposal = CaptureRuntimeState(harness.runtimeState);
 
             (void)harness.drive.ProposeBodyTick(kNaN, kNaN, kNaN, kNaN, kNaN);
             const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
@@ -167,7 +165,7 @@ namespace MazeMap
             AssertFlagSet(telemetry.feedbackBranchFlags, DriveTelemetry::kFeedbackHeadingInactive);
             Assert::IsTrue(std::isnan(telemetry.composedForwardAccelMps2));
             Assert::IsTrue(std::isnan(telemetry.composedYawAccelRadps2));
-            AssertMatchesPlantSolve(harness, telemetry, stateAtProposal);
+            AssertMatchesPlantFeedforward(harness, telemetry);
         }
 
         TEST_METHOD(ForwardVelocityFeedbackChangesOnlyComposedForwardAcceleration)
@@ -176,7 +174,6 @@ namespace MazeMap
             cluster.VelocityStatePD.SetGains(3.0f, 0.0f);
             DriveBaseHarness harness(cluster);
             harness.runtimeState.SetVelocity(0.20f);
-            const VehicleState::StateVector stateAtProposal = CaptureRuntimeState(harness.runtimeState);
 
             (void)harness.drive.ProposeBodyTick(1.0f, kNaN, 0.50f, kNaN, kNaN);
             const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
@@ -186,7 +183,7 @@ namespace MazeMap
             Assert::AreEqual(0.50f + ((1.0f - 0.20f) * 3.0f), telemetry.composedForwardAccelMps2, 1.0e-6f);
             Assert::IsTrue(std::isnan(telemetry.requestedYawRateRadps));
             Assert::IsTrue(std::isnan(telemetry.composedYawAccelRadps2));
-            AssertMatchesPlantSolve(harness, telemetry, stateAtProposal);
+            AssertMatchesPlantFeedforward(harness, telemetry);
         }
 
         TEST_METHOD(YawRateAndHeadingFeedbackComposeYawAcceleration)
@@ -197,7 +194,6 @@ namespace MazeMap
             DriveBaseHarness harness(cluster);
             harness.runtimeState.SetRotationalVelocity(0.40f);
             harness.runtimeState.SetOrientation(0.25f);
-            const VehicleState::StateVector stateAtProposal = CaptureRuntimeState(harness.runtimeState);
 
             (void)harness.drive.ProposeBodyTick(kNaN, 1.0f, kNaN, 0.30f, 0.75f);
             const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
@@ -209,7 +205,7 @@ namespace MazeMap
                 telemetry.composedYawAccelRadps2,
                 1.0e-6f);
             Assert::IsTrue(std::isnan(telemetry.composedForwardAccelMps2));
-            AssertMatchesPlantSolve(harness, telemetry, stateAtProposal);
+            AssertMatchesPlantFeedforward(harness, telemetry);
         }
 
         TEST_METHOD(InfiniteAccelerationIntentReachesPlantModelAsMaximizeObjective)
@@ -218,7 +214,6 @@ namespace MazeMap
             cluster.VelocityStatePD.SetGains(100.0f, 0.0f);
             cluster.YawRateStatePD.SetGains(100.0f, 0.0f);
             DriveBaseHarness harness(cluster);
-            const VehicleState::StateVector stateAtProposal = CaptureRuntimeState(harness.runtimeState);
 
             const CommandVector command =
                 harness.drive.ProposeBodyTick(2.0f, -3.0f, kInf, -kInf, kNaN);
@@ -233,7 +228,37 @@ namespace MazeMap
             Assert::IsFalse(std::signbit(telemetry.composedForwardAccelMps2));
             Assert::IsTrue(std::isinf(telemetry.composedYawAccelRadps2));
             Assert::IsTrue(std::signbit(telemetry.composedYawAccelRadps2));
-            AssertMatchesPlantSolve(harness, telemetry, stateAtProposal);
+            AssertMatchesPlantFeedforward(harness, telemetry);
+        }
+
+        TEST_METHOD(InfiniteForwardVelocityIntentIsRecordedInDriveTelemetry)
+        {
+            DriveBaseHarness harness;
+
+            const CommandVector command =
+                harness.drive.ProposeBodyTick(kInf, kNaN, 0.0f, 0.0f, kNaN);
+            const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
+
+            AssertFiniteCommand(command);
+            AssertFlagSet(telemetry.scalarIntentFlags, DriveTelemetry::kScalarForwardVelocityMaximize);
+            AssertFlagClear(telemetry.solverFailureFlags, DriveTelemetry::kSolverFailureUnsupportedScalarIntent);
+            AssertFlagClear(telemetry.commandKindFlags, DriveTelemetry::kCommandKindSolverFailureEvidence);
+            Assert::IsTrue(std::isinf(telemetry.requestedForwardMps));
+        }
+
+        TEST_METHOD(InfiniteYawRateIntentIsRecordedInDriveTelemetry)
+        {
+            DriveBaseHarness harness;
+
+            const CommandVector command =
+                harness.drive.ProposeBodyTick(kNaN, -kInf, 0.0f, 0.0f, kNaN);
+            const DriveTelemetry& telemetry = harness.drive.LastTelemetry();
+
+            AssertFiniteCommand(command);
+            AssertFlagSet(telemetry.scalarIntentFlags, DriveTelemetry::kScalarYawRateMaximize);
+            AssertFlagClear(telemetry.solverFailureFlags, DriveTelemetry::kSolverFailureUnsupportedScalarIntent);
+            AssertFlagClear(telemetry.commandKindFlags, DriveTelemetry::kCommandKindSolverFailureEvidence);
+            Assert::IsTrue(std::isinf(telemetry.requestedYawRateRadps));
         }
 
         TEST_METHOD(CommandClampingIsRecordedAsPlantCommandAndFinalCommandEvidence)
@@ -252,6 +277,7 @@ namespace MazeMap
             Assert::IsTrue(
                 (std::fabs(telemetry.leftPlantCommand - telemetry.leftDriveCommand) > 1.0e-5f) ||
                 (std::fabs(telemetry.rightPlantCommand - telemetry.rightDriveCommand) > 1.0e-5f));
+            AssertMatchesPlantFeedforward(harness, telemetry);
             AssertCommandMatchesTelemetry(command, telemetry);
         }
 

@@ -123,51 +123,6 @@ namespace MazeMap
         float maxContactUtilization = 0.0f;
     };
 
-    struct PlantModelBodyActionSolveResult
-    {
-        App::Internal::CommandVector command{};
-        App::Internal::CommandVector finalSolveCommand{};
-
-        float requestedForwardMps = 0.0f;
-        float requestedYawRateRadps = 0.0f;
-        float requestedForwardAccelMps2 = 0.0f;
-        float requestedYawAccelRadps2 = 0.0f;
-        float composedForwardAccelMps2 = 0.0f;
-        float composedYawAccelRadps2 = 0.0f;
-
-        float leftWheelTargetVelocityMps = 0.0f;
-        float rightWheelTargetVelocityMps = 0.0f;
-        float leftWheelTargetAccelMps2 = 0.0f;
-        float rightWheelTargetAccelMps2 = 0.0f;
-        float leftWheelTargetOmegaRadps = 0.0f;
-        float rightWheelTargetOmegaRadps = 0.0f;
-
-        std::uint32_t plantEvaluationId = 0U;
-        std::uint32_t plantModelFingerprint = 0U;
-        std::uint16_t validityFlags = 0U;
-        std::uint16_t failureFlags = 0U;
-        std::uint16_t scalarIntentFlags = 0U;
-
-        static constexpr std::uint16_t kValidityCommand = 1U << 0;
-        static constexpr std::uint16_t kValidityFinalSolveCommand = 1U << 1;
-        static constexpr std::uint16_t kValidityWheelTargets = 1U << 2;
-        static constexpr std::uint16_t kValidityPlantEvaluationId = 1U << 3;
-        static constexpr std::uint16_t kFailureNonFiniteCommand = 1U << 0;
-        static constexpr std::uint16_t kFailureUnsupportedScalarIntent = 1U << 1;
-        static constexpr std::uint16_t kScalarForwardVelocityInactive = 1U << 0;
-        static constexpr std::uint16_t kScalarForwardVelocityFinite = 1U << 1;
-        static constexpr std::uint16_t kScalarForwardVelocityMaximize = 1U << 2;
-        static constexpr std::uint16_t kScalarYawRateInactive = 1U << 3;
-        static constexpr std::uint16_t kScalarYawRateFinite = 1U << 4;
-        static constexpr std::uint16_t kScalarYawRateMaximize = 1U << 5;
-        static constexpr std::uint16_t kScalarForwardAccelInactive = 1U << 6;
-        static constexpr std::uint16_t kScalarForwardAccelFinite = 1U << 7;
-        static constexpr std::uint16_t kScalarForwardAccelMaximize = 1U << 8;
-        static constexpr std::uint16_t kScalarYawAccelInactive = 1U << 9;
-        static constexpr std::uint16_t kScalarYawAccelFinite = 1U << 10;
-        static constexpr std::uint16_t kScalarYawAccelMaximize = 1U << 11;
-    };
-
     // Tunable physical parameters and fixed sensor-mount facts for the UKF plant model.
     struct PlantParams
     {
@@ -344,7 +299,7 @@ namespace MazeMap
         float stopExitCommand = 0.0f;
     };
 
-    // Shared vehicle plant owner for runtime dynamics, inverse solves, and plant-side diagnostics.
+    // Shared vehicle plant owner for runtime dynamics, acceleration feedforward, and plant-side diagnostics.
     class EXPORT PlantModel
     {
     public:
@@ -440,69 +395,9 @@ namespace MazeMap
             float dt,
             const PreparedParams& params) const noexcept;
 
-        App::Internal::CommandVector solveSteadyStateFeedforward(
-            float desiredForwardVelocityMps,
-            float desiredYawRateRadps) const noexcept;
-        App::Internal::CommandVector solveAccelerationFeedforward(
-            float desiredLongitudinalAccelMps2,
+        App::Internal::CommandVector ComputeFeedforward(
+            float desiredAccelMps2,
             float desiredYawAccelRadps2) const noexcept;
-        PlantModelBodyActionSolveResult SolveBodyActionInverse(
-            const StateVector& currentState,
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            float requestedForwardAccelMps2,
-            float requestedYawAccelRadps2,
-            float composedForwardAccelMps2,
-            float composedYawAccelRadps2) const noexcept;
-
-        void ComputeBodyAction(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            float longitudinalAccelLimitMps2,
-            float yawAccelLimitRadps2,
-            float responseTimeS,
-            float& desiredLongitudinalAccelMps2,
-            float& desiredYawAccelRadps2) const noexcept;
-        void ComputeBodyAction(
-            float currentForwardVelocityMps,
-            float targetForwardVelocityMps,
-            float currentYawRateRadps,
-            float longitudinalAccelLimitMps2,
-            float responseTimeS,
-            float& desiredLongitudinalAccelMps2) const noexcept;
-        void ComputeBodyActionFromYawRate(
-            float currentForwardVelocityMps,
-            float currentYawRateRadps,
-            float targetYawRateRadps,
-            float yawAccelLimitRadps2,
-            float responseTimeS,
-            float& desiredYawAccelRadps2) const noexcept;
-
-        void resolveWheelMotionTargets(
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            float targetLongitudinalAccelMps2,
-            float targetYawAccelRadps2,
-            float& leftTargetVelocityMps,
-            float& rightTargetVelocityMps,
-            float& leftTargetAccelMps2,
-            float& rightTargetAccelMps2,
-            float& leftTargetOmegaRadps,
-            float& rightTargetOmegaRadps) const noexcept;
-        void resolveWheelMotionTargets(
-            float targetForwardVelocityMps,
-            float targetYawRateRadps,
-            float targetLongitudinalAccelMps2,
-            float targetYawAccelRadps2,
-            const PreparedParams& params,
-            float& leftTargetVelocityMps,
-            float& rightTargetVelocityMps,
-            float& leftTargetAccelMps2,
-            float& rightTargetAccelMps2,
-            float& leftTargetOmegaRadps,
-            float& rightTargetOmegaRadps) const noexcept;
 
         Eigen::Matrix<float, 2, 2> encoderPairCovarianceRadps(
             float linearSpeedSigmaMps,
@@ -585,9 +480,9 @@ namespace MazeMap
             const App::Internal::CommandVector& control,
             float& leftAppliedBankTorqueNm,
             float& rightAppliedBankTorqueNm) const noexcept;
-        App::Internal::CommandVector solveAccelerationFeedforward(
+        App::Internal::CommandVector ComputeFeedforwardFromState(
             const StateVector& currentState,
-            float desiredLongitudinalAccelMps2,
+            float desiredAccelMps2,
             float desiredYawAccelRadps2) const noexcept;
         struct WheelOnlyMeasurementPrediction
         {

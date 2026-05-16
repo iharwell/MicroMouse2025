@@ -68,6 +68,27 @@
     <ClCompile Include="FresnelTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DriveStack_DriveBasePlantBoundaryTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DriveManeuverProfileTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_DrivePrimitiveClosedLoopTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_EstimatorReplayTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_ManeuverGeometryTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_PlantModelPhysicsTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DriveStack_VehiclePlantBoundaryTest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="HistoricalMazePathFinderTest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

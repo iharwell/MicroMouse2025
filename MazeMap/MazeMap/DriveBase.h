@@ -48,17 +48,16 @@ namespace MazeMap
             float yawRateErrorRadps) noexcept;
         static float ComputeHeadingFeedbackAccelRadps2(
             const MazeMap::PDCluster& feedbackTuning,
-            float headingErrorRad) noexcept;
-        static std::uint16_t MapPlantFailureFlagsToDriveTelemetry(
-            std::uint16_t plantFailureFlags) noexcept;
+            float headingErrorRad,
+            float headingErrorRateRadps) noexcept;
+        static float ResolveComposedAccelerationObjective(float composedAccel, float maximizeLimit) noexcept;
         static std::uint16_t DecodeScalarIntentFlags(
             float targetForwardMps,
             float targetYawRateRadps,
             float targetForwardAccelMps2,
             float targetYawAccelRadps2,
             float targetYawRad) noexcept;
-        static std::uint16_t DecodeUnsupportedScalarIntentFlags(
-            float targetYawRad) noexcept;
+        static std::uint16_t DecodeUnsupportedScalarIntentFlags(float targetYawRad) noexcept;
 
         DriveTelemetry BuildBaseTelemetry(
             std::uint16_t commandKindFlags,
