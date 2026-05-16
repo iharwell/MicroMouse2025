@@ -427,19 +427,23 @@ namespace MazeMap::Config
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
     constexpr float kSmoothTurnYawRateKd = 5.0f;
+    // [High] DriveBase state-feedback gains tuned against the expanded high-performance PdTuning envelope. These are
+    // deliberately local to the DriveBase PD cluster so straight/turn shared tuning constants keep their existing
+    // meaning for other callers.
+    constexpr float kDriveBaseVelocityStateKp = 5.5f;
+    constexpr float kDriveBaseVelocityStateKd = 0.01f;
+    constexpr float kDriveBaseHeadingStateKp = 2300.0f;
+    constexpr float kDriveBaseHeadingStateKd = 0.0f;
+    constexpr float kDriveBaseYawRateStateKp = 120.0f;
+    constexpr float kDriveBaseYawRateStateKd = 5.0f;
     // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
     // current DriveBase PD setup family, with concrete starting values for every supported
     // control/signal pairing already represented by the new naming scheme.
     inline constexpr MazeMap::PDCluster kDriveBasePDCluster(
-        /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
-        // DriveBase velocity-state feedback is acceleration-domain. A gain of 8 s^-1 targets roughly 0.1-0.2 s
-        // capture for ordinary velocity errors without making every small correction a plant-limit request.
-        // Unfortunately, it significantly underperforms what we need, as we need a gain that keeps up with the
-        // 10 m/s^2 capabilities of the robot when we jump 1 m/s. I think we could do with dialing it back once
-        // we're within 0.4 m/s of the target, though.
-        /* velocityStatePD */ MazeMap::ProportionalDerivative(25.0f, 0.01f),
+        /* headingStatePD */ MazeMap::ProportionalDerivative(kDriveBaseHeadingStateKp, kDriveBaseHeadingStateKd),
+        /* velocityStatePD */ MazeMap::ProportionalDerivative(kDriveBaseVelocityStateKp, kDriveBaseVelocityStateKd),
         /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(kEncoderVelocityKp, kEncoderVelocityKd),
-        /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
+        /* yawRateStatePD */ MazeMap::ProportionalDerivative(kDriveBaseYawRateStateKp, kDriveBaseYawRateStateKd),
         /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateEncoderDeltaPD */ MazeMap::ProportionalDerivative(0.30f, 0.01f),
         /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.01f),
