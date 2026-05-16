@@ -290,7 +290,7 @@ namespace MazeMap
         struct YawRateLongRunScenario final
         {
             static constexpr int kYawRateTicks = 500;
-            static constexpr float kTargetYawRateRadps = 1.20f;
+            static constexpr float kTargetYawRateRadps = 2.20f;
 
             bool commandsFinite = true;
             bool commandEvidenceValid = true;
@@ -333,7 +333,7 @@ namespace MazeMap
 
         struct HeadingHoldLongRunScenario final
         {
-            static constexpr int kHeadingTicks = 900;
+            static constexpr int kHeadingTicks = 2000;
             static constexpr float kTargetYawRad = 0.0f;
             static constexpr float kInitialYawRad = 0.35f;
 

@@ -423,18 +423,18 @@ namespace MazeMap::Config
     constexpr float kArcYawD = 2.0f;
     // [High] Smooth-turn yaw-rate proportional gain. Smooth maneuvers treat the prescribed yaw-rate trace as the
     // authority, so this closes the measured turn rate onto that trace without changing maneuver geometry.
-    constexpr float kSmoothTurnYawRateKp = 8.0f;
+    constexpr float kSmoothTurnYawRateKp = 38.0f;
     // [High] Smooth-turn yaw-rate derivative gain. This damps yaw-rate error directly so the robot follows the
     // maneuver's sample-by-sample turn-rate target rather than lagging wide through the corner.
-    constexpr float kSmoothTurnYawRateKd = 0.05f;
+    constexpr float kSmoothTurnYawRateKd = 0.15f;
     // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
     // current DriveBase PD setup family, with concrete starting values for every supported
     // control/signal pairing already represented by the new naming scheme.
     inline constexpr MazeMap::PDCluster kDriveBasePDCluster(
         /* headingStatePD */ MazeMap::ProportionalDerivative(kStraightHeadingKp, kStraightYawD),
         // DriveBase velocity-state feedback is acceleration-domain. A gain of 8 s^-1 targets roughly 0.1-0.2 s
-        // capture for ordinary velocity errors without making every small correction a plant-limit request.
-        /* velocityStatePD */ MazeMap::ProportionalDerivative(8.0f, 0.01f),
+        // capture for ordinary velocity errors without making every small correction a plant-limit request. Unfortunately, it significantly underperforms.
+        /* velocityStatePD */ MazeMap::ProportionalDerivative(18.0f, 0.01f),
         /* velocityEncoderAveragePD */ MazeMap::ProportionalDerivative(kEncoderVelocityKp, kEncoderVelocityKd),
         /* yawRateStatePD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
         /* yawRateGyroPD */ MazeMap::ProportionalDerivative(kSmoothTurnYawRateKp, kSmoothTurnYawRateKd),
