@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <sstream>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -131,7 +132,7 @@ namespace MazeMap
             return actual(component) - state(component);
         }
 
-        bool StateComponentIsFiniteAfterSingleStep(int component)
+        float StateComponentAfterSingleStep(int component)
         {
             TestRuntime runtime;
             const PlantParams params = PlantParams::Default();
@@ -140,10 +141,10 @@ namespace MazeMap
             const App::Internal::CommandVector command = MakeCommand(0.42f, 0.31f);
             const VehicleState::StateVector actual =
                 runtime.plant.integrate(state, command, 0.004f, params);
-            return std::isfinite(actual(component));
+            return actual(component);
         }
 
-        bool StateComponentIsFiniteAfterSubsteps(int component)
+        float StateComponentAfterSubsteps(int component)
         {
             TestRuntime runtime;
             const PlantParams params = PlantParams::Default();
@@ -154,7 +155,7 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, command, 0.001f, params);
             }
-            return std::isfinite(state(component));
+            return state(component);
         }
 
         float SingleStepMinusSubsteps(int component)
@@ -176,7 +177,7 @@ namespace MazeMap
             return singleStep(component) - substeps(component);
         }
 
-        bool HighCommandComponentStayedFinite(int component)
+        float HighCommandFirstNonFiniteOrFinalComponent(int component)
         {
             TestRuntime runtime;
             const PlantParams params = PlantParams::Default();
@@ -189,14 +190,14 @@ namespace MazeMap
                 state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
                 if (!std::isfinite(state(component)))
                 {
-                    return false;
+                    return state(component);
                 }
             }
 
-            return true;
+            return state(component);
         }
 
-        bool HighCommandHeadingStayedNormalized()
+        float HighCommandFirstOutOfRangeOrFinalHeading()
         {
             TestRuntime runtime;
             const PlantParams params = PlantParams::Default();
@@ -209,11 +210,11 @@ namespace MazeMap
                 state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
                 if (state(VehicleState::kPsi) < -PI_F || state(VehicleState::kPsi) > PI_F)
                 {
-                    return false;
+                    return state(VehicleState::kPsi);
                 }
             }
 
-            return true;
+            return state(VehicleState::kPsi);
         }
 
         VehicleState::StateVector FinalHighCommandState()
@@ -232,27 +233,28 @@ namespace MazeMap
             return state;
         }
 
-        bool LongRunForwardSolveCommandStayedFinite()
+        App::Internal::CommandVector LongRunForwardFirstNonFiniteOrFinalSolveCommand()
         {
             TestRuntime runtime;
             const PlantParams params = PlantParams::Default();
             VehicleState::StateVector state = MakeRollingState(params, 0.30f, 0.0f);
+            App::Internal::CommandVector command{};
 
             for (int tick = 0; tick < 500; ++tick)
             {
-                const App::Internal::CommandVector command =
+                command =
                     SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
                 if (!command.IsFinite())
                 {
-                    return false;
+                    return command;
                 }
                 state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
             }
 
-            return true;
+            return command;
         }
 
-        bool LongRunForwardStateComponentStayedFinite(int component)
+        float LongRunForwardFirstNonFiniteOrFinalStateComponent(int component)
         {
             TestRuntime runtime;
             const PlantParams params = PlantParams::Default();
@@ -265,11 +267,11 @@ namespace MazeMap
                 state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
                 if (!std::isfinite(state(component)))
                 {
-                    return false;
+                    return state(component);
                 }
             }
 
-            return true;
+            return state(component);
         }
 
         float LongRunForwardVelocityDelta()
@@ -302,9 +304,16 @@ namespace MazeMap
                 MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.0f);
             const VehicleState::StateVector integrated =
                 runtime.plant.integrate(state, coast, 0.004f, params);
+            std::wstringstream message;
+            message << L"PM20_AXIS_CONVENTION"
+                << L"\nfield=world_y_m"
+                << L"\ninitial=" << state(VehicleState::kPy)
+                << L"\nactual=" << integrated(VehicleState::kPy)
+                << L"\ncriterion=actual>initial";
 
-            Assert::IsTrue(integrated(VehicleState::kPy) > state(VehicleState::kPy),
-                L"PM20_AXIS_CONVENTION heading=0 forward velocity must move world +Y.");
+            Assert::IsTrue(
+                integrated(VehicleState::kPy) > state(VehicleState::kPy),
+                message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_HeadingZeroForwardDoesNotDriftWorldX)
@@ -316,9 +325,18 @@ namespace MazeMap
                 MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.0f);
             const VehicleState::StateVector integrated =
                 runtime.plant.integrate(state, coast, 0.004f, params);
+            std::wstringstream message;
+            message << L"PM20_AXIS_CONVENTION"
+                << L"\nfield=world_x_m"
+                << L"\nexpected=" << state(VehicleState::kPx)
+                << L"\nactual=" << integrated(VehicleState::kPx)
+                << L"\ntolerance=2e-4";
 
-            Assert::AreEqual(state(VehicleState::kPx), integrated(VehicleState::kPx), 2.0e-4f,
-                L"PM20_AXIS_CONVENTION heading=0 forward velocity must not drift in +X.");
+            Assert::AreEqual(
+                state(VehicleState::kPx),
+                integrated(VehicleState::kPx),
+                2.0e-4f,
+                message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_HeadingRightForwardMovesWorldPositiveX)
@@ -330,9 +348,16 @@ namespace MazeMap
                 MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.5f * PI_F);
             const VehicleState::StateVector integrated =
                 runtime.plant.integrate(state, coast, 0.004f, params);
+            std::wstringstream message;
+            message << L"PM20_AXIS_CONVENTION"
+                << L"\nfield=world_x_m"
+                << L"\ninitial=" << state(VehicleState::kPx)
+                << L"\nactual=" << integrated(VehicleState::kPx)
+                << L"\ncriterion=actual>initial";
 
-            Assert::IsTrue(integrated(VehicleState::kPx) > state(VehicleState::kPx),
-                L"PM20_AXIS_CONVENTION heading=+90deg forward velocity must move world +X.");
+            Assert::IsTrue(
+                integrated(VehicleState::kPx) > state(VehicleState::kPx),
+                message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_HeadingRightForwardDoesNotDriftWorldY)
@@ -344,9 +369,18 @@ namespace MazeMap
                 MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.5f * PI_F);
             const VehicleState::StateVector integrated =
                 runtime.plant.integrate(state, coast, 0.004f, params);
+            std::wstringstream message;
+            message << L"PM20_AXIS_CONVENTION"
+                << L"\nfield=world_y_m"
+                << L"\nexpected=" << state(VehicleState::kPy)
+                << L"\nactual=" << integrated(VehicleState::kPy)
+                << L"\ntolerance=2e-4";
 
-            Assert::AreEqual(state(VehicleState::kPy), integrated(VehicleState::kPy), 2.0e-4f,
-                L"PM20_AXIS_CONVENTION heading=+90deg forward velocity must not drift in +Y.");
+            Assert::AreEqual(
+                state(VehicleState::kPy),
+                integrated(VehicleState::kPy),
+                2.0e-4f,
+                message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_BodyPositiveLateralMovesWorldPositiveX)
@@ -358,9 +392,16 @@ namespace MazeMap
                 MakeState(0.0f, 0.0f, 0.0f, 0.0f, 0.30f, 0.0f, 0.0f, 0.0f);
             const VehicleState::StateVector integrated =
                 runtime.plant.integrate(state, coast, 0.004f, params);
+            std::wstringstream message;
+            message << L"PM20_AXIS_CONVENTION"
+                << L"\nfield=world_x_m"
+                << L"\ninitial=" << state(VehicleState::kPx)
+                << L"\nactual=" << integrated(VehicleState::kPx)
+                << L"\ncriterion=actual>initial";
 
-            Assert::IsTrue(integrated(VehicleState::kPx) > state(VehicleState::kPx),
-                L"PM20_AXIS_CONVENTION body +V right velocity must move world +X at heading 0.");
+            Assert::IsTrue(
+                integrated(VehicleState::kPx) > state(VehicleState::kPx),
+                message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_PositiveYawRateIncreasesClockwiseYaw)
@@ -372,9 +413,16 @@ namespace MazeMap
                 MakeRollingState(params, 0.25f, 1.20f);
             const VehicleState::StateVector integrated =
                 runtime.plant.integrate(state, coast, 0.004f, params);
+            std::wstringstream message;
+            message << L"PM20_AXIS_CONVENTION"
+                << L"\nfield=yaw_rad"
+                << L"\ninitial=" << state(VehicleState::kPsi)
+                << L"\nactual=" << integrated(VehicleState::kPsi)
+                << L"\ncriterion=actual>initial";
 
-            Assert::IsTrue(integrated(VehicleState::kPsi) > state(VehicleState::kPsi),
-                L"PM20_AXIS_CONVENTION positive yaw rate must increase clockwise yaw.");
+            Assert::IsTrue(
+                integrated(VehicleState::kPsi) > state(VehicleState::kPsi),
+                message.str().c_str());
         }
 
         TEST_METHOD(WheelYawSign_PositiveYawMakesLeftWheelLinearVelocityFaster)
@@ -385,9 +433,16 @@ namespace MazeMap
                 MakeRollingState(params, 0.40f, 2.0f);
             const Eigen::Vector2f wheelLinearMps =
                 runtime.plant.wheelLinearVelocityFromBodyState(state);
+            std::wstringstream message;
+            message << L"PM20_WHEEL_YAW_SIGN"
+                << L"\nfield=wheel_linear_velocity_mps"
+                << L"\nleft=" << wheelLinearMps.x()
+                << L"\nright=" << wheelLinearMps.y()
+                << L"\ncriterion=left>right";
 
-            Assert::IsTrue(wheelLinearMps.x() > wheelLinearMps.y(),
-                L"PM20_WHEEL_YAW_SIGN positive yaw must map to left wheel faster than right.");
+            Assert::IsTrue(
+                wheelLinearMps.x() > wheelLinearMps.y(),
+                message.str().c_str());
         }
 
         TEST_METHOD(WheelYawSign_EncoderYawMeasurementPreservesClockwisePositiveSign)
@@ -399,9 +454,18 @@ namespace MazeMap
             EncoderObs observation{};
             observation.omegaLeftRadps = state(VehicleState::kOmegaL);
             observation.omegaRightRadps = state(VehicleState::kOmegaR);
+            const float actualYawRateRadps = runtime.plant.measuredYawRateRadps(observation);
+            std::wstringstream message;
+            message << L"PM20_WHEEL_YAW_SIGN"
+                << L"\nfield=measured_yaw_rate_radps"
+                << L"\nactual=" << actualYawRateRadps
+                << L"\ncriterion=actual>0"
+                << L"\nleft_omega_radps=" << observation.omegaLeftRadps
+                << L"\nright_omega_radps=" << observation.omegaRightRadps;
 
-            Assert::IsTrue(runtime.plant.measuredYawRateRadps(observation) > 0.0f,
-                L"PM20_WHEEL_YAW_SIGN encoder yaw measurement must preserve clockwise-positive sign.");
+            Assert::IsTrue(
+                actualYawRateRadps > 0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(WheelYawSign_PositiveTargetYawRateRequestsFasterLeftWheel)
@@ -412,9 +476,16 @@ namespace MazeMap
             state(VehicleState::kR) = 2.0f;
             const Eigen::Vector2f wheelLinearMps =
                 runtime.plant.wheelLinearVelocityFromBodyState(state);
+            std::wstringstream message;
+            message << L"PM20_WHEEL_YAW_SIGN"
+                << L"\nfield=target_wheel_linear_velocity_mps"
+                << L"\nleft=" << wheelLinearMps.x()
+                << L"\nright=" << wheelLinearMps.y()
+                << L"\ncriterion=left>right";
 
-            Assert::IsTrue(wheelLinearMps.x() > wheelLinearMps.y(),
-                L"PM20_WHEEL_YAW_SIGN positive target yaw rate must request faster left wheel.");
+            Assert::IsTrue(
+                wheelLinearMps.x() > wheelLinearMps.y(),
+                message.str().c_str());
         }
 
         TEST_METHOD(WheelYawSign_PositiveTargetYawAccelerationRequestsMoreLeftAcceleration)
@@ -427,11 +498,25 @@ namespace MazeMap
                 runtime.plant.ComputeFeedforward(0.0f, 5.0f);
             const PlantDerivatives derivatives =
                 runtime.plant.forwardStep(state, command, params);
+            std::wstringstream commandMessage;
+            commandMessage << L"PM20_WHEEL_YAW_SIGN"
+                << L"\nfield=command_differential"
+                << L"\nactual=" << command.Differential()
+                << L"\ncriterion=actual>0"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand();
+            std::wstringstream accelMessage;
+            accelMessage << L"PM20_WHEEL_YAW_SIGN"
+                << L"\nfield=yaw_accel_radps2"
+                << L"\nactual=" << derivatives.yawAccelRadps2
+                << L"\ncriterion=actual>0";
 
-            Assert::IsTrue(command.Differential() > 0.0f,
-                L"PM20_WHEEL_YAW_SIGN positive target yaw acceleration must command more left drive.");
-            Assert::IsTrue(derivatives.yawAccelRadps2 > 0.0f,
-                L"PM20_WHEEL_YAW_SIGN positive target yaw acceleration must produce clockwise yaw acceleration.");
+            Assert::IsTrue(
+                command.Differential() > 0.0f,
+                commandMessage.str().c_str());
+            Assert::IsTrue(
+                derivatives.yawAccelRadps2 > 0.0f,
+                accelMessage.str().c_str());
         }
 
         TEST_METHOD(SymmetricDrive_LeftRightForwardForceSymmetry)
@@ -441,12 +526,20 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
             const PlantDerivatives derivatives =
                 runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
+            const float leftForceN = derivatives.contactForces.LeftBankForwardForceN();
+            const float rightForceN = derivatives.contactForces.RightBankForwardForceN();
+            std::wstringstream message;
+            message << L"PM21_FORCE_SYMMETRY"
+                << L"\nfield=bank_forward_force_n"
+                << L"\nexpected_left=" << leftForceN
+                << L"\nactual_right=" << rightForceN
+                << L"\ntolerance=1e-5";
 
             Assert::AreEqual(
-                derivatives.contactForces.LeftBankForwardForceN(),
-                derivatives.contactForces.RightBankForwardForceN(),
+                leftForceN,
+                rightForceN,
                 1.0e-5f,
-                L"PM21_FORCE_SYMMETRY symmetric drive must preserve left/right forward force symmetry.");
+                message.str().c_str());
         }
 
         TEST_METHOD(SymmetricDrive_WheelAccelerationSymmetry)
@@ -456,12 +549,20 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
             const PlantDerivatives derivatives =
                 runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
+            const float leftWheelAccelRadps2 = derivatives.stateDot(VehicleState::kOmegaL);
+            const float rightWheelAccelRadps2 = derivatives.stateDot(VehicleState::kOmegaR);
+            std::wstringstream message;
+            message << L"PM21_FORCE_SYMMETRY"
+                << L"\nfield=wheel_accel_radps2"
+                << L"\nexpected_left=" << leftWheelAccelRadps2
+                << L"\nactual_right=" << rightWheelAccelRadps2
+                << L"\ntolerance=1e-4";
 
             Assert::AreEqual(
-                derivatives.stateDot(VehicleState::kOmegaL),
-                derivatives.stateDot(VehicleState::kOmegaR),
+                leftWheelAccelRadps2,
+                rightWheelAccelRadps2,
                 1.0e-4f,
-                L"PM21_FORCE_SYMMETRY symmetric drive must preserve wheel acceleration symmetry.");
+                message.str().c_str());
         }
 
         TEST_METHOD(SymmetricDrive_NoYawAccelerationBias)
@@ -471,9 +572,18 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
             const PlantDerivatives derivatives =
                 runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
+            std::wstringstream message;
+            message << L"PM21_FORCE_SYMMETRY"
+                << L"\nfield=yaw_accel_radps2"
+                << L"\nexpected=0"
+                << L"\nactual=" << derivatives.stateDot(VehicleState::kR)
+                << L"\ntolerance=1e-4";
 
-            Assert::AreEqual(0.0f, derivatives.stateDot(VehicleState::kR), 1.0e-4f,
-                L"PM21_FORCE_SYMMETRY symmetric drive must not create yaw acceleration bias.");
+            Assert::AreEqual(
+                0.0f,
+                derivatives.stateDot(VehicleState::kR),
+                1.0e-4f,
+                message.str().c_str());
         }
 
         TEST_METHOD(SymmetricDrive_NoLateralAccelerationBias)
@@ -483,9 +593,18 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
             const PlantDerivatives derivatives =
                 runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
+            std::wstringstream message;
+            message << L"PM21_FORCE_SYMMETRY"
+                << L"\nfield=lateral_accel_mps2"
+                << L"\nexpected=0"
+                << L"\nactual=" << derivatives.lateralAccelMps2
+                << L"\ntolerance=1e-4";
 
-            Assert::AreEqual(0.0f, derivatives.lateralAccelMps2, 1.0e-4f,
-                L"PM21_FORCE_SYMMETRY symmetric drive must not create lateral acceleration bias.");
+            Assert::AreEqual(
+                0.0f,
+                derivatives.lateralAccelMps2,
+                1.0e-4f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_SubthresholdDriveDoesNotAccelerateLeftWheelAtRest)
@@ -496,9 +615,18 @@ namespace MazeMap
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
             const PlantDerivatives derivatives =
                 runtime.plant.forwardStep(state, MakeCommand(0.25f, 0.25f), params);
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=left_wheel_accel_radps2"
+                << L"\nexpected=0"
+                << L"\nactual=" << derivatives.stateDot(VehicleState::kOmegaL)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(0.0f, derivatives.stateDot(VehicleState::kOmegaL), 1.0e-6f,
-                L"PM21_STICTION subthreshold command at rest must not accelerate left wheel.");
+            Assert::AreEqual(
+                0.0f,
+                derivatives.stateDot(VehicleState::kOmegaL),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_SubthresholdDriveDoesNotAccelerateRightWheelAtRest)
@@ -509,9 +637,18 @@ namespace MazeMap
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
             const PlantDerivatives derivatives =
                 runtime.plant.forwardStep(state, MakeCommand(0.25f, 0.25f), params);
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=right_wheel_accel_radps2"
+                << L"\nexpected=0"
+                << L"\nactual=" << derivatives.stateDot(VehicleState::kOmegaR)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(0.0f, derivatives.stateDot(VehicleState::kOmegaR), 1.0e-6f,
-                L"PM21_STICTION subthreshold command at rest must not accelerate right wheel.");
+            Assert::AreEqual(
+                0.0f,
+                derivatives.stateDot(VehicleState::kOmegaR),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftPositionX)
@@ -525,9 +662,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=position_x_m"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kPx)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kPx), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift position X under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kPx),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftPositionY)
@@ -541,9 +687,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=position_y_m"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kPy)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kPy), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift position Y under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kPy),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftYaw)
@@ -557,9 +712,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=yaw_rad"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kPsi)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kPsi), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift yaw under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kPsi),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftForwardVelocity)
@@ -573,9 +737,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=forward_velocity_mps"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kU)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kU), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift forward velocity under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kU),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftLateralVelocity)
@@ -589,9 +762,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=lateral_velocity_mps"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kV)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kV), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift lateral velocity under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kV),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftYawRate)
@@ -605,9 +787,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=yaw_rate_radps"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kR)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kR), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift yaw rate under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kR),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftLeftWheelSpeed)
@@ -621,9 +812,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=left_wheel_speed_radps"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kOmegaL)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kOmegaL), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift left wheel speed under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kOmegaL),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftRightWheelSpeed)
@@ -637,9 +837,18 @@ namespace MazeMap
             {
                 state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
             }
+            std::wstringstream message;
+            message << L"PM21_STICTION"
+                << L"\nfield=right_wheel_speed_radps"
+                << L"\nexpected=" << initial
+                << L"\nactual=" << state(VehicleState::kOmegaR)
+                << L"\ntolerance=1e-6";
 
-            Assert::AreEqual(initial, state(VehicleState::kOmegaR), 1.0e-6f,
-                L"PM21_STICTION direct integration must not drift right wheel speed under subthreshold stationary command.");
+            Assert::AreEqual(
+                initial,
+                state(VehicleState::kOmegaR),
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(FanLoad_NoFanContactNormalSumMatchesConfiguredLoad)
@@ -648,9 +857,21 @@ namespace MazeMap
             const PlantParams params = PlantParams::Default();
             const ContactForces forces =
                 runtime.plant.tireForces(MakeRollingState(params, 0.75f, 0.0f), params);
+            const float expectedLoadN = params.TotalNormalLoadN(0.0f);
+            const float actualLoadN = SumNormalLoadN(forces);
+            std::wstringstream message;
+            message << L"PM21_FAN_LOAD"
+                << L"\nfield=contact_normal_sum_n"
+                << L"\nexpected=" << expectedLoadN
+                << L"\nactual=" << actualLoadN
+                << L"\ntolerance=1e-5"
+                << L"\nfan_duty=0";
 
-            Assert::AreEqual(params.TotalNormalLoadN(0.0f), SumNormalLoadN(forces), 1.0e-5f,
-                L"PM21_FAN_LOAD contact normal sum must match no-fan configured normal load.");
+            Assert::AreEqual(
+                expectedLoadN,
+                actualLoadN,
+                1.0e-5f,
+                message.str().c_str());
         }
 
         TEST_METHOD(FanLoad_FanOnContactNormalSumMatchesConfiguredLoad)
@@ -659,9 +880,21 @@ namespace MazeMap
             const PlantParams params = PlantParams::Default();
             const ContactForces forces =
                 runtime.plant.tireForces(MakeRollingState(params, 0.75f, 0.0f), params);
+            const float expectedLoadN = params.TotalNormalLoadN(0.80f);
+            const float actualLoadN = SumNormalLoadN(forces);
+            std::wstringstream message;
+            message << L"PM21_FAN_LOAD"
+                << L"\nfield=contact_normal_sum_n"
+                << L"\nexpected=" << expectedLoadN
+                << L"\nactual=" << actualLoadN
+                << L"\ntolerance=1e-5"
+                << L"\nfan_duty=0.8";
 
-            Assert::AreEqual(params.TotalNormalLoadN(0.80f), SumNormalLoadN(forces), 1.0e-5f,
-                L"PM21_FAN_LOAD contact normal sum must match fan-on configured normal load.");
+            Assert::AreEqual(
+                expectedLoadN,
+                actualLoadN,
+                1.0e-5f,
+                message.str().c_str());
         }
 
         TEST_METHOD(FanLoad_FanDutyIncreasesTotalContactNormalLoad)
@@ -672,9 +905,18 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
             const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
             const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            const float fanOffLoadN = SumNormalLoadN(fanOffForces);
+            const float fanOnLoadN = SumNormalLoadN(fanOnForces);
+            std::wstringstream message;
+            message << L"PM21_FAN_LOAD"
+                << L"\nfield=total_contact_normal_load_n"
+                << L"\nfan_off=" << fanOffLoadN
+                << L"\nfan_on=" << fanOnLoadN
+                << L"\ncriterion=fan_on>fan_off";
 
-            Assert::IsTrue(SumNormalLoadN(fanOnForces) > SumNormalLoadN(fanOffForces),
-                L"PM21_FAN_LOAD fan duty must increase total contact normal load.");
+            Assert::IsTrue(
+                fanOnLoadN > fanOffLoadN,
+                message.str().c_str());
         }
 
         TEST_METHOD(FanLoad_Contact0NormalIncreasesWithFanDuty)
@@ -685,9 +927,16 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
             const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
             const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            std::wstringstream message;
+            message << L"PM21_FAN_LOAD"
+                << L"\nfield=contact_0_normal_force_n"
+                << L"\nfan_off=" << fanOffForces.contacts[0].normalForceN
+                << L"\nfan_on=" << fanOnForces.contacts[0].normalForceN
+                << L"\ncriterion=fan_on>fan_off";
 
-            Assert::IsTrue(fanOnForces.contacts[0].normalForceN > fanOffForces.contacts[0].normalForceN,
-                L"PM21_FAN_LOAD contact 0 normal must increase with fan duty.");
+            Assert::IsTrue(
+                fanOnForces.contacts[0].normalForceN > fanOffForces.contacts[0].normalForceN,
+                message.str().c_str());
         }
 
         TEST_METHOD(FanLoad_Contact1NormalIncreasesWithFanDuty)
@@ -698,9 +947,16 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
             const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
             const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            std::wstringstream message;
+            message << L"PM21_FAN_LOAD"
+                << L"\nfield=contact_1_normal_force_n"
+                << L"\nfan_off=" << fanOffForces.contacts[1].normalForceN
+                << L"\nfan_on=" << fanOnForces.contacts[1].normalForceN
+                << L"\ncriterion=fan_on>fan_off";
 
-            Assert::IsTrue(fanOnForces.contacts[1].normalForceN > fanOffForces.contacts[1].normalForceN,
-                L"PM21_FAN_LOAD contact 1 normal must increase with fan duty.");
+            Assert::IsTrue(
+                fanOnForces.contacts[1].normalForceN > fanOffForces.contacts[1].normalForceN,
+                message.str().c_str());
         }
 
         TEST_METHOD(FanLoad_Contact2NormalIncreasesWithFanDuty)
@@ -711,9 +967,16 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
             const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
             const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            std::wstringstream message;
+            message << L"PM21_FAN_LOAD"
+                << L"\nfield=contact_2_normal_force_n"
+                << L"\nfan_off=" << fanOffForces.contacts[2].normalForceN
+                << L"\nfan_on=" << fanOnForces.contacts[2].normalForceN
+                << L"\ncriterion=fan_on>fan_off";
 
-            Assert::IsTrue(fanOnForces.contacts[2].normalForceN > fanOffForces.contacts[2].normalForceN,
-                L"PM21_FAN_LOAD contact 2 normal must increase with fan duty.");
+            Assert::IsTrue(
+                fanOnForces.contacts[2].normalForceN > fanOffForces.contacts[2].normalForceN,
+                message.str().c_str());
         }
 
         TEST_METHOD(FanLoad_Contact3NormalIncreasesWithFanDuty)
@@ -724,278 +987,701 @@ namespace MazeMap
             const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
             const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
             const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            std::wstringstream message;
+            message << L"PM21_FAN_LOAD"
+                << L"\nfield=contact_3_normal_force_n"
+                << L"\nfan_off=" << fanOffForces.contacts[3].normalForceN
+                << L"\nfan_on=" << fanOnForces.contacts[3].normalForceN
+                << L"\ncriterion=fan_on>fan_off";
 
-            Assert::IsTrue(fanOnForces.contacts[3].normalForceN > fanOffForces.contacts[3].normalForceN,
-                L"PM21_FAN_LOAD contact 3 normal must increase with fan duty.");
+            Assert::IsTrue(
+                fanOnForces.contacts[3].normalForceN > fanOffForces.contacts[3].normalForceN,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangePositionX)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kPx), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change position X.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_x_delta_m"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangePositionY)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kPy), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change position Y.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kPy);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_y_delta_m"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeYaw)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kPsi), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change yaw.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kPsi);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=yaw_delta_rad"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeForwardVelocity)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kU), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change forward velocity.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kU);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=forward_velocity_delta_mps"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeLateralVelocity)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kV), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change lateral velocity.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kV);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=lateral_velocity_delta_mps"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeYawRate)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kR), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change yaw rate.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kR);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=yaw_rate_delta_radps"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeLeftWheelSpeed)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kOmegaL), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change left wheel speed.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kOmegaL);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=left_wheel_speed_delta_radps"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeRightWheelSpeed)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(0.0f, VehicleState::kOmegaR), 0.0f,
-                L"PM22_INTEGRATE_DIRECT zero dt must not change right wheel speed.");
+            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kOmegaR);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=right_wheel_speed_delta_radps"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=0";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_NegativeDtDoesNotChangePositionX)
         {
-            Assert::AreEqual(0.0f, NoOpDeltaForDt(-0.001f, VehicleState::kPx), 0.0f,
-                L"PM22_INTEGRATE_DIRECT negative dt must not change position X.");
+            const float actualDelta = NoOpDeltaForDt(-0.001f, VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_x_delta_m"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=-0.001";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_NonFiniteDtDoesNotChangePositionX)
         {
+            const float actualDelta =
+                NoOpDeltaForDt((std::numeric_limits<float>::quiet_NaN)(), VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_x_delta_m"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0"
+                << L"\ndt_seconds=nan";
+
             Assert::AreEqual(
                 0.0f,
-                NoOpDeltaForDt((std::numeric_limits<float>::quiet_NaN)(), VehicleState::kPx),
+                actualDelta,
                 0.0f,
-                L"PM22_INTEGRATE_DIRECT non-finite dt must not change position X.");
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepPositionXStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kPx),
-                L"PM22_INTEGRATE_DIRECT single 4ms step position X must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_x_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepPositionYStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kPy),
-                L"PM22_INTEGRATE_DIRECT single 4ms step position Y must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kPy);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_y_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepYawStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kPsi),
-                L"PM22_INTEGRATE_DIRECT single 4ms step yaw must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kPsi);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepForwardVelocityStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kU),
-                L"PM22_INTEGRATE_DIRECT single 4ms step forward velocity must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kU);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=forward_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepLateralVelocityStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kV),
-                L"PM22_INTEGRATE_DIRECT single 4ms step lateral velocity must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kV);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=lateral_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepYawRateStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kR),
-                L"PM22_INTEGRATE_DIRECT single 4ms step yaw rate must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kR);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=yaw_rate_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepLeftWheelSpeedStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kOmegaL),
-                L"PM22_INTEGRATE_DIRECT single 4ms step left wheel speed must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kOmegaL);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=left_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepRightWheelSpeedStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSingleStep(VehicleState::kOmegaR),
-                L"PM22_INTEGRATE_DIRECT single 4ms step right wheel speed must stay finite.");
+            const float actual = StateComponentAfterSingleStep(VehicleState::kOmegaR);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=right_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\ndt_seconds=0.004";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepPositionXStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kPx),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps position X must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_x_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepPositionYStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kPy),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps position Y must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kPy);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_y_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepYawStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kPsi),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps yaw must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kPsi);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepForwardVelocityStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kU),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps forward velocity must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kU);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=forward_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepLateralVelocityStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kV),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps lateral velocity must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kV);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=lateral_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepYawRateStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kR),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps yaw rate must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kR);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=yaw_rate_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepLeftWheelSpeedStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kOmegaL),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps left wheel speed must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kOmegaL);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=left_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepRightWheelSpeedStaysFinite)
         {
-            Assert::IsTrue(StateComponentIsFiniteAfterSubsteps(VehicleState::kOmegaR),
-                L"PM22_INTEGRATE_DIRECT four 1ms substeps right wheel speed must stay finite.");
+            const float actual = StateComponentAfterSubsteps(VehicleState::kOmegaR);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=right_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)"
+                << L"\nsubsteps=4"
+                << L"\ndt_seconds=0.001";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_PositionXRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            Assert::AreEqual(0.0f, SingleStepMinusSubsteps(VehicleState::kPx), 3.0e-3f,
-                L"PM22_INTEGRATE_DIRECT position X must remain close between 4ms direct step and substeps.");
+            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_x_single_minus_substeps_m"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0.003";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                3.0e-3f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_PositionYRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            Assert::AreEqual(0.0f, SingleStepMinusSubsteps(VehicleState::kPy), 3.0e-3f,
-                L"PM22_INTEGRATE_DIRECT position Y must remain close between 4ms direct step and substeps.");
+            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kPy);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=position_y_single_minus_substeps_m"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0.003";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                3.0e-3f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ForwardVelocityRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            Assert::AreEqual(0.0f, SingleStepMinusSubsteps(VehicleState::kU), 8.0e-2f,
-                L"PM22_INTEGRATE_DIRECT forward velocity must remain close between 4ms direct step and substeps.");
+            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kU);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=forward_velocity_single_minus_substeps_mps"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0.08";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                8.0e-2f,
+                message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_YawRateRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            Assert::AreEqual(0.0f, SingleStepMinusSubsteps(VehicleState::kR), 8.0e-1f,
-                L"PM22_INTEGRATE_DIRECT yaw rate must remain close between 4ms direct step and substeps.");
+            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kR);
+            std::wstringstream message;
+            message << L"PM22_INTEGRATE_DIRECT"
+                << L"\nfield=yaw_rate_single_minus_substeps_radps"
+                << L"\nexpected=0"
+                << L"\nactual=" << actualDelta
+                << L"\ntolerance=0.8";
+
+            Assert::AreEqual(
+                0.0f,
+                actualDelta,
+                8.0e-1f,
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_PositionXStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kPx),
-                L"PM22_NUMERIC_STABILITY position X stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=position_x_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_PositionYStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kPy),
-                L"PM22_NUMERIC_STABILITY position Y stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kPy);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=position_y_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_YawStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kPsi),
-                L"PM22_NUMERIC_STABILITY yaw stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kPsi);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_ForwardVelocityStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kU),
-                L"PM22_NUMERIC_STABILITY forward velocity stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kU);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=forward_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_LateralVelocityStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kV),
-                L"PM22_NUMERIC_STABILITY lateral velocity stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kV);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=lateral_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_YawRateStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kR),
-                L"PM22_NUMERIC_STABILITY yaw rate stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kR);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=yaw_rate_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_LeftWheelSpeedStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kOmegaL),
-                L"PM22_NUMERIC_STABILITY left wheel speed stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kOmegaL);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=left_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_RightWheelSpeedStaysFiniteUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandComponentStayedFinite(VehicleState::kOmegaR),
-                L"PM22_NUMERIC_STABILITY right wheel speed stayed finite under plausible high command.");
+            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kOmegaR);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=right_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_HeadingStaysNormalizedUnderPlausibleHighCommand)
         {
-            Assert::IsTrue(HighCommandHeadingStayedNormalized(),
-                L"PM22_NUMERIC_STABILITY direct integration must keep heading normalized.");
+            const float actual = HighCommandFirstOutOfRangeOrFinalHeading();
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << actual
+                << L"\nminimum=" << -PI_F
+                << L"\nmaximum=" << PI_F
+                << L"\ncriterion=minimum<=actual<=maximum";
+
+            Assert::IsTrue(
+                actual >= -PI_F && actual <= PI_F,
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_FinalForwardVelocityStaysWithinPlausibleBounds)
         {
             const VehicleState::StateVector state = FinalHighCommandState();
+            const float actual = state(VehicleState::kU);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=final_forward_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=abs(actual)<20";
 
-            Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 20.0f,
-                L"PM22_NUMERIC_STABILITY forward velocity escaped plausible bounds.");
+            Assert::IsTrue(
+                std::fabs(actual) < 20.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_FinalYawRateStaysWithinPlausibleBounds)
         {
             const VehicleState::StateVector state = FinalHighCommandState();
+            const float actual = state(VehicleState::kR);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=final_yaw_rate_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=abs(actual)<200";
 
-            Assert::IsTrue(std::fabs(state(VehicleState::kR)) < 200.0f,
-                L"PM22_NUMERIC_STABILITY yaw rate escaped plausible bounds.");
+            Assert::IsTrue(
+                std::fabs(actual) < 200.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_FinalLeftWheelSpeedStaysWithinPlausibleBounds)
         {
             const VehicleState::StateVector state = FinalHighCommandState();
+            const float actual = state(VehicleState::kOmegaL);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=final_left_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=abs(actual)<3000";
 
-            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 3000.0f,
-                L"PM22_NUMERIC_STABILITY left wheel speed escaped plausible bounds.");
+            Assert::IsTrue(
+                std::fabs(actual) < 3000.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(NumericStability_FinalRightWheelSpeedStaysWithinPlausibleBounds)
         {
             const VehicleState::StateVector state = FinalHighCommandState();
+            const float actual = state(VehicleState::kOmegaR);
+            std::wstringstream message;
+            message << L"PM22_NUMERIC_STABILITY"
+                << L"\nfield=final_right_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=abs(actual)<3000";
 
-            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 3000.0f,
-                L"PM22_NUMERIC_STABILITY right wheel speed escaped plausible bounds.");
+            Assert::IsTrue(
+                std::fabs(actual) < 3000.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_ForwardAccelerationCommandIsFinite)
@@ -1008,9 +1694,16 @@ namespace MazeMap
                     MakeRollingState(params, 0.60f, 0.0f),
                     0.80f,
                     0.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=forward_accel_feedforward_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(left)&&isfinite(right)";
 
-            Assert::IsTrue(command.IsFinite(),
-                L"PM23_INVERSE_SIGN forward acceleration feedforward command must be finite.");
+            Assert::IsTrue(
+                command.IsFinite(),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_ReverseAccelerationCommandIsFinite)
@@ -1023,9 +1716,16 @@ namespace MazeMap
                     MakeRollingState(params, 0.60f, 0.0f),
                     -0.80f,
                     0.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=reverse_accel_feedforward_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(left)&&isfinite(right)";
 
-            Assert::IsTrue(command.IsFinite(),
-                L"PM23_INVERSE_SIGN reverse acceleration feedforward command must be finite.");
+            Assert::IsTrue(
+                command.IsFinite(),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_ClockwiseYawCommandIsFinite)
@@ -1038,9 +1738,16 @@ namespace MazeMap
                     MakeRollingState(params, 0.60f, 0.0f),
                     0.0f,
                     8.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=yaw_accel_feedforward_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(left)&&isfinite(right)";
 
-            Assert::IsTrue(command.IsFinite(),
-                L"PM23_INVERSE_SIGN yaw acceleration feedforward command must be finite.");
+            Assert::IsTrue(
+                command.IsFinite(),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_PositiveForwardAccelerationCommandsMoreAverageThanReverse)
@@ -1052,9 +1759,16 @@ namespace MazeMap
                 SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
             const App::Internal::CommandVector reverse =
                 SolveAccelerationFeedforwardAt(runtime, state, -0.80f, 0.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=average_command"
+                << L"\nforward_average=" << forward.Average()
+                << L"\nreverse_average=" << reverse.Average()
+                << L"\ncriterion=forward_average>reverse_average";
 
-            Assert::IsTrue(forward.Average() > reverse.Average(),
-                L"PM23_INVERSE_SIGN positive forward acceleration must command more average drive than negative acceleration.");
+            Assert::IsTrue(
+                forward.Average() > reverse.Average(),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_PositiveClockwiseYawCommandsLeftGreaterThanRight)
@@ -1067,69 +1781,159 @@ namespace MazeMap
                     MakeRollingState(params, 0.60f, 0.0f),
                     0.0f,
                     8.0f);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=clockwise_command_differential"
+                << L"\nactual=" << clockwise.Differential()
+                << L"\ncriterion=actual>0"
+                << L"\nleft_command=" << clockwise.LeftCommand()
+                << L"\nright_command=" << clockwise.RightCommand();
 
-            Assert::IsTrue(clockwise.Differential() > 0.0f,
-                L"PM23_INVERSE_SIGN positive clockwise yaw acceleration must command left greater than right.");
+            Assert::IsTrue(
+                clockwise.Differential() > 0.0f,
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunForwardSolveCommandStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardSolveCommandStayedFinite(),
-                L"PM23_INVERSE_SIGN long-run acceleration feedforward command must stay finite.");
+            const App::Internal::CommandVector command =
+                LongRunForwardFirstNonFiniteOrFinalSolveCommand();
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_forward_solve_command"
+                << L"\nleft_command=" << command.LeftCommand()
+                << L"\nright_command=" << command.RightCommand()
+                << L"\ncriterion=isfinite(left)&&isfinite(right)";
+
+            Assert::IsTrue(
+                command.IsFinite(),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunPositionXStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kPx),
-                L"PM23_INVERSE_SIGN long-run direct prediction position X must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kPx);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_position_x_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunPositionYStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kPy),
-                L"PM23_INVERSE_SIGN long-run direct prediction position Y must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kPy);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_position_y_m"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunYawStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kPsi),
-                L"PM23_INVERSE_SIGN long-run direct prediction yaw must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kPsi);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_yaw_rad"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunForwardVelocityStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kU),
-                L"PM23_INVERSE_SIGN long-run direct prediction forward velocity must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kU);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_forward_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunLateralVelocityStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kV),
-                L"PM23_INVERSE_SIGN long-run direct prediction lateral velocity must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kV);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_lateral_velocity_mps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunYawRateStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kR),
-                L"PM23_INVERSE_SIGN long-run direct prediction yaw rate must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kR);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_yaw_rate_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunLeftWheelSpeedStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kOmegaL),
-                L"PM23_INVERSE_SIGN long-run direct prediction left wheel speed must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kOmegaL);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_left_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunRightWheelSpeedStaysFinite)
         {
-            Assert::IsTrue(LongRunForwardStateComponentStayedFinite(VehicleState::kOmegaR),
-                L"PM23_INVERSE_SIGN long-run direct prediction right wheel speed must stay finite.");
+            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kOmegaR);
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_right_wheel_speed_radps"
+                << L"\nactual=" << actual
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(
+                std::isfinite(actual),
+                message.str().c_str());
         }
 
         TEST_METHOD(AccelerationFeedforward_LongRunPositiveAccelerationIncreasesForwardVelocity)
         {
-            Assert::IsTrue(LongRunForwardVelocityDelta() > 0.05f,
-                L"PM23_INVERSE_SIGN long-run positive acceleration request must increase forward velocity.");
+            const float actualDelta = LongRunForwardVelocityDelta();
+            std::wstringstream message;
+            message << L"PM23_INVERSE_SIGN"
+                << L"\nfield=long_run_forward_velocity_delta_mps"
+                << L"\nactual=" << actualDelta
+                << L"\ncriterion=actual>0.05";
+
+            Assert::IsTrue(
+                actualDelta > 0.05f,
+                message.str().c_str());
         }
     };
 }

@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -40,30 +41,6 @@ namespace MazeMap
                 static_cast<int32_t>(std::ceil(remainderCounts));
             remainderCounts -= static_cast<float>(wholeCounts);
             return wholeCounts;
-        }
-
-        std::wstring ReplayMessage(
-            const wchar_t* label,
-            const wchar_t* field,
-            const float expected,
-            const float actual)
-        {
-            return
-                std::wstring(label) +
-                L" field=" + field +
-                L" expected=" + std::to_wstring(expected) +
-                L" actual=" + std::to_wstring(actual);
-        }
-
-        void AssertNearReplay(
-            const wchar_t* label,
-            const wchar_t* field,
-            const float expected,
-            const float actual,
-            const float tolerance)
-        {
-            const std::wstring message = ReplayMessage(label, field, expected, actual);
-            Assert::AreEqual(expected, actual, tolerance, message.c_str());
         }
 
         struct ReplayEncoderState final
@@ -294,7 +271,7 @@ namespace MazeMap
 
             ReplayEncoderState encoderState{};
             constexpr float forwardVelocityMps = 0.22f;
-            constexpr float yawRateRadps = 0.45f;
+            constexpr float yawRateRadps = 1.45f;
             constexpr int steps = 90;
             const float leftWheelVelocityMps =
                 Vehicle::LeftWheelLinearVelocityFromBody(forwardVelocityMps, yawRateRadps);
@@ -333,175 +310,431 @@ namespace MazeMap
         TEST_METHOD(EncoderOnlyForwardReplay_LeftCountsPositive)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            Assert::IsTrue(result.leftEncoderTotalCounts > 0, L"EST40_ENCODER_SIGN field=left_total_counts expected positive forward counts");
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=left_total_counts"
+                << L"\nactual=" << result.leftEncoderTotalCounts
+                << L"\ncriterion=actual>0";
+
+            Assert::IsTrue(result.leftEncoderTotalCounts > 0, message.str().c_str());
         }
 
         TEST_METHOD(EncoderOnlyForwardReplay_LeftRightCountsMatch)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            Assert::AreEqual(result.leftEncoderTotalCounts, result.rightEncoderTotalCounts, L"EST40_ENCODER_SIGN field=equal_forward_counts expected left/right totals to match");
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=equal_forward_counts"
+                << L"\nexpected_left=" << result.leftEncoderTotalCounts
+                << L"\nactual_right=" << result.rightEncoderTotalCounts
+                << L"\ncriterion=left==right";
+
+            Assert::AreEqual(
+                result.leftEncoderTotalCounts,
+                result.rightEncoderTotalCounts,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderOnlyForwardReplay_LeftDistanceMatchesCounts)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            AssertNearReplay(L"EST40_ENCODER_SIGN", L"left_encoder_distance_m", result.expectedForwardM, result.leftEncoderDistanceM, 1.0e-6f);
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=left_encoder_distance_m"
+                << L"\nexpected=" << result.expectedForwardM
+                << L"\nactual=" << result.leftEncoderDistanceM
+                << L"\ntolerance=1e-6";
+
+            Assert::AreEqual(
+                result.expectedForwardM,
+                result.leftEncoderDistanceM,
+                1.0e-6f,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderOnlyForwardReplay_PositionYMatchesEncoderDistance)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            AssertNearReplay(L"EST40_ENCODER_SIGN", L"position_y_m", result.expectedForwardM, result.positionYM, kForwardToleranceM);
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=position_y_m"
+                << L"\nexpected=" << result.expectedForwardM
+                << L"\nactual=" << result.positionYM
+                << L"\ntolerance=" << kForwardToleranceM;
+
+            Assert::AreEqual(
+                result.expectedForwardM,
+                result.positionYM,
+                kForwardToleranceM,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderOnlyForwardReplay_PositionXStaysNearZero)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            AssertNearReplay(L"EST40_ENCODER_SIGN", L"position_x_m", 0.0f, result.positionXM, kForwardToleranceM);
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=position_x_m"
+                << L"\nexpected=0"
+                << L"\nactual=" << result.positionXM
+                << L"\ntolerance=" << kForwardToleranceM;
+
+            Assert::AreEqual(
+                0.0f,
+                result.positionXM,
+                kForwardToleranceM,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderOnlyForwardReplay_YawStaysNearZero)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            AssertNearReplay(L"EST40_ENCODER_SIGN", L"yaw_rad", 0.0f, result.yawRad, kYawToleranceRad);
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=yaw_rad"
+                << L"\nexpected=0"
+                << L"\nactual=" << result.yawRad
+                << L"\ntolerance=" << kYawToleranceRad;
+
+            Assert::AreEqual(
+                0.0f,
+                result.yawRad,
+                kYawToleranceRad,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderOnlyForwardReplay_VelocityMatchesForward)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            AssertNearReplay(L"EST40_ENCODER_SIGN", L"velocity_mps", result.expectedVelocityMps, result.velocityMps, kVelocityToleranceMps);
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=velocity_mps"
+                << L"\nexpected=" << result.expectedVelocityMps
+                << L"\nactual=" << result.velocityMps
+                << L"\ntolerance=" << kVelocityToleranceMps;
+
+            Assert::AreEqual(
+                result.expectedVelocityMps,
+                result.velocityMps,
+                kVelocityToleranceMps,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderOnlyForwardReplay_EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunForwardEncoderReplay();
-            Assert::IsFalse(result.estimatorFault, L"EST40_ENCODER_SIGN field=estimator_fault expected false");
+            std::wstringstream message;
+            message << L"EST40_ENCODER_SIGN"
+                << L"\nfield=estimator_fault"
+                << L"\nexpected=false"
+                << L"\nactual=" << result.estimatorFault;
+
+            Assert::IsFalse(result.estimatorFault, message.str().c_str());
         }
 
         TEST_METHOD(EncoderDifferentialReplay_LeftCountsGreaterThanRight)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
-            Assert::IsTrue(result.leftEncoderTotalCounts > result.rightEncoderTotalCounts, L"EST40_LEFT_RIGHT_MAPPING field=count_order expected left counts greater than right for clockwise-positive yaw");
+            std::wstringstream message;
+            message << L"EST40_LEFT_RIGHT_MAPPING"
+                << L"\nfield=count_order"
+                << L"\nleft=" << result.leftEncoderTotalCounts
+                << L"\nright=" << result.rightEncoderTotalCounts
+                << L"\ncriterion=left>right";
+
+            Assert::IsTrue(
+                result.leftEncoderTotalCounts > result.rightEncoderTotalCounts,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderDifferentialReplay_YawSignPositive)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
-            Assert::IsTrue(result.yawRad > 0.0f, L"EST40_LEFT_RIGHT_MAPPING field=yaw_sign expected +Yaw clockwise from left>right");
+            std::wstringstream message;
+            message << L"EST40_LEFT_RIGHT_MAPPING"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << result.yawRad
+                << L"\ncriterion=actual>0";
+
+            Assert::IsTrue(result.yawRad > 0.0f, message.str().c_str());
         }
 
         TEST_METHOD(EncoderDifferentialReplay_YawRateMatchesEncoderDifferential)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
-            AssertNearReplay(L"EST40_LEFT_RIGHT_MAPPING", L"yaw_rate_radps", result.actualEncoderYawRateRadps, result.yawRateRadps, kYawRateToleranceRadps);
+            std::wstringstream message;
+            message << L"EST40_LEFT_RIGHT_MAPPING"
+                << L"\nfield=yaw_rate_radps"
+                << L"\nexpected=" << result.actualEncoderYawRateRadps
+                << L"\nactual=" << result.yawRateRadps
+                << L"\ntolerance=" << kYawRateToleranceRadps;
+
+            Assert::AreEqual(
+                result.actualEncoderYawRateRadps,
+                result.yawRateRadps,
+                kYawRateToleranceRadps,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderDifferentialReplay_YawMatchesEncoderIntegration)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
-            AssertNearReplay(L"EST40_LEFT_RIGHT_MAPPING", L"yaw_rad", result.expectedYawRad, result.yawRad, kYawToleranceRad);
+            std::wstringstream message;
+            message << L"EST40_LEFT_RIGHT_MAPPING"
+                << L"\nfield=yaw_rad"
+                << L"\nexpected=" << result.expectedYawRad
+                << L"\nactual=" << result.yawRad
+                << L"\ntolerance=" << kYawToleranceRad;
+
+            Assert::AreEqual(
+                result.expectedYawRad,
+                result.yawRad,
+                kYawToleranceRad,
+                message.str().c_str());
         }
 
         TEST_METHOD(EncoderDifferentialReplay_EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunDifferentialEncoderReplay();
-            Assert::IsFalse(result.estimatorFault, L"EST40_LEFT_RIGHT_MAPPING field=estimator_fault expected false");
+            std::wstringstream message;
+            message << L"EST40_LEFT_RIGHT_MAPPING"
+                << L"\nfield=estimator_fault"
+                << L"\nexpected=false"
+                << L"\nactual=" << result.estimatorFault;
+
+            Assert::IsFalse(result.estimatorFault, message.str().c_str());
         }
 
         TEST_METHOD(GyroOnlyReplay_YawSignPositive)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
-            Assert::IsTrue(result.yawRad > 0.0f, L"EST40_GYRO_SIGN field=yaw_sign expected positive gyro to produce +Yaw clockwise");
+            std::wstringstream message;
+            message << L"EST40_GYRO_SIGN"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << result.yawRad
+                << L"\ncriterion=actual>0";
+
+            Assert::IsTrue(result.yawRad > 0.0f, message.str().c_str());
         }
 
         TEST_METHOD(GyroOnlyReplay_YawMatchesGyroIntegration)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
-            AssertNearReplay(L"EST40_GYRO_SIGN", L"yaw_rad", result.expectedYawRad, result.yawRad, kYawToleranceRad);
+            std::wstringstream message;
+            message << L"EST40_GYRO_SIGN"
+                << L"\nfield=yaw_rad"
+                << L"\nexpected=" << result.expectedYawRad
+                << L"\nactual=" << result.yawRad
+                << L"\ntolerance=" << kYawToleranceRad;
+
+            Assert::AreEqual(
+                result.expectedYawRad,
+                result.yawRad,
+                kYawToleranceRad,
+                message.str().c_str());
         }
 
         TEST_METHOD(GyroOnlyReplay_YawRateMatchesGyro)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
-            AssertNearReplay(L"EST40_GYRO_SIGN", L"yaw_rate_radps", result.expectedYawRateRadps, result.yawRateRadps, kYawRateToleranceRadps);
+            std::wstringstream message;
+            message << L"EST40_GYRO_SIGN"
+                << L"\nfield=yaw_rate_radps"
+                << L"\nexpected=" << result.expectedYawRateRadps
+                << L"\nactual=" << result.yawRateRadps
+                << L"\ntolerance=" << kYawRateToleranceRadps;
+
+            Assert::AreEqual(
+                result.expectedYawRateRadps,
+                result.yawRateRadps,
+                kYawRateToleranceRadps,
+                message.str().c_str());
         }
 
         TEST_METHOD(GyroOnlyReplay_ForwardVelocityStaysZero)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
-            AssertNearReplay(L"EST40_GYRO_SIGN", L"forward_velocity_mps", 0.0f, result.velocityMps, kVelocityToleranceMps);
+            std::wstringstream message;
+            message << L"EST40_GYRO_SIGN"
+                << L"\nfield=forward_velocity_mps"
+                << L"\nexpected=0"
+                << L"\nactual=" << result.velocityMps
+                << L"\ntolerance=" << kVelocityToleranceMps;
+
+            Assert::AreEqual(
+                0.0f,
+                result.velocityMps,
+                kVelocityToleranceMps,
+                message.str().c_str());
         }
 
         TEST_METHOD(GyroOnlyReplay_EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunGyroOnlyReplay();
-            Assert::IsFalse(result.estimatorFault, L"EST40_GYRO_SIGN field=estimator_fault expected false");
+            std::wstringstream message;
+            message << L"EST40_GYRO_SIGN"
+                << L"\nfield=estimator_fault"
+                << L"\nexpected=false"
+                << L"\nactual=" << result.estimatorFault;
+
+            Assert::IsFalse(result.estimatorFault, message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_PositionXFinite)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            Assert::IsTrue(std::isfinite(result.positionXM), ReplayMessage(L"EST40_REPLAY_COHERENCE", L"position_x_m", 0.0f, result.positionXM).c_str());
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=position_x_m"
+                << L"\nactual=" << result.positionXM
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(std::isfinite(result.positionXM), message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_PositionYFinite)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            Assert::IsTrue(std::isfinite(result.positionYM), ReplayMessage(L"EST40_REPLAY_COHERENCE", L"position_y_m", 0.0f, result.positionYM).c_str());
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=position_y_m"
+                << L"\nactual=" << result.positionYM
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(std::isfinite(result.positionYM), message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_YawFinite)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            Assert::IsTrue(std::isfinite(result.yawRad), ReplayMessage(L"EST40_REPLAY_COHERENCE", L"yaw_rad", 0.0f, result.yawRad).c_str());
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=yaw_rad"
+                << L"\nactual=" << result.yawRad
+                << L"\ncriterion=isfinite(actual)";
+
+            Assert::IsTrue(std::isfinite(result.yawRad), message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_PositionXPositive)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            Assert::IsTrue(result.positionXM > 0.0f, L"EST40_REPLAY_COHERENCE field=position_x_sign expected clockwise arc to move toward +X");
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=position_x_m"
+                << L"\nactual=" << result.positionXM
+                << L"\ncriterion=actual>0";
+
+            Assert::IsTrue(result.positionXM > 0.0f, message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_PositionYPositive)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            Assert::IsTrue(result.positionYM > 0.0f, L"EST40_REPLAY_COHERENCE field=position_y_sign expected forward arc to move toward +Y");
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=position_y_m"
+                << L"\nactual=" << result.positionYM
+                << L"\ncriterion=actual>0";
+
+            Assert::IsTrue(result.positionYM > 0.0f, message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_PositionXMatchesArc)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            AssertNearReplay(L"EST40_REPLAY_COHERENCE", L"position_x_m", result.expectedArcXM, result.positionXM, 0.010f);
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=position_x_m"
+                << L"\nexpected=" << result.expectedArcXM
+                << L"\nactual=" << result.positionXM
+                << L"\ntolerance=0.01";
+
+            Assert::AreEqual(
+                result.expectedArcXM,
+                result.positionXM,
+                0.010f,
+                message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_PositionYMatchesArc)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            AssertNearReplay(L"EST40_REPLAY_COHERENCE", L"position_y_m", result.expectedArcYM, result.positionYM, 0.010f);
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=position_y_m"
+                << L"\nexpected=" << result.expectedArcYM
+                << L"\nactual=" << result.positionYM
+                << L"\ntolerance=0.01";
+
+            Assert::AreEqual(
+                result.expectedArcYM,
+                result.positionYM,
+                0.010f,
+                message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_YawMatchesGyroIntegration)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            AssertNearReplay(L"EST40_REPLAY_COHERENCE", L"yaw_rad", result.expectedYawRad, result.yawRad, kYawToleranceRad);
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=yaw_rad"
+                << L"\nexpected=" << result.expectedYawRad
+                << L"\nactual=" << result.yawRad
+                << L"\ntolerance=" << kYawToleranceRad;
+
+            Assert::AreEqual(
+                result.expectedYawRad,
+                result.yawRad,
+                kYawToleranceRad,
+                message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_VelocityMatchesEncoderAverage)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            AssertNearReplay(L"EST40_REPLAY_COHERENCE", L"velocity_mps", result.expectedVelocityMps, result.velocityMps, kVelocityToleranceMps);
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=velocity_mps"
+                << L"\nexpected=" << result.expectedVelocityMps
+                << L"\nactual=" << result.velocityMps
+                << L"\ntolerance=" << kVelocityToleranceMps;
+
+            Assert::AreEqual(
+                result.expectedVelocityMps,
+                result.velocityMps,
+                kVelocityToleranceMps,
+                message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_YawRateMatchesGyro)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            AssertNearReplay(L"EST40_REPLAY_COHERENCE", L"yaw_rate_radps", result.expectedYawRateRadps, result.yawRateRadps, kYawRateToleranceRadps);
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=yaw_rate_radps"
+                << L"\nexpected=" << result.expectedYawRateRadps
+                << L"\nactual=" << result.yawRateRadps
+                << L"\ntolerance=" << kYawRateToleranceRadps;
+
+            Assert::AreEqual(
+                result.expectedYawRateRadps,
+                result.yawRateRadps,
+                kYawRateToleranceRadps,
+                message.str().c_str());
         }
 
         TEST_METHOD(CombinedEncoderGyroReplay_EstimatorFaultClear)
         {
             const ReplayScenarioResult result = RunCombinedReplay();
-            Assert::IsFalse(result.estimatorFault, L"EST40_REPLAY_COHERENCE field=estimator_fault expected false");
+            std::wstringstream message;
+            message << L"EST40_REPLAY_COHERENCE"
+                << L"\nfield=estimator_fault"
+                << L"\nexpected=false"
+                << L"\nactual=" << result.estimatorFault;
+
+            Assert::IsFalse(result.estimatorFault, message.str().c_str());
         }
     };
 }

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -262,31 +263,6 @@ namespace MazeMap::App
             return std::fabs(VehicleState::NormalizeAngle(expectedRad - actualRad));
         }
 
-        std::wstring TraceMessage(
-            const wchar_t* label,
-            const wchar_t* primitive,
-            const wchar_t* field,
-            const PrimitiveTrace& trace,
-            const float expected,
-            const float actual,
-            const float limit)
-        {
-            return
-                std::wstring(L"DRV50_PRIMITIVE_CLOSED_LOOP ") + label +
-                L" primitive=" + primitive +
-                L" field=" + field +
-                L" expected=" + std::to_wstring(expected) +
-                L" actual=" + std::to_wstring(actual) +
-                L" limit=" + std::to_wstring(limit) +
-                L" completed=" + (trace.completed ? L"true" : L"false") +
-                L" ticks=" + std::to_wstring(trace.appliedTicks) +
-                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
-                L" x_m=" + std::to_wstring(trace.truth(VehicleState::kPx)) +
-                L" y_m=" + std::to_wstring(trace.truth(VehicleState::kPy)) +
-                L" yaw_deg=" + std::to_wstring(trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F) +
-                L" encoder_m=" + std::to_wstring(AverageEncoderDistanceM(trace));
-        }
-
         PrimitiveTrace RunStartStraight()
         {
             return SimulatePrimitive(
@@ -338,43 +314,260 @@ namespace MazeMap::App
         TEST_METHOD(StartStraight_Completes)
         {
             const PrimitiveTrace trace = RunStartStraight();
-            Assert::IsTrue(trace.completed, TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"completed", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.completed,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"completed"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_UsesMultiTickHorizon)
         {
             const PrimitiveTrace trace = RunStartStraight();
-            Assert::IsTrue(trace.appliedTicks >= 20, TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"multi_tick_horizon", trace, 20.0f, static_cast<float>(trace.appliedTicks), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.appliedTicks >= 20,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"multi_tick_horizon"
+                        << L"\nexpected=" << 20.0f
+                        << L"\nactual=" << static_cast<float>(trace.appliedTicks)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_ControlsStayFinite)
         {
             const PrimitiveTrace trace = RunStartStraight();
-            Assert::IsTrue(trace.allControlsFinite, TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"finite_controls", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.allControlsFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"finite_controls"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_TruthStaysFinite)
         {
             const PrimitiveTrace trace = RunStartStraight();
-            Assert::IsTrue(trace.truthFinite, TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"finite_truth", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.truthFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"finite_truth"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_CommandEvidenceMatchesControls)
         {
             const PrimitiveTrace trace = RunStartStraight();
-            Assert::IsTrue(trace.commandEvidenceValid, TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"command_evidence", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.commandEvidenceValid,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"command_evidence"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_RequestedObjectivesStayFinite)
         {
             const PrimitiveTrace trace = RunStartStraight();
-            Assert::IsTrue(trace.requestedObjectivesFinite, TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"finite_objectives", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.requestedObjectivesFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"finite_objectives"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_SolverFlagsStayClear)
         {
             const PrimitiveTrace trace = RunStartStraight();
-            Assert::IsTrue(trace.solverClean, TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"solver_flags", trace, 0.0f, static_cast<float>(trace.lastTelemetry.solverFailureFlags), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.solverClean,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"solver_flags"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_DoesNotMoveBackwardY)
@@ -382,7 +575,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartStraight();
             Assert::IsTrue(
                 trace.minY >= -0.010f,
-                TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"wrong_way_y", trace, 0.0f, trace.minY, 0.010f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"wrong_way_y"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << trace.minY
+                        << L"\nlimit=" << 0.010f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_FinalYMatchesDistance)
@@ -392,7 +614,36 @@ namespace MazeMap::App
                 kStraightDistanceM,
                 trace.truth(VehicleState::kPy),
                 0.080f,
-                TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"final_y_m", trace, kStraightDistanceM, trace.truth(VehicleState::kPy), 0.080f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"final_y_m"
+                        << L"\nexpected=" << kStraightDistanceM
+                        << L"\nactual=" << trace.truth(VehicleState::kPy)
+                        << L"\nlimit=" << 0.080f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_FinalXStaysCentered)
@@ -402,7 +653,36 @@ namespace MazeMap::App
                 0.0f,
                 trace.truth(VehicleState::kPx),
                 0.030f,
-                TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"final_x_m", trace, 0.0f, trace.truth(VehicleState::kPx), 0.030f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"final_x_m"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << trace.truth(VehicleState::kPx)
+                        << L"\nlimit=" << 0.030f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartStraight_FinalYawStaysZero)
@@ -412,49 +692,295 @@ namespace MazeMap::App
                 0.0f,
                 trace.truth(VehicleState::kPsi),
                 0.080f,
-                TraceMessage(L"DRV50_STRAIGHT", L"StartStraight", L"final_yaw_rad", trace, 0.0f, trace.truth(VehicleState::kPsi), 0.080f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_STRAIGHT"
+                        << L"\nprimitive=" << L"StartStraight"
+                        << L"\nfield=" << L"final_yaw_rad"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << trace.truth(VehicleState::kPsi)
+                        << L"\nlimit=" << 0.080f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_Completes)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(trace.completed, TraceMessage(L"DRV50_TURN", L"StartTurn", L"completed", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.completed,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"completed"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_UsesMultiTickHorizon)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(trace.appliedTicks >= 20, TraceMessage(L"DRV50_TURN", L"StartTurn", L"multi_tick_horizon", trace, 20.0f, static_cast<float>(trace.appliedTicks), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.appliedTicks >= 20,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"multi_tick_horizon"
+                        << L"\nexpected=" << 20.0f
+                        << L"\nactual=" << static_cast<float>(trace.appliedTicks)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_ControlsStayFinite)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(trace.allControlsFinite, TraceMessage(L"DRV50_TURN", L"StartTurn", L"finite_controls", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.allControlsFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"finite_controls"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_TruthStaysFinite)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(trace.truthFinite, TraceMessage(L"DRV50_TURN", L"StartTurn", L"finite_truth", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.truthFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"finite_truth"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_CommandEvidenceMatchesControls)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(trace.commandEvidenceValid, TraceMessage(L"DRV50_TURN", L"StartTurn", L"command_evidence", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.commandEvidenceValid,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"command_evidence"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_RequestedObjectivesStayFinite)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(trace.requestedObjectivesFinite, TraceMessage(L"DRV50_TURN", L"StartTurn", L"finite_objectives", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.requestedObjectivesFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"finite_objectives"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_SolverFlagsStayClear)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(trace.solverClean, TraceMessage(L"DRV50_TURN", L"StartTurn", L"solver_flags", trace, 0.0f, static_cast<float>(trace.lastTelemetry.solverFailureFlags), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.solverClean,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"solver_flags"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_BuildsClockwiseYaw)
@@ -462,7 +988,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartTurn();
             Assert::IsTrue(
                 trace.maxYawRad > 0.50f,
-                TraceMessage(L"DRV50_TURN", L"StartTurn", L"clockwise_yaw_progress", trace, 0.50f, trace.maxYawRad, 0.0f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"clockwise_yaw_progress"
+                        << L"\nexpected=" << 0.50f
+                        << L"\nactual=" << trace.maxYawRad
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_DoesNotYawWrongWay)
@@ -470,7 +1025,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartTurn();
             Assert::IsTrue(
                 trace.minYawRad >= -0.030f,
-                TraceMessage(L"DRV50_TURN", L"StartTurn", L"wrong_way_yaw", trace, 0.0f, trace.minYawRad, 0.030f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"wrong_way_yaw"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << trace.minYawRad
+                        << L"\nlimit=" << 0.030f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_FinalHeadingMatchesRequest)
@@ -481,7 +1065,36 @@ namespace MazeMap::App
                 0.0f,
                 headingErrorRad,
                 0.120f,
-                TraceMessage(L"DRV50_TURN", L"StartTurn", L"heading_error_rad", trace, 0.0f, headingErrorRad, 0.120f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"heading_error_rad"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << headingErrorRad
+                        << L"\nlimit=" << 0.120f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurn_PositionShiftStaysBounded)
@@ -492,49 +1105,295 @@ namespace MazeMap::App
                 0.0f,
                 shiftM,
                 0.080f,
-                TraceMessage(L"DRV50_TURN", L"StartTurn", L"position_shift_m", trace, 0.0f, shiftM, 0.080f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TURN"
+                        << L"\nprimitive=" << L"StartTurn"
+                        << L"\nfield=" << L"position_shift_m"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << shiftM
+                        << L"\nlimit=" << 0.080f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_Completes)
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(trace.completed, TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"completed", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.completed,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"completed"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_UsesMultiTickHorizon)
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(trace.appliedTicks >= 20, TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"multi_tick_horizon", trace, 20.0f, static_cast<float>(trace.appliedTicks), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.appliedTicks >= 20,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"multi_tick_horizon"
+                        << L"\nexpected=" << 20.0f
+                        << L"\nactual=" << static_cast<float>(trace.appliedTicks)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_ControlsStayFinite)
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(trace.allControlsFinite, TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"finite_controls", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.allControlsFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"finite_controls"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_TruthStaysFinite)
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(trace.truthFinite, TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"finite_truth", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.truthFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"finite_truth"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_CommandEvidenceMatchesControls)
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(trace.commandEvidenceValid, TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"command_evidence", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.commandEvidenceValid,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"command_evidence"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_RequestedObjectivesStayFinite)
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(trace.requestedObjectivesFinite, TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"finite_objectives", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.requestedObjectivesFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"finite_objectives"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_SolverFlagsStayClear)
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(trace.solverClean, TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"solver_flags", trace, 0.0f, static_cast<float>(trace.lastTelemetry.solverFailureFlags), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.solverClean,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"solver_flags"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_RequestsPositiveYawRate)
@@ -542,7 +1401,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartTurnTransition();
             Assert::IsTrue(
                 trace.maxRequestedYawRateRadps > 0.05f,
-                TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"positive_yaw_rate_request", trace, 0.05f, trace.maxRequestedYawRateRadps, 0.0f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"positive_yaw_rate_request"
+                        << L"\nexpected=" << 0.05f
+                        << L"\nactual=" << trace.maxRequestedYawRateRadps
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_DoesNotRequestWrongWayYawRate)
@@ -550,7 +1438,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartTurnTransition();
             Assert::IsTrue(
                 trace.minRequestedYawRateRadps >= -0.020f,
-                TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"wrong_way_yaw_rate_request", trace, 0.0f, trace.minRequestedYawRateRadps, 0.020f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"wrong_way_yaw_rate_request"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << trace.minRequestedYawRateRadps
+                        << L"\nlimit=" << 0.020f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_EncoderDistanceMatchesRequest)
@@ -560,7 +1477,36 @@ namespace MazeMap::App
                 kTransitionDistanceM,
                 AverageEncoderDistanceM(trace),
                 0.050f,
-                TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"encoder_distance_m", trace, kTransitionDistanceM, AverageEncoderDistanceM(trace), 0.050f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"encoder_distance_m"
+                        << L"\nexpected=" << kTransitionDistanceM
+                        << L"\nactual=" << AverageEncoderDistanceM(trace)
+                        << L"\nlimit=" << 0.050f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_FinalHeadingMatchesIntegratedCurvature)
@@ -573,7 +1519,36 @@ namespace MazeMap::App
                 0.0f,
                 headingErrorRad,
                 0.200f,
-                TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"heading_error_rad", trace, 0.0f, headingErrorRad, 0.200f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"heading_error_rad"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << headingErrorRad
+                        << L"\nlimit=" << 0.200f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartTurnTransition_MakesForwardProgress)
@@ -581,49 +1556,295 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartTurnTransition();
             Assert::IsTrue(
                 trace.truth(VehicleState::kPy) > 0.20f,
-                TraceMessage(L"DRV50_TRANSITION", L"StartTurnTransition", L"forward_progress_y_m", trace, 0.20f, trace.truth(VehicleState::kPy), 0.0f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_TRANSITION"
+                        << L"\nprimitive=" << L"StartTurnTransition"
+                        << L"\nfield=" << L"forward_progress_y_m"
+                        << L"\nexpected=" << 0.20f
+                        << L"\nactual=" << trace.truth(VehicleState::kPy)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_Completes)
         {
             const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(trace.completed, TraceMessage(L"DRV50_ARC", L"StartArc", L"completed", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.completed,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"completed"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_UsesMultiTickHorizon)
         {
             const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(trace.appliedTicks >= 20, TraceMessage(L"DRV50_ARC", L"StartArc", L"multi_tick_horizon", trace, 20.0f, static_cast<float>(trace.appliedTicks), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.appliedTicks >= 20,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"multi_tick_horizon"
+                        << L"\nexpected=" << 20.0f
+                        << L"\nactual=" << static_cast<float>(trace.appliedTicks)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_ControlsStayFinite)
         {
             const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(trace.allControlsFinite, TraceMessage(L"DRV50_ARC", L"StartArc", L"finite_controls", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.allControlsFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"finite_controls"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_TruthStaysFinite)
         {
             const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(trace.truthFinite, TraceMessage(L"DRV50_ARC", L"StartArc", L"finite_truth", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.truthFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"finite_truth"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_CommandEvidenceMatchesControls)
         {
             const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(trace.commandEvidenceValid, TraceMessage(L"DRV50_ARC", L"StartArc", L"command_evidence", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.commandEvidenceValid,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"command_evidence"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_RequestedObjectivesStayFinite)
         {
             const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(trace.requestedObjectivesFinite, TraceMessage(L"DRV50_ARC", L"StartArc", L"finite_objectives", trace, 1.0f, 0.0f, 0.0f).c_str());
+            Assert::IsTrue(
+                trace.requestedObjectivesFinite,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"finite_objectives"
+                        << L"\nexpected=" << 1.0f
+                        << L"\nactual=" << 0.0f
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_SolverFlagsStayClear)
         {
             const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(trace.solverClean, TraceMessage(L"DRV50_ARC", L"StartArc", L"solver_flags", trace, 0.0f, static_cast<float>(trace.lastTelemetry.solverFailureFlags), 0.0f).c_str());
+            Assert::IsTrue(
+                trace.solverClean,
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"solver_flags"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_RequestsPositiveYawRate)
@@ -631,7 +1852,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartArc();
             Assert::IsTrue(
                 trace.maxRequestedYawRateRadps > 0.10f,
-                TraceMessage(L"DRV50_ARC", L"StartArc", L"positive_yaw_rate_request", trace, 0.10f, trace.maxRequestedYawRateRadps, 0.0f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"positive_yaw_rate_request"
+                        << L"\nexpected=" << 0.10f
+                        << L"\nactual=" << trace.maxRequestedYawRateRadps
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_DoesNotYawWrongWay)
@@ -639,7 +1889,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartArc();
             Assert::IsTrue(
                 trace.minYawRad >= -0.030f,
-                TraceMessage(L"DRV50_ARC", L"StartArc", L"wrong_way_yaw", trace, 0.0f, trace.minYawRad, 0.030f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"wrong_way_yaw"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << trace.minYawRad
+                        << L"\nlimit=" << 0.030f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_EncoderDistanceMatchesRequest)
@@ -649,7 +1928,36 @@ namespace MazeMap::App
                 kArcDistanceM,
                 AverageEncoderDistanceM(trace),
                 0.060f,
-                TraceMessage(L"DRV50_ARC", L"StartArc", L"encoder_distance_m", trace, kArcDistanceM, AverageEncoderDistanceM(trace), 0.060f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"encoder_distance_m"
+                        << L"\nexpected=" << kArcDistanceM
+                        << L"\nactual=" << AverageEncoderDistanceM(trace)
+                        << L"\nlimit=" << 0.060f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_FinalHeadingMatchesCurvature)
@@ -661,7 +1969,36 @@ namespace MazeMap::App
                 0.0f,
                 headingErrorRad,
                 0.250f,
-                TraceMessage(L"DRV50_ARC", L"StartArc", L"heading_error_rad", trace, 0.0f, headingErrorRad, 0.250f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"heading_error_rad"
+                        << L"\nexpected=" << 0.0f
+                        << L"\nactual=" << headingErrorRad
+                        << L"\nlimit=" << 0.250f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_MakesRightwardProgress)
@@ -669,7 +2006,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartArc();
             Assert::IsTrue(
                 trace.truth(VehicleState::kPx) > 0.030f,
-                TraceMessage(L"DRV50_ARC", L"StartArc", L"rightward_progress_x_m", trace, 0.030f, trace.truth(VehicleState::kPx), 0.0f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"rightward_progress_x_m"
+                        << L"\nexpected=" << 0.030f
+                        << L"\nactual=" << trace.truth(VehicleState::kPx)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
 
         TEST_METHOD(StartArc_MakesForwardProgress)
@@ -677,7 +2043,36 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartArc();
             Assert::IsTrue(
                 trace.truth(VehicleState::kPy) > 0.20f,
-                TraceMessage(L"DRV50_ARC", L"StartArc", L"forward_progress_y_m", trace, 0.20f, trace.truth(VehicleState::kPy), 0.0f).c_str());
+                ([&]()
+                {
+                    std::wstringstream message;
+                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
+                        << L"\nlabel=" << L"DRV50_ARC"
+                        << L"\nprimitive=" << L"StartArc"
+                        << L"\nfield=" << L"forward_progress_y_m"
+                        << L"\nexpected=" << 0.20f
+                        << L"\nactual=" << trace.truth(VehicleState::kPy)
+                        << L"\nlimit=" << 0.0f
+                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
+                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
+                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
+                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
+                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
+                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
+                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
+                        << L"\nticks=" << trace.appliedTicks
+                        << L"\nelapsed_s=" << trace.elapsedSeconds
+                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
+                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
+                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
+                        << L"\nmin_y_m=" << trace.minY
+                        << L"\nmin_yaw_rad=" << trace.minYawRad
+                        << L"\nmax_yaw_rad=" << trace.maxYawRad
+                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
+                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
+                    return message.str();
+                }()).c_str());
         }
     };
 }

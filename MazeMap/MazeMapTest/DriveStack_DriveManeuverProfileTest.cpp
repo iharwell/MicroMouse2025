@@ -16,6 +16,7 @@
 #include "..\MazeMap\VehicleState.h"
 
 #include <cmath>
+#include <sstream>
 #include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -61,47 +62,6 @@ namespace MazeMap::App
             default:
                 return std::wstring(L"code_") + std::to_wstring(static_cast<unsigned int>(code));
             }
-        }
-
-        std::wstring ProfileMessage(
-            const wchar_t* label,
-            const ManeuverCode code,
-            const wchar_t* field,
-            const float progressM,
-            const float expected,
-            const float actual)
-        {
-            return
-                std::wstring(label) +
-                L" code=" + CodeName(code) +
-                L" field=" + field +
-                L" progress_m=" + std::to_wstring(progressM) +
-                L" expected=" + std::to_wstring(expected) +
-                L" actual=" + std::to_wstring(actual);
-        }
-
-        void AssertNearProfile(
-            const ManeuverCode code,
-            const wchar_t* field,
-            const float progressM,
-            const float expected,
-            const float actual,
-            const float tolerance = kTelemetryTolerance)
-        {
-            const std::wstring message =
-                ProfileMessage(L"DRV10_PROFILE_REQUEST", code, field, progressM, expected, actual);
-            Assert::AreEqual(expected, actual, tolerance, message.c_str());
-        }
-
-        void AssertFiniteProfile(
-            const ManeuverCode code,
-            const wchar_t* field,
-            const float progressM,
-            const float actual)
-        {
-            const std::wstring message =
-                ProfileMessage(L"DRV10_PROFILE_REQUEST", code, field, progressM, 0.0f, actual);
-            Assert::IsTrue(std::isfinite(actual), message.c_str());
         }
 
         void PublishSyntheticRuntimeProgress(
@@ -225,7 +185,12 @@ namespace MazeMap::App
                     kSmoothSpeedMps,
                     expectedPoint,
                     Config::kCellSizeM);
-                PublishSyntheticRuntimeProgress(runtime, progressM, expectedPoint.Theta, kSmoothSpeedMps, expectedPoint.Omega);
+                PublishSyntheticRuntimeProgress(
+                    runtime,
+                    progressM,
+                    expectedPoint.Theta,
+                    kSmoothSpeedMps,
+                    expectedPoint.Omega);
                 return SampleProfile(runtime, runtime.DriveService());
             }
         };
@@ -238,64 +203,143 @@ namespace MazeMap::App
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleInitial();
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=done"
+                << L"\nprogress_m=0"
+                << L"\nexpected=false"
+                << L"\nactual=" << sample.done;
 
-            Assert::IsFalse(sample.done, L"DRV10_PROFILE_REQUEST code=S4 expected initial straight maneuver to remain active");
+            Assert::IsFalse(sample.done, message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Initial_RequestedForwardMpsIsFinite)
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleInitial();
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedForwardMps"
+                << L"\nprogress_m=0"
+                << L"\nactual=" << sample.telemetry.requestedForwardMps
+                << L"\ncriterion=isfinite(actual)";
 
-            AssertFiniteProfile(S4, L"requestedForwardMps", 0.0f, sample.telemetry.requestedForwardMps);
+            Assert::IsTrue(
+                std::isfinite(sample.telemetry.requestedForwardMps),
+                message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Initial_RequestedYawRateRadpsIsFinite)
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleInitial();
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nprogress_m=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ncriterion=isfinite(actual)";
 
-            AssertFiniteProfile(S4, L"requestedYawRateRadps", 0.0f, sample.telemetry.requestedYawRateRadps);
+            Assert::IsTrue(
+                std::isfinite(sample.telemetry.requestedYawRateRadps),
+                message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Initial_RequestedYawRadIsFinite)
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleInitial();
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedYawRad"
+                << L"\nprogress_m=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ncriterion=isfinite(actual)";
 
-            AssertFiniteProfile(S4, L"requestedYawRad", 0.0f, sample.telemetry.requestedYawRad);
+            Assert::IsTrue(
+                std::isfinite(sample.telemetry.requestedYawRad),
+                message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Initial_RequestsCruiseForwardMps)
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleInitial();
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedForwardMps"
+                << L"\nprogress_m=0"
+                << L"\nexpected=" << kStraightCruiseMps
+                << L"\nactual=" << sample.telemetry.requestedForwardMps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S4, L"requestedForwardMps", 0.0f, kStraightCruiseMps, sample.telemetry.requestedForwardMps);
+            Assert::AreEqual(
+                kStraightCruiseMps,
+                sample.telemetry.requestedForwardMps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Initial_RequestsZeroYawRate)
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleInitial();
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nprogress_m=0"
+                << L"\nexpected=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S4, L"requestedYawRateRadps", 0.0f, 0.0f, sample.telemetry.requestedYawRateRadps);
+            Assert::AreEqual(
+                0.0f,
+                sample.telemetry.requestedYawRateRadps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Initial_RequestsZeroYawTarget)
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleInitial();
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedYawRad"
+                << L"\nprogress_m=0"
+                << L"\nexpected=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S4, L"requestedYawRad", 0.0f, 0.0f, sample.telemetry.requestedYawRad);
+            Assert::AreEqual(
+                0.0f,
+                sample.telemetry.requestedYawRad,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Completion_CompletesFromEncoderProgress)
         {
             StraightScenario scenario;
             const ProfileSample sample = scenario.SampleCompletion();
+            const float completionProgressM =
+                scenario.maneuver.GetTravelDistanceMeters(Config::kCellSizeM) + Config::kDistanceToleranceM;
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=done"
+                << L"\nprogress_m=" << completionProgressM
+                << L"\nexpected=true"
+                << L"\nactual=" << sample.done;
 
-            Assert::IsTrue(sample.done, L"DRV10_PROFILE_REQUEST code=S4 expected encoder-progress completion");
+            Assert::IsTrue(sample.done, message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Completion_RequestsZeroYawRate)
@@ -304,8 +348,20 @@ namespace MazeMap::App
             const ProfileSample sample = scenario.SampleCompletion();
             const float completionProgressM =
                 scenario.maneuver.GetTravelDistanceMeters(Config::kCellSizeM) + Config::kDistanceToleranceM;
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nprogress_m=" << completionProgressM
+                << L"\nexpected=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S4, L"requestedYawRateRadps", completionProgressM, 0.0f, sample.telemetry.requestedYawRateRadps);
+            Assert::AreEqual(
+                0.0f,
+                sample.telemetry.requestedYawRateRadps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(StraightManeuver_Completion_RequestsZeroYawTarget)
@@ -314,118 +370,259 @@ namespace MazeMap::App
             const ProfileSample sample = scenario.SampleCompletion();
             const float completionProgressM =
                 scenario.maneuver.GetTravelDistanceMeters(Config::kCellSizeM) + Config::kDistanceToleranceM;
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S4"
+                << L"\nfield=requestedYawRad"
+                << L"\nprogress_m=" << completionProgressM
+                << L"\nexpected=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S4, L"requestedYawRad", completionProgressM, 0.0f, sample.telemetry.requestedYawRad);
+            Assert::AreEqual(
+                0.0f,
+                sample.telemetry.requestedYawRad,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_Initial_RemainsActive)
         {
             InPlaceScenario scenario(IP90);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=done"
+                << L"\nyaw_rad=0"
+                << L"\nexpected=false"
+                << L"\nactual=" << sample.done;
 
-            Assert::IsFalse(sample.done, L"DRV10_PROFILE_REQUEST code=IP90 expected initial in-place turn to remain active");
+            Assert::IsFalse(sample.done, message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_Initial_RequestsZeroForwardMps)
         {
             InPlaceScenario scenario(IP90);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=requestedForwardMps"
+                << L"\nyaw_rad=0"
+                << L"\nexpected=0"
+                << L"\nactual=" << sample.telemetry.requestedForwardMps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(IP90, L"requestedForwardMps", 0.0f, 0.0f, sample.telemetry.requestedForwardMps);
+            Assert::AreEqual(
+                0.0f,
+                sample.telemetry.requestedForwardMps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_Initial_RequestsClockwiseYawRate)
         {
             InPlaceScenario scenario(IP90);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nyaw_rad=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ncriterion=actual>0";
 
             Assert::IsTrue(
                 sample.telemetry.requestedYawRateRadps > 0.0f,
-                L"DRV10_PROFILE_REQUEST code=IP90 field=requestedYawRateRadps expected clockwise-positive yaw request");
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_Initial_RequestsNinetyDegreeYawTarget)
         {
             InPlaceScenario scenario(IP90);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            const float expectedYawRad = 90.0f * DEG_TO_RAD_F;
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=requestedYawRad"
+                << L"\nyaw_rad=0"
+                << L"\nexpected=" << expectedYawRad
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(IP90, L"requestedYawRad", 0.0f, 90.0f * DEG_TO_RAD_F, sample.telemetry.requestedYawRad);
+            Assert::AreEqual(
+                expectedYawRad,
+                sample.telemetry.requestedYawRad,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_HalfYaw_RemainsActive)
         {
             InPlaceScenario scenario(IP90);
-            const ProfileSample sample = scenario.SampleAtYaw(45.0f * DEG_TO_RAD_F);
+            const float runtimeYawRad = 45.0f * DEG_TO_RAD_F;
+            const ProfileSample sample = scenario.SampleAtYaw(runtimeYawRad);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=done"
+                << L"\nyaw_rad=" << runtimeYawRad
+                << L"\nexpected=false"
+                << L"\nactual=" << sample.done;
 
-            Assert::IsFalse(sample.done, L"DRV10_PROFILE_REQUEST code=IP90 expected half-yaw sample to remain active");
+            Assert::IsFalse(sample.done, message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_HalfYaw_RequestsZeroForwardMps)
         {
             InPlaceScenario scenario(IP90);
-            const ProfileSample sample = scenario.SampleAtYaw(45.0f * DEG_TO_RAD_F);
+            const float runtimeYawRad = 45.0f * DEG_TO_RAD_F;
+            const ProfileSample sample = scenario.SampleAtYaw(runtimeYawRad);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=requestedForwardMps"
+                << L"\nyaw_rad=" << runtimeYawRad
+                << L"\nexpected=0"
+                << L"\nactual=" << sample.telemetry.requestedForwardMps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(IP90, L"requestedForwardMps", 0.0f, 0.0f, sample.telemetry.requestedForwardMps);
+            Assert::AreEqual(
+                0.0f,
+                sample.telemetry.requestedForwardMps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_HalfYaw_RequestsClockwiseYawRate)
         {
             InPlaceScenario scenario(IP90);
-            const ProfileSample sample = scenario.SampleAtYaw(45.0f * DEG_TO_RAD_F);
+            const float runtimeYawRad = 45.0f * DEG_TO_RAD_F;
+            const ProfileSample sample = scenario.SampleAtYaw(runtimeYawRad);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nyaw_rad=" << runtimeYawRad
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ncriterion=actual>0";
 
             Assert::IsTrue(
                 sample.telemetry.requestedYawRateRadps > 0.0f,
-                L"DRV10_PROFILE_REQUEST code=IP90 field=requestedYawRateRadps expected positive yaw through half turn");
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_HalfYaw_KeepsNinetyDegreeYawTarget)
         {
             InPlaceScenario scenario(IP90);
-            const ProfileSample sample = scenario.SampleAtYaw(45.0f * DEG_TO_RAD_F);
+            const float runtimeYawRad = 45.0f * DEG_TO_RAD_F;
+            const ProfileSample sample = scenario.SampleAtYaw(runtimeYawRad);
+            const float expectedYawRad = 90.0f * DEG_TO_RAD_F;
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=requestedYawRad"
+                << L"\nyaw_rad=" << runtimeYawRad
+                << L"\nexpected=" << expectedYawRad
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(IP90, L"requestedYawRad", 0.0f, 90.0f * DEG_TO_RAD_F, sample.telemetry.requestedYawRad);
+            Assert::AreEqual(
+                expectedYawRad,
+                sample.telemetry.requestedYawRad,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceManeuver_Completion_CompletesFromRuntimeYaw)
         {
             InPlaceScenario scenario(IP90);
-            const ProfileSample sample = scenario.SampleAtYaw(90.0f * DEG_TO_RAD_F);
+            const float runtimeYawRad = 90.0f * DEG_TO_RAD_F;
+            const ProfileSample sample = scenario.SampleAtYaw(runtimeYawRad);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90"
+                << L"\nfield=done"
+                << L"\nyaw_rad=" << runtimeYawRad
+                << L"\nexpected=true"
+                << L"\nactual=" << sample.done;
 
-            Assert::IsTrue(sample.done, L"DRV10_PROFILE_REQUEST code=IP90 expected runtime-yaw completion");
+            Assert::IsTrue(sample.done, message.str().c_str());
         }
 
         TEST_METHOD(InPlaceMirroredManeuver_Initial_RemainsActive)
         {
             InPlaceScenario scenario(IP90_M);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90_M"
+                << L"\nfield=done"
+                << L"\nyaw_rad=0"
+                << L"\nexpected=false"
+                << L"\nactual=" << sample.done;
 
-            Assert::IsFalse(sample.done, L"DRV10_PROFILE_REQUEST code=IP90_M expected initial mirrored turn to remain active");
+            Assert::IsFalse(sample.done, message.str().c_str());
         }
 
         TEST_METHOD(InPlaceMirroredManeuver_Initial_RequestsZeroForwardMps)
         {
             InPlaceScenario scenario(IP90_M);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90_M"
+                << L"\nfield=requestedForwardMps"
+                << L"\nyaw_rad=0"
+                << L"\nexpected=0"
+                << L"\nactual=" << sample.telemetry.requestedForwardMps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(IP90_M, L"requestedForwardMps", 0.0f, 0.0f, sample.telemetry.requestedForwardMps);
+            Assert::AreEqual(
+                0.0f,
+                sample.telemetry.requestedForwardMps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceMirroredManeuver_Initial_RequestsCounterClockwiseYawRate)
         {
             InPlaceScenario scenario(IP90_M);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90_M"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nyaw_rad=0"
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ncriterion=actual<0";
 
             Assert::IsTrue(
                 sample.telemetry.requestedYawRateRadps < 0.0f,
-                L"DRV10_PROFILE_REQUEST code=IP90_M field=requestedYawRateRadps expected mirrored yaw request to be negative");
+                message.str().c_str());
         }
 
         TEST_METHOD(InPlaceMirroredManeuver_Initial_RequestsNegativeNinetyDegreeYawTarget)
         {
             InPlaceScenario scenario(IP90_M);
             const ProfileSample sample = scenario.SampleAtYaw(0.0f);
+            const float expectedYawRad = -90.0f * DEG_TO_RAD_F;
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=IP90_M"
+                << L"\nfield=requestedYawRad"
+                << L"\nyaw_rad=0"
+                << L"\nexpected=" << expectedYawRad
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(IP90_M, L"requestedYawRad", 0.0f, -90.0f * DEG_TO_RAD_F, sample.telemetry.requestedYawRad);
+            Assert::AreEqual(
+                expectedYawRad,
+                sample.telemetry.requestedYawRad,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
 #define DEFINE_SMOOTH_PROFILE_SAMPLE_TESTS(SUFFIX, FRACTION, EXPECTED_DONE) \
@@ -435,8 +632,16 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{}; \
             float progressM = 0.0f; \
             const ProfileSample sample = scenario.SampleAtProgressFraction(FRACTION, expectedPoint, progressM); \
-            const std::wstring message = std::wstring(L"DRV10_PROFILE_REQUEST code=S90SS progress_m=") + std::to_wstring(progressM) + L" expected_done=" + ((EXPECTED_DONE) ? L"true" : L"false"); \
-            Assert::IsTrue(sample.done == (EXPECTED_DONE), message.c_str()); \
+            std::wstringstream message; \
+            message << L"DRV10_PROFILE_REQUEST" \
+                << L"\ncode=S90SS" \
+                << L"\nfield=done" \
+                << L"\nprogress_m=" << progressM \
+                << L"\nexpected=" << ((EXPECTED_DONE) ? L"true" : L"false") \
+                << L"\nactual=" << sample.done; \
+            Assert::IsTrue( \
+                sample.done == (EXPECTED_DONE), \
+                message.str().c_str()); \
         } \
         TEST_METHOD(SmoothManeuver_##SUFFIX##_ForwardMpsMatchesCatalogPoint) \
         { \
@@ -444,7 +649,19 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{}; \
             float progressM = 0.0f; \
             const ProfileSample sample = scenario.SampleAtProgressFraction(FRACTION, expectedPoint, progressM); \
-            AssertNearProfile(S90SS, L"requestedForwardMps", progressM, expectedPoint.Velocity, sample.telemetry.requestedForwardMps); \
+            std::wstringstream message; \
+            message << L"DRV10_PROFILE_REQUEST" \
+                << L"\ncode=S90SS" \
+                << L"\nfield=requestedForwardMps" \
+                << L"\nprogress_m=" << progressM \
+                << L"\nexpected=" << expectedPoint.Velocity \
+                << L"\nactual=" << sample.telemetry.requestedForwardMps \
+                << L"\ntolerance=" << kTelemetryTolerance; \
+            Assert::AreEqual( \
+                expectedPoint.Velocity, \
+                sample.telemetry.requestedForwardMps, \
+                kTelemetryTolerance, \
+                message.str().c_str()); \
         } \
         TEST_METHOD(SmoothManeuver_##SUFFIX##_YawRateMatchesCatalogPoint) \
         { \
@@ -452,7 +669,19 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{}; \
             float progressM = 0.0f; \
             const ProfileSample sample = scenario.SampleAtProgressFraction(FRACTION, expectedPoint, progressM); \
-            AssertNearProfile(S90SS, L"requestedYawRateRadps", progressM, expectedPoint.Omega, sample.telemetry.requestedYawRateRadps); \
+            std::wstringstream message; \
+            message << L"DRV10_PROFILE_REQUEST" \
+                << L"\ncode=S90SS" \
+                << L"\nfield=requestedYawRateRadps" \
+                << L"\nprogress_m=" << progressM \
+                << L"\nexpected=" << expectedPoint.Omega \
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps \
+                << L"\ntolerance=" << kTelemetryTolerance; \
+            Assert::AreEqual( \
+                expectedPoint.Omega, \
+                sample.telemetry.requestedYawRateRadps, \
+                kTelemetryTolerance, \
+                message.str().c_str()); \
         } \
         TEST_METHOD(SmoothManeuver_##SUFFIX##_YawTargetMatchesCatalogPoint) \
         { \
@@ -460,7 +689,19 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{}; \
             float progressM = 0.0f; \
             const ProfileSample sample = scenario.SampleAtProgressFraction(FRACTION, expectedPoint, progressM); \
-            AssertNearProfile(S90SS, L"requestedYawRad", progressM, expectedPoint.Theta, sample.telemetry.requestedYawRad); \
+            std::wstringstream message; \
+            message << L"DRV10_PROFILE_REQUEST" \
+                << L"\ncode=S90SS" \
+                << L"\nfield=requestedYawRad" \
+                << L"\nprogress_m=" << progressM \
+                << L"\nexpected=" << expectedPoint.Theta \
+                << L"\nactual=" << sample.telemetry.requestedYawRad \
+                << L"\ntolerance=" << kTelemetryTolerance; \
+            Assert::AreEqual( \
+                expectedPoint.Theta, \
+                sample.telemetry.requestedYawRad, \
+                kTelemetryTolerance, \
+                message.str().c_str()); \
         }
 
         DEFINE_SMOOTH_PROFILE_SAMPLE_TESTS(Start, 0.0f, false)
@@ -477,8 +718,15 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{};
             float progressM = 0.0f;
             const ProfileSample sample = scenario.SampleAtProgressFraction(0.50f, expectedPoint, progressM);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S90SS_M"
+                << L"\nfield=done"
+                << L"\nprogress_m=" << progressM
+                << L"\nexpected=false"
+                << L"\nactual=" << sample.done;
 
-            Assert::IsFalse(sample.done, L"DRV10_PROFILE_REQUEST code=S90SS_M expected midpoint to remain active");
+            Assert::IsFalse(sample.done, message.str().c_str());
         }
 
         TEST_METHOD(SmoothMirroredManeuver_Midpoint_ForwardMpsMatchesCatalogPoint)
@@ -487,8 +735,20 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{};
             float progressM = 0.0f;
             const ProfileSample sample = scenario.SampleAtProgressFraction(0.50f, expectedPoint, progressM);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S90SS_M"
+                << L"\nfield=requestedForwardMps"
+                << L"\nprogress_m=" << progressM
+                << L"\nexpected=" << expectedPoint.Velocity
+                << L"\nactual=" << sample.telemetry.requestedForwardMps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S90SS_M, L"requestedForwardMps", progressM, expectedPoint.Velocity, sample.telemetry.requestedForwardMps);
+            Assert::AreEqual(
+                expectedPoint.Velocity,
+                sample.telemetry.requestedForwardMps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(SmoothMirroredManeuver_Midpoint_YawRateMatchesCatalogPoint)
@@ -497,8 +757,20 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{};
             float progressM = 0.0f;
             const ProfileSample sample = scenario.SampleAtProgressFraction(0.50f, expectedPoint, progressM);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S90SS_M"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nprogress_m=" << progressM
+                << L"\nexpected=" << expectedPoint.Omega
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S90SS_M, L"requestedYawRateRadps", progressM, expectedPoint.Omega, sample.telemetry.requestedYawRateRadps);
+            Assert::AreEqual(
+                expectedPoint.Omega,
+                sample.telemetry.requestedYawRateRadps,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(SmoothMirroredManeuver_Midpoint_YawTargetMatchesCatalogPoint)
@@ -507,8 +779,20 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{};
             float progressM = 0.0f;
             const ProfileSample sample = scenario.SampleAtProgressFraction(0.50f, expectedPoint, progressM);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S90SS_M"
+                << L"\nfield=requestedYawRad"
+                << L"\nprogress_m=" << progressM
+                << L"\nexpected=" << expectedPoint.Theta
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ntolerance=" << kTelemetryTolerance;
 
-            AssertNearProfile(S90SS_M, L"requestedYawRad", progressM, expectedPoint.Theta, sample.telemetry.requestedYawRad);
+            Assert::AreEqual(
+                expectedPoint.Theta,
+                sample.telemetry.requestedYawRad,
+                kTelemetryTolerance,
+                message.str().c_str());
         }
 
         TEST_METHOD(SmoothMirroredManeuver_Midpoint_YawRateIsNegative)
@@ -517,10 +801,17 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{};
             float progressM = 0.0f;
             const ProfileSample sample = scenario.SampleAtProgressFraction(0.50f, expectedPoint, progressM);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S90SS_M"
+                << L"\nfield=requestedYawRateRadps"
+                << L"\nprogress_m=" << progressM
+                << L"\nactual=" << sample.telemetry.requestedYawRateRadps
+                << L"\ncriterion=actual<0";
 
             Assert::IsTrue(
                 sample.telemetry.requestedYawRateRadps < 0.0f,
-                L"DRV10_PROFILE_REQUEST code=S90SS_M field=requestedYawRateRadps expected mirrored smooth yaw request to be negative");
+                message.str().c_str());
         }
 
         TEST_METHOD(SmoothMirroredManeuver_Midpoint_YawTargetIsNegative)
@@ -529,10 +820,17 @@ namespace MazeMap::App
             ManeuverPoint expectedPoint{};
             float progressM = 0.0f;
             const ProfileSample sample = scenario.SampleAtProgressFraction(0.50f, expectedPoint, progressM);
+            std::wstringstream message;
+            message << L"DRV10_PROFILE_REQUEST"
+                << L"\ncode=S90SS_M"
+                << L"\nfield=requestedYawRad"
+                << L"\nprogress_m=" << progressM
+                << L"\nactual=" << sample.telemetry.requestedYawRad
+                << L"\ncriterion=actual<0";
 
             Assert::IsTrue(
                 sample.telemetry.requestedYawRad < 0.0f,
-                L"DRV10_PROFILE_REQUEST code=S90SS_M field=requestedYawRad expected mirrored smooth yaw target to be negative");
+                message.str().c_str());
         }
     };
 }

@@ -88,20 +88,6 @@ namespace MazeMap
 			return message.str();
 		}
 
-		std::wstring Message(const wchar_t* label, ManeuverCode code)
-		{
-			std::wstringstream message;
-			message << label << L" " << CodeLabel(code);
-			return message.str();
-		}
-
-		std::wstring Message(const wchar_t* label, ManeuverCode code, const wchar_t* detail, float value)
-		{
-			std::wstringstream message;
-			message << label << L" " << CodeLabel(code) << L" " << detail << L"=" << value;
-			return message.str();
-		}
-
 		void AppendFailure(std::wstring& failures, const std::wstring& message)
 		{
 			if (!failures.empty())
@@ -166,7 +152,17 @@ namespace MazeMap
 				const DirectionalLocation actualEnd = set.Move(code, start);
 				if (!(expectedEnd == actualEnd))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_ENDPOINT", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_ENDPOINT"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nexpected_x=" << static_cast<unsigned>(expectedEnd.GetLocation().GetX())
+						<< L"\nexpected_y=" << static_cast<unsigned>(expectedEnd.GetLocation().GetY())
+						<< L"\nexpected_dir=" << static_cast<unsigned>(expectedEnd.GetDirection())
+						<< L"\nactual_x=" << static_cast<unsigned>(actualEnd.GetLocation().GetX())
+						<< L"\nactual_y=" << static_cast<unsigned>(actualEnd.GetLocation().GetY())
+						<< L"\nactual_dir=" << static_cast<unsigned>(actualEnd.GetDirection())
+						<< L"\ncriterion=actual==expected";
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -184,7 +180,18 @@ namespace MazeMap
 				const ManeuverInstance instance(code, start);
 				if (!(expectedEnd == instance.getEnd()))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_INSTANCE_ENDPOINT", code));
+					const DirectionalLocation actualEnd = instance.getEnd();
+					std::wstringstream message;
+					message << L"MM00_GEOM_INSTANCE_ENDPOINT"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nexpected_x=" << static_cast<unsigned>(expectedEnd.GetLocation().GetX())
+						<< L"\nexpected_y=" << static_cast<unsigned>(expectedEnd.GetLocation().GetY())
+						<< L"\nexpected_dir=" << static_cast<unsigned>(expectedEnd.GetDirection())
+						<< L"\nactual_x=" << static_cast<unsigned>(actualEnd.GetLocation().GetX())
+						<< L"\nactual_y=" << static_cast<unsigned>(actualEnd.GetLocation().GetY())
+						<< L"\nactual_dir=" << static_cast<unsigned>(actualEnd.GetDirection())
+						<< L"\ncriterion=actual==expected";
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -203,7 +210,13 @@ namespace MazeMap
 				const float actualDistanceM = set.GetTravelDistanceMeters(code, cellSizeM);
 				if (!NearlyEqual(expectedDistanceM, actualDistanceM, kDistanceToleranceM))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_DISTANCE", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_DISTANCE"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nexpected=" << expectedDistanceM
+						<< L"\nactual=" << actualDistanceM
+						<< L"\ntolerance=" << kDistanceToleranceM;
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -223,7 +236,13 @@ namespace MazeMap
 				const float actualDistanceM = instance.GetTravelDistanceMeters(cellSizeM);
 				if (!NearlyEqual(expectedDistanceM, actualDistanceM, kDistanceToleranceM))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_INSTANCE_DISTANCE", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_INSTANCE_DISTANCE"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nexpected=" << expectedDistanceM
+						<< L"\nactual=" << actualDistanceM
+						<< L"\ntolerance=" << kDistanceToleranceM;
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -239,7 +258,12 @@ namespace MazeMap
 			{
 				if (set.SupportsPointTracking(code))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_STRAIGHT_POINT_TRACKING", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_STRAIGHT_POINT_TRACKING"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nexpected=false"
+						<< L"\nactual=true";
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -262,7 +286,18 @@ namespace MazeMap
 					const DirectionalLocation actualEnd = set.Move(code, start);
 					if (!(actualEnd == instance.getEnd()))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_INSTANCE_ENDPOINT", code));
+						const DirectionalLocation expectedEnd = instance.getEnd();
+						std::wstringstream message;
+						message << L"MM00_GEOM_INSTANCE_ENDPOINT"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nexpected_x=" << static_cast<unsigned>(expectedEnd.GetLocation().GetX())
+							<< L"\nexpected_y=" << static_cast<unsigned>(expectedEnd.GetLocation().GetY())
+							<< L"\nexpected_dir=" << static_cast<unsigned>(expectedEnd.GetDirection())
+							<< L"\nactual_x=" << static_cast<unsigned>(actualEnd.GetLocation().GetX())
+							<< L"\nactual_y=" << static_cast<unsigned>(actualEnd.GetLocation().GetY())
+							<< L"\nactual_dir=" << static_cast<unsigned>(actualEnd.GetDirection())
+							<< L"\ncriterion=actual==expected";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -286,7 +321,13 @@ namespace MazeMap
 					const float actualDistanceM = set.GetTravelDistanceMeters(code, cellSizeM);
 					if (!NearlyEqual(expectedDistanceM, actualDistanceM, kDistanceToleranceM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_DISTANCE", code));
+						std::wstringstream message;
+						message << L"MM00_GEOM_DISTANCE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nexpected=" << expectedDistanceM
+							<< L"\nactual=" << actualDistanceM
+							<< L"\ntolerance=" << kDistanceToleranceM;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -312,7 +353,13 @@ namespace MazeMap
 					const float actualDistanceM = instance.GetTravelDistanceMeters(cellSizeM);
 					if (!NearlyEqual(expectedDistanceM, actualDistanceM, kDistanceToleranceM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_INSTANCE_DISTANCE", code));
+						std::wstringstream message;
+						message << L"MM00_GEOM_INSTANCE_DISTANCE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nexpected=" << expectedDistanceM
+							<< L"\nactual=" << actualDistanceM
+							<< L"\ntolerance=" << kDistanceToleranceM;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -338,7 +385,18 @@ namespace MazeMap
 					const DirectionalLocation returnedToStart = set.Move(reverseCode, reverseStart.Turn(Reverse)).Turn(Reverse);
 					if (!(start == returnedToStart))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_REVERSE_ENDPOINT", code));
+						std::wstringstream message;
+						message << L"MM00_GEOM_REVERSE_ENDPOINT"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nreverse_code=" << CodeLabel(reverseCode)
+							<< L"\nexpected_x=" << static_cast<unsigned>(start.GetLocation().GetX())
+							<< L"\nexpected_y=" << static_cast<unsigned>(start.GetLocation().GetY())
+							<< L"\nexpected_dir=" << static_cast<unsigned>(start.GetDirection())
+							<< L"\nactual_x=" << static_cast<unsigned>(returnedToStart.GetLocation().GetX())
+							<< L"\nactual_y=" << static_cast<unsigned>(returnedToStart.GetLocation().GetY())
+							<< L"\nactual_dir=" << static_cast<unsigned>(returnedToStart.GetDirection())
+							<< L"\ncriterion=returned_to_start==start";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -359,7 +417,12 @@ namespace MazeMap
 					const float actualDistanceM = set.GetTravelDistanceMeters(code, cellSizeM);
 					if (!std::isfinite(actualDistanceM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_DISTANCE_FINITE", code));
+						std::wstringstream message;
+						message << L"MM00_GEOM_DISTANCE_FINITE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nactual=" << actualDistanceM
+							<< L"\ncriterion=isfinite(actual)";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -380,7 +443,12 @@ namespace MazeMap
 					const float actualDistanceM = set.GetTravelDistanceMeters(code, cellSizeM);
 					if (!(actualDistanceM >= 0.0f))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_DISTANCE_NONNEGATIVE", code));
+						std::wstringstream message;
+						message << L"MM00_GEOM_DISTANCE_NONNEGATIVE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nactual=" << actualDistanceM
+							<< L"\ncriterion=actual>=0";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -394,9 +462,15 @@ namespace MazeMap
 
 			for (ManeuverCode baseCode : kCatalogTurnCodes)
 			{
-				if (!(CodeDegrees(baseCode) > 0))
+				const int16_t actualDegrees = CodeDegrees(baseCode);
+				if (!(actualDegrees > 0))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_CODE_DEGREES_POSITIVE", baseCode));
+					std::wstringstream message;
+					message << L"MM00_GEOM_CODE_DEGREES_POSITIVE"
+						<< L"\ncode=" << CodeLabel(baseCode)
+						<< L"\nactual=" << actualDegrees
+						<< L"\ncriterion=actual>0";
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -413,7 +487,13 @@ namespace MazeMap
 				const int16_t mirroredDegrees = CodeDegrees(Mirrored(baseCode));
 				if (mirroredDegrees != -baseDegrees)
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_CODE_DEGREES", baseCode));
+					std::wstringstream message;
+					message << L"MM00_GEOM_MIRROR_CODE_DEGREES"
+						<< L"\ncode=" << CodeLabel(baseCode)
+						<< L"\nexpected=" << -baseDegrees
+						<< L"\nactual=" << mirroredDegrees
+						<< L"\nbase_degrees=" << baseDegrees;
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -424,9 +504,15 @@ namespace MazeMap
 		{
 			std::wstring failures;
 
-			if (CodeDegrees(MC_NONE) != 0)
+			const int16_t noneDegrees = CodeDegrees(MC_NONE);
+			if (noneDegrees != 0)
 			{
-				AppendFailure(failures, L"MM00_GEOM_CODE_DEGREES_NONE");
+				std::wstringstream message;
+				message << L"MM00_GEOM_CODE_DEGREES_NONE"
+					<< L"\ncode=" << CodeLabel(MC_NONE)
+					<< L"\nexpected=0"
+					<< L"\nactual=" << noneDegrees;
+				AppendFailure(failures, message.str());
 			}
 
 			AssertNoFailures(failures);
@@ -436,9 +522,15 @@ namespace MazeMap
 		{
 			std::wstring failures;
 
-			if (CodeDegrees(S6) != 0)
+			const int16_t straightDegrees = CodeDegrees(S6);
+			if (straightDegrees != 0)
 			{
-				AppendFailure(failures, L"MM00_GEOM_CODE_DEGREES_STRAIGHT");
+				std::wstringstream message;
+				message << L"MM00_GEOM_CODE_DEGREES_STRAIGHT"
+					<< L"\ncode=" << CodeLabel(S6)
+					<< L"\nexpected=0"
+					<< L"\nactual=" << straightDegrees;
+				AppendFailure(failures, message.str());
 			}
 
 			AssertNoFailures(failures);
@@ -451,9 +543,17 @@ namespace MazeMap
 
 			for (ManeuverCode code : kCatalogTurnCodes)
 			{
-				if (!set.SupportsPointTracking(code) && set.SupportsPointTracking(Mirrored(code)))
+				const bool baseSupportsPointTracking = set.SupportsPointTracking(code);
+				const bool mirroredSupportsPointTracking = set.SupportsPointTracking(Mirrored(code));
+				if (!baseSupportsPointTracking && mirroredSupportsPointTracking)
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_IP_POINT_TRACKING", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_IP_POINT_TRACKING"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nbase_supports=" << baseSupportsPointTracking
+						<< L"\nmirrored_supports=" << mirroredSupportsPointTracking
+						<< L"\ncriterion=mirrored_supports==base_supports_when_base_false";
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -473,9 +573,15 @@ namespace MazeMap
 					continue;
 				}
 
-				if (!(set.GetTravelDistanceMeters(code, cellSizeM) > 0.0f))
+				const float actualDistanceM = set.GetTravelDistanceMeters(code, cellSizeM);
+				if (!(actualDistanceM > 0.0f))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_PROFILE_DISTANCE", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_PROFILE_DISTANCE"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nactual=" << actualDistanceM
+						<< L"\ncriterion=actual>0";
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -504,9 +610,18 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (!TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM))
+					const float distanceM = totalDistanceM * fraction;
+					if (!TryProfilePoint(set, code, distanceM, point, cellSizeM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_PROFILE_SAMPLE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_PROFILE_SAMPLE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\ntotal_distance_m=" << totalDistanceM
+							<< L"\nexpected_available=true"
+							<< L"\nactual_available=false";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -531,9 +646,17 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) && !std::isfinite(point.X))
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) && !std::isfinite(point.X))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_POINT_X_FINITE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_POINT_X_FINITE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nactual=" << point.X
+							<< L"\ncriterion=isfinite(actual)";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -558,9 +681,17 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) && !std::isfinite(point.Y))
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) && !std::isfinite(point.Y))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_POINT_Y_FINITE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_POINT_Y_FINITE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nactual=" << point.Y
+							<< L"\ncriterion=isfinite(actual)";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -585,9 +716,17 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) && !std::isfinite(point.Theta))
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) && !std::isfinite(point.Theta))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_POINT_THETA_FINITE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_POINT_THETA_FINITE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nactual=" << point.Theta
+							<< L"\ncriterion=isfinite(actual)";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -612,9 +751,17 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) && !std::isfinite(point.Omega))
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) && !std::isfinite(point.Omega))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_POINT_OMEGA_FINITE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_POINT_OMEGA_FINITE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nactual=" << point.Omega
+							<< L"\ncriterion=isfinite(actual)";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -639,9 +786,17 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) && !std::isfinite(point.Velocity))
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) && !std::isfinite(point.Velocity))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_POINT_VELOCITY_FINITE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_POINT_VELOCITY_FINITE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nactual=" << point.Velocity
+							<< L"\ncriterion=isfinite(actual)";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -666,10 +821,19 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) &&
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) &&
 						!NearlyEqual(kSampleSpeedMps, point.Velocity, kDistanceToleranceM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_PROFILE_VELOCITY", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_PROFILE_VELOCITY"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nexpected=" << kSampleSpeedMps
+							<< L"\nactual=" << point.Velocity
+							<< L"\ntolerance=" << kDistanceToleranceM;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -702,7 +866,15 @@ namespace MazeMap
 
 					if (!(point.Theta + kAngleToleranceRad >= previousThetaRad))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_THETA_MONOTONIC", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_THETA_MONOTONIC"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\nprevious_theta_rad=" << previousThetaRad
+							<< L"\nactual_theta_rad=" << point.Theta
+							<< L"\ntolerance=" << kAngleToleranceRad
+							<< L"\ncriterion=actual+tolerance>=previous";
+						AppendFailure(failures, message.str());
 					}
 					previousThetaRad = point.Theta;
 				}
@@ -728,10 +900,19 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) &&
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) &&
 						!(point.Theta >= -kAngleToleranceRad))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_THETA_NONNEGATIVE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_THETA_NONNEGATIVE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nactual=" << point.Theta
+							<< L"\nminimum=" << -kAngleToleranceRad
+							<< L"\ncriterion=actual>=minimum";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -757,10 +938,20 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) &&
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) &&
 						!(point.Theta <= expectedFinalThetaRad + kAngleToleranceRad))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_THETA_BOUND", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_THETA_BOUND"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nexpected_final_theta_rad=" << expectedFinalThetaRad
+							<< L"\nactual=" << point.Theta
+							<< L"\ntolerance=" << kAngleToleranceRad
+							<< L"\ncriterion=actual<=expected_final+tolerance";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -785,10 +976,19 @@ namespace MazeMap
 				for (float fraction : kProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (TryProfilePoint(set, code, totalDistanceM * fraction, point, cellSizeM) &&
+					const float distanceM = totalDistanceM * fraction;
+					if (TryProfilePoint(set, code, distanceM, point, cellSizeM) &&
 						!(point.Omega >= -kOmegaToleranceRadps))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_OMEGA_NONNEGATIVE", code, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_OMEGA_NONNEGATIVE"
+							<< L"\ncode=" << CodeLabel(code)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\nactual=" << point.Omega
+							<< L"\nminimum=" << -kOmegaToleranceRadps
+							<< L"\ncriterion=actual>=minimum";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -815,7 +1015,14 @@ namespace MazeMap
 				if (TryProfilePoint(set, code, totalDistanceM, finalPoint, cellSizeM) &&
 					!NearlyEqual(expectedFinalThetaRad, finalPoint.Theta, kAngleToleranceRad))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_FINAL_THETA", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_FINAL_THETA"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nexpected=" << expectedFinalThetaRad
+						<< L"\nactual=" << finalPoint.Theta
+						<< L"\ntolerance=" << kAngleToleranceRad
+						<< L"\ntotal_distance_m=" << totalDistanceM;
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -840,7 +1047,14 @@ namespace MazeMap
 				if (TryProfilePoint(set, code, totalDistanceM, finalPoint, cellSizeM) &&
 					!NearlyEqual(0.0f, finalPoint.Omega, kOmegaToleranceRadps))
 				{
-					AppendFailure(failures, Message(L"MM00_GEOM_FINAL_OMEGA", code));
+					std::wstringstream message;
+					message << L"MM00_GEOM_FINAL_OMEGA"
+						<< L"\ncode=" << CodeLabel(code)
+						<< L"\nexpected=0"
+						<< L"\nactual=" << finalPoint.Omega
+						<< L"\ntolerance=" << kOmegaToleranceRadps
+						<< L"\ntotal_distance_m=" << totalDistanceM;
+					AppendFailure(failures, message.str());
 				}
 			}
 
@@ -864,9 +1078,18 @@ namespace MazeMap
 				for (float fraction : kMirrorProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (!TryProfilePoint(set, baseCode, totalDistanceM * fraction, point, cellSizeM))
+					const float distanceM = totalDistanceM * fraction;
+					if (!TryProfilePoint(set, baseCode, distanceM, point, cellSizeM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_BASE_SAMPLE", baseCode, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_MIRROR_BASE_SAMPLE"
+							<< L"\ncode=" << CodeLabel(baseCode)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\ntotal_distance_m=" << totalDistanceM
+							<< L"\nexpected_available=true"
+							<< L"\nactual_available=false";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -892,9 +1115,18 @@ namespace MazeMap
 				for (float fraction : kMirrorProfileFractions)
 				{
 					ManeuverPoint point{};
-					if (!TryProfilePoint(set, mirroredCode, totalDistanceM * fraction, point, cellSizeM))
+					const float distanceM = totalDistanceM * fraction;
+					if (!TryProfilePoint(set, mirroredCode, distanceM, point, cellSizeM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_SAMPLE", mirroredCode, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_MIRROR_SAMPLE"
+							<< L"\ncode=" << CodeLabel(mirroredCode)
+							<< L"\nfraction=" << fraction
+							<< L"\ndistance_m=" << distanceM
+							<< L"\ntotal_distance_m=" << totalDistanceM
+							<< L"\nexpected_available=true"
+							<< L"\nactual_available=false";
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -925,7 +1157,16 @@ namespace MazeMap
 						TryProfilePoint(set, mirroredCode, totalDistanceM * fraction, leftPoint, cellSizeM) &&
 						!NearlyEqual(-rightPoint.X, leftPoint.X, kDistanceToleranceM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_X", baseCode, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_MIRROR_X"
+							<< L"\nbase_code=" << CodeLabel(baseCode)
+							<< L"\nmirrored_code=" << CodeLabel(mirroredCode)
+							<< L"\nfraction=" << fraction
+							<< L"\nexpected=" << -rightPoint.X
+							<< L"\nactual=" << leftPoint.X
+							<< L"\ntolerance=" << kDistanceToleranceM
+							<< L"\nright_x=" << rightPoint.X;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -956,7 +1197,15 @@ namespace MazeMap
 						TryProfilePoint(set, mirroredCode, totalDistanceM * fraction, leftPoint, cellSizeM) &&
 						!NearlyEqual(rightPoint.Y, leftPoint.Y, kDistanceToleranceM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_Y", baseCode, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_MIRROR_Y"
+							<< L"\nbase_code=" << CodeLabel(baseCode)
+							<< L"\nmirrored_code=" << CodeLabel(mirroredCode)
+							<< L"\nfraction=" << fraction
+							<< L"\nexpected=" << rightPoint.Y
+							<< L"\nactual=" << leftPoint.Y
+							<< L"\ntolerance=" << kDistanceToleranceM;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -987,7 +1236,16 @@ namespace MazeMap
 						TryProfilePoint(set, mirroredCode, totalDistanceM * fraction, leftPoint, cellSizeM) &&
 						!NearlyEqual(-rightPoint.Theta, leftPoint.Theta, kAngleToleranceRad))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_THETA", baseCode, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_MIRROR_THETA"
+							<< L"\nbase_code=" << CodeLabel(baseCode)
+							<< L"\nmirrored_code=" << CodeLabel(mirroredCode)
+							<< L"\nfraction=" << fraction
+							<< L"\nexpected=" << -rightPoint.Theta
+							<< L"\nactual=" << leftPoint.Theta
+							<< L"\ntolerance=" << kAngleToleranceRad
+							<< L"\nright_theta=" << rightPoint.Theta;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -1018,7 +1276,16 @@ namespace MazeMap
 						TryProfilePoint(set, mirroredCode, totalDistanceM * fraction, leftPoint, cellSizeM) &&
 						!NearlyEqual(-rightPoint.Omega, leftPoint.Omega, kOmegaToleranceRadps))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_OMEGA", baseCode, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_MIRROR_OMEGA"
+							<< L"\nbase_code=" << CodeLabel(baseCode)
+							<< L"\nmirrored_code=" << CodeLabel(mirroredCode)
+							<< L"\nfraction=" << fraction
+							<< L"\nexpected=" << -rightPoint.Omega
+							<< L"\nactual=" << leftPoint.Omega
+							<< L"\ntolerance=" << kOmegaToleranceRadps
+							<< L"\nright_omega=" << rightPoint.Omega;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -1049,7 +1316,15 @@ namespace MazeMap
 						TryProfilePoint(set, mirroredCode, totalDistanceM * fraction, leftPoint, cellSizeM) &&
 						!NearlyEqual(rightPoint.Velocity, leftPoint.Velocity, kDistanceToleranceM))
 					{
-						AppendFailure(failures, Message(L"MM00_GEOM_MIRROR_VELOCITY", baseCode, L"fraction", fraction));
+						std::wstringstream message;
+						message << L"MM00_GEOM_MIRROR_VELOCITY"
+							<< L"\nbase_code=" << CodeLabel(baseCode)
+							<< L"\nmirrored_code=" << CodeLabel(mirroredCode)
+							<< L"\nfraction=" << fraction
+							<< L"\nexpected=" << rightPoint.Velocity
+							<< L"\nactual=" << leftPoint.Velocity
+							<< L"\ntolerance=" << kDistanceToleranceM;
+						AppendFailure(failures, message.str());
 					}
 				}
 			}
@@ -1081,15 +1356,36 @@ namespace MazeMap
 						ManeuverPoint point{};
 						if (!TryProfilePoint(set, code, distanceM - epsilonM, point, cellSizeM))
 						{
-							AppendFailure(failures, Message(L"MM00_GEOM_DTHETA_DS_PREVIOUS_SAMPLE", code, L"fraction", fraction));
+							std::wstringstream message;
+							message << L"MM00_GEOM_DTHETA_DS_PREVIOUS_SAMPLE"
+								<< L"\ncode=" << CodeLabel(code)
+								<< L"\nfraction=" << fraction
+								<< L"\ndistance_m=" << (distanceM - epsilonM)
+								<< L"\nexpected_available=true"
+								<< L"\nactual_available=false";
+							AppendFailure(failures, message.str());
 						}
 						if (!TryProfilePoint(set, code, distanceM, point, cellSizeM))
 						{
-							AppendFailure(failures, Message(L"MM00_GEOM_DTHETA_DS_CURRENT_SAMPLE", code, L"fraction", fraction));
+							std::wstringstream message;
+							message << L"MM00_GEOM_DTHETA_DS_CURRENT_SAMPLE"
+								<< L"\ncode=" << CodeLabel(code)
+								<< L"\nfraction=" << fraction
+								<< L"\ndistance_m=" << distanceM
+								<< L"\nexpected_available=true"
+								<< L"\nactual_available=false";
+							AppendFailure(failures, message.str());
 						}
 						if (!TryProfilePoint(set, code, distanceM + epsilonM, point, cellSizeM))
 						{
-							AppendFailure(failures, Message(L"MM00_GEOM_DTHETA_DS_NEXT_SAMPLE", code, L"fraction", fraction));
+							std::wstringstream message;
+							message << L"MM00_GEOM_DTHETA_DS_NEXT_SAMPLE"
+								<< L"\ncode=" << CodeLabel(code)
+								<< L"\nfraction=" << fraction
+								<< L"\ndistance_m=" << (distanceM + epsilonM)
+								<< L"\nexpected_available=true"
+								<< L"\nactual_available=false";
+							AppendFailure(failures, message.str());
 						}
 					}
 				}
@@ -1135,7 +1431,15 @@ namespace MazeMap
 						const float error = Abs(numericDThetaDs - kinematicDThetaDs);
 						if (!(error <= kDerivativeToleranceRadPerM))
 						{
-							AppendFailure(failures, Message(L"MM00_GEOM_DTHETA_DS", code, L"error", error));
+							std::wstringstream message;
+							message << L"MM00_GEOM_DTHETA_DS"
+								<< L"\ncode=" << CodeLabel(code)
+								<< L"\nfraction=" << fraction
+								<< L"\nnumeric_dtheta_ds=" << numericDThetaDs
+								<< L"\nkinematic_dtheta_ds=" << kinematicDThetaDs
+								<< L"\nactual_error=" << error
+								<< L"\ntolerance=" << kDerivativeToleranceRadPerM;
+							AppendFailure(failures, message.str());
 						}
 					}
 				}
