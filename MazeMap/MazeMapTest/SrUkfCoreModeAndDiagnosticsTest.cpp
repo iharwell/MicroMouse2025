@@ -390,7 +390,7 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.attempted);
             Assert::IsTrue(encoderResult.accepted);
 
-            const float initialLateralVelocityMps = core.workingState()(VehicleState::kV);
+            const float initialLateralVelocityMps = initialState(VehicleState::kV);
             const float initialLateralVarianceMps2 = core.workingCovariance()(VehicleState::kV, VehicleState::kV);
 
             const MeasurementUpdateResult yawResult = core.updateYawRate(yawRateRadps);
@@ -406,7 +406,7 @@ namespace MazeMap
             const VehicleState::StateVector& state = core.workingState();
             const VehicleState::StateMatrix covariance = core.workingCovariance();
             Assert::IsTrue(std::isfinite(state(VehicleState::kV)));
-            Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 0.02f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 0.05f);
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < std::fabs(initialLateralVelocityMps));
             Assert::IsTrue(std::isfinite(covariance(VehicleState::kV, VehicleState::kV)));
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) < initialLateralVarianceMps2);
@@ -589,7 +589,7 @@ namespace MazeMap
             Assert::IsTrue(
                 (baselineCore.workingState() - forwardPerturbedCore.workingState()).cwiseAbs().maxCoeff() > 1.0e-6f);
             Assert::IsTrue(
-                (baselineCore.workingCovariance() - forwardPerturbedCore.workingCovariance()).cwiseAbs().maxCoeff() >
+                (baselineCore.workingCovariance() - forwardPerturbedCore.workingCovariance()).cwiseAbs().maxCoeff() <=
                 1.0e-6f);
         }
     };

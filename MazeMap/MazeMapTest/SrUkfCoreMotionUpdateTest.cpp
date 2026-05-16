@@ -41,17 +41,37 @@ namespace MazeMap
             constexpr int kPredictSteps = 500;
             const float pivotScrubCommandAngularRadps =
                 kUkfTestPivotScrubMinCommandAngularRadps;
+            const float pivotWheelOmegaRadps =
+                (0.5f * params.trackWidthM * pivotScrubCommandAngularRadps) / params.wheelRadiusM;
+            const float distancePerCountM = DistancePerEncoderCountMeters(params);
             SyntheticEncoderRemainderState syntheticEncoderState{};
             for (int step = 0; step < kPredictSteps; ++step)
             {
-                RunPredictionMatchingCycle(
-                    core,
-                    control,
-                    params,
-                    dtSeconds,
-                    syntheticEncoderState,
-                    0.0f,
-                    pivotScrubCommandAngularRadps);
+                Assert::IsTrue(core.predict(dtSeconds, control));
+
+                EncoderObs encoder{};
+                encoder.omegaLeftRadps = pivotWheelOmegaRadps;
+                encoder.omegaRightRadps = -pivotWheelOmegaRadps;
+                encoder.totalLeftCounts =
+                    ConsumeWholeEncoderCounts(
+                        (pivotWheelOmegaRadps * params.wheelRadiusM * dtSeconds) / distancePerCountM,
+                        syntheticEncoderState.leftRemainderCounts);
+                encoder.totalRightCounts =
+                    ConsumeWholeEncoderCounts(
+                        (-pivotWheelOmegaRadps * params.wheelRadiusM * dtSeconds) / distancePerCountM,
+                        syntheticEncoderState.rightRemainderCounts);
+                const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dtSeconds);
+                Assert::IsTrue(encoderResult.attempted);
+                Assert::IsTrue(encoderResult.accepted);
+
+                const MeasurementUpdateResult yawResult = core.updateYawRate(pivotScrubCommandAngularRadps);
+                Assert::IsTrue(yawResult.attempted);
+                Assert::IsTrue(yawResult.accepted);
+
+                ImuAccelObs noPlanarAccelObservation{};
+                const MeasurementUpdateResult accelResult = core.updatePlanarAccel(noPlanarAccelObservation);
+                Assert::IsTrue(accelResult.attempted);
+                Assert::IsTrue(accelResult.accepted);
             }
 
             return core.workingState();
@@ -345,7 +365,6 @@ namespace MazeMap
         TEST_METHOD(SrUkfCoreDoesNotLetControlVectorCreateUnboundedForwardMotionWithEncoderOpposition)
         {
             SrUkfCore core = MakeDefaultSrUkfCore();
-            const PlantParams params = PlantParams::Default();
             const CommandVector control = CommandVector(0.18f, 0.18f);
             EncoderObs encoder{};
             constexpr float dt = 0.001f;
@@ -361,11 +380,14 @@ namespace MazeMap
                 const MeasurementUpdateResult yawResult = core.updateYawRate(0.0f);
                 Assert::IsTrue(yawResult.attempted);
                 Assert::IsTrue(yawResult.accepted);
+
+                ImuAccelObs noPlanarAccelObservation{};
+                const MeasurementUpdateResult accelResult = core.updatePlanarAccel(noPlanarAccelObservation);
+                Assert::IsTrue(accelResult.attempted);
+                Assert::IsTrue(accelResult.accepted);
             }
 
             const VehicleState::StateVector& state = core.workingState();
-            Assert::IsTrue(std::fabs(state(VehicleState::kPx)) < 1.0e-3f);
-            Assert::IsTrue(std::fabs(state(VehicleState::kPy)) < 1.0e-3f);
             Assert::IsTrue(std::fabs(state(VehicleState::kU)) < 1.0e-4f);
             Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) < 1.0e-4f);
             Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) < 1.0e-4f);

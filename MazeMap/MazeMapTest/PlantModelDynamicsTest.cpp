@@ -205,8 +205,8 @@ namespace MazeMap
         TEST_METHOD(PlantModelFeedforwardDoesNotUsePrediction)
         {
             constexpr uint32_t numFeedforward = 100000;
-            constexpr uint32_t numForwardStep = 70000;
-			constexpr uint32_t numIntegrate = 65000;
+            constexpr uint32_t numForwardStep = 80000;
+			constexpr uint32_t numIntegrate = 75000;
 
             PlantModelTestRuntime runtime;
             PlantModel& plant = runtime.plant;
