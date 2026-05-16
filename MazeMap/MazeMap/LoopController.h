@@ -311,8 +311,8 @@ namespace MazeMap::App::Internal
             std::uint32_t loopEndTimeUs,
             const MazeMap::VehicleState& state,
             LoopController& loopController);
-        static bool IsBrakeMotorPwmCommand(const CommandVector& command) noexcept;
-        static bool IsZeroMotorPwmCommand(const CommandVector& command) noexcept;
+        static bool IsBrakeCommand(const CommandVector& command) noexcept;
+        static bool IsZeroCommand(const CommandVector& command) noexcept;
         static std::uint32_t ReadCycleCounter() noexcept;
 
         void RunSessionStartWallSensorAdcProbe() noexcept;

@@ -171,8 +171,8 @@ namespace MazeMap
             return;
         }
 
-        _leftMotor.setDriveCommand(command.LeftMotorPwm());
-        _rightMotor.setDriveCommand(command.RightMotorPwm());
+        _leftMotor.setDriveCommand(command.LeftCommand());
+        _rightMotor.setDriveCommand(command.RightCommand());
     }
 
     void Vehicle::ResetDriveEncoders() noexcept

@@ -1317,10 +1317,7 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine(
             "Open-floor battery: timing capture plus the registered main-regime battery");
 
-        if (!_drive.Begin())
-        {
-            _runtime.FailActiveMode("Open-floor measurement drive base init failed");
-        }
+        _drive.ClearCommandEvidence();
 
         _startupCalibration.Cancel();
         _startupCalibration.SetIsInMaze(false);
@@ -1414,7 +1411,7 @@ namespace MazeMap::App::Internal
         Runtime::OpenFloorMainRow& row) const
     {
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
-        const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
+        const DriveTelemetry driveTelemetry = _drive.LastTelemetry();
         const float leftWheelVelocityMps =
             MazeMap::Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedLeft());
         const float rightWheelVelocityMps =
@@ -1432,30 +1429,34 @@ namespace MazeMap::App::Internal
         row.primitive_id = static_cast<std::uint8_t>(primitiveCode);
         row.speed_bin = speedBinValue;
         row.repeat_index = repeatIndex;
-        row.mode_flags = driveTelemetry.modeFlags;
-        row.saturation_flags = driveTelemetry.saturationFlags;
+        row.mode_flags = driveTelemetry.commandKindFlags;
+        row.saturation_flags = driveTelemetry.solverFailureFlags;
         row.SetVehicleState(state);
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;
-        row.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;
-        row.cmd_angular_radps = driveTelemetry.commandedAngularSpeedRadps;
+        row.cmd_linear_mps = driveTelemetry.requestedForwardMps;
+        row.cmd_angular_radps = driveTelemetry.requestedYawRateRadps;
         row.left_drive_command = driveTelemetry.leftDriveCommand;
         row.right_drive_command = driveTelemetry.rightDriveCommand;
-        row.left_feedforward_command = driveTelemetry.leftFeedforwardCommand;
-        row.right_feedforward_command = driveTelemetry.rightFeedforwardCommand;
-        row.left_feedback_command = driveTelemetry.leftFeedbackCommand;
-        row.right_feedback_command = driveTelemetry.rightFeedbackCommand;
-        row.left_target_velocity_mps = driveTelemetry.leftTargetVelocityMps;
-        row.right_target_velocity_mps = driveTelemetry.rightTargetVelocityMps;
+        row.left_plant_command = driveTelemetry.leftPlantCommand;
+        row.right_plant_command = driveTelemetry.rightPlantCommand;
+        row.left_command_residual = driveTelemetry.leftDriveCommand - driveTelemetry.leftPlantCommand;
+        row.right_command_residual = driveTelemetry.rightDriveCommand - driveTelemetry.rightPlantCommand;
+        row.left_target_velocity_mps = MazeMap::Vehicle::LeftWheelLinearVelocityFromBody(
+            driveTelemetry.requestedForwardMps,
+            driveTelemetry.requestedYawRateRadps);
+        row.right_target_velocity_mps = MazeMap::Vehicle::RightWheelLinearVelocityFromBody(
+            driveTelemetry.requestedForwardMps,
+            driveTelemetry.requestedYawRateRadps);
         row.encoder_timestamp_us = 0U;
-        row.left_encoder_count = static_cast<std::int32_t>(driveTelemetry.leftEncoderCount);
-        row.right_encoder_count = static_cast<std::int32_t>(driveTelemetry.rightEncoderCount);
-        row.left_encoder_omega_radps = driveTelemetry.leftEncoderOmegaRadps;
-        row.right_encoder_omega_radps = driveTelemetry.rightEncoderOmegaRadps;
-        row.left_encoder_distance_m = driveTelemetry.leftDistanceM;
-        row.right_encoder_distance_m = driveTelemetry.rightDistanceM;
-        row.left_encoder_velocity_mps = driveTelemetry.leftVelocityMps;
-        row.right_encoder_velocity_mps = driveTelemetry.rightVelocityMps;
+        row.left_encoder_count = static_cast<std::int32_t>(sensors.leftEncoderTotalCounts);
+        row.right_encoder_count = static_cast<std::int32_t>(sensors.rightEncoderTotalCounts);
+        row.left_encoder_omega_radps = sensors.encoderObservation.omegaLeftRadps;
+        row.right_encoder_omega_radps = sensors.encoderObservation.omegaRightRadps;
+        row.left_encoder_distance_m = sensors.leftEncoderDistanceM;
+        row.right_encoder_distance_m = sensors.rightEncoderDistanceM;
+        row.left_encoder_velocity_mps = sensors.encoderObservation.leftVelocityMps;
+        row.right_encoder_velocity_mps = sensors.encoderObservation.rightVelocityMps;
         row.imu_timestamp_us = sensors.imuTiming.readDoneUs;
         row.imu_status = sensors.imuBackLeft.status;
         row.accel_bias_valid = sensors.accelBiasValid ? 1U : 0U;

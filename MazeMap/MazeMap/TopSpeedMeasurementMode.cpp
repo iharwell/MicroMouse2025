@@ -13,6 +13,8 @@
 #include "PinPairStrap.h"
 #include "StartupCalibration.h"
 
+#include <limits>
+
 namespace
 {
     constexpr const char* kTopSpeedMeasurementStableId = "top_speed_measurement";
@@ -68,10 +70,7 @@ namespace MazeMap::App::Internal
             (void)_runtime.AppendTextLogLine("Top speed measurement mode");
             (void)_runtime.AppendTextLogLine("Shared-service open-floor straight-line top-speed audit");
 
-            if (!_drive.Begin())
-            {
-                _runtime.FailActiveMode("Top speed measurement drive base init failed");
-            }
+            _drive.ClearCommandEvidence();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(false);
@@ -115,7 +114,7 @@ namespace MazeMap::App::Internal
             self->ReleaseSelectorMonitor();
             self->_phase = Phase::Idle;
             self->_startupCalibration.Cancel();
-            self->_drive.Brake();
+            self->_drive.ClearCommandEvidence();
         }
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept
@@ -286,6 +285,7 @@ namespace MazeMap::App::Internal
                 return PollDrive(Phase::Complete);
 
             case Phase::Complete:
+            {
                 (void)_runtime.AppendTextLogFormatted(
                     "Top speed complete: ticks=%lu peak_speed_mps=%.3f peak_planar_accel_mps2=%.3f vbat0=%.3f",
                     static_cast<unsigned long>(_loopController.LastDiagnostics().sequence),
@@ -294,10 +294,16 @@ namespace MazeMap::App::Internal
                     _batteryVoltageStart);
                 ReleaseSelectorMonitor();
                 _startupCalibration.Cancel();
-                _drive.Brake();
+                const CommandVector stopCommand = _drive.ProposeBodyTick(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    (std::numeric_limits<float>::quiet_NaN)());
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return CommandVector::Brake();
+                return stopCommand;
+            }
 
             case Phase::Idle:
             default:

@@ -14,6 +14,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 namespace
 {
@@ -148,10 +149,7 @@ namespace MazeMap::App::Internal
             (void)_runtime.AppendTextLogLine(
                 "Load and execute the maneuver queue stored in test.txt through shared startup calibration and Drive.");
 
-            if (!_drive.Begin())
-            {
-                _runtime.FailActiveMode("Maneuver file test drive base init failed");
-            }
+            _drive.ClearCommandEvidence();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
@@ -311,12 +309,19 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::Complete:
+            {
                 (void)_runtime.AppendTextLogLine("Maneuver file test complete");
                 _startupCalibration.Cancel();
-                _drive.Brake();
+                const CommandVector stopCommand = _drive.ProposeBodyTick(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    (std::numeric_limits<float>::quiet_NaN)());
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return CommandVector::Brake();
+                return stopCommand;
+            }
 
             case Phase::Idle:
             default:
@@ -368,7 +373,7 @@ namespace MazeMap::App::Internal
 
             auto* const self = static_cast<ManeuverFileTestMode*>(context);
             self->_startupCalibration.Cancel();
-            self->_drive.Brake();
+            self->_drive.ClearCommandEvidence();
         }
 
         SharedRobotRuntime& _runtime;

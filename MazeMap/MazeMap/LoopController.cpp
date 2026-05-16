@@ -23,7 +23,7 @@ namespace MazeMap::App::Internal
 {
     namespace
     {
-        constexpr float kZeroMotorPwmThreshold = 1.0e-4f;
+        constexpr float kZeroMotorCommandThreshold = 1.0e-4f;
         constexpr std::uint16_t kTickTimingSaturatedUs = 0xFFFFU;
         constexpr float kPauseLinearThresholdMps = 0.01f;
         constexpr float kPauseAngularThresholdRadps = 0.05f;
@@ -266,18 +266,18 @@ namespace MazeMap::App::Internal
         return static_cast<IApplicationMode*>(context)->RunTick(loopEndTimeUs, state, loopController);
     }
 
-    bool LoopController::IsBrakeMotorPwmCommand(const CommandVector& command) noexcept
+    bool LoopController::IsBrakeCommand(const CommandVector& command) noexcept
     {
-        return !std::isfinite(command.LeftMotorPwm()) || !std::isfinite(command.RightMotorPwm());
+        return !std::isfinite(command.LeftCommand()) || !std::isfinite(command.RightCommand());
     }
 
-    bool LoopController::IsZeroMotorPwmCommand(const CommandVector& command) noexcept
+    bool LoopController::IsZeroCommand(const CommandVector& command) noexcept
     {
         return
-            std::isfinite(command.LeftMotorPwm()) &&
-            std::isfinite(command.RightMotorPwm()) &&
-            (std::fabs(command.LeftMotorPwm()) <= kZeroMotorPwmThreshold) &&
-            (std::fabs(command.RightMotorPwm()) <= kZeroMotorPwmThreshold);
+            std::isfinite(command.LeftCommand()) &&
+            std::isfinite(command.RightCommand()) &&
+            (std::fabs(command.LeftCommand()) <= kZeroMotorCommandThreshold) &&
+            (std::fabs(command.RightCommand()) <= kZeroMotorCommandThreshold);
     }
 
     std::uint32_t LoopController::ReadCycleCounter() noexcept
@@ -933,7 +933,7 @@ namespace MazeMap::App::Internal
 
     bool LoopController::ShouldTreatAppliedControlAsStationary() const noexcept
     {
-        return IsBrakeMotorPwmCommand(_appliedControl) || IsZeroMotorPwmCommand(_appliedControl);
+        return IsBrakeCommand(_appliedControl) || IsZeroCommand(_appliedControl);
     }
 
     void LoopController::ResolvePauseRequest()

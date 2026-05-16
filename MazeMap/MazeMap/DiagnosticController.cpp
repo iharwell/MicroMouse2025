@@ -43,6 +43,11 @@ namespace MazeMap
         constexpr float kForwardSweepCarryThresholdM = 0.180f;
     }
 
+    float AverageEncoderDistanceM(const SensorSnapshot& sensors) noexcept
+    {
+        return 0.5f * (sensors.leftEncoderDistanceM + sensors.rightEncoderDistanceM);
+    }
+
     class DiagnosticController : public IApplicationMode
     {
         using LoopController = MazeMap::App::Internal::LoopController;
@@ -80,10 +85,7 @@ namespace MazeMap
             }
             ResetStartupTrace("mode:primary_diagnostic");
             (void)_runtime.AppendTextLogLine("Micromouse diagnostic setup");
-            if (!_drive.Begin())
-            {
-                _runtime.FailActiveMode("Drive base init failed");
-            }
+            _drive.ClearCommandEvidence();
             _vehicle.SetFanDuty(Config::kRacingFanDutyCycle);
             gWallDistanceCalibration.Clear();
             if (!_sensors.Begin(DiagnosticConfig::kControlPeriodUs))
@@ -173,7 +175,7 @@ namespace MazeMap
         void BufferCurrentSample(const MazeMap::VehicleState& state)
         {
             const SensorSnapshot& snapshot = state.GetSensorSnapshot();
-            const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
+            const DriveTelemetry driveTelemetry = _drive.LastTelemetry();
             _logRow = {};
             _logRow.sample = static_cast<std::uint32_t>(_sampleCount);
             _logRow.phase_id = static_cast<std::uint32_t>(_phaseId);
@@ -186,16 +188,16 @@ namespace MazeMap
             _logRow.angular_speed_radps = state.GetRotationalVelocity();
             // LoopController refreshes runtime state before calling the mode callback, so these
             // command fields match the sampled state for this log row.
-            _logRow.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;
-            _logRow.cmd_angular_radps = driveTelemetry.commandedAngularSpeedRadps;
+            _logRow.cmd_linear_mps = driveTelemetry.requestedForwardMps;
+            _logRow.cmd_angular_radps = driveTelemetry.requestedYawRateRadps;
             _logRow.left_drive_cmd = driveTelemetry.leftDriveCommand;
             _logRow.right_drive_cmd = driveTelemetry.rightDriveCommand;
-            _logRow.left_encoder_count = static_cast<std::int32_t>(driveTelemetry.leftEncoderCount);
-            _logRow.right_encoder_count = static_cast<std::int32_t>(driveTelemetry.rightEncoderCount);
-            _logRow.left_distance_m = driveTelemetry.leftDistanceM;
-            _logRow.right_distance_m = driveTelemetry.rightDistanceM;
-            _logRow.left_velocity_mps = driveTelemetry.leftVelocityMps;
-            _logRow.right_velocity_mps = driveTelemetry.rightVelocityMps;
+            _logRow.left_encoder_count = static_cast<std::int32_t>(snapshot.leftEncoderTotalCounts);
+            _logRow.right_encoder_count = static_cast<std::int32_t>(snapshot.rightEncoderTotalCounts);
+            _logRow.left_distance_m = snapshot.leftEncoderDistanceM;
+            _logRow.right_distance_m = snapshot.rightEncoderDistanceM;
+            _logRow.left_velocity_mps = snapshot.encoderObservation.leftVelocityMps;
+            _logRow.right_velocity_mps = snapshot.encoderObservation.rightVelocityMps;
             _logRow.imu_fr_status = snapshot.imuFrontRight.status;
             _logRow.imu_fr_gyro_x = snapshot.imuFrontRight.gyroX;
             _logRow.imu_fr_gyro_y = snapshot.imuFrontRight.gyroY;
@@ -455,7 +457,7 @@ namespace MazeMap
         float _circleSequenceStartX{};
         float _circleSequenceStartY{};
         float _circleSequenceStartYawRad{};
-        DriveTelemetry _circleSequenceStartTelemetry{};
+        SensorSnapshot _circleSequenceStartSensors{};
         ArcPhaseMetrics _circleSequenceTotalMetrics{};
 
         char _squareSequenceNamePrefix[24]{};
@@ -513,7 +515,7 @@ namespace MazeMap
             }
 
             _phaseFn = nullptr;
-            _drive.Brake();
+            _drive.ClearCommandEvidence();
             CloseLog();
             _vehicle.SetFanDuty(0.0f);
             _cleanupComplete = true;
@@ -582,7 +584,8 @@ namespace MazeMap
             _straightPhaseState.phaseName = phaseName;
             _straightPhaseState.distanceM = distanceM;
             _straightPhaseState.cruiseSpeedMps = cruiseSpeedMps;
-            _straightPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+            _straightPhaseState.startDistanceM =
+                AverageEncoderDistanceM(_runtime.RuntimeState().GetSensorSnapshot());
             _straightPhaseState.targetHeading = _runtime.RuntimeState().GetHeadingUnit();
             _straightPhaseState.timeoutMs = millis() + static_cast<unsigned long>(2500.0f + (6000.0f * distanceM));
             _straightPhaseState.translationWatchdog.Reset(0.0f, millis());
@@ -606,7 +609,8 @@ namespace MazeMap
             _kickoffPhaseState = KickoffPhaseState{};
             snprintf(_kickoffPhaseState.label, sizeof(_kickoffPhaseState.label), "%s", label);
             _kickoffPhaseState.driveCommand = driveCommand;
-            _kickoffPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+            _kickoffPhaseState.startDistanceM =
+                AverageEncoderDistanceM(_runtime.RuntimeState().GetSensorSnapshot());
             _kickoffPhaseState.pulseDeadlineMs = millis() + LegacyDiagnosticConfig::kKickoffSweepPulseMs;
             _kickoffPhaseState.settleDeadlineMs = _kickoffPhaseState.pulseDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
             _kickoffPhaseState.travelLimitM = MazeMap::ComputeDiagnosticCharacterizationTravelLimitM(
@@ -630,7 +634,9 @@ namespace MazeMap
 
         bool FinishKickoffCharacterizationSample()
         {
-            const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _kickoffPhaseState.startDistanceM);
+            const float traveledDistanceM = std::fabs(
+                AverageEncoderDistanceM(_runtime.RuntimeState().GetSensorSnapshot()) -
+                _kickoffPhaseState.startDistanceM);
             const bool moved =
                 (traveledDistanceM >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdM) ||
                 (_kickoffPhaseState.maxSpeedMps >= LegacyDiagnosticConfig::kKickoffSweepMoveThresholdMps);
@@ -676,7 +682,8 @@ namespace MazeMap
             _forwardPhaseState = ForwardPhaseState{};
             snprintf(_forwardPhaseState.label, sizeof(_forwardPhaseState.label), "%s", label);
             _forwardPhaseState.forwardDriveCommand = forwardDriveCommand;
-            _forwardPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+            _forwardPhaseState.startDistanceM =
+                AverageEncoderDistanceM(_runtime.RuntimeState().GetSensorSnapshot());
             _forwardPhaseState.kickoffDeadlineMs = millis() + LegacyDiagnosticConfig::kForwardSweepKickoffMs;
             _forwardPhaseState.holdDeadlineMs = _forwardPhaseState.kickoffDeadlineMs + LegacyDiagnosticConfig::kForwardSweepHoldMs;
             _forwardPhaseState.settleDeadlineMs = _forwardPhaseState.holdDeadlineMs + DiagnosticConfig::kCharacterizationSettleMs;
@@ -706,10 +713,13 @@ namespace MazeMap
             if (!_forwardPhaseState.holdComplete)
             {
                 _forwardPhaseState.holdComplete = true;
-                _forwardPhaseState.holdEndDistanceM = _drive.GetAverageDistanceMeters();
+                _forwardPhaseState.holdEndDistanceM =
+                    AverageEncoderDistanceM(_runtime.RuntimeState().GetSensorSnapshot());
             }
 
-            const float totalDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _forwardPhaseState.startDistanceM);
+            const float totalDistanceM = std::fabs(
+                AverageEncoderDistanceM(_runtime.RuntimeState().GetSensorSnapshot()) -
+                _forwardPhaseState.startDistanceM);
             const float holdDistanceM =
                 _forwardPhaseState.holdStarted ?
                 std::fabs(_forwardPhaseState.holdEndDistanceM - _forwardPhaseState.holdStartDistanceM) :
@@ -801,7 +811,8 @@ namespace MazeMap
             _arcPhaseState.angleRad = angleRad;
             _arcPhaseState.cruiseSpeedMps = cruiseSpeedMps;
             _arcPhaseState.limits = DiagnosticLimits(cruiseSpeedMps);
-            _arcPhaseState.startDistanceM = _drive.GetAverageDistanceMeters();
+            _arcPhaseState.startDistanceM =
+                AverageEncoderDistanceM(_runtime.RuntimeState().GetSensorSnapshot());
             _arcPhaseState.startYawRad = _runtime.RuntimeState().GetOrientation();
             _arcPhaseState.targetYawRad = WrapAngleRad(_arcPhaseState.startYawRad + angleRad);
             _arcPhaseState.curvature = angleRad / distanceM;
@@ -820,7 +831,7 @@ namespace MazeMap
             _circleSequenceStartX = _runtime.RuntimeState().GetPositionX();
             _circleSequenceStartY = _runtime.RuntimeState().GetPositionY();
             _circleSequenceStartYawRad = _runtime.RuntimeState().GetOrientation();
-            _circleSequenceStartTelemetry = _drive.GetTelemetry();
+            _circleSequenceStartSensors = _runtime.RuntimeState().GetSensorSnapshot();
             _circleSequenceTotalMetrics = ArcPhaseMetrics{};
         }
 
@@ -1435,14 +1446,14 @@ namespace MazeMap
         bool WriteCircleResult(
             const char* phaseName,
             float cruiseSpeedMps,
-            const DriveTelemetry& startTelemetry,
+            const SensorSnapshot& startSensors,
             const ArcPhaseMetrics& metrics)
         {
-            const DriveTelemetry endTelemetry = _drive.GetTelemetry();
-            const long leftCountDelta = static_cast<long>(endTelemetry.leftEncoderCount - startTelemetry.leftEncoderCount);
-            const long rightCountDelta = static_cast<long>(endTelemetry.rightEncoderCount - startTelemetry.rightEncoderCount);
-            const float leftDistanceDeltaM = endTelemetry.leftDistanceM - startTelemetry.leftDistanceM;
-            const float rightDistanceDeltaM = endTelemetry.rightDistanceM - startTelemetry.rightDistanceM;
+            const SensorSnapshot& endSensors = _runtime.RuntimeState().GetSensorSnapshot();
+            const long leftCountDelta = static_cast<long>(endSensors.leftEncoderTotalCounts - startSensors.leftEncoderTotalCounts);
+            const long rightCountDelta = static_cast<long>(endSensors.rightEncoderTotalCounts - startSensors.rightEncoderTotalCounts);
+            const float leftDistanceDeltaM = endSensors.leftEncoderDistanceM - startSensors.leftEncoderDistanceM;
+            const float rightDistanceDeltaM = endSensors.rightEncoderDistanceM - startSensors.rightEncoderDistanceM;
             const float averageOmegaRadps = (metrics.durationSeconds > 0.0f) ? (metrics.omegaIntegralRad / metrics.durationSeconds) : 0.0f;
             const float averageSpeedMps = (metrics.durationSeconds > 0.0f) ? (metrics.speedIntegralMpsSeconds / metrics.durationSeconds) : 0.0f;
             const float effectiveTrackWidthM =
@@ -1596,7 +1607,7 @@ namespace MazeMap
             (void)loopEndTimeUs;
             const MotionLimits limits = DiagnosticLimits(_straightPhaseState.cruiseSpeedMps);
             _straightPhaseState.traveledM =
-                std::fabs(_drive.GetAverageDistanceMeters() - _straightPhaseState.startDistanceM);
+                std::fabs(AverageEncoderDistanceM(state.GetSensorSnapshot()) - _straightPhaseState.startDistanceM);
             const float remainingM = (std::max)(0.0f, _straightPhaseState.distanceM - _straightPhaseState.traveledM);
             _straightPhaseState.peakSpeedMps = (std::max)(
                 _straightPhaseState.peakSpeedMps,
@@ -1663,11 +1674,12 @@ namespace MazeMap
                 -limits.GetMaxAngularSpeedRadps(),
                 limits.GetMaxAngularSpeedRadps());
 
-            return _drive.PointControlVector(
+            return _drive.ProposeBodyTick(
                 _straightPhaseState.commandedSpeedMps,
                 angularCommandRadps,
-                MazeMap::FeedbackSource::Encoder,
-                MazeMap::FeedbackSource::Encoder);
+                0.0f,
+                0.0f,
+                state.GetOrientation());
         }
 
         CommandVector KickoffCharacterizationTick(
@@ -1679,7 +1691,7 @@ namespace MazeMap
             (void)loopController;
             const unsigned long nowMs = millis();
             const float traveledDistanceM =
-                std::fabs(_drive.GetAverageDistanceMeters() - _kickoffPhaseState.startDistanceM);
+                std::fabs(AverageEncoderDistanceM(state.GetSensorSnapshot()) - _kickoffPhaseState.startDistanceM);
             if (!_kickoffPhaseState.travelLimited &&
                 (_kickoffPhaseState.travelLimitM > 0.0f) &&
                 (traveledDistanceM >= _kickoffPhaseState.travelLimitM))
@@ -1738,7 +1750,7 @@ namespace MazeMap
             (void)loopController;
             const unsigned long nowMs = millis();
             const float traveledDistanceM =
-                std::fabs(_drive.GetAverageDistanceMeters() - _forwardPhaseState.startDistanceM);
+                std::fabs(AverageEncoderDistanceM(state.GetSensorSnapshot()) - _forwardPhaseState.startDistanceM);
             if (!_forwardPhaseState.travelLimited &&
                 (_forwardPhaseState.travelLimitM > 0.0f) &&
                 (traveledDistanceM >= _forwardPhaseState.travelLimitM))
@@ -1748,7 +1760,8 @@ namespace MazeMap
                 if (_forwardPhaseState.holdStarted && !_forwardPhaseState.holdComplete)
                 {
                     _forwardPhaseState.holdComplete = true;
-                    _forwardPhaseState.holdEndDistanceM = _drive.GetAverageDistanceMeters();
+                    _forwardPhaseState.holdEndDistanceM =
+                        AverageEncoderDistanceM(state.GetSensorSnapshot());
                 }
             }
 
@@ -1768,7 +1781,8 @@ namespace MazeMap
                 if (!_forwardPhaseState.holdStarted)
                 {
                     _forwardPhaseState.holdStarted = true;
-                    _forwardPhaseState.holdStartDistanceM = _drive.GetAverageDistanceMeters();
+                    _forwardPhaseState.holdStartDistanceM =
+                        AverageEncoderDistanceM(state.GetSensorSnapshot());
                 }
                 _forwardPhaseState.holdElapsedSeconds +=
                     static_cast<float>(_loopController.LastDiagnostics().dtUs) * 1.0e-6f;
@@ -1779,7 +1793,8 @@ namespace MazeMap
             else if (!_forwardPhaseState.holdComplete)
             {
                 _forwardPhaseState.holdComplete = true;
-                _forwardPhaseState.holdEndDistanceM = _drive.GetAverageDistanceMeters();
+                _forwardPhaseState.holdEndDistanceM =
+                    AverageEncoderDistanceM(state.GetSensorSnapshot());
             }
 
             _forwardPhaseState.maxSpeedMps = (std::max)(
@@ -1883,7 +1898,8 @@ namespace MazeMap
             LoopController& loopController)
         {
             (void)loopEndTimeUs;
-            _arcPhaseState.traveledM = std::fabs(_drive.GetAverageDistanceMeters() - _arcPhaseState.startDistanceM);
+            _arcPhaseState.traveledM =
+                std::fabs(AverageEncoderDistanceM(state.GetSensorSnapshot()) - _arcPhaseState.startDistanceM);
             const float remainingM = (std::max)(0.0f, _arcPhaseState.distanceM - _arcPhaseState.traveledM);
             _arcPhaseState.metrics.peakSpeedMps = (std::max)(
                 _arcPhaseState.metrics.peakSpeedMps,
@@ -1921,7 +1937,7 @@ namespace MazeMap
                     if (!WriteCircleResult(
                             _circleSequenceNamePrefix,
                             _circleSequenceCruiseSpeedMps,
-                            _circleSequenceStartTelemetry,
+                            _circleSequenceStartSensors,
                             _circleSequenceTotalMetrics))
                     {
                         _runtime.FailActiveMode("Failed to write circle diagnostic result");
@@ -1984,11 +2000,12 @@ namespace MazeMap
                 -_arcPhaseState.limits.GetMaxAngularSpeedRadps(),
                 _arcPhaseState.limits.GetMaxAngularSpeedRadps());
 
-            return _drive.PointControlVector(
+            return _drive.ProposeBodyTick(
                 _arcPhaseState.commandedSpeedMps,
                 angularCommandRadps,
-                MazeMap::FeedbackSource::Encoder,
-                MazeMap::FeedbackSource::Encoder);
+                0.0f,
+                0.0f,
+                phaseTargetYawRad);
         }
 
     };

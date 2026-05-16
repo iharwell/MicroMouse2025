@@ -29,6 +29,14 @@ MMLOG_DEFINE_ROW(FrontWallCharacterizationLogRow, FRONT_WALL_CHARACTERIZATION_LO
 
 namespace MazeMap
 {
+    namespace
+    {
+        float AverageEncoderDistanceM(const SensorSnapshot& snapshot) noexcept
+        {
+            return 0.5f * (snapshot.leftEncoderDistanceM + snapshot.rightEncoderDistanceM);
+        }
+    }
+
     MotionLimits BuildReverseCaptureLimits(const MazeMap::Vehicle& vehicle) noexcept
     {
         MotionLimits limits{};
@@ -79,7 +87,7 @@ public:
 
         _vehicle.SetFanDuty(0.0f);
 
-        const bool driveOk = _drive.Begin();
+        _drive.ClearCommandEvidence();
         _startupCalibration.Cancel();
         _startupCalibration.SetIsInMaze(false);
         const bool sensorsOk = _startupCalibration.BringUp();
@@ -99,10 +107,6 @@ public:
             (void)_runtime.AppendTextLogLine("Existing front-wall curve will be replaced on success.");
         }
 
-        if (!driveOk)
-        {
-            _runtime.FailActiveMode("Drive initialization failed");
-        }
         if (!sensorsOk)
         {
             _runtime.FailActiveMode("Sensor initialization failed");
@@ -144,14 +148,14 @@ private:
         self->_phase = Phase::Idle;
         self->_pauseAction = PauseAction::None;
         self->_startupCalibration.Cancel();
-        self->_drive.Brake();
+        self->_drive.ClearCommandEvidence();
         self->_vehicle.SetFanDuty(0.0f);
     }
 
     void FinalizeSuccessfulRun() noexcept
     {
         _startupCalibration.Cancel();
-        _drive.Brake();
+        _drive.ClearCommandEvidence();
         _phase = Phase::Idle;
         _pauseAction = PauseAction::None;
         _vehicle.SetFanDuty(0.0f);
@@ -267,7 +271,7 @@ private:
         }
 
         _pauseAction = PauseAction::None;
-        _drive.Brake();
+        _drive.ClearCommandEvidence();
 
         MazeMap::FrontWallCharacterizationStorage storage = _captureStorage;
         if (storage.sampleCount < 4U)
@@ -402,7 +406,7 @@ private:
 
             _captureStarted = true;
             _captureTargetHeading = state.GetHeadingUnit();
-            _captureStartDistanceM = _drive.GetAverageDistanceMeters();
+            _captureStartDistanceM = AverageEncoderDistanceM(snapshot);
             _captureStartMs = millis();
             StoreCurveSample(_captureStorage, 0.0f, snapshot);
 
@@ -415,7 +419,7 @@ private:
                 &_captureTargetHeading);
         }
 
-        const float traveledDistanceM = std::fabs(_drive.GetAverageDistanceMeters() - _captureStartDistanceM);
+        const float traveledDistanceM = std::fabs(AverageEncoderDistanceM(snapshot) - _captureStartDistanceM);
         if ((_captureStorage.sampleCount < MazeMap::kFrontWallCharacterizationMaxStoredSamples) &&
             ((traveledDistanceM + Config::kDistanceToleranceM) >= _captureNextStoredDistanceM))
         {

@@ -1,10 +1,8 @@
 #pragma once
 
 #include "CommandVector.h"
-#include "FeedbackAxis.h"
 #include "ManeuverInstance.h"
 #include "MotionLimits.h"
-#include "DriveTelemetry.h"
 #include "SensorSnapshot.h"
 #include "VehicleState.h"
 
@@ -29,11 +27,9 @@ namespace MazeMap::App::Internal
     // same LoopController callback.
     //
     // Layering contract:
-    // DriveBase is the low-level drive mechanism. It exposes canonical command helpers
-    // and explicit feedback composition. Drive owns the higher-level primitive
+    // DriveBase is the low-level drive mechanism. Drive owns the higher-level primitive
     // semantics used by normal mode code: primitive progression state, retained live
-    // execution configuration, standard DriveBase feedback selections, command
-    // interpretation, and degraded-input behavior.
+    // execution configuration, command interpretation, and degraded-input behavior.
     //
     // Mode code keeps callback ownership:
     // - A mode arms one primitive or maneuver through a Start... member.
@@ -384,12 +380,10 @@ namespace MazeMap::App::Internal
         // Primitive-specific stepping helpers behind the generic public GetNextControls(...).
         CommandVector HoldControls(
             const SensorSnapshot& sensors,
-            const DriveTelemetry& driveTelemetry,
             bool& done);
         CommandVector LinearMotionControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
-            const DriveTelemetry& driveTelemetry,
             bool& done);
         CommandVector TurnControls(
             const MazeMap::VehicleState& state,
@@ -397,28 +391,21 @@ namespace MazeMap::App::Internal
             bool& done);
         CommandVector TurnTransitionControls(
             const MazeMap::VehicleState& state,
-            const DriveTelemetry& driveTelemetry,
             bool& done);
         CommandVector ArcControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
-            const DriveTelemetry& driveTelemetry,
             bool& done);
         CommandVector ManeuverControls(
             const MazeMap::VehicleState& state,
-            const DriveTelemetry& driveTelemetry,
             bool& done);
 
         SharedRobotRuntime* _runtime{};     // Canonical runtime owner for live state and services.
-        MazeMap::DriveBase* _drive{};                // Concrete low-level drive command sink/helper.
+        MazeMap::DriveBase* _drive{};                // Concrete low-level drive command proposal sink.
         MazeMap::Vehicle* _vehicle{};       // Canonical vehicle facts used for limit derivation.
         MazeMap::Maze* _maze{};             // Maze facts used when maze-mode wall correction is enabled.
         MotionLimits _limits{};             // Drive-level live motion envelope, interpreted at use.
         float _nominalCommandPeriodSeconds{}; // Next-tick command-shaping horizon for MotionLimits.
-        MazeMap::FeedbackSource _headingFeedbackSources{};   // Drive-level heading feedback sources.
-        MazeMap::FeedbackSource _yawRateFeedbackSources{};   // Drive-level yaw-rate feedback sources.
-        MazeMap::FeedbackSource _distanceFeedbackSources{};  // Drive-level distance feedback sources.
-        MazeMap::FeedbackSource _velocityFeedbackSources{};  // Drive-level velocity feedback sources.
         OperationMode _operationMode{ OperationMode::Maze }; // Drive-level live wall-correction mode.
         ActivePrimitive _activePrimitive{ ActivePrimitive::None }; // Latest installed instruction kind.
         bool _effectivelyComplete{ true };  // Latest completion observation, defaulting to the no-command hold-like state.

@@ -286,7 +286,6 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.accepted);
 
             const VehicleState::StateVector& stateAfterEncoder = core.workingState();
-            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "direct_wheel_body_invariant"));
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
@@ -332,7 +331,6 @@ namespace MazeMap
             Assert::IsTrue(encoderResult.nis > kUkfTestEncoderPairNisThreshold);
 
             const VehicleState::StateVector& stateAfterEncoder = core.workingState();
-            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_filter_diagnostics", "direct_wheel_body_invariant"));
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
             Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
@@ -399,7 +397,10 @@ namespace MazeMap
         {
             const VehicleState::StateVector predictedState =
                 PredictStationarySplitCommandStateAfterPivotPredictSequence();
-            Assert::AreEqual(0.0f, predictedState(VehicleState::kU), kZeroVelocityToleranceMps);
+            Assert::AreEqual(
+                0.0f,
+                predictedState(VehicleState::kU),
+                kZeroVelocityToleranceMps);
         }
 
         TEST_METHOD(SrUkfCorePredictRepeatedSplitCommandProducesPositiveLeftWheelSpeed)
@@ -427,7 +428,10 @@ namespace MazeMap
                 (predictedState(VehicleState::kOmegaL) + predictedState(VehicleState::kOmegaR)) *
                 PlantParams::Default().wheelRadiusM;
 
-            Assert::AreEqual(0.0f, averageWheelLinearSpeedMps, kZeroVelocityToleranceMps);
+            Assert::AreEqual(
+                0.0f,
+                averageWheelLinearSpeedMps,
+                kZeroVelocityToleranceMps);
         }
 
         TEST_METHOD(SrUkfCoreAcceptsLaunchEncoderDeltasWhenOpenLoopPredictionDisagrees)
@@ -847,11 +851,14 @@ namespace MazeMap
             Assert::IsTrue(core.predict(0.002f, control));
 
             const float afterVarianceRadps2 = core.workingCovariance()(VehicleState::kBgz, VehicleState::kBgz);
-            Assert::AreEqual(2, FindDebugDumpModeId(core));
+            const VehicleState::StateVector& state = core.workingState();
+            Assert::IsTrue(std::fabs(state(VehicleState::kU)) > 0.05f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaL)) > 0.05f);
+            Assert::IsTrue(std::fabs(state(VehicleState::kOmegaR)) > 0.05f);
             Assert::AreEqual(beforeVarianceRadps2, afterVarianceRadps2, 1.0e-9f);
         }
 
-        TEST_METHOD(SrUkfCoreExposesFrozenUkfPolicyStateForRuntimeFeedforward)
+        TEST_METHOD(SrUkfCorePredictAndEncoderUpdateKeepRuntimeFeedforwardStateFinite)
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core = MakeDefaultSrUkfCore();
@@ -879,19 +886,21 @@ namespace MazeMap
             encoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(encoder, dt).accepted);
 
-            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "left_applied_bank_torque_nm")));
-            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "right_applied_bank_torque_nm")));
-            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_grip_recovery", "exact_stationary_lock"));
-            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "closure_residual_left_mps")));
-            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "closure_residual_right_mps")));
+            const VehicleState::StateVector& state = core.workingState();
+            const VehicleState::StateMatrix covariance = core.workingCovariance();
+            for (int row = 0; row < VehicleState::kDimension; ++row)
+            {
+                Assert::IsTrue(std::isfinite(state(row)));
+                Assert::IsTrue(std::isfinite(covariance(row, row)));
+                Assert::IsTrue(covariance(row, row) >= 0.0f);
+            }
+            Assert::AreEqual(encoder.omegaLeftRadps, state(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaRightRadps, state(VehicleState::kOmegaR), 1.0e-6f);
         }
 
         TEST_METHOD(SrUkfCorePredictRefreshesAppliedTorqueFromCurrentControl)
         {
             const PlantParams params = PlantParams::Default();
-            SrUkfCoreTestRuntime runtime;
-            const PlantModel& plant = runtime.plantModel;
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
             SrUkfCore core = MakeDefaultSrUkfCore();
             const VehicleState::StateVector initialState =
                 BuildUkfState(
@@ -907,10 +916,8 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance(0.003f, 0.003f, 0.004f, 0.004f, 0.004f, 0.004f, 0.002f)));
 
             App::Internal::CommandVector firstControl{};
-            firstControl.SetLeftMotorPwm(0.08f);
-            firstControl.SetRightMotorPwm(0.06f);
-            const float firstControlFanDutyCycle = 0.80f;
-            const float firstControlBatteryVoltageV = params.supplyVoltageV;
+            firstControl.SetLeftCommand(0.08f);
+            firstControl.SetRightCommand(0.06f);
 
             constexpr float dt = 0.002f;
             Assert::IsTrue(core.predict(dt, firstControl));
@@ -922,44 +929,25 @@ namespace MazeMap
             firstEncoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
             Assert::IsTrue(core.updateEncoderPair(firstEncoder, dt).accepted);
 
-            (void)plant;
-            (void)prepared;
-            (void)initialState;
-            (void)firstControlBatteryVoltageV;
-            const float firstLeftAppliedBankTorqueNm =
-                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "left_applied_bank_torque_nm");
-            const float firstRightAppliedBankTorqueNm =
-                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "right_applied_bank_torque_nm");
-            Assert::IsTrue(std::isfinite(firstLeftAppliedBankTorqueNm));
-            Assert::IsTrue(std::isfinite(firstRightAppliedBankTorqueNm));
-
             const VehicleState::StateVector stateBeforeSecondPredict = core.workingState();
+            const VehicleState::StateMatrix covarianceBeforeSecondPredict = core.workingCovariance();
             App::Internal::CommandVector secondControl{};
-            secondControl.SetLeftMotorPwm(0.31f);
-            secondControl.SetRightMotorPwm(0.27f);
-            const float secondControlFanDutyCycle = 0.80f;
-            const float secondControlBatteryVoltageV = params.supplyVoltageV;
+            secondControl.SetLeftCommand(0.31f);
+            secondControl.SetRightCommand(0.27f);
 
-            Assert::IsTrue(core.predict(dt, secondControl));
+            SrUkfCore firstControlCore = MakeDefaultSrUkfCore();
+            SrUkfCore secondControlCore = MakeDefaultSrUkfCore();
+            Assert::IsTrue(firstControlCore.reset(stateBeforeSecondPredict, covarianceBeforeSecondPredict));
+            Assert::IsTrue(secondControlCore.reset(stateBeforeSecondPredict, covarianceBeforeSecondPredict));
+            Assert::IsTrue(firstControlCore.predict(dt, firstControl));
+            Assert::IsTrue(secondControlCore.predict(dt, secondControl));
 
-            EncoderObs secondEncoder{};
-            secondEncoder.totalLeftCounts = 0;
-            secondEncoder.totalRightCounts = 0;
-            secondEncoder.omegaLeftRadps = core.workingState()(VehicleState::kOmegaL);
-            secondEncoder.omegaRightRadps = core.workingState()(VehicleState::kOmegaR);
-            Assert::IsTrue(core.updateEncoderPair(secondEncoder, dt).accepted);
+            const VehicleState::StateVector& firstControlState = firstControlCore.workingState();
+            const VehicleState::StateVector& secondControlState = secondControlCore.workingState();
 
-            (void)stateBeforeSecondPredict;
-            (void)secondControlBatteryVoltageV;
-            const float secondLeftAppliedBankTorqueNm =
-                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "left_applied_bank_torque_nm");
-            const float secondRightAppliedBankTorqueNm =
-                FindDebugDumpFloat(core, "ukf_dump_grip_recovery", "right_applied_bank_torque_nm");
-            Assert::IsTrue(std::isfinite(secondLeftAppliedBankTorqueNm));
-            Assert::IsTrue(std::isfinite(secondRightAppliedBankTorqueNm));
-            Assert::IsTrue(
-                (std::fabs(firstLeftAppliedBankTorqueNm - secondLeftAppliedBankTorqueNm) > 1.0e-6f) ||
-                (std::fabs(firstRightAppliedBankTorqueNm - secondRightAppliedBankTorqueNm) > 1.0e-6f));
+            const float controlResponseDelta =
+                (firstControlState - secondControlState).cwiseAbs().maxCoeff();
+            Assert::IsTrue(controlResponseDelta > 1.0e-6f);
         }
     };
 }

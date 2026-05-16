@@ -93,10 +93,10 @@ namespace MazeMap
     }
 
     inline App::Internal::CommandVector MakeControlVector(
-        float leftMotorPwm = 0.0f,
-        float rightMotorPwm = 0.0f) noexcept
+        float leftCommand = 0.0f,
+        float rightCommand = 0.0f) noexcept
     {
-        return App::Internal::CommandVector(leftMotorPwm, rightMotorPwm);
+        return App::Internal::CommandVector(leftCommand, rightCommand);
     }
 
     inline float DefaultFanDutyCycle() noexcept
@@ -105,14 +105,13 @@ namespace MazeMap
     }
 
     inline void UpdateDriveEstimator(
-        DriveBase& drive,
         Estimator& estimator,
         VehicleState& runtimeState,
         float dtSeconds,
         const SensorSnapshot& snapshot,
+        const App::Internal::CommandVector& appliedControl = MakeControlVector(),
         const Maze* map = nullptr)
     {
-        const auto control = drive.CurrentControlVector();
         runtimeState.SetSensorSnapshot(snapshot);
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
@@ -126,7 +125,7 @@ namespace MazeMap
 
         if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
         {
-            if (!estimator.predict(dtSeconds, control))
+            if (!estimator.predict(dtSeconds, appliedControl))
             {
                 return;
             }

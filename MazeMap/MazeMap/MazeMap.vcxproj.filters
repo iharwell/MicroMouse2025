@@ -348,9 +348,6 @@
     <ClInclude Include="EncoderObs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="FeedbackAxis.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="ImuAccelObs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -486,9 +483,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DriveTelemetry.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="FeedbackAxis.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="MotionLimits.cpp">

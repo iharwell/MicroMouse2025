@@ -125,8 +125,8 @@ namespace MazeMap
 
             state.SetCurrentCommand(command);
 
-            Assert::AreEqual(command.LeftMotorPwm(), state.GetCurrentCommand().LeftMotorPwm(), 0.0f);
-            Assert::AreEqual(command.RightMotorPwm(), state.GetCurrentCommand().RightMotorPwm(), 0.0f);
+            Assert::AreEqual(command.LeftCommand(), state.GetCurrentCommand().LeftCommand(), 0.0f);
+            Assert::AreEqual(command.RightCommand(), state.GetCurrentCommand().RightCommand(), 0.0f);
         }
 
         TEST_METHOD(VehicleBatteryVoltageMatchesPlantModelSupplyVoltage)

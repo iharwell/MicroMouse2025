@@ -151,10 +151,7 @@ namespace MazeMap::App::Internal
         (void)_runtime.AppendTextLogLine("Showcasing donut mode");
         (void)_runtime.AppendTextLogLine("Fixed-radius donut sweep followed by flashy in-place turns, open-floor main-schema logging");
 
-        if (!_drive.Begin())
-        {
-            _runtime.FailActiveMode("Showcasing donut drive base init failed");
-        }
+        _drive.ClearCommandEvidence();
 
         ConfigureSelectorMonitor();
         if (!_selectorMonitorArmed)
@@ -198,7 +195,7 @@ namespace MazeMap::App::Internal
 
         self->ReleaseSelectorMonitor();
         self->_phase = Phase::Idle;
-        self->_drive.Brake();
+        self->_drive.ClearCommandEvidence();
         self->_vehicle.SetFanDuty(0.0f);
     }
 
@@ -492,7 +489,7 @@ namespace MazeMap::App::Internal
     {
         row = {};
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
-        const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
+        const DriveTelemetry driveTelemetry = _drive.LastTelemetry();
         const float leftWheelVelocityMps =
             MazeMap::Vehicle::WheelLinearVelocityFromOmega(state.GetWheelSpeedLeft());
         const float rightWheelVelocityMps =
@@ -505,7 +502,7 @@ namespace MazeMap::App::Internal
             std::isfinite(sensors.gyroRadps) ?
                 sensors.gyroRadps :
                 measuredAngularSpeedFromWheelsRadps;
-        const bool encoderValid = driveTelemetry.encoderObservationValid;
+        const bool encoderValid = sensors.encoderObservationValid;
         const bool imuValid = std::isfinite(sensors.gyroRawRadps);
         const float maxRangeM = MazeMap::kDefaultWallObservationMaxRangeM;
 
@@ -545,9 +542,9 @@ namespace MazeMap::App::Internal
         row.start_marker_id = labels.startMarkerId;
         row.repeat_index = labels.repeatIndex;
         row.progress_norm = labels.progressNorm;
-        row.mode_flags = driveTelemetry.modeFlags;
+        row.mode_flags = driveTelemetry.commandKindFlags;
         row.clipping_flags = 0U;
-        row.saturation_flags = driveTelemetry.saturationFlags;
+        row.saturation_flags = driveTelemetry.solverFailureFlags;
         row.watchdog_flags = 0U;
         row.ukf_state_px_m = state.GetPositionX();
         row.ukf_state_py_m = state.GetPositionY();
@@ -560,24 +557,28 @@ namespace MazeMap::App::Internal
         row.ukf_state_bgz_radps = state.GetGyroBiasZ();
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;
-        row.cmd_linear_mps = driveTelemetry.commandedLinearSpeedMps;
-        row.cmd_angular_radps = driveTelemetry.commandedAngularSpeedRadps;
+        row.cmd_linear_mps = driveTelemetry.requestedForwardMps;
+        row.cmd_angular_radps = driveTelemetry.requestedYawRateRadps;
         row.left_drive_command = driveTelemetry.leftDriveCommand;
         row.right_drive_command = driveTelemetry.rightDriveCommand;
-        row.left_feedforward_command = driveTelemetry.leftFeedforwardCommand;
-        row.right_feedforward_command = driveTelemetry.rightFeedforwardCommand;
-        row.left_feedback_command = driveTelemetry.leftFeedbackCommand;
-        row.right_feedback_command = driveTelemetry.rightFeedbackCommand;
-        row.left_target_velocity_mps = driveTelemetry.leftTargetVelocityMps;
-        row.right_target_velocity_mps = driveTelemetry.rightTargetVelocityMps;
-        row.left_encoder_count = static_cast<std::int32_t>(driveTelemetry.leftEncoderCount);
-        row.right_encoder_count = static_cast<std::int32_t>(driveTelemetry.rightEncoderCount);
-        row.left_encoder_omega_radps = driveTelemetry.leftEncoderOmegaRadps;
-        row.right_encoder_omega_radps = driveTelemetry.rightEncoderOmegaRadps;
-        row.left_encoder_distance_m = driveTelemetry.leftDistanceM;
-        row.right_encoder_distance_m = driveTelemetry.rightDistanceM;
-        row.left_encoder_velocity_mps = driveTelemetry.leftVelocityMps;
-        row.right_encoder_velocity_mps = driveTelemetry.rightVelocityMps;
+        row.left_plant_command = driveTelemetry.leftPlantCommand;
+        row.right_plant_command = driveTelemetry.rightPlantCommand;
+        row.left_command_residual = driveTelemetry.leftDriveCommand - driveTelemetry.leftPlantCommand;
+        row.right_command_residual = driveTelemetry.rightDriveCommand - driveTelemetry.rightPlantCommand;
+        row.left_target_velocity_mps = MazeMap::Vehicle::LeftWheelLinearVelocityFromBody(
+            driveTelemetry.requestedForwardMps,
+            driveTelemetry.requestedYawRateRadps);
+        row.right_target_velocity_mps = MazeMap::Vehicle::RightWheelLinearVelocityFromBody(
+            driveTelemetry.requestedForwardMps,
+            driveTelemetry.requestedYawRateRadps);
+        row.left_encoder_count = static_cast<std::int32_t>(sensors.leftEncoderTotalCounts);
+        row.right_encoder_count = static_cast<std::int32_t>(sensors.rightEncoderTotalCounts);
+        row.left_encoder_omega_radps = sensors.encoderObservation.omegaLeftRadps;
+        row.right_encoder_omega_radps = sensors.encoderObservation.omegaRightRadps;
+        row.left_encoder_distance_m = sensors.leftEncoderDistanceM;
+        row.right_encoder_distance_m = sensors.rightEncoderDistanceM;
+        row.left_encoder_velocity_mps = sensors.encoderObservation.leftVelocityMps;
+        row.right_encoder_velocity_mps = sensors.encoderObservation.rightVelocityMps;
         row.imu_timestamp_us = sensors.imuTiming.readDoneUs;
         row.imu_status = sensors.imuBackLeft.status;
         row.imu_interrupt_high = sensors.imuBackLeft.interruptHigh ? 1U : 0U;
@@ -695,10 +696,9 @@ namespace MazeMap::App::Internal
 
     float ShowcasingDonutController::EncoderAverageSpeedMps(const MazeMap::VehicleState& state) const noexcept
     {
-        (void)state;
-        const DriveTelemetry driveTelemetry = _drive.GetTelemetry();
-        const float leftSpeedMps = std::fabs(driveTelemetry.leftVelocityMps);
-        const float rightSpeedMps = std::fabs(driveTelemetry.rightVelocityMps);
+        const SensorSnapshot& sensors = state.GetSensorSnapshot();
+        const float leftSpeedMps = std::fabs(sensors.encoderObservation.leftVelocityMps);
+        const float rightSpeedMps = std::fabs(sensors.encoderObservation.rightVelocityMps);
         if (!(std::isfinite(leftSpeedMps) && std::isfinite(rightSpeedMps)))
         {
             return 0.0f;
@@ -753,11 +753,12 @@ namespace MazeMap::App::Internal
                 return CommandVector::Brake();
             }
 
-            const CommandVector control = _drive.PointControlVector(
+            const CommandVector control = _drive.ProposeBodyTick(
                 _commandedSpeedMps,
                 CommandedYawRateRadps(),
-                MazeMap::FeedbackSource::Encoder,
-                MazeMap::FeedbackSource::Encoder);
+                kShowcasingDonutSpeedRampMps2,
+                0.0f,
+                state.GetOrientation());
             return control;
         }
 
@@ -803,7 +804,7 @@ namespace MazeMap::App::Internal
                         self->_runtime.FailActiveMode("Showcasing donut main log write failed");
                     }
                     self->ReleaseSelectorMonitor();
-                    self->_drive.Brake();
+                    self->_drive.ClearCommandEvidence();
                     self->_vehicle.SetFanDuty(0.0f);
                     (void)self->_runtime.AppendTextLogFormatted(
                         "Showcasing donut complete: reason=%s log=%s peak_cmd_mps=%.3f peak_enc_mps=%.3f peak_yaw_radps=%.3f peak_planar_accel_mps2=%.3f",

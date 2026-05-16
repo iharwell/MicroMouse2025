@@ -15,12 +15,14 @@ namespace MazeMap::App::Internal
     namespace
     {
         constexpr const char* kWallTouchLogSource = "wall_touch";
+
+        float AverageEncoderDistanceM(const SensorSnapshot& sensors) noexcept
+        {
+            return 0.5f * (sensors.leftEncoderDistanceM + sensors.rightEncoderDistanceM);
+        }
     }
 
-    WallTouch::WallTouch()
-        : _trackingFeedbackSources(Config::kWallTouchTrackingFeedbackSources)
-    {
-    }
+    WallTouch::WallTouch() = default;
 
     void WallTouch::SetLimits(const MotionLimits& limits) noexcept
     {
@@ -130,7 +132,7 @@ namespace MazeMap::App::Internal
         _state.contactXMeters = contactXMeters;
         _state.contactYMeters = contactYMeters;
         _state.targetYawRad = targetYawRad;
-        _state.startDistanceM = _drive->GetAverageDistanceMeters();
+        _state.startDistanceM = AverageEncoderDistanceM(pose.GetSensorSnapshot());
         _state.lastProgressDistanceM = _state.startDistanceM;
         _state.minLatchTravelM = minLatchTravelM;
         _state.maxApproachTravelM = maxApproachTravelM;
@@ -163,7 +165,6 @@ namespace MazeMap::App::Internal
 
         const MazeMap::VehicleState state = _runtime->RuntimeState();
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
-        const DriveTelemetry driveTelemetry = (_drive != nullptr) ? _drive->GetTelemetry() : DriveTelemetry{};
         if (_runtime->Estimator().HasFault())
         {
             SetFault(_runtime->Estimator().FaultReason());
@@ -175,7 +176,7 @@ namespace MazeMap::App::Internal
         switch (_activePhase)
         {
         case ActivePhase::Seek:
-            control = SeekControls(state, sensors, driveTelemetry, done);
+            control = SeekControls(state, sensors, done);
             break;
         case ActivePhase::Seat:
             control = SeatControls(state, done);
@@ -331,22 +332,22 @@ namespace MazeMap::App::Internal
                 _limits.GetMaxAngularSpeedRadps());
         }
 
-        return _drive->PointControlVector(
+        return _drive->ProposeBodyTick(
             clampedSpeedMps,
             angularCommandRadps,
-            MazeMap::FeedbackSource::None,
-            _trackingFeedbackSources);
+            0.0f,
+            0.0f,
+            _state.targetYawRad);
     }
 
     CommandVector WallTouch::SeekControls(
         const MazeMap::VehicleState& state,
         const SensorSnapshot& sensors,
-        const DriveTelemetry& driveTelemetry,
         bool& done)
     {
         const unsigned long nowMs = millis();
         const float currentDistanceM =
-            0.5f * (driveTelemetry.leftDistanceM + driveTelemetry.rightDistanceM);
+            AverageEncoderDistanceM(sensors);
         const float traveledDistanceM = std::fabs(currentDistanceM - _state.startDistanceM);
         const unsigned long elapsedMs = nowMs - _state.touchStartMs;
         const bool frontSignalActive =
@@ -389,7 +390,9 @@ namespace MazeMap::App::Internal
 
         CommandVector control = CommandVector::Brake();
         const float encoderSpeedMps =
-            0.5f * (std::fabs(driveTelemetry.leftVelocityMps) + std::fabs(driveTelemetry.rightVelocityMps));
+            0.5f * (
+                std::fabs(sensors.encoderObservation.leftVelocityMps) +
+                std::fabs(sensors.encoderObservation.rightVelocityMps));
         if (!std::isfinite(encoderSpeedMps) || (encoderSpeedMps < Config::kWallTouchMaxApproachEncoderSpeedMps))
         {
             control = ForwardControl(state, approachSpeedMps);

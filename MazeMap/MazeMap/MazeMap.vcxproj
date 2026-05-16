@@ -265,7 +265,6 @@
     <ClInclude Include="Pins.h" />
     <ClInclude Include="PlantModel.h" />
     <ClInclude Include="EncoderObs.h" />
-    <ClInclude Include="FeedbackAxis.h" />
     <ClInclude Include="ImuAccelObs.h" />
     <ClInclude Include="PlanarAccelLateralUpdate.h" />
     <ClInclude Include="ProportionalDerivative.h" />
@@ -314,7 +313,6 @@
     <ClCompile Include="Drive.cpp" />
     <ClCompile Include="DriveBase.cpp" />
     <ClCompile Include="DriveTelemetry.cpp" />
-    <ClCompile Include="FeedbackAxis.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="EncoderProgressWatchdog.cpp" />
     <ClCompile Include="Fresnel.cpp" />

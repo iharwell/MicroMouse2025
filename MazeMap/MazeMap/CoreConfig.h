@@ -1,7 +1,6 @@
 #pragma once
 #include "Defines.h"
 #include "Maze.h"
-#include "FeedbackAxis.h"
 #include "PDCluster.h"
 #include "Vehicle.h"
 
@@ -441,15 +440,6 @@ namespace MazeMap::Config
         /* yawRateIMULateralAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.01f),
         /* longitudinalAccelerationStatePD */ MazeMap::ProportionalDerivative(1.0f, 0.0f),
         /* longitudinalAccelerationIMUForwardAccelPD */ MazeMap::ProportionalDerivative(1.0f, 0.0f));
-    // Shared Drive/DriveBase signal hookup. Keep these selections here so maneuver-tracking users all
-    // resolve through one authoritative state-vs-sensor configuration instead of repeating ad hoc flags.
-    inline constexpr MazeMap::FeedbackSource kDriveHeadingFeedbackSources = MazeMap::FeedbackSource::State;
-    inline constexpr MazeMap::FeedbackSource kDriveYawRateFeedbackSources = MazeMap::FeedbackSource::Imu;
-    inline constexpr MazeMap::FeedbackSource kDriveVelocityFeedbackSources = MazeMap::FeedbackSource::Encoder;
-    inline constexpr MazeMap::FeedbackSource kDriveDistanceFeedbackSources = MazeMap::FeedbackSource::None;
-    inline constexpr MazeMap::FeedbackSource kManeuverTrackingFeedbackSources = kDriveYawRateFeedbackSources;
-    inline constexpr MazeMap::FeedbackSource kWallTouchTrackingFeedbackSources = kDriveYawRateFeedbackSources;
-
     // [Medium] Position tolerance used to declare straight and arc profiles complete. Tighten it if stop error is too
     // large and the robot can settle cleanly; loosen it if profiles dither near the endpoint.
     constexpr float kDistanceToleranceM = 0.003f;

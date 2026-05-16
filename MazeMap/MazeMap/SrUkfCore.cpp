@@ -548,10 +548,10 @@ namespace MazeMap
             std::fabs(commandedLinearMps) < kStationaryCandidateMaxLinearCommandMps &&
             std::isfinite(commandedAngularRadps) &&
             std::fabs(commandedAngularRadps) < kStationaryCandidateMaxAngularCommandRadps &&
-            std::isfinite(control.LeftMotorPwm()) &&
-            std::fabs(control.LeftMotorPwm()) < kStationaryCandidateMaxDriveCommand &&
-            std::isfinite(control.RightMotorPwm()) &&
-            std::fabs(control.RightMotorPwm()) < kStationaryCandidateMaxDriveCommand &&
+            std::isfinite(control.LeftCommand()) &&
+            std::fabs(control.LeftCommand()) < kStationaryCandidateMaxDriveCommand &&
+            std::isfinite(control.RightCommand()) &&
+            std::fabs(control.RightCommand()) < kStationaryCandidateMaxDriveCommand &&
             std::isfinite(observation.omegaLeftRadps) &&
             std::fabs(observation.omegaLeftRadps) < kStationaryCandidateMaxEncoderOmegaRadps &&
             std::isfinite(observation.omegaRightRadps) &&
@@ -945,8 +945,8 @@ namespace MazeMap
                 sink,
                 "ukf_dump_last_control",
                 "left_motor_pwm=%.9g;right_motor_pwm=%.9g;fan_duty_cycle=%.9g;battery_voltage_v=%.9g",
-                static_cast<double>(_lastControl.LeftMotorPwm()),
-                static_cast<double>(_lastControl.RightMotorPwm()),
+                static_cast<double>(_lastControl.LeftCommand()),
+                static_cast<double>(_lastControl.RightCommand()),
                 static_cast<double>(_lastFanDutyCycle),
                 static_cast<double>(_lastBatteryVoltageV)))
         {
@@ -1965,7 +1965,7 @@ namespace MazeMap
             GyroBiasProcessSquareRootForMode(static_cast<std::uint8_t>(_operatingMode));
         _workingFilter.setProcessNoiseSquareRoot(predictProcessNoiseSquareRoot);
         Eigen::Matrix<float, 3, 1> filterCommandVector;
-        filterCommandVector << control.LeftMotorPwm(), control.RightMotorPwm(), fanDutyCycle;
+        filterCommandVector << control.LeftCommand(), control.RightCommand(), fanDutyCycle;
         const auto invokeLoop = [loopHookContext, loopHook]() noexcept
         {
             InvokeLoopHook(loopHookContext, loopHook);
@@ -2393,8 +2393,8 @@ namespace MazeMap
     bool SrUkfCore::controlCommandsAreEffectivelyZero() const noexcept
     {
         return
-            (std::fabs(_lastControl.LeftMotorPwm()) <= 1.0e-6f) &&
-            (std::fabs(_lastControl.RightMotorPwm()) <= 1.0e-6f) &&
+            (std::fabs(_lastControl.LeftCommand()) <= 1.0e-6f) &&
+            (std::fabs(_lastControl.RightCommand()) <= 1.0e-6f) &&
             (std::fabs(_commandedLinearMps) <= kStationaryCandidateMaxLinearCommandMps) &&
             (std::fabs(_commandedAngularRadps) <= kStationaryCandidateMaxAngularCommandRadps);
     }
@@ -2651,8 +2651,8 @@ namespace MazeMap
             (_timeSinceStationaryExitS <= kStationaryExitLaunchWindowS);
         const bool launchTrigger = HasLaunchOrReversalTrigger(
             _workingFilter.state()(VehicleState::kU),
-            _lastControl.LeftMotorPwm(),
-            _lastControl.RightMotorPwm(),
+            _lastControl.LeftCommand(),
+            _lastControl.RightCommand(),
             recentCommandSignFlip,
             recentStationaryExit);
         if (launchTrigger)

@@ -101,7 +101,7 @@ namespace
             MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.leftEncoderTotalCounts);
         snapshot.rightEncoderDistanceM =
             MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.rightEncoderTotalCounts);
-        UpdateDriveEstimator(runtime.DriveBase(), runtime.Estimator(), runtime.RuntimeState(), dtSeconds, snapshot);
+        UpdateDriveEstimator(runtime.Estimator(), runtime.RuntimeState(), dtSeconds, snapshot, MazeMap::MakeControlVector());
     }
 
     void CaptureFaultCallback(void* context, const char* reason) noexcept
@@ -281,14 +281,14 @@ namespace MazeMap::App
             bool done = false;
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
         }
 
         TEST_METHOD(SharedRuntime_DriveTurnUsesHeadingTargetCommandPath)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             PrimeSharedRuntimeDriveWheelSpeed(runtime, 0.06f, 0.06f);
 
             Internal::Drive& drive = runtime.DriveService();
@@ -301,28 +301,23 @@ namespace MazeMap::App
             limits.SetAngleToleranceRad(Config::kAngleToleranceRad);
             drive.SetLimits(limits);
 
-            const Internal::CommandVector expected =
-                runtime.DriveBase().PointControlVectorWithHeadingTarget(
-                    0.0f,
-                    limits.GetMaxAngularSpeedRadps(),
-                    HALF_PI_F,
-                    Config::kDriveVelocityFeedbackSources,
-                    Config::kDriveYawRateFeedbackSources,
-                    Config::kDriveHeadingFeedbackSources);
-
             drive.StartTurn(HALF_PI_F);
 
             bool done = false;
             const Internal::CommandVector actual = drive.GetNextControls(done);
+            const DriveTelemetry& telemetry = runtime.DriveBase().LastTelemetry();
             Assert::IsFalse(done);
-            Assert::AreEqual(expected.LeftMotorPwm(), actual.LeftMotorPwm(), 1.0e-6f);
-            Assert::AreEqual(expected.RightMotorPwm(), actual.RightMotorPwm(), 1.0e-6f);
+            Assert::IsTrue(std::isfinite(actual.LeftCommand()));
+            Assert::IsTrue(std::isfinite(actual.RightCommand()));
+            Assert::AreEqual(actual.LeftCommand(), telemetry.leftDriveCommand, 1.0e-6f);
+            Assert::AreEqual(actual.RightCommand(), telemetry.rightDriveCommand, 1.0e-6f);
+            Assert::AreEqual(HALF_PI_F, telemetry.requestedYawRad, 1.0e-5f);
         }
 
-        TEST_METHOD(SharedRuntime_DriveStraightUsesDriveBaseHeadingCluster)
+        TEST_METHOD(SharedRuntime_DriveStraightPublishesHeadingObjective)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
@@ -338,8 +333,7 @@ namespace MazeMap::App
             const auto runStraightOnce =
                 [&runtime, &drive, &targetHeadingUnit]() -> Internal::CommandVector
             {
-                runtime.DriveBase().Brake();
-                runtime.DriveBase().ResetControllers();
+                runtime.DriveBase().ClearCommandEvidence();
                 Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.20f));
                 drive.StartStraight(0.25f, 0.20f, 0.0f, &targetHeadingUnit, nullptr);
 
@@ -349,26 +343,18 @@ namespace MazeMap::App
                 return control;
             };
 
-            const MazeMap::PDCluster baselineCluster =
-                runtime.DriveBase().GetProportionalDerivativeCluster();
-            MazeMap::PDCluster zeroHeadingCluster = baselineCluster;
-            zeroHeadingCluster.HeadingStatePD = MazeMap::ProportionalDerivative(0.0f, 0.0f);
+            const Internal::CommandVector control = runStraightOnce();
+            const DriveTelemetry& telemetry = runtime.DriveBase().LastTelemetry();
 
-            runtime.DriveBase().SetProportionalDerivativeCluster(baselineCluster);
-            const Internal::CommandVector baselineControl = runStraightOnce();
-
-            runtime.DriveBase().SetProportionalDerivativeCluster(zeroHeadingCluster);
-            const Internal::CommandVector zeroHeadingControl = runStraightOnce();
-
-            Assert::IsTrue(
-                (std::fabs(baselineControl.LeftMotorPwm() - zeroHeadingControl.LeftMotorPwm()) > 1.0e-6f) ||
-                (std::fabs(baselineControl.RightMotorPwm() - zeroHeadingControl.RightMotorPwm()) > 1.0e-6f));
+            Assert::AreEqual(control.LeftCommand(), telemetry.leftDriveCommand, 1.0e-6f);
+            Assert::AreEqual(control.RightCommand(), telemetry.rightDriveCommand, 1.0e-6f);
+            Assert::IsTrue(std::isfinite(telemetry.requestedYawRad));
         }
 
         TEST_METHOD(SharedRuntime_DriveHoldRejectsFanOffWheelSpeedAboveBaseSettleThreshold)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             PrimeSharedRuntimeDriveWheelSpeed(runtime, 0.06f, 0.06f);
             ScopedMissionFanDuty fanDuty(runtime.Vehicle(), 0.0f);
 
@@ -383,6 +369,7 @@ namespace MazeMap::App
         TEST_METHOD(SharedRuntime_DriveCompletionDoesNotCancelLatestInstruction)
         {
             Internal::SharedRobotRuntime runtime;
+            runtime.DriveBase().ClearCommandEvidence();
             Internal::Drive& drive = runtime.DriveService();
 
             drive.StartHold(0U, true);
@@ -392,8 +379,11 @@ namespace MazeMap::App
             const Internal::CommandVector firstControl = drive.GetNextControls(firstDone);
             Assert::IsTrue(firstDone);
             Assert::IsTrue(drive.IsEffectivelyComplete());
-            Assert::IsFalse(std::isfinite(firstControl.LeftMotorPwm()));
-            Assert::IsFalse(std::isfinite(firstControl.RightMotorPwm()));
+            Assert::IsFalse(std::isfinite(firstControl.LeftCommand()));
+            Assert::IsFalse(std::isfinite(firstControl.RightCommand()));
+            Assert::IsTrue(
+                (runtime.DriveBase().LastTelemetry().commandKindFlags &
+                    DriveTelemetry::kCommandKindStaleEvidence) != 0U);
 
             bool secondDone = false;
             (void)drive.GetNextControls(secondDone);
@@ -423,6 +413,7 @@ namespace MazeMap::App
         TEST_METHOD(SharedRuntime_DriveNoneManeuverStillLatchesLatestInstruction)
         {
             Internal::SharedRobotRuntime runtime;
+            runtime.DriveBase().ClearCommandEvidence();
             Internal::Drive& drive = runtime.DriveService();
 
             MazeMap::ManeuverInstance maneuver;
@@ -433,8 +424,11 @@ namespace MazeMap::App
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsTrue(done);
             Assert::IsTrue(drive.IsEffectivelyComplete());
-            Assert::IsFalse(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsFalse(std::isfinite(control.RightMotorPwm()));
+            Assert::IsFalse(std::isfinite(control.LeftCommand()));
+            Assert::IsFalse(std::isfinite(control.RightCommand()));
+            Assert::IsTrue(
+                (runtime.DriveBase().LastTelemetry().commandKindFlags &
+                    DriveTelemetry::kCommandKindStaleEvidence) != 0U);
         }
 
         TEST_METHOD(SharedRuntime_DriveIllPosedStraightRequestRemainsActiveAndFinite)
@@ -455,14 +449,14 @@ namespace MazeMap::App
 
             bool done = false;
             const Internal::CommandVector control = drive.GetNextControls(done);
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
         }
 
         TEST_METHOD(SharedRuntime_DriveZeroVectorHeadingOverrideFallsBackToCapturedHeading)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
@@ -476,8 +470,7 @@ namespace MazeMap::App
             const auto sampleStraightControl =
                 [&runtime, &drive, &limits](const Eigen::Vector2f* headingOverride) -> Internal::CommandVector
             {
-                runtime.DriveBase().Brake();
-                runtime.DriveBase().ResetControllers();
+                runtime.DriveBase().ClearCommandEvidence();
                 Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.35f));
                 drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
                 drive.SetLimits(limits);
@@ -486,21 +479,21 @@ namespace MazeMap::App
                 bool done = false;
                 const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.LeftCommand()));
+                Assert::IsTrue(std::isfinite(control.RightCommand()));
                 return control;
             };
 
             const Internal::CommandVector zeroHeadingControl = sampleStraightControl(&zeroHeading);
             const Internal::CommandVector nullHeadingControl = sampleStraightControl(nullptr);
-            Assert::AreEqual(nullHeadingControl.LeftMotorPwm(), zeroHeadingControl.LeftMotorPwm(), 1.0e-6f);
-            Assert::AreEqual(nullHeadingControl.RightMotorPwm(), zeroHeadingControl.RightMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(nullHeadingControl.LeftCommand(), zeroHeadingControl.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(nullHeadingControl.RightCommand(), zeroHeadingControl.RightCommand(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveInfiniteHeadingCoordinatesBehaveLikeFiniteDirectionHints)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
@@ -513,8 +506,7 @@ namespace MazeMap::App
             const auto sampleStraightControl =
                 [&runtime, &drive, &limits](const Eigen::Vector2f& headingOverride) -> Internal::CommandVector
             {
-                runtime.DriveBase().Brake();
-                runtime.DriveBase().ResetControllers();
+                runtime.DriveBase().ClearCommandEvidence();
                 Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.35f));
                 drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
                 drive.SetLimits(limits);
@@ -523,8 +515,8 @@ namespace MazeMap::App
                 bool done = false;
                 const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.LeftCommand()));
+                Assert::IsTrue(std::isfinite(control.RightCommand()));
                 return control;
             };
 
@@ -532,21 +524,21 @@ namespace MazeMap::App
             const Eigen::Vector2f rightFiniteHeading(1.0f, 0.0f);
             const Internal::CommandVector rightInfiniteControl = sampleStraightControl(rightInfiniteHeading);
             const Internal::CommandVector rightFiniteControl = sampleStraightControl(rightFiniteHeading);
-            Assert::AreEqual(rightFiniteControl.LeftMotorPwm(), rightInfiniteControl.LeftMotorPwm(), 1.0e-6f);
-            Assert::AreEqual(rightFiniteControl.RightMotorPwm(), rightInfiniteControl.RightMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(rightFiniteControl.LeftCommand(), rightInfiniteControl.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(rightFiniteControl.RightCommand(), rightInfiniteControl.RightCommand(), 1.0e-6f);
 
             const Eigen::Vector2f diagonalInfiniteHeading(INFINITY, INFINITY);
             const Eigen::Vector2f diagonalFiniteHeading(1.0f, 1.0f);
             const Internal::CommandVector diagonalInfiniteControl = sampleStraightControl(diagonalInfiniteHeading);
             const Internal::CommandVector diagonalFiniteControl = sampleStraightControl(diagonalFiniteHeading);
-            Assert::AreEqual(diagonalFiniteControl.LeftMotorPwm(), diagonalInfiniteControl.LeftMotorPwm(), 1.0e-6f);
-            Assert::AreEqual(diagonalFiniteControl.RightMotorPwm(), diagonalInfiniteControl.RightMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(diagonalFiniteControl.LeftCommand(), diagonalInfiniteControl.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(diagonalFiniteControl.RightCommand(), diagonalInfiniteControl.RightCommand(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveInfiniteTargetPositionCoordinatesRemainFunctional)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
@@ -562,16 +554,15 @@ namespace MazeMap::App
                     const Eigen::Vector2f& targetPositionOverride,
                     bool& done) -> Internal::CommandVector
             {
-                runtime.DriveBase().Brake();
-                runtime.DriveBase().ResetControllers();
+                runtime.DriveBase().ClearCommandEvidence();
                 Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
                 drive.SetOperationMode(Internal::Drive::OperationMode::OpenFloor);
                 drive.SetLimits(limits);
                 drive.StartStraight(NAN, 0.20f, 0.0f, &headingOverride, &targetPositionOverride);
 
                 const Internal::CommandVector control = drive.GetNextControls(done);
-                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.LeftCommand()));
+                Assert::IsTrue(std::isfinite(control.RightCommand()));
                 return control;
             };
 
@@ -591,7 +582,7 @@ namespace MazeMap::App
         TEST_METHOD(SharedRuntime_DriveInfiniteTurnReportsDoneWhileContinuingMotion)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up)));
 
             Internal::Drive& drive = runtime.DriveService();
@@ -608,15 +599,15 @@ namespace MazeMap::App
             bool done = false;
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsTrue(done);
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
-            Assert::IsTrue(runtime.DriveBase().GetLastAngularCommandRadps() > 1.0e-4f);
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedYawRateRadps > 1.0e-4f);
         }
 
         TEST_METHOD(SharedRuntime_DriveInfiniteArcReportsDoneWhileContinuingMotion)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up)));
 
             Internal::Drive& drive = runtime.DriveService();
@@ -633,16 +624,16 @@ namespace MazeMap::App
             bool done = false;
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsTrue(done);
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
-            Assert::IsTrue(runtime.DriveBase().GetLastLinearCommandMps() > 1.0e-4f);
-            Assert::IsTrue(runtime.DriveBase().GetLastAngularCommandRadps() > 1.0e-4f);
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedForwardMps > 1.0e-4f);
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedYawRateRadps > 1.0e-4f);
         }
 
         TEST_METHOD(SharedRuntime_DriveArcUsesMazeContextWhenDirectInputsAreIllPosed)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
 
             const float cellSizeM = MazeMap::Maze::GetCellDimension();
             Assert::IsTrue(runtime.Estimator().ResetPose(1.5f * cellSizeM, 1.5f * cellSizeM, DirectionToYawRad(MazeMap::Up)));
@@ -669,16 +660,16 @@ namespace MazeMap::App
             bool done = false;
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
-            Assert::IsTrue(runtime.DriveBase().GetLastLinearCommandMps() > 1.0e-6f);
-            Assert::IsTrue(runtime.DriveBase().GetLastAngularCommandRadps() > 1.0e-6f);
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedForwardMps > 1.0e-6f);
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedYawRateRadps > 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveMalformedRequestIsNonSticky)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
 
             Internal::Drive& drive = runtime.DriveService();
             MotionLimits limits{};
@@ -695,17 +686,17 @@ namespace MazeMap::App
             bool malformedDone = false;
             const Internal::CommandVector malformedControl = drive.GetNextControls(malformedDone);
             Assert::IsFalse(malformedDone);
-            Assert::IsTrue(std::isfinite(malformedControl.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(malformedControl.RightMotorPwm()));
-            Assert::IsTrue(runtime.DriveBase().GetLastAngularCommandRadps() > 1.0e-4f);
+            Assert::IsTrue(std::isfinite(malformedControl.LeftCommand()));
+            Assert::IsTrue(std::isfinite(malformedControl.RightCommand()));
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedYawRateRadps > 1.0e-4f);
 
             drive.StartTurn(HALF_PI_F);
 
             bool recoveredDone = false;
             const Internal::CommandVector recoveredControl = drive.GetNextControls(recoveredDone);
             Assert::IsFalse(recoveredDone);
-            Assert::IsTrue(std::isfinite(recoveredControl.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(recoveredControl.RightMotorPwm()));
+            Assert::IsTrue(std::isfinite(recoveredControl.LeftCommand()));
+            Assert::IsTrue(std::isfinite(recoveredControl.RightCommand()));
         }
 
         TEST_METHOD(SharedRuntime_DriveServicePreservesExplicitStraightDirectionAgainstSignedLimits)
@@ -724,8 +715,8 @@ namespace MazeMap::App
                 bool done = false;
                 const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
+                Assert::IsTrue(std::isfinite(control.LeftCommand()));
+                Assert::IsTrue(std::isfinite(control.RightCommand()));
                 return control;
             };
 
@@ -745,14 +736,14 @@ namespace MazeMap::App
             signedLimits.SetAngleToleranceRad(-positiveLimits.GetAngleToleranceRad());
             const Internal::CommandVector positiveControl = sampleStraightControl(positiveLimits);
             const Internal::CommandVector signedControl = sampleStraightControl(signedLimits);
-            Assert::AreEqual(positiveControl.LeftMotorPwm(), signedControl.LeftMotorPwm(), 1.0e-6f);
-            Assert::AreEqual(positiveControl.RightMotorPwm(), signedControl.RightMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(positiveControl.LeftCommand(), signedControl.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(positiveControl.RightCommand(), signedControl.RightCommand(), 1.0e-6f);
         }
 
         TEST_METHOD(SharedRuntime_DriveTurnRecoversMazeRightTurnFromDegenerateRequest)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             Assert::IsTrue(runtime.Estimator().ResetPose(
                 1.5f * Config::kCellSizeM,
                 1.5f * Config::kCellSizeM,
@@ -782,15 +773,15 @@ namespace MazeMap::App
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
             Assert::IsFalse(drive.IsEffectivelyComplete());
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
-            Assert::IsTrue(runtime.DriveBase().GetLastAngularCommandRadps() > 1.0e-4f);
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedYawRateRadps > 1.0e-4f);
         }
 
         TEST_METHOD(SharedRuntime_DriveArcRecoversMazeRightTurnFromDegenerateRequest)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             Assert::IsTrue(runtime.Estimator().ResetPose(
                 1.5f * Config::kCellSizeM,
                 1.5f * Config::kCellSizeM,
@@ -820,16 +811,16 @@ namespace MazeMap::App
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
             Assert::IsFalse(drive.IsEffectivelyComplete());
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
-            Assert::IsTrue(runtime.DriveBase().GetLastAngularCommandRadps() > 1.0e-4f);
-            Assert::IsTrue(runtime.DriveBase().GetLastLinearCommandMps() > 1.0e-4f);
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedYawRateRadps > 1.0e-4f);
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedForwardMps > 1.0e-4f);
         }
 
         TEST_METHOD(SharedRuntime_DriveArcChoosesDeterministicMotionWhenAllInputsAreAmbiguous)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, DirectionToYawRad(MazeMap::Up)));
 
             MotionLimits limits{};
@@ -848,16 +839,16 @@ namespace MazeMap::App
             const Internal::CommandVector control = drive.GetNextControls(done);
             Assert::IsFalse(done);
             Assert::IsFalse(drive.IsEffectivelyComplete());
-            Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-            Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
-            Assert::IsTrue(runtime.DriveBase().GetLastLinearCommandMps() > 1.0e-4f);
-            Assert::IsTrue(runtime.DriveBase().GetLastAngularCommandRadps() > 1.0e-4f);
+            Assert::IsTrue(std::isfinite(control.LeftCommand()));
+            Assert::IsTrue(std::isfinite(control.RightCommand()));
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedForwardMps > 1.0e-4f);
+            Assert::IsTrue(runtime.DriveBase().LastTelemetry().requestedYawRateRadps > 1.0e-4f);
         }
 
         TEST_METHOD(SharedRuntime_DriveServiceRecoversManeuverDirectionFromSignedLimitsWhenSpeedIsAmbiguous)
         {
             Internal::SharedRobotRuntime runtime;
-            Assert::IsTrue(runtime.DriveBase().Begin());
+            runtime.DriveBase().ClearCommandEvidence();
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
 
             Internal::Drive& drive = runtime.DriveService();
@@ -874,9 +865,9 @@ namespace MazeMap::App
                 bool done = false;
                 const Internal::CommandVector control = drive.GetNextControls(done);
                 Assert::IsFalse(done);
-                Assert::IsTrue(std::isfinite(control.LeftMotorPwm()));
-                Assert::IsTrue(std::isfinite(control.RightMotorPwm()));
-                return runtime.DriveBase().GetLastLinearCommandMps();
+                Assert::IsTrue(std::isfinite(control.LeftCommand()));
+                Assert::IsTrue(std::isfinite(control.RightCommand()));
+                return runtime.DriveBase().LastTelemetry().requestedForwardMps;
             };
 
             MotionLimits forwardLimits{};

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 
 #ifndef MAZEMAP_PLANTMODEL_VALIDATE_INVERSE
@@ -344,6 +345,38 @@ namespace
         return (magnitudeLimit > 0.0f) ?
             (std::clamp)(value, -magnitudeLimit, magnitudeLimit) :
             value;
+    }
+
+    inline std::uint32_t HashFloatBits(std::uint32_t hash, float value) noexcept
+    {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof(bits));
+        hash ^= bits;
+        hash *= 16777619U;
+        return hash;
+    }
+
+    inline std::uint32_t HashStateAndRequest(
+        const PlantModel::StateVector& state,
+        float targetForwardVelocityMps,
+        float targetYawRateRadps,
+        float requestedForwardAccelMps2,
+        float requestedYawAccelRadps2,
+        float composedForwardAccelMps2,
+        float composedYawAccelRadps2) noexcept
+    {
+        std::uint32_t hash = 2166136261U;
+        for (int i = 0; i < PlantModel::StateVector::RowsAtCompileTime; ++i)
+        {
+            hash = HashFloatBits(hash, state(i));
+        }
+        hash = HashFloatBits(hash, targetForwardVelocityMps);
+        hash = HashFloatBits(hash, targetYawRateRadps);
+        hash = HashFloatBits(hash, requestedForwardAccelMps2);
+        hash = HashFloatBits(hash, requestedYawAccelRadps2);
+        hash = HashFloatBits(hash, composedForwardAccelMps2);
+        hash = HashFloatBits(hash, composedYawAccelRadps2);
+        return hash;
     }
 
     inline ContactForce BuildClampedContactForce(
@@ -843,8 +876,8 @@ namespace MazeMap
             std::isfinite(currentState(VehicleState::kOmegaL)) ? currentState(VehicleState::kOmegaL) : 0.0f;
         const float rightWheelSpeedRadps =
             std::isfinite(currentState(VehicleState::kOmegaR)) ? currentState(VehicleState::kOmegaR) : 0.0f;
-        const float leftMotorCommand = std::isfinite(control.LeftMotorPwm()) ? control.LeftMotorPwm() : 0.0f;
-        const float rightMotorCommand = std::isfinite(control.RightMotorPwm()) ? control.RightMotorPwm() : 0.0f;
+        const float leftMotorCommand = std::isfinite(control.LeftCommand()) ? control.LeftCommand() : 0.0f;
+        const float rightMotorCommand = std::isfinite(control.RightCommand()) ? control.RightCommand() : 0.0f;
         const float batteryVoltageV = _vehicle.GetBatteryVoltage();
 
         leftAppliedBankTorqueNm =
@@ -1087,7 +1120,7 @@ namespace MazeMap
             leftDriveTorqueNm,
             rightDriveTorqueNm);
         const float activityNorm =
-            (std::max)(std::fabs(control.LeftMotorPwm()), std::fabs(control.RightMotorPwm()));
+            (std::max)(std::fabs(control.LeftCommand()), std::fabs(control.RightCommand()));
         return evaluateAppliedBankTorqueStep(
             state,
             leftDriveTorqueNm,
@@ -1565,7 +1598,7 @@ namespace MazeMap
         const float omegaLeftRadps = state(VehicleState::kOmegaL);
         const float omegaRightRadps = state(VehicleState::kOmegaR);
         const float commandNorm =
-            (std::max)(std::fabs(control.LeftMotorPwm()), std::fabs(control.RightMotorPwm()));
+            (std::max)(std::fabs(control.LeftCommand()), std::fabs(control.RightCommand()));
 
         const float speedNormMps =
             ComputeSpeedNormMps(
@@ -1646,7 +1679,7 @@ namespace MazeMap
         }
 
         const float commandNorm =
-            (std::max)(std::fabs(control.LeftMotorPwm()), std::fabs(control.RightMotorPwm()));
+            (std::max)(std::fabs(control.LeftCommand()), std::fabs(control.RightCommand()));
         const PlantDerivatives derivatives = forwardStep(state, control, params);
         StateVector implicitState = state + (dt * derivatives.stateDot);
         implicitState(VehicleState::kPsi) = VehicleState::NormalizeAngle(implicitState(VehicleState::kPsi));
@@ -1795,10 +1828,22 @@ namespace MazeMap
         float desiredLongitudinalAccelMps2,
         float desiredYawAccelRadps2) const noexcept
     {
+        return solveAccelerationFeedforward(
+            BuildBoundStateVector(),
+            desiredLongitudinalAccelMps2,
+            desiredYawAccelRadps2);
+    }
+
+    App::Internal::CommandVector PlantModel::solveAccelerationFeedforward(
+        const StateVector& currentState,
+        float desiredLongitudinalAccelMps2,
+        float desiredYawAccelRadps2) const noexcept
+    {
         const PreparedParams& params = _preparedParams;
-        const float forwardVelocityMps = _runtimeState.GetVelocity();
-        const float rightVelocityMps = _runtimeState.GetLateralVelocity();
-        const float yawRateRadps = _runtimeState.GetRotationalVelocity();
+        const StateVector operatingState = BuildDriveCommandOperatingState(currentState, params);
+        const float forwardVelocityMps = operatingState(VehicleState::kU);
+        const float rightVelocityMps = operatingState(VehicleState::kV);
+        const float yawRateRadps = operatingState(VehicleState::kR);
         const float leftBankVelocityMps =
             forwardVelocityMps + (params.halfTrackWidthM * yawRateRadps);
         const float rightBankVelocityMps =
@@ -1943,6 +1988,159 @@ namespace MazeMap
                 rightWheelTorqueRequestNm + rightFrictionTorqueNm,
                 rightMotorSpeedRadps,
                 params.supplyVoltageV));
+    }
+
+    PlantModelBodyActionSolveResult PlantModel::SolveBodyActionInverse(
+        const StateVector& currentState,
+        float targetForwardVelocityMps,
+        float targetYawRateRadps,
+        float requestedForwardAccelMps2,
+        float requestedYawAccelRadps2,
+        float composedForwardAccelMps2,
+        float composedYawAccelRadps2) const noexcept
+    {
+        PlantModelBodyActionSolveResult result{};
+        result.requestedForwardMps = targetForwardVelocityMps;
+        result.requestedYawRateRadps = targetYawRateRadps;
+        result.requestedForwardAccelMps2 = requestedForwardAccelMps2;
+        result.requestedYawAccelRadps2 = requestedYawAccelRadps2;
+        result.composedForwardAccelMps2 = composedForwardAccelMps2;
+        result.composedYawAccelRadps2 = composedYawAccelRadps2;
+
+        const StateVector operatingState = BuildDriveCommandOperatingState(currentState, _preparedParams);
+        const auto decodeVelocityIntent =
+            [](float objective, std::uint16_t inactiveFlag, std::uint16_t finiteFlag, std::uint16_t maximizeFlag) noexcept
+            {
+                if (std::isnan(objective))
+                {
+                    return inactiveFlag;
+                }
+                return std::isfinite(objective) ? finiteFlag : maximizeFlag;
+            };
+        result.scalarIntentFlags |=
+            decodeVelocityIntent(
+                targetForwardVelocityMps,
+                PlantModelBodyActionSolveResult::kScalarForwardVelocityInactive,
+                PlantModelBodyActionSolveResult::kScalarForwardVelocityFinite,
+                PlantModelBodyActionSolveResult::kScalarForwardVelocityMaximize);
+        result.scalarIntentFlags |=
+            decodeVelocityIntent(
+                targetYawRateRadps,
+                PlantModelBodyActionSolveResult::kScalarYawRateInactive,
+                PlantModelBodyActionSolveResult::kScalarYawRateFinite,
+                PlantModelBodyActionSolveResult::kScalarYawRateMaximize);
+        if (std::isinf(targetForwardVelocityMps) || std::isinf(targetYawRateRadps))
+        {
+            result.failureFlags |= PlantModelBodyActionSolveResult::kFailureUnsupportedScalarIntent;
+        }
+
+        result.plantEvaluationId =
+            HashStateAndRequest(
+                operatingState,
+                targetForwardVelocityMps,
+                targetYawRateRadps,
+                requestedForwardAccelMps2,
+                requestedYawAccelRadps2,
+                composedForwardAccelMps2,
+                composedYawAccelRadps2);
+        result.validityFlags |= PlantModelBodyActionSolveResult::kValidityPlantEvaluationId;
+
+        if (std::isnan(composedForwardAccelMps2))
+        {
+            result.scalarIntentFlags |= PlantModelBodyActionSolveResult::kScalarForwardAccelInactive;
+        }
+        else if (std::isinf(composedForwardAccelMps2))
+        {
+            result.scalarIntentFlags |= PlantModelBodyActionSolveResult::kScalarForwardAccelMaximize;
+        }
+        else
+        {
+            result.scalarIntentFlags |= PlantModelBodyActionSolveResult::kScalarForwardAccelFinite;
+        }
+
+        if (std::isnan(composedYawAccelRadps2))
+        {
+            result.scalarIntentFlags |= PlantModelBodyActionSolveResult::kScalarYawAccelInactive;
+        }
+        else if (std::isinf(composedYawAccelRadps2))
+        {
+            result.scalarIntentFlags |= PlantModelBodyActionSolveResult::kScalarYawAccelMaximize;
+        }
+        else
+        {
+            result.scalarIntentFlags |= PlantModelBodyActionSolveResult::kScalarYawAccelFinite;
+        }
+
+        float maxLongitudinalAccelMps2 = 0.0f;
+        float maxYawAccelRadps2 = 0.0f;
+        velocityTargetTechnicalLimits(
+            operatingState,
+            _preparedParams,
+            maxLongitudinalAccelMps2,
+            maxYawAccelRadps2);
+
+        const auto resolveComposedAccel =
+            [](float objective, float maximizeLimit) noexcept
+            {
+                if (std::isnan(objective))
+                {
+                    return 0.0f;
+                }
+                if (std::isinf(objective))
+                {
+                    const float resolvedLimit =
+                        (std::isfinite(maximizeLimit) && (maximizeLimit > 0.0f)) ? maximizeLimit : 0.0f;
+                    return std::signbit(objective) ? -resolvedLimit : resolvedLimit;
+                }
+                return std::isfinite(objective) ? objective : 0.0f;
+            };
+
+        const float finalForwardAccelMps2 =
+            resolveComposedAccel(composedForwardAccelMps2, maxLongitudinalAccelMps2);
+        const float finalYawAccelRadps2 =
+            resolveComposedAccel(composedYawAccelRadps2, maxYawAccelRadps2);
+
+        const auto resolveFiniteOrCurrent =
+            [](float objective, float currentValue) noexcept
+            {
+                return std::isfinite(objective) ? objective : currentValue;
+            };
+        const float targetWheelForwardMps =
+            resolveFiniteOrCurrent(targetForwardVelocityMps, operatingState(VehicleState::kU));
+        const float targetWheelYawRateRadps =
+            resolveFiniteOrCurrent(targetYawRateRadps, operatingState(VehicleState::kR));
+        resolveWheelMotionTargets(
+            targetWheelForwardMps,
+            targetWheelYawRateRadps,
+            finalForwardAccelMps2,
+            finalYawAccelRadps2,
+            _preparedParams,
+            result.leftWheelTargetVelocityMps,
+            result.rightWheelTargetVelocityMps,
+            result.leftWheelTargetAccelMps2,
+            result.rightWheelTargetAccelMps2,
+            result.leftWheelTargetOmegaRadps,
+            result.rightWheelTargetOmegaRadps);
+        result.validityFlags |= PlantModelBodyActionSolveResult::kValidityWheelTargets;
+
+        result.command =
+            solveAccelerationFeedforward(
+                operatingState,
+                finalForwardAccelMps2,
+                finalYawAccelRadps2);
+        result.finalSolveCommand = result.command;
+        if (result.command.IsFinite())
+        {
+            result.validityFlags |=
+                PlantModelBodyActionSolveResult::kValidityCommand |
+                PlantModelBodyActionSolveResult::kValidityFinalSolveCommand;
+        }
+        else
+        {
+            result.failureFlags |= PlantModelBodyActionSolveResult::kFailureNonFiniteCommand;
+        }
+
+        return result;
     }
 
     void PlantModel::ComputeBodyAction(

@@ -15,8 +15,8 @@ namespace MazeMap
         bool IsFiniteControlVector(const App::Internal::CommandVector& control) noexcept
         {
             return
-                std::isfinite(control.LeftMotorPwm()) &&
-                std::isfinite(control.RightMotorPwm());
+                std::isfinite(control.LeftCommand()) &&
+                std::isfinite(control.RightCommand());
         }
     }
 
@@ -31,8 +31,8 @@ namespace MazeMap
             const App::Internal::CommandVector control =
                 plant.solveAccelerationFeedforward(0.0f, 0.0f);
 
-            Assert::AreEqual(0.0f, control.LeftMotorPwm(), 1.0e-6f);
-            Assert::AreEqual(0.0f, control.RightMotorPwm(), 1.0e-6f);
+            Assert::AreEqual(0.0f, control.LeftCommand(), 1.0e-6f);
+            Assert::AreEqual(0.0f, control.RightCommand(), 1.0e-6f);
         }
 
         TEST_METHOD(PlantModelSteadyStateFeedforwardReturnsFiniteSymmetricCommandForForwardTarget)
@@ -44,7 +44,7 @@ namespace MazeMap
                 plant.solveSteadyStateFeedforward(0.75f, 0.0f);
 
             Assert::IsTrue(IsFiniteControlVector(control));
-            Assert::AreEqual(control.LeftMotorPwm(), control.RightMotorPwm(), 1.0e-5f);
+            Assert::AreEqual(control.LeftCommand(), control.RightCommand(), 1.0e-5f);
         }
 
         TEST_METHOD(PlantModelSteadyStateFeedforwardReturnsSplitCommandForYawTarget)
@@ -56,7 +56,7 @@ namespace MazeMap
                 plant.solveSteadyStateFeedforward(0.0f, 2.0f);
 
             Assert::IsTrue(IsFiniteControlVector(control));
-            Assert::IsTrue(std::fabs(control.LeftMotorPwm() - control.RightMotorPwm()) > 1.0e-4f);
+            Assert::IsTrue(std::fabs(control.LeftCommand() - control.RightCommand()) > 1.0e-4f);
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardReturnsFiniteOutputForCombinedRequest)
@@ -84,7 +84,7 @@ namespace MazeMap
                 plant.solveAccelerationFeedforward(4.0f, 0.0f);
 
             Assert::IsTrue(IsFiniteControlVector(control));
-            Assert::AreEqual(control.LeftMotorPwm(), control.RightMotorPwm(), 1.0e-5f);
+            Assert::AreEqual(control.LeftCommand(), control.RightCommand(), 1.0e-5f);
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf)
@@ -117,8 +117,8 @@ namespace MazeMap
 
             Assert::IsTrue(IsFiniteControlVector(slowControl));
             Assert::IsTrue(IsFiniteControlVector(movingControl));
-			Assert::AreNotEqual(slowControl.LeftMotorPwm(), movingControl.LeftMotorPwm(), 1.0e-5f);
-            Assert::AreNotEqual(slowControl.RightMotorPwm(), movingControl.RightMotorPwm(), 1.0e-5f);
+			Assert::AreNotEqual(slowControl.LeftCommand(), movingControl.LeftCommand(), 1.0e-5f);
+            Assert::AreNotEqual(slowControl.RightCommand(), movingControl.RightCommand(), 1.0e-5f);
             Assert::IsTrue(movingControl.Average() > slowControl.Average());
         }
 
@@ -202,6 +202,72 @@ namespace MazeMap
             Assert::IsTrue(std::isfinite(maxYawAccelRadps2));
             Assert::IsTrue(maxLongitudinalAccelMps2 > 0.0f);
             Assert::IsTrue(maxYawAccelRadps2 > 0.0f);
+        }
+
+        TEST_METHOD(PlantModelBodyActionInverseRecordsInfiniteForwardVelocityIntent)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+
+            const PlantModelBodyActionSolveResult positive =
+                plant.SolveBodyActionInverse(
+                    VehicleState::StateVector::Zero(),
+                    INFINITY,
+                    NAN,
+                    NAN,
+                    NAN,
+                    NAN,
+                    NAN);
+            const PlantModelBodyActionSolveResult negative =
+                plant.SolveBodyActionInverse(
+                    VehicleState::StateVector::Zero(),
+                    -INFINITY,
+                    NAN,
+                    NAN,
+                    NAN,
+                    NAN,
+                    NAN);
+
+            Assert::IsTrue(
+                (positive.scalarIntentFlags & PlantModelBodyActionSolveResult::kScalarForwardVelocityMaximize) != 0U);
+            Assert::IsTrue(
+                (negative.scalarIntentFlags & PlantModelBodyActionSolveResult::kScalarForwardVelocityMaximize) != 0U);
+            Assert::IsTrue(std::isinf(positive.requestedForwardMps));
+            Assert::IsTrue(std::isinf(negative.requestedForwardMps));
+        }
+
+        TEST_METHOD(PlantModelBodyActionInverseRecordsInfiniteYawRateIntent)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
+
+            const PlantModelBodyActionSolveResult positive =
+                plant.SolveBodyActionInverse(
+                    VehicleState::StateVector::Zero(),
+                    NAN,
+                    INFINITY,
+                    NAN,
+                    NAN,
+                    NAN,
+                    NAN);
+            const PlantModelBodyActionSolveResult negative =
+                plant.SolveBodyActionInverse(
+                    VehicleState::StateVector::Zero(),
+                    NAN,
+                    -INFINITY,
+                    NAN,
+                    NAN,
+                    NAN,
+                    NAN);
+
+            Assert::IsTrue(
+                (positive.scalarIntentFlags & PlantModelBodyActionSolveResult::kScalarYawRateMaximize) != 0U);
+            Assert::IsTrue(
+                (negative.scalarIntentFlags & PlantModelBodyActionSolveResult::kScalarYawRateMaximize) != 0U);
+            Assert::IsTrue(std::isinf(positive.requestedYawRateRadps));
+            Assert::IsTrue(std::isinf(negative.requestedYawRateRadps));
         }
     };
 }

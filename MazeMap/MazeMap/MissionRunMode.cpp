@@ -9,6 +9,8 @@
 #include "SharedRobotRuntime.h"
 #include "StartupCalibration.h"
 
+#include <limits>
+
 namespace
 {
     constexpr std::uint16_t kMissionPostStartupHoldMs = 250U;
@@ -40,10 +42,7 @@ namespace MazeMap::App::Internal
             (void)_runtime.AppendTextLogLine("Mission mode");
             (void)_runtime.AppendTextLogLine("Shared-service mission startup audit");
 
-            if (!_drive.Begin())
-            {
-                _runtime.FailActiveMode("Mission drive base init failed");
-            }
+            _drive.ClearCommandEvidence();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
@@ -150,12 +149,19 @@ namespace MazeMap::App::Internal
             }
 
             case Phase::Complete:
+            {
                 (void)_runtime.AppendTextLogLine("Mission startup audit complete");
                 _startupCalibration.Cancel();
-                _drive.Brake();
+                const CommandVector stopCommand = _drive.ProposeBodyTick(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    (std::numeric_limits<float>::quiet_NaN)());
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return CommandVector::Brake();
+                return stopCommand;
+            }
 
             case Phase::Idle:
             default:

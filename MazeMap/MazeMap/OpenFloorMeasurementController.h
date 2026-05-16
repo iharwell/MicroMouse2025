@@ -103,10 +103,10 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         cmd_angular_radps)            \
     X(float,         left_drive_command)           \
     X(float,         right_drive_command)          \
-    X(float,         left_feedforward_command)     \
-    X(float,         right_feedforward_command)    \
-    X(float,         left_feedback_command)        \
-    X(float,         right_feedback_command)       \
+    X(float,         left_plant_command)           \
+    X(float,         right_plant_command)          \
+    X(float,         left_command_residual)        \
+    X(float,         right_command_residual)       \
     X(float,         left_target_velocity_mps)     \
     X(float,         right_target_velocity_mps)    \
     X(std::uint32_t, encoder_timestamp_us)         \

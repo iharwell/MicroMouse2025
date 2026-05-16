@@ -3,7 +3,7 @@
 
 #include "EstimatorTestSupport.h"
 #include "PlantModelTestSupport.h"
-
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 
@@ -46,8 +46,8 @@ namespace MazeMap
             state(VehicleState::kOmegaR) = state(VehicleState::kU) / params.wheelRadiusM;
 
             App::Internal::CommandVector control;
-            control.SetLeftMotorPwm(0.55f);
-            control.SetRightMotorPwm(0.55f);
+            control.SetLeftCommand(0.55f);
+            control.SetRightCommand(0.55f);
 
             const PlantDerivatives derivatives =
                 plant.forwardStep(state, control, params);
@@ -118,8 +118,8 @@ namespace MazeMap
                 -0.03f);
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.38f);
-            control.SetRightMotorPwm(0.23f);
+            control.SetLeftCommand(0.38f);
+            control.SetRightCommand(0.23f);
             const float controlFanDutyCycle = 0.72f;
             runtime.vehicle.SetFanDuty(controlFanDutyCycle);
 
@@ -202,6 +202,65 @@ namespace MazeMap
                 1.0e-6f);
         }
 
+        TEST_METHOD(PlantModelFeedforwardDoesNotUsePrediction)
+        {
+            constexpr uint32_t numFeedforward = 100000;
+            constexpr uint32_t numForwardStep = 70000;
+			constexpr uint32_t numIntegrate = 65000;
+
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
+            const PlantParams params = PlantParams::Default();
+            constexpr float dtSeconds = 0.001f;
+
+            App::Internal::CommandVector control{};
+            control.SetLeftCommand(0.0f);
+            control.SetRightCommand(0.0f);
+
+            auto state = BuildUkfState(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    1.0f,
+                    0.0f,
+                    0.0f,
+                    1.0f / params.wheelRadiusM,
+                    1.0f / params.wheelRadiusM,
+                    0.0f);
+			auto startTime1 = std::chrono::high_resolution_clock::now();
+            for (int tick = 0; tick < numForwardStep; ++tick)
+            {
+                PlantDerivatives derivatives =
+                    plant.forwardStep(
+                        state,
+                        control,
+                        params);
+            }
+			auto durationForwardStep = std::chrono::high_resolution_clock::now() - startTime1;
+
+            startTime1 = std::chrono::high_resolution_clock::now();
+            for (int tick = 0; tick < numIntegrate; ++tick)
+            {
+                state =
+                    plant.integrate(
+                        state,
+                        control,
+                        dtSeconds,
+                        params);
+            }
+            auto durationIntegrate = std::chrono::high_resolution_clock::now() - startTime1;
+            startTime1 = std::chrono::high_resolution_clock::now();
+            for (int tick = 0; tick < numFeedforward; ++tick)
+            {
+				auto command = plant.SolveBodyActionInverse(state, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            }
+            auto durationFeedforward = std::chrono::high_resolution_clock::now() - startTime1;
+            auto ss = std::wstringstream();
+            ss << "feedforward: " << durationFeedforward.count() << "  integrate: " << durationIntegrate.count() << "  forwardstep: " << durationForwardStep.count();
+            Assert::IsTrue(durationFeedforward < durationIntegrate, ss.str().c_str());
+            Assert::IsTrue(durationIntegrate < durationForwardStep, ss.str().c_str());
+        }
+
         TEST_METHOD(PlantModelLateralTireForcePlateausAtSustainedLimitAcrossTicks)
         {
             PlantModelTestRuntime runtime;
@@ -210,8 +269,8 @@ namespace MazeMap
             constexpr float dtSeconds = 0.001f;
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.0f);
-            control.SetRightMotorPwm(0.0f);
+            control.SetLeftCommand(0.0f);
+            control.SetRightCommand(0.0f);
 
             auto buildState = [&params](const float lateralVelocityMps) {
                 return BuildUkfState(
@@ -268,8 +327,8 @@ namespace MazeMap
             params.pivotScrubRollingYawMomentNm = 0.11f;
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.0f);
-            control.SetRightMotorPwm(0.0f);
+            control.SetLeftCommand(0.0f);
+            control.SetRightCommand(0.0f);
 
             constexpr float dtSeconds = 0.001f;
             constexpr float initialYawRateRadps = 3.0f;
@@ -440,8 +499,8 @@ namespace MazeMap
             state(VehicleState::kOmegaR) = 0.95f * (state(VehicleState::kU) / params.wheelRadiusM);
 
             App::Internal::CommandVector control;
-            control.SetLeftMotorPwm(0.65f);
-            control.SetRightMotorPwm(0.60f);
+            control.SetLeftCommand(0.65f);
+            control.SetRightCommand(0.60f);
 
             const WheelKinematics kinematics = plant.wheelKinematics(state, params);
             const SlipTargets slip = plant.slipTargets(state, kinematics, params);
@@ -522,8 +581,8 @@ namespace MazeMap
             state(VehicleState::kOmegaR) = 1.1f * (state(VehicleState::kU) / zeroLeverParams.wheelRadiusM);
 
             App::Internal::CommandVector control;
-            control.SetLeftMotorPwm(0.30f);
-            control.SetRightMotorPwm(0.55f);
+            control.SetLeftCommand(0.30f);
+            control.SetRightCommand(0.55f);
 
             const PlantDerivatives zeroLever =
                 plant.forwardStep(state, control, zeroLeverParams);
@@ -561,8 +620,8 @@ namespace MazeMap
             state(VehicleState::kOmegaR) = 1.05f * (state(VehicleState::kU) / params.wheelRadiusM);
 
             App::Internal::CommandVector control;
-            control.SetLeftMotorPwm(0.25f);
-            control.SetRightMotorPwm(0.45f);
+            control.SetLeftCommand(0.25f);
+            control.SetRightCommand(0.45f);
 
             const PlantDerivatives derivatives =
                 plant.forwardStep(state, control, params);
@@ -593,8 +652,8 @@ namespace MazeMap
                 0.0f);
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.50f);
-            control.SetRightMotorPwm(0.50f);
+            control.SetLeftCommand(0.50f);
+            control.SetRightCommand(0.50f);
 
             constexpr float dt = 0.002f;
             constexpr int kSteps = 25;
@@ -629,8 +688,8 @@ namespace MazeMap
             const float staticWindowRadps = params.staticFrictionMaxSpeedMps / params.wheelRadiusM;
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.25f);
-            control.SetRightMotorPwm(0.25f);
+            control.SetLeftCommand(0.25f);
+            control.SetRightCommand(0.25f);
 
             const VehicleState::StateVector atRest = BuildUkfState(
                 0.0f,
@@ -680,8 +739,8 @@ namespace MazeMap
                 0.0f,
                 0.0f);
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.45f);
-            control.SetRightMotorPwm(0.45f);
+            control.SetLeftCommand(0.45f);
+            control.SetRightCommand(0.45f);
 
             constexpr float dt = 0.004f;
             const VehicleState::StateVector integrated =

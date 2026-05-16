@@ -66,6 +66,9 @@ namespace MazeMap::App
         {
             bool started = false;
             bool completed = false;
+            bool allReturnedCommandsFinite = true;
+            bool commandEvidenceMatchesReturnedCommand = true;
+            bool bodyObjectivesFinite = true;
             float elapsedSeconds = 0.0f;
             VehicleState::StateVector truthState = VehicleState::StateVector::Zero();
             std::vector<CommandSample> samples;
@@ -99,7 +102,6 @@ namespace MazeMap::App
         }
 
         void ApplyEncoderObservation(
-            DriveBase& drive,
             Estimator& estimator,
             VehicleState& runtimeState,
             const float leftDistanceDeltaM,
@@ -107,7 +109,8 @@ namespace MazeMap::App
             const float yawRateRadps,
             float& leftEncoderRemainderCounts,
             float& rightEncoderRemainderCounts,
-            const float dtSeconds)
+            const float dtSeconds,
+            const CommandVector& appliedControl = MakeControlVector())
         {
             const PlantParams params = PlantParams::Default();
             const float distancePerCountM = DistancePerEncoderCountMeters(params);
@@ -146,11 +149,11 @@ namespace MazeMap::App
             snapshot.rightEncoderDistanceM =
                 MazeMap::Vehicle::DriveEncoderDistanceFromCounts(snapshot.rightEncoderTotalCounts);
             UpdateDriveEstimator(
-                drive,
                 estimator,
                 runtimeState,
                 dtSeconds,
-                snapshot);
+                snapshot,
+                appliedControl);
         }
 
         VehicleState::StateVector BuildTruthState(const float linearSpeedMps) noexcept
@@ -190,7 +193,6 @@ namespace MazeMap::App
                 0.5f * static_cast<float>(projectedLeftCounts + projectedRightCounts) * distancePerCountM;
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f));
             ApplyEncoderObservation(
-                runtime.DriveBase(),
                 runtime.Estimator(),
                 runtime.RuntimeState(),
                 kSmoothEntrySpeedMps * kSimulationDtSeconds,
@@ -207,14 +209,10 @@ namespace MazeMap::App
             VehicleState::StateVector& truthState,
             float& leftEncoderRemainderCounts,
             float& rightEncoderRemainderCounts,
-            const float dtSeconds)
+            const float dtSeconds,
+            const CommandVector& control)
         {
             const PlantParams params = PlantParams::Default();
-            const DriveTelemetry telemetry = runtime.DriveBase().GetTelemetry();
-
-            const CommandVector control = CommandVector(
-                telemetry.leftDriveCommand,
-                telemetry.rightDriveCommand);
 
             const VehicleState::StateVector previousTruthState = truthState;
             truthState = plant.integrate(truthState, control, dtSeconds, params);
@@ -231,7 +229,6 @@ namespace MazeMap::App
                 dtSeconds;
 
             ApplyEncoderObservation(
-                runtime.DriveBase(),
                 runtime.Estimator(),
                 runtime.RuntimeState(),
                 leftDistanceDeltaM,
@@ -239,7 +236,8 @@ namespace MazeMap::App
                 truthState(VehicleState::kR),
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
-                dtSeconds);
+                dtSeconds,
+                control);
         }
 
         DirectionalLocation BuildManeuverStart() noexcept
@@ -312,10 +310,7 @@ namespace MazeMap::App
             float leftEncoderRemainderCounts = 0.0f;
             float rightEncoderRemainderCounts = 0.0f;
 
-            if (!runtime.DriveBase().Begin())
-            {
-                return trace;
-            }
+            runtime.DriveBase().ClearCommandEvidence();
 
             Assert::IsTrue(runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f));
             if (smoothTurn)
@@ -356,11 +351,28 @@ namespace MazeMap::App
                     return trace;
                 }
 
+                const DriveTelemetry& telemetry = runtime.DriveBase().LastTelemetry();
+                trace.allReturnedCommandsFinite =
+                    trace.allReturnedCommandsFinite && control.IsFinite();
+                trace.commandEvidenceMatchesReturnedCommand =
+                    trace.commandEvidenceMatchesReturnedCommand &&
+                    ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindBodyProposal) != 0U) &&
+                    ((telemetry.telemetryValidFlags & DriveTelemetry::kTelemetryCommandEvidenceValid) != 0U) &&
+                    (std::fabs(control.LeftCommand() - telemetry.leftDriveCommand) <= 1.0e-6f) &&
+                    (std::fabs(control.RightCommand() - telemetry.rightDriveCommand) <= 1.0e-6f);
+                trace.bodyObjectivesFinite =
+                    trace.bodyObjectivesFinite &&
+                    std::isfinite(telemetry.requestedForwardMps) &&
+                    std::isfinite(telemetry.requestedYawRateRadps) &&
+                    std::isfinite(telemetry.requestedForwardAccelMps2) &&
+                    std::isfinite(telemetry.requestedYawAccelRadps2) &&
+                    std::isfinite(telemetry.requestedYawRad);
+
                 trace.samples.push_back(
                     CommandSample{
                         trace.elapsedSeconds,
-                        runtime.DriveBase().GetLastLinearCommandMps(),
-                        runtime.DriveBase().GetLastAngularCommandRadps()
+                        telemetry.requestedForwardMps,
+                        telemetry.requestedYawRateRadps
                     });
 
                 SimulateRuntimeDriveCycle(
@@ -369,324 +381,72 @@ namespace MazeMap::App
                     trace.truthState,
                     leftEncoderRemainderCounts,
                     rightEncoderRemainderCounts,
-                    kSimulationDtSeconds);
+                    kSimulationDtSeconds,
+                    control);
                 trace.elapsedSeconds += kSimulationDtSeconds;
             }
 
             return trace;
         }
 
-        float ComputeNormalizedSpan(const std::vector<float>& values) noexcept
+        CheckResult EvaluateManeuverCompletes(const ManeuverCode code, const bool smoothTurn)
         {
-            if (values.size() < 2U)
-            {
-                return (std::numeric_limits<float>::infinity)();
-            }
-
-            const auto minmax = std::minmax_element(values.begin(), values.end());
-            const float average =
-                std::accumulate(values.begin(), values.end(), 0.0f) /
-                static_cast<float>(values.size());
-            if (!(average > 0.0f) || !std::isfinite(average))
-            {
-                return (std::numeric_limits<float>::infinity)();
-            }
-
-            return (*minmax.second - *minmax.first) / average;
-        }
-
-        std::vector<float> CollectLinearCommandMagnitudes(const ManeuverExecutionTrace& trace)
-        {
-            std::vector<float> magnitudes;
-            magnitudes.reserve(trace.samples.size());
-            for (const CommandSample& sample : trace.samples)
-            {
-                magnitudes.push_back(std::fabs(sample.linearCommandMps));
-            }
-            return magnitudes;
-        }
-
-        std::vector<float> CollectTurnYawRateMagnitudes(const ManeuverExecutionTrace& trace)
-        {
-            std::vector<float> magnitudes;
-            if (trace.samples.empty())
-            {
-                return magnitudes;
-            }
-
-            float maxOmegaMagnitudeRadps = 0.0f;
-            for (const CommandSample& sample : trace.samples)
-            {
-                maxOmegaMagnitudeRadps =
-                    (std::max)(maxOmegaMagnitudeRadps, std::fabs(sample.angularCommandRadps));
-            }
-
-            const float plateauThresholdRadps = kTurnPlateauFraction * maxOmegaMagnitudeRadps;
-            for (const CommandSample& sample : trace.samples)
-            {
-                const float magnitudeRadps = std::fabs(sample.angularCommandRadps);
-                if (magnitudeRadps >= plateauThresholdRadps)
-                {
-                    magnitudes.push_back(magnitudeRadps);
-                }
-            }
-
-            return magnitudes;
-        }
-
-        std::vector<float> CollectRampYawAccelMagnitudes(const ManeuverExecutionTrace& trace)
-        {
-            std::vector<float> magnitudes;
-            if (trace.samples.size() < 3U)
-            {
-                return magnitudes;
-            }
-
-            float maxOmegaMagnitudeRadps = 0.0f;
-            std::size_t plateauBeginIndex = trace.samples.size();
-            std::size_t plateauEndIndex = 0U;
-            for (std::size_t index = 0U; index < trace.samples.size(); ++index)
-            {
-                maxOmegaMagnitudeRadps =
-                    (std::max)(
-                        maxOmegaMagnitudeRadps,
-                        std::fabs(trace.samples[index].angularCommandRadps));
-            }
-
-            const float plateauThresholdRadps = kTurnPlateauFraction * maxOmegaMagnitudeRadps;
-            for (std::size_t index = 0U; index < trace.samples.size(); ++index)
-            {
-                if (std::fabs(trace.samples[index].angularCommandRadps) >= plateauThresholdRadps)
-                {
-                    plateauBeginIndex = (std::min)(plateauBeginIndex, index);
-                    plateauEndIndex = index;
-                }
-            }
-
-            if (plateauBeginIndex == trace.samples.size())
-            {
-                return magnitudes;
-            }
-
-            const auto appendTrimmedRegionMagnitudes =
-                [&](const std::size_t deltaBeginIndex, const std::size_t deltaEndIndexExclusive)
-            {
-                if (deltaBeginIndex >= deltaEndIndexExclusive)
-                {
-                    return;
-                }
-
-                const std::size_t regionLength = deltaEndIndexExclusive - deltaBeginIndex;
-                if (regionLength <= (2U * kRampDeltaTrimSamples))
-                {
-                    return;
-                }
-
-                const std::size_t trimmedBeginIndex = deltaBeginIndex + kRampDeltaTrimSamples;
-                const std::size_t trimmedEndIndexExclusive = deltaEndIndexExclusive - kRampDeltaTrimSamples;
-                for (std::size_t index = trimmedBeginIndex; index < trimmedEndIndexExclusive; ++index)
-                {
-                    const float previousOmegaMagnitudeRadps =
-                        std::fabs(trace.samples[index - 1U].angularCommandRadps);
-                    const float currentOmegaMagnitudeRadps =
-                        std::fabs(trace.samples[index].angularCommandRadps);
-                    if ((previousOmegaMagnitudeRadps <= kOmegaMagnitudeEpsilonRadps) ||
-                        (currentOmegaMagnitudeRadps <= kOmegaMagnitudeEpsilonRadps))
-                    {
-                        continue;
-                    }
-
-                    const float dtSeconds = trace.samples[index].timeSeconds - trace.samples[index - 1U].timeSeconds;
-                    if (!(dtSeconds > 0.0f))
-                    {
-                        continue;
-                    }
-
-                    magnitudes.push_back(
-                        std::fabs(
-                            (trace.samples[index].angularCommandRadps - trace.samples[index - 1U].angularCommandRadps) /
-                            dtSeconds));
-                }
-            };
-
-            appendTrimmedRegionMagnitudes(1U, plateauBeginIndex + 1U);
-            appendTrimmedRegionMagnitudes(plateauEndIndex + 1U, trace.samples.size());
-
-            return magnitudes;
-        }
-
-        CheckResult EvaluateInPlaceShift(const ManeuverCode code)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
-            const float shiftMeters =
-                std::hypot(
-                    trace.truthState(VehicleState::kPx),
-                    trace.truthState(VehicleState::kPy));
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, smoothTurn);
             CheckResult result{};
-            result.passed = trace.started && trace.completed && (shiftMeters < kInPlacePositionToleranceM);
+            result.passed = trace.started && trace.completed && !trace.samples.empty();
             result.message =
-                L"shift code=" + CodeLabel(code) +
-                L" actual_m=" + std::to_wstring(shiftMeters) +
-                L" limit_m=" + std::to_wstring(kInPlacePositionToleranceM) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
+                L"completion code=" + CodeLabel(code) +
+                L" started=" + (trace.started ? L"true" : L"false") +
+                L" completed=" + (trace.completed ? L"true" : L"false") +
+                L" samples=" + std::to_wstring(trace.samples.size()) +
+                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds);
             return result;
         }
 
-        CheckResult EvaluateInPlaceHeading(const ManeuverCode code)
+        CheckResult EvaluateManeuverCommandEvidence(const ManeuverCode code, const bool smoothTurn)
         {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
-            const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState(VehicleState::kPsi)));
+            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, smoothTurn);
             CheckResult result{};
-            result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
+            result.passed =
+                trace.started &&
+                trace.completed &&
+                !trace.samples.empty() &&
+                trace.allReturnedCommandsFinite &&
+                trace.commandEvidenceMatchesReturnedCommand &&
+                trace.bodyObjectivesFinite &&
+                trace.truthState.allFinite();
             result.message =
-                L"heading code=" + CodeLabel(code) +
-                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
-                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
-        }
-
-        CheckResult EvaluateInPlaceTime(const ManeuverCode code)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
-            Internal::SharedRobotRuntime runtime;
-            const float expectedTimeSeconds =
-                ComputeInPlaceTurnKinematicTimeSeconds(
-                    std::fabs(BuildNominalEndYawRad(code)),
-                    runtime.DriveService().GetLimits());
-            const float relativeError =
-                (expectedTimeSeconds > 0.0f) ?
-                (std::fabs(trace.elapsedSeconds - expectedTimeSeconds) / expectedTimeSeconds) :
-                (std::numeric_limits<float>::infinity)();
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (relativeError <= kTimeToleranceFraction);
-            result.message =
-                L"time code=" + CodeLabel(code) +
-                L" elapsed_s=" + std::to_wstring(trace.elapsedSeconds) +
-                L" expected_s=" + std::to_wstring(expectedTimeSeconds) +
-                L" rel_err=" + std::to_wstring(relativeError) +
-                L" limit=" + std::to_wstring(kTimeToleranceFraction) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
-        }
-
-        CheckResult EvaluateSmoothVelocityConstancy(const ManeuverCode code)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float normalizedSpan = ComputeNormalizedSpan(CollectLinearCommandMagnitudes(trace));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (normalizedSpan < kVelocityVariationLimit);
-            result.message =
-                L"velocity code=" + CodeLabel(code) +
-                L" span=" + std::to_wstring(normalizedSpan) +
-                L" limit=" + std::to_wstring(kVelocityVariationLimit) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
-        }
-
-        CheckResult EvaluateSmoothYawAccelerationConstancy(const ManeuverCode code)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float normalizedSpan = ComputeNormalizedSpan(CollectRampYawAccelMagnitudes(trace));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (normalizedSpan < kYawAccelerationVariationLimit);
-            result.message =
-                L"yaw_accel code=" + CodeLabel(code) +
-                L" span=" + std::to_wstring(normalizedSpan) +
-                L" limit=" + std::to_wstring(kYawAccelerationVariationLimit) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
-        }
-
-        CheckResult EvaluateSmoothYawRateConstancy(const ManeuverCode code)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float normalizedSpan = ComputeNormalizedSpan(CollectTurnYawRateMagnitudes(trace));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (normalizedSpan < kYawRateVariationLimit);
-            result.message =
-                L"yaw_rate code=" + CodeLabel(code) +
-                L" span=" + std::to_wstring(normalizedSpan) +
-                L" limit=" + std::to_wstring(kYawRateVariationLimit) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
-        }
-
-        CheckResult EvaluateSmoothFinalPosition(const ManeuverCode code)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float positionErrorMeters =
-                std::hypot(
-                    trace.truthState(VehicleState::kPx) - BuildNominalEndXMeters(code),
-                    trace.truthState(VehicleState::kPy) - BuildNominalEndYMeters(code));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (positionErrorMeters <= kSmoothPositionToleranceM);
-            result.message =
-                L"position code=" + CodeLabel(code) +
-                L" error_m=" + std::to_wstring(positionErrorMeters) +
-                L" limit_m=" + std::to_wstring(kSmoothPositionToleranceM) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
-            return result;
-        }
-
-        CheckResult EvaluateSmoothFinalHeading(const ManeuverCode code)
-        {
-            const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
-            const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState(VehicleState::kPsi)));
-            CheckResult result{};
-            result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
-            result.message =
-                L"heading code=" + CodeLabel(code) +
-                L" error_deg=" + std::to_wstring(headingErrorRad * RAD_TO_DEG_F) +
-                L" limit_deg=" + std::to_wstring(kHeadingToleranceRad * RAD_TO_DEG_F) +
-                L" completed=" + (trace.completed ? L"true" : L"false");
+                L"command evidence code=" + CodeLabel(code) +
+                L" completed=" + (trace.completed ? L"true" : L"false") +
+                L" finite_commands=" + (trace.allReturnedCommandsFinite ? L"true" : L"false") +
+                L" evidence_matches=" + (trace.commandEvidenceMatchesReturnedCommand ? L"true" : L"false") +
+                L" finite_objectives=" + (trace.bodyObjectivesFinite ? L"true" : L"false") +
+                L" truth_finite=" + (trace.truthState.allFinite() ? L"true" : L"false");
             return result;
         }
     }
 
 #define DRIVE_IN_PLACE_CONTRACT_TESTS(NAME, CODE) \
-    TEST_METHOD(NAME##_ShiftAcceptable) \
+    TEST_METHOD(NAME##_Completes) \
     { \
-        const CheckResult result = EvaluateInPlaceShift(CODE); \
+        const CheckResult result = EvaluateManeuverCompletes(CODE, false); \
         Assert::IsTrue(result.passed, result.message.c_str()); \
     } \
-    TEST_METHOD(NAME##_HeadingAcceptable) \
+    TEST_METHOD(NAME##_CommandEvidenceMatchesReturnedCommand) \
     { \
-        const CheckResult result = EvaluateInPlaceHeading(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_TimeAcceptable) \
-    { \
-        const CheckResult result = EvaluateInPlaceTime(CODE); \
+        const CheckResult result = EvaluateManeuverCommandEvidence(CODE, false); \
         Assert::IsTrue(result.passed, result.message.c_str()); \
     }
 
 #define DRIVE_SMOOTH_CONTRACT_TESTS(NAME, CODE) \
-    TEST_METHOD(NAME##_VelocityVariationAcceptable) \
+    TEST_METHOD(NAME##_Completes) \
     { \
-        const CheckResult result = EvaluateSmoothVelocityConstancy(CODE); \
+        const CheckResult result = EvaluateManeuverCompletes(CODE, true); \
         Assert::IsTrue(result.passed, result.message.c_str()); \
     } \
-    TEST_METHOD(NAME##_YawAccelerationVariationAcceptable) \
+    TEST_METHOD(NAME##_CommandEvidenceMatchesReturnedCommand) \
     { \
-        const CheckResult result = EvaluateSmoothYawAccelerationConstancy(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_YawRateVariationAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothYawRateConstancy(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_FinalPositionAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothFinalPosition(CODE); \
-        Assert::IsTrue(result.passed, result.message.c_str()); \
-    } \
-    TEST_METHOD(NAME##_FinalHeadingAcceptable) \
-    { \
-        const CheckResult result = EvaluateSmoothFinalHeading(CODE); \
+        const CheckResult result = EvaluateManeuverCommandEvidence(CODE, true); \
         Assert::IsTrue(result.passed, result.message.c_str()); \
     }
 

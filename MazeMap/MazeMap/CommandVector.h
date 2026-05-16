@@ -7,15 +7,15 @@
 
 namespace MazeMap::App::Internal
 {
-    // Left/right raw motor-PWM command proposal for the next control tick.
+    // Left/right normalized actuator-command proposal for the next control tick.
     class EXPORT CommandVector final
     {
     public:
         CommandVector() = default;
 
-        constexpr CommandVector(float leftMotorPwm, float rightMotorPwm) noexcept
-            : _leftMotorPwm(leftMotorPwm)
-            , _rightMotorPwm(rightMotorPwm)
+        constexpr CommandVector(float leftCommand, float rightCommand) noexcept
+            : _leftCommand(leftCommand)
+            , _rightCommand(rightCommand)
         {}
 
         static constexpr CommandVector Brake() noexcept
@@ -26,82 +26,82 @@ namespace MazeMap::App::Internal
         }
 
         static constexpr CommandVector FromAverageAndDifferential(
-            float averageMotorPwm,
-            float differentialMotorPwm) noexcept
+            float averageCommand,
+            float differentialCommand) noexcept
         {
             return CommandVector(
-                averageMotorPwm + differentialMotorPwm,
-                averageMotorPwm - differentialMotorPwm);
+                averageCommand + differentialCommand,
+                averageCommand - differentialCommand);
         }
 
-        constexpr float LeftMotorPwm() const noexcept { return _leftMotorPwm; }
-        constexpr float RightMotorPwm() const noexcept { return _rightMotorPwm; }
+        constexpr float LeftCommand() const noexcept { return _leftCommand; }
+        constexpr float RightCommand() const noexcept { return _rightCommand; }
 
-        void SetLeftMotorPwm(float leftMotorPwm) noexcept { _leftMotorPwm = leftMotorPwm; }
-        void SetRightMotorPwm(float rightMotorPwm) noexcept { _rightMotorPwm = rightMotorPwm; }
+        void SetLeftCommand(float leftCommand) noexcept { _leftCommand = leftCommand; }
+        void SetRightCommand(float rightCommand) noexcept { _rightCommand = rightCommand; }
 
-        constexpr float Average() const noexcept { return 0.5f * (_leftMotorPwm + _rightMotorPwm); }
-        constexpr float Differential() const noexcept { return 0.5f * (_leftMotorPwm - _rightMotorPwm); }
+        constexpr float Average() const noexcept { return 0.5f * (_leftCommand + _rightCommand); }
+        constexpr float Differential() const noexcept { return 0.5f * (_leftCommand - _rightCommand); }
 
-        void SetAverage(float averageMotorPwm) noexcept
+        void SetAverage(float averageCommand) noexcept
         {
-            SetAverageAndDifferential(averageMotorPwm, Differential());
+            SetAverageAndDifferential(averageCommand, Differential());
         }
 
-        void SetDifferential(float differentialMotorPwm) noexcept
+        void SetDifferential(float differentialCommand) noexcept
         {
-            SetAverageAndDifferential(Average(), differentialMotorPwm);
+            SetAverageAndDifferential(Average(), differentialCommand);
         }
 
-        void SetAverageAndDifferential(float averageMotorPwm, float differentialMotorPwm) noexcept
+        void SetAverageAndDifferential(float averageCommand, float differentialCommand) noexcept
         {
-            _leftMotorPwm = averageMotorPwm + differentialMotorPwm;
-            _rightMotorPwm = averageMotorPwm - differentialMotorPwm;
+            _leftCommand = averageCommand + differentialCommand;
+            _rightCommand = averageCommand - differentialCommand;
         }
 
         bool IsFinite() const noexcept
         {
-            return std::isfinite(_leftMotorPwm) && std::isfinite(_rightMotorPwm);
+            return std::isfinite(_leftCommand) && std::isfinite(_rightCommand);
         }
 
         CommandVector& operator+=(const CommandVector& rhs) noexcept
         {
-            _leftMotorPwm += rhs._leftMotorPwm;
-            _rightMotorPwm += rhs._rightMotorPwm;
+            _leftCommand += rhs._leftCommand;
+            _rightCommand += rhs._rightCommand;
             return *this;
         }
 
         CommandVector& operator-=(const CommandVector& rhs) noexcept
         {
-            _leftMotorPwm -= rhs._leftMotorPwm;
-            _rightMotorPwm -= rhs._rightMotorPwm;
+            _leftCommand -= rhs._leftCommand;
+            _rightCommand -= rhs._rightCommand;
             return *this;
         }
 
         CommandVector& operator*=(float scalar) noexcept
         {
-            _leftMotorPwm *= scalar;
-            _rightMotorPwm *= scalar;
+            _leftCommand *= scalar;
+            _rightCommand *= scalar;
             return *this;
         }
 
         CommandVector& operator/=(float scalar) noexcept
         {
-            _leftMotorPwm /= scalar;
-            _rightMotorPwm /= scalar;
+            _leftCommand /= scalar;
+            _rightCommand /= scalar;
             return *this;
         }
 
         constexpr CommandVector operator-() const noexcept
         {
-            return CommandVector(-_leftMotorPwm, -_rightMotorPwm);
+            return CommandVector(-_leftCommand, -_rightCommand);
         }
 
         friend constexpr bool operator==(const CommandVector& lhs, const CommandVector& rhs) noexcept
         {
             return
-                (lhs._leftMotorPwm == rhs._leftMotorPwm) &&
-                (lhs._rightMotorPwm == rhs._rightMotorPwm);
+                (lhs._leftCommand == rhs._leftCommand) &&
+                (lhs._rightCommand == rhs._rightCommand);
         }
 
         friend constexpr bool operator!=(const CommandVector& lhs, const CommandVector& rhs) noexcept
@@ -109,8 +109,8 @@ namespace MazeMap::App::Internal
             return !(lhs == rhs);
         }
     private:
-        float _leftMotorPwm{};
-        float _rightMotorPwm{};
+        float _leftCommand{};
+        float _rightCommand{};
     };
 
     inline CommandVector operator+(CommandVector lhs, const CommandVector& rhs) noexcept

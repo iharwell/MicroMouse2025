@@ -12,6 +12,8 @@
 #include "StartupCalibration.h"
 #include "WallTouch.h"
 
+#include <limits>
+
 namespace
 {
     constexpr const char* kPositionAuditStableId = "position_accuracy_audit";
@@ -62,10 +64,7 @@ namespace MazeMap::App::Internal
             (void)_runtime.AppendTextLogLine("Single-session shared-service straight audit");
             _fixture = AuxMeasurementModeSupport::BuildPositionAuditFixtureGeometry();
 
-            if (!_drive.Begin())
-            {
-                _runtime.FailActiveMode("Position accuracy audit drive base init failed");
-            }
+            _drive.ClearCommandEvidence();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
@@ -112,7 +111,7 @@ namespace MazeMap::App::Internal
             self->_phase = Phase::Idle;
             self->_wallTouch.Cancel();
             self->_startupCalibration.Cancel();
-            self->_drive.Brake();
+            self->_drive.ClearCommandEvidence();
         }
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept
@@ -357,13 +356,20 @@ namespace MazeMap::App::Internal
                 return CommandVector::Brake();
 
             case Phase::Complete:
+            {
                 (void)_runtime.AppendTextLogLine("Position accuracy audit complete");
                 _wallTouch.Cancel();
                 _startupCalibration.Cancel();
-                _drive.Brake();
+                const CommandVector stopCommand = _drive.ProposeBodyTick(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    (std::numeric_limits<float>::quiet_NaN)());
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return CommandVector::Brake();
+                return stopCommand;
+            }
 
             case Phase::Idle:
             default:

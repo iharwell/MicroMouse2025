@@ -41,7 +41,7 @@ namespace MazeMap
         const DriveBase& drive)
     {
         const SensorSnapshot& sensors = state.GetSensorSnapshot();
-        const DriveTelemetry driveTelemetry = drive.GetTelemetry();
+        const DriveTelemetry driveTelemetry = drive.LastTelemetry();
         row = {};
         row.sample = sample;
         row.phase_id = phaseId;
@@ -53,16 +53,16 @@ namespace MazeMap
         row.linear_speed_mps = state.GetVelocity();
         row.angular_speed_radps = state.GetRotationalVelocity();
         row.planar_accel_mps2 = sensors.planarAccelMps2;
-        row.cmd_linear_mps = drive.GetLastLinearCommandMps();
-        row.cmd_angular_radps = drive.GetLastAngularCommandRadps();
+        row.cmd_linear_mps = driveTelemetry.requestedForwardMps;
+        row.cmd_angular_radps = driveTelemetry.requestedYawRateRadps;
         row.left_drive_cmd = driveTelemetry.leftDriveCommand;
         row.right_drive_cmd = driveTelemetry.rightDriveCommand;
-        row.left_encoder_count = static_cast<std::int32_t>(driveTelemetry.leftEncoderCount);
-        row.right_encoder_count = static_cast<std::int32_t>(driveTelemetry.rightEncoderCount);
-        row.left_distance_m = driveTelemetry.leftDistanceM;
-        row.right_distance_m = driveTelemetry.rightDistanceM;
-        row.left_velocity_mps = driveTelemetry.leftVelocityMps;
-        row.right_velocity_mps = driveTelemetry.rightVelocityMps;
+        row.left_encoder_count = static_cast<std::int32_t>(sensors.leftEncoderTotalCounts);
+        row.right_encoder_count = static_cast<std::int32_t>(sensors.rightEncoderTotalCounts);
+        row.left_distance_m = sensors.leftEncoderDistanceM;
+        row.right_distance_m = sensors.rightEncoderDistanceM;
+        row.left_velocity_mps = sensors.encoderObservation.leftVelocityMps;
+        row.right_velocity_mps = sensors.encoderObservation.rightVelocityMps;
         row.front_wall = sensors.frontWall ? 1U : 0U;
         row.left_wall = sensors.leftWall ? 1U : 0U;
         row.right_wall = sensors.rightWall ? 1U : 0U;
@@ -125,10 +125,7 @@ namespace MazeMap
                 "Routine: %s",
                 AuxMeasurementRoutineName(AuxMeasurementConfig::kRoutine));
 
-            if (!_drive.Begin())
-            {
-                _runtime.FailActiveMode("Auxiliary measurement drive base init failed");
-            }
+            _drive.ClearCommandEvidence();
 
             if constexpr (AuxMeasurementConfig::kRoutine == AuxMeasurementConfig::Routine::TurningTractionSweep)
             {
@@ -180,7 +177,7 @@ namespace MazeMap
             self->_runtimeFaulted = true;
             self->_phase = Phase::Idle;
             self->_startupCalibration.Cancel();
-            self->_drive.Brake();
+            self->_drive.ClearCommandEvidence();
             self->SetFanEnabled(false);
         }
 
@@ -324,7 +321,7 @@ namespace MazeMap
                         "Auxiliary measurement complete, log saved to %s",
                         self->_logFileName);
                     self->_startupCalibration.Cancel();
-                    self->_drive.Brake();
+                    self->_drive.ClearCommandEvidence();
                     self->SetFanEnabled(false);
                     self->_phase = Phase::Idle;
                     boundaryLoopController.HaltExecutionEndProgram();
@@ -350,7 +347,6 @@ namespace MazeMap
             const MazeMap::VehicleState& state,
             LoopController& loopController)
         {
-            (void)state;
             const unsigned long nowMs = millis();
             if (!_turningTractionStarted)
             {
@@ -378,11 +374,12 @@ namespace MazeMap
                 (AuxMeasurementConfig::kTurningTractionSweepRadiusM > 1.0e-6f) ?
                 (_turningTractionDirectionSign * (_turningTractionCommandedSpeedMps / AuxMeasurementConfig::kTurningTractionSweepRadiusM)) :
                 0.0f;
-            return _drive.PointControlVector(
+            return _drive.ProposeBodyTick(
                 _turningTractionCommandedSpeedMps,
                 yawRateRadps,
-                FeedbackSource::Encoder,
-                FeedbackSource::Encoder);
+                0.0f,
+                0.0f,
+                state.GetOrientation());
         }
 
         CommandVector RunTick(

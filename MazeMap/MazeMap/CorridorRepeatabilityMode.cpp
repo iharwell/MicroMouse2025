@@ -11,6 +11,8 @@
 #include "StartupCalibration.h"
 #include "WallTouch.h"
 
+#include <limits>
+
 namespace
 {
     constexpr const char* kCorridorStableId = "corridor_repeatability";
@@ -60,10 +62,7 @@ namespace MazeMap::App::Internal
             (void)_runtime.AppendTextLogLine("Corridor repeatability mode");
             (void)_runtime.AppendTextLogLine("Single-session shared-service corridor passes");
 
-            if (!_drive.Begin())
-            {
-                _runtime.FailActiveMode("Corridor repeatability drive base init failed");
-            }
+            _drive.ClearCommandEvidence();
 
             _startupCalibration.Cancel();
             _startupCalibration.SetIsInMaze(true);
@@ -110,7 +109,7 @@ namespace MazeMap::App::Internal
             self->_phase = Phase::Idle;
             self->_wallTouch.Cancel();
             self->_startupCalibration.Cancel();
-            self->_drive.Brake();
+            self->_drive.ClearCommandEvidence();
         }
 
         LoopController::SessionOptions BuildLoopOptions() const noexcept
@@ -359,13 +358,20 @@ namespace MazeMap::App::Internal
                 return CommandVector::Brake();
 
             case Phase::Complete:
+            {
                 (void)_runtime.AppendTextLogLine("Corridor repeatability complete");
                 _wallTouch.Cancel();
                 _startupCalibration.Cancel();
-                _drive.Brake();
+                const CommandVector stopCommand = _drive.ProposeBodyTick(
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    0.0f,
+                    (std::numeric_limits<float>::quiet_NaN)());
                 _phase = Phase::Idle;
                 loopController.HaltExecutionEndProgram();
-                return CommandVector::Brake();
+                return stopCommand;
+            }
 
             case Phase::Idle:
             default:

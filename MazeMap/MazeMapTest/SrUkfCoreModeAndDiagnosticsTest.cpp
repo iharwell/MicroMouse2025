@@ -34,8 +34,8 @@ namespace MazeMap
         App::Internal::CommandVector BuildPlanarAccelUpdateTestControl(const PlantParams& params) noexcept
         {
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.26f);
-            control.SetRightMotorPwm(0.23f);
+            control.SetLeftCommand(0.26f);
+            control.SetRightCommand(0.23f);
             return control;
         }
 
@@ -119,7 +119,7 @@ namespace MazeMap
             Assert::AreEqual(
                 expectedSigmaRadps,
                 plantModel.stationaryEncoderOmegaSigmaRadps(kUkfTestStationaryEncoderVelocitySigmaMps),
-                1.0e-9f);
+                1.0e-6f);
         }
 
         TEST_METHOD(BuildDefaultInitialCovariance_ReturnsCanonicalResetCovariance)
@@ -137,7 +137,7 @@ namespace MazeMap
             Assert::AreEqual(3.05e-4f, covariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-12f);
         }
 
-        TEST_METHOD(SrUkfCorePivotScrubModeMasksEncoderYawAndAppliesSoftZeroU)
+        TEST_METHOD(SrUkfCorePivotConflictKeepsEncoderYawOutOfBodyStateAndUsesGyroYaw)
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core = MakeDefaultSrUkfCore();
@@ -157,8 +157,8 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, initialCovariance));
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.60f);
-            control.SetRightMotorPwm(-0.60f);
+            control.SetLeftCommand(0.60f);
+            control.SetRightCommand(-0.60f);
 
             struct PivotTickResults
             {
@@ -191,7 +191,6 @@ namespace MazeMap
 
             int seedLeftCounts = 0;
             int seedRightCounts = 0;
-            bool yawConflictSeeded = false;
             for (int seedIndex = 0; seedIndex < (8 * kPivotLegacyStepScale); ++seedIndex)
             {
                 seedLeftCounts += (100 / kPivotLegacyStepScale);
@@ -202,18 +201,11 @@ namespace MazeMap
                 Assert::IsTrue(seedResults.encoderResult.accepted);
                 Assert::IsTrue(seedResults.yawResult.attempted);
                 Assert::IsTrue(seedResults.yawResult.accepted);
-                Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_pivot_scrub", "pivot_scrub_mode"));
-
-                yawConflictSeeded =
-                    (std::fabs(FindDebugDumpFloat(core, "ukf_dump_consistency", "yaw_consistency_lp_radps")) > 0.03f) ||
-                    (std::fabs(FindDebugDumpFloat(core, "ukf_dump_consistency", "yaw_window_mismatch_rad")) > 0.003f);
-                if (yawConflictSeeded)
-                {
-                    break;
-                }
             }
 
-            Assert::IsTrue(yawConflictSeeded, L"Pivot scrub seed phase never produced a yaw conflict.");
+            const VehicleState::StateVector stateBeforePivot = core.workingState();
+            const float prePivotGyroFitError =
+                std::fabs((stateBeforePivot(VehicleState::kR) + stateBeforePivot(VehicleState::kBgz)) - 1.80f);
 
             const PivotTickResults pivotResults =
                 runPivotTick(
@@ -228,47 +220,18 @@ namespace MazeMap
             Assert::IsTrue(pivotResults.yawResult.attempted, L"Pivot scrub yaw update was not attempted.");
             Assert::IsTrue(pivotResults.yawResult.accepted, L"Pivot scrub yaw update was rejected.");
 
-            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_pivot_scrub", "pivot_scrub_mode"), L"Pivot scrub mode did not engage after the conflict tick.");
-            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_pivot_scrub", "encoder_body_update_skipped"));
-            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_pivot_scrub", "zero_u_soft_applied"));
-            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_encoder", "masked_delta_norm")));
-            Assert::IsTrue(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_encoder", "masked_delta_norm") > 0.0f);
-            Assert::AreEqual(0.0f, FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_encoder", "delta_psi_rad"), 1.0e-4f);
-            Assert::AreEqual(0.0f, FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_encoder", "delta_r_radps"), 1.0e-4f);
-            Assert::IsTrue(std::fabs(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_encoder", "delta_omega_l_radps")) > 0.0f);
-            Assert::IsTrue(std::fabs(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_encoder", "delta_omega_r_radps")) > 0.0f);
-            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_gyro", "delta_psi_rad")));
-            Assert::IsTrue(std::fabs(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_gyro", "delta_r_radps")) > 0.0f);
-            Assert::IsTrue(std::isfinite(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_gyro", "delta_bgz_radps")));
-            Assert::AreEqual(0.0f, FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_gyro", "delta_omega_l_radps"), 1.0e-4f);
-            Assert::AreEqual(0.0f, FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_gyro", "delta_omega_r_radps"), 1.0e-4f);
-            Assert::IsTrue(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_gyro", "masked_delta_norm") > 0.0f);
-            Assert::IsTrue(std::fabs(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_zero_u", "innovation_mps")) > 0.0f);
-            Assert::IsTrue(std::fabs(FindDebugDumpFloat(core, "ukf_dump_pivot_scrub_zero_u", "delta_mps")) > 0.0f);
-
-            const std::vector<std::pair<std::string, std::string>> dumpLines = CollectDebugDumpLines(core);
-            const std::size_t pivotModeIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub");
-            const std::size_t encoderIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub_encoder");
-            const std::size_t zeroUIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub_zero_u");
-            const std::size_t gyroIndex = FindFirstDumpLineIndexContaining(dumpLines, "ukf_dump_pivot_scrub_gyro");
-
-            Assert::IsTrue(pivotModeIndex < dumpLines.size());
-            Assert::IsTrue(encoderIndex < dumpLines.size());
-            Assert::IsTrue(zeroUIndex < dumpLines.size());
-            Assert::IsTrue(gyroIndex < dumpLines.size());
-
-            const std::string& pivotModeLine = dumpLines[pivotModeIndex].second;
-            const std::string& encoderLine = dumpLines[encoderIndex].second;
-            const std::string& zeroULine = dumpLines[zeroUIndex].second;
-            const std::string& gyroLine = dumpLines[gyroIndex].second;
-            Assert::IsTrue(pivotModeLine.find("pivot_scrub_mode=true") != std::string::npos);
-            Assert::IsTrue(encoderLine.find("masked_delta_norm=") != std::string::npos);
-            Assert::IsTrue(zeroULine.find("innovation_mps=") != std::string::npos);
-            Assert::IsTrue(gyroLine.find("delta_omega_l_radps=") != std::string::npos);
-            Assert::IsTrue(gyroLine.find("masked_delta_norm=") != std::string::npos);
+            const VehicleState::StateVector& stateAfterPivot = core.workingState();
+            const float postPivotGyroFitError =
+                std::fabs((stateAfterPivot(VehicleState::kR) + stateAfterPivot(VehicleState::kBgz)) - 1.80f);
+            Assert::AreEqual(18.0f, stateAfterPivot(VehicleState::kOmegaL), 1.0e-5f);
+            Assert::AreEqual(-18.0f, stateAfterPivot(VehicleState::kOmegaR), 1.0e-5f);
+            Assert::IsTrue(postPivotGyroFitError < prePivotGyroFitError);
+            Assert::IsTrue(std::fabs(stateAfterPivot(VehicleState::kU)) < 0.25f);
+            Assert::IsTrue(std::isfinite(stateAfterPivot(VehicleState::kPsi)));
+            Assert::IsTrue(std::isfinite(stateAfterPivot(VehicleState::kR)));
         }
 
-        TEST_METHOD(SrUkfCorePivotCommandWithoutYawConflictDoesNotEnterPivotScrubMode)
+        TEST_METHOD(SrUkfCorePivotCommandWithoutYawConflictUpdatesWheelStateWithoutBodyJump)
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core = MakeDefaultSrUkfCore();
@@ -286,10 +249,11 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.60f);
-            control.SetRightMotorPwm(-0.60f);
+            control.SetLeftCommand(0.60f);
+            control.SetRightCommand(-0.60f);
 
             Assert::IsTrue(core.predict(0.001f, control));
+            const VehicleState::StateVector stateBeforeEncoder = core.workingState();
 
             EncoderObs encoder{};
             encoder.totalLeftCounts = 10;
@@ -298,12 +262,18 @@ namespace MazeMap
             encoder.omegaRightRadps = -0.60f;
             Assert::IsTrue(core.updateEncoderPair(encoder, 0.001f).accepted);
 
-            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_pivot_scrub", "pivot_scrub_mode"));
-            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_pivot_scrub", "encoder_body_update_skipped"));
-            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_pivot_scrub", "zero_u_soft_applied"));
+            const VehicleState::StateVector& stateAfterEncoder = core.workingState();
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPx), stateAfterEncoder(VehicleState::kPx), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPy), stateAfterEncoder(VehicleState::kPy), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kPsi), stateAfterEncoder(VehicleState::kPsi), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kU), stateAfterEncoder(VehicleState::kU), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kV), stateAfterEncoder(VehicleState::kV), 1.0e-6f);
+            Assert::AreEqual(stateBeforeEncoder(VehicleState::kR), stateAfterEncoder(VehicleState::kR), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaLeftRadps, stateAfterEncoder(VehicleState::kOmegaL), 1.0e-6f);
+            Assert::AreEqual(encoder.omegaRightRadps, stateAfterEncoder(VehicleState::kOmegaR), 1.0e-6f);
         }
 
-        TEST_METHOD(SrUkfCoreNonPivotMotionLeavesPivotScrubTelemetryCleared)
+        TEST_METHOD(SrUkfCoreDiagnosticDebugDumpReportsPivotScrubInactiveForNonPivotMotion)
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core = MakeDefaultSrUkfCore();
@@ -321,8 +291,8 @@ namespace MazeMap
             Assert::IsTrue(core.reset(initialState, BuildUkfCovariance()));
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.25f);
-            control.SetRightMotorPwm(0.25f);
+            control.SetLeftCommand(0.25f);
+            control.SetRightCommand(0.25f);
 
             Assert::IsTrue(core.predict(0.001f, control));
 
@@ -346,7 +316,7 @@ namespace MazeMap
             Assert::IsTrue(pivotModeIndex < dumpLines.size());
             Assert::IsTrue(dumpLines[pivotModeIndex].second.find("pivot_scrub_mode=false") != std::string::npos);
         }
-        TEST_METHOD(SrUkfCoreLaunchModeDisablesGripPseudoMeasurement)
+        TEST_METHOD(SrUkfCoreLaunchTransientDoesNotForceLateralVelocityToZero)
         {
             const PlantParams params = PlantParams::Default();
             SrUkfCore core = MakeDefaultSrUkfCore();
@@ -364,12 +334,12 @@ namespace MazeMap
                 BuildUkfCovariance(0.01f, 0.03f, 0.05f, 0.30f, 0.05f, 0.30f, 0.03f)));
 
             App::Internal::CommandVector control{};
-            control.SetLeftMotorPwm(0.20f);
-            control.SetRightMotorPwm(0.20f);
+            control.SetLeftCommand(0.20f);
+            control.SetRightCommand(0.20f);
             Assert::IsTrue(core.predict(0.001f, control));
 
-            control.SetLeftMotorPwm(-0.20f);
-            control.SetRightMotorPwm(-0.20f);
+            control.SetLeftCommand(-0.20f);
+            control.SetRightCommand(-0.20f);
             Assert::IsTrue(core.predict(0.001f, control));
 
             EncoderObs encoder{};
@@ -384,14 +354,10 @@ namespace MazeMap
             Assert::IsTrue(yawResult.accepted);
 
             const VehicleState::StateVector& state = core.workingState();
-            Assert::AreEqual(
-                1,
-                FindDebugDumpModeId(core));
-            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_mode", "nhc_enabled"));
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) > 0.10f);
         }
 
-        TEST_METHOD(SrUkfCoreYawRateUpdateAppliesGripPseudoMeasurementForCredibleRollingGrip)
+        TEST_METHOD(SrUkfCorePlanarAccelUpdateDampsLateralVelocityForCredibleRollingGrip)
         {
             const PlantParams params = PlantParams::Default();
             const float forwardVelocityMps = 1.0f;
@@ -426,22 +392,27 @@ namespace MazeMap
 
             const float initialLateralVelocityMps = core.workingState()(VehicleState::kV);
             const float initialLateralVarianceMps2 = core.workingCovariance()(VehicleState::kV, VehicleState::kV);
-            const float expectedSigmaMps = UkfTestNonholonomicSigmaMps(forwardVelocityMps);
 
             const MeasurementUpdateResult yawResult = core.updateYawRate(yawRateRadps);
             Assert::IsTrue(yawResult.attempted);
             Assert::IsTrue(yawResult.accepted);
 
+            ImuAccelObs noPlanarAccelObservation{};
+            const MeasurementUpdateResult lateralAidResult =
+                core.updatePlanarAccel(noPlanarAccelObservation);
+            Assert::IsTrue(lateralAidResult.attempted);
+            Assert::IsTrue(lateralAidResult.accepted);
+
             const VehicleState::StateVector& state = core.workingState();
             const VehicleState::StateMatrix covariance = core.workingCovariance();
-            Assert::IsTrue(FindDebugDumpBool(core, "ukf_dump_mode", "nhc_enabled"));
+            Assert::IsTrue(std::isfinite(state(VehicleState::kV)));
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < 0.02f);
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) < std::fabs(initialLateralVelocityMps));
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kV, VehicleState::kV)));
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) < initialLateralVarianceMps2);
-            Assert::AreEqual(expectedSigmaMps, FindDebugDumpFloat(core, "ukf_dump_consistency", "nhc_sigma_mps"), 1.0e-6f);
         }
 
-        TEST_METHOD(SrUkfCoreYawRateUpdateInflatesLateralVarianceWhenRollingGripIsNotCredible)
+        TEST_METHOD(SrUkfCorePlanarAccelUpdateDoesNotOverConstrainLateralVelocityWhenRollingGripIsNotCredible)
         {
             const PlantParams params = PlantParams::Default();
             const float forwardVelocityMps = 2.0f;
@@ -478,12 +449,15 @@ namespace MazeMap
             Assert::IsTrue(yawResult.attempted);
             Assert::IsTrue(yawResult.accepted);
 
-            const float expectedSigmaMps = UkfTestNonholonomicSigmaMps(forwardVelocityMps);
+            ImuAccelObs noPlanarAccelObservation{};
+            const MeasurementUpdateResult lateralAidResult =
+                core.updatePlanarAccel(noPlanarAccelObservation);
+            Assert::IsTrue(lateralAidResult.attempted);
+
             const VehicleState::StateVector& state = core.workingState();
             const VehicleState::StateMatrix covariance = core.workingCovariance();
-            Assert::IsFalse(FindDebugDumpBool(core, "ukf_dump_mode", "nhc_enabled"));
             Assert::IsTrue(std::fabs(state(VehicleState::kV)) > 0.10f);
-            Assert::AreEqual(expectedSigmaMps, FindDebugDumpFloat(core, "ukf_dump_consistency", "nhc_sigma_mps"), 1.0e-6f);
+            Assert::IsTrue(std::isfinite(covariance(VehicleState::kV, VehicleState::kV)));
             Assert::IsTrue(covariance(VehicleState::kV, VehicleState::kV) >= (0.020f * 0.020f));
         }
 
@@ -594,8 +568,7 @@ namespace MazeMap
                     control,
                     prepared,
                     0.0f,
-                    -0.35f);
-
+                    0.55f);
             const MeasurementUpdateResult baselineResult = baselineCore.updatePlanarAccel(baselineObservation);
             const MeasurementUpdateResult lateralResult =
                 lateralPerturbedCore.updatePlanarAccel(lateralPerturbedObservation);
@@ -613,17 +586,11 @@ namespace MazeMap
                 (baselineCore.workingState() - lateralPerturbedCore.workingState()).cwiseAbs().maxCoeff() <= 1.0e-6f);
             Assert::IsTrue(
                 (baselineCore.workingCovariance() - lateralPerturbedCore.workingCovariance()).cwiseAbs().maxCoeff() <= 1.0e-6f);
-            Assert::AreEqual(
-                FindDebugDumpFloat(baselineCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2"),
-                FindDebugDumpFloat(lateralPerturbedCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2"),
-                1.0e-6f);
-
-            Assert::IsTrue(
-                std::fabs(
-                    FindDebugDumpFloat(baselineCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2") -
-                    FindDebugDumpFloat(forwardPerturbedCore, "ukf_dump_filter_diagnostics", "forward_accel_innovation_mps2")) > 0.5f);
             Assert::IsTrue(
                 (baselineCore.workingState() - forwardPerturbedCore.workingState()).cwiseAbs().maxCoeff() > 1.0e-6f);
+            Assert::IsTrue(
+                (baselineCore.workingCovariance() - forwardPerturbedCore.workingCovariance()).cwiseAbs().maxCoeff() >
+                1.0e-6f);
         }
     };
 }

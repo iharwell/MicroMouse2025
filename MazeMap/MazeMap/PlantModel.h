@@ -123,6 +123,51 @@ namespace MazeMap
         float maxContactUtilization = 0.0f;
     };
 
+    struct PlantModelBodyActionSolveResult
+    {
+        App::Internal::CommandVector command{};
+        App::Internal::CommandVector finalSolveCommand{};
+
+        float requestedForwardMps = 0.0f;
+        float requestedYawRateRadps = 0.0f;
+        float requestedForwardAccelMps2 = 0.0f;
+        float requestedYawAccelRadps2 = 0.0f;
+        float composedForwardAccelMps2 = 0.0f;
+        float composedYawAccelRadps2 = 0.0f;
+
+        float leftWheelTargetVelocityMps = 0.0f;
+        float rightWheelTargetVelocityMps = 0.0f;
+        float leftWheelTargetAccelMps2 = 0.0f;
+        float rightWheelTargetAccelMps2 = 0.0f;
+        float leftWheelTargetOmegaRadps = 0.0f;
+        float rightWheelTargetOmegaRadps = 0.0f;
+
+        std::uint32_t plantEvaluationId = 0U;
+        std::uint32_t plantModelFingerprint = 0U;
+        std::uint16_t validityFlags = 0U;
+        std::uint16_t failureFlags = 0U;
+        std::uint16_t scalarIntentFlags = 0U;
+
+        static constexpr std::uint16_t kValidityCommand = 1U << 0;
+        static constexpr std::uint16_t kValidityFinalSolveCommand = 1U << 1;
+        static constexpr std::uint16_t kValidityWheelTargets = 1U << 2;
+        static constexpr std::uint16_t kValidityPlantEvaluationId = 1U << 3;
+        static constexpr std::uint16_t kFailureNonFiniteCommand = 1U << 0;
+        static constexpr std::uint16_t kFailureUnsupportedScalarIntent = 1U << 1;
+        static constexpr std::uint16_t kScalarForwardVelocityInactive = 1U << 0;
+        static constexpr std::uint16_t kScalarForwardVelocityFinite = 1U << 1;
+        static constexpr std::uint16_t kScalarForwardVelocityMaximize = 1U << 2;
+        static constexpr std::uint16_t kScalarYawRateInactive = 1U << 3;
+        static constexpr std::uint16_t kScalarYawRateFinite = 1U << 4;
+        static constexpr std::uint16_t kScalarYawRateMaximize = 1U << 5;
+        static constexpr std::uint16_t kScalarForwardAccelInactive = 1U << 6;
+        static constexpr std::uint16_t kScalarForwardAccelFinite = 1U << 7;
+        static constexpr std::uint16_t kScalarForwardAccelMaximize = 1U << 8;
+        static constexpr std::uint16_t kScalarYawAccelInactive = 1U << 9;
+        static constexpr std::uint16_t kScalarYawAccelFinite = 1U << 10;
+        static constexpr std::uint16_t kScalarYawAccelMaximize = 1U << 11;
+    };
+
     // Tunable physical parameters and fixed sensor-mount facts for the UKF plant model.
     struct PlantParams
     {
@@ -401,6 +446,14 @@ namespace MazeMap
         App::Internal::CommandVector solveAccelerationFeedforward(
             float desiredLongitudinalAccelMps2,
             float desiredYawAccelRadps2) const noexcept;
+        PlantModelBodyActionSolveResult SolveBodyActionInverse(
+            const StateVector& currentState,
+            float targetForwardVelocityMps,
+            float targetYawRateRadps,
+            float requestedForwardAccelMps2,
+            float requestedYawAccelRadps2,
+            float composedForwardAccelMps2,
+            float composedYawAccelRadps2) const noexcept;
 
         void ComputeBodyAction(
             float currentForwardVelocityMps,
@@ -532,6 +585,10 @@ namespace MazeMap
             const App::Internal::CommandVector& control,
             float& leftAppliedBankTorqueNm,
             float& rightAppliedBankTorqueNm) const noexcept;
+        App::Internal::CommandVector solveAccelerationFeedforward(
+            const StateVector& currentState,
+            float desiredLongitudinalAccelMps2,
+            float desiredYawAccelRadps2) const noexcept;
         struct WheelOnlyMeasurementPrediction
         {
             float leftWheelSpeedRadps = 0.0f;

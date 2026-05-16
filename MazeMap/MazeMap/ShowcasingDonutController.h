@@ -70,10 +70,10 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(float, cmd_angular_radps) \
     FIELD(float, left_drive_command) \
     FIELD(float, right_drive_command) \
-    FIELD(float, left_feedforward_command) \
-    FIELD(float, right_feedforward_command) \
-    FIELD(float, left_feedback_command) \
-    FIELD(float, right_feedback_command) \
+    FIELD(float, left_plant_command) \
+    FIELD(float, right_plant_command) \
+    FIELD(float, left_command_residual) \
+    FIELD(float, right_command_residual) \
     FIELD(float, left_target_velocity_mps) \
     FIELD(float, right_target_velocity_mps) \
     FIELD(std::uint32_t, encoder_timestamp_us) \

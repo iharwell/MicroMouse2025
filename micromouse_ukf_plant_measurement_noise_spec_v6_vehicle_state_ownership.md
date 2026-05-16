@@ -2,7 +2,7 @@
 
 **Document status:** rewritten target specification, contact-continuum revision.  
 **Scope:** plant model, measurement models, stochastic/noise semantics, calibration, validation, host replay, and migration boundaries for the micromouse UKF.  
-**Out of scope:** UKF sigma-point math core, square-root factorization, numerical linear algebra internals, low-level sensor acquisition, raw log-packet schema, and drive-layer motion-limit implementation.
+**Out of scope:** UKF sigma-point math core, square-root factorization, numerical linear algebra internals, low-level sensor acquisition, raw log-packet schema, and drive-layer motion-limit implementation. This document does define minimal plant/measurement/noise submodel ownership boundaries where needed to prevent parameter-bag implementations.
 
 ---
 
@@ -213,21 +213,38 @@ The UKF remains planar. Ground strike, chassis rocking, and pitch/roll contamina
 
 ---
 
-## 5. Estimator input and timing contract
+## 5. Estimator input, timing, and implementation context
 
-### 5.1 Tick envelope
+### 5.1 Canonical implementation context
+
+The production codebase already has two canonical runtime types:
+
+```text
+CommandVector: left/right PWM command values
+VehicleState: per-tick estimator context visible to model owners by constructor reference
+```
+
+This specification shall not introduce competing tick-specific carriers such as `MotorTorqueInput`, `MotorTorqueOutput`, `ContactForceInput`, `WheelAngularRate`, or `MotorPhase`. Submodel owners may read tick-specific state, derived values, timing, validated wheel-bank rates, sample-validity flags, and other estimator-context values from `VehicleState` through the existing project API.
+
+`VehicleState` is a tick context, not a model-parameter bag. Durable model coefficients remain private to behavior-owning model classes and their validated construction-time calibration objects. If the current implementation still stores legacy calibration values such as `Bgz` inside `VehicleState`, the target estimator must not treat that value as a UKF state and plant submodels must not use it as an arbitrary shared model coefficient.
+
+In equations below, `C_L` and `C_R` mean the left and right PWM values extracted from `CommandVector`. The spec does not require a new command wrapper.
+
+### 5.2 Tick envelope semantics
 
 The estimator consumes a time-stamped tick envelope:
 
 ```text
 estimator_tick = {
     timestamp,
-    drive_sample,
+    commandVector,
     encoder_sample,
     imu_sample,
     wall_samples
 }
 ```
+
+The block above is a semantic boundary schema, not a production C++ object declaration. Production APIs should use the existing `CommandVector` and `VehicleState` architecture.
 
 `timestamp` is the estimator-boundary timebase. The estimator derives:
 
@@ -235,43 +252,33 @@ estimator_tick = {
 \Delta t_k=timestamp_k-timestamp_{lastPredict}
 \]
 
-Do not pass external `dt` as an independent source of truth when `timestamp` is present.
+If `VehicleState` exposes `dT`, that value must be derived from the same estimator-boundary timestamp/effective-time policy. It must not be an independent external timing source.
 
-### 5.2 Drive sample
+### 5.3 Command sample
 
-```text
-drive_sample = {
-    CL,
-    CR,
-    fanCommand
-}
-```
-
-`CL` and `CR` are signed motor commands. The firmware/logging contract must state whether they were active over the interval ending at `timestamp` or are newly issued for the next interval.
+`CommandVector` is the canonical command object and carries left/right PWM values. The firmware/logging contract must state whether the command values were active over the interval ending at `timestamp` or were issued at `timestamp` for the next interval.
 
 No live `Vbat` measurement is assumed. Bus-voltage effects are calibrated parameters, torque uncertainty, and process-noise schedule inputs.
 
-### 5.3 Encoder sample
+### 5.4 Encoder sample
+
+Semantic encoder information required by the model:
 
 ```text
-encoder_sample = {
-    deltaCountL,
-    deltaCountR,
-    wheelRateL,
-    wheelRateR,
-    motorPhaseL,
-    motorPhaseR,
-    Romega,
-    encoderSampleValid,
-    encoderFaultReason
-}
+deltaCountL, deltaCountR
+wheelRateL, wheelRateR
+Romega
+encoderSampleValid
+encoderFaultReason
 ```
 
-`wheelRateL/R` are drivetrain inputs, not body-motion measurements. `Romega` must enter prediction before motor torque, contact-relative velocity, force limiting, noise scheduling, and any optional encoder-body pseudo-measurement.
+`wheelRateL/R` are drivetrain inputs, not body-motion measurements. They may already be stored as derived values in `VehicleState`; the spec does not require a `WheelAngularRate` wrapper. `Romega` must enter prediction before motor torque, contact-relative velocity, force limiting, noise scheduling, and any optional encoder-body pseudo-measurement.
 
 Invalid encoder samples are acquisition faults. They are skipped or routed through an explicit degraded prediction path; they are not ordinary Gaussian missed-pulse noise.
 
-### 5.4 IMU sample
+There is no normative `MotorPhase` input. If a future ripple correction needs phase-like information, the source, units, wrapping convention, logging/replay reconstruction, and ownership must be specified before the correction is promoted. Until then, ripple is not part of the first-pass torque model.
+
+### 5.5 IMU sample
 
 ```text
 imu_sample = {
@@ -295,7 +302,7 @@ use outage/degraded covariance policy if persistent
 make skip reason reconstructable in host replay/debug diagnostics
 ```
 
-### 5.5 Wall sample
+### 5.6 Wall sample
 
 ```text
 wall_sample_s = {
@@ -310,7 +317,7 @@ wall_sample_s = {
 
 When `sensorValid == false`, skip the wall row. Do not convert invalid raw values into large innovations. Very-large-covariance rows are allowed only as skipped-equivalent adapters for fixed-size APIs.
 
-### 5.6 Effective-time handling
+### 5.7 Effective-time handling
 
 Each measurement type must use one replayable policy:
 
@@ -540,7 +547,7 @@ clipAsymE(x,x_{min},x_{max},e)=smoothMaxE(x_{min},smoothMinE(x,x_{max},e),e)
 
 ---
 
-## 9. Plant submodel pattern
+## 9. Plant submodel pattern and anti-parameter-bag rule
 
 Every empirical physical submodel must declare:
 
@@ -553,19 +560,424 @@ Permitted follow-on options
 Promotion / replacement rule
 ```
 
-This applies to:
+Hard contracts are state meanings, units, signs, timing, validity behavior, covariance semantics, and submodel inputs/outputs. First-pass empirical formulas are not permanent physical truth.
+
+### 9.1 Runtime ownership rule
+
+Flexible does not mean globally parameterized. Runtime estimator code shall not expose or depend on one passive `PlantParams`, `EstimatorParams`, `NoiseParams`, `WallParams`, `Config`, or equivalent scalar namespace containing unrelated model coefficients.
+
+Each flexible submodel shall be represented by a behavior-owning class. Calibration values are owned by that class or by a typed calibration class used only to construct that class. Public fields and public data members are prohibited. C++ `struct` declarations are prohibited for model, calibration, configuration, input, output, diagnostic, and metadata API objects. Cross-submodel coupling must happen through explicit owner methods, `VehicleState`, named calibration products, or returned math artifacts, not arbitrary reads from a shared scalar namespace.
+
+The parameter registry in Section 23 is a metadata and replay-traceability artifact. It is not a runtime parameter lookup service.
+
+### 9.2 VehicleState and output ownership rule
+
+`VehicleState` is the canonical tick context. It may be passed by reference to model owners at construction time. Model owners may read required tick values from it and may write/update their own derived outputs through named methods or existing project channels.
+
+Do not introduce separate per-submodel input/output carrier classes merely to shuttle values already available in `VehicleState`. In particular, this spec rejects generated API types such as:
 
 ```text
-motor/driver torque
-normal load and fan/downforce
-contact force law
-yaw-loss / yaw-moment correction
-ground-strike / acceleration envelope
-wall sensor response
-process and measurement noise schedules
+MotorTorqueInput
+MotorTorqueOutput
+ContactForceInput
+ContactForceOutput
+NormalLoadInput
+NormalLoadOutput
+WheelAngularRate
+MotorPhase
 ```
 
-Hard contracts are state meanings, units, signs, timing, validity behavior, covariance semantics, and submodel inputs/outputs. First-pass empirical formulas are not permanent physical truth.
+If an implementation uses a returned result object for math-core convenience, that object must be immutable, private-field, narrowly scoped to one evaluation, and must not carry durable calibration coefficients. The preferred runtime pattern is a behavior-owning class reading `VehicleState` plus explicit external arguments such as `CommandVector`, then updating or exposing named computed quantities.
+
+### 9.3 Behavior-to-field review heuristic
+
+A class with fewer behavioral functions than stored fields is presumed to be a parameter bag in another form.
+
+For this review heuristic:
+
+```text
+Counts as behavior:
+    update/evaluate/predict methods
+    invariant checks
+    finite/continuity checks
+    interpolation, clipping, force, torque, load, wall, or covariance logic
+    validation/export logic tied to model behavior
+
+Does not count as behavior:
+    constructors/destructors
+    trivial getters/setters
+    public field access
+    plain serialization
+    configHash() alone
+    variantId() alone
+```
+
+The heuristic is intentionally conservative. A violation must be justified explicitly before code using it is accepted.
+
+### 9.4 Required starting class structures for bag-prone areas above moderate risk
+
+The sketches below define ownership and API shape, not filenames, heap allocation, or a math-core implementation. Concrete implementations may use static storage, fixed-size arrays, and `final` classes.
+
+#### 9.4.1 Plant assembly owner — high risk
+
+```cpp
+class EstimatorPlantModel final {
+public:
+    EstimatorPlantModel(VehicleState& vehicleState,
+                        MotorTorqueModel motorTorque,
+                        NormalLoadModel normalLoad,
+                        ContactForceModel contactForce,
+                        YawMomentModel yawMoment,
+                        GroundEnvelopeModel groundEnvelope,
+                        ResidualNoiseSchedule residualNoise);
+
+    void predictFromCommand(const CommandVector& command);
+    PredictionNoise buildPredictionNoise() const;
+    bool verifyFinitePrediction() const;
+    bool verifyStateContract() const;
+    bool verifyNoTractionCommandGate() const;
+    bool verifyZeroSpeedContinuity() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    void updateTimingFromVehicleState();
+    void runMotorTorque(const CommandVector& command);
+    void runNormalLoad();
+    void runContactForce();
+    void runYawMoment();
+    void runGroundEnvelope();
+    void runResidualNoise();
+
+    VehicleState& vehicleState_;
+    MotorTorqueModel motorTorque_;
+    NormalLoadModel normalLoad_;
+    ContactForceModel contactForce_;
+    YawMomentModel yawMoment_;
+    GroundEnvelopeModel groundEnvelope_;
+    ResidualNoiseSchedule residualNoise_;
+};
+```
+
+#### 9.4.2 Motor torque owner — high risk
+
+```cpp
+class MotorTorqueModel final {
+public:
+    MotorTorqueModel(VehicleState& vehicleState,
+                     MotorTorqueCalibration calibration,
+                     TorqueCorrectionModel correction);
+
+    void updateFromCommand(const CommandVector& command);
+    bool validateCommandRange(const CommandVector& command) const;
+    bool verifyFiniteTorque() const;
+    bool currentLimitCanBind() const;
+    float bankTorqueNewtonMeters(Side side) const;
+    float driveForceNewtons(Side side) const;
+    float driveSaturationIndex() const;
+    float driveAuthorityUncertainty() const;
+    ModelVariantId variantId() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    float pwmForSide(const CommandVector& command, Side side) const;
+    float normalizedPwm(float pwm) const;
+    float motorRateFromVehicleState(Side side) const;
+    float driveVoltage(float normalizedPwm) const;
+    float rawCurrent(float driveVoltage, float motorRate) const;
+    float limitedCurrent(float rawCurrent) const;
+    float motorTorque(float current, float motorRate) const;
+    float rawBankTorque(float motorTorque) const;
+    float usableBankTorque(Side side, float rawBankTorque) const;
+    float driveForceFromTorque(float bankTorque) const;
+    void writeVehicleStateOutputs(float leftTorque, float rightTorque);
+
+    VehicleState& vehicleState_;
+    MotorTorqueCalibration calibration_;
+    TorqueCorrectionModel correction_;
+};
+```
+
+`CommandVector` is the only command argument. Wheel-bank rates and `dT` are read from `VehicleState`. There is no `MotorTorqueInput`, `MotorTorqueOutput`, `WheelAngularRate`, or `MotorPhase` API.
+
+#### 9.4.3 Normal-load owner — high physical-coupling risk
+
+```cpp
+class NormalLoadModel final {
+public:
+    NormalLoadModel(VehicleState& vehicleState,
+                    NormalLoadCalibration calibration,
+                    FanLoadModel fanLoad,
+                    LoadTransferModel loadTransfer);
+
+    void updateLoads();
+    bool verifyNonnegativeLoads() const;
+    bool verifyLoadConservation() const;
+    float normalLoadNewtons(ContactPatchId patch) const;
+    bool minimumLoadClampActive(ContactPatchId patch) const;
+    ModelVariantId variantId() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    float staticLoad(ContactPatchId patch) const;
+    float fanLoad(ContactPatchId patch) const;
+    float longitudinalTransfer(ContactPatchId patch) const;
+    float lateralTransfer(ContactPatchId patch) const;
+    float clampLoad(float load) const;
+    void writeVehicleStateOutputs();
+
+    VehicleState& vehicleState_;
+    NormalLoadCalibration calibration_;
+    FanLoadModel fanLoad_;
+    LoadTransferModel loadTransfer_;
+};
+```
+
+#### 9.4.4 Contact force owner — very high risk
+
+```cpp
+class ContactForceModel final {
+public:
+    ContactForceModel(VehicleState& vehicleState,
+                      ContactForceCalibration calibration,
+                      ContactEnvelopeModel envelope);
+
+    void updateContactForces();
+    bool verifyZeroForwardSpeedContinuity() const;
+    bool verifyFiniteForces() const;
+    bool verifyNoCommandAdmissibilityGate() const;
+    float contactRelativeForwardVelocity(ContactPatchId patch) const;
+    float contactRelativeRightVelocity(ContactPatchId patch) const;
+    float forceEnvelopeRatio(ContactPatchId patch) const;
+    float forceLimiterActivity(ContactPatchId patch) const;
+    ModelVariantId variantId() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    float relativeForwardVelocity(ContactPatchId patch) const;
+    float relativeRightVelocity(ContactPatchId patch) const;
+    float driveForceRequest(ContactPatchId patch) const;
+    Force2D rawForceRequest(ContactPatchId patch) const;
+    float forceLimit(ContactPatchId patch, float relativeSpeed) const;
+    float envelopeRatio(const Force2D& request, float limit) const;
+    Force2D limitedForce(const Force2D& request, float envelopeRatio) const;
+    void writeVehicleStateOutputs();
+
+    VehicleState& vehicleState_;
+    ContactForceCalibration calibration_;
+    ContactEnvelopeModel envelope_;
+};
+```
+
+#### 9.4.5 Yaw moment owner — moderate-high risk
+
+```cpp
+class YawMomentModel final {
+public:
+    YawMomentModel(VehicleState& vehicleState,
+                   YawMomentCalibration calibration);
+
+    void updateYawMoment();
+    bool verifyNoTurnCategoryDependency() const;
+    bool verifyFiniteYawAcceleration() const;
+    float yawMomentContact() const;
+    float yawMomentLoss() const;
+    float yawMomentNominal() const;
+    float yawAccelerationRaw() const;
+    ModelVariantId variantId() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    float contactMomentFromVehicleState() const;
+    float continuousYawLoss() const;
+    float nominalMoment(float contactMoment, float lossMoment) const;
+    float rawYawAcceleration(float nominalMoment) const;
+    void writeVehicleStateOutputs(float contactMoment, float lossMoment, float yawAccel);
+
+    VehicleState& vehicleState_;
+    YawMomentCalibration calibration_;
+};
+```
+
+#### 9.4.6 Ground-envelope owner — high physical-coupling risk
+
+```cpp
+class GroundEnvelopeModel final {
+public:
+    GroundEnvelopeModel(VehicleState& vehicleState,
+                        GroundEnvelopeCalibration calibration,
+                        ImpactIndicatorModel impactIndicator,
+                        ForceConsistencyPolicy forceConsistency);
+
+    void updateEnvelope();
+    bool verifyInternalConsistency() const;
+    bool forceMutationEnabled() const;
+    float clippedForwardAcceleration() const;
+    float groundUse() const;
+    float impactIndicator() const;
+    ModelVariantId variantId() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    float rawForwardAcceleration() const;
+    float clipForwardAcceleration(float rawAf) const;
+    float computeGroundUse(float rawAf, float clippedAf) const;
+    float computeImpactIndicator(float groundUse) const;
+    void applyForceConsistencyPolicy();
+    void writeVehicleStateOutputs(float clippedAf, float groundUse, float impact);
+
+    VehicleState& vehicleState_;
+    GroundEnvelopeCalibration calibration_;
+    ImpactIndicatorModel impactIndicator_;
+    ForceConsistencyPolicy forceConsistency_;
+};
+```
+
+#### 9.4.7 Residual noise schedule owner — very high risk
+
+```cpp
+class ResidualNoiseSchedule final {
+public:
+    ResidualNoiseSchedule(VehicleState& vehicleState,
+                          ResidualNoiseCalibration calibration,
+                          OuInjectionConvention convention);
+
+    void updateForCurrentPrediction();
+    PredictionNoise buildPredictionNoise() const;
+    bool verifyOuSemantics(TimeStep deltaTime) const;
+    bool verifyFullCovarianceInjection() const;
+    float steadyStateSigma(ResidualChannel channel) const;
+    float ouPhi(ResidualChannel channel, TimeStep deltaTime) const;
+    float residualVariance(ResidualChannel channel, TimeStep deltaTime) const;
+    OuInjectionConvention injectionConvention() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    float contactRelativeContribution(ResidualChannel channel) const;
+    float forceLimitContribution(ResidualChannel channel) const;
+    float groundContribution(ResidualChannel channel) const;
+    float driveAuthorityContribution(ResidualChannel channel) const;
+    float impactContribution(ResidualChannel channel) const;
+    float encoderFaultContribution(ResidualChannel channel) const;
+    void writeVehicleStateOutputs();
+
+    VehicleState& vehicleState_;
+    ResidualNoiseCalibration calibration_;
+    OuInjectionConvention convention_;
+};
+```
+
+#### 9.4.8 Wall measurement owner — high risk
+
+```cpp
+class WallSensorModel final {
+public:
+    WallSensorModel(VehicleState& vehicleState,
+                    WallSensorCalibration calibration,
+                    WallResponseModel responseModel,
+                    WallNoiseModel noiseModel);
+
+    void predictForCurrentState();
+    bool makeUpdateCandidate(WallUpdateAssembler& assembler) const;
+    bool shouldSkipSample(const WallSampleView& sample) const;
+    bool verifyRayBundleNumerics() const;
+    bool verifyNoHitPolicy() const;
+    bool verifySaturationPolicy() const;
+    SensorId sensorId() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    SensorPose sensorPoseFromVehicleState() const;
+    RayBundle buildRayBundle(const SensorPose& pose) const;
+    RayHitSet castAgainstWallHypothesis(const RayBundle& rays) const;
+    float effectiveDistance(const RayHitSet& hits) const;
+    float predictedResponse(float effectiveDistance) const;
+    float measurementVariance(const WallSampleView& sample) const;
+
+    VehicleState& vehicleState_;
+    WallSensorCalibration calibration_;
+    WallResponseModel responseModel_;
+    WallNoiseModel noiseModel_;
+};
+
+class WallMeasurementModel final {
+public:
+    WallMeasurementModel(VehicleState& vehicleState,
+                         WallSensorSet sensors);
+
+    MeasurementBlock buildUpdateBlock();
+    bool verifyCorrelationPolicy() const;
+    bool verifyNoInvalidSampleInnovation() const;
+    ModelConfigHash configHash() const;
+    void exportParameterMetadata(ParameterMetadataRegistry& registry) const;
+
+private:
+    void collectCandidates(WallUpdateAssembler& assembler) const;
+    void groupCorrelatedCandidates(WallUpdateAssembler& assembler) const;
+    void applySkipEquivalentPolicy(WallUpdateAssembler& assembler) const;
+
+    VehicleState& vehicleState_;
+    WallSensorSet sensors_;
+};
+```
+
+#### 9.4.9 Parameter metadata registry — very high risk
+
+```cpp
+class ParameterMetadataRegistry final {
+public:
+    void recordModel(const ModelMetadataProvider& model);
+    void validateCompleteness() const;
+    void validateNoRuntimeLookupApi() const;
+    ParameterRegistrySnapshot snapshot() const;
+    ModelConfigHash registryHash() const;
+
+private:
+    ParameterMetadataStore metadata_;
+};
+```
+
+The registry records names, units, priors, bounds, fit data, validation data, residual policy, confounds, and version metadata. It must not provide runtime scalar lookup methods such as `getFloat(name)` for plant evaluation.
+
+#### 9.4.10 Configuration manifest owner — moderate-high risk
+
+```cpp
+class EstimatorModelConfiguration final {
+public:
+    static Expected<EstimatorModelConfiguration, ConfigurationError>
+    load(const ConfigurationSource& source, VehicleState& vehicleState);
+
+    EstimatorPlantModel makePlantModel();
+    MeasurementModel makeMeasurementModel();
+    void validateOwnerGraph() const;
+    void validateBehaviorToFieldHeuristic() const;
+    void validateNoParameterBagApis() const;
+    ModelConfigHash configHash() const;
+    ParameterRegistrySnapshot parameterMetadata() const;
+
+private:
+    EstimatorModelConfiguration(VehicleState& vehicleState,
+                                EstimatorPlantModel plantModel,
+                                MeasurementModel measurementModel,
+                                ParameterMetadataRegistry metadataRegistry,
+                                BuildIdentity buildIdentity);
+
+    VehicleState& vehicleState_;
+    EstimatorPlantModel plantModel_;
+    MeasurementModel measurementModel_;
+    ParameterMetadataRegistry metadataRegistry_;
+    BuildIdentity buildIdentity_;
+};
+```
+
+The configuration manifest constructs typed model owners and records their identity. It is not a mutable global configuration object and not a runtime coefficient dictionary.
 
 ---
 
@@ -577,17 +989,28 @@ Flexible empirical model family with a physics-first initial mean model.
 
 ### 10.2 Hard contract
 
-Inputs:
+Runtime inputs:
 
 ```text
-CL, CR
-wheelRateL, wheelRateR
-motorPhaseL, motorPhaseR
-motor/driver parameters
-optional runtime/thermal/recent-current proxy if versioned
+CommandVector left/right PWM values
+validated left/right wheel-bank rates from VehicleState
+current timestamp/dT from VehicleState
+optional fan/supply/runtime estimator outputs only if already owned and versioned
 ```
 
-Outputs:
+Owned calibration:
+
+```text
+R_m, K_t/K_e, M_R
+R_drv, R_wire
+V_busEff prior and uncertainty
+I_trip or current-limit policy if relevant
+eta_drive left/right
+launch and rolling/friction terms
+compact torque-correction variant, initially zero
+```
+
+Outputs, normally written to or exposed from `VehicleState` by `MotorTorqueModel`:
 
 ```text
 T_bankRaw_L, T_bankRaw_R
@@ -606,13 +1029,19 @@ force: N
 wheel and motor rate: rad/s
 ```
 
+There is no normative `MotorPhase`. Calibration is not passed as a per-tick input; it is private owner state validated when `MotorTorqueModel` is constructed.
+
 ### 10.3 First-pass implementation
 
 Use a direct quasi-static motor/driver model as the initial mean model.
 
+Let \(C_j\) be the side-specific PWM command value extracted from `CommandVector`:
+
 \[
 u_j=normalize(C_j),\quad u_j\in[-1,1]
 \]
+
+Wheel-bank rate is read from `VehicleState`:
 
 \[
 motorRate_j=G\hat{wheelRate}_j
@@ -684,7 +1113,6 @@ slow_j=\exp\left[-\left(\frac{r_w|\hat{wheelRate}_j|}{v_{static}}\right)^2\right
 T_{bank,j}=deadzoneE(T_{bankRaw,j},slow_jT_{launch,j},T_E)
 -T_{roll,j}sgnE(\hat{wheelRate}_j,wheelRate_E)
 -T_{visc,j}\hat{wheelRate}_j
--T_{ripple,j}(motorPhase_j)
 \]
 
 Set \(T_{visc,j}=0\) initially unless logs prove it is needed.
@@ -723,10 +1151,10 @@ Promote corrections in this order:
 2. effective \(V_{busEff}\), \(R_{wire}\), or \(R_{drv}\) calibration;
 3. launch and rolling/friction terms;
 4. compact command/rate correction surface;
-5. motor-phase ripple correction;
-6. runtime/thermal/recent-current proxy.
+5. runtime/thermal/recent-current proxy;
+6. only if explicitly defined and replayable, a periodic ripple correction based on a specified measured source.
 
-A dense LUT is a follow-on escape path, not the initial mean model.
+A dense LUT is a follow-on escape path, not the initial mean model. A phase-like ripple source must not be invented by the spec; it must be introduced as a separate measured or reconstructable quantity with units, wrapping, and replay semantics.
 
 ### 10.5 Expected failure signatures
 
@@ -736,7 +1164,7 @@ A dense LUT is a follow-on escape path, not the initial mean model.
 | Braking requires persistent negative `DeltaAf` | Decay/brake behavior or reverse torque wrong |
 | Differential commands produce biased yaw residuals | Left/right torque asymmetry or contact/yaw model wrong |
 | Similar commands drift over a run | Thermal or supply effect missing |
-| Motor phase correlates with residuals | Enable ripple correction |
+| Residuals show repeatable periodic structure versus a logged drivetrain coordinate | Define and validate a measured ripple source before adding ripple correction |
 
 ### 10.6 Promotion rule
 
@@ -859,7 +1287,7 @@ v_rel_r_i
 N_i
 F_drive_side(i)
 contact geometry
-tire/contact parameters
+ContactForceModel calibration
 ```
 
 Outputs:
@@ -1230,7 +1658,7 @@ First-pass schedules:
 \sigma_{\Delta yawAccel,ss}=\sigma_{yaw,base,ss}+k_{yaw,rel}contactRelRms+k_{yaw,contact}yawContactSpeedRms+k_{yaw,limit}forceLimiterActivityMax+k_{yaw,drive}driveSaturationIndex^2+k_{yaw,auth}driveAuthorityUncertainty+k_{yaw,impact}impactIndicator+k_{yaw,enc}encoderFaultIndicator
 \]
 
-All coefficients are versioned parameters.
+All coefficients are owned by `ResidualNoiseSchedule`, exposed only through validated owner APIs, and exported through the parameter metadata registry.
 
 ### 16.4 Event scalar first pass
 
@@ -1392,7 +1820,7 @@ Validated encoder rates feed:
 ```text
 motor rate
 back-EMF / torque prior
-motor phase / ripple
+optional periodic torque correction
 contact-relative velocity
 force request / force limiting
 continuous noise scheduling
@@ -1402,7 +1830,7 @@ continuous noise scheduling
 
 The encoder-body pseudo-measurement is not part of the default high-performance estimator path. It may be enabled only for conservative, exploration, or debug configurations after host replay proves benefit.
 
-It must not classify the maneuver as rolling or nonrolling. It may only use continuous covariance based on contact-relative velocities, force-envelope ratio, ground use, launch torque state, and encoder validity.
+It must not classify the maneuver as rolling or nonrolling. It may only use continuous covariance based on contact-relative velocities, force-envelope ratio, ground use, launch/low-speed torque state, and encoder validity.
 
 ### 19.2 Optional first-pass form
 
@@ -1609,9 +2037,11 @@ These are replay/debug products, not normal embedded telemetry requirements.
 10. Process and measurement covariance schedules.
 11. Held-out replay and ablation.
 
-### 23.2 Parameter registry
+### 23.2 Parameter metadata registry
 
-Every fitted parameter must have:
+The parameter metadata registry is a replay, traceability, and calibration-readiness artifact. It is not a runtime parameter bag and must not be used by plant, measurement, or noise code as a shared scalar lookup table.
+
+Every fitted parameter exported by an active model owner must have:
 
 | Field | Requirement |
 |---|---|
@@ -1625,7 +2055,7 @@ Every fitted parameter must have:
 | Confounds | Parameters that can mimic it |
 | Version metadata | robot rev, tire/floor condition, firmware, estimator build |
 
-Physical tuning and performance claims are blocked until this registry exists for active fitted parameters.
+Physical tuning and performance claims are blocked until this metadata registry exists for active fitted parameters and every active model owner exports its own parameter metadata.
 
 ### 23.3 Identifiability posture
 
@@ -1751,7 +2181,15 @@ residual and encoder uncertainty affect full prediction covariance
 invalid IMU/wall/encoder samples skip or degrade correctly
 wall ray-bundle numerics are stable
 host replay runs the same estimator code as target
-parameter registry exists for active fitted parameters
+runtime model coefficients are owned by typed model classes, not public-field parameter bags
+typed submodel owner classes exist for motor/load/contact/yaw/ground/residual/wall models
+no global public-field parameter bag exists
+no runtime lookup of arbitrary scalar coefficients from a shared registry exists
+CommandVector is used as the canonical left/right PWM command type
+VehicleState is used as the tick context rather than generated submodel input bags
+no normative MotorPhase, WheelAngularRate, MotorTorqueInput, or MotorTorqueOutput API exists
+classes above moderate parameter-bag risk satisfy or explicitly justify the behavior-to-field heuristic
+parameter metadata registry is complete for active fitted parameters
 ```
 
 ---
@@ -1785,7 +2223,7 @@ stationary-selected turn model
 
 ## 27. Summary
 
-The target estimator is a 9-state planar body UKF with encoder-derived drivetrain inputs and contact-relative-velocity plant physics. It explicitly rejects the legacy failure modes: gyro bias as a UKF state, traction-gated control authority, speed-normalized slip math, zero-speed-singular contact models, runtime turn taxonomy, and embedded validation-diagnostic logging requirements that exceed the existing input-log/replay architecture.
+The target estimator is a 9-state planar body UKF with encoder-derived drivetrain inputs and contact-relative-velocity plant physics. It explicitly rejects the legacy failure modes: gyro bias as a UKF state, traction-gated control authority, speed-normalized slip math, zero-speed-singular contact models, runtime turn taxonomy, invented submodel input/output carrier bags, and embedded validation-diagnostic logging requirements that exceed the existing input-log/replay architecture.
 
 The model is strict where ambiguity would break implementation: state, signs, timing, measurement semantics, input validity, covariance semantics, and contact-relative-velocity definition. It remains flexible where the physical robot must be learned from logs: motor/driver torque corrections, contact force law, normal load, yaw loss, ground strike, wall response, and noise schedules.
 

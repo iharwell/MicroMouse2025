@@ -2,7 +2,6 @@
 
 #include "CommandVector.h"
 #include "CellCoordinates.h"
-#include "FeedbackAxis.h"
 #include "Direction.h"
 #include "MazeMapRuntimeCore.h"
 #include "SensorSnapshot.h"
@@ -81,7 +80,6 @@ namespace MazeMap::App::Internal
         CommandVector SeekControls(
             const MazeMap::VehicleState& state,
             const SensorSnapshot& sensors,
-            const DriveTelemetry& driveTelemetry,
             bool& done);
         CommandVector SeatControls(const MazeMap::VehicleState& state, bool& done);
         CommandVector SquareControls(
@@ -97,7 +95,6 @@ namespace MazeMap::App::Internal
         DriveBase* _drive{};
         Drive* _driveService{};
         MotionLimits _limits{};
-        MazeMap::FeedbackSource _trackingFeedbackSources{};
         bool _allowPassThroughNoWall{};
         bool _faulted{};
         ActivePhase _activePhase{ ActivePhase::None };

@@ -93,8 +93,8 @@ namespace
         float commandedAngularRadps = 0.0f;
         float leftDriveCommand = 0.0f;
         float rightDriveCommand = 0.0f;
-        float leftFeedforwardCommand = 0.0f;
-        float rightFeedforwardCommand = 0.0f;
+        float leftPlantCommand = 0.0f;
+        float rightPlantCommand = 0.0f;
         std::int32_t leftEncoderCount = 0;
         std::int32_t rightEncoderCount = 0;
         float leftEncoderOmegaRadps = 0.0f;
@@ -171,24 +171,24 @@ namespace
         float loggedRightDriveCommand = std::numeric_limits<float>::quiet_NaN();
         float loggedAverageDriveCommand = std::numeric_limits<float>::quiet_NaN();
         float loggedDeltaDriveCommand = std::numeric_limits<float>::quiet_NaN();
-        float loggedLeftFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
-        float loggedRightFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
-        float loggedAverageFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
-        float loggedDeltaFeedforwardCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedLeftPlantCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedRightPlantCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedAveragePlantCommand = std::numeric_limits<float>::quiet_NaN();
+        float loggedDeltaPlantCommand = std::numeric_limits<float>::quiet_NaN();
         float leftDriveCommandError = std::numeric_limits<float>::quiet_NaN();
         float rightDriveCommandError = std::numeric_limits<float>::quiet_NaN();
         float averageDriveCommandError = std::numeric_limits<float>::quiet_NaN();
         float deltaDriveCommandError = std::numeric_limits<float>::quiet_NaN();
-        float leftFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
-        float rightFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
-        float averageFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
-        float deltaFeedforwardCommandError = std::numeric_limits<float>::quiet_NaN();
+        float leftPlantCommandError = std::numeric_limits<float>::quiet_NaN();
+        float rightPlantCommandError = std::numeric_limits<float>::quiet_NaN();
+        float averagePlantCommandError = std::numeric_limits<float>::quiet_NaN();
+        float deltaPlantCommandError = std::numeric_limits<float>::quiet_NaN();
         float envelopeLeftMin = std::numeric_limits<float>::quiet_NaN();
         float envelopeLeftMax = std::numeric_limits<float>::quiet_NaN();
         float envelopeRightMin = std::numeric_limits<float>::quiet_NaN();
         float envelopeRightMax = std::numeric_limits<float>::quiet_NaN();
         bool loggedDriveWithinEnvelope = false;
-        bool loggedFeedforwardWithinEnvelope = false;
+        bool loggedPlantCommandWithinEnvelope = false;
         float predictedNextForwardMps = std::numeric_limits<float>::quiet_NaN();
         float predictedNextYawRateRadps = std::numeric_limits<float>::quiet_NaN();
         float predictedForwardTargetErrorMps = std::numeric_limits<float>::quiet_NaN();
@@ -318,14 +318,14 @@ namespace
         ErrorStats rightDriveCommand;
         ErrorStats averageDriveCommand;
         ErrorStats deltaDriveCommand;
-        ErrorStats leftFeedforwardCommand;
-        ErrorStats rightFeedforwardCommand;
-        ErrorStats averageFeedforwardCommand;
-        ErrorStats deltaFeedforwardCommand;
+        ErrorStats leftPlantCommand;
+        ErrorStats rightPlantCommand;
+        ErrorStats averagePlantCommand;
+        ErrorStats deltaPlantCommand;
         ErrorStats predictedForwardTargetErrorMps;
         ErrorStats predictedYawTargetErrorRadps;
         HitRateStats driveEnvelopeHit;
-        HitRateStats feedforwardEnvelopeHit;
+        HitRateStats plantCommandEnvelopeHit;
 
         void merge(const FeedforwardMetrics& other) noexcept
         {
@@ -333,14 +333,14 @@ namespace
             rightDriveCommand.merge(other.rightDriveCommand);
             averageDriveCommand.merge(other.averageDriveCommand);
             deltaDriveCommand.merge(other.deltaDriveCommand);
-            leftFeedforwardCommand.merge(other.leftFeedforwardCommand);
-            rightFeedforwardCommand.merge(other.rightFeedforwardCommand);
-            averageFeedforwardCommand.merge(other.averageFeedforwardCommand);
-            deltaFeedforwardCommand.merge(other.deltaFeedforwardCommand);
+            leftPlantCommand.merge(other.leftPlantCommand);
+            rightPlantCommand.merge(other.rightPlantCommand);
+            averagePlantCommand.merge(other.averagePlantCommand);
+            deltaPlantCommand.merge(other.deltaPlantCommand);
             predictedForwardTargetErrorMps.merge(other.predictedForwardTargetErrorMps);
             predictedYawTargetErrorRadps.merge(other.predictedYawTargetErrorRadps);
             driveEnvelopeHit.merge(other.driveEnvelopeHit);
-            feedforwardEnvelopeHit.merge(other.feedforwardEnvelopeHit);
+            plantCommandEnvelopeHit.merge(other.plantCommandEnvelopeHit);
         }
     };
 
@@ -1658,8 +1658,8 @@ namespace
                 !ParseField(tokens, indices, "cmd_angular_radps", row.commandedAngularRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_drive_command", row.leftDriveCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "right_drive_command", row.rightDriveCommand, ParseFloat, error) ||
-                !ParseField(tokens, indices, "left_feedforward_command", row.leftFeedforwardCommand, ParseFloat, error) ||
-                !ParseField(tokens, indices, "right_feedforward_command", row.rightFeedforwardCommand, ParseFloat, error) ||
+                !ParseField(tokens, indices, "left_plant_command", row.leftPlantCommand, ParseFloat, error) ||
+                !ParseField(tokens, indices, "right_plant_command", row.rightPlantCommand, ParseFloat, error) ||
                 !ParseField(tokens, indices, "left_encoder_count", row.leftEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "right_encoder_count", row.rightEncoderCount, ParseInt32, error) ||
                 !ParseField(tokens, indices, "left_encoder_omega_radps", row.leftEncoderOmegaRadps, ParseFloat, error) ||
@@ -1965,10 +1965,10 @@ namespace
                                 }
 
                                 envelope.valid = true;
-                                envelope.leftMin = (std::min)(envelope.leftMin, command.LeftMotorPwm());
-                                envelope.leftMax = (std::max)(envelope.leftMax, command.LeftMotorPwm());
-                                envelope.rightMin = (std::min)(envelope.rightMin, command.RightMotorPwm());
-                                envelope.rightMax = (std::max)(envelope.rightMax, command.RightMotorPwm());
+                                envelope.leftMin = (std::min)(envelope.leftMin, command.LeftCommand());
+                                envelope.leftMax = (std::max)(envelope.leftMax, command.LeftCommand());
+                                envelope.rightMin = (std::min)(envelope.rightMin, command.RightCommand());
+                                envelope.rightMax = (std::max)(envelope.rightMax, command.RightCommand());
                             }
                         }
                     }
@@ -1987,10 +1987,10 @@ namespace
         metrics.rightDriveCommand.add(row.rightDriveCommandError);
         metrics.averageDriveCommand.add(row.averageDriveCommandError);
         metrics.deltaDriveCommand.add(row.deltaDriveCommandError);
-        metrics.leftFeedforwardCommand.add(row.leftFeedforwardCommandError);
-        metrics.rightFeedforwardCommand.add(row.rightFeedforwardCommandError);
-        metrics.averageFeedforwardCommand.add(row.averageFeedforwardCommandError);
-        metrics.deltaFeedforwardCommand.add(row.deltaFeedforwardCommandError);
+        metrics.leftPlantCommand.add(row.leftPlantCommandError);
+        metrics.rightPlantCommand.add(row.rightPlantCommandError);
+        metrics.averagePlantCommand.add(row.averagePlantCommandError);
+        metrics.deltaPlantCommand.add(row.deltaPlantCommandError);
         metrics.predictedForwardTargetErrorMps.add(row.predictedForwardTargetErrorMps);
         metrics.predictedYawTargetErrorRadps.add(row.predictedYawTargetErrorRadps);
         if (std::isfinite(row.envelopeLeftMin) &&
@@ -1999,7 +1999,7 @@ namespace
             std::isfinite(row.envelopeRightMax))
         {
             metrics.driveEnvelopeHit.add(row.loggedDriveWithinEnvelope);
-            metrics.feedforwardEnvelopeHit.add(row.loggedFeedforwardWithinEnvelope);
+            metrics.plantCommandEnvelopeHit.add(row.loggedPlantCommandWithinEnvelope);
         }
     }
 
@@ -2083,8 +2083,8 @@ namespace
         exportRow.targetLeftVelocityMps = nextRow.leftEncoderVelocityMps;
         exportRow.targetRightVelocityMps = nextRow.rightEncoderVelocityMps;
         exportRow.targetYawRateSensorRadps = inputs.targetYawRateSensorRadps;
-        exportRow.nominalLeftCommand = command.LeftMotorPwm();
-        exportRow.nominalRightCommand = command.RightMotorPwm();
+        exportRow.nominalLeftCommand = command.LeftCommand();
+        exportRow.nominalRightCommand = command.RightCommand();
         exportRow.nominalAverageCommand =
             CommandAverage(exportRow.nominalLeftCommand, exportRow.nominalRightCommand);
         exportRow.nominalDeltaCommand =
@@ -2095,24 +2095,24 @@ namespace
             CommandAverage(currentRow.leftDriveCommand, currentRow.rightDriveCommand);
         exportRow.loggedDeltaDriveCommand =
             CommandDelta(currentRow.leftDriveCommand, currentRow.rightDriveCommand);
-        exportRow.loggedLeftFeedforwardCommand = currentRow.leftFeedforwardCommand;
-        exportRow.loggedRightFeedforwardCommand = currentRow.rightFeedforwardCommand;
-        exportRow.loggedAverageFeedforwardCommand =
-            CommandAverage(currentRow.leftFeedforwardCommand, currentRow.rightFeedforwardCommand);
-        exportRow.loggedDeltaFeedforwardCommand =
-            CommandDelta(currentRow.leftFeedforwardCommand, currentRow.rightFeedforwardCommand);
+        exportRow.loggedLeftPlantCommand = currentRow.leftPlantCommand;
+        exportRow.loggedRightPlantCommand = currentRow.rightPlantCommand;
+        exportRow.loggedAveragePlantCommand =
+            CommandAverage(currentRow.leftPlantCommand, currentRow.rightPlantCommand);
+        exportRow.loggedDeltaPlantCommand =
+            CommandDelta(currentRow.leftPlantCommand, currentRow.rightPlantCommand);
         exportRow.leftDriveCommandError = exportRow.nominalLeftCommand - exportRow.loggedLeftDriveCommand;
         exportRow.rightDriveCommandError = exportRow.nominalRightCommand - exportRow.loggedRightDriveCommand;
         exportRow.averageDriveCommandError = exportRow.nominalAverageCommand - exportRow.loggedAverageDriveCommand;
         exportRow.deltaDriveCommandError = exportRow.nominalDeltaCommand - exportRow.loggedDeltaDriveCommand;
-        exportRow.leftFeedforwardCommandError =
-            exportRow.nominalLeftCommand - exportRow.loggedLeftFeedforwardCommand;
-        exportRow.rightFeedforwardCommandError =
-            exportRow.nominalRightCommand - exportRow.loggedRightFeedforwardCommand;
-        exportRow.averageFeedforwardCommandError =
-            exportRow.nominalAverageCommand - exportRow.loggedAverageFeedforwardCommand;
-        exportRow.deltaFeedforwardCommandError =
-            exportRow.nominalDeltaCommand - exportRow.loggedDeltaFeedforwardCommand;
+        exportRow.leftPlantCommandError =
+            exportRow.nominalLeftCommand - exportRow.loggedLeftPlantCommand;
+        exportRow.rightPlantCommandError =
+            exportRow.nominalRightCommand - exportRow.loggedRightPlantCommand;
+        exportRow.averagePlantCommandError =
+            exportRow.nominalAverageCommand - exportRow.loggedAveragePlantCommand;
+        exportRow.deltaPlantCommandError =
+            exportRow.nominalDeltaCommand - exportRow.loggedDeltaPlantCommand;
         exportRow.predictedNextForwardMps = predictedNextState(MazeMap::VehicleState::kU);
         exportRow.predictedNextYawRateRadps = predictedNextState(MazeMap::VehicleState::kR);
         exportRow.predictedForwardTargetErrorMps = exportRow.predictedNextForwardMps - inputs.targetForwardSensorMps;
@@ -2128,11 +2128,11 @@ namespace
                 (currentRow.leftDriveCommand <= envelope.leftMax) &&
                 (currentRow.rightDriveCommand >= envelope.rightMin) &&
                 (currentRow.rightDriveCommand <= envelope.rightMax);
-            exportRow.loggedFeedforwardWithinEnvelope =
-                (currentRow.leftFeedforwardCommand >= envelope.leftMin) &&
-                (currentRow.leftFeedforwardCommand <= envelope.leftMax) &&
-                (currentRow.rightFeedforwardCommand >= envelope.rightMin) &&
-                (currentRow.rightFeedforwardCommand <= envelope.rightMax);
+            exportRow.loggedPlantCommandWithinEnvelope =
+                (currentRow.leftPlantCommand >= envelope.leftMin) &&
+                (currentRow.leftPlantCommand <= envelope.leftMax) &&
+                (currentRow.rightPlantCommand >= envelope.rightMin) &&
+                (currentRow.rightPlantCommand <= envelope.rightMax);
         }
         return true;
     }
@@ -2748,12 +2748,12 @@ namespace
             << "current_yaw_rate_sensor_radps,target_forward_sensor_mps,target_left_velocity_mps,"
             << "target_right_velocity_mps,target_yaw_rate_sensor_radps,nominal_left_command,nominal_right_command,"
             << "nominal_average_command,nominal_delta_command,logged_left_drive_command,logged_right_drive_command,"
-            << "logged_average_drive_command,logged_delta_drive_command,logged_left_feedforward_command,"
-            << "logged_right_feedforward_command,logged_average_feedforward_command,logged_delta_feedforward_command,"
+            << "logged_average_drive_command,logged_delta_drive_command,logged_left_plant_command,"
+            << "logged_right_plant_command,logged_average_plant_command,logged_delta_plant_command,"
             << "left_drive_command_error,right_drive_command_error,average_drive_command_error,delta_drive_command_error,"
-            << "left_feedforward_command_error,right_feedforward_command_error,average_feedforward_command_error,"
-            << "delta_feedforward_command_error,envelope_left_min,envelope_left_max,envelope_right_min,"
-            << "envelope_right_max,logged_drive_within_envelope,logged_feedforward_within_envelope,"
+            << "left_plant_command_error,right_plant_command_error,average_plant_command_error,"
+            << "delta_plant_command_error,envelope_left_min,envelope_left_max,envelope_right_min,"
+            << "envelope_right_max,logged_drive_within_envelope,logged_plant_command_within_envelope,"
             << "predicted_next_forward_mps,predicted_next_yaw_rate_radps,predicted_forward_target_error_mps,"
             << "predicted_yaw_target_error_radps\n";
 
@@ -2792,24 +2792,24 @@ namespace
                 << FormatDouble(row.loggedRightDriveCommand) << ','
                 << FormatDouble(row.loggedAverageDriveCommand) << ','
                 << FormatDouble(row.loggedDeltaDriveCommand) << ','
-                << FormatDouble(row.loggedLeftFeedforwardCommand) << ','
-                << FormatDouble(row.loggedRightFeedforwardCommand) << ','
-                << FormatDouble(row.loggedAverageFeedforwardCommand) << ','
-                << FormatDouble(row.loggedDeltaFeedforwardCommand) << ','
+                << FormatDouble(row.loggedLeftPlantCommand) << ','
+                << FormatDouble(row.loggedRightPlantCommand) << ','
+                << FormatDouble(row.loggedAveragePlantCommand) << ','
+                << FormatDouble(row.loggedDeltaPlantCommand) << ','
                 << FormatDouble(row.leftDriveCommandError) << ','
                 << FormatDouble(row.rightDriveCommandError) << ','
                 << FormatDouble(row.averageDriveCommandError) << ','
                 << FormatDouble(row.deltaDriveCommandError) << ','
-                << FormatDouble(row.leftFeedforwardCommandError) << ','
-                << FormatDouble(row.rightFeedforwardCommandError) << ','
-                << FormatDouble(row.averageFeedforwardCommandError) << ','
-                << FormatDouble(row.deltaFeedforwardCommandError) << ','
+                << FormatDouble(row.leftPlantCommandError) << ','
+                << FormatDouble(row.rightPlantCommandError) << ','
+                << FormatDouble(row.averagePlantCommandError) << ','
+                << FormatDouble(row.deltaPlantCommandError) << ','
                 << FormatDouble(row.envelopeLeftMin) << ','
                 << FormatDouble(row.envelopeLeftMax) << ','
                 << FormatDouble(row.envelopeRightMin) << ','
                 << FormatDouble(row.envelopeRightMax) << ','
                 << (row.loggedDriveWithinEnvelope ? "true" : "false") << ','
-                << (row.loggedFeedforwardWithinEnvelope ? "true" : "false") << ','
+                << (row.loggedPlantCommandWithinEnvelope ? "true" : "false") << ','
                 << FormatDouble(row.predictedNextForwardMps) << ','
                 << FormatDouble(row.predictedNextYawRateRadps) << ','
                 << FormatDouble(row.predictedForwardTargetErrorMps) << ','
@@ -2833,8 +2833,8 @@ namespace
                 << ": samples=" << summary.validSolutions
                 << ", drive_average_rmse=" << FormatDouble(summary.metrics.averageDriveCommand.rmse(), 6)
                 << ", drive_delta_rmse=" << FormatDouble(summary.metrics.deltaDriveCommand.rmse(), 6)
-                << ", feedforward_average_rmse=" << FormatDouble(summary.metrics.averageFeedforwardCommand.rmse(), 6)
-                << ", feedforward_delta_rmse=" << FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse(), 6)
+                << ", plant_command_average_rmse=" << FormatDouble(summary.metrics.averagePlantCommand.rmse(), 6)
+                << ", plant_command_delta_rmse=" << FormatDouble(summary.metrics.deltaPlantCommand.rmse(), 6)
                 << ", drive_envelope_hit_rate_pct=" << FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 2)
                 << "\n";
         }
@@ -2989,9 +2989,9 @@ namespace
                     << " | "
                     << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.deltaDriveCommand.rmse()) : "")
                     << " | "
-                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.averageFeedforwardCommand.rmse()) : "")
+                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.averagePlantCommand.rmse()) : "")
                     << " | "
-                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse()) : "")
+                    << (summary.validSolutions > 0U ? FormatDouble(summary.metrics.deltaPlantCommand.rmse()) : "")
                     << " | "
                     << (summary.validSolutions > 0U ? FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 2) : "")
                     << " | "
@@ -3115,7 +3115,7 @@ namespace
         }
 
         feedforwardPathCsv
-            << "path_id,label,category,comparable_transitions,valid_solutions,drive_average_rmse,drive_delta_rmse,feedforward_average_rmse,feedforward_delta_rmse,drive_envelope_hit_pct,feedforward_envelope_hit_pct,forward_target_rmse_mps,yaw_target_rmse_radps\n";
+            << "path_id,label,category,comparable_transitions,valid_solutions,drive_average_rmse,drive_delta_rmse,plant_command_average_rmse,plant_command_delta_rmse,drive_envelope_hit_pct,plant_command_envelope_hit_pct,forward_target_rmse_mps,yaw_target_rmse_radps\n";
         for (const FeedforwardPathSummary& summary : corpus.feedforwardPaths)
         {
             feedforwardPathCsv
@@ -3126,10 +3126,10 @@ namespace
                 << summary.validSolutions << ','
                 << FormatDouble(summary.metrics.averageDriveCommand.rmse()) << ','
                 << FormatDouble(summary.metrics.deltaDriveCommand.rmse()) << ','
-                << FormatDouble(summary.metrics.averageFeedforwardCommand.rmse()) << ','
-                << FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse()) << ','
+                << FormatDouble(summary.metrics.averagePlantCommand.rmse()) << ','
+                << FormatDouble(summary.metrics.deltaPlantCommand.rmse()) << ','
                 << FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 2) << ','
-                << FormatDouble(100.0 * summary.metrics.feedforwardEnvelopeHit.rate(), 2) << ','
+                << FormatDouble(100.0 * summary.metrics.plantCommandEnvelopeHit.rate(), 2) << ','
                 << FormatDouble(summary.metrics.predictedForwardTargetErrorMps.rmse()) << ','
                 << FormatDouble(summary.metrics.predictedYawTargetErrorRadps.rmse()) << '\n';
         }
@@ -3215,10 +3215,10 @@ namespace
                 << "      \"valid_solutions\": " << summary.validSolutions << ",\n"
                 << "      \"drive_average_rmse\": " << FormatDouble(summary.metrics.averageDriveCommand.rmse(), 12) << ",\n"
                 << "      \"drive_delta_rmse\": " << FormatDouble(summary.metrics.deltaDriveCommand.rmse(), 12) << ",\n"
-                << "      \"feedforward_average_rmse\": " << FormatDouble(summary.metrics.averageFeedforwardCommand.rmse(), 12) << ",\n"
-                << "      \"feedforward_delta_rmse\": " << FormatDouble(summary.metrics.deltaFeedforwardCommand.rmse(), 12) << ",\n"
+                << "      \"plant_command_average_rmse\": " << FormatDouble(summary.metrics.averagePlantCommand.rmse(), 12) << ",\n"
+                << "      \"plant_command_delta_rmse\": " << FormatDouble(summary.metrics.deltaPlantCommand.rmse(), 12) << ",\n"
                 << "      \"drive_envelope_hit_pct\": " << FormatDouble(100.0 * summary.metrics.driveEnvelopeHit.rate(), 12) << ",\n"
-                << "      \"feedforward_envelope_hit_pct\": " << FormatDouble(100.0 * summary.metrics.feedforwardEnvelopeHit.rate(), 12) << ",\n"
+                << "      \"plant_command_envelope_hit_pct\": " << FormatDouble(100.0 * summary.metrics.plantCommandEnvelopeHit.rate(), 12) << ",\n"
                 << "      \"forward_target_rmse_mps\": " << FormatDouble(summary.metrics.predictedForwardTargetErrorMps.rmse(), 12) << ",\n"
                 << "      \"yaw_target_rmse_radps\": " << FormatDouble(summary.metrics.predictedYawTargetErrorRadps.rmse(), 12) << "\n"
                 << "    }" << ((pathIndex + 1U) < corpus.feedforwardPaths.size() ? "," : "") << "\n";

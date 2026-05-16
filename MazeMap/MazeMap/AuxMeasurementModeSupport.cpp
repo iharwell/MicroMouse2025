@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "AuxMeasurementModeSupport.h"
 
+#include "SensorSnapshot.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -517,6 +519,11 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
         const float deltaYM = finalPose.GetPositionY() - startPose.GetPositionY();
         const float closureErrorM = std::sqrt((deltaXM * deltaXM) + (deltaYM * deltaYM));
         const float yawErrorDeg = RAD_TO_DEG_F * AngleErrorRad(startPose.GetOrientation(), finalPose.GetOrientation());
+        const SensorSnapshot& startSensors = startPose.GetSensorSnapshot();
+        const SensorSnapshot& finalSensors = finalPose.GetSensorSnapshot();
+
+        (void)startTelemetry;
+        (void)finalTelemetry;
 
         char message[224] = {};
         const int length = std::snprintf(
@@ -530,10 +537,10 @@ namespace MazeMap::App::Internal::AuxMeasurementModeSupport
             deltaYM,
             closureErrorM,
             yawErrorDeg,
-            finalTelemetry.leftDistanceM - startTelemetry.leftDistanceM,
-            finalTelemetry.rightDistanceM - startTelemetry.rightDistanceM,
-            static_cast<long>(finalTelemetry.leftEncoderCount - startTelemetry.leftEncoderCount),
-            static_cast<long>(finalTelemetry.rightEncoderCount - startTelemetry.rightEncoderCount));
+            finalSensors.leftEncoderDistanceM - startSensors.leftEncoderDistanceM,
+            finalSensors.rightEncoderDistanceM - startSensors.rightEncoderDistanceM,
+            static_cast<long>(finalSensors.leftEncoderTotalCounts - startSensors.leftEncoderTotalCounts),
+            static_cast<long>(finalSensors.rightEncoderTotalCounts - startSensors.rightEncoderTotalCounts));
 
         if (length <= 0 || length >= static_cast<int>(sizeof(message)))
         {

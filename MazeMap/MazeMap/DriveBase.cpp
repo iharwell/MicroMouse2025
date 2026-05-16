@@ -1,738 +1,324 @@
 #include "pch.h"
 #include "DriveBase.h"
 
-#include "PlantModel.h"
-#include "Vehicle.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
-using CommandVector = MazeMap::App::Internal::CommandVector;
-namespace MazeMap {
-    CommandVector DriveBase::DeltaCommand(
-        float presentLinearSpeedMps,
-        float desiredLongitudinalAccelMps2,
-        MazeMap::FeedbackSource linearSources) const
+namespace
+{
+    using CommandVector = MazeMap::App::Internal::CommandVector;
+
+    constexpr float kPi = 3.14159265358979323846f;
+    constexpr float kTwoPi = 2.0f * kPi;
+
+    float NormalizeClockwiseYawError(float errorRad) noexcept
     {
-        const CommandVector baseCommand =
-            ResolveRawAccelerationCommand(
-                presentLinearSpeedMps,
-                0.0f,
-                desiredLongitudinalAccelMps2,
-                0.0f);
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        ResolveDefaultVelocityTargetCommandEnvelope(maxLongitudinalAccelMps2, maxYawAccelRadps2);
-
-        CommandVector command = baseCommand;
-        if (linearSources != MazeMap::FeedbackSource::None)
+        if (!std::isfinite(errorRad))
         {
-            command +=
-                ResolveLongitudinalCorrectionCommand(
-                    presentLinearSpeedMps,
-                    0.0f,
-                    maxLongitudinalAccelMps2,
-                    _linearFeedback.GetFeedback(
-                        2U,
-                        desiredLongitudinalAccelMps2,
-                        linearSources,
-                        GetProportionalDerivativeCluster()));
+            return 0.0f;
         }
 
-        const CommandVector feedbackCommand = command - baseCommand;
-        const CommandVector clampedCommand(
-            (std::clamp)(command.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(command.RightMotorPwm(), -1.0f, 1.0f));
-        CacheGeneratedCommandTelemetry(baseCommand, feedbackCommand);
-        _lastLinearCommandMps = presentLinearSpeedMps;
-        _lastAngularCommandRadps = 0.0f;
-        _lastLeftTargetVelocityMps = 0.0f;
-        _lastRightTargetVelocityMps = 0.0f;
-        _lastModeFlags = kModeClosedLoop;
-        _lastSaturationFlags =
-            ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-        _lastProposedCommand = clampedCommand;
-        return clampedCommand;
+        while (errorRad > kPi)
+        {
+            errorRad -= kTwoPi;
+        }
+        while (errorRad <= -kPi)
+        {
+            errorRad += kTwoPi;
+        }
+        return errorRad;
     }
 
-    CommandVector DriveBase::DeltaCommand(
-        float presentLinearSpeedMps,
-        float desiredLongitudinalAccelMps2,
-        float presentYawRateRadps,
-        float desiredYawAccelRadps2,
-        MazeMap::FeedbackSource linearSources,
-        MazeMap::FeedbackSource rotationalSources) const
+    bool IsMaximizeObjective(float value) noexcept
     {
-        const CommandVector baseCommand =
-            ResolveRawAccelerationCommand(
-                presentLinearSpeedMps,
-                presentYawRateRadps,
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        ResolveDefaultVelocityTargetCommandEnvelope(maxLongitudinalAccelMps2, maxYawAccelRadps2);
+        return std::isinf(value);
+    }
+}
 
-        CommandVector command = baseCommand;
-        if (linearSources != MazeMap::FeedbackSource::None)
-        {
-            command +=
-                ResolveLongitudinalCorrectionCommand(
-                    presentLinearSpeedMps,
-                    presentYawRateRadps,
-                    maxLongitudinalAccelMps2,
-                    _linearFeedback.GetFeedback(
-                        2U,
-                        desiredLongitudinalAccelMps2,
-                        linearSources,
-                        GetProportionalDerivativeCluster()));
-        }
-        if (rotationalSources != MazeMap::FeedbackSource::None)
-        {
-            command +=
-                ResolveYawCorrectionCommand(
-                    presentLinearSpeedMps,
-                    presentYawRateRadps,
-                    maxYawAccelRadps2,
-                    _rotationalFeedback.GetFeedback(
-                        2U,
-                        desiredYawAccelRadps2,
-                        rotationalSources,
-                        GetProportionalDerivativeCluster()));
-        }
-
-        const CommandVector feedbackCommand = command - baseCommand;
-        const CommandVector clampedCommand(
-            (std::clamp)(command.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(command.RightMotorPwm(), -1.0f, 1.0f));
-        CacheGeneratedCommandTelemetry(baseCommand, feedbackCommand);
-        _lastLinearCommandMps = presentLinearSpeedMps;
-        _lastAngularCommandRadps = presentYawRateRadps;
-        _lastLeftTargetVelocityMps = 0.0f;
-        _lastRightTargetVelocityMps = 0.0f;
-        _lastModeFlags = kModeClosedLoop;
-        _lastSaturationFlags =
-            ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-        _lastProposedCommand = clampedCommand;
-        return clampedCommand;
+namespace MazeMap
+{
+    DriveBase::DriveBase(
+        const MazeMap::PlantModel& plant,
+        const MazeMap::VehicleState& runtimeState,
+        const MazeMap::PDCluster& feedbackTuning) noexcept
+        : _plant(plant)
+        , _runtimeState(runtimeState)
+        , _feedbackTuning(feedbackTuning)
+    {
+        ClearCommandEvidence();
     }
 
-    MazeMap::App::Internal::CommandVector DriveBase::DeltaYawRateCommand(
-        float presentYawRateRadps,
-        float desiredYawAccelRadps2,
-        MazeMap::FeedbackSource rotationalSources) const
+    void DriveBase::ClearCommandEvidence() noexcept
     {
-        const CommandVector baseCommand =
-            ResolveRawAccelerationCommand(
-                0.0f,
-                presentYawRateRadps,
-                0.0f,
-                desiredYawAccelRadps2);
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        ResolveDefaultVelocityTargetCommandEnvelope(maxLongitudinalAccelMps2, maxYawAccelRadps2);
+        _lastTelemetry = DriveTelemetry{};
+        _lastTelemetry.commandKindFlags = DriveTelemetry::kCommandKindStaleEvidence;
+    }
 
-        CommandVector command = baseCommand;
-        if (rotationalSources != MazeMap::FeedbackSource::None)
+    CommandVector DriveBase::ProposeBodyTick(
+        float targetForwardMps,
+        float targetYawRateRadps,
+        float targetForwardAccelMps2,
+        float targetYawAccelRadps2,
+        float targetYawRad) noexcept
+    {
+        DriveTelemetry telemetry =
+            BuildBaseTelemetry(
+                DriveTelemetry::kCommandKindBodyProposal,
+                targetForwardMps,
+                targetYawRateRadps,
+                targetForwardAccelMps2,
+                targetYawAccelRadps2,
+                targetYawRad);
+
+        const VehicleState::StateVector stateSnapshot = CaptureStateSnapshot(_runtimeState);
+        const float observedForwardMps = stateSnapshot(VehicleState::kU);
+        const float observedYawRateRadps = stateSnapshot(VehicleState::kR);
+        const float observedYawRad = stateSnapshot(VehicleState::kPsi);
+
+        float forwardFeedbackAccelMps2 = 0.0f;
+        if (std::isfinite(targetForwardMps) && std::isfinite(observedForwardMps))
         {
-            command +=
-                ResolveYawCorrectionCommand(
-                    0.0f,
-                    presentYawRateRadps,
-                    maxYawAccelRadps2,
-                    _rotationalFeedback.GetFeedback(
-                        2U,
-                        desiredYawAccelRadps2,
-                        rotationalSources,
-                        GetProportionalDerivativeCluster()));
+            forwardFeedbackAccelMps2 =
+                ComputeForwardVelocityFeedbackAccelMps2(
+                    _feedbackTuning,
+                    targetForwardMps - observedForwardMps);
+        }
+        else
+        {
+            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackForwardVelocityInactive;
         }
 
-        const CommandVector feedbackCommand = command - baseCommand;
-        const CommandVector clampedCommand(
-            (std::clamp)(command.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(command.RightMotorPwm(), -1.0f, 1.0f));
-        CacheGeneratedCommandTelemetry(baseCommand, feedbackCommand);
-        _lastLinearCommandMps = 0.0f;
-        _lastAngularCommandRadps = presentYawRateRadps;
-        _lastLeftTargetVelocityMps = 0.0f;
-        _lastRightTargetVelocityMps = 0.0f;
-        _lastModeFlags = kModeClosedLoop;
-        _lastSaturationFlags =
-            ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-        _lastProposedCommand = clampedCommand;
-        return clampedCommand;
-    }
-
-    MazeMap::App::Internal::CommandVector DriveBase::PointCommand(
-        float desiredLinearSpeedMps,
-        MazeMap::FeedbackSource linearSources) const
-    {
-        float presentLinearSpeedMps = 0.0f;
-        float presentYawRateRadps = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
-
-        const CommandVector baseCommand =
-            ResolveRawVelocityTargetCommand(
-                desiredLinearSpeedMps,
-                presentYawRateRadps);
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        ResolveDefaultVelocityTargetCommandEnvelope(maxLongitudinalAccelMps2, maxYawAccelRadps2);
-
-        float adjustedLinearSpeedMps = desiredLinearSpeedMps;
-        if (linearSources != MazeMap::FeedbackSource::None)
+        float yawFeedbackAccelRadps2 = 0.0f;
+        if (std::isfinite(targetYawRateRadps) && std::isfinite(observedYawRateRadps))
         {
-            adjustedLinearSpeedMps +=
-                ClampMagnitude(
-                    _linearFeedback.GetFeedback(
-                        1U,
-                        desiredLinearSpeedMps,
-                        linearSources,
-                        GetProportionalDerivativeCluster()),
-                    ResolveCommandResponseTimeS() * maxLongitudinalAccelMps2);
+            yawFeedbackAccelRadps2 +=
+                ComputeYawRateFeedbackAccelRadps2(
+                    _feedbackTuning,
+                    targetYawRateRadps - observedYawRateRadps);
+        }
+        else
+        {
+            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackYawRateInactive;
         }
 
-        CommandVector command =
-            (adjustedLinearSpeedMps != desiredLinearSpeedMps) ?
-            ResolveRawVelocityTargetCommand(adjustedLinearSpeedMps, presentYawRateRadps) :
-            baseCommand;
-        float leftWheelLinearTargetMps = 0.0f;
-        float rightWheelLinearTargetMps = 0.0f;
-        ResolveWheelTargets(
-            adjustedLinearSpeedMps,
-            presentYawRateRadps,
-            leftWheelLinearTargetMps,
-            rightWheelLinearTargetMps);
-
-        const CommandVector feedbackCommand = command - baseCommand;
-        const CommandVector clampedCommand(
-            (std::clamp)(command.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(command.RightMotorPwm(), -1.0f, 1.0f));
-        CacheGeneratedCommandTelemetry(baseCommand, feedbackCommand);
-        _lastLinearCommandMps = adjustedLinearSpeedMps;
-        _lastAngularCommandRadps = presentYawRateRadps;
-        _lastLeftTargetVelocityMps = leftWheelLinearTargetMps;
-        _lastRightTargetVelocityMps = rightWheelLinearTargetMps;
-        _lastModeFlags = kModeClosedLoop;
-        _lastSaturationFlags =
-            ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-        _lastProposedCommand = clampedCommand;
-        return clampedCommand;
-    }
-
-    MazeMap::App::Internal::CommandVector DriveBase::PointCommand(
-        float desiredLinearSpeedMps,
-        float desiredYawRateRadps,
-        MazeMap::FeedbackSource linearSources,
-        MazeMap::FeedbackSource rotationalSources) const
-    {
-        float presentLinearSpeedMps = 0.0f;
-        float presentYawRateRadps = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
-
-        const CommandVector baseCommand =
-            ResolveRawVelocityTargetCommand(
-                desiredLinearSpeedMps,
-                desiredYawRateRadps);
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        ResolveDefaultVelocityTargetCommandEnvelope(maxLongitudinalAccelMps2, maxYawAccelRadps2);
-        const float responseTimeS = ResolveCommandResponseTimeS();
-
-        float adjustedLinearSpeedMps = desiredLinearSpeedMps;
-        float adjustedYawRateRadps = desiredYawRateRadps;
-        if (linearSources != MazeMap::FeedbackSource::None)
+        if (std::isfinite(targetYawRad) && std::isfinite(observedYawRad))
         {
-            adjustedLinearSpeedMps +=
-                ClampMagnitude(
-                    _linearFeedback.GetFeedback(
-                        1U,
-                        desiredLinearSpeedMps,
-                        linearSources,
-                        GetProportionalDerivativeCluster()),
-                    responseTimeS * maxLongitudinalAccelMps2);
+            yawFeedbackAccelRadps2 +=
+                ComputeHeadingFeedbackAccelRadps2(
+                    _feedbackTuning,
+                    NormalizeClockwiseYawError(targetYawRad - observedYawRad));
         }
-        if (rotationalSources != MazeMap::FeedbackSource::None)
+        else
         {
-            adjustedYawRateRadps +=
-                ClampMagnitude(
-                    responseTimeS *
-                    _rotationalFeedback.GetFeedback(
-                        1U,
-                        desiredYawRateRadps,
-                        rotationalSources,
-                        GetProportionalDerivativeCluster()),
-                    responseTimeS * maxYawAccelRadps2);
+            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackHeadingInactive;
         }
 
-        CommandVector command =
-            ((adjustedLinearSpeedMps != desiredLinearSpeedMps) ||
-                (adjustedYawRateRadps != desiredYawRateRadps)) ?
-            ResolveRawVelocityTargetCommand(adjustedLinearSpeedMps, adjustedYawRateRadps) :
-            baseCommand;
-        float leftWheelLinearTargetMps = 0.0f;
-        float rightWheelLinearTargetMps = 0.0f;
-        ResolveWheelTargets(
-            adjustedLinearSpeedMps,
-            adjustedYawRateRadps,
-            leftWheelLinearTargetMps,
-            rightWheelLinearTargetMps);
-
-        const CommandVector feedbackCommand = command - baseCommand;
-        const CommandVector clampedCommand(
-            (std::clamp)(command.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(command.RightMotorPwm(), -1.0f, 1.0f));
-        CacheGeneratedCommandTelemetry(baseCommand, feedbackCommand);
-        _lastLinearCommandMps = adjustedLinearSpeedMps;
-        _lastAngularCommandRadps = adjustedYawRateRadps;
-        _lastLeftTargetVelocityMps = leftWheelLinearTargetMps;
-        _lastRightTargetVelocityMps = rightWheelLinearTargetMps;
-        _lastModeFlags = kModeClosedLoop;
-        _lastSaturationFlags =
-            ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-        _lastProposedCommand = clampedCommand;
-        return clampedCommand;
-    }
-
-    MazeMap::App::Internal::CommandVector DriveBase::PointCommandWithHeadingTarget(
-        float desiredLinearSpeedMps,
-        float desiredYawRateRadps,
-        float targetYawRad,
-        MazeMap::FeedbackSource linearSources,
-        MazeMap::FeedbackSource rotationalSources,
-        MazeMap::FeedbackSource headingSources) const
-    {
-        float presentLinearSpeedMps = 0.0f;
-        float presentYawRateRadps = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
-
-        const CommandVector baseCommand =
-            ResolveRawVelocityTargetCommand(
-                desiredLinearSpeedMps,
-                desiredYawRateRadps);
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        ResolveDefaultVelocityTargetCommandEnvelope(maxLongitudinalAccelMps2, maxYawAccelRadps2);
-        const float responseTimeS = ResolveCommandResponseTimeS();
-
-        float adjustedLinearSpeedMps = desiredLinearSpeedMps;
-        float adjustedYawRateRadps = desiredYawRateRadps;
-        if (linearSources != MazeMap::FeedbackSource::None)
+        if (IsMaximizeObjective(targetForwardAccelMps2))
         {
-            adjustedLinearSpeedMps +=
-                ClampMagnitude(
-                    _linearFeedback.GetFeedback(
-                        1U,
-                        desiredLinearSpeedMps,
-                        linearSources,
-                        GetProportionalDerivativeCluster()),
-                    responseTimeS * maxLongitudinalAccelMps2);
+            telemetry.composedForwardAccelMps2 = targetForwardAccelMps2;
+            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackForwardSuppressedForMaximize;
         }
-        if (headingSources != MazeMap::FeedbackSource::None)
+        else
         {
-            adjustedYawRateRadps +=
-                ClampMagnitude(
-                    _rotationalFeedback.GetFeedback(
-                        0U,
-                        targetYawRad,
-                        headingSources,
-                        GetProportionalDerivativeCluster()),
-                    responseTimeS * maxYawAccelRadps2);
-        }
-        else if (rotationalSources != MazeMap::FeedbackSource::None)
-        {
-            adjustedYawRateRadps +=
-                ClampMagnitude(
-                    responseTimeS *
-                    _rotationalFeedback.GetFeedback(
-                        1U,
-                        desiredYawRateRadps,
-                        rotationalSources,
-                        GetProportionalDerivativeCluster()),
-                    responseTimeS * maxYawAccelRadps2);
+            telemetry.composedForwardAccelMps2 =
+                ComposeAccelerationObjective(targetForwardAccelMps2, forwardFeedbackAccelMps2);
         }
 
-        CommandVector command =
-            ((adjustedLinearSpeedMps != desiredLinearSpeedMps) ||
-                (adjustedYawRateRadps != desiredYawRateRadps)) ?
-            ResolveRawVelocityTargetCommand(adjustedLinearSpeedMps, adjustedYawRateRadps) :
-            baseCommand;
-        float leftWheelLinearTargetMps = 0.0f;
-        float rightWheelLinearTargetMps = 0.0f;
-        ResolveWheelTargets(
-            adjustedLinearSpeedMps,
-            adjustedYawRateRadps,
-            leftWheelLinearTargetMps,
-            rightWheelLinearTargetMps);
-
-        const CommandVector feedbackCommand = command - baseCommand;
-        const CommandVector clampedCommand(
-            (std::clamp)(command.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(command.RightMotorPwm(), -1.0f, 1.0f));
-        CacheGeneratedCommandTelemetry(baseCommand, feedbackCommand);
-        _lastLinearCommandMps = adjustedLinearSpeedMps;
-        _lastAngularCommandRadps = adjustedYawRateRadps;
-        _lastLeftTargetVelocityMps = leftWheelLinearTargetMps;
-        _lastRightTargetVelocityMps = rightWheelLinearTargetMps;
-        _lastModeFlags = kModeClosedLoop;
-        _lastSaturationFlags =
-            ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-        _lastProposedCommand = clampedCommand;
-        return clampedCommand;
-    }
-
-    MazeMap::App::Internal::CommandVector DriveBase::PointControlVector(
-        float desiredLinearSpeedMps,
-        float desiredYawRateRadps,
-        MazeMap::FeedbackSource linearSources,
-        MazeMap::FeedbackSource rotationalSources) const
-    {
-        return PointCommand(
-            desiredLinearSpeedMps,
-            desiredYawRateRadps,
-            linearSources,
-            rotationalSources);
-    }
-
-    MazeMap::App::Internal::CommandVector DriveBase::PointControlVectorWithHeadingTarget(
-        float desiredLinearSpeedMps,
-        float desiredYawRateRadps,
-        float targetYawRad,
-        MazeMap::FeedbackSource linearSources,
-        MazeMap::FeedbackSource rotationalSources,
-        MazeMap::FeedbackSource headingSources) const
-    {
-        return PointCommandWithHeadingTarget(
-            desiredLinearSpeedMps,
-            desiredYawRateRadps,
-            targetYawRad,
-            linearSources,
-            rotationalSources,
-            headingSources);
-    }
-
-    MazeMap::App::Internal::CommandVector DriveBase::PointCommand(
-        const MazeMap::ManeuverPoint& point,
-        MazeMap::FeedbackSource linearSources,
-        MazeMap::FeedbackSource rotationalSources) const
-    {
-        if (!point.IsFinite())
+        if (IsMaximizeObjective(targetYawAccelRadps2))
         {
-            return {};
+            telemetry.composedYawAccelRadps2 = targetYawAccelRadps2;
+            telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackYawSuppressedForMaximize;
+        }
+        else
+        {
+            telemetry.composedYawAccelRadps2 =
+                ComposeAccelerationObjective(targetYawAccelRadps2, yawFeedbackAccelRadps2);
         }
 
-        return PointCommand(point.Velocity, point.Omega, linearSources, rotationalSources);
-    }
+        const PlantModelBodyActionSolveResult solve =
+            _plant.SolveBodyActionInverse(
+                stateSnapshot,
+                targetForwardMps,
+                targetYawRateRadps,
+                targetForwardAccelMps2,
+                targetYawAccelRadps2,
+                telemetry.composedForwardAccelMps2,
+                telemetry.composedYawAccelRadps2);
 
-    MazeMap::App::Internal::CommandVector DriveBase::PointControlVector(
-        const MazeMap::ManeuverPoint& point,
-        MazeMap::FeedbackSource linearSources,
-        MazeMap::FeedbackSource rotationalSources) const
-    {
-        return PointCommand(point, linearSources, rotationalSources);
-    }
+        telemetry.plantEvaluationId = solve.plantEvaluationId;
+        telemetry.leftPlantCommand = solve.command.LeftCommand();
+        telemetry.rightPlantCommand = solve.command.RightCommand();
+        telemetry.telemetryValidFlags |= DriveTelemetry::kTelemetryPlantEvaluationValid;
+        telemetry.solverFailureFlags |= MapPlantFailureFlagsToDriveTelemetry(solve.failureFlags);
 
-    MazeMap::App::Internal::CommandVector DriveBase::PointYawRateCommand(
-        float desiredYawRateRadps,
-        MazeMap::FeedbackSource rotationalSources) const
-    {
-        float presentLinearSpeedMps = 0.0f;
-        float presentYawRateRadps = 0.0f;
-        GetVelocityCommandOperatingPoint(presentLinearSpeedMps, presentYawRateRadps);
-
-        const CommandVector baseCommand =
-            ResolveRawVelocityTargetCommand(
-                presentLinearSpeedMps,
-                desiredYawRateRadps);
-        float maxLongitudinalAccelMps2 = 0.0f;
-        float maxYawAccelRadps2 = 0.0f;
-        ResolveDefaultVelocityTargetCommandEnvelope(maxLongitudinalAccelMps2, maxYawAccelRadps2);
-        const float responseTimeS = ResolveCommandResponseTimeS();
-
-        float adjustedYawRateRadps = desiredYawRateRadps;
-        if (rotationalSources != MazeMap::FeedbackSource::None)
+        CommandVector finalCommand(
+            ClampCommandComponent(solve.command.LeftCommand()),
+            ClampCommandComponent(solve.command.RightCommand()));
+        if (!solve.command.IsFinite())
         {
-            adjustedYawRateRadps +=
-                ClampMagnitude(
-                    responseTimeS *
-                    _rotationalFeedback.GetFeedback(
-                        1U,
-                        desiredYawRateRadps,
-                        rotationalSources,
-                        GetProportionalDerivativeCluster()),
-                    responseTimeS * maxYawAccelRadps2);
+            finalCommand = CommandVector(0.0f, 0.0f);
+            telemetry.commandKindFlags |= DriveTelemetry::kCommandKindSolverFailureEvidence;
+            telemetry.solverFailureFlags |= DriveTelemetry::kSolverFailurePlantNonFinite;
+            telemetry.telemetryValidFlags &= ~DriveTelemetry::kTelemetryPlantCommandValid;
         }
 
-        CommandVector command =
-            (adjustedYawRateRadps != desiredYawRateRadps) ?
-            ResolveRawVelocityTargetCommand(presentLinearSpeedMps, adjustedYawRateRadps) :
-            baseCommand;
-        float leftWheelLinearTargetMps = 0.0f;
-        float rightWheelLinearTargetMps = 0.0f;
-        ResolveWheelTargets(
-            presentLinearSpeedMps,
-            adjustedYawRateRadps,
-            leftWheelLinearTargetMps,
-            rightWheelLinearTargetMps);
-
-        const CommandVector feedbackCommand = command - baseCommand;
-        const CommandVector clampedCommand(
-            (std::clamp)(command.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(command.RightMotorPwm(), -1.0f, 1.0f));
-        CacheGeneratedCommandTelemetry(baseCommand, feedbackCommand);
-        _lastLinearCommandMps = presentLinearSpeedMps;
-        _lastAngularCommandRadps = adjustedYawRateRadps;
-        _lastLeftTargetVelocityMps = leftWheelLinearTargetMps;
-        _lastRightTargetVelocityMps = rightWheelLinearTargetMps;
-        _lastModeFlags = kModeClosedLoop;
-        _lastSaturationFlags =
-            ((std::fabs(clampedCommand.LeftMotorPwm()) >= 0.999f) ? 0x1u : 0u) |
-            ((std::fabs(clampedCommand.RightMotorPwm()) >= 0.999f) ? 0x2u : 0u);
-        _lastProposedCommand = clampedCommand;
-        return clampedCommand;
-    }
-
-    MazeMap::App::Internal::CommandVector DriveBase::GetFeedbackCommand(
-        const std::uint8_t linearDerivativeOrder,
-        const float linearTarget,
-        const MazeMap::FeedbackSource linearSources,
-        const std::uint8_t rotationalDerivativeOrder,
-        const float rotationalTarget,
-        const MazeMap::FeedbackSource rotationalSources) const
-    {
-        const float linearFeedback =
-            _linearFeedback.GetFeedback(
-                linearDerivativeOrder,
-                linearTarget,
-                linearSources,
-                GetProportionalDerivativeCluster());
-        const float rotationalFeedback =
-            _rotationalFeedback.GetFeedback(
-                rotationalDerivativeOrder,
-                rotationalTarget,
-                rotationalSources,
-                GetProportionalDerivativeCluster());
-        return CommandVector::FromAverageAndDifferential(linearFeedback, rotationalFeedback);
-    }
-
-    void DriveBase::GetVelocityCommandOperatingPoint(
-        float& presentLinearSpeedMps,
-        float& presentYawRateRadps) const
-    {
-        RefreshSensorSnapshotDerivedState();
-        const float measuredLeftVelocityMps = _leftEncoderVelocityMps;
-        const float measuredRightVelocityMps = _rightEncoderVelocityMps;
-        float measuredLinearSpeedMps = 0.0f;
-        float measuredAngularSpeedRadps = 0.0f;
-        measuredLinearSpeedMps =
-            MazeMap::Vehicle::BodyForwardVelocityFromWheelLinear(measuredLeftVelocityMps, measuredRightVelocityMps);
-        measuredAngularSpeedRadps =
-            MazeMap::Vehicle::BodyYawRateFromWheelLinear(measuredLeftVelocityMps, measuredRightVelocityMps);
-        if (_lastImuYawRateValid)
+        if (std::isinf(targetYawRad))
         {
-            measuredAngularSpeedRadps = _lastImuYawRateRadps;
-        }
-        presentLinearSpeedMps =
-            std::isfinite(_runtimeState.GetVelocity()) ?
-            _runtimeState.GetVelocity() :
-            measuredLinearSpeedMps;
-        presentYawRateRadps =
-            std::isfinite(_runtimeState.GetRotationalVelocity()) ?
-            _runtimeState.GetRotationalVelocity() :
-            measuredAngularSpeedRadps;
-        if (!std::isfinite(presentLinearSpeedMps))
-        {
-            presentLinearSpeedMps = 0.0f;
-        }
-        if (!std::isfinite(presentYawRateRadps))
-        {
-            presentYawRateRadps = 0.0f;
-        }
-    }
-
-    float DriveBase::ResolveCommandResponseTimeS() noexcept
-    {
-        return
-            (std::isfinite(MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS) &&
-                (MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS > 0.0f)) ?
-            MazeMap::PlantModel::kDefaultVelocityTargetResponseTimeS :
-            1.0f;
-    }
-
-    float DriveBase::ResolvePositiveOrZero(float value) noexcept
-    {
-        return (std::isfinite(value) && (value > 0.0f)) ? value : 0.0f;
-    }
-
-    float DriveBase::ClampMagnitude(float value, float limit) noexcept
-    {
-        return
-            (ResolvePositiveOrZero(limit) > 0.0f) ?
-            (std::clamp)(value, -limit, limit) :
-            0.0f;
-    }
-
-    void DriveBase::RefreshSensorSnapshotDerivedState() const noexcept
-    {
-        const SensorSnapshot& snapshot = _runtimeState.GetSensorSnapshot();
-        _lastGyroRawRadps = snapshot.gyroRawRadps;
-        _lastImuYawRateRadps = snapshot.gyroRadps;
-        _lastImuYawRateValid = std::isfinite(snapshot.gyroRadps);
-        _lastImuAccelBodyXMps2 = snapshot.accelBodyXMps2;
-        _lastImuAccelBodyYMps2 = snapshot.accelBodyYMps2;
-        _lastImuAccelValid =
-            snapshot.accelBiasValid &&
-            std::isfinite(snapshot.accelBodyXMps2) &&
-            std::isfinite(snapshot.accelBodyYMps2);
-        if (!_encoderReferenceInitialized)
-        {
-            _leftEncoderReferenceCounts = snapshot.leftEncoderTotalCounts;
-            _rightEncoderReferenceCounts = snapshot.rightEncoderTotalCounts;
-            _encoderReferenceInitialized = true;
+            finalCommand = CommandVector(0.0f, 0.0f);
+            telemetry.commandKindFlags |= DriveTelemetry::kCommandKindSolverFailureEvidence;
         }
 
-        _leftEncoderCountTotal = snapshot.leftEncoderTotalCounts - _leftEncoderReferenceCounts;
-        _rightEncoderCountTotal = snapshot.rightEncoderTotalCounts - _rightEncoderReferenceCounts;
-        _leftEncoderDistanceMeters =
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_leftEncoderCountTotal);
-        _rightEncoderDistanceMeters =
-            MazeMap::Vehicle::DriveEncoderDistanceFromCounts(_rightEncoderCountTotal);
+        telemetry.leftDriveCommand = finalCommand.LeftCommand();
+        telemetry.rightDriveCommand = finalCommand.RightCommand();
+        telemetry.telemetryValidFlags |= DriveTelemetry::kTelemetryCommandEvidenceValid;
+        _lastTelemetry = telemetry;
+        return finalCommand;
+    }
 
-        if (!snapshot.encoderObservationValid)
+    const DriveTelemetry& DriveBase::LastTelemetry() const noexcept
+    {
+        return _lastTelemetry;
+    }
+
+    VehicleState::StateVector DriveBase::CaptureStateSnapshot(
+        const MazeMap::VehicleState& runtimeState) noexcept
+    {
+        VehicleState::StateVector state = VehicleState::StateVector::Zero();
+        state(VehicleState::kPx) = runtimeState.GetPositionX();
+        state(VehicleState::kPy) = runtimeState.GetPositionY();
+        state(VehicleState::kPsi) = runtimeState.GetOrientation();
+        state(VehicleState::kU) = runtimeState.GetVelocity();
+        state(VehicleState::kV) = runtimeState.GetLateralVelocity();
+        state(VehicleState::kR) = runtimeState.GetRotationalVelocity();
+        state(VehicleState::kOmegaL) = runtimeState.GetWheelSpeedLeft();
+        state(VehicleState::kOmegaR) = runtimeState.GetWheelSpeedRight();
+        state(VehicleState::kBgz) = runtimeState.GetGyroBiasZ();
+        VehicleState::NormalizeStateVector(state);
+        return state;
+    }
+
+    float DriveBase::ComposeAccelerationObjective(float requestedAccel, float feedbackAccel) noexcept
+    {
+        const bool hasRequestedAccel = std::isfinite(requestedAccel);
+        const bool hasFeedbackAccel = std::isfinite(feedbackAccel) && (feedbackAccel != 0.0f);
+        if (hasRequestedAccel)
         {
-            // Invalid current encoder data clears instantaneous encoder state while preserving the
-            // sensor-suite-owned accumulated totals copied above.
-            _encoderObservationValid = false;
-            _lastEncoderObservation = {};
-            _leftEncoderVelocityMps = 0.0f;
-            _rightEncoderVelocityMps = 0.0f;
-            return;
+            return requestedAccel + (hasFeedbackAccel ? feedbackAccel : 0.0f);
         }
-
-        const MazeMap::EncoderObs& observation = snapshot.encoderObservation;
-        _lastEncoderObservation = observation;
-        _encoderObservationValid = true;
-        _leftEncoderVelocityMps =
-            std::isfinite(observation.leftVelocityMps) ? observation.leftVelocityMps : 0.0f;
-        _rightEncoderVelocityMps =
-            std::isfinite(observation.rightVelocityMps) ? observation.rightVelocityMps : 0.0f;
+        return hasFeedbackAccel ? feedbackAccel : (std::numeric_limits<float>::quiet_NaN)();
     }
 
-    void DriveBase::ResolveWheelTargets(
-        float desiredLinearSpeedMps,
-        float desiredYawRateRadps,
-        float& leftWheelLinearTargetMps,
-        float& rightWheelLinearTargetMps) const
+    float DriveBase::ClampCommandComponent(float command) noexcept
     {
-        float unusedLeftTargetAccelMps2 = 0.0f;
-        float unusedRightTargetAccelMps2 = 0.0f;
-        float unusedLeftTargetOmegaRadps = 0.0f;
-        float unusedRightTargetOmegaRadps = 0.0f;
-        _plantModel.resolveWheelMotionTargets(
-            desiredLinearSpeedMps,
-            desiredYawRateRadps,
-            0.0f,
-            0.0f,
-            leftWheelLinearTargetMps,
-            rightWheelLinearTargetMps,
-            unusedLeftTargetAccelMps2,
-            unusedRightTargetAccelMps2,
-            unusedLeftTargetOmegaRadps,
-            unusedRightTargetOmegaRadps);
+        return std::isfinite(command) ? (std::clamp)(command, -1.0f, 1.0f) : 0.0f;
     }
 
-    MazeMap::App::Internal::CommandVector DriveBase::ResolveRawAccelerationCommand(
-        float presentLinearSpeedMps,
-        float presentYawRateRadps,
-        float desiredLongitudinalAccelMps2,
-        float desiredYawAccelRadps2) const
+    float DriveBase::ComputeForwardVelocityFeedbackAccelMps2(
+        const MazeMap::PDCluster& feedbackTuning,
+        float forwardVelocityErrorMps) noexcept
     {
-        const bool isSteadyHoldRequest =
-            (std::fabs(desiredLongitudinalAccelMps2) <= 1.0e-5f) &&
-            (std::fabs(desiredYawAccelRadps2) <= 1.0e-5f);
-        const CommandVector rawCommand =
-            isSteadyHoldRequest ?
-            _plantModel.solveSteadyStateFeedforward(
-                presentLinearSpeedMps,
-                presentYawRateRadps) :
-            _plantModel.solveAccelerationFeedforward(
-                desiredLongitudinalAccelMps2,
-                desiredYawAccelRadps2);
-        // Precondition: PlantModel feedforward returns finite PWM. DriveBase only enforces the PWM envelope.
-        return CommandVector(
-            (std::clamp)(rawCommand.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(rawCommand.RightMotorPwm(), -1.0f, 1.0f));
+        // PDCluster is the canonical tuning owner. In this DriveBase path the state-velocity
+        // proportional gain is interpreted as (m/s^2)/(m/s); derivative history is not sampled.
+        return feedbackTuning.VelocityStatePD.Compute(forwardVelocityErrorMps, 0.0f);
     }
 
-    MazeMap::App::Internal::CommandVector DriveBase::ResolveRawVelocityTargetCommand(
-        float desiredLinearSpeedMps,
-        float desiredYawRateRadps) const
+    float DriveBase::ComputeYawRateFeedbackAccelRadps2(
+        const MazeMap::PDCluster& feedbackTuning,
+        float yawRateErrorRadps) noexcept
     {
-        const CommandVector rawCommand =
-            _plantModel.solveSteadyStateFeedforward(
-                desiredLinearSpeedMps,
-                desiredYawRateRadps);
-        // Precondition: PlantModel feedforward returns finite PWM. DriveBase only enforces the PWM envelope.
-        return CommandVector(
-            (std::clamp)(rawCommand.LeftMotorPwm(), -1.0f, 1.0f),
-            (std::clamp)(rawCommand.RightMotorPwm(), -1.0f, 1.0f));
+        // The yaw-rate proportional gain is interpreted as (rad/s^2)/(rad/s) for same-tick
+        // acceleration-domain correction before PlantModel inverse dynamics.
+        return feedbackTuning.YawRateStatePD.Compute(yawRateErrorRadps, 0.0f);
     }
 
-    MazeMap::App::Internal::CommandVector DriveBase::ResolveLongitudinalCorrectionCommand(
-        const float presentLinearSpeedMps,
-        const float presentYawRateRadps,
-        const float maxLongitudinalAccelMps2,
-        float desiredLongitudinalAccelCorrectionMps2) const
+    float DriveBase::ComputeHeadingFeedbackAccelRadps2(
+        const MazeMap::PDCluster& feedbackTuning,
+        float headingErrorRad) noexcept
     {
-        const float resolvedCorrectionMps2 =
-            ClampMagnitude(
-                desiredLongitudinalAccelCorrectionMps2,
-                maxLongitudinalAccelMps2);
-        return
-            ResolveRawAccelerationCommand(
-                presentLinearSpeedMps,
-                presentYawRateRadps,
-                resolvedCorrectionMps2,
-                0.0f) -
-            ResolveRawAccelerationCommand(
-                presentLinearSpeedMps,
-                presentYawRateRadps,
-                0.0f,
-                0.0f);
+        // The heading proportional gain is interpreted as (rad/s^2)/rad. No sampled derivative
+        // or generic feedback-axis state participates in DriveBase feedback.
+        return feedbackTuning.HeadingStatePD.Compute(headingErrorRad, 0.0f);
     }
 
-    MazeMap::App::Internal::CommandVector DriveBase::ResolveYawCorrectionCommand(
-        const float presentLinearSpeedMps,
-        const float presentYawRateRadps,
-        const float maxYawAccelRadps2,
-        float desiredYawAccelCorrectionRadps2) const
+    std::uint16_t DriveBase::MapPlantFailureFlagsToDriveTelemetry(
+        std::uint16_t plantFailureFlags) noexcept
     {
-        const float resolvedCorrectionRadps2 =
-            ClampMagnitude(
-                desiredYawAccelCorrectionRadps2,
-                maxYawAccelRadps2);
-        return
-            ResolveRawAccelerationCommand(
-                presentLinearSpeedMps,
-                presentYawRateRadps,
-                0.0f,
-                resolvedCorrectionRadps2) -
-            ResolveRawAccelerationCommand(
-                presentLinearSpeedMps,
-                presentYawRateRadps,
-                0.0f,
-                0.0f);
+        std::uint16_t telemetryFlags = 0U;
+        if ((plantFailureFlags & PlantModelBodyActionSolveResult::kFailureNonFiniteCommand) != 0U)
+        {
+            telemetryFlags |= DriveTelemetry::kSolverFailurePlantNonFinite;
+        }
+        if ((plantFailureFlags & PlantModelBodyActionSolveResult::kFailureUnsupportedScalarIntent) != 0U)
+        {
+            telemetryFlags |= DriveTelemetry::kSolverFailureUnsupportedScalarIntent;
+        }
+        return telemetryFlags;
     }
 
-    void DriveBase::CacheGeneratedCommandTelemetry(
-        const MazeMap::App::Internal::CommandVector& feedforwardCommand,
-        const MazeMap::App::Internal::CommandVector& feedbackCommand) const noexcept
+    std::uint16_t DriveBase::DecodeScalarIntentFlags(
+        float targetForwardMps,
+        float targetYawRateRadps,
+        float targetForwardAccelMps2,
+        float targetYawAccelRadps2,
+        float targetYawRad) noexcept
     {
-        _lastFeedforwardCommand = feedforwardCommand;
-        _lastFeedbackCommand = feedbackCommand;
+        std::uint16_t flags = 0U;
+        flags |=
+            std::isnan(targetForwardMps) ? DriveTelemetry::kScalarForwardVelocityInactive :
+            (std::isfinite(targetForwardMps) ? DriveTelemetry::kScalarForwardVelocityFinite :
+                DriveTelemetry::kScalarForwardVelocityMaximize);
+        flags |=
+            std::isnan(targetYawRateRadps) ? DriveTelemetry::kScalarYawRateInactive :
+            (std::isfinite(targetYawRateRadps) ? DriveTelemetry::kScalarYawRateFinite :
+                DriveTelemetry::kScalarYawRateMaximize);
+        flags |=
+            std::isnan(targetForwardAccelMps2) ? DriveTelemetry::kScalarForwardAccelInactive :
+            (std::isfinite(targetForwardAccelMps2) ? DriveTelemetry::kScalarForwardAccelFinite :
+                DriveTelemetry::kScalarForwardAccelMaximize);
+        flags |=
+            std::isnan(targetYawAccelRadps2) ? DriveTelemetry::kScalarYawAccelInactive :
+            (std::isfinite(targetYawAccelRadps2) ? DriveTelemetry::kScalarYawAccelFinite :
+                DriveTelemetry::kScalarYawAccelMaximize);
+        flags |=
+            std::isnan(targetYawRad) ? DriveTelemetry::kScalarYawInactive :
+            (std::isfinite(targetYawRad) ? DriveTelemetry::kScalarYawFinite :
+                DriveTelemetry::kScalarYawMaximizeUnsupported);
+        return flags;
     }
 
+    std::uint16_t DriveBase::DecodeUnsupportedScalarIntentFlags(float targetYawRad) noexcept
+    {
+        return std::isinf(targetYawRad) ? DriveTelemetry::kSolverFailureUnsupportedScalarIntent : 0U;
+    }
+
+    DriveTelemetry DriveBase::BuildBaseTelemetry(
+        std::uint16_t commandKindFlags,
+        float targetForwardMps,
+        float targetYawRateRadps,
+        float targetForwardAccelMps2,
+        float targetYawAccelRadps2,
+        float targetYawRad) noexcept
+    {
+        DriveTelemetry telemetry{};
+        telemetry.proposalSequenceId = _nextProposalSequenceId++;
+        telemetry.requestedForwardMps = targetForwardMps;
+        telemetry.requestedYawRateRadps = targetYawRateRadps;
+        telemetry.requestedForwardAccelMps2 = targetForwardAccelMps2;
+        telemetry.requestedYawAccelRadps2 = targetYawAccelRadps2;
+        telemetry.requestedYawRad = targetYawRad;
+        telemetry.commandKindFlags = commandKindFlags;
+        telemetry.scalarIntentFlags =
+            DecodeScalarIntentFlags(
+                targetForwardMps,
+                targetYawRateRadps,
+                targetForwardAccelMps2,
+                targetYawAccelRadps2,
+                targetYawRad);
+        telemetry.telemetryValidFlags =
+            DriveTelemetry::kTelemetryProposalSequenceValid |
+            DriveTelemetry::kTelemetryPlantCommandValid;
+        telemetry.solverFailureFlags = DecodeUnsupportedScalarIntentFlags(targetYawRad);
+        return telemetry;
+    }
 }
