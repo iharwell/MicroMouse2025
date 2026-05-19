@@ -22,7 +22,7 @@ namespace MazeMap
 {
     namespace
     {
-        constexpr float kReplayDtSeconds = 0.004f;
+        constexpr float kReplayDtSeconds = 0.001f;
         constexpr float kForwardToleranceM = 0.006f;
         constexpr float kYawToleranceRad = 0.012f;
         constexpr float kVelocityToleranceMps = 0.020f;

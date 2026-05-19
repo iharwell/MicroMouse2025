@@ -28,6 +28,7 @@
 #include <iostream>
 #include <limits>
 #include <new>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -57,14 +58,31 @@ namespace
     constexpr double kYawRateStepRmsScoreWeight = 60.0;
     constexpr double kForwardAccelStepRmsScoreWeight = 40.0;
     constexpr double kYawAccelStepRmsScoreWeight = 40.0;
-    constexpr double kAcceptanceBlockerPenalty = 1000000.0;
+    constexpr double kAcceptanceCompletionScoreWeight = 250000.0;
+    constexpr double kAcceptanceCommandEvidenceScoreWeight = 250000.0;
+    constexpr double kInPlaceShiftScoreWeight = 150000.0;
+    constexpr double kInPlaceHeadingScoreWeight = 150000.0;
+    constexpr double kInPlaceTimeScoreWeight = 75000.0;
+    constexpr double kSmoothVelocityVariationScoreWeight = 100000.0;
+    constexpr double kSmoothYawAccelerationVariationScoreWeight = 200000.0;
+    constexpr double kSmoothYawRateVariationScoreWeight = 150000.0;
+    constexpr double kSmoothFinalPositionScoreWeight = 250000.0;
+    constexpr double kSmoothFinalHeadingScoreWeight = 200000.0;
     constexpr int kStartStraightMaxTicks = 6000;
     constexpr int kDriveManeuverMaxTicks = 20000;
     constexpr float kStartStraightDistanceM = 0.30f;
     constexpr float kStartStraightCruiseMps = 0.30f;
     constexpr float kSmoothManeuverEntrySpeedMps = 0.50f;
+    constexpr float kInPlaceManeuverPositionToleranceM = 0.020f;
     constexpr float kManeuverHeadingToleranceRad = 3.0f * DEG_TO_RAD_F;
-    constexpr float kManeuverPositionToleranceM = 0.030f;
+    constexpr float kSmoothManeuverPositionToleranceM = 0.030f;
+    constexpr float kManeuverTimeToleranceFraction = 0.40f;
+    constexpr float kSmoothManeuverVelocityVariationLimit = 0.05f;
+    constexpr float kSmoothManeuverYawAccelerationVariationLimit = 0.20f;
+    constexpr float kSmoothManeuverYawRateVariationLimit = 0.08f;
+    constexpr float kManeuverOmegaMagnitudeEpsilonRadps = 1.0e-4f;
+    constexpr float kManeuverTurnPlateauFraction = 0.95f;
+    constexpr std::size_t kManeuverRampDeltaTrimSamples = 5U;
 
     enum class SignalKind
     {
@@ -213,6 +231,7 @@ namespace
         std::string description;
         std::string path;
         std::string code;
+        std::string metric;
         bool started = false;
         bool completed = false;
         bool passed = false;
@@ -237,9 +256,45 @@ namespace
         float headingToleranceDeg = (std::numeric_limits<float>::quiet_NaN)();
         float finalPositionErrorM = (std::numeric_limits<float>::quiet_NaN)();
         float positionToleranceM = (std::numeric_limits<float>::quiet_NaN)();
+        float shiftDistanceM = (std::numeric_limits<float>::quiet_NaN)();
+        float shiftToleranceM = (std::numeric_limits<float>::quiet_NaN)();
+        float expectedElapsedSeconds = (std::numeric_limits<float>::quiet_NaN)();
+        float elapsedRelativeError = (std::numeric_limits<float>::quiet_NaN)();
+        float elapsedRelativeTolerance = (std::numeric_limits<float>::quiet_NaN)();
+        float velocityVariation = (std::numeric_limits<float>::quiet_NaN)();
+        float velocityVariationLimit = (std::numeric_limits<float>::quiet_NaN)();
+        float yawAccelerationVariation = (std::numeric_limits<float>::quiet_NaN)();
+        float yawAccelerationVariationLimit = (std::numeric_limits<float>::quiet_NaN)();
+        float yawRateVariation = (std::numeric_limits<float>::quiet_NaN)();
+        float yawRateVariationLimit = (std::numeric_limits<float>::quiet_NaN)();
         int solverFailureCount = 0;
         int nonFiniteCount = 0;
         double scorePenalty = 0.0;
+    };
+
+    struct AcceptanceCommandSample
+    {
+        float timeSeconds = 0.0f;
+        float linearCommandMps = 0.0f;
+        float angularCommandRadps = 0.0f;
+    };
+
+    struct ManeuverAcceptanceTrace
+    {
+        bool started = false;
+        bool completed = false;
+        bool allControlsFinite = true;
+        bool commandEvidenceValid = true;
+        bool requestedObjectivesFinite = true;
+        bool truthFinite = true;
+        bool solverClean = true;
+        int solverFailureCount = 0;
+        int nonFiniteCount = 0;
+        int appliedTicks = 0;
+        float elapsedSeconds = 0.0f;
+        WheelObservationState wheels{};
+        MazeMap::VehicleState::StateVector truth = MazeMap::VehicleState::StateVector::Zero();
+        std::vector<AcceptanceCommandSample> samples;
     };
 
     struct EvaluationResult
@@ -1138,32 +1193,123 @@ namespace
         metrics.elapsedSeconds = static_cast<float>(metrics.appliedTicks) * kTickSeconds;
     }
 
-    double ComputeAcceptancePenalty(const AcceptanceMetrics& metrics) noexcept
+    double ComputeNormalizedMetricScore(
+        const float value,
+        const float limit,
+        const double weight) noexcept
     {
-        if (metrics.passed)
+        if (!std::isfinite(value) || !std::isfinite(limit) || !(limit > 0.0f))
+        {
+            return 25.0 * weight;
+        }
+
+        const double ratio = static_cast<double>(std::fabs(value)) / static_cast<double>(limit);
+        const double baseScore = weight * ratio * ratio;
+        if (ratio <= 1.0)
+        {
+            return baseScore;
+        }
+
+        const double excess = ratio - 1.0;
+        return baseScore + (9.0 * weight * excess * excess);
+    }
+
+    double ComputeCompletionScore(const AcceptanceMetrics& metrics) noexcept
+    {
+        if (metrics.completed && (metrics.appliedTicks > 0))
         {
             return 0.0;
         }
 
-        double penalty = kAcceptanceBlockerPenalty;
-        if (!metrics.completed)
+        const double progress =
+            (metrics.maxTicks > 0) ?
+            (static_cast<double>((std::max)(0, metrics.appliedTicks)) / static_cast<double>(metrics.maxTicks)) :
+            0.0;
+        return kAcceptanceCompletionScoreWeight * (2.0 - (std::min)(progress, 1.0));
+    }
+
+    double ComputeCommandEvidenceScore(const AcceptanceMetrics& metrics) noexcept
+    {
+        double score = 0.0;
+        score += metrics.allControlsFinite ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
+        score += metrics.commandEvidenceValid ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
+        score += metrics.requestedObjectivesFinite ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
+        score += metrics.truthFinite ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
+        score += metrics.solverClean ? 0.0 : kAcceptanceCommandEvidenceScoreWeight;
+        score +=
+            kAcceptanceCommandEvidenceScoreWeight *
+            static_cast<double>(metrics.nonFiniteCount + metrics.solverFailureCount);
+        return score;
+    }
+
+    double ComputeAcceptancePenalty(const AcceptanceMetrics& metrics) noexcept
+    {
+        if ((metrics.metric == "drive_primitive_completion") || (metrics.metric == "completion"))
         {
-            penalty += 0.5 * kAcceptanceBlockerPenalty;
+            return ComputeCompletionScore(metrics);
         }
-        if (std::isfinite(metrics.finalHeadingErrorRad) && std::isfinite(metrics.headingToleranceRad))
+        if (metrics.metric == "command_evidence")
         {
-            const double excessRad =
-                (std::max)(0.0, static_cast<double>(metrics.finalHeadingErrorRad - metrics.headingToleranceRad));
-            penalty += 500000.0 * excessRad;
+            return ComputeCommandEvidenceScore(metrics);
         }
-        if (std::isfinite(metrics.finalPositionErrorM) && std::isfinite(metrics.positionToleranceM))
+        if (metrics.metric == "in_place_shift")
         {
-            const double excessM =
-                (std::max)(0.0, static_cast<double>(metrics.finalPositionErrorM - metrics.positionToleranceM));
-            penalty += 10000.0 * excessM;
+            return ComputeNormalizedMetricScore(
+                metrics.shiftDistanceM,
+                metrics.shiftToleranceM,
+                kInPlaceShiftScoreWeight);
         }
-        penalty += 100000.0 * static_cast<double>(metrics.nonFiniteCount + metrics.solverFailureCount);
-        return penalty;
+        if (metrics.metric == "in_place_heading")
+        {
+            return ComputeNormalizedMetricScore(
+                metrics.finalHeadingErrorRad,
+                metrics.headingToleranceRad,
+                kInPlaceHeadingScoreWeight);
+        }
+        if (metrics.metric == "in_place_time")
+        {
+            return ComputeNormalizedMetricScore(
+                metrics.elapsedRelativeError,
+                metrics.elapsedRelativeTolerance,
+                kInPlaceTimeScoreWeight);
+        }
+        if (metrics.metric == "smooth_velocity_variation")
+        {
+            return ComputeNormalizedMetricScore(
+                metrics.velocityVariation,
+                metrics.velocityVariationLimit,
+                kSmoothVelocityVariationScoreWeight);
+        }
+        if (metrics.metric == "smooth_yaw_acceleration_variation")
+        {
+            return ComputeNormalizedMetricScore(
+                metrics.yawAccelerationVariation,
+                metrics.yawAccelerationVariationLimit,
+                kSmoothYawAccelerationVariationScoreWeight);
+        }
+        if (metrics.metric == "smooth_yaw_rate_variation")
+        {
+            return ComputeNormalizedMetricScore(
+                metrics.yawRateVariation,
+                metrics.yawRateVariationLimit,
+                kSmoothYawRateVariationScoreWeight);
+        }
+        if (metrics.metric == "smooth_final_position")
+        {
+            return ComputeNormalizedMetricScore(
+                metrics.finalPositionErrorM,
+                metrics.positionToleranceM,
+                kSmoothFinalPositionScoreWeight);
+        }
+        if (metrics.metric == "smooth_final_heading")
+        {
+            return ComputeNormalizedMetricScore(
+                metrics.finalHeadingErrorRad,
+                metrics.headingToleranceRad,
+                kSmoothFinalHeadingScoreWeight);
+        }
+
+        return ComputeCommandEvidenceScore(metrics);
     }
 
     void FinalizeAcceptance(AcceptanceMetrics& metrics, const bool acceptanceCondition) noexcept
@@ -1200,6 +1346,7 @@ namespace
             "Drive::StartStraight closed-loop acceptance through SharedRobotRuntime, Drive, DriveBase, PlantModel::integrate, and sensor snapshot publication.";
         metrics.path = "SharedRobotRuntime.DriveService.StartStraight";
         metrics.code = "StartStraight";
+        metrics.metric = "drive_primitive_completion";
         metrics.started = true;
         metrics.maxTicks = kStartStraightMaxTicks;
         metrics.targetDistanceM = kStartStraightDistanceM;
@@ -1266,12 +1413,38 @@ namespace
     {
         switch (code)
         {
+        case MazeMap::IP45:
+            return "IP45";
+        case MazeMap::IP90:
+            return "IP90";
+        case MazeMap::IP135:
+            return "IP135";
+        case MazeMap::IP180:
+            return "IP180";
+        case MazeMap::S45LS:
+            return "S45LS";
+        case MazeMap::S45LD:
+            return "S45LD";
+        case MazeMap::S45SS:
+            return "S45SS";
+        case MazeMap::S45SD:
+            return "S45SD";
+        case MazeMap::S90LS:
+            return "S90LS";
+        case MazeMap::S90SS:
+            return "S90SS";
+        case MazeMap::S90SD:
+            return "S90SD";
+        case MazeMap::S135SS:
+            return "S135SS";
         case MazeMap::S135SD:
             return "S135SD";
         case MazeMap::S135LS:
             return "S135LS";
         case MazeMap::S135LD:
             return "S135LD";
+        case MazeMap::S180LS:
+            return "S180LS";
         case MazeMap::S180SS:
             return "S180SS";
         default:
@@ -1279,9 +1452,67 @@ namespace
         }
     }
 
-    AcceptanceMetrics RunSmoothManeuverHeadingAcceptance(
+    std::string LowercaseCopy(std::string text)
+    {
+        std::transform(
+            text.begin(),
+            text.end(),
+            text.begin(),
+            [](const unsigned char ch)
+            {
+                return static_cast<char>(std::tolower(ch));
+            });
+        return text;
+    }
+
+    float ComputeInPlaceTurnKinematicTimeSeconds(
+        const float angleRad,
+        const MotionLimits& limits) noexcept
+    {
+        return limits.ComputeMinimumTurnDurationSeconds(angleRad);
+    }
+
+    void RecordManeuverTraceTelemetry(
+        ManeuverAcceptanceTrace& trace,
+        const CommandVector& control,
+        const DriveTelemetry& telemetry) noexcept
+    {
+        trace.allControlsFinite = trace.allControlsFinite && control.IsFinite();
+        trace.commandEvidenceValid =
+            trace.commandEvidenceValid &&
+            ((telemetry.commandKindFlags & DriveTelemetry::kCommandKindBodyProposal) != 0U) &&
+            ((telemetry.telemetryValidFlags & DriveTelemetry::kTelemetryCommandEvidenceValid) != 0U) &&
+            ((telemetry.telemetryValidFlags & DriveTelemetry::kTelemetryPlantCommandValid) != 0U) &&
+            (std::fabs(control.LeftCommand() - telemetry.leftDriveCommand) <= 1.0e-5f) &&
+            (std::fabs(control.RightCommand() - telemetry.rightDriveCommand) <= 1.0e-5f);
+        trace.requestedObjectivesFinite =
+            trace.requestedObjectivesFinite &&
+            std::isfinite(telemetry.requestedForwardMps) &&
+            std::isfinite(telemetry.requestedYawRateRadps) &&
+            std::isfinite(telemetry.requestedForwardAccelMps2) &&
+            std::isfinite(telemetry.requestedYawAccelRadps2) &&
+            std::isfinite(telemetry.requestedYawRad);
+        trace.solverClean = trace.solverClean && (telemetry.solverFailureFlags == 0U);
+        if (telemetry.solverFailureFlags != 0U)
+        {
+            ++trace.solverFailureCount;
+        }
+        if (!control.IsFinite())
+        {
+            ++trace.nonFiniteCount;
+        }
+        trace.samples.push_back(
+            AcceptanceCommandSample{
+                trace.elapsedSeconds,
+                telemetry.requestedForwardMps,
+                telemetry.requestedYawRateRadps
+            });
+    }
+
+    ManeuverAcceptanceTrace SimulateDriveManeuverAcceptance(
         const GainSet& gains,
-        const MazeMap::ManeuverCode code)
+        const MazeMap::ManeuverCode code,
+        const bool smoothTurn)
     {
         MazeMap::PDCluster cluster = BuildCandidateCluster(gains);
         MazeMap::App::Internal::SharedRobotRuntime runtime(kTickSeconds);
@@ -1292,71 +1523,253 @@ namespace
         const MazeMap::PlantModel::PreparedParams params = MazeMap::PlantModel::Prepare(rawParams);
         float leftEncoderRemainderCounts = 0.0f;
         float rightEncoderRemainderCounts = 0.0f;
-        MazeMap::VehicleState::StateVector truth = MazeMap::VehicleState::StateVector::Zero();
-        PrimeDriveForSmoothEntry(
-            runtime,
-            truth,
-            leftEncoderRemainderCounts,
-            rightEncoderRemainderCounts,
-            params);
+        ManeuverAcceptanceTrace trace{};
 
-        AcceptanceMetrics metrics{};
-        metrics.name = std::string("drive_maneuver_") + ManeuverCodeLabel(code) + "_final_heading_acceptance";
-        std::transform(metrics.name.begin(), metrics.name.end(), metrics.name.begin(),
-            [](const unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        metrics.description =
-            "Smooth Drive::StartManeuver final-heading acceptance through SharedRobotRuntime, Drive, DriveBase, PlantModel::integrate, and direct truth-to-sensor snapshot publication.";
-        metrics.path = "SharedRobotRuntime.DriveService.StartManeuver";
-        metrics.code = ManeuverCodeLabel(code);
-        metrics.started = true;
-        metrics.maxTicks = kDriveManeuverMaxTicks;
-        metrics.targetDistanceM = MazeMap::ManeuverSet::GetSet().GetTravelDistanceMeters(code, MazeMap::Config::kCellSizeM);
-        metrics.targetYawRad = BuildNominalEndYawRad(code);
-        metrics.headingToleranceRad = kManeuverHeadingToleranceRad;
-        metrics.headingToleranceDeg = kManeuverHeadingToleranceRad * RAD_TO_DEG_F;
-        metrics.positionToleranceM = kManeuverPositionToleranceM;
+        (void)runtime.Estimator().ResetPose(0.0f, 0.0f, 0.0f);
+        if (smoothTurn)
+        {
+            PrimeDriveForSmoothEntry(
+                runtime,
+                trace.truth,
+                leftEncoderRemainderCounts,
+                rightEncoderRemainderCounts,
+                params);
+        }
+        else
+        {
+            trace.truth = BuildAcceptanceTruthState(0.0f, 0.0f, params);
+        }
 
         MazeMap::ManeuverInstance maneuver(
             code,
             BuildManeuverStart(),
-            kSmoothManeuverEntrySpeedMps,
-            kSmoothManeuverEntrySpeedMps);
+            smoothTurn ? kSmoothManeuverEntrySpeedMps : 0.0f,
+            smoothTurn ? kSmoothManeuverEntrySpeedMps : 0.0f);
 
         MazeMap::App::Internal::Drive& drive = runtime.DriveService();
         drive.StartManeuver(maneuver);
+        trace.started = true;
 
         for (int tick = 0; tick < kDriveManeuverMaxTicks; ++tick)
         {
+            if (runtime.Estimator().HasFault())
+            {
+                trace.solverClean = false;
+                break;
+            }
+
             bool done = false;
             const CommandVector control = drive.GetNextControls(done);
             if (done)
             {
-                metrics.completed = true;
+                trace.completed = true;
                 break;
             }
 
-            RecordAcceptanceTelemetry(metrics, control, runtime.DriveBase().LastTelemetry());
+            RecordManeuverTraceTelemetry(trace, control, runtime.DriveBase().LastTelemetry());
             AdvanceRuntimeDriveCycle(
                 runtime,
-                truth,
+                trace.truth,
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
                 control,
                 params);
-            ++metrics.appliedTicks;
-            metrics.truthFinite = metrics.truthFinite && truth.allFinite();
-            if (!truth.allFinite())
+            ++trace.appliedTicks;
+            trace.elapsedSeconds = static_cast<float>(trace.appliedTicks) * kTickSeconds;
+            trace.truthFinite = trace.truthFinite && trace.truth.allFinite();
+            if (!trace.truth.allFinite())
             {
-                ++metrics.nonFiniteCount;
+                ++trace.nonFiniteCount;
                 break;
             }
         }
 
-        WheelObservationState wheels{};
         const SensorSnapshot& finalSnapshot = runtime.RuntimeState().GetSensorSnapshot();
-        wheels.leftDistanceM = finalSnapshot.leftEncoderDistanceM;
-        wheels.rightDistanceM = finalSnapshot.rightEncoderDistanceM;
-        CaptureAcceptanceFinalState(metrics, truth, wheels);
+        trace.wheels.leftDistanceM = finalSnapshot.leftEncoderDistanceM;
+        trace.wheels.rightDistanceM = finalSnapshot.rightEncoderDistanceM;
+        return trace;
+    }
+
+    double ComputeNormalizedSpan(const std::vector<float>& values) noexcept
+    {
+        if (values.size() < 2U)
+        {
+            return (std::numeric_limits<double>::quiet_NaN)();
+        }
+
+        const auto minmax = std::minmax_element(values.begin(), values.end());
+        const double average =
+            static_cast<double>(std::accumulate(values.begin(), values.end(), 0.0f)) /
+            static_cast<double>(values.size());
+        if (!(average > 0.0) || !std::isfinite(average))
+        {
+            return (std::numeric_limits<double>::quiet_NaN)();
+        }
+
+        return static_cast<double>(*minmax.second - *minmax.first) / average;
+    }
+
+    std::vector<float> CollectLinearCommandMagnitudes(const ManeuverAcceptanceTrace& trace)
+    {
+        std::vector<float> magnitudes;
+        magnitudes.reserve(trace.samples.size());
+        for (const AcceptanceCommandSample& sample : trace.samples)
+        {
+            magnitudes.push_back(std::fabs(sample.linearCommandMps));
+        }
+        return magnitudes;
+    }
+
+    std::vector<float> CollectTurnYawRateMagnitudes(const ManeuverAcceptanceTrace& trace)
+    {
+        std::vector<float> magnitudes;
+        if (trace.samples.empty())
+        {
+            return magnitudes;
+        }
+
+        float maxOmegaMagnitudeRadps = 0.0f;
+        for (const AcceptanceCommandSample& sample : trace.samples)
+        {
+            maxOmegaMagnitudeRadps =
+                (std::max)(maxOmegaMagnitudeRadps, std::fabs(sample.angularCommandRadps));
+        }
+
+        const float plateauThresholdRadps = kManeuverTurnPlateauFraction * maxOmegaMagnitudeRadps;
+        for (const AcceptanceCommandSample& sample : trace.samples)
+        {
+            const float magnitudeRadps = std::fabs(sample.angularCommandRadps);
+            if (magnitudeRadps >= plateauThresholdRadps)
+            {
+                magnitudes.push_back(magnitudeRadps);
+            }
+        }
+
+        return magnitudes;
+    }
+
+    std::vector<float> CollectRampYawAccelMagnitudes(const ManeuverAcceptanceTrace& trace)
+    {
+        std::vector<float> magnitudes;
+        if (trace.samples.size() < 3U)
+        {
+            return magnitudes;
+        }
+
+        float maxOmegaMagnitudeRadps = 0.0f;
+        std::size_t plateauBeginIndex = trace.samples.size();
+        std::size_t plateauEndIndex = 0U;
+        for (std::size_t index = 0U; index < trace.samples.size(); ++index)
+        {
+            maxOmegaMagnitudeRadps =
+                (std::max)(
+                    maxOmegaMagnitudeRadps,
+                    std::fabs(trace.samples[index].angularCommandRadps));
+        }
+
+        const float plateauThresholdRadps = kManeuverTurnPlateauFraction * maxOmegaMagnitudeRadps;
+        for (std::size_t index = 0U; index < trace.samples.size(); ++index)
+        {
+            if (std::fabs(trace.samples[index].angularCommandRadps) >= plateauThresholdRadps)
+            {
+                plateauBeginIndex = (std::min)(plateauBeginIndex, index);
+                plateauEndIndex = index;
+            }
+        }
+
+        if (plateauBeginIndex == trace.samples.size())
+        {
+            return magnitudes;
+        }
+
+        const auto appendTrimmedRegionMagnitudes =
+            [&](const std::size_t deltaBeginIndex, const std::size_t deltaEndIndexExclusive)
+            {
+                if (deltaBeginIndex >= deltaEndIndexExclusive)
+                {
+                    return;
+                }
+
+                const std::size_t regionLength = deltaEndIndexExclusive - deltaBeginIndex;
+                if (regionLength <= (2U * kManeuverRampDeltaTrimSamples))
+                {
+                    return;
+                }
+
+                const std::size_t trimmedBeginIndex = deltaBeginIndex + kManeuverRampDeltaTrimSamples;
+                const std::size_t trimmedEndIndexExclusive = deltaEndIndexExclusive - kManeuverRampDeltaTrimSamples;
+                for (std::size_t index = trimmedBeginIndex; index < trimmedEndIndexExclusive; ++index)
+                {
+                    const float previousOmegaMagnitudeRadps =
+                        std::fabs(trace.samples[index - 1U].angularCommandRadps);
+                    const float currentOmegaMagnitudeRadps =
+                        std::fabs(trace.samples[index].angularCommandRadps);
+                    if ((previousOmegaMagnitudeRadps <= kManeuverOmegaMagnitudeEpsilonRadps) ||
+                        (currentOmegaMagnitudeRadps <= kManeuverOmegaMagnitudeEpsilonRadps))
+                    {
+                        continue;
+                    }
+
+                    const float dtSeconds = trace.samples[index].timeSeconds - trace.samples[index - 1U].timeSeconds;
+                    if (!(dtSeconds > 0.0f))
+                    {
+                        continue;
+                    }
+
+                    magnitudes.push_back(
+                        std::fabs(
+                            (trace.samples[index].angularCommandRadps - trace.samples[index - 1U].angularCommandRadps) /
+                            dtSeconds));
+                }
+            };
+
+        appendTrimmedRegionMagnitudes(1U, plateauBeginIndex + 1U);
+        appendTrimmedRegionMagnitudes(plateauEndIndex + 1U, trace.samples.size());
+        return magnitudes;
+    }
+
+    AcceptanceMetrics BuildManeuverAcceptanceBase(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code,
+        const bool smoothTurn,
+        const char* metricSuffix,
+        const char* metricName)
+    {
+        AcceptanceMetrics metrics{};
+        metrics.name =
+            LowercaseCopy(
+                std::string("drive_maneuver_") +
+                ManeuverCodeLabel(code) +
+                "_" +
+                metricSuffix);
+        metrics.description =
+            std::string(smoothTurn ? "Smooth" : "In-place") +
+            " Drive::StartManeuver release-test metric through SharedRobotRuntime, Drive, DriveBase, PlantModel::integrate, and estimator sensor updates.";
+        metrics.path = "SharedRobotRuntime.DriveService.StartManeuver";
+        metrics.code = ManeuverCodeLabel(code);
+        metrics.metric = metricName;
+        metrics.started = trace.started;
+        metrics.completed = trace.completed;
+        metrics.maxTicks = kDriveManeuverMaxTicks;
+        metrics.appliedTicks = trace.appliedTicks;
+        metrics.elapsedSeconds = trace.elapsedSeconds;
+        metrics.targetDistanceM =
+            smoothTurn ?
+            MazeMap::ManeuverSet::GetSet().GetTravelDistanceMeters(code, MazeMap::Config::kCellSizeM) :
+            0.0f;
+        metrics.targetYawRad = BuildNominalEndYawRad(code);
+        metrics.headingToleranceRad = kManeuverHeadingToleranceRad;
+        metrics.headingToleranceDeg = kManeuverHeadingToleranceRad * RAD_TO_DEG_F;
+        metrics.positionToleranceM =
+            smoothTurn ? kSmoothManeuverPositionToleranceM : kInPlaceManeuverPositionToleranceM;
+        metrics.allControlsFinite = trace.allControlsFinite;
+        metrics.commandEvidenceValid = trace.commandEvidenceValid;
+        metrics.requestedObjectivesFinite = trace.requestedObjectivesFinite;
+        metrics.truthFinite = trace.truthFinite;
+        metrics.solverClean = trace.solverClean;
+        metrics.solverFailureCount = trace.solverFailureCount;
+        metrics.nonFiniteCount = trace.nonFiniteCount;
+        CaptureAcceptanceFinalState(metrics, trace.truth, trace.wheels);
         metrics.finalHeadingErrorRad =
             std::fabs(AngleErrorRad(metrics.targetYawRad, metrics.finalYawRad));
         metrics.finalHeadingErrorDeg = metrics.finalHeadingErrorRad * RAD_TO_DEG_F;
@@ -1364,6 +1777,161 @@ namespace
             std::hypot(
                 metrics.finalXM - BuildNominalEndXMeters(code),
                 metrics.finalYM - BuildNominalEndYMeters(code));
+        metrics.shiftDistanceM = std::hypot(metrics.finalXM, metrics.finalYM);
+        metrics.shiftToleranceM = kInPlaceManeuverPositionToleranceM;
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeCompletionAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code,
+        const bool smoothTurn)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, smoothTurn, "completes", "completion");
+        FinalizeAcceptance(metrics, metrics.completed && !trace.samples.empty());
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeCommandEvidenceAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code,
+        const bool smoothTurn)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, smoothTurn, "command_evidence_matches_returned_command", "command_evidence");
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            !trace.samples.empty() &&
+            metrics.allControlsFinite &&
+            metrics.commandEvidenceValid &&
+            metrics.requestedObjectivesFinite &&
+            metrics.truthFinite);
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeInPlaceShiftAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, false, "shift_acceptance", "in_place_shift");
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            std::isfinite(metrics.shiftDistanceM) &&
+            (metrics.shiftDistanceM < kInPlaceManeuverPositionToleranceM));
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeInPlaceHeadingAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, false, "heading_acceptance", "in_place_heading");
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            std::isfinite(metrics.finalHeadingErrorRad) &&
+            (metrics.finalHeadingErrorRad <= kManeuverHeadingToleranceRad));
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeInPlaceTimeAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, false, "time_acceptance", "in_place_time");
+        MazeMap::App::Internal::SharedRobotRuntime runtime(kTickSeconds);
+        metrics.expectedElapsedSeconds =
+            ComputeInPlaceTurnKinematicTimeSeconds(
+                std::fabs(BuildNominalEndYawRad(code)),
+                runtime.DriveService().GetLimits());
+        metrics.elapsedRelativeTolerance = kManeuverTimeToleranceFraction;
+        metrics.elapsedRelativeError =
+            (metrics.expectedElapsedSeconds > 0.0f) ?
+            (std::fabs(metrics.elapsedSeconds - metrics.expectedElapsedSeconds) / metrics.expectedElapsedSeconds) :
+            (std::numeric_limits<float>::quiet_NaN)();
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            std::isfinite(metrics.elapsedRelativeError) &&
+            (metrics.elapsedRelativeError <= kManeuverTimeToleranceFraction));
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeSmoothVelocityVariationAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, true, "velocity_variation_acceptance", "smooth_velocity_variation");
+        metrics.velocityVariation = static_cast<float>(ComputeNormalizedSpan(CollectLinearCommandMagnitudes(trace)));
+        metrics.velocityVariationLimit = kSmoothManeuverVelocityVariationLimit;
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            std::isfinite(metrics.velocityVariation) &&
+            (metrics.velocityVariation < kSmoothManeuverVelocityVariationLimit));
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeSmoothYawAccelerationVariationAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, true, "yaw_acceleration_variation_acceptance", "smooth_yaw_acceleration_variation");
+        metrics.yawAccelerationVariation =
+            static_cast<float>(ComputeNormalizedSpan(CollectRampYawAccelMagnitudes(trace)));
+        metrics.yawAccelerationVariationLimit = kSmoothManeuverYawAccelerationVariationLimit;
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            std::isfinite(metrics.yawAccelerationVariation) &&
+            (metrics.yawAccelerationVariation < kSmoothManeuverYawAccelerationVariationLimit));
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeSmoothYawRateVariationAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, true, "yaw_rate_variation_acceptance", "smooth_yaw_rate_variation");
+        metrics.yawRateVariation = static_cast<float>(ComputeNormalizedSpan(CollectTurnYawRateMagnitudes(trace)));
+        metrics.yawRateVariationLimit = kSmoothManeuverYawRateVariationLimit;
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            std::isfinite(metrics.yawRateVariation) &&
+            (metrics.yawRateVariation < kSmoothManeuverYawRateVariationLimit));
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeSmoothFinalPositionAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, true, "final_position_acceptance", "smooth_final_position");
+        FinalizeAcceptance(
+            metrics,
+            metrics.completed &&
+            std::isfinite(metrics.finalPositionErrorM) &&
+            (metrics.finalPositionErrorM <= kSmoothManeuverPositionToleranceM));
+        return metrics;
+    }
+
+    AcceptanceMetrics MakeSmoothFinalHeadingAcceptance(
+        const ManeuverAcceptanceTrace& trace,
+        const MazeMap::ManeuverCode code)
+    {
+        AcceptanceMetrics metrics =
+            BuildManeuverAcceptanceBase(trace, code, true, "final_heading_acceptance", "smooth_final_heading");
         FinalizeAcceptance(
             metrics,
             metrics.completed &&
@@ -1806,12 +2374,53 @@ namespace
     std::vector<AcceptanceMetrics> RunAcceptanceScenarios(const GainSet& gains)
     {
         std::vector<AcceptanceMetrics> acceptances;
-        acceptances.reserve(5U);
+        constexpr std::array<MazeMap::ManeuverCode, 4U> inPlaceManeuvers = {{
+            MazeMap::IP45,
+            MazeMap::IP90,
+            MazeMap::IP135,
+            MazeMap::IP180
+        }};
+        constexpr std::array<MazeMap::ManeuverCode, 13U> smoothManeuvers = {{
+            MazeMap::S45LS,
+            MazeMap::S45LD,
+            MazeMap::S45SS,
+            MazeMap::S45SD,
+            MazeMap::S90LS,
+            MazeMap::S90SS,
+            MazeMap::S90SD,
+            MazeMap::S135LS,
+            MazeMap::S135LD,
+            MazeMap::S135SS,
+            MazeMap::S135SD,
+            MazeMap::S180LS,
+            MazeMap::S180SS
+        }};
+
+        acceptances.reserve(1U + (inPlaceManeuvers.size() * 5U) + (smoothManeuvers.size() * 7U));
         acceptances.push_back(RunStartStraightAcceptance(gains));
-        acceptances.push_back(RunSmoothManeuverHeadingAcceptance(gains, MazeMap::S180SS));
-        acceptances.push_back(RunSmoothManeuverHeadingAcceptance(gains, MazeMap::S135SD));
-        acceptances.push_back(RunSmoothManeuverHeadingAcceptance(gains, MazeMap::S135LD));
-        acceptances.push_back(RunSmoothManeuverHeadingAcceptance(gains, MazeMap::S135LS));
+
+        for (const MazeMap::ManeuverCode code : inPlaceManeuvers)
+        {
+            const ManeuverAcceptanceTrace trace = SimulateDriveManeuverAcceptance(gains, code, false);
+            acceptances.push_back(MakeCompletionAcceptance(trace, code, false));
+            acceptances.push_back(MakeCommandEvidenceAcceptance(trace, code, false));
+            acceptances.push_back(MakeInPlaceShiftAcceptance(trace, code));
+            acceptances.push_back(MakeInPlaceHeadingAcceptance(trace, code));
+            acceptances.push_back(MakeInPlaceTimeAcceptance(trace, code));
+        }
+
+        for (const MazeMap::ManeuverCode code : smoothManeuvers)
+        {
+            const ManeuverAcceptanceTrace trace = SimulateDriveManeuverAcceptance(gains, code, true);
+            acceptances.push_back(MakeCompletionAcceptance(trace, code, true));
+            acceptances.push_back(MakeCommandEvidenceAcceptance(trace, code, true));
+            acceptances.push_back(MakeSmoothVelocityVariationAcceptance(trace, code));
+            acceptances.push_back(MakeSmoothYawAccelerationVariationAcceptance(trace, code));
+            acceptances.push_back(MakeSmoothYawRateVariationAcceptance(trace, code));
+            acceptances.push_back(MakeSmoothFinalPositionAcceptance(trace, code));
+            acceptances.push_back(MakeSmoothFinalHeadingAcceptance(trace, code));
+        }
+
         return acceptances;
     }
 
@@ -2268,6 +2877,7 @@ namespace
             << pad << "  \"description\": " << JsonString(metrics.description) << ",\n"
             << pad << "  \"path\": " << JsonString(metrics.path) << ",\n"
             << pad << "  \"code\": " << JsonString(metrics.code) << ",\n"
+            << pad << "  \"metric\": " << JsonString(metrics.metric) << ",\n"
             << pad << "  \"tick_seconds\": ";
         WriteJsonNumber(output, kTickSecondsExact);
         output << ",\n"
@@ -2295,6 +2905,24 @@ namespace
         output << ",\n"
             << pad << "    \"position_tolerance_m\": ";
         WriteJsonNumber(output, metrics.positionToleranceM);
+        output << ",\n"
+            << pad << "    \"shift_tolerance_m\": ";
+        WriteJsonNumber(output, metrics.shiftToleranceM);
+        output << ",\n"
+            << pad << "    \"expected_elapsed_seconds\": ";
+        WriteJsonNumber(output, metrics.expectedElapsedSeconds);
+        output << ",\n"
+            << pad << "    \"elapsed_relative_tolerance\": ";
+        WriteJsonNumber(output, metrics.elapsedRelativeTolerance);
+        output << ",\n"
+            << pad << "    \"velocity_variation_limit\": ";
+        WriteJsonNumber(output, metrics.velocityVariationLimit);
+        output << ",\n"
+            << pad << "    \"yaw_acceleration_variation_limit\": ";
+        WriteJsonNumber(output, metrics.yawAccelerationVariationLimit);
+        output << ",\n"
+            << pad << "    \"yaw_rate_variation_limit\": ";
+        WriteJsonNumber(output, metrics.yawRateVariationLimit);
         output << "\n" << pad << "  },\n"
             << pad << "  \"final\": {\n"
             << pad << "    \"x_m\": ";
@@ -2317,6 +2945,21 @@ namespace
         output << ",\n"
             << pad << "    \"position_error_m\": ";
         WriteJsonNumber(output, metrics.finalPositionErrorM);
+        output << ",\n"
+            << pad << "    \"shift_distance_m\": ";
+        WriteJsonNumber(output, metrics.shiftDistanceM);
+        output << ",\n"
+            << pad << "    \"elapsed_relative_error\": ";
+        WriteJsonNumber(output, metrics.elapsedRelativeError);
+        output << ",\n"
+            << pad << "    \"velocity_variation\": ";
+        WriteJsonNumber(output, metrics.velocityVariation);
+        output << ",\n"
+            << pad << "    \"yaw_acceleration_variation\": ";
+        WriteJsonNumber(output, metrics.yawAccelerationVariation);
+        output << ",\n"
+            << pad << "    \"yaw_rate_variation\": ";
+        WriteJsonNumber(output, metrics.yawRateVariation);
         output << "\n" << pad << "  },\n"
             << pad << "  \"health\": {\n"
             << pad << "    \"all_controls_finite\": " << (metrics.allControlsFinite ? "true" : "false") << ",\n"
@@ -2327,6 +2970,9 @@ namespace
             << pad << "    \"solver_failure_count\": " << metrics.solverFailureCount << ",\n"
             << pad << "    \"non_finite_count\": " << metrics.nonFiniteCount << "\n"
             << pad << "  },\n"
+            << pad << "  \"score_contribution\": ";
+        WriteJsonNumber(output, metrics.scorePenalty);
+        output << ",\n"
             << pad << "  \"score_penalty\": ";
         WriteJsonNumber(output, metrics.scorePenalty);
         output << "\n" << pad << "}";
@@ -2397,8 +3043,22 @@ namespace
         std::cout << ",\n"
             << "  \"physical_parameters_fixed\": true,\n"
             << "  \"acceptance_metric_definitions\": {\n"
-            << "    \"drive_primitive_start_straight_completes\": \"Runs Drive::StartStraight(0.30 m, 0.30 m/s, 0.0 m/s exit) for up to 6000 exact 0.001s ticks through SharedRobotRuntime, Drive, DriveBase, PlantModel::integrate, and sensor snapshot publication; completion failure is a blocker.\",\n"
-            << "    \"drive_maneuver_final_heading_acceptance\": \"Runs smooth Drive::StartManeuver at 0.50 m/s entry/exit for S180SS, S135SD, S135LD, and S135LS for up to 20000 exact 0.001s ticks; completion or final heading error above 3 degrees is a blocker. Position error is emitted for context but does not define these heading-focused blockers.\"\n"
+            << "    \"scoring\": \"Drive primitive and DriveManeuver checks are reported with pass/blocker flags, but optimizer ranking uses continuous normalized score contributions rather than flat pass/fail penalties. Ratios below each release-test limit still score, so candidates can improve margin before and after crossing the pass threshold.\",\n"
+            << "    \"drive_primitive_start_straight_completes\": \"Runs Drive::StartStraight(0.30 m, 0.30 m/s, 0.0 m/s exit) for up to 6000 exact 0.001s ticks through SharedRobotRuntime, Drive, DriveBase, PlantModel::integrate, and sensor snapshot publication; completion failure is reported as a blocker and scored as a continuous completion deficit.\",\n"
+            << "    \"drive_maneuver_in_place_codes\": \"Covers IP45, IP90, IP135, and IP180 through the same SharedRobotRuntime/Drive/DriveBase/PlantModel path as DriveManeuverTests.\",\n"
+            << "    \"drive_maneuver_in_place_completion\": \"Each in-place maneuver must start, complete within 20000 exact 0.001s ticks, and emit command samples.\",\n"
+            << "    \"drive_maneuver_in_place_command_evidence\": \"Each in-place maneuver must return finite wheel commands matching DriveTelemetry command evidence, with finite requested body objectives and finite truth state.\",\n"
+            << "    \"drive_maneuver_in_place_shift\": \"Each in-place maneuver final translation must stay below 0.020 m.\",\n"
+            << "    \"drive_maneuver_in_place_heading\": \"Each in-place maneuver final heading error must stay at or below 3 degrees.\",\n"
+            << "    \"drive_maneuver_in_place_time\": \"Each in-place maneuver elapsed time must stay within 40% of MotionLimits::ComputeMinimumTurnDurationSeconds for the nominal turn angle.\",\n"
+            << "    \"drive_maneuver_smooth_codes\": \"Covers S45LS, S45LD, S45SS, S45SD, S90LS, S90SS, S90SD, S135LS, S135LD, S135SS, S135SD, S180LS, and S180SS through the same SharedRobotRuntime/Drive/DriveBase/PlantModel path as DriveManeuverTests.\",\n"
+            << "    \"drive_maneuver_smooth_completion\": \"Each smooth maneuver at 0.50 m/s entry/exit must start, complete within 20000 exact 0.001s ticks, and emit command samples.\",\n"
+            << "    \"drive_maneuver_smooth_command_evidence\": \"Each smooth maneuver must return finite wheel commands matching DriveTelemetry command evidence, with finite requested body objectives and finite truth state.\",\n"
+            << "    \"drive_maneuver_smooth_velocity_variation\": \"Each smooth maneuver normalized span of requested forward-speed magnitudes must stay below 0.05.\",\n"
+            << "    \"drive_maneuver_smooth_yaw_acceleration_variation\": \"Each smooth maneuver normalized span of trimmed ramp yaw-acceleration magnitudes must stay below 0.20.\",\n"
+            << "    \"drive_maneuver_smooth_yaw_rate_variation\": \"Each smooth maneuver normalized span of plateau yaw-rate magnitudes must stay below 0.08.\",\n"
+            << "    \"drive_maneuver_smooth_final_position\": \"Each smooth maneuver final position error must stay at or below 0.030 m.\",\n"
+            << "    \"drive_maneuver_smooth_final_heading\": \"Each smooth maneuver final heading error must stay at or below 3 degrees.\"\n"
             << "  },\n"
             << "  \"step_response_metric_definitions\": {\n"
             << "    \"tick_seconds\": ";
@@ -2421,6 +3081,36 @@ namespace
         std::cout << ",\n"
             << "    \"yaw_accel_error_first_100_ticks\": ";
         WriteJsonNumber(std::cout, kYawAccelStepRmsScoreWeight);
+        std::cout << ",\n"
+            << "    \"acceptance_completion\": ";
+        WriteJsonNumber(std::cout, kAcceptanceCompletionScoreWeight);
+        std::cout << ",\n"
+            << "    \"acceptance_command_evidence\": ";
+        WriteJsonNumber(std::cout, kAcceptanceCommandEvidenceScoreWeight);
+        std::cout << ",\n"
+            << "    \"in_place_shift\": ";
+        WriteJsonNumber(std::cout, kInPlaceShiftScoreWeight);
+        std::cout << ",\n"
+            << "    \"in_place_heading\": ";
+        WriteJsonNumber(std::cout, kInPlaceHeadingScoreWeight);
+        std::cout << ",\n"
+            << "    \"in_place_time\": ";
+        WriteJsonNumber(std::cout, kInPlaceTimeScoreWeight);
+        std::cout << ",\n"
+            << "    \"smooth_velocity_variation\": ";
+        WriteJsonNumber(std::cout, kSmoothVelocityVariationScoreWeight);
+        std::cout << ",\n"
+            << "    \"smooth_yaw_acceleration_variation\": ";
+        WriteJsonNumber(std::cout, kSmoothYawAccelerationVariationScoreWeight);
+        std::cout << ",\n"
+            << "    \"smooth_yaw_rate_variation\": ";
+        WriteJsonNumber(std::cout, kSmoothYawRateVariationScoreWeight);
+        std::cout << ",\n"
+            << "    \"smooth_final_position\": ";
+        WriteJsonNumber(std::cout, kSmoothFinalPositionScoreWeight);
+        std::cout << ",\n"
+            << "    \"smooth_final_heading\": ";
+        WriteJsonNumber(std::cout, kSmoothFinalHeadingScoreWeight);
         std::cout << "\n"
             << "  },\n"
             << "  \"baseline_source\": \"Config::kDriveBasePDCluster\",\n"

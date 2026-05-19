@@ -432,9 +432,9 @@ namespace MazeMap::Config
     // meaning for other callers.
     constexpr float kDriveBaseVelocityStateKp = 5.5f;
     constexpr float kDriveBaseVelocityStateKd = 0.01f;
-    constexpr float kDriveBaseHeadingStateKp = 2300.0f;
+    constexpr float kDriveBaseHeadingStateKp = 9718.0f;
     constexpr float kDriveBaseHeadingStateKd = 0.0f;
-    constexpr float kDriveBaseYawRateStateKp = 120.0f;
+    constexpr float kDriveBaseYawRateStateKp = 126.0f;
     constexpr float kDriveBaseYawRateStateKd = 5.0f;
     // Shared DriveBase proportional-derivative cluster. This is the authoritative home for the
     // current DriveBase PD setup family, with concrete starting values for every supported

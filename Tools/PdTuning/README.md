@@ -18,9 +18,11 @@ also reports this as `tick_seconds`.
 
 The evaluator also runs release-test-style acceptance scenarios through
 `SharedRobotRuntime`, `Drive`, `DriveBase`, `PlantModel::integrate(...)`, and
-sensor snapshot publication. These checks are blocker gates, not just tuning
-score hints, so a candidate cannot pass if it breaks the Drive primitive or
-smooth-maneuver acceptance behavior.
+sensor snapshot publication. These checks report blocker flags for release-test
+contract visibility, but optimizer ranking uses strong continuous score terms
+for the underlying metric ratios instead of flat pass/fail penalties. Candidates
+therefore get useful scoring pressure while approaching, crossing, and improving
+beyond each mission-critical threshold.
 
 Build:
 
@@ -54,8 +56,8 @@ Stdout is JSON. The output includes baseline metrics, candidate metrics, and,
 when `--search` is used, the best candidate and top candidate list.
 
 Each evaluation includes `acceptance_scenarios`. A failed acceptance scenario
-sets `acceptance_blocked=true`, adds a large score penalty, and makes the
-process return failure.
+sets `acceptance_blocked=true`, adds its normalized score contribution, and
+makes the process return failure.
 
 ## Scenario Envelope
 
@@ -118,24 +120,27 @@ envelope alone does not see:
   `Drive::StartStraight(0.30 m, 0.30 m/s, 0.0 m/s exit)` through
   `SharedRobotRuntime::DriveService()` for up to 6000 exact 0.001 s ticks. It
   emits completion, elapsed ticks, final pose, and average encoder distance.
-  Non-completion is a blocker.
-- `drive_maneuver_s180ss_final_heading_acceptance`: runs smooth
-  `Drive::StartManeuver(S180SS)` at 0.50 m/s entry/exit for up to 20000 exact
-  0.001 s ticks. It emits completion, final heading error, final position
-  error, final pose, and encoder distance. Completion plus final heading error
-  at or below 3 degrees is required.
-- `drive_maneuver_s135sd_final_heading_acceptance`: same smooth maneuver
-  heading gate for `S135SD`.
-- `drive_maneuver_s135ld_final_heading_acceptance`: same smooth maneuver
-  heading gate for `S135LD`.
-- `drive_maneuver_s135ls_final_heading_acceptance`: same smooth maneuver
-  heading gate for `S135LS`.
+  Non-completion is a blocker and scores as a completion deficit.
+- DriveManeuver in-place coverage: `IP45`, `IP90`, `IP135`, and `IP180`, each
+  with completion, command-evidence, shift, heading, and elapsed-time gates.
+  Shift must stay below 0.020 m, heading error must stay at or below 3 degrees,
+  and elapsed time must stay within 40% of the `MotionLimits` kinematic minimum.
+- DriveManeuver smooth coverage: `S45LS`, `S45LD`, `S45SS`, `S45SD`, `S90LS`,
+  `S90SS`, `S90SD`, `S135LS`, `S135LD`, `S135SS`, `S135SD`, `S180LS`, and
+  `S180SS`, each with completion, command-evidence, velocity-variation,
+  yaw-acceleration-variation, yaw-rate-variation, final-position, and
+  final-heading gates. Position error must stay at or below 0.030 m and heading
+  error must stay at or below 3 degrees.
 
-The maneuver checks use the same smooth-entry and per-tick encoder/gyro
-estimator update pattern as the maneuver release tests, without importing the
-test harness. This keeps `PdTuning` focused on the candidate-dependent
-`Drive`/`DriveBase`/plant path while still exercising the canonical runtime
-service and maneuver geometry enough to catch final-heading regressions.
+The maneuver checks use the same smooth-entry, sample extraction, and per-tick
+encoder/gyro estimator update pattern as `DriveManeuverTests`, without
+importing the test harness. This keeps `PdTuning` focused on the
+candidate-dependent `Drive`/`DriveBase`/plant path while exercising the
+canonical runtime service and the full maneuver release-test metric matrix.
+Each maneuver metric also contributes a normalized squared score using its
+release-test tolerance or variation limit, so the search can tune toward lower
+shift, heading error, timing error, position error, and command variation even
+when a candidate has not yet passed the threshold.
 
 ## Oscillation Metrics
 

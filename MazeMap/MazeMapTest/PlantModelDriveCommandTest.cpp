@@ -30,6 +30,7 @@ namespace MazeMap
             const int stateIndex,
             const float dtSeconds) noexcept
         {
+			Assert::AreEqual(0.001f, dtSeconds, 1.0e-6f, L"Unexpected time step. Should be 1ms.");
             return (after(stateIndex) - before(stateIndex)) / dtSeconds;
         }
     }
@@ -37,6 +38,8 @@ namespace MazeMap
     TEST_CLASS(PlantModelDriveCommandTest)
     {
     public:
+
+        static constexpr float dtSeconds = 0.001f;
         TEST_METHOD(PlantModelAccelerationFeedforwardZeroRequestReturnsZeroCommand)
         {
             Vehicle vehicle;
@@ -139,7 +142,6 @@ namespace MazeMap
         TEST_METHOD(PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity)
         {
             constexpr float requestedAccelMps2 = 4.0f;
-            constexpr float dtSeconds = 0.004f;
             PlantModelTestRuntime runtime;
             PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();
@@ -175,7 +177,6 @@ namespace MazeMap
         TEST_METHOD(PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate)
         {
             constexpr float requestedYawAccelRadps2 = 25.0f;
-            constexpr float dtSeconds = 0.004f;
             PlantModelTestRuntime runtime;
             PlantModel& plant = runtime.plant;
             const PlantParams params = PlantParams::Default();

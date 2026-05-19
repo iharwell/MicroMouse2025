@@ -23,7 +23,7 @@ namespace MazeMap
 
         constexpr float kNaN = (std::numeric_limits<float>::quiet_NaN)();
         constexpr float kInf = (std::numeric_limits<float>::infinity)();
-        constexpr float kDtSeconds = 0.004f;
+        constexpr float kDtSeconds = 0.001f;
 
         VehicleState::StateVector CaptureRuntimeState(const VehicleState& runtimeState)
         {
@@ -365,6 +365,7 @@ namespace MazeMap
             float finalYawRateRadps = 0.0f;
             float maxAbsHeadingErrorRad = 0.0f;
             float finalRequestedYawRad = 0.0f;
+            float totalHeadingDelta = 0.0f;
             std::uint16_t finalTelemetryValidFlags = 0U;
 
             HeadingHoldLongRunScenario()
@@ -396,6 +397,7 @@ namespace MazeMap
                         (headingErrorRad <= initialHeadingErrorRad + 0.08f);
                     finalRequestedYawRad = telemetry.requestedYawRad;
                     finalTelemetryValidFlags = telemetry.telemetryValidFlags;
+					totalHeadingDelta += (VehicleState::NormalizeAngle(harness.runtimeState.GetRotationalVelocity() * 0.001f));
                 }
 
                 finalHeadingErrorRad = AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetOrientation());
@@ -1246,6 +1248,23 @@ namespace MazeMap
             Assert::IsTrue(
                 std::fabs(scenario.finalYawRateRadps) < 0.80f,
                 message.str().c_str());
+        }
+
+        TEST_METHOD(HeadingHoldLongRun_SingleTurn)
+        {
+            const HeadingHoldLongRunScenario scenario;
+            std::wstringstream message;
+            message << L"DRV30_HEADING_CLOSED_LOOP"
+                << L"\nfield=total heading traversal"
+                << L"\nactual=" << scenario.totalHeadingDelta
+				<< L"\ncriterion=" << (scenario.kTargetYawRad - scenario.kInitialYawRad)
+                << L"\ntolerance=1e-3";
+
+			Assert::AreEqual(
+				scenario.kTargetYawRad - scenario.kInitialYawRad,
+				scenario.totalHeadingDelta,
+				1.0e-3f,
+				message.str().c_str());
         }
     };
 }
