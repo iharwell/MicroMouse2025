@@ -21,6 +21,7 @@ namespace MazeMap
     class Vehicle;
     class MotorEncoderDrive;
 
+    // Private implementation details.
     // Contact-point velocity resolved in the project body frame (+X right, +Y forward).
     struct ContactKinematics
     {
@@ -28,6 +29,7 @@ namespace MazeMap
         float forwardVelocityMps = 0.0f;
     };
 
+    // Private implementation details.
     // Per-wheel-bank and per-contact kinematics derived from the current vehicle state.
     struct WheelKinematics
     {
@@ -36,6 +38,7 @@ namespace MazeMap
         std::array<ContactKinematics, 4> contacts{};
     };
 
+    // Private implementation details.
     // Diagnostic longitudinal slip and lateral slip ratios for each tire contact.
     struct SlipTargets
     {
@@ -44,6 +47,7 @@ namespace MazeMap
         std::array<float, 4> lateralRatio{};
     };
 
+    // Private implementation details.
     // Force request and normalized traction utilization for one tire contact patch.
     struct ContactForce
     {
@@ -54,7 +58,7 @@ namespace MazeMap
         float preProjectionUtilization = 0.0f;
     };
 
-    // Aggregate contact-force bundle for the four tire contact patches.
+    // Private implementation details.
     struct ContactForces
     {
         std::array<ContactForce, 4> contacts{};
@@ -100,6 +104,7 @@ namespace MazeMap
         }
     };
 
+    // Unsanctioned classifier.
     enum class MotionRegime : uint8_t
     {
         StoppedHold = 0,
@@ -123,7 +128,7 @@ namespace MazeMap
         float maxContactUtilization = 0.0f;
     };
 
-    // Tunable physical parameters and fixed sensor-mount facts for the UKF plant model.
+    // Unsanctioned proxy for Vehicle and Vehicle-owned subsystem data. Slated for removal.
     struct PlantParams
     {
         float massKg;
@@ -155,14 +160,7 @@ namespace MazeMap
         float staticFrictionTorqueNm = 0.0f;
         float staticFrictionMaxSpeedMps = 0.005f;
         float viscousFrictionNmPerRadps = 0.0f;
-        // In-place tire scrub applies as a persistent resisting yaw moment while the chassis is
-        // effectively not translating forward.
-        float pivotScrubRollingYawMomentNm = 0.11f;
-        float pivotScrubMaxForwardSpeedMps = 0.12f;
-
         float longitudinalTireStiffnessN = 0.0f;
-        float corneringStiffnessFrontNPerRad = 0.0f;
-        float corneringStiffnessRearNPerRad = 0.0f;
         float lateralVelocityDampingNsPerM = 0.0f;
         float yawRateDampingNmsPerRad = 0.0f;
         float muFront = 1.65f;
@@ -185,7 +183,7 @@ namespace MazeMap
         float maxIntegrationStepS = 0.0005f;
         float forceEpsilonN = 1.0e-4f;
         float fanDownforceAtFullDutyN = 0.7f;
-        float combinedAccelSustainedMps2 = 16.5f;
+        float combinedAccelSustainedMps2 = 1.91f * GRAVITY_MPS2;
         float combinedAccelNominalMps2 = 17.5f;
         float combinedAccelPeakMps2 = 20.1f;
 
@@ -258,8 +256,6 @@ namespace MazeMap
 
         float longitudinalTireStiffnessN = 0.0f;
         float invLongitudinalTireStiffnessN = 0.0f;
-        float frontCorneringStiffnessAxleNPerRad = 0.0f;
-        float rearCorneringStiffnessAxleNPerRad = 0.0f;
 
         float lateralDampingNPerM = 0.0f;
         float yawDampingNmPerRadps = 0.0f;
@@ -286,8 +282,6 @@ namespace MazeMap
         float supplyVoltageV = 0.0f;
         float rollingFrictionTorqueNm = 0.0f;
         float viscousFrictionNmPerRadps = 0.0f;
-        float pivotScrubRollingYawMomentNm = 0.0f;
-        float pivotScrubMaxForwardSpeedMps = 0.0f;
 
         float stopEnterSpeedMps = 0.0f;
         float stopExitSpeedMps = 0.0f;

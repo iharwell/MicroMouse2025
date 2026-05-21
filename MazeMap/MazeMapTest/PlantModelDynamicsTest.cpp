@@ -15,6 +15,14 @@ namespace MazeMap
     namespace
     {
         constexpr float kZeroLinearVelocityToleranceMps = 0.008f;
+        constexpr float kPi = 3.14159265358979323846f;
+        constexpr float kRadiansToDegrees = 180.0f / kPi;
+        constexpr float kInPlaceSlipContextDegrees = 22.6f;
+        constexpr float kSymmetricFrontLoadFraction = 0.5f;
+        constexpr int kFrontLeft = 0;
+        constexpr int kFrontRight = 1;
+        constexpr int kRearLeft = 2;
+        constexpr int kRearRight = 3;
     }
 
     TEST_CLASS(PlantModelDynamicsTest)
@@ -27,12 +35,8 @@ namespace MazeMap
 
             Assert::AreEqual(2.4e-7f, params.equivalentWheelInertiaKgM2, 1.0e-10f);
             Assert::AreEqual(4.12f, params.longitudinalTireStiffnessN, 0.01f);
-            Assert::AreEqual(0.223f, params.corneringStiffnessFrontNPerRad, 0.001f);
-            Assert::AreEqual(0.223f, params.corneringStiffnessRearNPerRad, 0.001f);
             Assert::AreEqual(params.equivalentWheelInertiaKgM2, prepared.wheelInertiaKgM2, 1.0e-10f);
             Assert::AreEqual(params.longitudinalTireStiffnessN, prepared.longitudinalTireStiffnessN, 0.01f);
-            Assert::AreEqual(2.0f * params.corneringStiffnessFrontNPerRad, prepared.frontCorneringStiffnessAxleNPerRad, 0.01f);
-            Assert::AreEqual(2.0f * params.corneringStiffnessRearNPerRad, prepared.rearCorneringStiffnessAxleNPerRad, 0.01f);
         }
 
         TEST_METHOD(PlantModelSymmetricDriveDoesNotCreateYawBias)
@@ -102,8 +106,6 @@ namespace MazeMap
             PlantModelTestRuntime runtime;
             PlantModel& plant = runtime.plant;
             PlantParams params = PlantParams::Default();
-            params.corneringStiffnessFrontNPerRad = 19.5f;
-            params.corneringStiffnessRearNPerRad = 17.25f;
             params.staticFrictionTorqueNm = 0.012f;
             const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
 
@@ -323,61 +325,193 @@ namespace MazeMap
             Assert::IsTrue(extremeSlipAccelMps2 >= highSlipAccelMps2 - 0.40f);
         }
 
-        TEST_METHOD(PlantModelInPlacePivotScrubStopsYawFromYawInertiaAcrossTicks)
+        TEST_METHOD(PlantModelInPlaceSlipSaturatesContactPatchSideForces)
         {
             PlantModelTestRuntime runtime;
             PlantModel& plant = runtime.plant;
             PlantParams params = PlantParams::Default();
             params.longitudinalTireStiffnessN = 0.0f;
-            params.corneringStiffnessFrontNPerRad = 0.0f;
-            params.corneringStiffnessRearNPerRad = 0.0f;
             params.yawRateDampingNmsPerRad = 0.0f;
-            params.pivotScrubRollingYawMomentNm = 0.11f;
+            params.frontLoadFraction = kSymmetricFrontLoadFraction;
+            params.trackWidthM = Vehicle::GetPhysicalModel().trackWidthPhysicalMinM;
+            const float halfTrackM = 0.5f * params.trackWidthM;
+            const float contactY = std::fabs(params.contactPatchLongitudinalOffsetM);
+            params.contactPositionsBodyM[kFrontLeft] = Eigen::Vector2f(-halfTrackM, contactY);
+            params.contactPositionsBodyM[kFrontRight] = Eigen::Vector2f(halfTrackM, contactY);
+            params.contactPositionsBodyM[kRearLeft] = Eigen::Vector2f(-halfTrackM, -contactY);
+            params.contactPositionsBodyM[kRearRight] = Eigen::Vector2f(halfTrackM, -contactY);
+
+            App::Internal::CommandVector control{};
+            control.SetLeftCommand(0.0f);
+            control.SetRightCommand(0.0f);
+
+            constexpr float yawRateRadps = 30.0f;
+            VehicleState::StateVector state = VehicleState::StateVector::Zero();
+            state(VehicleState::kR) = yawRateRadps;
+            state(VehicleState::kOmegaL) = (halfTrackM * yawRateRadps) / params.wheelRadiusM;
+            state(VehicleState::kOmegaR) = -(halfTrackM * yawRateRadps) / params.wheelRadiusM;
+
+            const SlipTargets slip = plant.slipTargets(state, params);
+            const float frontSlipAngleRad = std::fabs(std::atan(slip.lateralRatio[kFrontLeft]));
+            const float rearSlipAngleRad = std::fabs(std::atan(slip.lateralRatio[kRearLeft]));
+            const float totalSustainedLateralForceN =
+                params.massKg * Vehicle::GetSustainedLateralAccelerationReferenceMps2();
+            const float frontContactLimitN =
+                0.5f * kSymmetricFrontLoadFraction * totalSustainedLateralForceN;
+            const float rearContactLimitN =
+                0.5f * (1.0f - kSymmetricFrontLoadFraction) * totalSustainedLateralForceN;
+
+            Assert::AreEqual(kInPlaceSlipContextDegrees, frontSlipAngleRad * kRadiansToDegrees, 0.5f);
+            Assert::AreEqual(kInPlaceSlipContextDegrees, rearSlipAngleRad * kRadiansToDegrees, 0.5f);
+
+            const ContactForces forces = plant.tireForces(state, control, params);
+            Assert::AreEqual(-frontContactLimitN, forces.contacts[kFrontLeft].rightForceN, 1.0e-4f);
+            Assert::AreEqual(-frontContactLimitN, forces.contacts[kFrontRight].rightForceN, 1.0e-4f);
+            Assert::AreEqual(rearContactLimitN, forces.contacts[kRearLeft].rightForceN, 1.0e-4f);
+            Assert::AreEqual(rearContactLimitN, forces.contacts[kRearRight].rightForceN, 1.0e-4f);
+
+            const PlantDerivatives derivatives = plant.forwardStep(state, control, params);
+            const float saturatedYawDecelRadps2 =
+                (2.0f * contactY * (frontContactLimitN + rearContactLimitN)) /
+                params.yawInertiaKgM2;
+            Assert::AreEqual(
+                -saturatedYawDecelRadps2,
+                derivatives.yawAccelRadps2,
+                1.0e-3f);
+        }
+
+        TEST_METHOD(PlantModelYawAccelerationIsContinuousAcrossRetiredPivotForwardSpeedCutoff)
+        {
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
+            PlantParams params = PlantParams::Default();
+            params.longitudinalTireStiffnessN = 0.0f;
+            params.yawRateDampingNmsPerRad = 0.0f;
+            params.frontLoadFraction = kSymmetricFrontLoadFraction;
+            params.trackWidthM = Vehicle::GetPhysicalModel().trackWidthPhysicalMinM;
+            const float halfTrackM = 0.5f * params.trackWidthM;
+            const float contactY = std::fabs(params.contactPatchLongitudinalOffsetM);
+
+            App::Internal::CommandVector control{};
+            control.SetLeftCommand(0.0f);
+            control.SetRightCommand(0.0f);
+
+            constexpr float retiredForwardCutoffMps = 0.12f;
+            constexpr float cutoffDeltaMps = 0.0005f;
+            constexpr float yawRateRadps = 3.0f;
+            VehicleState::StateVector belowState = VehicleState::StateVector::Zero();
+            belowState(VehicleState::kU) = retiredForwardCutoffMps - cutoffDeltaMps;
+            belowState(VehicleState::kR) = yawRateRadps;
+            belowState(VehicleState::kOmegaL) =
+                (belowState(VehicleState::kU) + (halfTrackM * yawRateRadps)) /
+                params.wheelRadiusM;
+            belowState(VehicleState::kOmegaR) =
+                (belowState(VehicleState::kU) - (halfTrackM * yawRateRadps)) /
+                params.wheelRadiusM;
+
+            VehicleState::StateVector aboveState = VehicleState::StateVector::Zero();
+            aboveState(VehicleState::kU) = retiredForwardCutoffMps + cutoffDeltaMps;
+            aboveState(VehicleState::kR) = yawRateRadps;
+            aboveState(VehicleState::kOmegaL) =
+                (aboveState(VehicleState::kU) + (halfTrackM * yawRateRadps)) /
+                params.wheelRadiusM;
+            aboveState(VehicleState::kOmegaR) =
+                (aboveState(VehicleState::kU) - (halfTrackM * yawRateRadps)) /
+                params.wheelRadiusM;
+
+            const PlantDerivatives below =
+                plant.forwardStep(
+                    belowState,
+                    control,
+                    params);
+            const PlantDerivatives above =
+                plant.forwardStep(
+                    aboveState,
+                    control,
+                    params);
+            const float totalSustainedLateralForceN =
+                params.massKg * Vehicle::GetSustainedLateralAccelerationReferenceMps2();
+            const float frontContactLimitN =
+                0.5f * kSymmetricFrontLoadFraction * totalSustainedLateralForceN;
+            const float rearContactLimitN =
+                0.5f * (1.0f - kSymmetricFrontLoadFraction) * totalSustainedLateralForceN;
+            const float saturatedYawDecelRadps2 =
+                (2.0f * contactY * (frontContactLimitN + rearContactLimitN)) /
+                params.yawInertiaKgM2;
+
+            Assert::IsTrue(std::isfinite(below.yawAccelRadps2));
+            Assert::IsTrue(std::isfinite(above.yawAccelRadps2));
+            Assert::IsTrue(below.yawAccelRadps2 < 0.0f);
+            Assert::IsTrue(above.yawAccelRadps2 < 0.0f);
+            Assert::IsTrue(std::fabs(below.yawAccelRadps2) <= saturatedYawDecelRadps2);
+            Assert::IsTrue(std::fabs(above.yawAccelRadps2) <= saturatedYawDecelRadps2);
+            Assert::IsTrue(
+                std::fabs(above.yawAccelRadps2 - below.yawAccelRadps2) <
+                0.01f * saturatedYawDecelRadps2);
+        }
+
+        TEST_METHOD(PlantModelInPlaceSlipIntegratesYawRateToStopBandWithinContactForceWindow)
+        {
+            PlantModelTestRuntime runtime;
+            PlantModel& plant = runtime.plant;
+            PlantParams params = PlantParams::Default();
+            params.longitudinalTireStiffnessN = 0.0f;
+            params.yawRateDampingNmsPerRad = 0.0f;
+            params.frontLoadFraction = kSymmetricFrontLoadFraction;
+            params.trackWidthM = Vehicle::GetPhysicalModel().trackWidthPhysicalMinM;
+            const float halfTrackM = 0.5f * params.trackWidthM;
+            const float contactY = std::fabs(params.contactPatchLongitudinalOffsetM);
+            params.contactPositionsBodyM[kFrontLeft] = Eigen::Vector2f(-halfTrackM, contactY);
+            params.contactPositionsBodyM[kFrontRight] = Eigen::Vector2f(halfTrackM, contactY);
+            params.contactPositionsBodyM[kRearLeft] = Eigen::Vector2f(-halfTrackM, -contactY);
+            params.contactPositionsBodyM[kRearRight] = Eigen::Vector2f(halfTrackM, -contactY);
 
             App::Internal::CommandVector control{};
             control.SetLeftCommand(0.0f);
             control.SetRightCommand(0.0f);
 
             constexpr float dtSeconds = 0.001f;
-            constexpr float initialYawRateRadps = 3.0f;
+            constexpr float initialYawRateRadps = 30.0f;
+            const float totalSustainedLateralForceN =
+                params.massKg * Vehicle::GetSustainedLateralAccelerationReferenceMps2();
+            const float frontContactLimitN =
+                0.5f * kSymmetricFrontLoadFraction * totalSustainedLateralForceN;
+            const float rearContactLimitN =
+                0.5f * (1.0f - kSymmetricFrontLoadFraction) * totalSustainedLateralForceN;
+            const float saturatedYawDecelRadps2 =
+                (2.0f * contactY * (frontContactLimitN + rearContactLimitN)) /
+                params.yawInertiaKgM2;
+            const float saturatedStopTimeS =
+                (initialYawRateRadps - params.stopEnterYawRateRadps) /
+                saturatedYawDecelRadps2;
+            const float maxAllowedStopTimeS = 1.20f * saturatedStopTimeS;
+            const int maxSteps =
+                static_cast<int>(std::ceil(maxAllowedStopTimeS / dtSeconds));
+
             VehicleState::StateVector state = VehicleState::StateVector::Zero();
             state(VehicleState::kR) = initialYawRateRadps;
+            state(VehicleState::kOmegaL) = (halfTrackM * initialYawRateRadps) / params.wheelRadiusM;
+            state(VehicleState::kOmegaR) = -(halfTrackM * initialYawRateRadps) / params.wheelRadiusM;
 
-            const float expectedYawDecelRadps2 =
-                params.pivotScrubRollingYawMomentNm / params.yawInertiaKgM2;
-            const int expectedStopTicks =
-                static_cast<int>(std::ceil(initialYawRateRadps / (expectedYawDecelRadps2 * dtSeconds)));
-            int observedStopTicks = 0;
-            for (; observedStopTicks < 10; ++observedStopTicks)
+            float previousYawRateAbsRadps = std::fabs(state(VehicleState::kR));
+            int stopStep = -1;
+            for (int step = 0; step < maxSteps; ++step)
             {
-                const PlantDerivatives derivatives =
-                    plant.forwardStep(
-                        state,
-                        control,
-                        params);
-                if (state(VehicleState::kR) <= params.stopEnterYawRateRadps)
+                state = plant.integrate(state, control, dtSeconds, params);
+                const float yawRateAbsRadps = std::fabs(state(VehicleState::kR));
+                Assert::IsTrue(yawRateAbsRadps <= previousYawRateAbsRadps + 1.0e-4f);
+                previousYawRateAbsRadps = yawRateAbsRadps;
+                if (yawRateAbsRadps <= params.stopEnterYawRateRadps)
                 {
+                    stopStep = step + 1;
                     break;
                 }
-
-                Assert::AreEqual(
-                    -expectedYawDecelRadps2,
-                    derivatives.yawAccelRadps2,
-                    1.0e-3f);
-                state =
-                    plant.integrate(
-                        state,
-                        control,
-                        dtSeconds,
-                        params);
             }
 
-            const int stopTickError =
-                (observedStopTicks > expectedStopTicks) ?
-                (observedStopTicks - expectedStopTicks) :
-                (expectedStopTicks - observedStopTicks);
-            Assert::IsTrue(stopTickError <= 1);
-            Assert::IsTrue(std::fabs(state(VehicleState::kR)) <= params.stopEnterYawRateRadps);
+            Assert::IsTrue(stopStep > 0);
+            Assert::IsTrue(
+                static_cast<float>(stopStep) * dtSeconds <=
+                maxAllowedStopTimeS + dtSeconds);
         }
 
         TEST_METHOD(PlantModelExactRestHoldKeepsMotionStateAtZero)

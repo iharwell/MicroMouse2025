@@ -143,9 +143,10 @@ namespace MazeMap
         }
 
         // Shared sustained lateral-acceleration reference used by both planning and estimator retunes.
+        // Inclined-ramp slip begins at about 63.2 degrees, matching roughly 1.91 g sustained lateral hold.
         static constexpr float GetSustainedLateralAccelerationReferenceMps2() noexcept
         {
-            return 16.5f;
+            return 1.91f * GRAVITY_MPS2;
         }
 
         static constexpr float GetDriveWheelRadiusM() noexcept
