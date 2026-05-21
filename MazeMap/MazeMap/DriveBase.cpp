@@ -80,10 +80,9 @@ namespace MazeMap
                 targetYawAccelRadps2,
                 targetYawRad);
 
-        const VehicleState::StateVector stateSnapshot = CaptureStateSnapshot(_runtimeState);
-        const float observedForwardMps = stateSnapshot(VehicleState::kU);
-        const float observedYawRateRadps = stateSnapshot(VehicleState::kR);
-        const float observedYawRad = stateSnapshot(VehicleState::kPsi);
+        const float observedForwardMps = _runtimeState.GetVelocity();
+        const float observedYawRateRadps = _runtimeState.GetRotationalVelocity();
+        const float observedYawRad = _runtimeState.GetOrientation();
 
         float forwardFeedbackAccelMps2 = (std::numeric_limits<float>::quiet_NaN)();
         if (std::isfinite(targetForwardMps) && std::isfinite(observedForwardMps))
@@ -172,14 +171,12 @@ namespace MazeMap
         telemetry.leftPlantCommand = plantCommand.LeftCommand();
         telemetry.rightPlantCommand = plantCommand.RightCommand();
 
-        CommandVector finalCommand(
-            ClampCommandComponent(plantCommand.LeftCommand()),
-            ClampCommandComponent(plantCommand.RightCommand()));
+		CommandVector finalCommand = plantCommand;
+        finalCommand.ClampCommand();
         if (!plantCommand.IsFinite())
         {
             finalCommand = CommandVector(0.0f, 0.0f);
             telemetry.commandKindFlags |= DriveTelemetry::kCommandKindSolverFailureEvidence;
-            telemetry.solverFailureFlags |= DriveTelemetry::kSolverFailurePlantNonFinite;
             telemetry.telemetryValidFlags &= ~DriveTelemetry::kTelemetryPlantCommandValid;
         }
 
@@ -201,23 +198,6 @@ namespace MazeMap
         return _lastTelemetry;
     }
 
-    VehicleState::StateVector DriveBase::CaptureStateSnapshot(
-        const MazeMap::VehicleState& runtimeState) noexcept
-    {
-        VehicleState::StateVector state = VehicleState::StateVector::Zero();
-        state(VehicleState::kPx) = runtimeState.GetPositionX();
-        state(VehicleState::kPy) = runtimeState.GetPositionY();
-        state(VehicleState::kPsi) = runtimeState.GetOrientation();
-        state(VehicleState::kU) = runtimeState.GetVelocity();
-        state(VehicleState::kV) = runtimeState.GetLateralVelocity();
-        state(VehicleState::kR) = runtimeState.GetRotationalVelocity();
-        state(VehicleState::kOmegaL) = runtimeState.GetWheelSpeedLeft();
-        state(VehicleState::kOmegaR) = runtimeState.GetWheelSpeedRight();
-        state(VehicleState::kBgz) = runtimeState.GetGyroBiasZ();
-        VehicleState::NormalizeStateVector(state);
-        return state;
-    }
-
     float DriveBase::ComposeAccelerationObjective(float requestedAccel, float feedbackAccel) noexcept
     {
         const bool hasRequestedAccel = std::isfinite(requestedAccel);
@@ -227,11 +207,6 @@ namespace MazeMap
             return requestedAccel + (hasFeedbackAccel ? feedbackAccel : 0.0f);
         }
         return hasFeedbackAccel ? feedbackAccel : (std::numeric_limits<float>::quiet_NaN)();
-    }
-
-    float DriveBase::ClampCommandComponent(float command) noexcept
-    {
-        return std::isfinite(command) ? (std::clamp)(command, -1.0f, 1.0f) : 0.0f;
     }
 
     float DriveBase::ComputeForwardVelocityFeedbackAccelMps2(
@@ -277,45 +252,6 @@ namespace MazeMap
         return std::isfinite(composedAccel) ? composedAccel : 0.0f;
     }
 
-    std::uint16_t DriveBase::DecodeScalarIntentFlags(
-        float targetForwardMps,
-        float targetYawRateRadps,
-        float targetForwardAccelMps2,
-        float targetYawAccelRadps2,
-        float targetYawRad) noexcept
-    {
-        std::uint16_t flags = 0U;
-        flags |=
-            std::isnan(targetForwardMps) ? DriveTelemetry::kScalarForwardVelocityInactive :
-            (std::isfinite(targetForwardMps) ? DriveTelemetry::kScalarForwardVelocityFinite :
-                DriveTelemetry::kScalarForwardVelocityMaximize);
-        flags |=
-            std::isnan(targetYawRateRadps) ? DriveTelemetry::kScalarYawRateInactive :
-            (std::isfinite(targetYawRateRadps) ? DriveTelemetry::kScalarYawRateFinite :
-                DriveTelemetry::kScalarYawRateMaximize);
-        flags |=
-            std::isnan(targetForwardAccelMps2) ? DriveTelemetry::kScalarForwardAccelInactive :
-            (std::isfinite(targetForwardAccelMps2) ? DriveTelemetry::kScalarForwardAccelFinite :
-                DriveTelemetry::kScalarForwardAccelMaximize);
-        flags |=
-            std::isnan(targetYawAccelRadps2) ? DriveTelemetry::kScalarYawAccelInactive :
-            (std::isfinite(targetYawAccelRadps2) ? DriveTelemetry::kScalarYawAccelFinite :
-                DriveTelemetry::kScalarYawAccelMaximize);
-        flags |=
-            std::isnan(targetYawRad) ? DriveTelemetry::kScalarYawInactive :
-            (std::isfinite(targetYawRad) ? DriveTelemetry::kScalarYawFinite :
-                DriveTelemetry::kScalarYawMaximizeUnsupported);
-        return flags;
-    }
-
-    std::uint16_t DriveBase::DecodeUnsupportedScalarIntentFlags(float targetYawRad) noexcept
-    {
-        return
-            std::isinf(targetYawRad) ?
-            DriveTelemetry::kSolverFailureUnsupportedScalarIntent :
-            0U;
-    }
-
     DriveTelemetry DriveBase::BuildBaseTelemetry(
         std::uint16_t commandKindFlags,
         float targetForwardMps,
@@ -332,18 +268,9 @@ namespace MazeMap
         telemetry.requestedYawAccelRadps2 = targetYawAccelRadps2;
         telemetry.requestedYawRad = targetYawRad;
         telemetry.commandKindFlags = commandKindFlags;
-        telemetry.scalarIntentFlags =
-            DecodeScalarIntentFlags(
-                targetForwardMps,
-                targetYawRateRadps,
-                targetForwardAccelMps2,
-                targetYawAccelRadps2,
-                targetYawRad);
         telemetry.telemetryValidFlags =
             DriveTelemetry::kTelemetryProposalSequenceValid |
             DriveTelemetry::kTelemetryPlantCommandValid;
-        telemetry.solverFailureFlags =
-            DecodeUnsupportedScalarIntentFlags(targetYawRad);
         return telemetry;
     }
 }

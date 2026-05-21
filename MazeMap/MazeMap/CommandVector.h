@@ -59,6 +59,26 @@ namespace MazeMap::App::Internal
             _rightCommand = averageCommand - differentialCommand;
         }
 
+        void ClampCommand() noexcept
+        {
+			if (_leftCommand > 1.0f)
+			{
+				_leftCommand = 1.0f;
+			}
+			else if (_leftCommand < -1.0f)
+			{
+				_leftCommand = -1.0f;
+			}
+			if (_rightCommand > 1.0f)
+			{
+				_rightCommand = 1.0f;
+			}
+			else if (_rightCommand < -1.0f)
+			{
+				_rightCommand = -1.0f;
+			}
+        }
+
         bool IsFinite() const noexcept
         {
             return std::isfinite(_leftCommand) && std::isfinite(_rightCommand);

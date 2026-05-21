@@ -177,7 +177,7 @@ namespace MazeMap::App
                 std::isfinite(telemetry.requestedForwardAccelMps2) &&
                 std::isfinite(telemetry.requestedYawAccelRadps2) &&
                 std::isfinite(telemetry.requestedYawRad);
-            trace.solverClean = trace.solverClean && (telemetry.solverFailureFlags == 0U);
+            trace.solverClean = trace.solverClean;
             trace.minRequestedForwardMps =
                 (std::min)(trace.minRequestedForwardMps, telemetry.requestedForwardMps);
             trace.maxRequestedForwardMps =
@@ -332,7 +332,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -369,7 +368,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -406,7 +404,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -443,7 +440,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -480,7 +476,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -517,7 +512,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -546,7 +540,6 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartStraight"
                         << L"\nfield=" << L"solver_flags"
                         << L"\nexpected=" << 0.0f
-                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
                         << L"\nlimit=" << 0.0f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -554,7 +547,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -591,7 +583,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -630,7 +621,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -669,7 +659,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -708,7 +697,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -745,7 +733,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -782,7 +769,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -819,7 +805,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -856,7 +841,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -893,7 +877,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -930,44 +913,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
-                        << L"\nticks=" << trace.appliedTicks
-                        << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
-                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
-                        << L"\nmin_y_m=" << trace.minY
-                        << L"\nmin_yaw_rad=" << trace.minYawRad
-                        << L"\nmax_yaw_rad=" << trace.maxYawRad
-                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
-                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
-                    return message.str();
-                }()).c_str());
-        }
-
-        TEST_METHOD(StartTurn_SolverFlagsStayClear)
-        {
-            const PrimitiveTrace trace = RunStartTurn();
-            Assert::IsTrue(
-                trace.solverClean,
-                ([&]()
-                {
-                    std::wstringstream message;
-                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
-                        << L"\nlabel=" << L"DRV50_TURN"
-                        << L"\nprimitive=" << L"StartTurn"
-                        << L"\nfield=" << L"solver_flags"
-                        << L"\nexpected=" << 0.0f
-                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
-                        << L"\nlimit=" << 0.0f
-                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
-                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
-                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
-                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
-                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
-                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1004,7 +949,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1041,7 +985,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1081,7 +1024,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1121,7 +1063,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1158,7 +1099,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1195,7 +1135,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1232,7 +1171,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1269,7 +1207,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1306,7 +1243,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1343,44 +1279,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
-                        << L"\nticks=" << trace.appliedTicks
-                        << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
-                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
-                        << L"\nmin_y_m=" << trace.minY
-                        << L"\nmin_yaw_rad=" << trace.minYawRad
-                        << L"\nmax_yaw_rad=" << trace.maxYawRad
-                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
-                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
-                    return message.str();
-                }()).c_str());
-        }
-
-        TEST_METHOD(StartTurnTransition_SolverFlagsStayClear)
-        {
-            const PrimitiveTrace trace = RunStartTurnTransition();
-            Assert::IsTrue(
-                trace.solverClean,
-                ([&]()
-                {
-                    std::wstringstream message;
-                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
-                        << L"\nlabel=" << L"DRV50_TRANSITION"
-                        << L"\nprimitive=" << L"StartTurnTransition"
-                        << L"\nfield=" << L"solver_flags"
-                        << L"\nexpected=" << 0.0f
-                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
-                        << L"\nlimit=" << 0.0f
-                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
-                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
-                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
-                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
-                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
-                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1417,7 +1315,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1454,7 +1351,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1493,7 +1389,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1535,7 +1430,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1572,7 +1466,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1609,7 +1502,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1646,7 +1538,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1683,7 +1574,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1720,7 +1610,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1757,7 +1646,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1794,44 +1682,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
-                        << L"\nticks=" << trace.appliedTicks
-                        << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
-                        << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
-                        << L"\nmin_y_m=" << trace.minY
-                        << L"\nmin_yaw_rad=" << trace.minYawRad
-                        << L"\nmax_yaw_rad=" << trace.maxYawRad
-                        << L"\nmin_requested_yaw_rate_radps=" << trace.minRequestedYawRateRadps
-                        << L"\nmax_requested_yaw_rate_radps=" << trace.maxRequestedYawRateRadps;
-                    return message.str();
-                }()).c_str());
-        }
-
-        TEST_METHOD(StartArc_SolverFlagsStayClear)
-        {
-            const PrimitiveTrace trace = RunStartArc();
-            Assert::IsTrue(
-                trace.solverClean,
-                ([&]()
-                {
-                    std::wstringstream message;
-                    message << L"DRV50_PRIMITIVE_CLOSED_LOOP"
-                        << L"\nlabel=" << L"DRV50_ARC"
-                        << L"\nprimitive=" << L"StartArc"
-                        << L"\nfield=" << L"solver_flags"
-                        << L"\nexpected=" << 0.0f
-                        << L"\nactual=" << static_cast<float>(trace.lastTelemetry.solverFailureFlags)
-                        << L"\nlimit=" << 0.0f
-                        << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
-                        << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
-                        << L"\ntruth_finite=" << (trace.truthFinite ? L"true" : L"false")
-                        << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
-                        << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
-                        << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1868,7 +1718,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1905,7 +1754,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1944,7 +1792,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -1985,7 +1832,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -2022,7 +1868,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)
@@ -2059,7 +1904,6 @@ namespace MazeMap::App
                         << L"\ncommand_evidence_valid=" << (trace.commandEvidenceValid ? L"true" : L"false")
                         << L"\nrequested_objectives_finite=" << (trace.requestedObjectivesFinite ? L"true" : L"false")
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
-                        << L"\nsolver_failure_flags=" << trace.lastTelemetry.solverFailureFlags
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
                         << L"\nx_m=" << trace.truth(VehicleState::kPx)

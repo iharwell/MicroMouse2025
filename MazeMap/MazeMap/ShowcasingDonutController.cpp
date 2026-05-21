@@ -544,7 +544,6 @@ namespace MazeMap::App::Internal
         row.progress_norm = labels.progressNorm;
         row.mode_flags = driveTelemetry.commandKindFlags;
         row.clipping_flags = 0U;
-        row.saturation_flags = driveTelemetry.solverFailureFlags;
         row.watchdog_flags = 0U;
         row.ukf_state_px_m = state.GetPositionX();
         row.ukf_state_py_m = state.GetPositionY();

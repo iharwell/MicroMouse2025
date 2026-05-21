@@ -17,8 +17,8 @@ namespace
     // characterization runs are completed. The maneuver planner only uses the shared lateral limit here;
     // runtime yaw-rate ceilings are applied separately by the motion controller.
     constexpr float kVehiclePeakForwardAccelerationMps2 = 15.0f;
-    constexpr float kVehiclePeakRotationalVelocityRadps = 9.0f;
-    constexpr float kVehiclePeakAngularAccelerationRadps2 = 45.0f;
+    constexpr float kVehiclePeakRotationalVelocityRadps = 27.0f;
+    constexpr float kVehiclePeakAngularAccelerationRadps2 = 645.0f;
     constexpr float kVehicleMaxSpeedMps = 4.0f;
 
     constexpr uint8_t kFrontRightWallSensorPin = 23U;

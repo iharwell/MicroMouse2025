@@ -87,7 +87,6 @@ namespace MazeMap::App::Internal::Runtime
     X(float,         speed_bin)                    \
     X(std::uint16_t, repeat_index)                 \
     X(std::uint16_t, mode_flags)                   \
-    X(std::uint16_t, saturation_flags)             \
     X(std::uint8_t,  ukf_mode_id)                  \
     X(std::uint8_t,  bias_update_enabled)          \
     X(MazeMap::VehicleStateLogEntry, ukf_state) \

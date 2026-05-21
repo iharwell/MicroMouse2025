@@ -44,7 +44,6 @@ namespace MazeMap::App::Internal::Runtime
     FIELD(float, progress_norm) \
     FIELD(std::uint16_t, mode_flags) \
     FIELD(std::uint32_t, clipping_flags) \
-    FIELD(std::uint16_t, saturation_flags) \
     FIELD(std::uint16_t, watchdog_flags) \
     FIELD(std::uint16_t, measurement_flags) \
     FIELD(std::uint8_t, ukf_mode_id) \

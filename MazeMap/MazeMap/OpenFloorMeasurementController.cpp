@@ -1430,7 +1430,6 @@ namespace MazeMap::App::Internal
         row.speed_bin = speedBinValue;
         row.repeat_index = repeatIndex;
         row.mode_flags = driveTelemetry.commandKindFlags;
-        row.saturation_flags = driveTelemetry.solverFailureFlags;
         row.SetVehicleState(state);
         row.measured_linear_speed_mps = measuredLinearSpeedMps;
         row.measured_angular_speed_radps = measuredAngularSpeedRadps;

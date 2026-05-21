@@ -36,10 +36,7 @@ namespace MazeMap
         const DriveTelemetry& LastTelemetry() const noexcept;
 
     private:
-        static MazeMap::VehicleState::StateVector CaptureStateSnapshot(
-            const MazeMap::VehicleState& runtimeState) noexcept;
         static float ComposeAccelerationObjective(float requestedAccel, float feedbackAccel) noexcept;
-        static float ClampCommandComponent(float command) noexcept;
         static float ComputeForwardVelocityFeedbackAccelMps2(
             const MazeMap::PDCluster& feedbackTuning,
             float forwardVelocityErrorMps) noexcept;
@@ -51,13 +48,6 @@ namespace MazeMap
             float headingErrorRad,
             float headingErrorRateRadps) noexcept;
         static float ResolveComposedAccelerationObjective(float composedAccel, float maximizeLimit) noexcept;
-        static std::uint16_t DecodeScalarIntentFlags(
-            float targetForwardMps,
-            float targetYawRateRadps,
-            float targetForwardAccelMps2,
-            float targetYawAccelRadps2,
-            float targetYawRad) noexcept;
-        static std::uint16_t DecodeUnsupportedScalarIntentFlags(float targetYawRad) noexcept;
 
         DriveTelemetry BuildBaseTelemetry(
             std::uint16_t commandKindFlags,

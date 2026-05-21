@@ -26,10 +26,8 @@ struct DriveTelemetry
     float rightDriveCommand = 0.0f;
 
     std::uint16_t commandKindFlags = 0U;
-    std::uint16_t scalarIntentFlags = 0U;
     std::uint16_t feedbackBranchFlags = 0U;
     std::uint16_t telemetryValidFlags = 0U;
-    std::uint16_t solverFailureFlags = 0U;
 
     static constexpr std::uint16_t kCommandKindStaleEvidence = 1U << 0;
     static constexpr std::uint16_t kCommandKindBodyProposal = 1U << 1;
