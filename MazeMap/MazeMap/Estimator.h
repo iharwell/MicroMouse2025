@@ -120,8 +120,8 @@ namespace MazeMap
             return VehicleState::DefaultInitialCovariance();
         }
         bool reset(
-            const SrUkfCore::StateVector& state,
-            const SrUkfCore::StateMatrix& covariance) noexcept;
+            const VehicleState::StateVector& state,
+            const VehicleState::StateMatrix& covariance) noexcept;
         void ResetRuntimeMetadata() noexcept;
         void TriggerFault(const char* reason) noexcept;
 

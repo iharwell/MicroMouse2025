@@ -1,16 +1,24 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
-#include "..\MazeMap\Defines.h"
-#include "..\MazeMap\EncoderObs.h"
-#include "..\MazeMap\PlantModel.h"
-#include "..\MazeMap\Vehicle.h"
-#include "..\MazeMap\VehicleState.h"
-
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdarg>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <sstream>
+
+#include "..\MazeMap\CommandVector.h"
+#include "..\MazeMap\Defines.h"
+#include "..\MazeMap\EigenCompat.h"
+#include "..\MazeMap\EncoderObs.h"
+#include "..\MazeMap\Maze.h"
+#include "..\MazeMap\SensorMount.h"
+#include "..\MazeMap\Vehicle.h"
+#include "..\MazeMap\VehicleState.h"
+#include "..\MazeMap\PlantModel.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -33,7 +41,7 @@ namespace MazeMap
             }
         };
 
-        VehicleState::StateVector MakeState(
+        VehicleState MakeState(
             float xM,
             float yM,
             float yawRad,
@@ -43,30 +51,23 @@ namespace MazeMap
             float leftWheelSpeedRadps,
             float rightWheelSpeedRadps) noexcept
         {
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
-            state(VehicleState::kPx) = xM;
-            state(VehicleState::kPy) = yM;
-            state(VehicleState::kPsi) = yawRad;
-            state(VehicleState::kU) = forwardVelocityMps;
-            state(VehicleState::kV) = lateralVelocityMps;
-            state(VehicleState::kR) = yawRateRadps;
-            state(VehicleState::kOmegaL) = leftWheelSpeedRadps;
-            state(VehicleState::kOmegaR) = rightWheelSpeedRadps;
-            VehicleState::NormalizeStateVector(state);
+            VehicleState state;
+            state.SetPosition(Eigen::Vector2f(xM, yM));
+            state.SetOrientation(yawRad);
+            state.SetVelocity(forwardVelocityMps);
+            state.SetLateralVelocity(lateralVelocityMps);
+            state.SetRotationalVelocity(yawRateRadps);
+            state.SetWheelSpeedLeft(leftWheelSpeedRadps);
+            state.SetWheelSpeedRight(rightWheelSpeedRadps);
             return state;
         }
 
-        VehicleState::StateVector MakeRollingState(
-            const PlantParams& params,
+        VehicleState MakeRollingState(
             float forwardVelocityMps,
             float yawRateRadps,
             float lateralVelocityMps = 0.0f,
             float yawRad = 0.0f) noexcept
         {
-            const float leftWheelMps =
-                forwardVelocityMps + (0.5f * params.trackWidthM * yawRateRadps);
-            const float rightWheelMps =
-                forwardVelocityMps - (0.5f * params.trackWidthM * yawRateRadps);
             return MakeState(
                 0.0f,
                 0.0f,
@@ -74,8 +75,10 @@ namespace MazeMap
                 forwardVelocityMps,
                 lateralVelocityMps,
                 yawRateRadps,
-                leftWheelMps / params.wheelRadiusM,
-                rightWheelMps / params.wheelRadiusM);
+                Vehicle::WheelOmegaFromLinearVelocity(
+                    Vehicle::LeftWheelLinearVelocityFromBody(forwardVelocityMps, yawRateRadps)),
+                Vehicle::WheelOmegaFromLinearVelocity(
+                    Vehicle::RightWheelLinearVelocityFromBody(forwardVelocityMps, yawRateRadps)));
         }
 
         App::Internal::CommandVector MakeCommand(float left, float right) noexcept
@@ -86,158 +89,41 @@ namespace MazeMap
             return command;
         }
 
-        void ApplyStateVectorToRuntime(
-            VehicleState& runtimeState,
-            const VehicleState::StateVector& state) noexcept
-        {
-            runtimeState.SetPosition(Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)));
-            runtimeState.SetOrientation(state(VehicleState::kPsi));
-            runtimeState.SetVelocity(state(VehicleState::kU));
-            runtimeState.SetLateralVelocity(state(VehicleState::kV));
-            runtimeState.SetRotationalVelocity(state(VehicleState::kR));
-            runtimeState.SetWheelSpeedLeft(state(VehicleState::kOmegaL));
-            runtimeState.SetWheelSpeedRight(state(VehicleState::kOmegaR));
-            runtimeState.SetGyroBiasZ(state(VehicleState::kBgz));
-        }
-
         App::Internal::CommandVector SolveAccelerationFeedforwardAt(
             TestRuntime& runtime,
-            const VehicleState::StateVector& state,
+            const VehicleState& state,
             float forwardAccelMps2,
             float yawAccelRadps2) noexcept
         {
-            ApplyStateVectorToRuntime(runtime.runtimeState, state);
+            runtime.runtimeState = state;
             return runtime.plant.ComputeFeedforward(forwardAccelMps2, yawAccelRadps2);
-        }
-
-        float SumNormalLoadN(const ContactForces& forces) noexcept
-        {
-            float sum = 0.0f;
-            for (const ContactForce& contact : forces.contacts)
-            {
-                sum += contact.normalForceN;
-            }
-            return sum;
-        }
-
-        float NoOpDeltaForDt(float dtSeconds, int component)
-        {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.70f, 1.50f, 0.04f, 0.20f);
-            const App::Internal::CommandVector command = MakeCommand(0.42f, 0.31f);
-            const VehicleState::StateVector actual =
-                runtime.plant.integrate(state, command, dtSeconds, params);
-            return actual(component) - state(component);
-        }
-
-        float StateComponentAfterSingleStep(int component)
-        {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.70f, 1.50f, 0.04f, 0.20f);
-            const App::Internal::CommandVector command = MakeCommand(0.42f, 0.31f);
-            const VehicleState::StateVector actual =
-                runtime.plant.integrate(state, command, 0.004f, params);
-            return actual(component);
-        }
-
-        float StateComponentAfterSubsteps(int component)
-        {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
-                MakeRollingState(params, 0.70f, 1.50f, 0.04f, 0.20f);
-            const App::Internal::CommandVector command = MakeCommand(0.42f, 0.31f);
-            for (int step = 0; step < 4; ++step)
-            {
-                state = runtime.plant.integrate(state, command, 0.001f, params);
-            }
-            return state(component);
-        }
-
-        float SingleStepMinusSubsteps(int component)
-        {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector initialState =
-                MakeRollingState(params, 0.70f, 1.50f, 0.04f, 0.20f);
-            const App::Internal::CommandVector command = MakeCommand(0.42f, 0.31f);
-            const VehicleState::StateVector singleStep =
-                runtime.plant.integrate(initialState, command, 0.004f, params);
-
-            VehicleState::StateVector substeps = initialState;
-            for (int step = 0; step < 4; ++step)
-            {
-                substeps = runtime.plant.integrate(substeps, command, 0.001f, params);
-            }
-
-            return singleStep(component) - substeps(component);
-        }
-
-        float HighCommandFirstNonFiniteOrFinalComponent(int component)
-        {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
-                MakeRollingState(params, 1.25f, 4.0f, 0.15f, 0.30f);
-            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
-
-            for (int tick = 0; tick < 250; ++tick)
-            {
-                state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
-                if (!std::isfinite(state(component)))
-                {
-                    return state(component);
-                }
-            }
-
-            return state(component);
         }
 
         float HighCommandFirstOutOfRangeOrFinalHeading()
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
-                MakeRollingState(params, 1.25f, 4.0f, 0.15f, 0.30f);
+            VehicleState state =
+                MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
             const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
 
             for (int tick = 0; tick < 250; ++tick)
             {
-                state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
-                if (state(VehicleState::kPsi) < -PI_F || state(VehicleState::kPsi) > PI_F)
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (state.GetOrientation() < -PI_F || state.GetOrientation() > PI_F)
                 {
-                    return state(VehicleState::kPsi);
+                    return state.GetOrientation();
                 }
             }
 
-            return state(VehicleState::kPsi);
-        }
-
-        VehicleState::StateVector FinalHighCommandState()
-        {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
-                MakeRollingState(params, 1.25f, 4.0f, 0.15f, 0.30f);
-            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
-
-            for (int tick = 0; tick < 250; ++tick)
-            {
-                state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
-            }
-
-            return state;
+            return state.GetOrientation();
         }
 
         App::Internal::CommandVector LongRunForwardFirstNonFiniteOrFinalSolveCommand()
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state = MakeRollingState(params, 0.30f, 0.0f);
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
             App::Internal::CommandVector command{};
 
             for (int tick = 0; tick < 500; ++tick)
@@ -248,47 +134,30 @@ namespace MazeMap
                 {
                     return command;
                 }
-                state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
 
             return command;
         }
 
-        float LongRunForwardFirstNonFiniteOrFinalStateComponent(int component)
-        {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state = MakeRollingState(params, 0.30f, 0.0f);
-
-            for (int tick = 0; tick < 500; ++tick)
-            {
-                const App::Internal::CommandVector command =
-                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
-                state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
-                if (!std::isfinite(state(component)))
-                {
-                    return state(component);
-                }
-            }
-
-            return state(component);
-        }
-
         float LongRunForwardVelocityDelta()
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state = MakeRollingState(params, 0.30f, 0.0f);
-            const float initialForwardMps = state(VehicleState::kU);
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            const float initialForwardMps = state.GetVelocity();
 
             for (int tick = 0; tick < 500; ++tick)
             {
                 const App::Internal::CommandVector command =
                     SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
-                state = runtime.plant.integrate(state, command, kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
 
-            return state(VehicleState::kU) - initialForwardMps;
+            return state.GetVelocity() - initialForwardMps;
         }
     }
 
@@ -298,43 +167,43 @@ namespace MazeMap
         TEST_METHOD(AxisConvention_HeadingZeroForwardMovesWorldPositiveY)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector coast{};
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.0f);
-            const VehicleState::StateVector integrated =
-                runtime.plant.integrate(state, coast, 0.004f, params);
+            const VehicleState state =
+                MakeRollingState(0.50f, 0.0f, 0.0f, 0.0f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(coast, 0.004f);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
                 << L"\nfield=world_y_m"
-                << L"\ninitial=" << state(VehicleState::kPy)
-                << L"\nactual=" << integrated(VehicleState::kPy)
+                << L"\ninitial=" << state.GetPositionY()
+                << L"\nactual=" << integrated.GetPositionY()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
-                integrated(VehicleState::kPy) > state(VehicleState::kPy),
+                integrated.GetPositionY() > state.GetPositionY(),
                 message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_HeadingZeroForwardDoesNotDriftWorldX)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector coast{};
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.0f);
-            const VehicleState::StateVector integrated =
-                runtime.plant.integrate(state, coast, 0.004f, params);
+            const VehicleState state =
+                MakeRollingState(0.50f, 0.0f, 0.0f, 0.0f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(coast, 0.004f);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
                 << L"\nfield=world_x_m"
-                << L"\nexpected=" << state(VehicleState::kPx)
-                << L"\nactual=" << integrated(VehicleState::kPx)
+                << L"\nexpected=" << state.GetPositionX()
+                << L"\nactual=" << integrated.GetPositionX()
                 << L"\ntolerance=2e-4";
 
             Assert::AreEqual(
-                state(VehicleState::kPx),
-                integrated(VehicleState::kPx),
+                state.GetPositionX(),
+                integrated.GetPositionX(),
                 2.0e-4f,
                 message.str().c_str());
         }
@@ -342,43 +211,43 @@ namespace MazeMap
         TEST_METHOD(AxisConvention_HeadingRightForwardMovesWorldPositiveX)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector coast{};
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.5f * PI_F);
-            const VehicleState::StateVector integrated =
-                runtime.plant.integrate(state, coast, 0.004f, params);
+            const VehicleState state =
+                MakeRollingState(0.50f, 0.0f, 0.0f, 0.5f * PI_F);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(coast, 0.004f);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
                 << L"\nfield=world_x_m"
-                << L"\ninitial=" << state(VehicleState::kPx)
-                << L"\nactual=" << integrated(VehicleState::kPx)
+                << L"\ninitial=" << state.GetPositionX()
+                << L"\nactual=" << integrated.GetPositionX()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
-                integrated(VehicleState::kPx) > state(VehicleState::kPx),
+                integrated.GetPositionX() > state.GetPositionX(),
                 message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_HeadingRightForwardDoesNotDriftWorldY)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector coast{};
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.50f, 0.0f, 0.0f, 0.5f * PI_F);
-            const VehicleState::StateVector integrated =
-                runtime.plant.integrate(state, coast, 0.004f, params);
+            const VehicleState state =
+                MakeRollingState(0.50f, 0.0f, 0.0f, 0.5f * PI_F);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(coast, 0.004f);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
                 << L"\nfield=world_y_m"
-                << L"\nexpected=" << state(VehicleState::kPy)
-                << L"\nactual=" << integrated(VehicleState::kPy)
+                << L"\nexpected=" << state.GetPositionY()
+                << L"\nactual=" << integrated.GetPositionY()
                 << L"\ntolerance=2e-4";
 
             Assert::AreEqual(
-                state(VehicleState::kPy),
-                integrated(VehicleState::kPy),
+                state.GetPositionY(),
+                integrated.GetPositionY(),
                 2.0e-4f,
                 message.str().c_str());
         }
@@ -386,74 +255,72 @@ namespace MazeMap
         TEST_METHOD(AxisConvention_BodyPositiveLateralMovesWorldPositiveX)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector coast{};
-            const VehicleState::StateVector state =
+            const VehicleState state =
                 MakeState(0.0f, 0.0f, 0.0f, 0.0f, 0.30f, 0.0f, 0.0f, 0.0f);
-            const VehicleState::StateVector integrated =
-                runtime.plant.integrate(state, coast, 0.004f, params);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(coast, 0.004f);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
                 << L"\nfield=world_x_m"
-                << L"\ninitial=" << state(VehicleState::kPx)
-                << L"\nactual=" << integrated(VehicleState::kPx)
+                << L"\ninitial=" << state.GetPositionX()
+                << L"\nactual=" << integrated.GetPositionX()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
-                integrated(VehicleState::kPx) > state(VehicleState::kPx),
+                integrated.GetPositionX() > state.GetPositionX(),
                 message.str().c_str());
         }
 
         TEST_METHOD(AxisConvention_PositiveYawRateIncreasesClockwiseYaw)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector coast{};
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.25f, 1.20f);
-            const VehicleState::StateVector integrated =
-                runtime.plant.integrate(state, coast, 0.004f, params);
+            const VehicleState state =
+                MakeRollingState(0.25f, 1.20f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(coast, 0.004f);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM20_AXIS_CONVENTION"
                 << L"\nfield=yaw_rad"
-                << L"\ninitial=" << state(VehicleState::kPsi)
-                << L"\nactual=" << integrated(VehicleState::kPsi)
+                << L"\ninitial=" << state.GetOrientation()
+                << L"\nactual=" << integrated.GetOrientation()
                 << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
-                integrated(VehicleState::kPsi) > state(VehicleState::kPsi),
+                integrated.GetOrientation() > state.GetOrientation(),
                 message.str().c_str());
         }
 
         TEST_METHOD(WheelYawSign_PositiveYawMakesLeftWheelLinearVelocityFaster)
         {
-            TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.40f, 2.0f);
-            const Eigen::Vector2f wheelLinearMps =
-                runtime.plant.wheelLinearVelocityFromBodyState(state);
+            const float leftWheelMps =
+                Vehicle::LeftWheelLinearVelocityFromBody(0.40f, 2.0f);
+            const float rightWheelMps =
+                Vehicle::RightWheelLinearVelocityFromBody(0.40f, 2.0f);
             std::wstringstream message;
             message << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=wheel_linear_velocity_mps"
-                << L"\nleft=" << wheelLinearMps.x()
-                << L"\nright=" << wheelLinearMps.y()
+                << L"\nleft=" << leftWheelMps
+                << L"\nright=" << rightWheelMps
                 << L"\ncriterion=left>right";
 
             Assert::IsTrue(
-                wheelLinearMps.x() > wheelLinearMps.y(),
+                leftWheelMps > rightWheelMps,
                 message.str().c_str());
         }
 
         TEST_METHOD(WheelYawSign_EncoderYawMeasurementPreservesClockwisePositiveSign)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.40f, 2.0f);
             EncoderObs observation{};
-            observation.omegaLeftRadps = state(VehicleState::kOmegaL);
-            observation.omegaRightRadps = state(VehicleState::kOmegaR);
+            Vehicle::WheelOmegasFromBodyVelocity(
+                0.40f,
+                2.0f,
+                observation.omegaLeftRadps,
+                observation.omegaRightRadps);
             const float actualYawRateRadps = runtime.plant.measuredYawRateRadps(observation);
             std::wstringstream message;
             message << L"PM20_WHEEL_YAW_SIGN"
@@ -470,34 +337,32 @@ namespace MazeMap
 
         TEST_METHOD(WheelYawSign_PositiveTargetYawRateRequestsFasterLeftWheel)
         {
-            TestRuntime runtime;
-            PlantModel::StateVector state = PlantModel::StateVector::Zero();
-            state(VehicleState::kU) = 0.40f;
-            state(VehicleState::kR) = 2.0f;
-            const Eigen::Vector2f wheelLinearMps =
-                runtime.plant.wheelLinearVelocityFromBodyState(state);
+            const float leftWheelMps =
+                Vehicle::LeftWheelLinearVelocityFromBody(0.40f, 2.0f);
+            const float rightWheelMps =
+                Vehicle::RightWheelLinearVelocityFromBody(0.40f, 2.0f);
             std::wstringstream message;
             message << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=target_wheel_linear_velocity_mps"
-                << L"\nleft=" << wheelLinearMps.x()
-                << L"\nright=" << wheelLinearMps.y()
+                << L"\nleft=" << leftWheelMps
+                << L"\nright=" << rightWheelMps
                 << L"\ncriterion=left>right";
 
             Assert::IsTrue(
-                wheelLinearMps.x() > wheelLinearMps.y(),
+                leftWheelMps > rightWheelMps,
                 message.str().c_str());
         }
 
         TEST_METHOD(WheelYawSign_PositiveTargetYawAccelerationRequestsMoreLeftAcceleration)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state =
-                MakeRollingState(params, 0.40f, 2.0f);
+            const VehicleState state =
+                MakeRollingState(0.40f, 2.0f);
             const App::Internal::CommandVector command =
                 runtime.plant.ComputeFeedforward(0.0f, 5.0f);
-            const PlantDerivatives derivatives =
-                runtime.plant.forwardStep(state, command, params);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(command, kDirectDtSeconds);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream commandMessage;
             commandMessage << L"PM20_WHEEL_YAW_SIGN"
                 << L"\nfield=command_differential"
@@ -507,27 +372,29 @@ namespace MazeMap
                 << L"\nright_command=" << command.RightCommand();
             std::wstringstream accelMessage;
             accelMessage << L"PM20_WHEEL_YAW_SIGN"
-                << L"\nfield=yaw_accel_radps2"
-                << L"\nactual=" << derivatives.yawAccelRadps2
-                << L"\ncriterion=actual>0";
+                << L"\nfield=yaw_rate_after_step_radps"
+                << L"\ninitial=" << state.GetRotationalVelocity()
+                << L"\nactual=" << integrated.GetRotationalVelocity()
+                << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
                 command.Differential() > 0.0f,
                 commandMessage.str().c_str());
             Assert::IsTrue(
-                derivatives.yawAccelRadps2 > 0.0f,
+                integrated.GetRotationalVelocity() > state.GetRotationalVelocity(),
                 accelMessage.str().c_str());
         }
 
         TEST_METHOD(SymmetricDrive_LeftRightForwardForceSymmetry)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
-            const PlantDerivatives derivatives =
-                runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
-            const float leftForceN = derivatives.contactForces.LeftBankForwardForceN();
-            const float rightForceN = derivatives.contactForces.RightBankForwardForceN();
+            const VehicleState state = MakeRollingState(0.80f, 0.0f);
+            runtime.runtimeState = state;
+            const App::Internal::CommandVector command = MakeCommand(0.45f, 0.45f);
+            const float leftForceN =
+                runtime.plant.leftBankForwardContactForceN(command);
+            const float rightForceN =
+                runtime.plant.rightBankForwardContactForceN(command);
             std::wstringstream message;
             message << L"PM21_FORCE_SYMMETRY"
                 << L"\nfield=bank_forward_force_n"
@@ -545,12 +412,14 @@ namespace MazeMap
         TEST_METHOD(SymmetricDrive_WheelAccelerationSymmetry)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
-            const PlantDerivatives derivatives =
-                runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
-            const float leftWheelAccelRadps2 = derivatives.stateDot(VehicleState::kOmegaL);
-            const float rightWheelAccelRadps2 = derivatives.stateDot(VehicleState::kOmegaR);
+            const VehicleState state = MakeRollingState(0.80f, 0.0f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(MakeCommand(0.45f, 0.45f), kDirectDtSeconds);
+            const VehicleState integrated = runtime.runtimeState;
+            const float leftWheelAccelRadps2 =
+                (integrated.GetWheelSpeedLeft() - state.GetWheelSpeedLeft()) / kDirectDtSeconds;
+            const float rightWheelAccelRadps2 =
+                (integrated.GetWheelSpeedRight() - state.GetWheelSpeedRight()) / kDirectDtSeconds;
             std::wstringstream message;
             message << L"PM21_FORCE_SYMMETRY"
                 << L"\nfield=wheel_accel_radps2"
@@ -565,23 +434,68 @@ namespace MazeMap
                 message.str().c_str());
         }
 
+        TEST_METHOD(SymmetricDrive_LeftRightWheelSpeedSymmetryAfterStep)
+        {
+            TestRuntime runtime;
+            const VehicleState state = MakeRollingState(0.80f, 0.0f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(MakeCommand(0.45f, 0.45f), kDirectDtSeconds);
+            const VehicleState integrated = runtime.runtimeState;
+            std::wstringstream message;
+            message << L"PM21_FORCE_SYMMETRY"
+                << L"\nfield=wheel_speed_radps"
+                << L"\nexpected_left=" << integrated.GetWheelSpeedLeft()
+                << L"\nactual_right=" << integrated.GetWheelSpeedRight()
+                << L"\ntolerance=1e-5";
+
+            Assert::AreEqual(
+                integrated.GetWheelSpeedLeft(),
+                integrated.GetWheelSpeedRight(),
+                1.0e-5f,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(SymmetricDrive_WheelSpeedSymmetryPersistsAcrossTicks)
+        {
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.80f, 0.0f);
+            for (int tick = 0; tick < 10; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.45f, 0.45f), kDirectDtSeconds);
+                state = runtime.runtimeState;
+            }
+            std::wstringstream message;
+            message << L"PM21_FORCE_SYMMETRY"
+                << L"\nfield=wheel_speed_radps"
+                << L"\nexpected_left=" << state.GetWheelSpeedLeft()
+                << L"\nactual_right=" << state.GetWheelSpeedRight()
+                << L"\ntolerance=1e-4";
+
+            Assert::AreEqual(
+                state.GetWheelSpeedLeft(),
+                state.GetWheelSpeedRight(),
+                1.0e-4f,
+                message.str().c_str());
+        }
+
         TEST_METHOD(SymmetricDrive_NoYawAccelerationBias)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
-            const PlantDerivatives derivatives =
-                runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
+            const VehicleState state = MakeRollingState(0.80f, 0.0f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(MakeCommand(0.45f, 0.45f), kDirectDtSeconds);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM21_FORCE_SYMMETRY"
                 << L"\nfield=yaw_accel_radps2"
                 << L"\nexpected=0"
-                << L"\nactual=" << derivatives.stateDot(VehicleState::kR)
+                << L"\nactual=" << integrated.GetYawAcceleration()
                 << L"\ntolerance=1e-4";
 
             Assert::AreEqual(
                 0.0f,
-                derivatives.stateDot(VehicleState::kR),
+                integrated.GetYawAcceleration(),
                 1.0e-4f,
                 message.str().c_str());
         }
@@ -589,20 +503,20 @@ namespace MazeMap
         TEST_METHOD(SymmetricDrive_NoLateralAccelerationBias)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.80f, 0.0f);
-            const PlantDerivatives derivatives =
-                runtime.plant.forwardStep(state, MakeCommand(0.45f, 0.45f), params);
+            const VehicleState state = MakeRollingState(0.80f, 0.0f);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(MakeCommand(0.45f, 0.45f), kDirectDtSeconds);
+            const VehicleState integrated = runtime.runtimeState;
             std::wstringstream message;
             message << L"PM21_FORCE_SYMMETRY"
                 << L"\nfield=lateral_accel_mps2"
                 << L"\nexpected=0"
-                << L"\nactual=" << derivatives.lateralAccelMps2
+                << L"\nactual=" << integrated.GetLateralAcceleration()
                 << L"\ntolerance=1e-4";
 
             Assert::AreEqual(
                 0.0f,
-                derivatives.lateralAccelMps2,
+                integrated.GetLateralAcceleration(),
                 1.0e-4f,
                 message.str().c_str());
         }
@@ -610,21 +524,23 @@ namespace MazeMap
         TEST_METHOD(Stiction_SubthresholdDriveDoesNotAccelerateLeftWheelAtRest)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state =
+            const VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const PlantDerivatives derivatives =
-                runtime.plant.forwardStep(state, MakeCommand(0.25f, 0.25f), params);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+            const VehicleState integrated = runtime.runtimeState;
+            const float wheelAccelRadps2 =
+                (integrated.GetWheelSpeedLeft() - state.GetWheelSpeedLeft()) / kDirectDtSeconds;
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=left_wheel_accel_radps2"
                 << L"\nexpected=0"
-                << L"\nactual=" << derivatives.stateDot(VehicleState::kOmegaL)
+                << L"\nactual=" << wheelAccelRadps2
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 0.0f,
-                derivatives.stateDot(VehicleState::kOmegaL),
+                wheelAccelRadps2,
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -632,21 +548,23 @@ namespace MazeMap
         TEST_METHOD(Stiction_SubthresholdDriveDoesNotAccelerateRightWheelAtRest)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state =
+            const VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const PlantDerivatives derivatives =
-                runtime.plant.forwardStep(state, MakeCommand(0.25f, 0.25f), params);
+            runtime.runtimeState = state;
+            runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+            const VehicleState integrated = runtime.runtimeState;
+            const float wheelAccelRadps2 =
+                (integrated.GetWheelSpeedRight() - state.GetWheelSpeedRight()) / kDirectDtSeconds;
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=right_wheel_accel_radps2"
                 << L"\nexpected=0"
-                << L"\nactual=" << derivatives.stateDot(VehicleState::kOmegaR)
+                << L"\nactual=" << wheelAccelRadps2
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 0.0f,
-                derivatives.stateDot(VehicleState::kOmegaR),
+                wheelAccelRadps2,
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -654,24 +572,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftPositionX)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kPx);
+            const float initial = state.GetPositionX();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=position_x_m"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kPx)
+                << L"\nactual=" << state.GetPositionX()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kPx),
+                state.GetPositionX(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -679,24 +598,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftPositionY)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kPy);
+            const float initial = state.GetPositionY();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=position_y_m"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kPy)
+                << L"\nactual=" << state.GetPositionY()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kPy),
+                state.GetPositionY(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -704,24 +624,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftYaw)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kPsi);
+            const float initial = state.GetOrientation();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=yaw_rad"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kPsi)
+                << L"\nactual=" << state.GetOrientation()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kPsi),
+                state.GetOrientation(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -729,24 +650,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftForwardVelocity)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kU);
+            const float initial = state.GetVelocity();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=forward_velocity_mps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kU)
+                << L"\nactual=" << state.GetVelocity()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kU),
+                state.GetVelocity(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -754,24 +676,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftLateralVelocity)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kV);
+            const float initial = state.GetLateralVelocity();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=lateral_velocity_mps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kV)
+                << L"\nactual=" << state.GetLateralVelocity()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kV),
+                state.GetLateralVelocity(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -779,24 +702,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftYawRate)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kR);
+            const float initial = state.GetRotationalVelocity();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=yaw_rate_radps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kR)
+                << L"\nactual=" << state.GetRotationalVelocity()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kR),
+                state.GetRotationalVelocity(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -804,24 +728,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftLeftWheelSpeed)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kOmegaL);
+            const float initial = state.GetWheelSpeedLeft();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=left_wheel_speed_radps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kOmegaL)
+                << L"\nactual=" << state.GetWheelSpeedLeft()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kOmegaL),
+                state.GetWheelSpeedLeft(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -829,24 +754,25 @@ namespace MazeMap
         TEST_METHOD(Stiction_DirectIntegrationDoesNotDriftRightWheelSpeed)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state =
+            VehicleState state =
                 MakeState(0.02f, 0.03f, 0.10f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-            const float initial = state(VehicleState::kOmegaR);
+            const float initial = state.GetWheelSpeedRight();
             for (int tick = 0; tick < 100; ++tick)
             {
-                state = runtime.plant.integrate(state, MakeCommand(0.25f, 0.25f), kDirectDtSeconds, params);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.25f, 0.25f), kDirectDtSeconds);
+                state = runtime.runtimeState;
             }
             std::wstringstream message;
             message << L"PM21_STICTION"
                 << L"\nfield=right_wheel_speed_radps"
                 << L"\nexpected=" << initial
-                << L"\nactual=" << state(VehicleState::kOmegaR)
+                << L"\nactual=" << state.GetWheelSpeedRight()
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
                 initial,
-                state(VehicleState::kOmegaR),
+                state.GetWheelSpeedRight(),
                 1.0e-6f,
                 message.str().c_str());
         }
@@ -854,11 +780,9 @@ namespace MazeMap
         TEST_METHOD(FanLoad_NoFanContactNormalSumMatchesConfiguredLoad)
         {
             TestRuntime runtime(0.0f);
-            const PlantParams params = PlantParams::Default();
-            const ContactForces forces =
-                runtime.plant.tireForces(MakeRollingState(params, 0.75f, 0.0f), params);
-            const float expectedLoadN = params.TotalNormalLoadN(0.0f);
-            const float actualLoadN = SumNormalLoadN(forces);
+            runtime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            const float expectedLoadN = runtime.vehicle.GetMass() * GRAVITY_MPS2;
+            const float actualLoadN = runtime.plant.totalContactNormalLoadN();
             std::wstringstream message;
             message << L"PM21_FAN_LOAD"
                 << L"\nfield=contact_normal_sum_n"
@@ -877,11 +801,11 @@ namespace MazeMap
         TEST_METHOD(FanLoad_FanOnContactNormalSumMatchesConfiguredLoad)
         {
             TestRuntime runtime(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const ContactForces forces =
-                runtime.plant.tireForces(MakeRollingState(params, 0.75f, 0.0f), params);
-            const float expectedLoadN = params.TotalNormalLoadN(0.80f);
-            const float actualLoadN = SumNormalLoadN(forces);
+            runtime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            const float expectedLoadN =
+                (runtime.vehicle.GetMass() * GRAVITY_MPS2) +
+                (0.80f * runtime.vehicle.GetFanDownforceAtFullDuty());
+            const float actualLoadN = runtime.plant.totalContactNormalLoadN();
             std::wstringstream message;
             message << L"PM21_FAN_LOAD"
                 << L"\nfield=contact_normal_sum_n"
@@ -901,12 +825,12 @@ namespace MazeMap
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
-            const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
-            const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
-            const float fanOffLoadN = SumNormalLoadN(fanOffForces);
-            const float fanOnLoadN = SumNormalLoadN(fanOnForces);
+            fanOffRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            fanOnRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            const float fanOffLoadN =
+                fanOffRuntime.plant.totalContactNormalLoadN();
+            const float fanOnLoadN =
+                fanOnRuntime.plant.totalContactNormalLoadN();
             std::wstringstream message;
             message << L"PM21_FAN_LOAD"
                 << L"\nfield=total_contact_normal_load_n"
@@ -923,19 +847,21 @@ namespace MazeMap
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
-            const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
-            const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            fanOffRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            fanOnRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            const float fanOffNormalLoadN =
+                fanOffRuntime.plant.contactNormalLoadN(0U);
+            const float fanOnNormalLoadN =
+                fanOnRuntime.plant.contactNormalLoadN(0U);
             std::wstringstream message;
             message << L"PM21_FAN_LOAD"
                 << L"\nfield=contact_0_normal_force_n"
-                << L"\nfan_off=" << fanOffForces.contacts[0].normalForceN
-                << L"\nfan_on=" << fanOnForces.contacts[0].normalForceN
+                << L"\nfan_off=" << fanOffNormalLoadN
+                << L"\nfan_on=" << fanOnNormalLoadN
                 << L"\ncriterion=fan_on>fan_off";
 
             Assert::IsTrue(
-                fanOnForces.contacts[0].normalForceN > fanOffForces.contacts[0].normalForceN,
+                fanOnNormalLoadN > fanOffNormalLoadN,
                 message.str().c_str());
         }
 
@@ -943,19 +869,21 @@ namespace MazeMap
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
-            const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
-            const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            fanOffRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            fanOnRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            const float fanOffNormalLoadN =
+                fanOffRuntime.plant.contactNormalLoadN(1U);
+            const float fanOnNormalLoadN =
+                fanOnRuntime.plant.contactNormalLoadN(1U);
             std::wstringstream message;
             message << L"PM21_FAN_LOAD"
                 << L"\nfield=contact_1_normal_force_n"
-                << L"\nfan_off=" << fanOffForces.contacts[1].normalForceN
-                << L"\nfan_on=" << fanOnForces.contacts[1].normalForceN
+                << L"\nfan_off=" << fanOffNormalLoadN
+                << L"\nfan_on=" << fanOnNormalLoadN
                 << L"\ncriterion=fan_on>fan_off";
 
             Assert::IsTrue(
-                fanOnForces.contacts[1].normalForceN > fanOffForces.contacts[1].normalForceN,
+                fanOnNormalLoadN > fanOffNormalLoadN,
                 message.str().c_str());
         }
 
@@ -963,19 +891,21 @@ namespace MazeMap
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
-            const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
-            const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            fanOffRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            fanOnRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            const float fanOffNormalLoadN =
+                fanOffRuntime.plant.contactNormalLoadN(2U);
+            const float fanOnNormalLoadN =
+                fanOnRuntime.plant.contactNormalLoadN(2U);
             std::wstringstream message;
             message << L"PM21_FAN_LOAD"
                 << L"\nfield=contact_2_normal_force_n"
-                << L"\nfan_off=" << fanOffForces.contacts[2].normalForceN
-                << L"\nfan_on=" << fanOnForces.contacts[2].normalForceN
+                << L"\nfan_off=" << fanOffNormalLoadN
+                << L"\nfan_on=" << fanOnNormalLoadN
                 << L"\ncriterion=fan_on>fan_off";
 
             Assert::IsTrue(
-                fanOnForces.contacts[2].normalForceN > fanOffForces.contacts[2].normalForceN,
+                fanOnNormalLoadN > fanOffNormalLoadN,
                 message.str().c_str());
         }
 
@@ -983,25 +913,32 @@ namespace MazeMap
         {
             TestRuntime fanOffRuntime(0.0f);
             TestRuntime fanOnRuntime(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.75f, 0.0f);
-            const ContactForces fanOffForces = fanOffRuntime.plant.tireForces(state, params);
-            const ContactForces fanOnForces = fanOnRuntime.plant.tireForces(state, params);
+            fanOffRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            fanOnRuntime.runtimeState = MakeRollingState(0.75f, 0.0f);
+            const float fanOffNormalLoadN =
+                fanOffRuntime.plant.contactNormalLoadN(3U);
+            const float fanOnNormalLoadN =
+                fanOnRuntime.plant.contactNormalLoadN(3U);
             std::wstringstream message;
             message << L"PM21_FAN_LOAD"
                 << L"\nfield=contact_3_normal_force_n"
-                << L"\nfan_off=" << fanOffForces.contacts[3].normalForceN
-                << L"\nfan_on=" << fanOnForces.contacts[3].normalForceN
+                << L"\nfan_off=" << fanOffNormalLoadN
+                << L"\nfan_on=" << fanOnNormalLoadN
                 << L"\ncriterion=fan_on>fan_off";
 
             Assert::IsTrue(
-                fanOnForces.contacts[3].normalForceN > fanOffForces.contacts[3].normalForceN,
+                fanOnNormalLoadN > fanOffNormalLoadN,
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangePositionX)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kPx);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetPositionX() - initial.GetPositionX();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_x_delta_m"
@@ -1019,7 +956,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangePositionY)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kPy);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetPositionY() - initial.GetPositionY();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_y_delta_m"
@@ -1037,7 +979,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeYaw)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kPsi);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetOrientation() - initial.GetOrientation();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_delta_rad"
@@ -1055,7 +1002,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeForwardVelocity)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kU);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetVelocity() - initial.GetVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_delta_mps"
@@ -1073,7 +1025,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeLateralVelocity)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kV);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetLateralVelocity() - initial.GetLateralVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=lateral_velocity_delta_mps"
@@ -1091,7 +1048,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeYawRate)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kR);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetRotationalVelocity() - initial.GetRotationalVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_delta_radps"
@@ -1109,7 +1071,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeLeftWheelSpeed)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kOmegaL);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetWheelSpeedLeft() - initial.GetWheelSpeedLeft();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=left_wheel_speed_delta_radps"
@@ -1127,7 +1094,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ZeroDtDoesNotChangeRightWheelSpeed)
         {
-            const float actualDelta = NoOpDeltaForDt(0.0f, VehicleState::kOmegaR);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.0f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetWheelSpeedRight() - initial.GetWheelSpeedRight();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=right_wheel_speed_delta_radps"
@@ -1145,7 +1117,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_NegativeDtDoesNotChangePositionX)
         {
-            const float actualDelta = NoOpDeltaForDt(-0.001f, VehicleState::kPx);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), -0.001f);
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetPositionX() - initial.GetPositionX();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_x_delta_m"
@@ -1163,8 +1140,12 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_NonFiniteDtDoesNotChangePositionX)
         {
-            const float actualDelta =
-                NoOpDeltaForDt((std::numeric_limits<float>::quiet_NaN)(), VehicleState::kPx);
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            TestRuntime runtime;
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), (std::numeric_limits<float>::quiet_NaN)());
+            const VehicleState actual = runtime.runtimeState;
+            const float actualDelta = actual.GetPositionX() - initial.GetPositionX();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_x_delta_m"
@@ -1182,255 +1163,394 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_SingleStepPositionXStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kPx);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetPositionX();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_x_m"
+                << L"\ninitial=" << initial.GetPositionX()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetPositionX(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepPositionYStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kPy);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetPositionY();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_y_m"
+                << L"\ninitial=" << initial.GetPositionY()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetPositionY(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepYawStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kPsi);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetOrientation();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rad"
+                << L"\ninitial=" << initial.GetOrientation()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetOrientation(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepForwardVelocityStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kU);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_mps"
+                << L"\ninitial=" << initial.GetVelocity()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetVelocity(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepLateralVelocityStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kV);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetLateralVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=lateral_velocity_mps"
+                << L"\ninitial=" << initial.GetLateralVelocity()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=abs(actual)<abs(initial)"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                std::fabs(actual) < std::fabs(initial.GetLateralVelocity()),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepYawRateStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kR);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetRotationalVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_radps"
+                << L"\ninitial=" << initial.GetRotationalVelocity()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetRotationalVelocity(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepLeftWheelSpeedStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kOmegaL);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetWheelSpeedLeft();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=left_wheel_speed_radps"
+                << L"\ninitial=" << initial.GetWheelSpeedLeft()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetWheelSpeedLeft(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SingleStepRightWheelSpeedStaysFinite)
         {
-            const float actual = StateComponentAfterSingleStep(VehicleState::kOmegaR);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.runtimeState = initial;
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState state = runtime.runtimeState;
+            const float actual = state.GetWheelSpeedRight();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=right_wheel_speed_radps"
+                << L"\ninitial=" << initial.GetWheelSpeedRight()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\ndt_seconds=0.004";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetWheelSpeedRight(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepPositionXStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kPx);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetPositionX();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_x_m"
+                << L"\ninitial=" << initial.GetPositionX()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetPositionX(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepPositionYStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kPy);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetPositionY();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_y_m"
+                << L"\ninitial=" << initial.GetPositionY()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetPositionY(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepYawStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kPsi);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetOrientation();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rad"
+                << L"\ninitial=" << initial.GetOrientation()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetOrientation(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepForwardVelocityStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kU);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_mps"
+                << L"\ninitial=" << initial.GetVelocity()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetVelocity(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepLateralVelocityStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kV);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetLateralVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=lateral_velocity_mps"
+                << L"\ninitial=" << initial.GetLateralVelocity()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=abs(actual)<abs(initial)"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                std::fabs(actual) < std::fabs(initial.GetLateralVelocity()),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepYawRateStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kR);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetRotationalVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_radps"
+                << L"\ninitial=" << initial.GetRotationalVelocity()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetRotationalVelocity(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepLeftWheelSpeedStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kOmegaL);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetWheelSpeedLeft();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=left_wheel_speed_radps"
+                << L"\ninitial=" << initial.GetWheelSpeedLeft()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetWheelSpeedLeft(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_SubstepRightWheelSpeedStaysFinite)
         {
-            const float actual = StateComponentAfterSubsteps(VehicleState::kOmegaR);
+            TestRuntime runtime;
+            const VehicleState initial = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            VehicleState state = initial;
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetWheelSpeedRight();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=right_wheel_speed_radps"
+                << L"\ninitial=" << initial.GetWheelSpeedRight()
                 << L"\nactual=" << actual
-                << L"\ncriterion=isfinite(actual)"
+                << L"\ncriterion=actual>initial"
                 << L"\nsubsteps=4"
                 << L"\ndt_seconds=0.001";
 
             Assert::IsTrue(
-                std::isfinite(actual),
+                actual > initial.GetWheelSpeedRight(),
                 message.str().c_str());
         }
 
         TEST_METHOD(IntegrateDirect_PositionXRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kPx);
+            TestRuntime runtime;
+            runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState singleStep = runtime.runtimeState;
+            VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = substeps;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                substeps = runtime.runtimeState;
+            }
+            const float actualDelta = singleStep.GetPositionX() - substeps.GetPositionX();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_x_single_minus_substeps_m"
@@ -1447,7 +1567,18 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_PositionYRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kPy);
+            TestRuntime runtime;
+            runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState singleStep = runtime.runtimeState;
+            VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = substeps;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                substeps = runtime.runtimeState;
+            }
+            const float actualDelta = singleStep.GetPositionY() - substeps.GetPositionY();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=position_y_single_minus_substeps_m"
@@ -1464,7 +1595,18 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_ForwardVelocityRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kU);
+            TestRuntime runtime;
+            runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState singleStep = runtime.runtimeState;
+            VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = substeps;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                substeps = runtime.runtimeState;
+            }
+            const float actualDelta = singleStep.GetVelocity() - substeps.GetVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=forward_velocity_single_minus_substeps_mps"
@@ -1481,7 +1623,19 @@ namespace MazeMap
 
         TEST_METHOD(IntegrateDirect_YawRateRemainsCloseBetweenSingleStepAndSubsteps)
         {
-            const float actualDelta = SingleStepMinusSubsteps(VehicleState::kR);
+            TestRuntime runtime;
+            runtime.runtimeState = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.004f);
+            const VehicleState singleStep = runtime.runtimeState;
+            VehicleState substeps = MakeRollingState(0.70f, 1.50f, 0.04f, 0.20f);
+            for (int step = 0; step < 4; ++step)
+            {
+                runtime.runtimeState = substeps;
+                runtime.plant.integrate(MakeCommand(0.42f, 0.31f), 0.001f);
+                substeps = runtime.runtimeState;
+            }
+            const float actualDelta =
+                singleStep.GetRotationalVelocity() - substeps.GetRotationalVelocity();
             std::wstringstream message;
             message << L"PM22_INTEGRATE_DIRECT"
                 << L"\nfield=yaw_rate_single_minus_substeps_radps"
@@ -1498,7 +1652,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_PositionXStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kPx);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetPositionX()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetPositionX();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=position_x_m"
@@ -1512,7 +1679,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_PositionYStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kPy);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetPositionY()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetPositionY();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=position_y_m"
@@ -1526,7 +1706,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_YawStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kPsi);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetOrientation()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetOrientation();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=yaw_rad"
@@ -1540,7 +1733,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_ForwardVelocityStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kU);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetVelocity()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=forward_velocity_mps"
@@ -1554,7 +1760,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_LateralVelocityStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kV);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetLateralVelocity()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetLateralVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=lateral_velocity_mps"
@@ -1568,7 +1787,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_YawRateStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kR);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetRotationalVelocity()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetRotationalVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=yaw_rate_radps"
@@ -1582,7 +1814,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_LeftWheelSpeedStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kOmegaL);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetWheelSpeedLeft()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetWheelSpeedLeft();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=left_wheel_speed_radps"
@@ -1596,7 +1841,20 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_RightWheelSpeedStaysFiniteUnderPlausibleHighCommand)
         {
-            const float actual = HighCommandFirstNonFiniteOrFinalComponent(VehicleState::kOmegaR);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetWheelSpeedRight()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetWheelSpeedRight();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=right_wheel_speed_radps"
@@ -1626,8 +1884,16 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_FinalForwardVelocityStaysWithinPlausibleBounds)
         {
-            const VehicleState::StateVector state = FinalHighCommandState();
-            const float actual = state(VehicleState::kU);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=final_forward_velocity_mps"
@@ -1641,8 +1907,16 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_FinalYawRateStaysWithinPlausibleBounds)
         {
-            const VehicleState::StateVector state = FinalHighCommandState();
-            const float actual = state(VehicleState::kR);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetRotationalVelocity();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=final_yaw_rate_radps"
@@ -1656,8 +1930,16 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_FinalLeftWheelSpeedStaysWithinPlausibleBounds)
         {
-            const VehicleState::StateVector state = FinalHighCommandState();
-            const float actual = state(VehicleState::kOmegaL);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetWheelSpeedLeft();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=final_left_wheel_speed_radps"
@@ -1671,8 +1953,16 @@ namespace MazeMap
 
         TEST_METHOD(NumericStability_FinalRightWheelSpeedStaysWithinPlausibleBounds)
         {
-            const VehicleState::StateVector state = FinalHighCommandState();
-            const float actual = state(VehicleState::kOmegaR);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(1.25f, 4.0f, 0.15f, 0.30f);
+            const App::Internal::CommandVector command = MakeCommand(0.85f, 0.20f);
+            for (int tick = 0; tick < 250; ++tick)
+            {
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+            }
+            const float actual = state.GetWheelSpeedRight();
             std::wstringstream message;
             message << L"PM22_NUMERIC_STABILITY"
                 << L"\nfield=final_right_wheel_speed_radps"
@@ -1687,11 +1977,10 @@ namespace MazeMap
         TEST_METHOD(AccelerationFeedforward_ForwardAccelerationCommandIsFinite)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector command =
                 SolveAccelerationFeedforwardAt(
                     runtime,
-                    MakeRollingState(params, 0.60f, 0.0f),
+                    MakeRollingState(0.60f, 0.0f),
                     0.80f,
                     0.0f);
             std::wstringstream message;
@@ -1709,11 +1998,10 @@ namespace MazeMap
         TEST_METHOD(AccelerationFeedforward_ReverseAccelerationCommandIsFinite)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector command =
                 SolveAccelerationFeedforwardAt(
                     runtime,
-                    MakeRollingState(params, 0.60f, 0.0f),
+                    MakeRollingState(0.60f, 0.0f),
                     -0.80f,
                     0.0f);
             std::wstringstream message;
@@ -1731,11 +2019,10 @@ namespace MazeMap
         TEST_METHOD(AccelerationFeedforward_ClockwiseYawCommandIsFinite)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector command =
                 SolveAccelerationFeedforwardAt(
                     runtime,
-                    MakeRollingState(params, 0.60f, 0.0f),
+                    MakeRollingState(0.60f, 0.0f),
                     0.0f,
                     8.0f);
             std::wstringstream message;
@@ -1753,8 +2040,7 @@ namespace MazeMap
         TEST_METHOD(AccelerationFeedforward_PositiveForwardAccelerationCommandsMoreAverageThanReverse)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
-            const VehicleState::StateVector state = MakeRollingState(params, 0.60f, 0.0f);
+            const VehicleState state = MakeRollingState(0.60f, 0.0f);
             const App::Internal::CommandVector forward =
                 SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
             const App::Internal::CommandVector reverse =
@@ -1774,11 +2060,10 @@ namespace MazeMap
         TEST_METHOD(AccelerationFeedforward_PositiveClockwiseYawCommandsLeftGreaterThanRight)
         {
             TestRuntime runtime;
-            const PlantParams params = PlantParams::Default();
             const App::Internal::CommandVector clockwise =
                 SolveAccelerationFeedforwardAt(
                     runtime,
-                    MakeRollingState(params, 0.60f, 0.0f),
+                    MakeRollingState(0.60f, 0.0f),
                     0.0f,
                     8.0f);
             std::wstringstream message;
@@ -1812,7 +2097,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunPositionXStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kPx);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetPositionX()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetPositionX();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_position_x_m"
@@ -1826,7 +2125,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunPositionYStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kPy);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetPositionY()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetPositionY();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_position_y_m"
@@ -1840,7 +2153,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunYawStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kPsi);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetOrientation()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetOrientation();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_yaw_rad"
@@ -1854,7 +2181,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunForwardVelocityStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kU);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetVelocity()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetVelocity();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_forward_velocity_mps"
@@ -1868,7 +2209,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunLateralVelocityStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kV);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetLateralVelocity()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetLateralVelocity();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_lateral_velocity_mps"
@@ -1882,7 +2237,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunYawRateStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kR);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetRotationalVelocity()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetRotationalVelocity();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_yaw_rate_radps"
@@ -1896,7 +2265,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunLeftWheelSpeedStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kOmegaL);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetWheelSpeedLeft()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetWheelSpeedLeft();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_left_wheel_speed_radps"
@@ -1910,7 +2293,21 @@ namespace MazeMap
 
         TEST_METHOD(AccelerationFeedforward_LongRunRightWheelSpeedStaysFinite)
         {
-            const float actual = LongRunForwardFirstNonFiniteOrFinalStateComponent(VehicleState::kOmegaR);
+            TestRuntime runtime;
+            VehicleState state = MakeRollingState(0.30f, 0.0f);
+            for (int tick = 0; tick < 500; ++tick)
+            {
+                const App::Internal::CommandVector command =
+                    SolveAccelerationFeedforwardAt(runtime, state, 0.80f, 0.0f);
+                runtime.runtimeState = state;
+                runtime.plant.integrate(command, kDirectDtSeconds);
+                state = runtime.runtimeState;
+                if (!std::isfinite(state.GetWheelSpeedRight()))
+                {
+                    break;
+                }
+            }
+            const float actual = state.GetWheelSpeedRight();
             std::wstringstream message;
             message << L"PM23_INVERSE_SIGN"
                 << L"\nfield=long_run_right_wheel_speed_radps"

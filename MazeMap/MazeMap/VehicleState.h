@@ -7,24 +7,17 @@
 #include "SensorSnapshot.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 
 namespace MazeMap
 {
     class Estimator;
+    class PlantModel;
     class SrUkfCore;
 
     class EXPORT VehicleState
     {
-    public:
-        static constexpr int kDimension = 9;
-        using StateVector = Eigen::Matrix<float, kDimension, 1>;
-        using StateMatrix = Eigen::Matrix<float, kDimension, kDimension>;
-
-        // World pose uses +X right and +Y forward.
-        // Body velocity uses kV = body-right speed, kU = body-forward speed, and kR = clockwise yaw rate.
 
         enum Index : int
         {
@@ -38,6 +31,13 @@ namespace MazeMap
             kOmegaR = 7,
             kBgz = 8
         };
+    public:
+        static constexpr int kDimension = 9;
+        using StateVector = Eigen::Matrix<float, kDimension, 1>;
+        using StateMatrix = Eigen::Matrix<float, kDimension, kDimension>;
+
+        // World pose uses +X right and +Y forward.
+        // Body velocity uses kV = body-right speed, kU = body-forward speed, and kR = clockwise yaw rate.
 
 
         static StateMatrix DefaultInitialCovariance() noexcept
@@ -83,14 +83,6 @@ namespace MazeMap
         }
 
         bool IsStationary() const noexcept;
-
-        // Applies the stationary zero-motion constraint while preserving the caller-provided pose anchor block.
-        // Gyro bias remains untouched.
-        void ApplyStationaryZeroMotionConstraint(
-            bool resetLateralVelocity,
-            bool hasPoseReference,
-            const StateVector& poseReferenceState,
-            const StateMatrix& poseReferenceCovariance) noexcept;
 
         void SetPosition(const Eigen::Vector2f& position) noexcept { _state(kPx) = position.x(); _state(kPy) = position.y(); }
         float GetPositionX() const noexcept { return _state(kPx); }
@@ -170,26 +162,6 @@ namespace MazeMap
         const App::Internal::CommandVector& GetCurrentCommand() const noexcept { return _currentCommand; }
         App::Internal::CommandVector& GetCurrentCommand() noexcept { return _currentCommand; }
 
-        VehicleState ProjectConstantVelocity(float dtSeconds) const noexcept
-        {
-            VehicleState projected = *this;
-            if (!std::isfinite(dtSeconds) || (dtSeconds <= 0.0f))
-            {
-                return projected;
-            }
-
-            const float linearSpeedMps = std::isfinite(GetVelocity()) ? GetVelocity() : 0.0f;
-            const float yawRateRadps = std::isfinite(GetRotationalVelocity()) ? GetRotationalVelocity() : 0.0f;
-            const float midYawRad = NormalizeAngle(GetOrientation() + (0.5f * yawRateRadps * dtSeconds));
-            const Eigen::Vector2f midHeading(std::sin(midYawRad), std::cos(midYawRad));
-            projected.SetPosition(Eigen::Vector2f(
-                GetPositionX() + (linearSpeedMps * midHeading.x() * dtSeconds),
-                GetPositionY() + (linearSpeedMps * midHeading.y() * dtSeconds)));
-            projected.SetOrientation(GetOrientation() + (yawRateRadps * dtSeconds));
-            projected.SetTime(GetTime() + dtSeconds);
-            return projected;
-        }
-
         void SetVarianceValues(float xVar, float yVar, float velocityVar, float orientationVar, float rotVelocityVar)
         {
             StateMatrix covariance = GetCovariance();
@@ -226,6 +198,16 @@ namespace MazeMap
 
         float GetVelocityVar() const noexcept { return GetCovariance()(kU, kU); }
         float GetVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetVelocityVar(); }
+
+        void SetLateralVelocityVar(float lateralVelocityVariance) noexcept
+        {
+            StateMatrix covariance = GetCovariance();
+            covariance(kV, kV) = (std::max)(0.0f, lateralVelocityVariance);
+            SetCovariance(covariance);
+        }
+
+        float GetLateralVelocityVar() const noexcept { return GetCovariance()(kV, kV); }
+        float GetLateralVelocityVar() noexcept { return const_cast<const VehicleState*>(this)->GetLateralVelocityVar(); }
 
         void SetOrientationVar(float orientationVariance) noexcept
         {
@@ -276,31 +258,9 @@ namespace MazeMap
 
         float GetGyroBiasZVar() const noexcept { return GetCovariance()(kBgz, kBgz); }
 
-        static float NormalizeAngle(float angleRad) noexcept
-        {
-            if (!std::isfinite(angleRad))
-            {
-                return 0.0f;
-            }
-
-            while (angleRad > PI_F)
-            {
-                angleRad -= TWO_PI_F;
-            }
-            while (angleRad <= -PI_F)
-            {
-                angleRad += TWO_PI_F;
-            }
-            return angleRad;
-        }
-
-        static void NormalizeStateVector(StateVector& state) noexcept
-        {
-            state(kPsi) = NormalizeAngle(state(kPsi));
-        }
-
     private:
         friend class Estimator;
+        friend class PlantModel;
         friend class SrUkfCore;
 
         const StateVector& GetStateVector() const noexcept { return _state; }
@@ -310,11 +270,6 @@ namespace MazeMap
             _state = state;
             _state(kPsi) = NormalizeAngle(_state(kPsi));
         }
-
-        static bool BuildConstrainedLowerTriangularSquareRoot(
-            const StateMatrix& covariance,
-            const std::array<bool, kDimension>& exactZeroMask,
-            StateMatrix& sqrtCovariance) noexcept;
 
         StateVector _state;
         StateMatrix _sqrtCovariance;

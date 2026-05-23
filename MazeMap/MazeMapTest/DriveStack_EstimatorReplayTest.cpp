@@ -79,8 +79,7 @@ namespace MazeMap
             const float dtSeconds,
             const bool encoderObservationValid = true)
         {
-            const PlantParams params = PlantParams::Default();
-            const float distancePerCountM = DistancePerEncoderCountMeters(params);
+            const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
 
             const int32_t leftDeltaCounts =
                 ConsumeReplayEncoderCounts(
@@ -108,9 +107,9 @@ namespace MazeMap
             snapshot.encoderObservation.rightVelocityMps =
                 snapshot.encoderObservation.rightDistanceDeltaM / dtSeconds;
             snapshot.encoderObservation.omegaLeftRadps =
-                snapshot.encoderObservation.leftVelocityMps / params.wheelRadiusM;
+                Vehicle::WheelOmegaFromLinearVelocity(snapshot.encoderObservation.leftVelocityMps);
             snapshot.encoderObservation.omegaRightRadps =
-                snapshot.encoderObservation.rightVelocityMps / params.wheelRadiusM;
+                Vehicle::WheelOmegaFromLinearVelocity(snapshot.encoderObservation.rightVelocityMps);
             snapshot.leftEncoderTotalCounts = encoderState.leftTotalCounts;
             snapshot.rightEncoderTotalCounts = encoderState.rightTotalCounts;
             snapshot.leftEncoderDistanceM =
@@ -237,7 +236,7 @@ namespace MazeMap
 
             ReplayScenarioResult result = base;
             result.expectedYawRad =
-                VehicleState::NormalizeAngle(
+                NormalizeAngle(
                     base.actualEncoderYawRateRadps * kReplayDtSeconds * static_cast<float>(steps));
             return result;
         }
@@ -260,7 +259,7 @@ namespace MazeMap
                 false);
 
             const float expectedYawRad =
-                VehicleState::NormalizeAngle(yawRateRadps * kReplayDtSeconds * static_cast<float>(steps));
+                NormalizeAngle(yawRateRadps * kReplayDtSeconds * static_cast<float>(steps));
             return CaptureReplayResult(runtime, encoderState, 0.0f, yawRateRadps, expectedYawRad);
         }
 
@@ -287,7 +286,7 @@ namespace MazeMap
                 steps);
 
             const float totalTimeSeconds = kReplayDtSeconds * static_cast<float>(steps);
-            const float expectedYawRad = VehicleState::NormalizeAngle(yawRateRadps * totalTimeSeconds);
+            const float expectedYawRad = NormalizeAngle(yawRateRadps * totalTimeSeconds);
             const float expectedRadiusM = forwardVelocityMps / yawRateRadps;
             const float expectedXM = expectedRadiusM * (1.0f - std::cos(expectedYawRad));
             const float expectedYM = expectedRadiusM * std::sin(expectedYawRad);

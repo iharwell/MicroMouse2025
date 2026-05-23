@@ -2,10 +2,10 @@
 
 #include "CppUnitTest.h"
 
-#include "EstimatorTestSupport.h"
-
+#include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\SrUkfCore.h"
 #include "..\MazeMap\Vehicle.h"
+#include "..\MazeMap\VehicleState.h"
 
 #include <algorithm>
 #include <cstdarg>
@@ -298,34 +298,34 @@ namespace MazeMap
     inline EncoderObs BuildPredictionMatchingEncoderObservation(
         const VehicleState::StateVector& previousState,
         const VehicleState::StateVector& predictedState,
-        const PlantParams& params,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState) noexcept
     {
         EncoderObs encoder{};
-        encoder.omegaLeftRadps = predictedState(VehicleState::kOmegaL);
-        encoder.omegaRightRadps = predictedState(VehicleState::kOmegaR);
+        encoder.omegaLeftRadps = predictedState(6);
+        encoder.omegaRightRadps = predictedState(7);
 
         if (!(std::isfinite(dtSeconds) && (dtSeconds > 0.0f)))
         {
             return encoder;
         }
 
-        const float distancePerCountM = DistancePerEncoderCountMeters(params);
+        const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
         if (!(std::isfinite(distancePerCountM) && (distancePerCountM > 0.0f)))
         {
             return encoder;
         }
 
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const float leftDistanceDeltaM =
             0.5f *
-            (previousState(VehicleState::kOmegaL) + predictedState(VehicleState::kOmegaL)) *
-            params.wheelRadiusM *
+            (previousState(6) + predictedState(6)) *
+            wheelRadiusM *
             dtSeconds;
         const float rightDistanceDeltaM =
             0.5f *
-            (previousState(VehicleState::kOmegaR) + predictedState(VehicleState::kOmegaR)) *
-            params.wheelRadiusM *
+            (previousState(7) + predictedState(7)) *
+            wheelRadiusM *
             dtSeconds;
 
         encoder.totalLeftCounts =
@@ -343,7 +343,6 @@ namespace MazeMap
         SrUkfCore& core,
         const VehicleState::StateVector& previousState,
         const VehicleState::StateVector& predictedState,
-        const PlantParams& params,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState)
     {
@@ -351,7 +350,6 @@ namespace MazeMap
             BuildPredictionMatchingEncoderObservation(
                 previousState,
                 predictedState,
-                params,
                 dtSeconds,
                 remainderState);
         const MeasurementUpdateResult encoderResult = core.updateEncoderPair(encoder, dtSeconds);
@@ -359,7 +357,7 @@ namespace MazeMap
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(encoderResult.accepted);
 
         const MeasurementUpdateResult yawResult =
-            core.updateYawRate(predictedState(VehicleState::kR));
+            core.updateYawRate(predictedState(5));
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.attempted);
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(yawResult.accepted);
     }
@@ -367,7 +365,6 @@ namespace MazeMap
     inline void RunPredictionMatchingCycle(
         SrUkfCore& core,
         const App::Internal::CommandVector& control,
-        const PlantParams& params,
         float dtSeconds,
         SyntheticEncoderRemainderState& remainderState,
         float commandedLinearMps,
@@ -384,7 +381,6 @@ namespace MazeMap
             core,
             stateBeforePredict,
             core.workingState(),
-            params,
             dtSeconds,
             remainderState);
     }
@@ -415,19 +411,26 @@ namespace MazeMap
         App::Internal::CommandVector control =
             App::Internal::CommandVector(0.0f, 0.0f))
     {
-        const VehicleState::StateVector initialState =
-            BuildUkfState(
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f);
-        const VehicleState::StateMatrix initialCovariance =
-            BuildUkfCovariance(0.001f, 0.01f, 0.005f, 0.005f, 0.05f, 0.05f, 0.02f);
+        VehicleState::StateVector initialState = VehicleState::StateVector::Zero();
+        initialState(0) = 0.0f;
+        initialState(1) = 0.0f;
+        initialState(2) = (0.0f);
+        initialState(3) = 0.0f;
+        initialState(4) = 0.0f;
+        initialState(5) = 0.0f;
+        initialState(6) = 0.0f;
+        initialState(7) = 0.0f;
+        initialState(8) = 0.0f;
+        VehicleState::StateMatrix initialCovariance = VehicleState::StateMatrix::Zero();
+        initialCovariance(0, 0) = 0.001f * 0.001f;
+        initialCovariance(1, 1) = 0.001f * 0.001f;
+        initialCovariance(2, 2) = 0.01f * 0.01f;
+        initialCovariance(3, 3) = 0.005f * 0.005f;
+        initialCovariance(4, 4) = 0.005f * 0.005f;
+        initialCovariance(5, 5) = 0.05f * 0.05f;
+        initialCovariance(6, 6) = 0.05f * 0.05f;
+        initialCovariance(7, 7) = 0.05f * 0.05f;
+        initialCovariance(8, 8) = 0.02f * 0.02f;
 
         SrUkfCore core = MakeDefaultSrUkfCore();
         Microsoft::VisualStudio::CppUnitTestFramework::Assert::IsTrue(core.reset(initialState, initialCovariance));

@@ -38,14 +38,16 @@ namespace MazeMap
             const Eigen::Vector2f& position,
             const Eigen::Vector2f& facingDirection,
             const std::array<float, 8>& adcToLightTable,
-            const DistanceModel& distanceModel
+            const DistanceModel& distanceModel,
+            float noHitRangeM = 0.30f
         )
             : _wallSensorInPin(wallSensorInPin),
             _ledOutPin(ledOutPin),
             _position(position),
             _facingDirection(Normalize(facingDirection)),
             _adcToLightTable(adcToLightTable),
-            _distanceModel(distanceModel)
+            _distanceModel(distanceModel),
+            _noHitRangeM((std::isfinite(noHitRangeM) && (noHitRangeM > 0.0f)) ? noHitRangeM : 0.30f)
         {
 #ifndef NDEBUG
             const float dirMagSq =
@@ -68,6 +70,7 @@ namespace MazeMap
         uint8_t GetLedOutPin() const { return _ledOutPin; }
         const Eigen::Vector2f& GetPosition() const { return _position; }
         const Eigen::Vector2f& GetFacingDirection() const { return _facingDirection; }
+        float GetNoHitRangeM() const { return _noHitRangeM; }
 
         void SetLedEnabled(bool enabled) const
         {
@@ -132,6 +135,7 @@ namespace MazeMap
         Eigen::Vector2f _facingDirection;
         std::array<float, 8> _adcToLightTable;
         DistanceModel _distanceModel;
+        float _noHitRangeM;
 
         static Eigen::Vector2f Normalize(const Eigen::Vector2f& v)
         {

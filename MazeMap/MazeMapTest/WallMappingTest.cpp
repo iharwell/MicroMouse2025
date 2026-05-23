@@ -9,6 +9,8 @@
 #include "..\MazeMap\WallObservationPipeline.h"
 #include "..\MazeMap\WallSensor.h"
 #include "..\MazeMap\WallSensorCalibration.h"
+#include "..\MazeMap\Vehicle.h"
+#include "..\MazeMap\VehicleState.h"
 
 #include <array>
 #include <cmath>
@@ -40,11 +42,11 @@ namespace MazeMap
 
 	static WallGeometryModel::GeometryStateFrame BuildGeometryFrame(
 		const WallGeometryModel& geometry,
-		const VehicleState::StateVector& state)
+		const VehicleState& state)
 	{
 		return geometry.buildStateFrame(
-			Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)),
-			state(VehicleState::kPsi));
+			state.GetPosition(),
+			state.GetOrientation());
 	}
 
 	TEST_CLASS(WallMappingTest)
@@ -220,19 +222,18 @@ namespace MazeMap
 			maze.SetWall(maze(0, 0), Direction::Up, WallState::Wall);
 
 			WallGeometryModel geometry;
-			PlantParams params = PlantParams::Default();
 
-			VehicleState::StateVector state = VehicleState::StateVector::Zero();
-			state(VehicleState::kPx) = 0.09f;
-			state(VehicleState::kPy) = 0.09f;
-			state(VehicleState::kPsi) = 0.0f;
+			VehicleState state;
+			state.SetPosition(Eigen::Vector2f(0.09f, 0.09f));
+			state.SetOrientation(0.0f);
 
 			const WallGeometryModel::GeometryStateFrame frame = BuildGeometryFrame(geometry, state);
-			GeometryPrediction baseline = geometry.predictRay(frame, params.frontLeftSensor, maze);
+			const SensorMount frontLeftSensor = Vehicle::GetFrontLeftSensorMount();
+			GeometryPrediction baseline = geometry.predictRay(frame, frontLeftSensor, maze);
 			Assert::IsTrue(baseline.hit);
 			Assert::AreEqual(static_cast<int>(GeometryHitType::WallFace), static_cast<int>(baseline.type));
 
-			const SensorMount rotatedSensor = RotateMountYaw(params.frontLeftSensor, 0.35f);
+			const SensorMount rotatedSensor = RotateMountYaw(frontLeftSensor, 0.35f);
 			GeometryPrediction rotated = geometry.predictRay(frame, rotatedSensor, maze);
 			Assert::IsTrue(rotated.rangeM > baseline.rangeM);
 		}
@@ -255,10 +256,9 @@ namespace MazeMap
 					Eigen::Vector2f(0.0f, 1.0f)),
 				PI_F / 4.0f);
 
-			VehicleState::StateVector state = VehicleState::StateVector::Zero();
-			state(VehicleState::kPx) = 0.09f;
-			state(VehicleState::kPy) = 0.09f;
-			state(VehicleState::kPsi) = 0.0f;
+			VehicleState state;
+			state.SetPosition(Eigen::Vector2f(0.09f, 0.09f));
+			state.SetOrientation(0.0f);
 
 			const GeometryPrediction prediction = geometry.predictRay(BuildGeometryFrame(geometry, state), sensor, maze);
 			Assert::IsTrue(prediction.hit);

@@ -1,13 +1,16 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
-#include "EstimatorTestSupport.h"
-
+#include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\Vehicle.h"
+#include "..\MazeMap\VehicleState.h"
 
-#include <array>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -88,21 +91,18 @@ namespace MazeMap
 
         TEST_METHOD(VehicleStateIsStationaryUsesCurrentUkfThresholds)
         {
-            const PlantParams params = PlantParams::Default();
             const float wheelSpeedThresholdRadps =
-                kStationaryEncoderVelocitySigmaMps / params.wheelRadiusM;
+                Vehicle::WheelOmegaFromLinearVelocity(kStationaryEncoderVelocitySigmaMps);
 
             VehicleState stationaryState;
-            SetVehicleStateFromUkfStateVector(stationaryState, BuildUkfState(
-                0.40f,
-                -0.18f,
-                0.35f,
-                0.0f,
-                0.0f,
-                0.5f * (3.0f * kImuYawRateSigmaRadps),
-                0.5f * wheelSpeedThresholdRadps,
-                -0.5f * wheelSpeedThresholdRadps,
-                0.12f));
+            stationaryState.SetPosition(Eigen::Vector2f(0.40f, -0.18f));
+            stationaryState.SetOrientation(0.35f);
+            stationaryState.SetVelocity(0.0f);
+            stationaryState.SetLateralVelocity(0.0f);
+            stationaryState.SetRotationalVelocity(0.5f * (3.0f * kImuYawRateSigmaRadps));
+            stationaryState.SetWheelSpeedLeft(0.5f * wheelSpeedThresholdRadps);
+            stationaryState.SetWheelSpeedRight(-0.5f * wheelSpeedThresholdRadps);
+            stationaryState.SetGyroBiasZ(0.12f);
             Assert::IsTrue(stationaryState.IsStationary());
 
             VehicleState movingState = stationaryState;
@@ -132,9 +132,47 @@ namespace MazeMap
         TEST_METHOD(VehicleBatteryVoltageMatchesPlantModelSupplyVoltage)
         {
             const Vehicle vehicle;
-            const PlantParams params = PlantParams::Default();
+            VehicleState runtimeState;
+            const PlantModel plantModel(vehicle, runtimeState);
+            float plantModelSupplyVoltageV = std::numeric_limits<float>::quiet_NaN();
 
-            Assert::AreEqual(params.supplyVoltageV, vehicle.GetBatteryVoltage(), 0.0f);
+            const bool wrotePlantDump = plantModel.WriteUkfPlantDebugTextDump(
+                &plantModelSupplyVoltageV,
+                [](
+                    void* context,
+                    const char* type,
+                    const char* format,
+                    std::va_list args) noexcept
+                {
+                    if (std::strcmp(type, "ukf_dump_params_drive_electrical") != 0)
+                    {
+                        return true;
+                    }
+
+                    char message[512] = {};
+                    std::va_list argsCopy;
+                    va_copy(argsCopy, args);
+                    const int length = std::vsnprintf(message, sizeof(message), format, argsCopy);
+                    va_end(argsCopy);
+                    if ((length <= 0) || (length >= static_cast<int>(sizeof(message))))
+                    {
+                        return false;
+                    }
+
+                    constexpr char kSupplyVoltageToken[] = "supply_voltage_v=";
+                    const char* const valueStart = std::strstr(message, kSupplyVoltageToken);
+                    if (valueStart == nullptr)
+                    {
+                        return false;
+                    }
+                    *static_cast<float*>(context) =
+                        std::strtof(valueStart + (sizeof(kSupplyVoltageToken) - 1U), nullptr);
+                    return true;
+                });
+
+            Assert::IsTrue(wrotePlantDump);
+            Assert::IsTrue(std::isfinite(plantModelSupplyVoltageV));
+            Assert::AreEqual(vehicle.GetBatteryVoltage(), plantModelSupplyVoltageV, 0.0f);
         }
 
         TEST_METHOD(VehicleStateLogEntryProjectsThroughDomainGetters)
@@ -177,83 +215,6 @@ namespace MazeMap
                     &flattened,
                     &projected,
                     sizeof(VehicleStateLogTestRow)));
-        }
-
-        TEST_METHOD(VehicleStateStationaryConstraintKeepsPoseReferenceAndCollapsesStationaryStates)
-        {
-            VehicleState state;
-            SetVehicleStateFromUkfStateVector(state, BuildUkfState(
-                0.40f,
-                -0.18f,
-                0.35f,
-                0.8f,
-                -0.12f,
-                0.4f,
-                9.0f,
-                7.5f,
-                -0.02f));
-            state.SetCovariance(BuildUkfCovariance(0.05f, 0.08f, 0.30f, 0.20f, 0.25f, 0.45f, 0.06f));
-            Assert::IsFalse(state.IsStationary());
-
-            const VehicleState::StateVector poseReferenceState = BuildUkfState(
-                1.20f,
-                0.70f,
-                -0.20f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f,
-                0.0f);
-            VehicleState::StateMatrix poseReferenceCovariance =
-                BuildUkfCovariance(0.012f, 0.02f, 0.15f, 0.11f, 0.09f, 0.40f, 0.03f);
-            poseReferenceCovariance(VehicleState::kPx, VehicleState::kPy) = 2.5e-5f;
-            poseReferenceCovariance(VehicleState::kPy, VehicleState::kPx) = 2.5e-5f;
-            poseReferenceCovariance(VehicleState::kPx, VehicleState::kPsi) = -1.5e-5f;
-            poseReferenceCovariance(VehicleState::kPsi, VehicleState::kPx) = -1.5e-5f;
-            poseReferenceCovariance(VehicleState::kPy, VehicleState::kPsi) = 1.2e-5f;
-            poseReferenceCovariance(VehicleState::kPsi, VehicleState::kPy) = 1.2e-5f;
-
-            state.ApplyStationaryZeroMotionConstraint(
-                true,
-                true,
-                poseReferenceState,
-                poseReferenceCovariance);
-
-            const VehicleState::StateMatrix constrainedCovariance = state.GetCovariance();
-
-            Assert::AreEqual(poseReferenceState(VehicleState::kPx), state.GetPositionX(), 1.0e-6f);
-            Assert::AreEqual(poseReferenceState(VehicleState::kPy), state.GetPositionY(), 1.0e-6f);
-            Assert::AreEqual(poseReferenceState(VehicleState::kPsi), state.GetOrientation(), 1.0e-6f);
-            Assert::AreEqual(0.0f, state.GetVelocity(), 1.0e-7f);
-            Assert::AreEqual(0.0f, state.GetLateralVelocity(), 1.0e-7f);
-            Assert::AreEqual(0.0f, state.GetRotationalVelocity(), 1.0e-7f);
-            Assert::AreEqual(0.0f, state.GetWheelSpeedLeft(), 1.0e-7f);
-            Assert::AreEqual(0.0f, state.GetWheelSpeedRight(), 1.0e-7f);
-            Assert::AreEqual(-0.02f, state.GetGyroBiasZ(), 1.0e-7f);
-            Assert::IsTrue(state.IsStationary());
-
-            constexpr std::array<int, 3> kPoseIndices = {
-                VehicleState::kPx,
-                VehicleState::kPy,
-                VehicleState::kPsi
-            };
-            for (const int row : kPoseIndices)
-            {
-                for (const int col : kPoseIndices)
-                {
-                    Assert::AreEqual(
-                        poseReferenceCovariance(row, col),
-                        constrainedCovariance(row, col),
-                        1.0e-7f);
-                }
-            }
-
-            Assert::IsTrue(constrainedCovariance(VehicleState::kU, VehicleState::kU) <= 1.0e-12f);
-            Assert::IsTrue(constrainedCovariance(VehicleState::kV, VehicleState::kV) <= 1.0e-12f);
-            Assert::IsTrue(constrainedCovariance(VehicleState::kR, VehicleState::kR) <= 1.0e-12f);
-            Assert::IsTrue(constrainedCovariance(VehicleState::kOmegaL, VehicleState::kOmegaL) <= 1.0e-12f);
-            Assert::IsTrue(constrainedCovariance(VehicleState::kOmegaR, VehicleState::kOmegaR) <= 1.0e-12f);
-            Assert::AreEqual(0.06f * 0.06f, constrainedCovariance(VehicleState::kBgz, VehicleState::kBgz), 1.0e-7f);
         }
     };
 }

@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <sstream>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -17,37 +16,6 @@ namespace MazeMap
 {
     namespace
     {
-        struct ContactBounds final
-        {
-            float minX;
-            float maxX;
-            float minY;
-            float maxY;
-        };
-
-        ContactBounds GetContactBounds(const PlantParams& params) noexcept
-        {
-            ContactBounds bounds{
-                (std::numeric_limits<float>::infinity)(),
-                -(std::numeric_limits<float>::infinity)(),
-                (std::numeric_limits<float>::infinity)(),
-                -(std::numeric_limits<float>::infinity)()};
-
-            for (const Eigen::Vector2f& contact : params.contactPositionsBodyM)
-            {
-                bounds.minX = (std::min)(bounds.minX, contact.x());
-                bounds.maxX = (std::max)(bounds.maxX, contact.x());
-                bounds.minY = (std::min)(bounds.minY, contact.y());
-                bounds.maxY = (std::max)(bounds.maxY, contact.y());
-            }
-
-            return bounds;
-        }
-
-        PlantModel MakePlant(Vehicle& vehicle, VehicleState& runtimeState)
-        {
-            return PlantModel(vehicle, runtimeState);
-        }
 
         void GetRepresentativeWheelOmegas(float& leftOmegaRadps, float& rightOmegaRadps) noexcept
         {
@@ -58,345 +26,46 @@ namespace MazeMap
     TEST_CLASS(DriveStack_VehiclePlantBoundaryTest)
     {
     public:
-        TEST_METHOD(DefaultParams_MassMatchesVehicle)
+        TEST_METHOD(VehicleMass_DrivesPlantLongitudinalTechnicalLimit)
         {
-            const Vehicle vehicle;
-            const PlantParams params = PlantParams::Default();
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            auto plant = PlantModel(vehicle, runtimeState);
+            float actualForwardAccelMps2 = 0.0f;
+            float unusedYawAccelRadps2 = 0.0f;
+            plant.velocityTargetTechnicalLimits(actualForwardAccelMps2, unusedYawAccelRadps2);
+
+            const MotorEncoderDrive& leftDrive = vehicle.GetLeftMotorEncoderDrive();
+            const MotorEncoderDrive& rightDrive = vehicle.GetRightMotorEncoderDrive();
+            const float batteryVoltageV = vehicle.GetBatteryVoltage();
+            const float leftLimitN = (std::min)(
+                std::fabs(leftDrive.getForwardForceFromCommand(1.0f, 0.0f, batteryVoltageV)),
+                std::fabs(leftDrive.getForwardForceFromCommand(-1.0f, 0.0f, batteryVoltageV)));
+            const float rightLimitN = (std::min)(
+                std::fabs(rightDrive.getForwardForceFromCommand(1.0f, 0.0f, batteryVoltageV)),
+                std::fabs(rightDrive.getForwardForceFromCommand(-1.0f, 0.0f, batteryVoltageV)));
+            const float expectedForwardAccelMps2 =
+                (2.0f * (std::min)(leftLimitN, rightLimitN)) / vehicle.GetMass();
+
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=mass_kg"
-                << L"\nexpected=" << vehicle.GetMass()
-                << L"\nactual=" << params.massKg
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                vehicle.GetMass(),
-                params.massKg,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(DefaultParams_TrackWidthMatchesVehicle)
-        {
-            const Vehicle vehicle;
-            const PlantParams params = PlantParams::Default();
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=track_width_m"
-                << L"\nexpected=" << vehicle.GetTrackWidth()
-                << L"\nactual=" << params.trackWidthM
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                vehicle.GetTrackWidth(),
-                params.trackWidthM,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(DefaultParams_YawInertiaMatchesVehicle)
-        {
-            const Vehicle vehicle;
-            const PlantParams params = PlantParams::Default();
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=yaw_inertia_kg_m2"
-                << L"\nexpected=" << vehicle.GetYawInertia()
-                << L"\nactual=" << params.yawInertiaKgM2
-                << L"\ntolerance=1e-8";
-
-            Assert::AreEqual(
-                vehicle.GetYawInertia(),
-                params.yawInertiaKgM2,
-                1.0e-8f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(DefaultParams_WheelRadiusMatchesVehicle)
-        {
-            const PlantParams params = PlantParams::Default();
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=wheel_radius_m"
-                << L"\nexpected=" << Vehicle::GetDriveWheelRadiusM()
-                << L"\nactual=" << params.wheelRadiusM
-                << L"\ntolerance=1e-7";
-
-            Assert::AreEqual(
-                Vehicle::GetDriveWheelRadiusM(),
-                params.wheelRadiusM,
-                1.0e-7f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(DefaultParams_ContactLongitudinalOffsetMatchesVehicle)
-        {
-            const VehiclePhysicalModel& physical = Vehicle::GetPhysicalModel();
-            const PlantParams params = PlantParams::Default();
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=contact_patch_longitudinal_offset_m"
-                << L"\nexpected=" << physical.driveWheelLongitudinalOffsetM
-                << L"\nactual=" << params.contactPatchLongitudinalOffsetM
-                << L"\ntolerance=1e-7";
-
-            Assert::AreEqual(
-                physical.driveWheelLongitudinalOffsetM,
-                params.contactPatchLongitudinalOffsetM,
-                1.0e-7f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(DefaultParams_SustainedAccelerationMatchesVehicleReference)
-        {
-            const PlantParams params = PlantParams::Default();
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=combined_accel_sustained_mps2"
-                << L"\nexpected=" << Vehicle::GetSustainedLateralAccelerationReferenceMps2()
-                << L"\nactual=" << params.combinedAccelSustainedMps2
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                Vehicle::GetSustainedLateralAccelerationReferenceMps2(),
-                params.combinedAccelSustainedMps2,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(Prepare_RetainsVehicleTrackWidth)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=prepared_track_width_m"
-                << L"\nexpected=" << params.trackWidthM
-                << L"\nactual=" << prepared.trackWidthM
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                params.trackWidthM,
-                prepared.trackWidthM,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(Prepare_RetainsVehicleWheelRadius)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=prepared_wheel_radius_m"
-                << L"\nexpected=" << params.wheelRadiusM
-                << L"\nactual=" << prepared.wheelRadiusM
-                << L"\ntolerance=1e-7";
-
-            Assert::AreEqual(
-                params.wheelRadiusM,
-                prepared.wheelRadiusM,
-                1.0e-7f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(Prepare_LongitudinalMassDerivesFromVehicleMass)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=longitudinal_mass_kg"
-                << L"\nexpected=" << params.massKg
-                << L"\nactual=" << prepared.longitudinalMassKg
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                params.massKg,
-                prepared.longitudinalMassKg,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(Prepare_LateralMassDerivesFromVehicleMass)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=lateral_mass_kg"
-                << L"\nexpected=" << params.massKg
-                << L"\nactual=" << prepared.lateralMassKg
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                params.massKg,
-                prepared.lateralMassKg,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(Prepare_YawInertiaDerivesFromVehicle)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=prepared_yaw_inertia_kg_m2"
-                << L"\nexpected=" << params.yawInertiaKgM2
-                << L"\nactual=" << prepared.yawInertiaKgM2
-                << L"\ntolerance=1e-8";
-
-            Assert::AreEqual(
-                params.yawInertiaKgM2,
-                prepared.yawInertiaKgM2,
-                1.0e-8f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(Prepare_BaseNormalLoadUsesVehicleMass)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            const float expectedBaseNormalLoadN = params.massKg * GRAVITY_MPS2;
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=base_normal_load_n"
-                << L"\nexpected=" << expectedBaseNormalLoadN
-                << L"\nactual=" << prepared.baseNormalLoadN
+                << L"\nfield=max_longitudinal_accel_mps2"
+                << L"\nexpected=" << expectedForwardAccelMps2
+                << L"\nactual=" << actualForwardAccelMps2
                 << L"\ntolerance=1e-5";
 
             Assert::AreEqual(
-                expectedBaseNormalLoadN,
-                prepared.baseNormalLoadN,
+                expectedForwardAccelMps2,
+                actualForwardAccelMps2,
                 1.0e-5f,
                 message.str().c_str());
         }
 
-        TEST_METHOD(Prepare_SustainedLateralForceUsesVehicleMass)
-        {
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            const float expectedForceN = params.combinedAccelSustainedMps2 * params.massKg;
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=lateral_force_sustained_limit_n"
-                << L"\nexpected=" << expectedForceN
-                << L"\nactual=" << prepared.lateralForceSustainedLimitN
-                << L"\ntolerance=1e-5";
-
-            Assert::AreEqual(
-                expectedForceN,
-                prepared.lateralForceSustainedLimitN,
-                1.0e-5f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactGeometry_MinXUsesVehicleHalfTrack)
-        {
-            const PlantParams params = PlantParams::Default();
-            const ContactBounds bounds = GetContactBounds(params);
-            const float halfTrackWidthM = 0.5f * Vehicle::GetPhysicalModel().trackWidthM;
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=contact_min_x_m"
-                << L"\nexpected=" << -halfTrackWidthM
-                << L"\nactual=" << bounds.minX
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                -halfTrackWidthM,
-                bounds.minX,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactGeometry_MaxXUsesVehicleHalfTrack)
-        {
-            const PlantParams params = PlantParams::Default();
-            const ContactBounds bounds = GetContactBounds(params);
-            const float halfTrackWidthM = 0.5f * Vehicle::GetPhysicalModel().trackWidthM;
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=contact_max_x_m"
-                << L"\nexpected=" << halfTrackWidthM
-                << L"\nactual=" << bounds.maxX
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                halfTrackWidthM,
-                bounds.maxX,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactGeometry_MinYUsesVehicleWheelOffset)
-        {
-            const PlantParams params = PlantParams::Default();
-            const ContactBounds bounds = GetContactBounds(params);
-            const float contactOffsetM = std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=contact_min_y_m"
-                << L"\nexpected=" << -contactOffsetM
-                << L"\nactual=" << bounds.minY
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                -contactOffsetM,
-                bounds.minY,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactGeometry_MaxYUsesVehicleWheelOffset)
-        {
-            const PlantParams params = PlantParams::Default();
-            const ContactBounds bounds = GetContactBounds(params);
-            const float contactOffsetM = std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=contact_max_y_m"
-                << L"\nexpected=" << contactOffsetM
-                << L"\nactual=" << bounds.maxY
-                << L"\ntolerance=1e-6";
-
-            Assert::AreEqual(
-                contactOffsetM,
-                bounds.maxY,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(PublicKinematics_MeasuredLinearSpeedUsesVehicleWheelRadius)
+        TEST_METHOD(VehicleTrackWidth_DrivesMeasuredYawRate)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
-            EncoderObs observation{};
-            GetRepresentativeWheelOmegas(observation.omegaLeftRadps, observation.omegaRightRadps);
-            const float actualSpeedMps = plant.measuredLinearSpeedMps(observation);
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=measured_linear_speed_mps"
-                << L"\nexpected=0.72"
-                << L"\nactual=" << actualSpeedMps
-                << L"\ntolerance=1e-6"
-                << L"\nleft_omega_radps=" << observation.omegaLeftRadps
-                << L"\nright_omega_radps=" << observation.omegaRightRadps;
-
-            Assert::AreEqual(
-                0.72f,
-                actualSpeedMps,
-                1.0e-6f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(PublicKinematics_MeasuredYawRateUsesVehicleWheelRadiusAndTrack)
-        {
-            Vehicle vehicle;
-            VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
+            auto plant = PlantModel(vehicle, runtimeState);
             EncoderObs observation{};
             GetRepresentativeWheelOmegas(observation.omegaLeftRadps, observation.omegaRightRadps);
             const float actualYawRateRadps = plant.measuredYawRateRadps(observation);
@@ -406,8 +75,7 @@ namespace MazeMap
                 << L"\nexpected=1.35"
                 << L"\nactual=" << actualYawRateRadps
                 << L"\ntolerance=1e-6"
-                << L"\nleft_omega_radps=" << observation.omegaLeftRadps
-                << L"\nright_omega_radps=" << observation.omegaRightRadps;
+                << L"\ntrack_width_m=" << vehicle.GetTrackWidth();
 
             Assert::AreEqual(
                 1.35f,
@@ -416,51 +84,109 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(PublicKinematics_LeftWheelProjectionMatchesVehicle)
+        TEST_METHOD(VehicleYawInertia_DrivesPlantYawTechnicalLimit)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
-            PlantModel::StateVector state = PlantModel::StateVector::Zero();
-            state(VehicleState::kU) = 0.72f;
-            state(VehicleState::kR) = 1.35f;
-            const Eigen::Vector2f wheelLinearMps = plant.wheelLinearVelocityFromBodyState(state);
-            const float expectedLeftMps = Vehicle::LeftWheelLinearVelocityFromBody(0.72f, 1.35f);
+            auto plant = PlantModel(vehicle, runtimeState);
+            float unusedForwardAccelMps2 = 0.0f;
+            float actualYawAccelRadps2 = 0.0f;
+            plant.velocityTargetTechnicalLimits(unusedForwardAccelMps2, actualYawAccelRadps2);
+
+            const MotorEncoderDrive& leftDrive = vehicle.GetLeftMotorEncoderDrive();
+            const MotorEncoderDrive& rightDrive = vehicle.GetRightMotorEncoderDrive();
+            const float batteryVoltageV = vehicle.GetBatteryVoltage();
+            const float leftLimitN = (std::min)(
+                std::fabs(leftDrive.getForwardForceFromCommand(1.0f, 0.0f, batteryVoltageV)),
+                std::fabs(leftDrive.getForwardForceFromCommand(-1.0f, 0.0f, batteryVoltageV)));
+            const float rightLimitN = (std::min)(
+                std::fabs(rightDrive.getForwardForceFromCommand(1.0f, 0.0f, batteryVoltageV)),
+                std::fabs(rightDrive.getForwardForceFromCommand(-1.0f, 0.0f, batteryVoltageV)));
+            const float expectedYawAccelRadps2 =
+                (vehicle.GetTrackWidth() * (std::min)(leftLimitN, rightLimitN)) / vehicle.GetYawInertia();
+
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=left_wheel_linear_mps"
-                << L"\nexpected=" << expectedLeftMps
-                << L"\nactual=" << wheelLinearMps(0)
-                << L"\ntolerance=1e-6";
+                << L"\nfield=max_yaw_accel_radps2"
+                << L"\nexpected=" << expectedYawAccelRadps2
+                << L"\nactual=" << actualYawAccelRadps2
+                << L"\ntolerance=0.05";
 
             Assert::AreEqual(
-                expectedLeftMps,
-                wheelLinearMps(0),
+                expectedYawAccelRadps2,
+                actualYawAccelRadps2,
+                5.0e-2f,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(VehicleWheelRadius_DrivesMeasuredLinearSpeed)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            auto plant = PlantModel(vehicle, runtimeState);
+            EncoderObs observation{};
+            GetRepresentativeWheelOmegas(observation.omegaLeftRadps, observation.omegaRightRadps);
+            const float actualSpeedMps = plant.measuredLinearSpeedMps(observation);
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
+                << L"\nfield=measured_linear_speed_mps"
+                << L"\nexpected=0.72"
+                << L"\nactual=" << actualSpeedMps
+                << L"\ntolerance=1e-6"
+                << L"\nwheel_radius_m=" << Vehicle::GetDriveWheelRadiusM();
+
+            Assert::AreEqual(
+                0.72f,
+                actualSpeedMps,
                 1.0e-6f,
                 message.str().c_str());
         }
 
-        TEST_METHOD(PublicKinematics_RightWheelProjectionMatchesVehicle)
+        TEST_METHOD(VehicleSustainedAcceleration_DrivesPlantUsage)
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
-            PlantModel::StateVector state = PlantModel::StateVector::Zero();
-            state(VehicleState::kU) = 0.72f;
-            state(VehicleState::kR) = 1.35f;
-            const Eigen::Vector2f wheelLinearMps = plant.wheelLinearVelocityFromBodyState(state);
-            const float expectedRightMps = Vehicle::RightWheelLinearVelocityFromBody(0.72f, 1.35f);
+            auto plant = PlantModel(vehicle, runtimeState);
+            const float actualUsage =
+                plant.sustainedCombinedAccelerationUsage(
+                    Vehicle::GetSustainedLateralAccelerationReferenceMps2());
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=right_wheel_linear_mps"
-                << L"\nexpected=" << expectedRightMps
-                << L"\nactual=" << wheelLinearMps(1)
+                << L"\nfield=sustained_combined_accel_usage"
+                << L"\nexpected=1"
+                << L"\nactual=" << actualUsage
                 << L"\ntolerance=1e-6";
 
             Assert::AreEqual(
-                expectedRightMps,
-                wheelLinearMps(1),
+                1.0f,
+                actualUsage,
                 1.0e-6f,
+                message.str().c_str());
+        }
+
+        TEST_METHOD(PlantDynamics_LateralAccelerationMatchesVehicleSustainedReference)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            auto plant = PlantModel(vehicle, runtimeState);
+            runtimeState.SetLateralVelocity(100.0f);
+            constexpr float dtSeconds = 0.001f;
+            plant.integrate(App::Internal::CommandVector{}, dtSeconds);
+            const float actualAccelMps2 =
+                std::fabs(runtimeState.GetLateralAcceleration());
+            const float expectedAccelMps2 =
+                Vehicle::GetSustainedLateralAccelerationReferenceMps2();
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
+                << L"\nfield=lateral_accel_mps2"
+                << L"\nexpected=" << expectedAccelMps2
+                << L"\nactual=" << actualAccelMps2
+                << L"\ntolerance=1e-3";
+
+            Assert::AreEqual(
+                expectedAccelMps2,
+                actualAccelMps2,
+                1.0e-3f,
                 message.str().c_str());
         }
 
@@ -468,20 +194,15 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
-            const PlantParams params = PlantParams::Default();
-            PlantModel::StateVector state = PlantModel::StateVector::Zero();
-            state(VehicleState::kU) = 0.30f;
-            state(VehicleState::kOmegaL) = Vehicle::WheelOmegaFromLinearVelocity(0.30f);
-            state(VehicleState::kOmegaR) = Vehicle::WheelOmegaFromLinearVelocity(0.30f);
-            runtimeState.SetVelocity(state(VehicleState::kU));
-            runtimeState.SetWheelSpeedLeft(state(VehicleState::kOmegaL));
-            runtimeState.SetWheelSpeedRight(state(VehicleState::kOmegaR));
+            auto plant = PlantModel(vehicle, runtimeState);
+            runtimeState.SetVelocity(0.30f);
+            runtimeState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
+            runtimeState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
 
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(1.20f, 0.0f);
-            const PlantDerivatives derivatives =
-                plant.forwardStep(state, command, params);
+            const float initialForwardVelocityMps = runtimeState.GetVelocity();
+            plant.integrate(command, 0.001f);
             std::wstringstream commandMessage;
             commandMessage << L"PM05_VEHICLE_PLANT_BOUNDARY"
                 << L"\nfield=forward_feedforward_command_finite"
@@ -490,15 +211,16 @@ namespace MazeMap
                 << L"\ncriterion=isfinite(left)&&isfinite(right)";
             std::wstringstream accelMessage;
             accelMessage << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=longitudinal_accel_mps2"
-                << L"\nactual=" << derivatives.longitudinalAccelMps2
-                << L"\ncriterion=actual>0";
+                << L"\nfield=forward_velocity_after_step_mps"
+                << L"\ninitial=" << initialForwardVelocityMps
+                << L"\nactual=" << runtimeState.GetVelocity()
+                << L"\ncriterion=actual>initial";
 
             Assert::IsTrue(
                 command.IsFinite(),
                 commandMessage.str().c_str());
             Assert::IsTrue(
-                derivatives.longitudinalAccelMps2 > 0.0f,
+                runtimeState.GetVelocity() > initialForwardVelocityMps,
                 accelMessage.str().c_str());
         }
 
@@ -506,7 +228,7 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
+            auto plant = PlantModel(vehicle, runtimeState);
             runtimeState.SetVelocity(0.30f);
             runtimeState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
             runtimeState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(0.30f));
@@ -531,7 +253,7 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
+            auto plant = PlantModel(vehicle, runtimeState);
 
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(0.0f, 8.50f);
@@ -551,23 +273,80 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
-            const PlantParams params = PlantParams::Default();
+            auto plant = PlantModel(vehicle, runtimeState);
 
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(0.0f, 8.50f);
-            const PlantDerivatives derivatives =
-                plant.forwardStep(PlantModel::StateVector::Zero(), command, params);
+            plant.integrate(command, 0.001f);
             std::wstringstream message;
             message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=yaw_accel_radps2"
-                << L"\nactual=" << derivatives.yawAccelRadps2
+                << L"\nfield=yaw_rate_after_step_radps"
+                << L"\nactual=" << runtimeState.GetRotationalVelocity()
                 << L"\ncriterion=actual>0"
                 << L"\nleft_command=" << command.LeftCommand()
                 << L"\nright_command=" << command.RightCommand();
 
             Assert::IsTrue(
-                derivatives.yawAccelRadps2 > 0.0f,
+                runtimeState.GetRotationalVelocity() > 0.0f,
+                message.str().c_str());
+        }
+
+        // This is based on directly observed yaw motion thresholds.
+        TEST_METHOD(YawFeedforwardGivesRealisticCommand)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            auto plant = PlantModel(vehicle, runtimeState);
+
+            const App::Internal::CommandVector command =
+                plant.ComputeFeedforward(0.0f, 0.50f);
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
+                << L"\nfield=feedforward yaw"
+                << L"\nactual=" << ((command.LeftCommand() - command.RightCommand())/2.0f)
+                << L"\ncriterion=actual>0.55";
+
+            Assert::IsTrue(
+                ((command.LeftCommand() - command.RightCommand()) / 2.0f) > 0.55f,
+                message.str().c_str());
+        }
+
+        // This is based on directly observed yaw motion thresholds.
+        TEST_METHOD(YawFeedforwardGivesRealisticCommandWithRotation)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+			runtimeState.SetRotationalVelocity(0.05f);
+            auto plant = PlantModel(vehicle, runtimeState);
+
+            const App::Internal::CommandVector command =
+                plant.ComputeFeedforward(0.0f, 0.50f);
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
+                << L"\nfield=feedforward yaw"
+                << L"\nactual=" << ((command.LeftCommand() - command.RightCommand()) / 2.0f)
+                << L"\ncriterion=actual>0.55";
+
+            Assert::IsTrue(
+                ((command.LeftCommand() - command.RightCommand()) / 2.0f) > 0.55f,
+                message.str().c_str());
+        }
+        TEST_METHOD(StraightFeedforwardGivesRealisticCommand)
+        {
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            auto plant = PlantModel(vehicle, runtimeState);
+
+            const App::Internal::CommandVector command =
+                plant.ComputeFeedforward(2.0f, 0.0f);
+            std::wstringstream message;
+            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
+                << L"\nfield=feedforward accel"
+                << L"\nactual=" << ((command.LeftCommand() + command.RightCommand()) / 2.0f)
+                << L"\ncriterion=actual>0.2";
+
+            Assert::IsTrue(
+                ((command.LeftCommand() + command.RightCommand()) / 2.0f) > 0.2f,
                 message.str().c_str());
         }
 
@@ -575,7 +354,7 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
+            auto plant = PlantModel(vehicle, runtimeState);
             EncoderObs observation{};
             Vehicle::WheelOmegasFromBodyVelocity(0.30f, 1.75f, observation.omegaLeftRadps, observation.omegaRightRadps);
             const float actualSpeedMps = plant.measuredLinearSpeedMps(observation);
@@ -599,7 +378,7 @@ namespace MazeMap
         {
             Vehicle vehicle;
             VehicleState runtimeState;
-            PlantModel plant = MakePlant(vehicle, runtimeState);
+            auto plant = PlantModel(vehicle, runtimeState);
             EncoderObs observation{};
             Vehicle::WheelOmegasFromBodyVelocity(0.30f, 1.75f, observation.omegaLeftRadps, observation.omegaRightRadps);
             const float actualYawRateRadps = plant.measuredYawRateRadps(observation);
@@ -619,195 +398,5 @@ namespace MazeMap
                 message.str().c_str());
         }
 
-        TEST_METHOD(ContactLoad_ZeroFanTotalNormalLoadUsesVehicleMass)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.0f);
-            const PlantParams params = PlantParams::Default();
-            const float expectedLoadN = vehicle.GetMass() * GRAVITY_MPS2;
-            const float actualLoadN = params.TotalNormalLoadN(vehicle.GetFanDuty());
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=zero_fan_total_normal_load_n"
-                << L"\nexpected=" << expectedLoadN
-                << L"\nactual=" << actualLoadN
-                << L"\ntolerance=1e-5"
-                << L"\nfan_duty=" << vehicle.GetFanDuty();
-
-            Assert::AreEqual(
-                expectedLoadN,
-                actualLoadN,
-                1.0e-5f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_PreparedBaseNormalLoadUsesVehicleMass)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.0f);
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            const float expectedLoadN = params.TotalNormalLoadN(vehicle.GetFanDuty());
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=prepared_base_normal_load_n"
-                << L"\nexpected=" << expectedLoadN
-                << L"\nactual=" << prepared.baseNormalLoadN
-                << L"\ntolerance=1e-5"
-                << L"\nfan_duty=" << vehicle.GetFanDuty();
-
-            Assert::AreEqual(
-                expectedLoadN,
-                prepared.baseNormalLoadN,
-                1.0e-5f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_FanDutyAddsPreparedDownforce)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const PlantModel::PreparedParams prepared = PlantModel::Prepare(params);
-            const float expectedLoadN =
-                prepared.baseNormalLoadN + (vehicle.GetFanDuty() * prepared.fanDownforceAtFullDutyN);
-            const float actualLoadN = params.TotalNormalLoadN(vehicle.GetFanDuty());
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=fan_duty_total_normal_load_n"
-                << L"\nexpected=" << expectedLoadN
-                << L"\nactual=" << actualLoadN
-                << L"\ntolerance=1e-5"
-                << L"\nfan_duty=" << vehicle.GetFanDuty();
-
-            Assert::AreEqual(
-                expectedLoadN,
-                actualLoadN,
-                1.0e-5f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_FanDutyDeltaUsesPlantDownforcePath)
-        {
-            Vehicle vehicle;
-            const PlantParams params = PlantParams::Default();
-            vehicle.SetFanDuty(0.0f);
-            const float noFanNormalLoadN = params.TotalNormalLoadN(vehicle.GetFanDuty());
-            vehicle.SetFanDuty(0.80f);
-            const float fanNormalLoadN = params.TotalNormalLoadN(vehicle.GetFanDuty());
-            const float expectedDeltaN = 0.80f * params.fanDownforceAtFullDutyN;
-            const float actualDeltaN = fanNormalLoadN - noFanNormalLoadN;
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=fan_duty_normal_load_delta_n"
-                << L"\nexpected=" << expectedDeltaN
-                << L"\nactual=" << actualDeltaN
-                << L"\ntolerance=1e-5"
-                << L"\nno_fan_normal_load_n=" << noFanNormalLoadN
-                << L"\nfan_normal_load_n=" << fanNormalLoadN;
-
-            Assert::AreEqual(
-                expectedDeltaN,
-                actualDeltaN,
-                1.0e-5f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_AxleLoadSplitSumsToTotalNormalLoad)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const float frontAxleLoadN = 2.0f * params.FrontWheelLoadN(vehicle.GetFanDuty());
-            const float rearAxleLoadN = 2.0f * params.RearWheelLoadN(vehicle.GetFanDuty());
-            const float expectedTotalLoadN = params.TotalNormalLoadN(vehicle.GetFanDuty());
-            const float actualTotalLoadN = frontAxleLoadN + rearAxleLoadN;
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=axle_load_sum_n"
-                << L"\nexpected=" << expectedTotalLoadN
-                << L"\nactual=" << actualTotalLoadN
-                << L"\ntolerance=1e-5"
-                << L"\nfront_axle_load_n=" << frontAxleLoadN
-                << L"\nrear_axle_load_n=" << rearAxleLoadN;
-
-            Assert::AreEqual(
-                expectedTotalLoadN,
-                actualTotalLoadN,
-                1.0e-5f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_FrontAxleLoadIsFinite)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const float frontAxleLoadN = 2.0f * params.FrontWheelLoadN(vehicle.GetFanDuty());
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=front_axle_load_n"
-                << L"\nactual=" << frontAxleLoadN
-                << L"\ncriterion=isfinite(actual)"
-                << L"\nfan_duty=" << vehicle.GetFanDuty();
-
-            Assert::IsTrue(
-                std::isfinite(frontAxleLoadN),
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_FrontAxleLoadIsPositive)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const float frontAxleLoadN = 2.0f * params.FrontWheelLoadN(vehicle.GetFanDuty());
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=front_axle_load_n"
-                << L"\nactual=" << frontAxleLoadN
-                << L"\ncriterion=actual>0"
-                << L"\nfan_duty=" << vehicle.GetFanDuty();
-
-            Assert::IsTrue(
-                frontAxleLoadN > 0.0f,
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_RearAxleLoadIsFinite)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const float rearAxleLoadN = 2.0f * params.RearWheelLoadN(vehicle.GetFanDuty());
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=rear_axle_load_n"
-                << L"\nactual=" << rearAxleLoadN
-                << L"\ncriterion=isfinite(actual)"
-                << L"\nfan_duty=" << vehicle.GetFanDuty();
-
-            Assert::IsTrue(
-                std::isfinite(rearAxleLoadN),
-                message.str().c_str());
-        }
-
-        TEST_METHOD(ContactLoad_RearAxleLoadIsPositive)
-        {
-            Vehicle vehicle;
-            vehicle.SetFanDuty(0.80f);
-            const PlantParams params = PlantParams::Default();
-            const float rearAxleLoadN = 2.0f * params.RearWheelLoadN(vehicle.GetFanDuty());
-            std::wstringstream message;
-            message << L"PM05_VEHICLE_PLANT_BOUNDARY"
-                << L"\nfield=rear_axle_load_n"
-                << L"\nactual=" << rearAxleLoadN
-                << L"\ncriterion=actual>0"
-                << L"\nfan_duty=" << vehicle.GetFanDuty();
-
-            Assert::IsTrue(
-                rearAxleLoadN > 0.0f,
-                message.str().c_str());
-        }
     };
 }

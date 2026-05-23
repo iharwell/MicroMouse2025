@@ -9,32 +9,6 @@ namespace
 {
     using CommandVector = MazeMap::App::Internal::CommandVector;
 
-    constexpr float kPi = 3.14159265358979323846f;
-    constexpr float kTwoPi = 2.0f * kPi;
-
-    float NormalizeClockwiseYawError(float errorRad) noexcept
-    {
-        if (!std::isfinite(errorRad))
-        {
-            return 0.0f;
-        }
-
-        while (errorRad > kPi)
-        {
-            errorRad -= kTwoPi;
-        }
-        while (errorRad <= -kPi)
-        {
-            errorRad += kTwoPi;
-        }
-        return errorRad;
-    }
-
-    bool IsMaximizeObjective(float value) noexcept
-    {
-        return std::isinf(value);
-    }
-
     float AddFeedbackAccel(float accumulatedAccel, float feedbackAccel) noexcept
     {
         if (!std::isfinite(feedbackAccel))
@@ -127,7 +101,7 @@ namespace MazeMap
                     yawFeedbackAccelRadps2,
                     ComputeHeadingFeedbackAccelRadps2(
                         _feedbackTuning,
-                        NormalizeClockwiseYawError(targetYawRad - observedYawRad),
+                        AngleDifference(observedYawRad, targetYawRad),
                         headingErrorRateRadps));
         }
         else
@@ -135,7 +109,7 @@ namespace MazeMap
             telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackHeadingInactive;
         }
 
-        if (IsMaximizeObjective(targetForwardAccelMps2))
+        if ((targetForwardAccelMps2) == std::numeric_limits<float>::infinity())
         {
             telemetry.composedForwardAccelMps2 = targetForwardAccelMps2;
             telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackForwardSuppressedForMaximize;
@@ -146,7 +120,7 @@ namespace MazeMap
                 ComposeAccelerationObjective(targetForwardAccelMps2, forwardFeedbackAccelMps2);
         }
 
-        if (IsMaximizeObjective(targetYawAccelRadps2))
+        if ((targetYawAccelRadps2) == std::numeric_limits<float>::infinity())
         {
             telemetry.composedYawAccelRadps2 = targetYawAccelRadps2;
             telemetry.feedbackBranchFlags |= DriveTelemetry::kFeedbackYawSuppressedForMaximize;

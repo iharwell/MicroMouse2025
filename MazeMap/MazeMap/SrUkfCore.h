@@ -19,6 +19,8 @@
 
 namespace MazeMap
 {
+    class Vehicle;
+
     // Outcome of one scalar or vector measurement-update attempt.
     struct MeasurementUpdateResult
     {
@@ -46,6 +48,8 @@ namespace MazeMap
     class EXPORT SrUkfCore
     {
     private:
+        using PlantDerivatives = PlantModel::PlantDerivatives;
+
         struct GripUtilizationSnapshot
         {
             float longitudinalClosureSeverity = 0.0f;
@@ -125,6 +129,10 @@ namespace MazeMap
 
         bool reset(const StateVector& state, const StateMatrix& covariance) noexcept;
         static StateMatrix BuildDefaultInitialCovariance() noexcept;
+        static WallGeometryModel::GeometryStateFrame BuildWallGeometryFrame(
+            float pX,
+            float pY,
+            const Eigen::Vector2f& headingUnit) noexcept;
 
         bool predict(
             float dt,
@@ -360,9 +368,11 @@ namespace MazeMap
         float wallPredictionForSensor(
             const StateVector& sigmaPoint,
             const SensorMount& sensor,
-            const Maze& maze) const noexcept;
+            const Maze& maze,
+            float noHitRangeM) const noexcept;
 
         const PlantModel& _plantModel;
+        const Vehicle& _vehicle;
         VehicleState& _runtimeState;
         WallGeometryModel _geometryModel;
         UKF<VehicleState::kDimension, 3> _workingFilter;

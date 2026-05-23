@@ -164,7 +164,6 @@ namespace
             ((elapsedMs.count() * 1000.0) / static_cast<double>(iterations)) :
             0.0;
         const MazeMap::VehicleState& state = runtimeState;
-        const MazeMap::VehicleState::StateMatrix covariance = state.GetCovariance();
 
         std::cout << std::fixed << std::setprecision(6);
         std::cout << "Open-floor UKF stationary benchmark\n";
@@ -185,17 +184,6 @@ namespace
             << " omega_l=" << state.GetWheelSpeedLeft()
             << " omega_r=" << state.GetWheelSpeedRight()
             << " bgz=" << state.GetGyroBiasZ()
-            << "\n";
-        std::cout << "  covariance_diag:"
-            << " px=" << covariance(MazeMap::VehicleState::kPx, MazeMap::VehicleState::kPx)
-            << " py=" << covariance(MazeMap::VehicleState::kPy, MazeMap::VehicleState::kPy)
-            << " psi=" << covariance(MazeMap::VehicleState::kPsi, MazeMap::VehicleState::kPsi)
-            << " u=" << covariance(MazeMap::VehicleState::kU, MazeMap::VehicleState::kU)
-            << " v=" << covariance(MazeMap::VehicleState::kV, MazeMap::VehicleState::kV)
-            << " r=" << covariance(MazeMap::VehicleState::kR, MazeMap::VehicleState::kR)
-            << " omega_l=" << covariance(MazeMap::VehicleState::kOmegaL, MazeMap::VehicleState::kOmegaL)
-            << " omega_r=" << covariance(MazeMap::VehicleState::kOmegaR, MazeMap::VehicleState::kOmegaR)
-            << " bgz=" << covariance(MazeMap::VehicleState::kBgz, MazeMap::VehicleState::kBgz)
             << "\n";
         return 0;
     }

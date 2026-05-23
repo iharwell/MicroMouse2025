@@ -376,6 +376,9 @@ namespace MazeMap
 #endif
     }
     float Vehicle::GetFanDuty() const noexcept { return _fanDuty; }
+    float Vehicle::GetFanDownforceAtFullDuty() const noexcept { return kFanDownforceAtFullDutyN; }
+    float Vehicle::GetNominalCombinedAcceleration() const noexcept { return kNominalCombinedAccelerationMps2; }
+    float Vehicle::GetPeakCombinedAcceleration() const noexcept { return kPeakCombinedAccelerationMps2; }
     float Vehicle::GetArcEffectiveTrackWidth(float turningRadiusM) noexcept
     {
         const ArcTrackWidthInterpolation& interpolation = GetPhysicalModel().arcTrackWidthInterpolation;

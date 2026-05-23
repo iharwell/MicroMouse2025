@@ -17,17 +17,6 @@ namespace
 {
     using CommandVector = MazeMap::App::Internal::CommandVector;
 
-    MazeMap::WallGeometryModel::GeometryStateFrame BuildWallGeometryFrame(
-        const MazeMap::WallGeometryModel& geometryModel,
-        const MazeMap::VehicleState::StateVector& state) noexcept
-    {
-        return geometryModel.buildStateFrame(
-            Eigen::Vector2f(
-                state(MazeMap::VehicleState::kPx),
-                state(MazeMap::VehicleState::kPy)),
-            state(MazeMap::VehicleState::kPsi));
-    }
-
     constexpr std::array<const char*, MazeMap::VehicleState::kDimension> kUkfStateFieldNames = {
         "px_m",
         "py_m",
@@ -370,6 +359,7 @@ namespace MazeMap
 {
     SrUkfCore::SrUkfCore(const PlantModel& plantModel, VehicleState& runtimeState) noexcept
         : _plantModel(plantModel)
+        , _vehicle(plantModel._vehicle)
         , _runtimeState(runtimeState)
         , _geometryModel()
         , _workingFilter(runtimeState._state, runtimeState._sqrtCovariance)
@@ -462,7 +452,11 @@ namespace MazeMap
         , _yawWindowSize(0U)
         , _yawWindowSpanS(0.0f)
     {
-        _workingFilter.setStateNormalizer(&VehicleState::NormalizeStateVector);
+        _workingFilter.setStateNormalizer(
+            [](StateVector& state) noexcept
+            {
+                state(VehicleState::kPsi) = NormalizeAngle(state(VehicleState::kPsi));
+            });
         _workingFilter.setSigmaPointStrategy(UKF<VehicleState::kDimension, 3>::SigmaPointStrategy::Simplex);
 
         _sqrtProcessNoiseDensity = BuildProcessNoiseSquareRootForMode(_operatingMode);
@@ -498,7 +492,7 @@ namespace MazeMap
         _accelBodyYMps2 = accelBiasValid ? accelBodyYMps2 : std::numeric_limits<float>::quiet_NaN();
     }
 
-    SrUkfCore::StateVector SrUkfCore::IntegrateStationaryHoldState(
+    VehicleState::StateVector SrUkfCore::IntegrateStationaryHoldState(
         const StateVector& currentState,
         float dtS) noexcept
     {
@@ -507,14 +501,13 @@ namespace MazeMap
         const float wheelDecayAlpha = ResolveStationaryDecayAlpha(dtS, kStationaryWheelDecayTauS);
         nextState(VehicleState::kPx) = currentState(VehicleState::kPx);
         nextState(VehicleState::kPy) = currentState(VehicleState::kPy);
-        nextState(VehicleState::kPsi) = VehicleState::NormalizeAngle(currentState(VehicleState::kPsi));
+        nextState(VehicleState::kPsi) = NormalizeAngle(currentState(VehicleState::kPsi));
         nextState(VehicleState::kU) = bodyDecayAlpha * currentState(VehicleState::kU);
         nextState(VehicleState::kV) = bodyDecayAlpha * currentState(VehicleState::kV);
         nextState(VehicleState::kR) = bodyDecayAlpha * currentState(VehicleState::kR);
         nextState(VehicleState::kOmegaL) = wheelDecayAlpha * currentState(VehicleState::kOmegaL);
         nextState(VehicleState::kOmegaR) = wheelDecayAlpha * currentState(VehicleState::kOmegaR);
         nextState(VehicleState::kBgz) = currentState(VehicleState::kBgz);
-        VehicleState::NormalizeStateVector(nextState);
         return nextState;
     }
 
@@ -802,7 +795,7 @@ namespace MazeMap
             }
         }
 
-        VehicleState::NormalizeStateVector(projectedState);
+        projectedState(VehicleState::kPsi) = NormalizeAngle(projectedState(VehicleState::kPsi));
     }
 
     bool SrUkfCore::IsPivotScrubCandidate(
@@ -1193,12 +1186,24 @@ namespace MazeMap
             static_cast<double>(covarianceDiagonal(VehicleState::kBgz, VehicleState::kBgz)));
     }
 
-    SrUkfCore::StateMatrix SrUkfCore::BuildDefaultInitialCovariance() noexcept
+    VehicleState::StateMatrix SrUkfCore::BuildDefaultInitialCovariance() noexcept
     {
         return VehicleState::DefaultInitialCovariance();
     }
 
-    SrUkfCore::StateMatrix SrUkfCore::BuildProcessNoiseSquareRootForMode(const OperatingMode mode) noexcept
+    WallGeometryModel::GeometryStateFrame SrUkfCore::BuildWallGeometryFrame(
+        float pX,
+        float pY,
+        const Eigen::Vector2f& headingUnit) noexcept
+    {
+        WallGeometryModel::GeometryStateFrame frame{};
+        frame.positionWorldM = Eigen::Vector2f(pX, pY);
+        frame.heading = headingUnit;
+        frame.centerCell = WallGeometryModel::WorldToCell(pX, pY);
+        return frame;
+    }
+
+    VehicleState::StateMatrix SrUkfCore::BuildProcessNoiseSquareRootForMode(const OperatingMode mode) noexcept
     {
         const ModeProcessNoise& config = GetModeProcessNoise(static_cast<std::uint8_t>(mode));
         StateMatrix sqrtNoise = StateMatrix::Zero();
@@ -1870,12 +1875,12 @@ namespace MazeMap
 
     float SrUkfCore::runtimeFanDuty() const noexcept
     {
-        return _plantModel._vehicle.GetFanDuty();
+        return _vehicle.GetFanDuty();
     }
 
     float SrUkfCore::runtimeBatteryVoltage() const noexcept
     {
-        return _plantModel._vehicle.GetBatteryVoltage();
+        return _vehicle.GetBatteryVoltage();
     }
 
     bool SrUkfCore::predictImpl(
@@ -2015,7 +2020,6 @@ namespace MazeMap
         void* loopHookContext,
         LoopHookInvoker loopHook) noexcept
     {
-        (void)updateYaw;
         MeasurementUpdateResult result{};
         result.attempted = true;
 
@@ -2116,6 +2120,45 @@ namespace MazeMap
                     projectedSqrtCovariance);
                 _workingFilter.setStateSquareRootCovariance(projectedState, projectedSqrtCovariance);
                 applyWheelSpeedConstraint(measured, measuredWheelVarianceRadps2);
+            }
+            if (updateYaw && !_frozenSchedule.exactStationaryLock)
+            {
+                const float measuredForwardSpeedMps = _plantModel.measuredLinearSpeedMps(measured);
+                const float measuredYawRateRadps = _plantModel.measuredYawRateRadps(measured);
+                StateVector measuredKinematicState = _workingFilter.state();
+                if (std::isfinite(_lastEncoderDtSeconds) && (_lastEncoderDtSeconds > 0.0f))
+                {
+                    const StateVector& poseReference =
+                        _havePredictionReference ?
+                        _prePredictState :
+                        priorState;
+                    const float startYawRad = poseReference(VehicleState::kPsi);
+                    const float midYawRad =
+                        NormalizeAngle(
+                            startYawRad + (0.5f * measuredYawRateRadps * _lastEncoderDtSeconds));
+                    measuredKinematicState(VehicleState::kPx) =
+                        poseReference(VehicleState::kPx) +
+                        (measuredForwardSpeedMps * std::sin(midYawRad) * _lastEncoderDtSeconds);
+                    measuredKinematicState(VehicleState::kPy) =
+                        poseReference(VehicleState::kPy) +
+                        (measuredForwardSpeedMps * std::cos(midYawRad) * _lastEncoderDtSeconds);
+                    measuredKinematicState(VehicleState::kPsi) =
+                        NormalizeAngle(startYawRad + (measuredYawRateRadps * _lastEncoderDtSeconds));
+                }
+                measuredKinematicState(VehicleState::kU) =
+                    std::isfinite(measuredForwardSpeedMps) ? measuredForwardSpeedMps : 0.0f;
+                measuredKinematicState(VehicleState::kV) = 0.0f;
+                measuredKinematicState(VehicleState::kR) =
+                    std::isfinite(measuredYawRateRadps) ? measuredYawRateRadps : 0.0f;
+                measuredKinematicState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
+                measuredKinematicState(VehicleState::kOmegaR) = measured.omegaRightRadps;
+                measuredKinematicState(VehicleState::kPsi) =
+                    NormalizeAngle(measuredKinematicState(VehicleState::kPsi));
+                const StateMatrix measuredKinematicSqrtCovariance = _workingFilter.sqrtCovariance();
+                _workingFilter.setStateSquareRootCovariance(
+                    measuredKinematicState,
+                    measuredKinematicSqrtCovariance);
+                updateNonholonomicDiagnostics(false);
             }
             const StateVector& postEncoderState = _workingFilter.state();
             _pivotScrubEncoderWheelDeltaPsiRad =
@@ -2229,16 +2272,10 @@ namespace MazeMap
             const StateMatrix updatedSqrtCovariance = _workingFilter.sqrtCovariance();
             StateVector projectedState = priorState;
             StateMatrix projectedSqrtCovariance = priorSqrtCovariance;
-            constexpr std::array<int, 7> kAllowedIndices = {
-                VehicleState::kPx,
-                VehicleState::kPy,
-                VehicleState::kPsi,
-                VehicleState::kU,
-                VehicleState::kV,
+            constexpr std::array<int, 2> kAllowedIndices = {
                 VehicleState::kR,
                 VehicleState::kBgz
             };
-
             ProjectMaskedStateAndSquareRootCovariance(
                 priorState,
                 priorSqrtCovariance,
@@ -2273,6 +2310,7 @@ namespace MazeMap
             (void)_workingFilter.floorVariance(VehicleState::kR, yawModeNoise.StdRMin() * yawModeNoise.StdRMin());
             (void)_workingFilter.floorVariance(VehicleState::kV, yawModeNoise.StdVMin() * yawModeNoise.StdVMin());
             (void)_workingFilter.floorVariance(VehicleState::kBgz, kGyroBiasCovarianceFloorRadps2);
+            (void)applyGripLateralVelocityConstraint(loopHookContext, loopHook);
         }
         result.nis = yawMeasurementNis;
         return result;
@@ -2453,7 +2491,7 @@ namespace MazeMap
         StateVector constrainedState = _workingFilter.state();
         constrainedState(VehicleState::kOmegaL) = measured.omegaLeftRadps;
         constrainedState(VehicleState::kOmegaR) = measured.omegaRightRadps;
-        VehicleState::NormalizeStateVector(constrainedState);
+        constrainedState(VehicleState::kPsi) = NormalizeAngle(constrainedState(VehicleState::kPsi));
 
         StateMatrix constrainedCovariance = _workingFilter.covariance();
         constrainedCovariance.row(VehicleState::kOmegaL).setZero();
@@ -2469,6 +2507,7 @@ namespace MazeMap
     void SrUkfCore::applyStationaryZeroMotionConstraint(float yawRateRadps) noexcept
     {
         (void)yawRateRadps;
+        constexpr bool resetLateralVelocity = true;
         const bool hasPoseReference =
             _stationaryCandidatePoseReferenceValid ||
             _havePredictionReference;
@@ -2477,35 +2516,142 @@ namespace MazeMap
             _stationaryCandidatePoseReferenceState :
             _prePredictState;
         const StateMatrix& poseReferenceCovariance = _prePredictCovariance;
-        VehicleState constrainedState;
-        constrainedState.SetPosition(Eigen::Vector2f(_workingFilter.state()(VehicleState::kPx), _workingFilter.state()(VehicleState::kPy)));
-        constrainedState.SetOrientation(_workingFilter.state()(VehicleState::kPsi));
-        constrainedState.SetVelocity(_workingFilter.state()(VehicleState::kU));
-        constrainedState.SetLateralVelocity(_workingFilter.state()(VehicleState::kV));
-        constrainedState.SetRotationalVelocity(_workingFilter.state()(VehicleState::kR));
-        constrainedState.SetWheelSpeedLeft(_workingFilter.state()(VehicleState::kOmegaL));
-        constrainedState.SetWheelSpeedRight(_workingFilter.state()(VehicleState::kOmegaR));
-        constrainedState.SetGyroBiasZ(_workingFilter.state()(VehicleState::kBgz));
-        constrainedState.SetCovariance(_workingFilter.covariance());
-        constrainedState.ApplyStationaryZeroMotionConstraint(
-            true,
-            hasPoseReference,
-            poseReferenceState,
-            poseReferenceCovariance);
-        StateVector constrainedStateVector = StateVector::Zero();
-        constrainedStateVector(VehicleState::kPx) = constrainedState.GetPositionX();
-        constrainedStateVector(VehicleState::kPy) = constrainedState.GetPositionY();
-        constrainedStateVector(VehicleState::kPsi) = constrainedState.GetOrientation();
-        constrainedStateVector(VehicleState::kU) = constrainedState.GetVelocity();
-        constrainedStateVector(VehicleState::kV) = constrainedState.GetLateralVelocity();
-        constrainedStateVector(VehicleState::kR) = constrainedState.GetRotationalVelocity();
-        constrainedStateVector(VehicleState::kOmegaL) = constrainedState.GetWheelSpeedLeft();
-        constrainedStateVector(VehicleState::kOmegaR) = constrainedState.GetWheelSpeedRight();
-        constrainedStateVector(VehicleState::kBgz) = constrainedState.GetGyroBiasZ();
-        VehicleState::NormalizeStateVector(constrainedStateVector);
+
+        StateVector constrainedState = _workingFilter.state();
+        if (hasPoseReference)
+        {
+            constrainedState(VehicleState::kPx) = poseReferenceState(VehicleState::kPx);
+            constrainedState(VehicleState::kPy) = poseReferenceState(VehicleState::kPy);
+            constrainedState(VehicleState::kPsi) = poseReferenceState(VehicleState::kPsi);
+        }
+
+        constrainedState(VehicleState::kU) = 0.0f;
+        if (resetLateralVelocity)
+        {
+            constrainedState(VehicleState::kV) = 0.0f;
+        }
+        constrainedState(VehicleState::kR) = 0.0f;
+        constrainedState(VehicleState::kOmegaL) = 0.0f;
+        constrainedState(VehicleState::kOmegaR) = 0.0f;
+        constrainedState(VehicleState::kPsi) =
+            NormalizeAngle(constrainedState(VehicleState::kPsi));
+
+        StateMatrix constrainedCovariance = _workingFilter.covariance();
+        if (hasPoseReference)
+        {
+            constexpr std::array<int, 3> poseIndices = {
+                VehicleState::kPx,
+                VehicleState::kPy,
+                VehicleState::kPsi
+            };
+            for (const int poseIndex : poseIndices)
+            {
+                constrainedCovariance.row(poseIndex).setZero();
+                constrainedCovariance.col(poseIndex).setZero();
+            }
+            for (const int row : poseIndices)
+            {
+                for (const int col : poseIndices)
+                {
+                    constrainedCovariance(row, col) = poseReferenceCovariance(row, col);
+                }
+            }
+        }
+
+        constexpr std::array<int, 4> constrainedIndices = {
+            VehicleState::kU,
+            VehicleState::kR,
+            VehicleState::kOmegaL,
+            VehicleState::kOmegaR
+        };
+        for (const int index : constrainedIndices)
+        {
+            constrainedCovariance.row(index).setZero();
+            constrainedCovariance.col(index).setZero();
+        }
+        if (resetLateralVelocity)
+        {
+            constrainedCovariance.row(VehicleState::kV).setZero();
+            constrainedCovariance.col(VehicleState::kV).setZero();
+        }
+
+        std::array<bool, VehicleState::kDimension> exactZeroMask = {};
+        exactZeroMask[VehicleState::kU] = true;
+        if (resetLateralVelocity)
+        {
+            exactZeroMask[VehicleState::kV] = true;
+        }
+        exactZeroMask[VehicleState::kR] = true;
+        exactZeroMask[VehicleState::kOmegaL] = true;
+        exactZeroMask[VehicleState::kOmegaR] = true;
+
+        StateMatrix constrainedSqrt = StateMatrix::Zero();
+        std::array<int, VehicleState::kDimension> activeIndices{};
+        int activeCount = 0;
+        for (int index = 0; index < VehicleState::kDimension; ++index)
+        {
+            if (!exactZeroMask[static_cast<std::size_t>(index)])
+            {
+                activeIndices[static_cast<std::size_t>(activeCount)] = index;
+                ++activeCount;
+            }
+        }
+
+        bool builtExactConstrainedSquareRoot = activeCount == 0;
+        if (activeCount > 0)
+        {
+            Eigen::MatrixXf activeCovariance = Eigen::MatrixXf::Zero(activeCount, activeCount);
+            for (int row = 0; row < activeCount; ++row)
+            {
+                const int globalRow = activeIndices[static_cast<std::size_t>(row)];
+                for (int col = 0; col < activeCount; ++col)
+                {
+                    const int globalCol = activeIndices[static_cast<std::size_t>(col)];
+                    activeCovariance(row, col) = constrainedCovariance(globalRow, globalCol);
+                }
+            }
+
+            activeCovariance = 0.5f * (activeCovariance + activeCovariance.transpose());
+            if (activeCovariance.allFinite())
+            {
+                const Eigen::LLT<Eigen::MatrixXf> llt(activeCovariance);
+                if (llt.info() == Eigen::Success)
+                {
+                    const Eigen::MatrixXf activeSqrt = llt.matrixL();
+                    for (int row = 0; row < activeCount; ++row)
+                    {
+                        const int globalRow = activeIndices[static_cast<std::size_t>(row)];
+                        for (int col = 0; col <= row; ++col)
+                        {
+                            const int globalCol = activeIndices[static_cast<std::size_t>(col)];
+                            constrainedSqrt(globalRow, globalCol) = activeSqrt(row, col);
+                        }
+                    }
+                    builtExactConstrainedSquareRoot = true;
+                }
+            }
+        }
+
+        if (!builtExactConstrainedSquareRoot)
+        {
+            for (int index = 0; index < VehicleState::kDimension; ++index)
+            {
+                if (exactZeroMask[static_cast<std::size_t>(index)])
+                {
+                    constrainedCovariance(index, index) =
+                        (std::max)(constrainedCovariance(index, index), 1.0e-12f);
+                }
+            }
+            constrainedSqrt = StateMatrix::Zero();
+            if (!SrUkfMath<VehicleState::kDimension>::FactorCovariance(constrainedCovariance, constrainedSqrt))
+            {
+                return;
+            }
+        }
+
         _workingFilter.setStateSquareRootCovariance(
-            constrainedStateVector,
-            constrainedState.GetSqrtCovariance());
+            constrainedState,
+            constrainedSqrt);
         updateNonholonomicDiagnostics(false);
     }
 
@@ -2822,10 +2968,14 @@ namespace MazeMap
     float SrUkfCore::wallPredictionForSensor(
         const StateVector& sigmaPoint,
         const SensorMount& sensor,
-        const Maze& maze) const noexcept
+        const Maze& maze,
+        float noHitRangeM) const noexcept
     {
-        const float noHitRangeM = _plantModel.wallObservationNoHitRangeM();
-        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(_geometryModel, sigmaPoint);
+        const float yaw = sigmaPoint(VehicleState::kPsi);
+        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(
+            sigmaPoint(VehicleState::kPx),
+            sigmaPoint(VehicleState::kPy),
+            Eigen::Vector2f(std::sin(yaw), std::cos(yaw)));
         const GeometryPrediction prediction = _geometryModel.predictRay(frame, sensor, maze, noHitRangeM);
         return prediction.hit ? prediction.rangeM : noHitRangeM;
     }
@@ -2835,16 +2985,21 @@ namespace MazeMap
         const Maze& maze) const noexcept
     {
         Eigen::Matrix<float, 2, 1> prediction{};
-        const float noHitRangeM = _plantModel.wallObservationNoHitRangeM();
         const SensorMount frontLeftSensor = Vehicle::GetFrontLeftSensorMount();
         const SensorMount frontRightSensor = Vehicle::GetFrontRightSensorMount();
-        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(_geometryModel, sigmaPoint);
+        const float frontLeftNoHitRangeM = _vehicle.FrontLeft.GetNoHitRangeM();
+        const float frontRightNoHitRangeM = _vehicle.FrontRight.GetNoHitRangeM();
+        const float yaw = sigmaPoint(VehicleState::kPsi);
+        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(
+            sigmaPoint(VehicleState::kPx),
+            sigmaPoint(VehicleState::kPy),
+            Eigen::Vector2f(std::sin(yaw), std::cos(yaw)));
         const GeometryPrediction leftPrediction =
-            _geometryModel.predictRay(frame, frontLeftSensor, maze, noHitRangeM);
+            _geometryModel.predictRay(frame, frontLeftSensor, maze, frontLeftNoHitRangeM);
         const GeometryPrediction rightPrediction =
-            _geometryModel.predictRay(frame, frontRightSensor, maze, noHitRangeM);
-        prediction(0) = leftPrediction.hit ? leftPrediction.rangeM : noHitRangeM;
-        prediction(1) = rightPrediction.hit ? rightPrediction.rangeM : noHitRangeM;
+            _geometryModel.predictRay(frame, frontRightSensor, maze, frontRightNoHitRangeM);
+        prediction(0) = leftPrediction.hit ? leftPrediction.rangeM : frontLeftNoHitRangeM;
+        prediction(1) = rightPrediction.hit ? rightPrediction.rangeM : frontRightNoHitRangeM;
         return prediction;
     }
 
@@ -2854,12 +3009,18 @@ namespace MazeMap
         const Maze& maze) noexcept
     {
         FrontPairUpdateResult result{};
-        const float noHitRangeM = _plantModel.wallObservationNoHitRangeM();
         const SensorMount frontLeftSensor = Vehicle::GetFrontLeftSensorMount();
         const SensorMount frontRightSensor = Vehicle::GetFrontRightSensorMount();
-        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(_geometryModel, _workingFilter.state());
-        result.leftPrediction = _geometryModel.predictRay(frame, frontLeftSensor, maze, noHitRangeM);
-        result.rightPrediction = _geometryModel.predictRay(frame, frontRightSensor, maze, noHitRangeM);
+        const float frontLeftNoHitRangeM = _vehicle.FrontLeft.GetNoHitRangeM();
+        const float frontRightNoHitRangeM = _vehicle.FrontRight.GetNoHitRangeM();
+        const StateVector& state = _workingFilter.state();
+        const float yaw = state(VehicleState::kPsi);
+        const WallGeometryModel::GeometryStateFrame frame = BuildWallGeometryFrame(
+            state(VehicleState::kPx),
+            state(VehicleState::kPy),
+            Eigen::Vector2f(std::sin(yaw), std::cos(yaw)));
+        result.leftPrediction = _geometryModel.predictRay(frame, frontLeftSensor, maze, frontLeftNoHitRangeM);
+        result.rightPrediction = _geometryModel.predictRay(frame, frontRightSensor, maze, frontRightNoHitRangeM);
         result.filter.attempted = left.valid && right.valid;
         if (!result.filter.attempted)
         {
@@ -2897,10 +3058,18 @@ namespace MazeMap
             return result;
         }
 
-        const float noHitRangeM = _plantModel.wallObservationNoHitRangeM();
         const SensorMount sensor = isLeft ? Vehicle::GetSideLeftSensorMount() : Vehicle::GetSideRightSensorMount();
+        const float noHitRangeM =
+            isLeft ?
+            _vehicle.SideLeft.GetNoHitRangeM() :
+            _vehicle.SideRight.GetNoHitRangeM();
+        const StateVector& state = _workingFilter.state();
+        const float yaw = state(VehicleState::kPsi);
         result.prediction = _geometryModel.predictRay(
-            BuildWallGeometryFrame(_geometryModel, _workingFilter.state()),
+            BuildWallGeometryFrame(
+                state(VehicleState::kPx),
+                state(VehicleState::kPy),
+                Eigen::Vector2f(std::sin(yaw), std::cos(yaw))),
             sensor,
             maze,
             noHitRangeM);
@@ -2919,10 +3088,10 @@ namespace MazeMap
             z,
             sqrtNoise,
             7.87944f,
-            [this, &maze, &sensor](const StateVector& sigmaPoint) noexcept
+            [this, &maze, &sensor, noHitRangeM](const StateVector& sigmaPoint) noexcept
             {
                 Eigen::Matrix<float, 1, 1> prediction;
-                prediction(0) = wallPredictionForSensor(sigmaPoint, sensor, maze);
+                prediction(0) = wallPredictionForSensor(sigmaPoint, sensor, maze, noHitRangeM);
                 return prediction;
             });
         result.filter.nis = _workingFilter.lastNis();

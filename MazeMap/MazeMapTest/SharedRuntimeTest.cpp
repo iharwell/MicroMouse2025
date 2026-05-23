@@ -68,8 +68,7 @@ namespace
         const float rightWheelSpeedMps,
         const float dtSeconds = 0.001f) noexcept
     {
-        const MazeMap::PlantParams params = MazeMap::PlantParams::Default();
-        const float distancePerCountM = MazeMap::DistancePerEncoderCountMeters(params);
+        const float distancePerCountM = MazeMap::Vehicle::DriveEncoderDistanceFromCounts(1);
         const int32_t leftCounts = static_cast<int32_t>(std::round((leftWheelSpeedMps * dtSeconds) / distancePerCountM));
         const int32_t rightCounts = static_cast<int32_t>(std::round((rightWheelSpeedMps * dtSeconds) / distancePerCountM));
         SensorSnapshot snapshot = BuildSharedRuntimeSensorSnapshot();
@@ -77,9 +76,9 @@ namespace
         snapshot.encoderObservation.totalRightCounts = rightCounts;
         snapshot.encoderObservation.leftDistanceDeltaM = static_cast<float>(leftCounts) * distancePerCountM;
         snapshot.encoderObservation.rightDistanceDeltaM = static_cast<float>(rightCounts) * distancePerCountM;
-        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds) && (params.wheelRadiusM > 0.0f))
+        if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds) && (MazeMap::Vehicle::GetDriveWheelRadiusM() > 0.0f))
         {
-            const float invWheelRadiusM = 1.0f / params.wheelRadiusM;
+            const float invWheelRadiusM = 1.0f / MazeMap::Vehicle::GetDriveWheelRadiusM();
             const float invDtSeconds = 1.0f / dtSeconds;
             snapshot.encoderObservation.leftVelocityMps =
                 snapshot.encoderObservation.leftDistanceDeltaM * invDtSeconds;

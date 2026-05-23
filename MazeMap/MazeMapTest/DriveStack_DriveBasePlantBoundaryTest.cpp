@@ -25,34 +25,6 @@ namespace MazeMap
         constexpr float kInf = (std::numeric_limits<float>::infinity)();
         constexpr float kDtSeconds = 0.001f;
 
-        VehicleState::StateVector CaptureRuntimeState(const VehicleState& runtimeState)
-        {
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
-            state(VehicleState::kPx) = runtimeState.GetPositionX();
-            state(VehicleState::kPy) = runtimeState.GetPositionY();
-            state(VehicleState::kPsi) = runtimeState.GetOrientation();
-            state(VehicleState::kU) = runtimeState.GetVelocity();
-            state(VehicleState::kV) = runtimeState.GetLateralVelocity();
-            state(VehicleState::kR) = runtimeState.GetRotationalVelocity();
-            state(VehicleState::kOmegaL) = runtimeState.GetWheelSpeedLeft();
-            state(VehicleState::kOmegaR) = runtimeState.GetWheelSpeedRight();
-            state(VehicleState::kBgz) = runtimeState.GetGyroBiasZ();
-            VehicleState::NormalizeStateVector(state);
-            return state;
-        }
-
-        void ApplyStateVectorToRuntime(VehicleState& runtimeState, const VehicleState::StateVector& state)
-        {
-            runtimeState.SetPosition(Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)));
-            runtimeState.SetOrientation(state(VehicleState::kPsi));
-            runtimeState.SetVelocity(state(VehicleState::kU));
-            runtimeState.SetLateralVelocity(state(VehicleState::kV));
-            runtimeState.SetRotationalVelocity(state(VehicleState::kR));
-            runtimeState.SetWheelSpeedLeft(state(VehicleState::kOmegaL));
-            runtimeState.SetWheelSpeedRight(state(VehicleState::kOmegaR));
-            runtimeState.SetGyroBiasZ(state(VehicleState::kBgz));
-        }
-
         void SetRollingWheelState(Vehicle& vehicle, VehicleState& runtimeState)
         {
             float leftOmegaRadps = 0.0f;
@@ -77,19 +49,14 @@ namespace MazeMap
             VehicleState runtimeState;
             PlantModel plant;
             DriveBase drive;
-            PlantModel::PreparedParams prepared;
-            VehicleState::StateVector truthState;
 
             DriveBasePlantHarness() noexcept
                 : vehicle()
                 , runtimeState()
                 , plant(vehicle, runtimeState)
                 , drive(plant, runtimeState, MazeMap::Config::kDriveBasePDCluster)
-                , prepared(PlantModel::Prepare(PlantParams::Default()))
-                , truthState(VehicleState::StateVector::Zero())
             {
                 vehicle.SetFanDuty(0.80f);
-                truthState = CaptureRuntimeState(runtimeState);
             }
 
             CommandVector ProposeAndIntegrate(
@@ -106,10 +73,7 @@ namespace MazeMap
                         targetForwardAccelMps2,
                         targetYawAccelRadps2,
                         targetYawRad);
-                truthState = plant.integrate(truthState, command, kDtSeconds, prepared);
-                ApplyStateVectorToRuntime(runtimeState, truthState);
-                runtimeState.SetCurrentCommand(command);
-                runtimeState.SetTime(runtimeState.GetTime() + kDtSeconds);
+                plant.integrate(command, kDtSeconds);
                 return command;
             }
         };
@@ -260,7 +224,6 @@ namespace MazeMap
                 DriveBasePlantHarness harness;
                 harness.runtimeState.SetVelocity(0.1f);
                 SetRollingWheelState(harness.vehicle, harness.runtimeState);
-                harness.truthState = CaptureRuntimeState(harness.runtimeState);
 
                 minimumVelocityMps = harness.runtimeState.GetVelocity();
                 maximumVelocityMps = harness.runtimeState.GetVelocity();
@@ -296,7 +259,7 @@ namespace MazeMap
 
         float AbsYawErrorRad(const float targetYawRad, const float actualYawRad) noexcept
         {
-            return std::fabs(VehicleState::NormalizeAngle(targetYawRad - actualYawRad));
+            return std::fabs(NormalizeAngle(targetYawRad - actualYawRad));
         }
 
         struct YawRateLongRunScenario final
@@ -372,7 +335,6 @@ namespace MazeMap
             {
                 DriveBasePlantHarness harness;
                 harness.runtimeState.SetOrientation(kInitialYawRad);
-                harness.truthState = CaptureRuntimeState(harness.runtimeState);
                 initialHeadingErrorRad = AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetOrientation());
                 maxAbsHeadingErrorRad = initialHeadingErrorRad;
 
@@ -397,7 +359,7 @@ namespace MazeMap
                         (headingErrorRad <= initialHeadingErrorRad + 0.08f);
                     finalRequestedYawRad = telemetry.requestedYawRad;
                     finalTelemetryValidFlags = telemetry.telemetryValidFlags;
-					totalHeadingDelta += (VehicleState::NormalizeAngle(harness.runtimeState.GetRotationalVelocity() * 0.001f));
+					totalHeadingDelta += (NormalizeAngle(harness.runtimeState.GetRotationalVelocity() * 0.001f));
                 }
 
                 finalHeadingErrorRad = AbsYawErrorRad(kTargetYawRad, harness.runtimeState.GetOrientation());

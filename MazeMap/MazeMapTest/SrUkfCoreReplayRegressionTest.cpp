@@ -111,23 +111,22 @@ namespace MazeMap
     public:
         TEST_METHOD(SrUkfCoreReplayOfLatestOpenFloorLaunchLogDoesNotProduceXPoseBoundaryJump)
         {
-            const PlantParams params = PlantParams::Default();
-            const float distancePerCountM = DistancePerEncoderCountMeters(params);
+            const float distancePerCountM = Vehicle::DriveEncoderDistanceFromCounts(1);
             constexpr int sampleCount =
                 static_cast<int>(sizeof(kLatestLoggedOpenFloorPoseJumpWindow) / sizeof(kLatestLoggedOpenFloorPoseJumpWindow[0]));
             const LoggedOpenFloorPoseJumpSample& first = kLatestLoggedOpenFloorPoseJumpWindow[0];
 
             SrUkfCore core = MakeDefaultSrUkfCore();
-            const VehicleState::StateVector initialState = BuildUkfState(
-                first.poseXM,
-                first.poseYM,
-                first.poseYawRad,
-                first.measuredLinearSpeedMps,
-                0.0f,
-                first.gyroRawRadps - first.gyroBiasRadps,
-                first.leftEncoderOmegaRadps,
-                first.rightEncoderOmegaRadps,
-                first.gyroBiasRadps);
+            VehicleState::StateVector initialState = VehicleState::StateVector::Zero();
+            initialState(0) = first.poseXM;
+            initialState(1) = first.poseYM;
+            initialState(2) = NormalizeAngle(first.poseYawRad);
+            initialState(3) = first.measuredLinearSpeedMps;
+            initialState(4) = 0.0f;
+            initialState(5) = first.gyroRawRadps - first.gyroBiasRadps;
+            initialState(6) = first.leftEncoderOmegaRadps;
+            initialState(7) = first.rightEncoderOmegaRadps;
+            initialState(8) = first.gyroBiasRadps;
             Assert::IsTrue(core.reset(initialState, SrUkfCore::BuildDefaultInitialCovariance()));
 
             float maxStepDxM = 0.0f;
@@ -164,7 +163,7 @@ namespace MazeMap
                 accelObservation.accelBodyYMps2 = sample.accelBodyYMps2;
                 (void)core.updatePlanarAccel(accelObservation);
 
-                const float currentXM = core.workingState()(VehicleState::kPx);
+                const float currentXM = core.workingState()(0);
                 maxStepDxM = (std::max)(maxStepDxM, std::fabs(currentXM - previousXM));
                 maxAbsDxFromStartM = (std::max)(maxAbsDxFromStartM, std::fabs(currentXM - first.poseXM));
                 previousXM = currentXM;
@@ -173,8 +172,8 @@ namespace MazeMap
                     0.5f * static_cast<float>(sample.leftEncoderCount + sample.rightEncoderCount) * distancePerCountM);
             }
 
-            const float finalXM = core.workingState()(VehicleState::kPx);
-            const float finalYM = core.workingState()(VehicleState::kPy);
+            const float finalXM = core.workingState()(0);
+            const float finalYM = core.workingState()(1);
 
             Assert::IsTrue(maxStepDxM < 0.01f);
             Assert::IsTrue(maxAbsDxFromStartM < 0.01f);

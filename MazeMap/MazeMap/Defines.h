@@ -1,6 +1,6 @@
 #ifndef DEFINES_H
 #define DEFINES_H
-
+#include <cmath>
 constexpr float AVG_SPD_WEIGHT = 0.3f;
 //#define SMALL_RDD
 constexpr int PATH_SIZE = 256;
@@ -28,6 +28,25 @@ constexpr float GRAVITY_MPS2 = 9.80665f;
 #define ClampMeasuredRange(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(ClampMeasuredRange)
 #define Fail(...) MAZEMAP_BANNED_HELPER_WRAPPER_FUNCTION(Fail)
 
+inline float NormalizeAngle(float angleRad) noexcept
+{
+    if (!std::isfinite(angleRad))
+    {
+        return 0.0f;
+    }
+
+    return angleRad = std::remainder(angleRad, TWO_PI_F);
+}
+
+inline float AngleDifference(float angleFromRad, float angleToRad) noexcept
+{
+    if (!std::isfinite(angleFromRad))
+    {
+        return (angleToRad==angleFromRad)? (NAN) : (INFINITY);
+    }
+
+	return NormalizeAngle(angleToRad - angleFromRad+PI_F) - PI_F;
+}
 #if defined(ARDUINO) || defined(CORE_TEENSY) || defined(ARDUINO_TEENSY41)
 #include <arm_math.h>
 #include <Arduino.h>

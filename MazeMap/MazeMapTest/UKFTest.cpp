@@ -92,7 +92,7 @@ namespace MazeMap
             UKF<1, 1> filter;
             filter.setStateNormalizer([](AngleState& state) noexcept
                 {
-                    state(0) = VehicleState::NormalizeAngle(state(0));
+                    state(0) = NormalizeAngle(state(0));
                 });
 
             AngleState initialState;
@@ -113,7 +113,7 @@ namespace MazeMap
 
             Assert::IsTrue(predictOk);
             const float wrappedError =
-                VehicleState::NormalizeAngle(filter.state()(0) - initialState(0));
+                AngleDifference(initialState(0), filter.state()(0));
             Assert::IsTrue(std::fabs(wrappedError) < 0.05f);
         }
 

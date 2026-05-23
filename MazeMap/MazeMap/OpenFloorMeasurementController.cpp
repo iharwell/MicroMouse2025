@@ -12,7 +12,6 @@
 #include "PlantModel.h"
 #include "RuntimeSensorSuite.h"
 #include "SharedRobotRuntime.h"
-#include "SigmaPointSetSimplex.h"
 #include "StartupCalibration.h"
 #include "Vehicle.h"
 
@@ -98,14 +97,6 @@ namespace MazeMap
         return
             runtime.WriteUtilityDataLogMetadata("ukfver", "v6.2") &&
             runtime.WriteUtilityDataLogMetadata("ukfset", "splx") &&
-            runtime.WriteUtilityDataLogMetadataUnsigned(
-                "nx",
-                static_cast<unsigned long>(MazeMap::VehicleState::kDimension)) &&
-            runtime.WriteUtilityDataLogMetadataUnsigned(
-                "nsig",
-                static_cast<unsigned long>(
-                    MazeMap::SigmaPointSetSimplex::ActiveSigmaCountForDimension(
-                        MazeMap::VehicleState::kDimension))) &&
             runtime.Plant().WriteOpenFloorUkfMetadata(
                 [&runtime](const char* key, float value, std::uint8_t precision) -> bool
                 {

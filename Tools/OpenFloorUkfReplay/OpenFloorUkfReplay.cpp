@@ -2,8 +2,9 @@
 #include "..\..\MazeMap\MazeMap\MazeMapRuntimeCore.h"
 #include "..\..\MazeMap\MazeMap\OpenFloorMeasurementSpec.h"
 #include "..\..\MazeMap\MazeMap\PlantModel.h"
+#include "..\..\MazeMap\MazeMap\Vehicle.h"
+#include "..\..\MazeMap\MazeMap\VehicleState.h"
 
-#include <array>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -35,13 +36,11 @@ namespace
     constexpr float kRadiansToDegrees = 57.295779513082320876f;
     constexpr float kWheelVelocitySensorBoundMps = 0.06f;
     constexpr float kYawRateSensorBoundRadps = 0.03f;
-    constexpr float kDefaultFeedforwardReserveUsage = 0.90f;
 
     struct ReplayOptions
     {
         fs::path rootPath;
         fs::path outputPath;
-        fs::path tuningPath;
         std::string runIdFilter;
         fs::path sampleCsvPath;
         fs::path feedforwardSampleCsvPath;
@@ -86,7 +85,7 @@ namespace
         std::uint8_t phaseId = 0U;
         std::uint16_t repeatIndex = 0U;
         std::uint16_t saturationFlags = 0U;
-        MazeMap::VehicleState::StateVector loggedState = MazeMap::VehicleState::StateVector::Zero();
+        MazeMap::VehicleState loggedState;
         float measuredLinearSpeedMps = 0.0f;
         float measuredAngularSpeedRadps = 0.0f;
         float commandedLinearMps = 0.0f;
@@ -193,20 +192,6 @@ namespace
         float predictedNextYawRateRadps = std::numeric_limits<float>::quiet_NaN();
         float predictedForwardTargetErrorMps = std::numeric_limits<float>::quiet_NaN();
         float predictedYawTargetErrorRadps = std::numeric_limits<float>::quiet_NaN();
-    };
-
-    enum class FeedforwardPathId : std::size_t
-    {
-        Acceleration = 0U,
-        Count
-    };
-
-    struct FeedforwardPathDefinition
-    {
-        FeedforwardPathId id = FeedforwardPathId::Acceleration;
-        const char* pathId = "";
-        const char* label = "";
-        const char* category = "";
     };
 
     struct ErrorStats
@@ -354,7 +339,6 @@ namespace
 
     struct FeedforwardPathSummary
     {
-        FeedforwardPathId id = FeedforwardPathId::Acceleration;
         std::string pathId;
         std::string label;
         std::string category;
@@ -368,23 +352,6 @@ namespace
             validSolutions += other.validSolutions;
             metrics.merge(other.metrics);
         }
-    };
-
-    struct FeedforwardTransitionInputs
-    {
-        MazeMap::VehicleState::StateVector currentState = MazeMap::VehicleState::StateVector::Zero();
-        float currentForwardSensorMps = std::numeric_limits<float>::quiet_NaN();
-        float currentYawRateSensorRadps = std::numeric_limits<float>::quiet_NaN();
-        float targetForwardSensorMps = std::numeric_limits<float>::quiet_NaN();
-        float targetYawRateSensorRadps = std::numeric_limits<float>::quiet_NaN();
-        float desiredStateLongitudinalAccelMps2 = std::numeric_limits<float>::quiet_NaN();
-        float desiredStateYawAccelRadps2 = std::numeric_limits<float>::quiet_NaN();
-        float desiredScalarLongitudinalAccelMps2 = std::numeric_limits<float>::quiet_NaN();
-        float desiredScalarYawAccelRadps2 = std::numeric_limits<float>::quiet_NaN();
-        float responseTimeS = std::numeric_limits<float>::quiet_NaN();
-        float fanDutyCycle = 0.0f;
-        float batteryVoltageV = 0.0f;
-        float reserveUsage = kDefaultFeedforwardReserveUsage;
     };
 
     struct ConsistencyMetrics
@@ -496,30 +463,19 @@ namespace
         std::vector<SectionPhaseReport> sectionPhaseBuckets;
     };
 
-    constexpr std::size_t kFeedforwardPathCount = static_cast<std::size_t>(FeedforwardPathId::Count);
-
-    const std::array<FeedforwardPathDefinition, kFeedforwardPathCount>& GetFeedforwardPathDefinitions() noexcept
-    {
-        static const std::array<FeedforwardPathDefinition, kFeedforwardPathCount> definitions =
-        {{
-            { FeedforwardPathId::Acceleration, "acceleration", "PlantModel acceleration feedforward", "plant_model" }
-        }};
-        return definitions;
-    }
+    constexpr const char* kAccelerationFeedforwardPathId = "acceleration";
+    constexpr const char* kAccelerationFeedforwardPathLabel = "PlantModel acceleration feedforward";
+    constexpr const char* kAccelerationFeedforwardPathCategory = "plant_model";
 
     std::vector<FeedforwardPathSummary> BuildDefaultFeedforwardPathSummaries()
     {
         std::vector<FeedforwardPathSummary> summaries;
-        summaries.reserve(kFeedforwardPathCount);
-        for (const FeedforwardPathDefinition& definition : GetFeedforwardPathDefinitions())
-        {
-            FeedforwardPathSummary summary{};
-            summary.id = definition.id;
-            summary.pathId = definition.pathId;
-            summary.label = definition.label;
-            summary.category = definition.category;
-            summaries.push_back(std::move(summary));
-        }
+        summaries.reserve(1U);
+        FeedforwardPathSummary summary{};
+        summary.pathId = kAccelerationFeedforwardPathId;
+        summary.label = kAccelerationFeedforwardPathLabel;
+        summary.category = kAccelerationFeedforwardPathCategory;
+        summaries.push_back(std::move(summary));
         return summaries;
     }
 
@@ -614,156 +570,9 @@ namespace
         return !(end == text.c_str() || *end != '\0');
     }
 
-    bool ApplyTuningSetting(
-        MazeMap::SrUkfCore::RuntimeTuning& tuning,
-        const std::string& rawKey,
-        float value,
-        std::string& error)
+    MazeMap::VehicleState BuildKnownStationaryOpenFloorInitialState() noexcept
     {
-        const std::string key = ToLower(Trim(rawKey));
-        if (key == "general_encoder_linear_speed_sigma_mps") tuning.generalEncoderLinearSpeedSigmaMps = value;
-        else if (key == "general_encoder_yaw_rate_sigma_radps") tuning.generalEncoderYawRateSigmaRadps = value;
-        else if (key == "stationary_encoder_velocity_sigma_mps") tuning.stationaryEncoderVelocitySigmaMps = value;
-        else if (key == "encoder_pair_nis_threshold") tuning.encoderPairNisThreshold = value;
-        else if (key == "imu_yaw_rate_sigma_radps") tuning.imuYawRateSigmaRadps = value;
-        else if (key == "imu_accel_sigma_mps2") tuning.imuAccelSigmaMps2 = value;
-        else if (key == "pivot_scrub_max_command_linear_mps") tuning.pivotScrubMaxCommandLinearMps = value;
-        else if (key == "pivot_scrub_min_command_angular_radps") tuning.pivotScrubMinCommandAngularRadps = value;
-        else if (key == "pivot_scrub_yaw_consistency_threshold_radps") tuning.pivotScrubYawConsistencyThresholdRadps = value;
-        else if (key == "pivot_scrub_yaw_window_mismatch_threshold_rad") tuning.pivotScrubYawWindowMismatchThresholdRad = value;
-        else if (key == "pivot_scrub_zero_u_sigma_mps") tuning.pivotScrubZeroUSigmaMps = value;
-        else if (key == "stationary_gyro_bias_time_constant_s") { (void)value; }
-        else if (key == "stationary_certification_dwell_s") tuning.stationaryCertificationDwellS = value;
-        else if (key == "stationary_candidate_max_linear_command_mps") tuning.stationaryCandidateMaxLinearCommandMps = value;
-        else if (key == "stationary_candidate_max_angular_command_radps") tuning.stationaryCandidateMaxAngularCommandRadps = value;
-        else if (key == "stationary_candidate_max_drive_command") tuning.stationaryCandidateMaxDriveCommand = value;
-        else if (key == "stationary_candidate_max_encoder_omega_radps") tuning.stationaryCandidateMaxEncoderOmegaRadps = value;
-        else if (key == "stationary_candidate_max_corrected_gyro_radps") tuning.stationaryCandidateMaxCorrectedGyroRadps = value;
-        else if (key == "stationary_candidate_max_accel_mps2") tuning.stationaryCandidateMaxAccelMps2 = value;
-        else if (key == "command_sign_flip_window_s") tuning.commandSignFlipWindowS = value;
-        else if (key == "stationary_exit_launch_window_s") tuning.stationaryExitLaunchWindowS = value;
-        else if (key == "launch_hold_s") tuning.launchHoldS = value;
-        else if (key == "launch_low_speed_threshold_mps") tuning.launchLowSpeedThresholdMps = value;
-        else if (key == "launch_drive_command_delta_threshold") tuning.launchDriveCommandDeltaThreshold = value;
-        else if (key == "inconsistent_hold_s") tuning.inconsistentHoldS = value;
-        else if (key == "yaw_consistency_low_pass_tau_s") tuning.yawConsistencyLowPassTauS = value;
-        else if (key == "yaw_consistency_low_pass_threshold_radps") tuning.yawConsistencyLowPassThresholdRadps = value;
-        else if (key == "yaw_consistency_exceed_dwell_s") tuning.yawConsistencyExceedDwellS = value;
-        else if (key == "yaw_window_duration_s") tuning.yawWindowDurationS = value;
-        else if (key == "yaw_window_mismatch_threshold_rad") tuning.yawWindowMismatchThresholdRad = value;
-        else if (key == "nhc_residual_trip_sigma") tuning.nhcResidualTripSigma = value;
-        else if (key == "nhc_minimum_enable_forward_speed_mps") tuning.nhcMinimumEnableForwardSpeedMps = value;
-        else if (key == "nhc_disable_forward_speed_mps") tuning.nhcDisableForwardSpeedMps = value;
-        else if (key == "nhc_max_drive_command_delta") tuning.nhcMaxDriveCommandDelta = value;
-        else if (key == "recovery_nhc_reenable_delay_s") tuning.recoveryNhcReenableDelayS = value;
-        else if (key == "nhc_base_sigma_mps") tuning.nhcBaseSigmaMps = value;
-        else if (key == "nhc_speed_slope_per_mps") tuning.nhcSpeedSlopePerMps = value;
-        else if (key == "nhc_minimum_sigma_mps") tuning.nhcMinimumSigmaMps = value;
-        else if (key == "nhc_maximum_sigma_mps") tuning.nhcMaximumSigmaMps = value;
-        else if (key == "moving_gyro_bias_std_cap_radps") { (void)value; }
-        else if (key == "recovery_yaw_rate_std_floor_radps") tuning.recoveryYawRateStdFloorRadps = value;
-        else if (key == "yaw_validity_bias_delta_max_radps") tuning.yawValidityBiasDeltaMaxRadps = value;
-        else if (key == "stationary_sigma_u_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaUSqrtQ = value;
-        else if (key == "stationary_sigma_v_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaVSqrtQ = value;
-        else if (key == "stationary_sigma_r_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaRSqrtQ = value;
-        else if (key == "stationary_sigma_omega_sqrt_q") tuning.stationaryCertifiedProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "stationary_sigma_bgz_sqrt_q") { (void)value; }
-        else if (key == "stationary_std_r_min") tuning.stationaryCertifiedProcessNoise.stdRMin = value;
-        else if (key == "stationary_std_v_min") tuning.stationaryCertifiedProcessNoise.stdVMin = value;
-        else if (key == "launch_sigma_u_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaUSqrtQ = value;
-        else if (key == "launch_sigma_v_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaVSqrtQ = value;
-        else if (key == "launch_sigma_r_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaRSqrtQ = value;
-        else if (key == "launch_sigma_omega_sqrt_q") tuning.launchOrReversalProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "launch_sigma_bgz_sqrt_q") { (void)value; }
-        else if (key == "launch_std_r_min") tuning.launchOrReversalProcessNoise.stdRMin = value;
-        else if (key == "launch_std_v_min") tuning.launchOrReversalProcessNoise.stdVMin = value;
-        else if (key == "grip_sigma_u_sqrt_q") tuning.gripLinearProcessNoise.sigmaUSqrtQ = value;
-        else if (key == "grip_sigma_v_sqrt_q") tuning.gripLinearProcessNoise.sigmaVSqrtQ = value;
-        else if (key == "grip_sigma_r_sqrt_q") tuning.gripLinearProcessNoise.sigmaRSqrtQ = value;
-        else if (key == "grip_sigma_omega_sqrt_q") tuning.gripLinearProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "grip_sigma_bgz_sqrt_q") { (void)value; }
-        else if (key == "grip_std_r_min") tuning.gripLinearProcessNoise.stdRMin = value;
-        else if (key == "grip_std_v_min") tuning.gripLinearProcessNoise.stdVMin = value;
-        else if (key == "inconsistent_sigma_u_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaUSqrtQ = value;
-        else if (key == "inconsistent_sigma_v_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaVSqrtQ = value;
-        else if (key == "inconsistent_sigma_r_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaRSqrtQ = value;
-        else if (key == "inconsistent_sigma_omega_sqrt_q") tuning.inconsistentOrSaturatedProcessNoise.sigmaOmegaSqrtQ = value;
-        else if (key == "inconsistent_sigma_bgz_sqrt_q") { (void)value; }
-        else if (key == "inconsistent_std_r_min") tuning.inconsistentOrSaturatedProcessNoise.stdRMin = value;
-        else if (key == "inconsistent_std_v_min") tuning.inconsistentOrSaturatedProcessNoise.stdVMin = value;
-        else
-        {
-            error = "Unknown tuning key: " + rawKey;
-            return false;
-        }
-
-        return true;
-    }
-
-    bool LoadTuningFile(const fs::path& path, std::string& error)
-    {
-        if (path.empty())
-        {
-            MazeMap::SrUkfCore::ResetRuntimeTuning();
-            return true;
-        }
-
-        std::ifstream input(path);
-        if (!input)
-        {
-            error = "Failed to open tuning file: " + path.string();
-            return false;
-        }
-
-        MazeMap::SrUkfCore::RuntimeTuning tuning = MazeMap::SrUkfCore::BuildDefaultRuntimeTuning();
-        std::string line;
-        std::size_t lineNumber = 0U;
-        while (std::getline(input, line))
-        {
-            ++lineNumber;
-            const std::size_t commentStart = line.find('#');
-            if (commentStart != std::string::npos)
-            {
-                line = line.substr(0, commentStart);
-            }
-
-            line = Trim(line);
-            if (line.empty())
-            {
-                continue;
-            }
-
-            const std::size_t equals = line.find('=');
-            if (equals == std::string::npos)
-            {
-                error = "Malformed tuning line " + std::to_string(lineNumber) + ": " + line;
-                return false;
-            }
-
-            const std::string key = Trim(line.substr(0, equals));
-            const std::string valueText = Trim(line.substr(equals + 1U));
-            float value = 0.0f;
-            if (!ParseFloat(valueText, value))
-            {
-                error = "Invalid float at tuning line " + std::to_string(lineNumber) + ": " + valueText;
-                return false;
-            }
-
-            if (!ApplyTuningSetting(tuning, key, value, error))
-            {
-                error += " at line " + std::to_string(lineNumber);
-                return false;
-            }
-        }
-
-        MazeMap::SrUkfCore::SetRuntimeTuning(tuning);
-        return true;
-    }
-
-    MazeMap::SrUkfCore::StateVector BuildKnownStationaryOpenFloorInitialState() noexcept
-    {
-        MazeMap::SrUkfCore::StateVector state = MazeMap::SrUkfCore::StateVector::Zero();
-        MazeMap::VehicleState::NormalizeStateVector(state);
+        MazeMap::VehicleState state{};
         return state;
     }
 
@@ -1051,13 +860,8 @@ namespace
             }
             else if (argument == "--tuning")
             {
-                if ((index + 1) >= argc)
-                {
-                    error = "--tuning requires a path";
-                    return false;
-                }
-
-                options.tuningPath = fs::path(argv[++index]);
+                error = "--tuning is no longer supported by the canonical SR-UKF configuration";
+                return false;
             }
             else if (argument == "--known-stationary-seed")
             {
@@ -1069,7 +873,6 @@ namespace
                     << "OpenFloorUkfReplay\n"
                     << "  --root <path>    Root directory to scan for open_floor_main.csv captures.\n"
                     << "  --output <path>  Output directory for the generated report.\n"
-                    << "  --tuning <path>  Optional key=value tuning override file.\n"
                     << "  --known-stationary-seed  Seed from the canonical open-floor start pose instead of the logged UKF state.\n"
                     << "  --run-id <id>    Optional single-run filter.\n"
                     << "  --sample-csv <path>  Optional per-sample CSV export for the selected run.\n"
@@ -1633,6 +1436,15 @@ namespace
             }
 
             LoggedRow row{};
+            float loggedPxM = 0.0f;
+            float loggedPyM = 0.0f;
+            float loggedPsiRad = 0.0f;
+            float loggedForwardMps = 0.0f;
+            float loggedLateralMps = 0.0f;
+            float loggedYawRateRadps = 0.0f;
+            float loggedLeftOmegaRadps = 0.0f;
+            float loggedRightOmegaRadps = 0.0f;
+            float loggedGyroBiasRadps = 0.0f;
             if (!ParseField(tokens, indices, "master_time_us", row.masterTimeUs, ParseUnsigned32, error) ||
                 !ParseField(tokens, indices, "control_tick_sequence", row.controlTickSequence, ParseUnsigned32, error) ||
                 !ParseField(tokens, indices, "dt_us", row.dtUs, ParseUnsigned32, error) ||
@@ -1641,15 +1453,15 @@ namespace
                 !ParseField(tokens, indices, "phase_id", row.phaseId, ParseUnsigned8, error) ||
                 !ParseField(tokens, indices, "repeat_index", row.repeatIndex, ParseUnsigned16, error) ||
                 !ParseField(tokens, indices, "saturation_flags", row.saturationFlags, ParseUnsigned16, error) ||
-                !ParseField(tokens, indices, "ukf_state_px_m", row.loggedState(MazeMap::VehicleState::kPx), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_py_m", row.loggedState(MazeMap::VehicleState::kPy), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_psi_rad", row.loggedState(MazeMap::VehicleState::kPsi), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_u_mps", row.loggedState(MazeMap::VehicleState::kU), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_v_mps", row.loggedState(MazeMap::VehicleState::kV), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_r_radps", row.loggedState(MazeMap::VehicleState::kR), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_omega_l_radps", row.loggedState(MazeMap::VehicleState::kOmegaL), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_omega_r_radps", row.loggedState(MazeMap::VehicleState::kOmegaR), ParseFloat, error) ||
-                !ParseField(tokens, indices, "ukf_state_bgz_radps", row.loggedState(MazeMap::VehicleState::kBgz), ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_px_m", loggedPxM, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_py_m", loggedPyM, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_psi_rad", loggedPsiRad, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_u_mps", loggedForwardMps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_v_mps", loggedLateralMps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_r_radps", loggedYawRateRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_omega_l_radps", loggedLeftOmegaRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_omega_r_radps", loggedRightOmegaRadps, ParseFloat, error) ||
+                !ParseField(tokens, indices, "ukf_state_bgz_radps", loggedGyroBiasRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "measured_linear_speed_mps", row.measuredLinearSpeedMps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "measured_angular_speed_radps", row.measuredAngularSpeedRadps, ParseFloat, error) ||
                 !ParseField(tokens, indices, "cmd_linear_mps", row.commandedLinearMps, ParseFloat, error) ||
@@ -1681,7 +1493,14 @@ namespace
 
             row.accelBiasValid = (accelBiasValid != 0U);
             row.fanDutyCycle = loggedFanDutyCycle;
-            MazeMap::VehicleState::NormalizeStateVector(row.loggedState);
+            row.loggedState.SetPosition(Eigen::Vector2f(loggedPxM, loggedPyM));
+            row.loggedState.SetOrientation(loggedPsiRad);
+            row.loggedState.SetVelocity(loggedForwardMps);
+            row.loggedState.SetLateralVelocity(loggedLateralMps);
+            row.loggedState.SetRotationalVelocity(loggedYawRateRadps);
+            row.loggedState.SetWheelSpeedLeft(loggedLeftOmegaRadps);
+            row.loggedState.SetWheelSpeedRight(loggedRightOmegaRadps);
+            row.loggedState.SetGyroBiasZ(loggedGyroBiasRadps);
             rows.push_back(row);
         }
 
@@ -1692,16 +1511,6 @@ namespace
         }
 
         return true;
-    }
-
-    MazeMap::ControlInput BuildControlInput(const LoggedRow& row, float batteryVoltageV, float fallbackBatteryVoltageV) noexcept
-    {
-        MazeMap::ControlInput control{};
-        control.leftMotorCommand = row.leftDriveCommand;
-        control.rightMotorCommand = row.rightDriveCommand;
-        control.fanDutyCycle = row.fanDutyCycle;
-        control.batteryVoltageV = std::isfinite(batteryVoltageV) ? batteryVoltageV : fallbackBatteryVoltageV;
-        return control;
     }
 
     MazeMap::EncoderObs BuildEncoderObservation(const LoggedRow& row) noexcept
@@ -1737,222 +1546,129 @@ namespace
             (currentRow.repeatIndex == nextRow.repeatIndex);
     }
 
-    const FeedforwardPathDefinition& GetFeedforwardPathDefinition(const FeedforwardPathId id) noexcept
+    void ScoreFeedforward(
+        const FeedforwardSampleExportRow& row,
+        FeedforwardMetrics& metrics) noexcept
     {
-        return GetFeedforwardPathDefinitions()[static_cast<std::size_t>(id)];
-    }
-
-    bool BuildSensorOnlyFeedforwardState(
-        const LoggedRow& row,
-        const MazeMap::PlantModel::PreparedParams& prepared,
-        MazeMap::VehicleState::StateVector& state) noexcept
-    {
-        if (!(std::isfinite(row.leftEncoderVelocityMps) &&
-            std::isfinite(row.rightEncoderVelocityMps) &&
-            std::isfinite(row.gyroCorrectedRadps) &&
-            (prepared.raw.wheelRadiusM > 0.0f)))
+        metrics.leftDriveCommand.add(row.leftDriveCommandError);
+        metrics.rightDriveCommand.add(row.rightDriveCommandError);
+        metrics.averageDriveCommand.add(row.averageDriveCommandError);
+        metrics.deltaDriveCommand.add(row.deltaDriveCommandError);
+        metrics.leftPlantCommand.add(row.leftPlantCommandError);
+        metrics.rightPlantCommand.add(row.rightPlantCommandError);
+        metrics.averagePlantCommand.add(row.averagePlantCommandError);
+        metrics.deltaPlantCommand.add(row.deltaPlantCommandError);
+        metrics.predictedForwardTargetErrorMps.add(row.predictedForwardTargetErrorMps);
+        metrics.predictedYawTargetErrorRadps.add(row.predictedYawTargetErrorRadps);
+        if (std::isfinite(row.envelopeLeftMin) &&
+            std::isfinite(row.envelopeLeftMax) &&
+            std::isfinite(row.envelopeRightMin) &&
+            std::isfinite(row.envelopeRightMax))
         {
-            return false;
+            metrics.driveEnvelopeHit.add(row.loggedDriveWithinEnvelope);
+            metrics.plantCommandEnvelopeHit.add(row.loggedPlantCommandWithinEnvelope);
         }
-
-        state = MazeMap::VehicleState::StateVector::Zero();
-        state(MazeMap::VehicleState::kU) = SensorForwardVelocityMps(row);
-        state(MazeMap::VehicleState::kV) = 0.0f;
-        state(MazeMap::VehicleState::kR) = row.gyroCorrectedRadps;
-        state(MazeMap::VehicleState::kOmegaL) = row.leftEncoderVelocityMps / prepared.raw.wheelRadiusM;
-        state(MazeMap::VehicleState::kOmegaR) = row.rightEncoderVelocityMps / prepared.raw.wheelRadiusM;
-        MazeMap::VehicleState::NormalizeStateVector(state);
-        return true;
     }
 
-    bool BuildFeedforwardTransitionInputs(
-        const MazeMap::PlantModel& plantModel,
+    bool BuildFeedforwardSampleExportRow(
+        MazeMap::PlantModel& plantModel,
+        MazeMap::Vehicle& vehicle,
+        MazeMap::VehicleState& runtimeState,
         const LoggedRow& currentRow,
         const LoggedRow& nextRow,
-        const MazeMap::PlantModel::PreparedParams& prepared,
-        float batteryVoltageV,
-        FeedforwardTransitionInputs& inputs) noexcept
+        FeedforwardSampleExportRow& exportRow) noexcept
     {
-        if (!IsSensorComparableTransition(currentRow, nextRow))
+        const auto tryComputeFeedforwardCommand =
+            [&plantModel, &vehicle](
+                const LoggedRow& sourceRow,
+                const LoggedRow& targetRow,
+                MazeMap::App::Internal::CommandVector& solvedCommand) noexcept -> bool
+        {
+            if (!IsSensorComparableTransition(sourceRow, targetRow))
+            {
+                return false;
+            }
+
+            const float responseTimeS = static_cast<float>(targetRow.dtUs) * 1.0e-6f;
+            const float currentForwardVelocityMps = SensorForwardVelocityMps(sourceRow);
+            const float currentYawRateRadps = sourceRow.gyroCorrectedRadps;
+            const float targetForwardVelocityMps = SensorForwardVelocityMps(targetRow);
+            const float targetYawRateRadps = targetRow.gyroCorrectedRadps;
+            if (!(std::isfinite(responseTimeS) &&
+                (responseTimeS > 0.0f) &&
+                std::isfinite(sourceRow.leftEncoderVelocityMps) &&
+                std::isfinite(sourceRow.rightEncoderVelocityMps) &&
+                std::isfinite(currentForwardVelocityMps) &&
+                std::isfinite(currentYawRateRadps) &&
+                std::isfinite(targetForwardVelocityMps) &&
+                std::isfinite(targetYawRateRadps) &&
+                (MazeMap::Vehicle::GetDriveWheelRadiusM() > 0.0f)))
+            {
+                return false;
+            }
+
+            vehicle.SetFanDuty(sourceRow.fanDutyCycle);
+            float maxLongitudinalAccelMps2 = 0.0f;
+            float maxYawAccelRadps2 = 0.0f;
+            plantModel.velocityTargetTechnicalLimits(
+                currentForwardVelocityMps,
+                currentYawRateRadps,
+                maxLongitudinalAccelMps2,
+                maxYawAccelRadps2);
+
+            const float longitudinalAccelLimitMps2 =
+                (std::isfinite(maxLongitudinalAccelMps2) && (maxLongitudinalAccelMps2 > 0.0f)) ?
+                maxLongitudinalAccelMps2 :
+                0.0f;
+            const float yawAccelLimitRadps2 =
+                (std::isfinite(maxYawAccelRadps2) && (maxYawAccelRadps2 > 0.0f)) ?
+                maxYawAccelRadps2 :
+                0.0f;
+            float desiredLongitudinalAccelMps2 =
+                (longitudinalAccelLimitMps2 > 0.0f) ?
+                ((targetForwardVelocityMps - currentForwardVelocityMps) / responseTimeS) :
+                0.0f;
+            float desiredYawAccelRadps2 =
+                (yawAccelLimitRadps2 > 0.0f) ?
+                ((targetYawRateRadps - currentYawRateRadps) / responseTimeS) :
+                0.0f;
+            const float longitudinalDemand =
+                (longitudinalAccelLimitMps2 > 0.0f) ?
+                (std::fabs(desiredLongitudinalAccelMps2) / longitudinalAccelLimitMps2) :
+                0.0f;
+            const float yawDemand =
+                (yawAccelLimitRadps2 > 0.0f) ?
+                (std::fabs(desiredYawAccelRadps2) / yawAccelLimitRadps2) :
+                0.0f;
+            const float balanceScale = (std::max)(1.0f, (std::max)(longitudinalDemand, yawDemand));
+            desiredLongitudinalAccelMps2 =
+                (std::clamp)(
+                    desiredLongitudinalAccelMps2 / balanceScale,
+                    -longitudinalAccelLimitMps2,
+                    longitudinalAccelLimitMps2);
+            desiredYawAccelRadps2 =
+                (std::clamp)(
+                    desiredYawAccelRadps2 / balanceScale,
+                    -yawAccelLimitRadps2,
+                    yawAccelLimitRadps2);
+
+            if (!(std::isfinite(desiredLongitudinalAccelMps2) && std::isfinite(desiredYawAccelRadps2)))
+            {
+                return false;
+            }
+
+            solvedCommand = plantModel.ComputeFeedforward(
+                desiredLongitudinalAccelMps2,
+                desiredYawAccelRadps2);
+            return solvedCommand.IsFinite();
+        };
+
+        MazeMap::App::Internal::CommandVector command{};
+        if (!tryComputeFeedforwardCommand(currentRow, nextRow, command))
         {
             return false;
         }
 
-        const float responseTimeS = static_cast<float>(nextRow.dtUs) * 1.0e-6f;
-        if (!(std::isfinite(responseTimeS) && (responseTimeS > 0.0f)))
-        {
-            return false;
-        }
-
-        MazeMap::VehicleState::StateVector currentState = MazeMap::VehicleState::StateVector::Zero();
-        if (!BuildSensorOnlyFeedforwardState(currentRow, prepared, currentState))
-        {
-            return false;
-        }
-
-        const float currentForwardVelocityMps = SensorForwardVelocityMps(currentRow);
-        const float currentYawRateRadps = currentRow.gyroCorrectedRadps;
-        const float targetForwardVelocityMps = SensorForwardVelocityMps(nextRow);
-        const float targetYawRateRadps = nextRow.gyroCorrectedRadps;
-        if (!(std::isfinite(currentForwardVelocityMps) &&
-            std::isfinite(currentYawRateRadps) &&
-            std::isfinite(targetForwardVelocityMps) &&
-            std::isfinite(targetYawRateRadps)))
-        {
-            return false;
-        }
-
-        float maxStateLongitudinalAccelMps2 = 0.0f;
-        float maxStateYawAccelRadps2 = 0.0f;
-        plantModel.velocityTargetTechnicalLimits(
-            currentState,
-            prepared,
-            maxStateLongitudinalAccelMps2,
-            maxStateYawAccelRadps2,
-            currentRow.fanDutyCycle);
-
-        float desiredStateLongitudinalAccelMps2 = 0.0f;
-        float desiredStateYawAccelRadps2 = 0.0f;
-        const float stateLongitudinalAccelLimitMps2 =
-            (std::isfinite(maxStateLongitudinalAccelMps2) && (maxStateLongitudinalAccelMps2 > 0.0f)) ?
-            maxStateLongitudinalAccelMps2 :
-            0.0f;
-        const float stateYawAccelLimitRadps2 =
-            (std::isfinite(maxStateYawAccelRadps2) && (maxStateYawAccelRadps2 > 0.0f)) ?
-            maxStateYawAccelRadps2 :
-            0.0f;
-        desiredStateLongitudinalAccelMps2 =
-            (stateLongitudinalAccelLimitMps2 > 0.0f) ?
-            ((targetForwardVelocityMps - currentForwardVelocityMps) / responseTimeS) :
-            0.0f;
-        desiredStateYawAccelRadps2 =
-            (stateYawAccelLimitRadps2 > 0.0f) ?
-            ((targetYawRateRadps - currentYawRateRadps) / responseTimeS) :
-            0.0f;
-        const float stateLongitudinalDemand =
-            (stateLongitudinalAccelLimitMps2 > 0.0f) ?
-            (std::fabs(desiredStateLongitudinalAccelMps2) / stateLongitudinalAccelLimitMps2) :
-            0.0f;
-        const float stateYawDemand =
-            (stateYawAccelLimitRadps2 > 0.0f) ?
-            (std::fabs(desiredStateYawAccelRadps2) / stateYawAccelLimitRadps2) :
-            0.0f;
-        const float stateBalanceScale =
-            (std::max)(1.0f, (std::max)(stateLongitudinalDemand, stateYawDemand));
-        desiredStateLongitudinalAccelMps2 =
-            (std::clamp)(
-                desiredStateLongitudinalAccelMps2 / stateBalanceScale,
-                -stateLongitudinalAccelLimitMps2,
-                stateLongitudinalAccelLimitMps2);
-        desiredStateYawAccelRadps2 =
-            (std::clamp)(
-                desiredStateYawAccelRadps2 / stateBalanceScale,
-                -stateYawAccelLimitRadps2,
-                stateYawAccelLimitRadps2);
-
-        float maxScalarLongitudinalAccelMps2 = 0.0f;
-        float maxScalarYawAccelRadps2 = 0.0f;
-        plantModel.velocityTargetTechnicalLimits(
-            currentForwardVelocityMps,
-            currentYawRateRadps,
-            prepared,
-            maxScalarLongitudinalAccelMps2,
-            maxScalarYawAccelRadps2,
-            currentRow.fanDutyCycle);
-
-        float desiredScalarLongitudinalAccelMps2 = 0.0f;
-        float desiredScalarYawAccelRadps2 = 0.0f;
-        const float scalarLongitudinalAccelLimitMps2 =
-            (std::isfinite(maxScalarLongitudinalAccelMps2) && (maxScalarLongitudinalAccelMps2 > 0.0f)) ?
-            maxScalarLongitudinalAccelMps2 :
-            0.0f;
-        const float scalarYawAccelLimitRadps2 =
-            (std::isfinite(maxScalarYawAccelRadps2) && (maxScalarYawAccelRadps2 > 0.0f)) ?
-            maxScalarYawAccelRadps2 :
-            0.0f;
-        desiredScalarLongitudinalAccelMps2 =
-            (scalarLongitudinalAccelLimitMps2 > 0.0f) ?
-            ((targetForwardVelocityMps - currentForwardVelocityMps) / responseTimeS) :
-            0.0f;
-        desiredScalarYawAccelRadps2 =
-            (scalarYawAccelLimitRadps2 > 0.0f) ?
-            ((targetYawRateRadps - currentYawRateRadps) / responseTimeS) :
-            0.0f;
-        const float scalarLongitudinalDemand =
-            (scalarLongitudinalAccelLimitMps2 > 0.0f) ?
-            (std::fabs(desiredScalarLongitudinalAccelMps2) / scalarLongitudinalAccelLimitMps2) :
-            0.0f;
-        const float scalarYawDemand =
-            (scalarYawAccelLimitRadps2 > 0.0f) ?
-            (std::fabs(desiredScalarYawAccelRadps2) / scalarYawAccelLimitRadps2) :
-            0.0f;
-        const float scalarBalanceScale =
-            (std::max)(1.0f, (std::max)(scalarLongitudinalDemand, scalarYawDemand));
-        desiredScalarLongitudinalAccelMps2 =
-            (std::clamp)(
-                desiredScalarLongitudinalAccelMps2 / scalarBalanceScale,
-                -scalarLongitudinalAccelLimitMps2,
-                scalarLongitudinalAccelLimitMps2);
-        desiredScalarYawAccelRadps2 =
-            (std::clamp)(
-                desiredScalarYawAccelRadps2 / scalarBalanceScale,
-                -scalarYawAccelLimitRadps2,
-                scalarYawAccelLimitRadps2);
-
-        if (!(std::isfinite(desiredStateLongitudinalAccelMps2) &&
-            std::isfinite(desiredStateYawAccelRadps2) &&
-            std::isfinite(desiredScalarLongitudinalAccelMps2) &&
-            std::isfinite(desiredScalarYawAccelRadps2)))
-        {
-            return false;
-        }
-
-        inputs = {};
-        inputs.currentState = currentState;
-        inputs.currentForwardSensorMps = currentForwardVelocityMps;
-        inputs.currentYawRateSensorRadps = currentYawRateRadps;
-        inputs.targetForwardSensorMps = targetForwardVelocityMps;
-        inputs.targetYawRateSensorRadps = targetYawRateRadps;
-        inputs.desiredStateLongitudinalAccelMps2 = desiredStateLongitudinalAccelMps2;
-        inputs.desiredStateYawAccelRadps2 = desiredStateYawAccelRadps2;
-        inputs.desiredScalarLongitudinalAccelMps2 = desiredScalarLongitudinalAccelMps2;
-        inputs.desiredScalarYawAccelRadps2 = desiredScalarYawAccelRadps2;
-        inputs.responseTimeS = responseTimeS;
-        inputs.fanDutyCycle = currentRow.fanDutyCycle;
-        inputs.batteryVoltageV = batteryVoltageV;
-        inputs.reserveUsage = kDefaultFeedforwardReserveUsage;
-        return true;
-    }
-
-    bool TrySolveFeedforwardPath(
-        const MazeMap::PlantModel& plantModel,
-        const FeedforwardPathId pathId,
-        const FeedforwardTransitionInputs& inputs,
-        const MazeMap::PlantModel::PreparedParams& prepared,
-        MazeMap::App::Internal::CommandVector& command) noexcept
-    {
-        (void)prepared;
-        switch (pathId)
-        {
-        case FeedforwardPathId::Acceleration:
-            command =
-                plantModel.ComputeFeedforward(
-                    inputs.desiredScalarLongitudinalAccelMps2,
-                    inputs.desiredScalarYawAccelRadps2);
-            return true;
-        default:
-            return false;
-        }
-    }
-
-    FeedforwardEnvelope ComputeFeedforwardCommandEnvelope(
-        const MazeMap::PlantModel& plantModel,
-        const FeedforwardPathId pathId,
-        const LoggedRow& currentRow,
-        const LoggedRow& nextRow,
-        const MazeMap::PlantModel::PreparedParams& prepared,
-        float batteryVoltageV) noexcept
-    {
         FeedforwardEnvelope envelope{};
         for (int currentLeftSign = -1; currentLeftSign <= 1; currentLeftSign += 2)
         {
@@ -1981,38 +1697,17 @@ namespace
                                 perturbedNext.gyroCorrectedRadps +=
                                     static_cast<float>(nextYawSign) * kYawRateSensorBoundRadps;
 
-                                FeedforwardTransitionInputs perturbedInputs{};
-                                if (!BuildFeedforwardTransitionInputs(
-                                    plantModel,
-                                    perturbedCurrent,
-                                    perturbedNext,
-                                    prepared,
-                                    batteryVoltageV,
-                                    perturbedInputs))
-                                {
-                                    continue;
-                                }
-
-                                MazeMap::App::Internal::CommandVector command{};
-                                if (!TrySolveFeedforwardPath(
-                                    plantModel,
-                                    pathId,
-                                    perturbedInputs,
-                                    prepared,
-                                    command))
-                                {
-                                    continue;
-                                }
-                                if (!command.IsFinite())
+                                MazeMap::App::Internal::CommandVector perturbedCommand{};
+                                if (!tryComputeFeedforwardCommand(perturbedCurrent, perturbedNext, perturbedCommand))
                                 {
                                     continue;
                                 }
 
                                 envelope.valid = true;
-                                envelope.leftMin = (std::min)(envelope.leftMin, command.LeftCommand());
-                                envelope.leftMax = (std::max)(envelope.leftMax, command.LeftCommand());
-                                envelope.rightMin = (std::min)(envelope.rightMin, command.RightCommand());
-                                envelope.rightMax = (std::max)(envelope.rightMax, command.RightCommand());
+                                envelope.leftMin = (std::min)(envelope.leftMin, perturbedCommand.LeftCommand());
+                                envelope.leftMax = (std::max)(envelope.leftMax, perturbedCommand.LeftCommand());
+                                envelope.rightMin = (std::min)(envelope.rightMin, perturbedCommand.RightCommand());
+                                envelope.rightMax = (std::max)(envelope.rightMax, perturbedCommand.RightCommand());
                             }
                         }
                     }
@@ -2020,87 +1715,17 @@ namespace
             }
         }
 
-        return envelope;
-    }
-
-    void ScoreFeedforward(
-        const FeedforwardSampleExportRow& row,
-        FeedforwardMetrics& metrics) noexcept
-    {
-        metrics.leftDriveCommand.add(row.leftDriveCommandError);
-        metrics.rightDriveCommand.add(row.rightDriveCommandError);
-        metrics.averageDriveCommand.add(row.averageDriveCommandError);
-        metrics.deltaDriveCommand.add(row.deltaDriveCommandError);
-        metrics.leftPlantCommand.add(row.leftPlantCommandError);
-        metrics.rightPlantCommand.add(row.rightPlantCommandError);
-        metrics.averagePlantCommand.add(row.averagePlantCommandError);
-        metrics.deltaPlantCommand.add(row.deltaPlantCommandError);
-        metrics.predictedForwardTargetErrorMps.add(row.predictedForwardTargetErrorMps);
-        metrics.predictedYawTargetErrorRadps.add(row.predictedYawTargetErrorRadps);
-        if (std::isfinite(row.envelopeLeftMin) &&
-            std::isfinite(row.envelopeLeftMax) &&
-            std::isfinite(row.envelopeRightMin) &&
-            std::isfinite(row.envelopeRightMax))
-        {
-            metrics.driveEnvelopeHit.add(row.loggedDriveWithinEnvelope);
-            metrics.plantCommandEnvelopeHit.add(row.loggedPlantCommandWithinEnvelope);
-        }
-    }
-
-    bool BuildFeedforwardSampleExportRow(
-        const MazeMap::PlantModel& plantModel,
-        const FeedforwardPathId pathId,
-        const MazeMap::PlantModel::PreparedParams& prepared,
-        const LoggedRow& currentRow,
-        const LoggedRow& nextRow,
-        float batteryVoltageV,
-        FeedforwardSampleExportRow& exportRow) noexcept
-    {
-        const FeedforwardPathDefinition& definition = GetFeedforwardPathDefinition(pathId);
-        FeedforwardTransitionInputs inputs{};
-        if (!BuildFeedforwardTransitionInputs(
-            plantModel,
-            currentRow,
-            nextRow,
-            prepared,
-            batteryVoltageV,
-            inputs))
-        {
-            return false;
-        }
-
-        MazeMap::App::Internal::CommandVector command{};
-        if (!TrySolveFeedforwardPath(
-            plantModel,
-            pathId,
-            inputs,
-            prepared,
-            command))
-        {
-            return false;
-        }
-        if (!command.IsFinite())
-        {
-            return false;
-        }
-
-        const FeedforwardEnvelope envelope =
-            ComputeFeedforwardCommandEnvelope(
-                plantModel,
-                pathId,
-                currentRow,
-                nextRow,
-                prepared,
-                batteryVoltageV);
-
-        const MazeMap::VehicleState::StateVector predictedNextState =
-            plantModel.integrate(
-                inputs.currentState,
-                command,
-                inputs.fanDutyCycle,
-                inputs.batteryVoltageV,
-                inputs.responseTimeS,
-                prepared);
+        const float responseTimeS = static_cast<float>(nextRow.dtUs) * 1.0e-6f;
+        vehicle.SetFanDuty(currentRow.fanDutyCycle);
+        runtimeState.SetPosition(Eigen::Vector2f::Zero());
+        runtimeState.SetOrientation(0.0f);
+        runtimeState.SetVelocity(SensorForwardVelocityMps(currentRow));
+        runtimeState.SetLateralVelocity(0.0f);
+        runtimeState.SetRotationalVelocity(currentRow.gyroCorrectedRadps);
+        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(currentRow.leftEncoderVelocityMps));
+        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(currentRow.rightEncoderVelocityMps));
+        runtimeState.SetGyroBiasZ(0.0f);
+        plantModel.integrate(command, responseTimeS);
 
         exportRow = {};
         exportRow.masterTimeUs = currentRow.masterTimeUs;
@@ -2113,20 +1738,20 @@ namespace
         exportRow.phaseId = currentRow.phaseId;
         exportRow.repeatIndex = currentRow.repeatIndex;
         exportRow.saturationFlags = currentRow.saturationFlags;
-        exportRow.pathId = definition.pathId;
-        exportRow.pathLabel = definition.label;
-        exportRow.pathCategory = definition.category;
+        exportRow.pathId = kAccelerationFeedforwardPathId;
+        exportRow.pathLabel = kAccelerationFeedforwardPathLabel;
+        exportRow.pathCategory = kAccelerationFeedforwardPathCategory;
         exportRow.sectionName = SectionName(currentRow.sectionId);
         exportRow.primitiveName = PrimitiveName(currentRow.primitiveId);
         exportRow.phaseName = PhaseName(currentRow.phaseId);
-        exportRow.currentForwardSensorMps = inputs.currentForwardSensorMps;
+        exportRow.currentForwardSensorMps = SensorForwardVelocityMps(currentRow);
         exportRow.currentLeftVelocityMps = currentRow.leftEncoderVelocityMps;
         exportRow.currentRightVelocityMps = currentRow.rightEncoderVelocityMps;
-        exportRow.currentYawRateSensorRadps = inputs.currentYawRateSensorRadps;
-        exportRow.targetForwardSensorMps = inputs.targetForwardSensorMps;
+        exportRow.currentYawRateSensorRadps = currentRow.gyroCorrectedRadps;
+        exportRow.targetForwardSensorMps = SensorForwardVelocityMps(nextRow);
         exportRow.targetLeftVelocityMps = nextRow.leftEncoderVelocityMps;
         exportRow.targetRightVelocityMps = nextRow.rightEncoderVelocityMps;
-        exportRow.targetYawRateSensorRadps = inputs.targetYawRateSensorRadps;
+        exportRow.targetYawRateSensorRadps = nextRow.gyroCorrectedRadps;
         exportRow.nominalLeftCommand = command.LeftCommand();
         exportRow.nominalRightCommand = command.RightCommand();
         exportRow.nominalAverageCommand =
@@ -2157,10 +1782,12 @@ namespace
             exportRow.nominalAverageCommand - exportRow.loggedAveragePlantCommand;
         exportRow.deltaPlantCommandError =
             exportRow.nominalDeltaCommand - exportRow.loggedDeltaPlantCommand;
-        exportRow.predictedNextForwardMps = predictedNextState(MazeMap::VehicleState::kU);
-        exportRow.predictedNextYawRateRadps = predictedNextState(MazeMap::VehicleState::kR);
-        exportRow.predictedForwardTargetErrorMps = exportRow.predictedNextForwardMps - inputs.targetForwardSensorMps;
-        exportRow.predictedYawTargetErrorRadps = exportRow.predictedNextYawRateRadps - inputs.targetYawRateSensorRadps;
+        exportRow.predictedNextForwardMps = runtimeState.GetVelocity();
+        exportRow.predictedNextYawRateRadps = runtimeState.GetRotationalVelocity();
+        exportRow.predictedForwardTargetErrorMps =
+            exportRow.predictedNextForwardMps - exportRow.targetForwardSensorMps;
+        exportRow.predictedYawTargetErrorRadps =
+            exportRow.predictedNextYawRateRadps - exportRow.targetYawRateSensorRadps;
         if (envelope.valid)
         {
             exportRow.envelopeLeftMin = envelope.leftMin;
@@ -2183,8 +1810,7 @@ namespace
 
     SampleExportRow BuildSampleExportRow(
         const LoggedRow& row,
-        const MazeMap::VehicleState::StateVector& predictedState,
-        float predictedGyroBiasAnchorRadps,
+        const MazeMap::VehicleState& predictedState,
         const Eigen::Vector2f& predictedAccelBodyMps2)
     {
         SampleExportRow exportRow{};
@@ -2205,56 +1831,53 @@ namespace
         exportRow.actualAccelBodyYMps2 = row.accelBodyYMps2;
         exportRow.predictedPlanarAccelMps2 = predictedAccelBodyMps2.norm();
         exportRow.actualPlanarAccelMps2 = row.planarAccelMps2;
-        exportRow.predictedLinearSpeedMps = predictedState(MazeMap::VehicleState::kU);
+        exportRow.predictedLinearSpeedMps = predictedState.GetVelocity();
         exportRow.actualLinearSpeedMps = row.measuredLinearSpeedMps;
-        exportRow.predictedYawRateRadps = predictedState(MazeMap::VehicleState::kR);
+        exportRow.predictedYawRateRadps = predictedState.GetRotationalVelocity();
         exportRow.actualYawRateRadps = row.gyroCorrectedRadps;
         exportRow.predictedRawGyroRadps =
-            predictedState(MazeMap::VehicleState::kR) + predictedGyroBiasAnchorRadps;
+            predictedState.GetRotationalVelocity() + predictedState.GetGyroBiasZ();
         exportRow.actualRawGyroRadps = row.gyroRawRadps;
         return exportRow;
     }
 
     void ScorePrediction(
         const LoggedRow& row,
-        const MazeMap::VehicleState::StateVector& predictedState,
-        float predictedGyroBiasAnchorRadps,
-        const MazeMap::PlantParams& params,
+        const MazeMap::VehicleState& predictedState,
         const Eigen::Vector2f& predictedAccelBodyMps2,
         PredictionMetrics& metrics)
     {
         metrics.encoderLeftOmegaRadps.add(
-            static_cast<double>(predictedState(MazeMap::VehicleState::kOmegaL)) -
+            static_cast<double>(predictedState.GetWheelSpeedLeft()) -
             static_cast<double>(row.leftEncoderOmegaRadps));
         metrics.encoderRightOmegaRadps.add(
-            static_cast<double>(predictedState(MazeMap::VehicleState::kOmegaR)) -
+            static_cast<double>(predictedState.GetWheelSpeedRight()) -
             static_cast<double>(row.rightEncoderOmegaRadps));
 
         const double predictedEncoderLinearMps =
-            0.5 * static_cast<double>(params.wheelRadiusM) *
-            (static_cast<double>(predictedState(MazeMap::VehicleState::kOmegaL)) +
-             static_cast<double>(predictedState(MazeMap::VehicleState::kOmegaR)));
+            static_cast<double>(MazeMap::Vehicle::BodyForwardVelocityFromWheelLinear(
+                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedLeft()),
+                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedRight())));
         metrics.encoderLinearSpeedMps.add(predictedEncoderLinearMps - static_cast<double>(row.measuredLinearSpeedMps));
 
         const double predictedEncoderYawRadps =
-            static_cast<double>(params.wheelRadiusM) *
-            (static_cast<double>(predictedState(MazeMap::VehicleState::kOmegaL)) -
-             static_cast<double>(predictedState(MazeMap::VehicleState::kOmegaR))) /
-            static_cast<double>(params.trackWidthM);
+            static_cast<double>(MazeMap::Vehicle::BodyYawRateFromWheelLinear(
+                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedLeft()),
+                MazeMap::Vehicle::WheelLinearVelocityFromOmega(predictedState.GetWheelSpeedRight())));
         metrics.encoderYawRateRadps.add(predictedEncoderYawRadps - static_cast<double>(row.measuredAngularSpeedRadps));
 
         metrics.bodyForwardSpeedMps.add(
-            static_cast<double>(predictedState(MazeMap::VehicleState::kU)) -
+            static_cast<double>(predictedState.GetVelocity()) -
             static_cast<double>(row.measuredLinearSpeedMps));
         metrics.bodyYawRateRadps.add(
-            static_cast<double>(predictedState(MazeMap::VehicleState::kR)) -
+            static_cast<double>(predictedState.GetRotationalVelocity()) -
             static_cast<double>(row.gyroCorrectedRadps));
 
         if (std::isfinite(row.gyroRawRadps))
         {
             const double predictedRawGyroRadps =
-                static_cast<double>(predictedState(MazeMap::VehicleState::kR)) +
-                static_cast<double>(predictedGyroBiasAnchorRadps);
+                static_cast<double>(predictedState.GetRotationalVelocity()) +
+                static_cast<double>(predictedState.GetGyroBiasZ());
             metrics.rawGyroRadps.add(predictedRawGyroRadps - static_cast<double>(row.gyroRawRadps));
         }
 
@@ -2272,28 +1895,28 @@ namespace
 
     void ScoreConsistency(
         const LoggedRow& row,
-        const MazeMap::VehicleState::StateVector& replayedState,
+        const MazeMap::VehicleState& replayedState,
         ConsistencyMetrics& metrics)
     {
-        const double dxM = static_cast<double>(replayedState(MazeMap::VehicleState::kPx) - row.loggedState(MazeMap::VehicleState::kPx));
-        const double dyM = static_cast<double>(replayedState(MazeMap::VehicleState::kPy) - row.loggedState(MazeMap::VehicleState::kPy));
+        const double dxM = static_cast<double>(replayedState.GetPositionX() - row.loggedState.GetPositionX());
+        const double dyM = static_cast<double>(replayedState.GetPositionY() - row.loggedState.GetPositionY());
         metrics.positionMm.add(1000.0 * std::hypot(dxM, dyM));
         metrics.headingDeg.add(
             static_cast<double>(kRadiansToDegrees) *
             static_cast<double>(MazeMap::VehicleState::NormalizeAngle(
-                replayedState(MazeMap::VehicleState::kPsi) - row.loggedState(MazeMap::VehicleState::kPsi))));
+                replayedState.GetOrientation() - row.loggedState.GetOrientation())));
         metrics.forwardSpeedMps.add(
-            static_cast<double>(replayedState(MazeMap::VehicleState::kU) - row.loggedState(MazeMap::VehicleState::kU)));
+            static_cast<double>(replayedState.GetVelocity() - row.loggedState.GetVelocity()));
         metrics.lateralSpeedMps.add(
-            static_cast<double>(replayedState(MazeMap::VehicleState::kV) - row.loggedState(MazeMap::VehicleState::kV)));
+            static_cast<double>(replayedState.GetLateralVelocity() - row.loggedState.GetLateralVelocity()));
         metrics.yawRateRadps.add(
-            static_cast<double>(replayedState(MazeMap::VehicleState::kR) - row.loggedState(MazeMap::VehicleState::kR)));
+            static_cast<double>(replayedState.GetRotationalVelocity() - row.loggedState.GetRotationalVelocity()));
         metrics.leftWheelOmegaRadps.add(
-            static_cast<double>(replayedState(MazeMap::VehicleState::kOmegaL) - row.loggedState(MazeMap::VehicleState::kOmegaL)));
+            static_cast<double>(replayedState.GetWheelSpeedLeft() - row.loggedState.GetWheelSpeedLeft()));
         metrics.rightWheelOmegaRadps.add(
-            static_cast<double>(replayedState(MazeMap::VehicleState::kOmegaR) - row.loggedState(MazeMap::VehicleState::kOmegaR)));
+            static_cast<double>(replayedState.GetWheelSpeedRight() - row.loggedState.GetWheelSpeedRight()));
         metrics.gyroBiasRadps.add(
-            static_cast<double>(replayedState(MazeMap::VehicleState::kBgz) - row.loggedState(MazeMap::VehicleState::kBgz)));
+            static_cast<double>(replayedState.GetGyroBiasZ() - row.loggedState.GetGyroBiasZ()));
     }
 
     RunReport ReplayRun(const RunCandidate& candidate, const ReplayOptions& options)
@@ -2341,23 +1964,15 @@ namespace
             return report;
         }
 
-        MazeMap::Estimator ukf;
-        MazeMap::PlantModel plantModel;
-        const MazeMap::SrUkfCore::StateVector initialState =
+        MazeMap::VehicleState initialState =
             options.useKnownStationarySeed ?
             BuildKnownStationaryOpenFloorInitialState() :
             keptRows.front().loggedState;
-        if (!ukf.reset(initialState, MazeMap::SrUkfCore::BuildDefaultInitialCovariance()))
-        {
-            report.completed = false;
-            report.failureReason = "Failed to seed replay UKF";
-            return report;
-        }
+        MazeMap::Vehicle vehicle;
+        MazeMap::VehicleState runtimeState = initialState;
+        MazeMap::PlantModel plantModel(vehicle, runtimeState);
 
         SectionPhaseReportMap sectionPhaseBuckets;
-        const MazeMap::PlantParams& params = ukf.ukf().params();
-        const MazeMap::PlantModel::PreparedParams prepared = ukf.ukf().preparedParams();
-        const float fallbackBatteryVoltageV = params.supplyVoltageV;
         const bool exportSampleRows =
             !options.sampleCsvPath.empty() &&
             (options.runIdFilter == candidate.sidecar.runId);
@@ -2377,61 +1992,65 @@ namespace
         {
             const LoggedRow& currentRow = keptRows[index];
             const LoggedRow& nextRow = keptRows[index + 1U];
-            FeedforwardTransitionInputs transitionInputs{};
-            if (!BuildFeedforwardTransitionInputs(
+            if (report.feedforwardPaths.empty())
+            {
+                continue;
+            }
+
+            FeedforwardSampleExportRow sample{};
+            if (!BuildFeedforwardSampleExportRow(
                 plantModel,
+                vehicle,
+                runtimeState,
                 currentRow,
                 nextRow,
-                prepared,
-                std::isfinite(candidate.batteryVoltageV) ? candidate.batteryVoltageV : fallbackBatteryVoltageV,
-                transitionInputs))
+                sample))
             {
                 continue;
             }
 
             ++report.feedforwardTransitions;
-            for (FeedforwardPathSummary& pathSummary : report.feedforwardPaths)
+            FeedforwardPathSummary& pathSummary = report.feedforwardPaths.front();
+            ++pathSummary.comparableTransitions;
+            ++pathSummary.validSolutions;
+            ScoreFeedforward(sample, pathSummary.metrics);
+            if (exportFeedforwardRows)
             {
-                ++pathSummary.comparableTransitions;
-                FeedforwardSampleExportRow sample{};
-                if (!BuildFeedforwardSampleExportRow(
-                    plantModel,
-                    pathSummary.id,
-                    prepared,
-                    currentRow,
-                    nextRow,
-                    transitionInputs.batteryVoltageV,
-                    sample))
-                {
-                    continue;
-                }
-
-                ++pathSummary.validSolutions;
-                ScoreFeedforward(sample, pathSummary.metrics);
-                if (exportFeedforwardRows)
-                {
-                    report.feedforwardSampleExportRows.push_back(std::move(sample));
-                }
+                report.feedforwardSampleExportRows.push_back(std::move(sample));
             }
         }
+
+        runtimeState = initialState;
+        MazeMap::Estimator estimator(plantModel, runtimeState);
 
         for (std::size_t index = 1; index < keptRows.size(); ++index)
         {
             const LoggedRow& row = keptRows[index];
             ++report.scoredTransitions;
 
-            ukf.ukf().setRuntimeContext(
-                row.commandedLinearMps,
-                row.commandedAngularRadps,
-                row.saturationFlags,
-                row.accelBiasValid,
-                row.accelBodyXMps2,
-                row.accelBodyYMps2);
-
             const float dtSeconds = static_cast<float>(row.dtUs) * 1.0e-6f;
-            const MazeMap::ControlInput control =
-                BuildControlInput(row, candidate.batteryVoltageV, fallbackBatteryVoltageV);
-            if (!ukf.predict(dtSeconds, control))
+            const MazeMap::App::Internal::CommandVector control(row.leftDriveCommand, row.rightDriveCommand);
+            const MazeMap::EncoderObs encoderObservation = BuildEncoderObservation(row);
+            vehicle.SetFanDuty(row.fanDutyCycle);
+            runtimeState.SetCurrentCommand(control);
+            SensorSnapshot snapshot{};
+            snapshot.encoderObservationValid = true;
+            snapshot.encoderObservation = encoderObservation;
+            snapshot.leftEncoderTotalCounts = row.leftEncoderCount;
+            snapshot.rightEncoderTotalCounts = row.rightEncoderCount;
+            snapshot.gyroRawRadps = std::isfinite(row.gyroRawRadps) ? row.gyroRawRadps : 0.0f;
+            snapshot.gyroRadps = std::isfinite(row.gyroCorrectedRadps) ? row.gyroCorrectedRadps : 0.0f;
+            snapshot.gyroBiasRadps = runtimeState.GetGyroBiasZ();
+            snapshot.accelBiasValid = row.accelBiasValid;
+            snapshot.accelBodyXMps2 = row.accelBodyXMps2;
+            snapshot.accelBodyYMps2 = row.accelBodyYMps2;
+            snapshot.planarAccelMps2 = row.planarAccelMps2;
+            runtimeState.SetSensorSnapshot(snapshot);
+            if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f))
+            {
+                runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
+            }
+            if (!estimator.predict(dtSeconds, control))
             {
                 ++report.predictFailures;
                 report.completed = false;
@@ -2440,24 +2059,21 @@ namespace
                 break;
             }
 
-            const MazeMap::VehicleState::StateVector predictedState = ukf.ukf().state();
-            const Eigen::Vector2f predictedAccelBodyMps2 =
-                plantModel.imuPlanarAcceleration(predictedState, control, ukf.ukf().preparedParams());
+            const MazeMap::VehicleState& predictedState = runtimeState;
+            const Eigen::Vector2f predictedAccelBodyMps2(
+                std::numeric_limits<float>::quiet_NaN(),
+                std::numeric_limits<float>::quiet_NaN());
             SectionPhaseReport& phaseBucket =
                 GetOrCreateSectionPhaseReport(sectionPhaseBuckets, row.sectionId, row.phaseId);
             ++phaseBucket.sampleCount;
             ScorePrediction(
                 row,
                 predictedState,
-                ukf.ukf().gyroBiasAnchorRadps(),
-                params,
                 predictedAccelBodyMps2,
                 report.prediction);
             ScorePrediction(
                 row,
                 predictedState,
-                ukf.ukf().gyroBiasAnchorRadps(),
-                params,
                 predictedAccelBodyMps2,
                 phaseBucket.prediction);
             if (exportSampleRows)
@@ -2465,14 +2081,13 @@ namespace
                 report.sampleExportRows.push_back(BuildSampleExportRow(
                     row,
                     predictedState,
-                    ukf.ukf().gyroBiasAnchorRadps(),
                     predictedAccelBodyMps2));
             }
 
-            (void)ukf.updateEncoderPair(BuildEncoderObservation(row), dtSeconds);
+            (void)estimator.updateEncoderPair(encoderObservation, dtSeconds);
             if (std::isfinite(row.gyroRawRadps))
             {
-                const MazeMap::MeasurementUpdateResult yawUpdate = ukf.updateYawRate(row.gyroRawRadps);
+                const MazeMap::MeasurementUpdateResult yawUpdate = estimator.updateYawRate(row.gyroRawRadps);
                 if (!yawUpdate.accepted)
                 {
                     ++report.yawRejects;
@@ -2491,11 +2106,11 @@ namespace
                     std::isfinite(row.accelBodyYMps2);
                 accelObservation.accelBodyXMps2 = row.accelBodyXMps2;
                 accelObservation.accelBodyYMps2 = row.accelBodyYMps2;
-                (void)ukf.updatePlanarAccel(accelObservation);
+                (void)estimator.updatePlanarAccel(accelObservation);
             }
 
-            ScoreConsistency(row, ukf.ukf().state(), report.consistency);
-            ScoreConsistency(row, ukf.ukf().state(), phaseBucket.consistency);
+            ScoreConsistency(row, runtimeState, report.consistency);
+            ScoreConsistency(row, runtimeState, phaseBucket.consistency);
         }
 
         report.sectionPhaseBuckets = ToSortedSectionPhaseReports(sectionPhaseBuckets);
@@ -2977,11 +2592,11 @@ namespace
             << "- Final-section policy: ignore the highest `section_id` present in each run.\n"
             << "- Replay seed policy: "
             << (options.useKnownStationarySeed ?
-                "canonical open-floor marker `C` stationary state plus `SrUkfCore::BuildDefaultInitialCovariance()`.\n" :
-                "first kept logged state plus `SrUkfCore::BuildDefaultInitialCovariance()`.\n")
-            << "- Tuning override file: "
-            << (options.tuningPath.empty() ? "`<none>`\n" : (std::string("`") + options.tuningPath.string() + "`\n"))
-            << "- Battery policy: use `battery_voltage_start` from the bound `logging.txt` when available; otherwise fall back to the current plant default.\n"
+                "canonical open-floor marker `C` stationary state using `VehicleState` semantic defaults.\n" :
+                "first kept logged state using `VehicleState` semantic defaults.\n")
+            << "- Battery policy: captured `battery_voltage_start` is reported; replay dynamics use `Vehicle::GetBatteryVoltage()` because no canonical logged-voltage override owner is exposed.\n"
+            << "- Runtime-context gap: captured command targets, saturation flags, and acceleration context are parsed but not injected because no public `Estimator`/`VehicleState` owner path replaces the removed direct SR-UKF context hook.\n"
+            << "- Plant diagnostic gap: body-acceleration prediction metrics remain non-finite until a canonical bound-state IMU-acceleration diagnostic is exposed.\n"
             << "- Prediction metrics compare the pre-update UKF prediction against observable sensor-space signals.\n"
             << "- Post-update replay deltas compare the replayed UKF state against the logged UKF state from the capture; they are consistency checks, not external ground truth.\n"
             << "- Feedforward validation uses the present row's wheel-side velocities plus debiased gyro as the current state, the following row's wheel-side velocities plus debiased gyro as the target state, the following row's `dt_us` as the response horizon, and never uses logged UKF state for that validation.\n"
@@ -3233,8 +2848,6 @@ namespace
             << "  \"seed_policy\": \""
             << (options.useKnownStationarySeed ? "known_stationary_marker_c" : "logged_first_state")
             << "\",\n"
-            << "  \"tuning_path\": "
-            << (options.tuningPath.empty() ? "null" : (std::string("\"") + options.tuningPath.generic_string() + "\"")) << ",\n"
             << "  \"prediction\": {\n"
             << "    \"encoder_linear_rmse_mps\": " << FormatDouble(corpus.prediction.encoderLinearSpeedMps.rmse(), 12) << ",\n"
             << "    \"raw_gyro_rmse_radps\": " << FormatDouble(corpus.prediction.rawGyroRadps.rmse(), 12) << ",\n"
@@ -3286,12 +2899,6 @@ int main(int argc, char* argv[])
     ReplayOptions options{};
     std::string error;
     if (!ParseArgs(argc, argv, options, error))
-    {
-        std::cerr << error << "\n";
-        return 1;
-    }
-
-    if (!LoadTuningFile(options.tuningPath, error))
     {
         std::cerr << error << "\n";
         return 1;

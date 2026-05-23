@@ -10,44 +10,6 @@
 
 namespace MazeMap
 {
-    namespace
-    {
-        struct MeasuredKinematics final
-        {
-            float leftVelocityMps = 0.0f;
-            float rightVelocityMps = 0.0f;
-            float linearSpeedMps = 0.0f;
-            float angularSpeedRadps = 0.0f;
-        };
-
-        MeasuredKinematics ResolveMeasuredKinematics(
-            const EncoderObs& encoderObservation,
-            float measuredYawRateRadps) noexcept
-        {
-            MeasuredKinematics measured{};
-            measured.leftVelocityMps = Vehicle::WheelLinearVelocityFromOmega(encoderObservation.omegaLeftRadps);
-            measured.rightVelocityMps = Vehicle::WheelLinearVelocityFromOmega(encoderObservation.omegaRightRadps);
-            measured.linearSpeedMps =
-                Vehicle::BodyForwardVelocityFromWheelLinear(measured.leftVelocityMps, measured.rightVelocityMps);
-            const float fallbackYawRateRadps =
-                Vehicle::BodyYawRateFromWheelLinear(measured.leftVelocityMps, measured.rightVelocityMps);
-            measured.angularSpeedRadps =
-                std::isfinite(measuredYawRateRadps) ?
-                measuredYawRateRadps :
-                fallbackYawRateRadps;
-            return measured;
-        }
-
-        WallGeometryModel::GeometryStateFrame BuildWallGeometryFrame(
-            const WallGeometryModel& geometryModel,
-            const VehicleState::StateVector& state) noexcept
-        {
-            return geometryModel.buildStateFrame(
-                Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)),
-                state(VehicleState::kPsi));
-        }
-    }
-
     Estimator::Estimator(const PlantModel& plantModel, VehicleState& runtimeState) noexcept
         : _core(plantModel, runtimeState)
         , _mapEvidence()
@@ -81,8 +43,8 @@ namespace MazeMap
     }
 
     bool Estimator::reset(
-        const SrUkfCore::StateVector& state,
-        const SrUkfCore::StateMatrix& covariance) noexcept
+        const VehicleState::StateVector& state,
+        const VehicleState::StateMatrix& covariance) noexcept
     {
         _mapEvidence.Reset();
         const bool ok = _core.reset(state, covariance);
@@ -99,8 +61,13 @@ namespace MazeMap
         const VehicleState::StateVector& state) noexcept
     {
         const WallGeometryModel geometryModel{};
+        const float yaw = state(VehicleState::kPsi);
+        const WallGeometryModel::GeometryStateFrame frame = SrUkfCore::BuildWallGeometryFrame(
+            state(VehicleState::kPx),
+            state(VehicleState::kPy),
+            Eigen::Vector2f(std::sin(yaw), std::cos(yaw)));
         const Eigen::Vector2f directionWorld =
-            geometryModel.sensorDirectionWorld(BuildWallGeometryFrame(geometryModel, state), sensor);
+            geometryModel.sensorDirectionWorld(frame, sensor);
         const float x = directionWorld.x();
         const float y = directionWorld.y();
         if (std::fabs(x) >= std::fabs(y))
@@ -115,8 +82,13 @@ namespace MazeMap
         const VehicleState::StateVector& state) noexcept
     {
         const WallGeometryModel geometryModel{};
+        const float yaw = state(VehicleState::kPsi);
+        const WallGeometryModel::GeometryStateFrame frame = SrUkfCore::BuildWallGeometryFrame(
+            state(VehicleState::kPx),
+            state(VehicleState::kPy),
+            Eigen::Vector2f(std::sin(yaw), std::cos(yaw)));
         const Eigen::Vector2f sensorPositionWorld =
-            geometryModel.sensorOriginWorld(BuildWallGeometryFrame(geometryModel, state), sensor);
+            geometryModel.sensorOriginWorld(frame, sensor);
         return WallGeometryModel::WorldToCell(sensorPositionWorld.x(), sensorPositionWorld.y());
     }
 
@@ -233,22 +205,32 @@ namespace MazeMap
             return;
         }
 
-        const MeasuredKinematics measured =
-            ResolveMeasuredKinematics(encoderObservation, measuredYawRateRadps);
+        const float measuredLeftVelocityMps =
+            Vehicle::WheelLinearVelocityFromOmega(encoderObservation.omegaLeftRadps);
+        const float measuredRightVelocityMps =
+            Vehicle::WheelLinearVelocityFromOmega(encoderObservation.omegaRightRadps);
+        const float measuredLinearSpeedMps =
+            Vehicle::BodyForwardVelocityFromWheelLinear(measuredLeftVelocityMps, measuredRightVelocityMps);
+        const float fallbackYawRateRadps =
+            Vehicle::BodyYawRateFromWheelLinear(measuredLeftVelocityMps, measuredRightVelocityMps);
+        const float measuredAngularSpeedRadps =
+            std::isfinite(measuredYawRateRadps) ?
+            measuredYawRateRadps :
+            fallbackYawRateRadps;
         if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds))
         {
             const float midYawRad =
-                WrapAngleRad(_runtimeState.GetOrientation() + (0.5f * measured.angularSpeedRadps * dtSeconds));
+                WrapAngleRad(_runtimeState.GetOrientation() + (0.5f * measuredAngularSpeedRadps * dtSeconds));
             const Eigen::Vector2f midHeading = HeadingUnitFromYawRad(midYawRad);
             _runtimeState.SetPosition(Eigen::Vector2f(
-                _runtimeState.GetPositionX() + (measured.linearSpeedMps * midHeading.x() * dtSeconds),
-                _runtimeState.GetPositionY() + (measured.linearSpeedMps * midHeading.y() * dtSeconds)));
-            _runtimeState.SetOrientation(_runtimeState.GetOrientation() + (measured.angularSpeedRadps * dtSeconds));
+                _runtimeState.GetPositionX() + (measuredLinearSpeedMps * midHeading.x() * dtSeconds),
+                _runtimeState.GetPositionY() + (measuredLinearSpeedMps * midHeading.y() * dtSeconds)));
+            _runtimeState.SetOrientation(_runtimeState.GetOrientation() + (measuredAngularSpeedRadps * dtSeconds));
         }
 
-        _runtimeState.SetVelocity(measured.linearSpeedMps);
+        _runtimeState.SetVelocity(measuredLinearSpeedMps);
         _runtimeState.SetLateralVelocity(0.0f);
-        _runtimeState.SetRotationalVelocity(measured.angularSpeedRadps);
+        _runtimeState.SetRotationalVelocity(measuredAngularSpeedRadps);
         _runtimeState.SetLongitudinalAcceleration(0.0f);
         _runtimeState.SetLateralAcceleration(0.0f);
         _runtimeState.SetYawAcceleration(0.0f);

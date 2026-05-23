@@ -6,7 +6,9 @@
 #include "..\MazeMap\DriveBase.h"
 #include "..\MazeMap\ManeuverInstance.h"
 #include "..\MazeMap\ManeuverSet.h"
+#include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\SharedRobotRuntime.h"
+#include "..\MazeMap\Vehicle.h"
 
 #include <algorithm>
 #include <cmath>
@@ -70,7 +72,7 @@ namespace MazeMap::App
             bool commandEvidenceMatchesReturnedCommand = true;
             bool bodyObjectivesFinite = true;
             float elapsedSeconds = 0.0f;
-            VehicleState::StateVector truthState = VehicleState::StateVector::Zero();
+            VehicleState truthState;
             std::vector<CommandSample> samples;
         };
 
@@ -112,8 +114,7 @@ namespace MazeMap::App
             const float dtSeconds,
             const CommandVector& appliedControl = MakeControlVector())
         {
-            const PlantParams params = PlantParams::Default();
-            const float distancePerCountM = DistancePerEncoderCountMeters(params);
+            const float distancePerCountM = MazeMap::Vehicle::DriveEncoderDistanceFromCounts(1);
             const int32_t leftCounts =
                 ConsumeWholeEncoderCounts(leftDistanceDeltaM / distancePerCountM, leftEncoderRemainderCounts);
             const int32_t rightCounts =
@@ -124,9 +125,9 @@ namespace MazeMap::App
             snapshot.encoderObservation.totalRightCounts = rightCounts;
             snapshot.encoderObservation.leftDistanceDeltaM = static_cast<float>(leftCounts) * distancePerCountM;
             snapshot.encoderObservation.rightDistanceDeltaM = static_cast<float>(rightCounts) * distancePerCountM;
-            if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds) && (params.wheelRadiusM > 0.0f))
+            if ((dtSeconds > 0.0f) && std::isfinite(dtSeconds) && (MazeMap::Vehicle::GetDriveWheelRadiusM() > 0.0f))
             {
-                const float invWheelRadiusM = 1.0f / params.wheelRadiusM;
+                const float invWheelRadiusM = 1.0f / MazeMap::Vehicle::GetDriveWheelRadiusM();
                 const float invDtSeconds = 1.0f / dtSeconds;
                 snapshot.encoderObservation.leftVelocityMps =
                     snapshot.encoderObservation.leftDistanceDeltaM * invDtSeconds;
@@ -156,31 +157,38 @@ namespace MazeMap::App
                 appliedControl);
         }
 
-        VehicleState::StateVector BuildTruthState(const float linearSpeedMps) noexcept
+        bool IsVehicleStateFinite(const VehicleState& state) noexcept
         {
-            const PlantParams params = PlantParams::Default();
-            const float wheelOmegaRadps = linearSpeedMps / params.wheelRadiusM;
-            return BuildUkfState(
-                0.0f,
-                0.0f,
-                0.0f,
-                linearSpeedMps,
-                0.0f,
-                0.0f,
-                wheelOmegaRadps,
-                wheelOmegaRadps,
-                0.0f);
+            return
+                std::isfinite(state.GetPositionX()) &&
+                std::isfinite(state.GetPositionY()) &&
+                std::isfinite(state.GetOrientation()) &&
+                std::isfinite(state.GetVelocity()) &&
+                std::isfinite(state.GetLateralVelocity()) &&
+                std::isfinite(state.GetRotationalVelocity()) &&
+                std::isfinite(state.GetWheelSpeedLeft()) &&
+                std::isfinite(state.GetWheelSpeedRight()) &&
+                std::isfinite(state.GetGyroBiasZ());
+        }
+
+        VehicleState BuildTruthState(const float linearSpeedMps) noexcept
+        {
+            const float wheelOmegaRadps = Vehicle::WheelOmegaFromLinearVelocity(linearSpeedMps);
+            VehicleState state;
+            state.SetVelocity(linearSpeedMps);
+            state.SetWheelSpeedLeft(wheelOmegaRadps);
+            state.SetWheelSpeedRight(wheelOmegaRadps);
+            return state;
         }
 
         void PrimeDriveForSmoothEntry(
             Internal::SharedRobotRuntime& runtime,
-            VehicleState::StateVector& truthState,
+            VehicleState& truthState,
             float& leftEncoderRemainderCounts,
             float& rightEncoderRemainderCounts)
         {
             truthState = BuildTruthState(kSmoothEntrySpeedMps);
-            const PlantParams params = PlantParams::Default();
-            const float distancePerCountM = DistancePerEncoderCountMeters(params);
+            const float distancePerCountM = MazeMap::Vehicle::DriveEncoderDistanceFromCounts(1);
             float projectedLeftEncoderRemainderCounts = leftEncoderRemainderCounts;
             float projectedRightEncoderRemainderCounts = rightEncoderRemainderCounts;
             const int32_t projectedLeftCounts = ConsumeWholeEncoderCounts(
@@ -205,27 +213,26 @@ namespace MazeMap::App
 
         void SimulateRuntimeDriveCycle(
             Internal::SharedRobotRuntime& runtime,
-            PlantModel& plant,
-            VehicleState::StateVector& truthState,
+            PlantModel& truthPlant,
+            VehicleState& truthState,
             float& leftEncoderRemainderCounts,
             float& rightEncoderRemainderCounts,
             const float dtSeconds,
             const CommandVector& control)
         {
-            const PlantParams params = PlantParams::Default();
-
-            const VehicleState::StateVector previousTruthState = truthState;
-            truthState = plant.integrate(truthState, control, dtSeconds, params);
+            const float previousLeftWheelSpeedRadps = truthState.GetWheelSpeedLeft();
+            const float previousRightWheelSpeedRadps = truthState.GetWheelSpeedRight();
+            truthPlant.integrate(control, dtSeconds);
 
             const float leftDistanceDeltaM =
                 0.5f *
-                (previousTruthState(VehicleState::kOmegaL) + truthState(VehicleState::kOmegaL)) *
-                params.wheelRadiusM *
+                (previousLeftWheelSpeedRadps + truthState.GetWheelSpeedLeft()) *
+                Vehicle::GetDriveWheelRadiusM() *
                 dtSeconds;
             const float rightDistanceDeltaM =
                 0.5f *
-                (previousTruthState(VehicleState::kOmegaR) + truthState(VehicleState::kOmegaR)) *
-                params.wheelRadiusM *
+                (previousRightWheelSpeedRadps + truthState.GetWheelSpeedRight()) *
+                Vehicle::GetDriveWheelRadiusM() *
                 dtSeconds;
 
             ApplyEncoderObservation(
@@ -233,7 +240,7 @@ namespace MazeMap::App
                 runtime.RuntimeState(),
                 leftDistanceDeltaM,
                 rightDistanceDeltaM,
-                truthState(VehicleState::kR),
+                truthState.GetRotationalVelocity(),
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
                 dtSeconds,
@@ -306,7 +313,6 @@ namespace MazeMap::App
             ManeuverExecutionTrace trace{};
             Internal::SharedRobotRuntime runtime(kSimulationDtSeconds);
             ScopedMissionFanDuty fanDuty(runtime.Vehicle(), 0.80f);
-            PlantModel& plant = runtime.Plant();
             float leftEncoderRemainderCounts = 0.0f;
             float rightEncoderRemainderCounts = 0.0f;
 
@@ -325,6 +331,7 @@ namespace MazeMap::App
             {
                 trace.truthState = BuildTruthState(0.0f);
             }
+            PlantModel truthPlant(runtime.Vehicle(), trace.truthState);
 
             ManeuverInstance maneuver(
                 code,
@@ -377,7 +384,7 @@ namespace MazeMap::App
 
                 SimulateRuntimeDriveCycle(
                     runtime,
-                    plant,
+                    truthPlant,
                     trace.truthState,
                     leftEncoderRemainderCounts,
                     rightEncoderRemainderCounts,
@@ -414,14 +421,14 @@ namespace MazeMap::App
                 trace.allReturnedCommandsFinite &&
                 trace.commandEvidenceMatchesReturnedCommand &&
                 trace.bodyObjectivesFinite &&
-                trace.truthState.allFinite();
+                IsVehicleStateFinite(trace.truthState);
             result.message =
                 L"command evidence code=" + CodeLabel(code) +
                 L" completed=" + (trace.completed ? L"true" : L"false") +
                 L" finite_commands=" + (trace.allReturnedCommandsFinite ? L"true" : L"false") +
                 L" evidence_matches=" + (trace.commandEvidenceMatchesReturnedCommand ? L"true" : L"false") +
                 L" finite_objectives=" + (trace.bodyObjectivesFinite ? L"true" : L"false") +
-                L" truth_finite=" + (trace.truthState.allFinite() ? L"true" : L"false");
+                L" truth_finite=" + (IsVehicleStateFinite(trace.truthState) ? L"true" : L"false");
             return result;
         }
 
@@ -569,8 +576,8 @@ namespace MazeMap::App
             const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
             const float shiftMeters =
                 std::hypot(
-                    trace.truthState(VehicleState::kPx),
-                    trace.truthState(VehicleState::kPy));
+                    trace.truthState.GetPositionX(),
+                    trace.truthState.GetPositionY());
             CheckResult result{};
             result.passed = trace.started && trace.completed && (shiftMeters < kInPlacePositionToleranceM);
             result.message =
@@ -585,7 +592,7 @@ namespace MazeMap::App
         {
             const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, false);
             const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState(VehicleState::kPsi)));
+                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetOrientation()));
             CheckResult result{};
             result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
             result.message =
@@ -667,8 +674,8 @@ namespace MazeMap::App
             const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
             const float positionErrorMeters =
                 std::hypot(
-                    trace.truthState(VehicleState::kPx) - BuildNominalEndXMeters(code),
-                    trace.truthState(VehicleState::kPy) - BuildNominalEndYMeters(code));
+                    trace.truthState.GetPositionX() - BuildNominalEndXMeters(code),
+                    trace.truthState.GetPositionY() - BuildNominalEndYMeters(code));
             CheckResult result{};
             result.passed = trace.started && trace.completed && (positionErrorMeters <= kSmoothPositionToleranceM);
             result.message =
@@ -683,7 +690,7 @@ namespace MazeMap::App
         {
             const ManeuverExecutionTrace trace = SimulateDriveManeuver(code, true);
             const float headingErrorRad =
-                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState(VehicleState::kPsi)));
+                std::fabs(AngleErrorRad(BuildNominalEndYawRad(code), trace.truthState.GetOrientation()));
             CheckResult result{};
             result.passed = trace.started && trace.completed && (headingErrorRad <= kHeadingToleranceRad);
             result.message =

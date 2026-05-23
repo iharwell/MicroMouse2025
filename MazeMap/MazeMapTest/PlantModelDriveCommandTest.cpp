@@ -1,11 +1,13 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
-#include "PlantModelTestSupport.h"
 #include "..\MazeMap\EncoderObs.h"
+#include "..\MazeMap\PlantModel.h"
 #include "..\MazeMap\Vehicle.h"
+#include "..\MazeMap\VehicleState.h"
 
 #include <cmath>
+#include <sstream>
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
 
@@ -25,13 +27,20 @@ namespace MazeMap
         }
 
         float IntegratedRateOfChange(
-            const VehicleState::StateVector& before,
-            const VehicleState::StateVector& after,
-            const int stateIndex,
-            const float dtSeconds) noexcept
+            const float before,
+            const float after,
+            const float dtSeconds)
         {
-			Assert::AreEqual(0.001f, dtSeconds, 1.0e-6f, L"Unexpected time step. Should be 1ms.");
-            return (after(stateIndex) - before(stateIndex)) / dtSeconds;
+            std::wstringstream message;
+            message <<
+                L"IntegratedRateOfChange\n"
+                L"field=dt_seconds\n"
+                L"actual=" << dtSeconds << L"\n"
+                L"expected=0.001\n"
+                L"tolerance=1e-6\n"
+                L"criterion=abs(actual - expected) <= tolerance";
+            Assert::AreEqual(0.001f, dtSeconds, 1.0e-6f, message.str().c_str());
+            return (after - before) / dtSeconds;
         }
     }
 
@@ -48,8 +57,29 @@ namespace MazeMap
             const App::Internal::CommandVector control =
                 plant.ComputeFeedforward(0.0f, 0.0f);
 
-            Assert::AreEqual(0.0f, control.LeftCommand(), 1.0e-6f);
-            Assert::AreEqual(0.0f, control.RightCommand(), 1.0e-6f);
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardZeroRequestReturnsZeroCommand\n"
+                    L"field=left_command\n"
+                    L"actual=" << control.LeftCommand() << L"\n"
+                    L"expected=0\n"
+                    L"tolerance=1e-6\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(0.0f, control.LeftCommand(), 1.0e-6f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardZeroRequestReturnsZeroCommand\n"
+                    L"field=right_command\n"
+                    L"actual=" << control.RightCommand() << L"\n"
+                    L"expected=0\n"
+                    L"tolerance=1e-6\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(0.0f, control.RightCommand(), 1.0e-6f, message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardReturnsFiniteSymmetricCommandForForwardRequest)
@@ -60,8 +90,32 @@ namespace MazeMap
             const App::Internal::CommandVector control =
                 plant.ComputeFeedforward(1.0f, 0.0f);
 
-            Assert::IsTrue(IsFiniteControlVector(control));
-            Assert::AreEqual(control.LeftCommand(), control.RightCommand(), 1.0e-5f);
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardReturnsFiniteSymmetricCommandForForwardRequest\n"
+                    L"field=feedforward_command\n"
+                    L"actual={left_command=" << control.LeftCommand() <<
+                    L", right_command=" << control.RightCommand() << L"}\n"
+                    L"criterion=isfinite(left_command) && isfinite(right_command)";
+                Assert::IsTrue(IsFiniteControlVector(control), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardReturnsFiniteSymmetricCommandForForwardRequest\n"
+                    L"field=right_command_symmetry\n"
+                    L"actual=" << control.RightCommand() << L"\n"
+                    L"expected_left_command=" << control.LeftCommand() << L"\n"
+                    L"tolerance=1e-5\n"
+                    L"criterion=abs(actual - expected_left_command) <= tolerance";
+                Assert::AreEqual(
+                    control.LeftCommand(),
+                    control.RightCommand(),
+                    1.0e-5f,
+                    message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardReturnsSplitCommandForYawRequest)
@@ -71,9 +125,30 @@ namespace MazeMap
             PlantModel plant(vehicle, runtimeState);
             const App::Internal::CommandVector control =
                 plant.ComputeFeedforward(0.0f, 8.0f);
+            const float commandSplit = std::fabs(control.LeftCommand() - control.RightCommand());
 
-            Assert::IsTrue(IsFiniteControlVector(control));
-            Assert::IsTrue(std::fabs(control.LeftCommand() - control.RightCommand()) > 1.0e-4f);
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardReturnsSplitCommandForYawRequest\n"
+                    L"field=feedforward_command\n"
+                    L"actual={left_command=" << control.LeftCommand() <<
+                    L", right_command=" << control.RightCommand() << L"}\n"
+                    L"criterion=isfinite(left_command) && isfinite(right_command)";
+                Assert::IsTrue(IsFiniteControlVector(control), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardReturnsSplitCommandForYawRequest\n"
+                    L"field=command_split\n"
+                    L"actual=" << commandSplit << L"\n"
+                    L"left_command=" << control.LeftCommand() << L"\n"
+                    L"right_command=" << control.RightCommand() << L"\n"
+                    L"criterion=actual > 0.0001";
+                Assert::IsTrue(commandSplit > 1.0e-4f, message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardReturnsFiniteOutputForCombinedRequest)
@@ -84,7 +159,14 @@ namespace MazeMap
             const App::Internal::CommandVector control =
                 plant.ComputeFeedforward(1.25f, 3.75f);
 
-            Assert::IsTrue(IsFiniteControlVector(control));
+            std::wstringstream message;
+            message <<
+                L"PlantModelAccelerationFeedforwardReturnsFiniteOutputForCombinedRequest\n"
+                L"field=feedforward_command\n"
+                L"actual={left_command=" << control.LeftCommand() <<
+                L", right_command=" << control.RightCommand() << L"}\n"
+                L"criterion=isfinite(left_command) && isfinite(right_command)";
+            Assert::IsTrue(IsFiniteControlVector(control), message.str().c_str());
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardIgnoresObservedWheelMismatchForForwardRequest)
@@ -100,8 +182,32 @@ namespace MazeMap
             const App::Internal::CommandVector control =
                 plant.ComputeFeedforward(4.0f, 0.0f);
 
-            Assert::IsTrue(IsFiniteControlVector(control));
-            Assert::AreEqual(control.LeftCommand(), control.RightCommand(), 1.0e-5f);
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardIgnoresObservedWheelMismatchForForwardRequest\n"
+                    L"field=feedforward_command\n"
+                    L"actual={left_command=" << control.LeftCommand() <<
+                    L", right_command=" << control.RightCommand() << L"}\n"
+                    L"criterion=isfinite(left_command) && isfinite(right_command)";
+                Assert::IsTrue(IsFiniteControlVector(control), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardIgnoresObservedWheelMismatchForForwardRequest\n"
+                    L"field=right_command_symmetry\n"
+                    L"actual=" << control.RightCommand() << L"\n"
+                    L"expected_left_command=" << control.LeftCommand() << L"\n"
+                    L"tolerance=1e-5\n"
+                    L"criterion=abs(actual - expected_left_command) <= tolerance";
+                Assert::AreEqual(
+                    control.LeftCommand(),
+                    control.RightCommand(),
+                    1.0e-5f,
+                    message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf)
@@ -111,13 +217,13 @@ namespace MazeMap
             restState.SetVelocity(0.25f);
 
             // We deliberately set the wheel speeds higher on the slow state to ensure back-emf is not looking at the wheel speeds.
-			float s_left = 0.0f, s_right = 0.0f;
-            
-			vehicle.WheelOmegasFromBodyVelocity(
-				restState.GetVelocity(),
-				restState.GetRotationalVelocity(),
-				s_left,
-				s_right);
+            float s_left = 0.0f, s_right = 0.0f;
+
+            vehicle.WheelOmegasFromBodyVelocity(
+                restState.GetVelocity(),
+                restState.GetRotationalVelocity(),
+                s_left,
+                s_right);
             restState.SetWheelSpeedLeft(s_left);
             restState.SetWheelSpeedRight(s_right);
             PlantModel slowPlant(vehicle, restState);
@@ -126,106 +232,273 @@ namespace MazeMap
 
             VehicleState movingState;
             movingState.SetVelocity(0.75f);
-			movingState.SetWheelSpeedLeft(0.0f);
+            movingState.SetWheelSpeedLeft(0.0f);
             movingState.SetWheelSpeedRight(0.0f);
             PlantModel movingPlant(vehicle, movingState);
             const App::Internal::CommandVector movingControl =
                 movingPlant.ComputeFeedforward(4.0f, 0.0f);
+            const float leftCommandDelta =
+                std::fabs(slowControl.LeftCommand() - movingControl.LeftCommand());
+            const float rightCommandDelta =
+                std::fabs(slowControl.RightCommand() - movingControl.RightCommand());
 
-            Assert::IsTrue(IsFiniteControlVector(slowControl));
-            Assert::IsTrue(IsFiniteControlVector(movingControl));
-			Assert::AreNotEqual(slowControl.LeftCommand(), movingControl.LeftCommand(), 1.0e-5f);
-            Assert::AreNotEqual(slowControl.RightCommand(), movingControl.RightCommand(), 1.0e-5f);
-            Assert::IsTrue(movingControl.Average() > slowControl.Average());
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf\n"
+                    L"field=slow_state_feedforward_command\n"
+                    L"actual={left_command=" << slowControl.LeftCommand() <<
+                    L", right_command=" << slowControl.RightCommand() << L"}\n"
+                    L"criterion=isfinite(left_command) && isfinite(right_command)";
+                Assert::IsTrue(IsFiniteControlVector(slowControl), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf\n"
+                    L"field=moving_state_feedforward_command\n"
+                    L"actual={left_command=" << movingControl.LeftCommand() <<
+                    L", right_command=" << movingControl.RightCommand() << L"}\n"
+                    L"criterion=isfinite(left_command) && isfinite(right_command)";
+                Assert::IsTrue(IsFiniteControlVector(movingControl), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf\n"
+                    L"field=left_command_delta\n"
+                    L"actual=" << leftCommandDelta << L"\n"
+                    L"slow_left_command=" << slowControl.LeftCommand() << L"\n"
+                    L"moving_left_command=" << movingControl.LeftCommand() << L"\n"
+                    L"criterion=actual > 1e-5";
+                Assert::IsTrue(leftCommandDelta > 1.0e-5f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf\n"
+                    L"field=right_command_delta\n"
+                    L"actual=" << rightCommandDelta << L"\n"
+                    L"slow_right_command=" << slowControl.RightCommand() << L"\n"
+                    L"moving_right_command=" << movingControl.RightCommand() << L"\n"
+                    L"criterion=actual > 1e-5";
+                Assert::IsTrue(rightCommandDelta > 1.0e-5f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardAccountsForForwardVelocityBackEmf\n"
+                    L"field=moving_average_command\n"
+                    L"actual=" << movingControl.Average() << L"\n"
+                    L"slow_average_command=" << slowControl.Average() << L"\n"
+                    L"criterion=actual > slow_average_command";
+                Assert::IsTrue(movingControl.Average() > slowControl.Average(), message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity)
         {
             constexpr float requestedAccelMps2 = 4.0f;
-            PlantModelTestRuntime runtime;
-            PlantModel& plant = runtime.plant;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
-            state(VehicleState::kU) = 0.20f;
-            state(VehicleState::kOmegaL) = state(VehicleState::kU) / params.wheelRadiusM;
-            state(VehicleState::kOmegaR) = state(VehicleState::kU) / params.wheelRadiusM;
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
 
-            runtime.runtimeState.SetVelocity(state(VehicleState::kU));
-            runtime.runtimeState.SetWheelSpeedLeft(state(VehicleState::kOmegaL));
-            runtime.runtimeState.SetWheelSpeedRight(state(VehicleState::kOmegaR));
+            runtimeState.SetVelocity(0.20f);
+            runtimeState.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(runtimeState.GetVelocity()));
+            runtimeState.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(runtimeState.GetVelocity()));
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(requestedAccelMps2, 0.0f);
-            const PlantDerivatives derivatives =
-                plant.forwardStep(state, command, params);
-            const VehicleState::StateVector integrated =
-                plant.integrate(state, command, dtSeconds, params);
+            const float initialVelocityMps = runtimeState.GetVelocity();
+            plant.integrate(command, dtSeconds);
             const float integratedForwardAccelMps2 =
-                IntegratedRateOfChange(state, integrated, VehicleState::kU, dtSeconds);
+                IntegratedRateOfChange(initialVelocityMps, runtimeState.GetVelocity(), dtSeconds);
 
-            Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::IsTrue(derivatives.longitudinalAccelMps2 > 0.0f);
-            Assert::AreEqual(
-                requestedAccelMps2,
-                derivatives.longitudinalAccelMps2,
-                kAccelerationToleranceMps2);
-            Assert::AreEqual(
-                requestedAccelMps2,
-                integratedForwardAccelMps2,
-                kAccelerationToleranceMps2);
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity\n"
+                    L"field=feedforward_command\n"
+                    L"actual={left_command=" << command.LeftCommand() <<
+                    L", right_command=" << command.RightCommand() << L"}\n"
+                    L"criterion=isfinite(left_command) && isfinite(right_command)";
+                Assert::IsTrue(IsFiniteControlVector(command), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity\n"
+                    L"field=longitudinal_acceleration_mps2\n"
+                    L"actual=" << runtimeState.GetLongitudinalAcceleration() << L"\n"
+                    L"criterion=actual > 0";
+                Assert::IsTrue(runtimeState.GetLongitudinalAcceleration() > 0.0f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity\n"
+                    L"field=runtime_longitudinal_acceleration_mps2\n"
+                    L"actual=" << runtimeState.GetLongitudinalAcceleration() << L"\n"
+                    L"expected=" << requestedAccelMps2 << L"\n"
+                    L"tolerance=" << kAccelerationToleranceMps2 << L"\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(
+                    requestedAccelMps2,
+                    runtimeState.GetLongitudinalAcceleration(),
+                    kAccelerationToleranceMps2,
+                    message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForLongitudinalRequestIncreasesForwardVelocity\n"
+                    L"field=integrated_forward_acceleration_mps2\n"
+                    L"actual=" << integratedForwardAccelMps2 << L"\n"
+                    L"expected=" << requestedAccelMps2 << L"\n"
+                    L"tolerance=" << kAccelerationToleranceMps2 << L"\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(
+                    requestedAccelMps2,
+                    integratedForwardAccelMps2,
+                    kAccelerationToleranceMps2,
+                    message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate)
         {
             constexpr float requestedYawAccelRadps2 = 25.0f;
-            PlantModelTestRuntime runtime;
-            PlantModel& plant = runtime.plant;
-            const PlantParams params = PlantParams::Default();
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
 
             const App::Internal::CommandVector command =
                 plant.ComputeFeedforward(0.0f, requestedYawAccelRadps2);
-            const PlantDerivatives derivatives =
-                plant.forwardStep(state, command, params);
-            const VehicleState::StateVector integrated =
-                plant.integrate(state, command, dtSeconds, params);
+            const float initialYawRateRadps = runtimeState.GetRotationalVelocity();
+            plant.integrate(command, dtSeconds);
             const float integratedYawAccelRadps2 =
-                IntegratedRateOfChange(state, integrated, VehicleState::kR, dtSeconds);
+                IntegratedRateOfChange(initialYawRateRadps, runtimeState.GetRotationalVelocity(), dtSeconds);
 
-            Assert::IsTrue(IsFiniteControlVector(command));
-            Assert::IsTrue(derivatives.yawAccelRadps2 > 0.0f);
-            Assert::AreEqual(
-                requestedYawAccelRadps2,
-                derivatives.yawAccelRadps2,
-                kYawAccelerationToleranceRadps2);
-            Assert::AreEqual(
-                requestedYawAccelRadps2,
-                integratedYawAccelRadps2,
-                kYawAccelerationToleranceRadps2);
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate\n"
+                    L"field=feedforward_command\n"
+                    L"actual={left_command=" << command.LeftCommand() <<
+                    L", right_command=" << command.RightCommand() << L"}\n"
+                    L"criterion=isfinite(left_command) && isfinite(right_command)";
+                Assert::IsTrue(IsFiniteControlVector(command), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate\n"
+                    L"field=yaw_acceleration_radps2\n"
+                    L"actual=" << runtimeState.GetYawAcceleration() << L"\n"
+                    L"criterion=actual > 0";
+                Assert::IsTrue(runtimeState.GetYawAcceleration() > 0.0f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate\n"
+                    L"field=runtime_yaw_acceleration_radps2\n"
+                    L"actual=" << runtimeState.GetYawAcceleration() << L"\n"
+                    L"expected=" << requestedYawAccelRadps2 << L"\n"
+                    L"tolerance=" << kYawAccelerationToleranceRadps2 << L"\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(
+                    requestedYawAccelRadps2,
+                    runtimeState.GetYawAcceleration(),
+                    kYawAccelerationToleranceRadps2,
+                    message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelAccelerationFeedforwardForClockwiseYawRequestIncreasesYawRate\n"
+                    L"field=integrated_yaw_acceleration_radps2\n"
+                    L"actual=" << integratedYawAccelRadps2 << L"\n"
+                    L"expected=" << requestedYawAccelRadps2 << L"\n"
+                    L"tolerance=" << kYawAccelerationToleranceRadps2 << L"\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(
+                    requestedYawAccelRadps2,
+                    integratedYawAccelRadps2,
+                    kYawAccelerationToleranceRadps2,
+                    message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelWheelProjectionRoundTripsVehicleBodyVelocity)
         {
-            PlantModelTestRuntime runtime;
+            Vehicle vehicle;
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
             constexpr float forwardMps = 1.0f;
             constexpr float yawRateRadps = 2.0f;
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
-            state(VehicleState::kU) = forwardMps;
-            state(VehicleState::kR) = yawRateRadps;
-            const Eigen::Vector2f wheelVelocityMps =
-                runtime.plant.wheelLinearVelocityFromBodyState(state);
+            float leftOmegaRadps = 0.0f;
+            float rightOmegaRadps = 0.0f;
+            vehicle.WheelOmegasFromBodyVelocity(forwardMps, yawRateRadps, leftOmegaRadps, rightOmegaRadps);
             EncoderObs observation{};
-            observation.omegaLeftRadps = Vehicle::WheelOmegaFromLinearVelocity(wheelVelocityMps.x());
-            observation.omegaRightRadps = Vehicle::WheelOmegaFromLinearVelocity(wheelVelocityMps.y());
+            observation.omegaLeftRadps = leftOmegaRadps;
+            observation.omegaRightRadps = rightOmegaRadps;
+            const float measuredLinearSpeedMps = plant.measuredLinearSpeedMps(observation);
+            const float measuredYawRateRadps = plant.measuredYawRateRadps(observation);
 
-            Assert::AreEqual(forwardMps, runtime.plant.measuredLinearSpeedMps(observation), 1.0e-6f);
-            Assert::AreEqual(yawRateRadps, runtime.plant.measuredYawRateRadps(observation), 1.0e-6f);
-            Assert::IsTrue(wheelVelocityMps.x() > wheelVelocityMps.y());
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelWheelProjectionRoundTripsVehicleBodyVelocity\n"
+                    L"field=measured_linear_speed_mps\n"
+                    L"actual=" << measuredLinearSpeedMps << L"\n"
+                    L"expected=" << forwardMps << L"\n"
+                    L"tolerance=1e-6\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(forwardMps, measuredLinearSpeedMps, 1.0e-6f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelWheelProjectionRoundTripsVehicleBodyVelocity\n"
+                    L"field=measured_yaw_rate_radps\n"
+                    L"actual=" << measuredYawRateRadps << L"\n"
+                    L"expected=" << yawRateRadps << L"\n"
+                    L"tolerance=1e-6\n"
+                    L"criterion=abs(actual - expected) <= tolerance";
+                Assert::AreEqual(yawRateRadps, measuredYawRateRadps, 1.0e-6f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelWheelProjectionRoundTripsVehicleBodyVelocity\n"
+                    L"field=left_wheel_omega_radps\n"
+                    L"actual=" << leftOmegaRadps << L"\n"
+                    L"right_wheel_omega_radps=" << rightOmegaRadps << L"\n"
+                    L"criterion=actual > right_wheel_omega_radps";
+                Assert::IsTrue(leftOmegaRadps > rightOmegaRadps, message.str().c_str());
+            }
         }
 
         TEST_METHOD(PlantModelVelocityTargetTechnicalLimitsReportFinitePositiveEnvelope)
         {
-            PlantModelTestRuntime runtime;
-            PlantModel& plant = runtime.plant;
+            Vehicle vehicle;
+            vehicle.SetFanDuty(0.80f);
+            VehicleState runtimeState;
+            PlantModel plant(vehicle, runtimeState);
             float maxLongitudinalAccelMps2 = 0.0f;
             float maxYawAccelRadps2 = 0.0f;
 
@@ -233,10 +506,45 @@ namespace MazeMap
                 maxLongitudinalAccelMps2,
                 maxYawAccelRadps2);
 
-            Assert::IsTrue(std::isfinite(maxLongitudinalAccelMps2));
-            Assert::IsTrue(std::isfinite(maxYawAccelRadps2));
-            Assert::IsTrue(maxLongitudinalAccelMps2 > 0.0f);
-            Assert::IsTrue(maxYawAccelRadps2 > 0.0f);
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelVelocityTargetTechnicalLimitsReportFinitePositiveEnvelope\n"
+                    L"field=max_longitudinal_accel_mps2\n"
+                    L"actual=" << maxLongitudinalAccelMps2 << L"\n"
+                    L"criterion=isfinite(actual)";
+                Assert::IsTrue(std::isfinite(maxLongitudinalAccelMps2), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelVelocityTargetTechnicalLimitsReportFinitePositiveEnvelope\n"
+                    L"field=max_yaw_accel_radps2\n"
+                    L"actual=" << maxYawAccelRadps2 << L"\n"
+                    L"criterion=isfinite(actual)";
+                Assert::IsTrue(std::isfinite(maxYawAccelRadps2), message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelVelocityTargetTechnicalLimitsReportFinitePositiveEnvelope\n"
+                    L"field=max_longitudinal_accel_mps2\n"
+                    L"actual=" << maxLongitudinalAccelMps2 << L"\n"
+                    L"criterion=actual > 0";
+                Assert::IsTrue(maxLongitudinalAccelMps2 > 0.0f, message.str().c_str());
+            }
+
+            {
+                std::wstringstream message;
+                message <<
+                    L"PlantModelVelocityTargetTechnicalLimitsReportFinitePositiveEnvelope\n"
+                    L"field=max_yaw_accel_radps2\n"
+                    L"actual=" << maxYawAccelRadps2 << L"\n"
+                    L"criterion=actual > 0";
+                Assert::IsTrue(maxYawAccelRadps2 > 0.0f, message.str().c_str());
+            }
         }
 
     };

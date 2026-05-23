@@ -73,8 +73,8 @@ namespace MazeMap
             0.07004f,
             0.07868f,
             0.01475f,
-            // Investigation note: PlantParams still places tire contacts from the effective track width. Keep the
-            // kinematic fit here authoritative until physical contact geometry is split explicitly.
+            // Investigation note: plant contact placement still uses the effective track width. Keep the kinematic
+            // fit here authoritative until physical contact geometry is split explicitly.
             // April 20, 2026 post-fan-swap open-floor smooth card `12:10:58` is the current hardware baseline and
             // implies about 132.35 mm effective track width in SEC_50_SMOOTH. Only one usable post-swap smooth card
             // exists so both anchor radii currently share that fit.
@@ -93,6 +93,9 @@ namespace MazeMap
                 kDriveNoLoadCurrentA,
                 kDriveResistanceOhms);
         inline static constexpr float kDriveGearRatio = 56.0f / 17.0f;
+        inline static constexpr float kFanDownforceAtFullDutyN = 0.7f;
+        inline static constexpr float kNominalCombinedAccelerationMps2 = 17.5f;
+        inline static constexpr float kPeakCombinedAccelerationMps2 = 20.1f;
         // March 22, 2026 low-speed straight-audit fit: aux001-aux003 speed_idx 0 still over-reported outbound
         // encoder distance by about 3.05 mm on the 0.72 m north-corridor run, so trim the shared wheel diameter
         // down by 0.42% to keep the fixed-distance phases from finishing short.
@@ -152,6 +155,11 @@ namespace MazeMap
         static constexpr float GetDriveWheelRadiusM() noexcept
         {
             return 0.5f * kDriveWheelDiameterM;
+        }
+
+        static constexpr float GetFanDownforceAtFullDutyN() noexcept
+        {
+            return kFanDownforceAtFullDutyN;
         }
 
         static constexpr float WheelLinearVelocityFromOmega(float omegaRadps) noexcept
@@ -258,6 +266,9 @@ namespace MazeMap
         float GetBatteryVoltage() const noexcept;
         void SetFanDuty(float dutyCycle) noexcept;
         float GetFanDuty() const noexcept;
+        float GetFanDownforceAtFullDuty() const noexcept;
+        float GetNominalCombinedAcceleration() const noexcept;
+        float GetPeakCombinedAcceleration() const noexcept;
         static float GetArcEffectiveTrackWidth(float turningRadiusM) noexcept;
         static float GetEffectiveTrackWidthForMotion(float linearSpeedMps, float angularSpeedRadps) noexcept;
         float GetLength() const;

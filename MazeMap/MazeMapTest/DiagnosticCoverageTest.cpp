@@ -212,18 +212,18 @@ namespace MazeMap
 			Assert::IsTrue(std::fabs(ComputeFanRampDutyCycle(0.80f, 3000UL, 2000UL) - 0.80f) < 1.0e-6f);
 		}
 
-		TEST_METHOD(PlantParamsDefaultUsesVehicleDriveModel)
+		TEST_METHOD(VehicleDriveFactsExposePhysicalAndEncoderModel)
 		{
 			const auto& vehicleModel = Vehicle::GetPhysicalModel();
-			const PlantParams params = PlantParams::Default();
 
-			Assert::AreEqual(vehicleModel.massKg, params.massKg, 1.0e-6f);
-			Assert::AreEqual(vehicleModel.trackWidthM, params.trackWidthM, 1.0e-6f);
-			Assert::AreEqual(vehicleModel.yawInertiaKgM2, params.yawInertiaKgM2, 1.0e-8f);
-			Assert::IsTrue(params.wheelRadiusM > 0.0f);
-			Assert::IsTrue(params.gearRatio > 1.0f);
-			Assert::AreEqual(4096U, static_cast<unsigned>(params.encoderCountsPerMotorRev));
-			Assert::AreEqual(8.4f, params.supplyVoltageV, 1.0e-6f);
+			Assert::AreEqual(0.14f, vehicleModel.massKg, 1.0e-6f);
+			Assert::AreEqual(0.084635f, vehicleModel.trackWidthM, 1.0e-6f);
+			Assert::AreEqual(0.000220f, vehicleModel.yawInertiaKgM2, 1.0e-8f);
+			Assert::IsTrue(Vehicle::GetDriveWheelRadiusM() > 0.0f);
+			Assert::IsTrue(Vehicle::DriveEncoderDistanceFromCounts(1) > 0.0f);
+
+			Vehicle vehicle;
+			Assert::AreEqual(8.4f, vehicle.GetBatteryVoltage(), 1.0e-6f);
 		}
 
 		TEST_METHOD(ArcTrackWidthInterpolationClampsAndBlendsByRadius)
@@ -1906,16 +1906,6 @@ namespace MazeMap
 			const float noLoadCurrentA = MilliAmpsToAmps(45.9f);
 			const float speedConstantRadpsPerVolt = ComputeMotorSpeedConstantRadpsPerVolt(14100.0f, voltageV, noLoadCurrentA, resistanceOhms);
 
-			PlantParams params = PlantParams::Default();
-			params.supplyVoltageV = voltageV;
-			params.driveResistanceOhms = resistanceOhms;
-			params.torqueConstantNmPerA = torqueConstantNmPerA;
-			params.speedConstantRadpsPerVolt = speedConstantRadpsPerVolt;
-			params.noLoadCurrentA = noLoadCurrentA;
-			params.motorCurrentLimitA = 0.0f;
-			params.gearRatio = 1.0f;
-			params.drivetrainEfficiency = 1.0f;
-
 			const float stallCurrentA = (voltageV / resistanceOhms) - noLoadCurrentA;
 			const float stallTorqueNm = stallCurrentA * torqueConstantNmPerA;
 			const float noLoadTorqueNm = 0.0f;
@@ -1938,17 +1928,6 @@ namespace MazeMap
 			const float expectedOvervoltedNoLoadSpeedRadps =
 				nominalNoLoadSpeedRadps * ((overvoltedBusV - (noLoadCurrentA * resistanceOhms)) / (nominalVoltageV - (noLoadCurrentA * resistanceOhms)));
 
-			PlantParams params = PlantParams::Default();
-			params.supplyVoltageV = overvoltedBusV;
-			params.driveResistanceOhms = resistanceOhms;
-			params.torqueConstantNmPerA = MilliNewtonMetersToNewtonMeters(3.96f);
-			params.speedConstantRadpsPerVolt = speedConstantRadpsPerVolt;
-			params.noLoadCurrentA = noLoadCurrentA;
-			params.motorCurrentLimitA = 0.0f;
-			params.gearRatio = 1.0f;
-			params.drivetrainEfficiency = 1.0f;
-
-			(void)params;
 			const float motorCurrentAtExpectedNoLoadSpeedA =
 				(overvoltedBusV - (expectedOvervoltedNoLoadSpeedRadps / speedConstantRadpsPerVolt)) / resistanceOhms;
 			const float torqueAtExpectedNoLoadSpeedNm =

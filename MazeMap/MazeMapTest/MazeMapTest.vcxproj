@@ -252,7 +252,6 @@
   <ItemGroup>
     <ClInclude Include="EstimatorTestSupport.h" />
     <ClInclude Include="MazeRef.h" />
-    <ClInclude Include="PlantModelTestSupport.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="SrUkfCoreTestSupport.h" />
     <ClInclude Include="Templates.h" />

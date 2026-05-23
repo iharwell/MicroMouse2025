@@ -96,65 +96,78 @@ namespace MazeMap::App
             float maxRequestedYawRateRadps = -(std::numeric_limits<float>::infinity)();
             WheelObservationState wheels{};
             DriveTelemetry lastTelemetry{};
-            VehicleState::StateVector truth = VehicleState::StateVector::Zero();
+            VehicleState truth;
         };
 
-        VehicleState::StateVector BuildTruthState(
+        VehicleState BuildTruthState(
             const float forwardMps,
-            const float yawRad,
-            const PlantParams& params) noexcept
+            const float yawRad) noexcept
         {
-            VehicleState::StateVector state = VehicleState::StateVector::Zero();
-            state(VehicleState::kPsi) = yawRad;
-            state(VehicleState::kU) = forwardMps;
-            state(VehicleState::kOmegaL) = forwardMps / params.wheelRadiusM;
-            state(VehicleState::kOmegaR) = forwardMps / params.wheelRadiusM;
-            VehicleState::NormalizeStateVector(state);
+            VehicleState state;
+            state.SetOrientation(yawRad);
+            state.SetVelocity(forwardMps);
+            state.SetWheelSpeedLeft(Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
+            state.SetWheelSpeedRight(Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
             return state;
+        }
+
+        bool IsVehicleStateFinite(const VehicleState& state) noexcept
+        {
+            return
+                std::isfinite(state.GetPositionX()) &&
+                std::isfinite(state.GetPositionY()) &&
+                std::isfinite(state.GetOrientation()) &&
+                std::isfinite(state.GetVelocity()) &&
+                std::isfinite(state.GetLateralVelocity()) &&
+                std::isfinite(state.GetRotationalVelocity()) &&
+                std::isfinite(state.GetWheelSpeedLeft()) &&
+                std::isfinite(state.GetWheelSpeedRight()) &&
+                std::isfinite(state.GetGyroBiasZ());
         }
 
         void PublishTruthToRuntime(
             Internal::SharedRobotRuntime& runtime,
-            const VehicleState::StateVector& truth,
+            const VehicleState& truth,
             const WheelObservationState& wheels,
             const float leftDistanceDeltaM,
-            const float rightDistanceDeltaM,
-            const PlantParams& params)
+            const float rightDistanceDeltaM)
         {
             SensorSnapshot snapshot{};
-            snapshot.gyroRawRadps = truth(VehicleState::kR);
-            snapshot.gyroRadps = truth(VehicleState::kR);
+            snapshot.gyroRawRadps = truth.GetRotationalVelocity();
+            snapshot.gyroRadps = truth.GetRotationalVelocity();
             snapshot.encoderObservationValid = true;
             snapshot.leftEncoderDistanceM = wheels.leftDistanceM;
             snapshot.rightEncoderDistanceM = wheels.rightDistanceM;
             snapshot.encoderObservation.leftDistanceDeltaM = leftDistanceDeltaM;
             snapshot.encoderObservation.rightDistanceDeltaM = rightDistanceDeltaM;
-            snapshot.encoderObservation.leftVelocityMps = truth(VehicleState::kOmegaL) * params.wheelRadiusM;
-            snapshot.encoderObservation.rightVelocityMps = truth(VehicleState::kOmegaR) * params.wheelRadiusM;
-            snapshot.encoderObservation.omegaLeftRadps = truth(VehicleState::kOmegaL);
-            snapshot.encoderObservation.omegaRightRadps = truth(VehicleState::kOmegaR);
+            snapshot.encoderObservation.leftVelocityMps =
+                Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedLeft());
+            snapshot.encoderObservation.rightVelocityMps =
+                Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedRight());
+            snapshot.encoderObservation.omegaLeftRadps = truth.GetWheelSpeedLeft();
+            snapshot.encoderObservation.omegaRightRadps = truth.GetWheelSpeedRight();
 
             VehicleState& state = runtime.RuntimeState();
-            state.SetPosition(Eigen::Vector2f(truth(VehicleState::kPx), truth(VehicleState::kPy)));
-            state.SetOrientation(truth(VehicleState::kPsi));
-            state.SetVelocity(truth(VehicleState::kU));
-            state.SetLateralVelocity(truth(VehicleState::kV));
-            state.SetRotationalVelocity(truth(VehicleState::kR));
-            state.SetWheelSpeedLeft(truth(VehicleState::kOmegaL));
-            state.SetWheelSpeedRight(truth(VehicleState::kOmegaR));
-            state.SetGyroBiasZ(truth(VehicleState::kBgz));
+            state.SetPosition(truth.GetPosition());
+            state.SetOrientation(truth.GetOrientation());
+            state.SetVelocity(truth.GetVelocity());
+            state.SetLateralVelocity(truth.GetLateralVelocity());
+            state.SetRotationalVelocity(truth.GetRotationalVelocity());
+            state.SetWheelSpeedLeft(truth.GetWheelSpeedLeft());
+            state.SetWheelSpeedRight(truth.GetWheelSpeedRight());
+            state.SetGyroBiasZ(truth.GetGyroBiasZ());
             state.SetSensorSnapshot(snapshot);
         }
 
         void RecordTraceState(PrimitiveTrace& trace) noexcept
         {
-            trace.truthFinite = trace.truthFinite && trace.truth.allFinite();
-            trace.minX = (std::min)(trace.minX, trace.truth(VehicleState::kPx));
-            trace.maxX = (std::max)(trace.maxX, trace.truth(VehicleState::kPx));
-            trace.minY = (std::min)(trace.minY, trace.truth(VehicleState::kPy));
-            trace.maxY = (std::max)(trace.maxY, trace.truth(VehicleState::kPy));
-            trace.minYawRad = (std::min)(trace.minYawRad, trace.truth(VehicleState::kPsi));
-            trace.maxYawRad = (std::max)(trace.maxYawRad, trace.truth(VehicleState::kPsi));
+            trace.truthFinite = trace.truthFinite && IsVehicleStateFinite(trace.truth);
+            trace.minX = (std::min)(trace.minX, trace.truth.GetPositionX());
+            trace.maxX = (std::max)(trace.maxX, trace.truth.GetPositionX());
+            trace.minY = (std::min)(trace.minY, trace.truth.GetPositionY());
+            trace.maxY = (std::max)(trace.maxY, trace.truth.GetPositionY());
+            trace.minYawRad = (std::min)(trace.minYawRad, trace.truth.GetOrientation());
+            trace.maxYawRad = (std::max)(trace.maxYawRad, trace.truth.GetOrientation());
         }
 
         void RecordTelemetry(
@@ -192,25 +205,25 @@ namespace MazeMap::App
         void AdvancePlantTruth(
             Internal::SharedRobotRuntime& runtime,
             PrimitiveTrace& trace,
-            const CommandVector& control,
-            const PlantParams& params)
+            const CommandVector& control)
         {
-            const VehicleState::StateVector previous = trace.truth;
-            trace.truth = runtime.Plant().integrate(previous, control, kPrimitiveDtSeconds, params);
+            const VehicleState previous = trace.truth;
+            runtime.Plant().integrate(control, kPrimitiveDtSeconds);
+            trace.truth = runtime.RuntimeState();
 
             const float leftDeltaM =
                 0.5f *
-                (previous(VehicleState::kOmegaL) + trace.truth(VehicleState::kOmegaL)) *
-                params.wheelRadiusM *
+                (previous.GetWheelSpeedLeft() + trace.truth.GetWheelSpeedLeft()) *
+                Vehicle::GetDriveWheelRadiusM() *
                 kPrimitiveDtSeconds;
             const float rightDeltaM =
                 0.5f *
-                (previous(VehicleState::kOmegaR) + trace.truth(VehicleState::kOmegaR)) *
-                params.wheelRadiusM *
+                (previous.GetWheelSpeedRight() + trace.truth.GetWheelSpeedRight()) *
+                Vehicle::GetDriveWheelRadiusM() *
                 kPrimitiveDtSeconds;
             trace.wheels.leftDistanceM += leftDeltaM;
             trace.wheels.rightDistanceM += rightDeltaM;
-            PublishTruthToRuntime(runtime, trace.truth, trace.wheels, leftDeltaM, rightDeltaM, params);
+            PublishTruthToRuntime(runtime, trace.truth, trace.wheels, leftDeltaM, rightDeltaM);
             ++trace.appliedTicks;
             trace.elapsedSeconds = static_cast<float>(trace.appliedTicks) * kPrimitiveDtSeconds;
             RecordTraceState(trace);
@@ -222,13 +235,12 @@ namespace MazeMap::App
             const int maxTicks,
             ArmPrimitive armPrimitive)
         {
-            const PlantParams params = PlantParams::Default();
             PrimitiveTrace trace{};
             Internal::SharedRobotRuntime runtime(kPrimitiveDtSeconds);
             ScopedFanDuty fanDuty(runtime.Vehicle(), 0.80f);
 
-            trace.truth = BuildTruthState(initialForwardMps, 0.0f, params);
-            PublishTruthToRuntime(runtime, trace.truth, trace.wheels, 0.0f, 0.0f, params);
+            trace.truth = BuildTruthState(initialForwardMps, 0.0f);
+            PublishTruthToRuntime(runtime, trace.truth, trace.wheels, 0.0f, 0.0f);
             runtime.DriveBase().ClearCommandEvidence();
 
             Internal::Drive& drive = runtime.DriveService();
@@ -247,7 +259,7 @@ namespace MazeMap::App
                 }
 
                 RecordTelemetry(trace, control, runtime.DriveBase().LastTelemetry());
-                AdvancePlantTruth(runtime, trace, control, params);
+                AdvancePlantTruth(runtime, trace, control);
             }
 
             return trace;
@@ -256,11 +268,6 @@ namespace MazeMap::App
         float AverageEncoderDistanceM(const PrimitiveTrace& trace) noexcept
         {
             return 0.5f * (trace.wheels.leftDistanceM + trace.wheels.rightDistanceM);
-        }
-
-        float AbsAngleErrorRad(const float expectedRad, const float actualRad) noexcept
-        {
-            return std::fabs(VehicleState::NormalizeAngle(expectedRad - actualRad));
         }
 
         PrimitiveTrace RunStartStraight()
@@ -334,9 +341,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -370,9 +377,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -406,9 +413,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -442,9 +449,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -478,9 +485,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -514,9 +521,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -549,9 +556,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -585,9 +592,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -603,7 +610,7 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartStraight();
             Assert::AreEqual(
                 kStraightDistanceM,
-                trace.truth(VehicleState::kPy),
+                trace.truth.GetPositionY(),
                 0.080f,
                 ([&]()
                 {
@@ -613,7 +620,7 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartStraight"
                         << L"\nfield=" << L"final_y_m"
                         << L"\nexpected=" << kStraightDistanceM
-                        << L"\nactual=" << trace.truth(VehicleState::kPy)
+                        << L"\nactual=" << trace.truth.GetPositionY()
                         << L"\nlimit=" << 0.080f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -623,9 +630,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -641,7 +648,7 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartStraight();
             Assert::AreEqual(
                 0.0f,
-                trace.truth(VehicleState::kPx),
+                trace.truth.GetPositionX(),
                 0.030f,
                 ([&]()
                 {
@@ -651,7 +658,7 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartStraight"
                         << L"\nfield=" << L"final_x_m"
                         << L"\nexpected=" << 0.0f
-                        << L"\nactual=" << trace.truth(VehicleState::kPx)
+                        << L"\nactual=" << trace.truth.GetPositionX()
                         << L"\nlimit=" << 0.030f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -661,9 +668,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -679,7 +686,7 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartStraight();
             Assert::AreEqual(
                 0.0f,
-                trace.truth(VehicleState::kPsi),
+                trace.truth.GetOrientation(),
                 0.080f,
                 ([&]()
                 {
@@ -689,7 +696,7 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartStraight"
                         << L"\nfield=" << L"final_yaw_rad"
                         << L"\nexpected=" << 0.0f
-                        << L"\nactual=" << trace.truth(VehicleState::kPsi)
+                        << L"\nactual=" << trace.truth.GetOrientation()
                         << L"\nlimit=" << 0.080f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -699,9 +706,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -735,9 +742,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -771,9 +778,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -807,9 +814,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -843,9 +850,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -879,9 +886,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -915,9 +922,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -951,9 +958,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -987,9 +994,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1003,7 +1010,7 @@ namespace MazeMap::App
         TEST_METHOD(StartTurn_FinalHeadingMatchesRequest)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            const float headingErrorRad = AbsAngleErrorRad(HALF_PI_F, trace.truth(VehicleState::kPsi));
+            const float headingErrorRad = std::fabs(AngleDifference(HALF_PI_F, trace.truth.GetOrientation()));
             Assert::AreEqual(
                 0.0f,
                 headingErrorRad,
@@ -1026,9 +1033,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1042,7 +1049,7 @@ namespace MazeMap::App
         TEST_METHOD(StartTurn_PositionShiftStaysBounded)
         {
             const PrimitiveTrace trace = RunStartTurn();
-            const float shiftM = std::hypot(trace.truth(VehicleState::kPx), trace.truth(VehicleState::kPy));
+            const float shiftM = std::hypot(trace.truth.GetPositionX(), trace.truth.GetPositionY());
             Assert::AreEqual(
                 0.0f,
                 shiftM,
@@ -1065,9 +1072,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1101,9 +1108,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1137,9 +1144,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1173,9 +1180,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1209,9 +1216,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1245,9 +1252,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1281,9 +1288,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1317,9 +1324,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1353,9 +1360,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1391,9 +1398,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1409,7 +1416,7 @@ namespace MazeMap::App
             const PrimitiveTrace trace = RunStartTurnTransition();
             const float expectedYawRad =
                 0.5f * kTransitionCurvatureRatePerM * kTransitionDistanceM * kTransitionDistanceM;
-            const float headingErrorRad = AbsAngleErrorRad(expectedYawRad, trace.truth(VehicleState::kPsi));
+            const float headingErrorRad = std::fabs(AngleDifference(expectedYawRad, trace.truth.GetOrientation()));
             Assert::AreEqual(
                 0.0f,
                 headingErrorRad,
@@ -1432,9 +1439,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1449,7 +1456,7 @@ namespace MazeMap::App
         {
             const PrimitiveTrace trace = RunStartTurnTransition();
             Assert::IsTrue(
-                trace.truth(VehicleState::kPy) > 0.20f,
+                trace.truth.GetPositionY() > 0.20f,
                 ([&]()
                 {
                     std::wstringstream message;
@@ -1458,7 +1465,7 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartTurnTransition"
                         << L"\nfield=" << L"forward_progress_y_m"
                         << L"\nexpected=" << 0.20f
-                        << L"\nactual=" << trace.truth(VehicleState::kPy)
+                        << L"\nactual=" << trace.truth.GetPositionY()
                         << L"\nlimit=" << 0.0f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -1468,9 +1475,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1504,9 +1511,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1540,9 +1547,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1576,9 +1583,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1612,9 +1619,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1648,9 +1655,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1684,9 +1691,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1720,9 +1727,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1756,9 +1763,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1794,9 +1801,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1811,7 +1818,7 @@ namespace MazeMap::App
         {
             const PrimitiveTrace trace = RunStartArc();
             const float expectedYawRad = kArcDistanceM * kArcCurvaturePerM;
-            const float headingErrorRad = AbsAngleErrorRad(expectedYawRad, trace.truth(VehicleState::kPsi));
+            const float headingErrorRad = std::fabs(AngleDifference(expectedYawRad, trace.truth.GetOrientation()));
             Assert::AreEqual(
                 0.0f,
                 headingErrorRad,
@@ -1834,9 +1841,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1851,7 +1858,7 @@ namespace MazeMap::App
         {
             const PrimitiveTrace trace = RunStartArc();
             Assert::IsTrue(
-                trace.truth(VehicleState::kPx) > 0.030f,
+                trace.truth.GetPositionX() > 0.030f,
                 ([&]()
                 {
                     std::wstringstream message;
@@ -1860,7 +1867,7 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartArc"
                         << L"\nfield=" << L"rightward_progress_x_m"
                         << L"\nexpected=" << 0.030f
-                        << L"\nactual=" << trace.truth(VehicleState::kPx)
+                        << L"\nactual=" << trace.truth.GetPositionX()
                         << L"\nlimit=" << 0.0f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -1870,9 +1877,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad
@@ -1887,7 +1894,7 @@ namespace MazeMap::App
         {
             const PrimitiveTrace trace = RunStartArc();
             Assert::IsTrue(
-                trace.truth(VehicleState::kPy) > 0.20f,
+                trace.truth.GetPositionY() > 0.20f,
                 ([&]()
                 {
                     std::wstringstream message;
@@ -1896,7 +1903,7 @@ namespace MazeMap::App
                         << L"\nprimitive=" << L"StartArc"
                         << L"\nfield=" << L"forward_progress_y_m"
                         << L"\nexpected=" << 0.20f
-                        << L"\nactual=" << trace.truth(VehicleState::kPy)
+                        << L"\nactual=" << trace.truth.GetPositionY()
                         << L"\nlimit=" << 0.0f
                         << L"\ncompleted=" << (trace.completed ? L"true" : L"false")
                         << L"\nall_controls_finite=" << (trace.allControlsFinite ? L"true" : L"false")
@@ -1906,9 +1913,9 @@ namespace MazeMap::App
                         << L"\nsolver_clean=" << (trace.solverClean ? L"true" : L"false")
                         << L"\nticks=" << trace.appliedTicks
                         << L"\nelapsed_s=" << trace.elapsedSeconds
-                        << L"\nx_m=" << trace.truth(VehicleState::kPx)
-                        << L"\ny_m=" << trace.truth(VehicleState::kPy)
-                        << L"\nyaw_deg=" << (trace.truth(VehicleState::kPsi) * RAD_TO_DEG_F)
+                        << L"\nx_m=" << trace.truth.GetPositionX()
+                        << L"\ny_m=" << trace.truth.GetPositionY()
+                        << L"\nyaw_deg=" << (trace.truth.GetOrientation() * RAD_TO_DEG_F)
                         << L"\nencoder_m=" << AverageEncoderDistanceM(trace)
                         << L"\nmin_y_m=" << trace.minY
                         << L"\nmin_yaw_rad=" << trace.minYawRad

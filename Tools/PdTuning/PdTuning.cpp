@@ -293,7 +293,7 @@ namespace
         int appliedTicks = 0;
         float elapsedSeconds = 0.0f;
         WheelObservationState wheels{};
-        MazeMap::VehicleState::StateVector truth = MazeMap::VehicleState::StateVector::Zero();
+        MazeMap::VehicleState truth{};
         std::vector<AcceptanceCommandSample> samples;
     };
 
@@ -853,22 +853,36 @@ namespace
         return 0;
     }
 
-    float SignalValue(const MazeMap::VehicleState::StateVector& state, SignalKind signal) noexcept
+    bool VehicleStateIsFinite(const MazeMap::VehicleState& state) noexcept
+    {
+        return
+            std::isfinite(state.GetPositionX()) &&
+            std::isfinite(state.GetPositionY()) &&
+            std::isfinite(state.GetOrientation()) &&
+            std::isfinite(state.GetVelocity()) &&
+            std::isfinite(state.GetLateralVelocity()) &&
+            std::isfinite(state.GetRotationalVelocity()) &&
+            std::isfinite(state.GetWheelSpeedLeft()) &&
+            std::isfinite(state.GetWheelSpeedRight()) &&
+            std::isfinite(state.GetGyroBiasZ());
+    }
+
+    float SignalValue(const MazeMap::VehicleState& state, SignalKind signal) noexcept
     {
         switch (signal)
         {
         case SignalKind::ForwardVelocity:
-            return state(MazeMap::VehicleState::kU);
+            return state.GetVelocity();
         case SignalKind::YawRate:
-            return state(MazeMap::VehicleState::kR);
+            return state.GetRotationalVelocity();
         case SignalKind::Heading:
-            return state(MazeMap::VehicleState::kPsi);
+            return state.GetOrientation();
         default:
             return 0.0f;
         }
     }
 
-    float SignalError(const ScenarioSpec& spec, const MazeMap::VehicleState::StateVector& state) noexcept
+    float SignalError(const ScenarioSpec& spec, const MazeMap::VehicleState& state) noexcept
     {
         const float target = ScenarioTarget(spec);
         const float value = SignalValue(state, spec.signal);
@@ -879,99 +893,102 @@ namespace
         return target - value;
     }
 
-    MazeMap::VehicleState::StateVector BuildInitialState(
-        const ScenarioSpec& spec,
-        const MazeMap::PlantModel::PreparedParams& params) noexcept
+    MazeMap::VehicleState BuildInitialState(const ScenarioSpec& spec) noexcept
     {
-        MazeMap::VehicleState::StateVector state = MazeMap::VehicleState::StateVector::Zero();
-        state(MazeMap::VehicleState::kPsi) = spec.initialYawRad;
-        state(MazeMap::VehicleState::kU) = spec.initialForwardMps;
-        state(MazeMap::VehicleState::kR) = spec.initialYawRateRadps;
-        state(MazeMap::VehicleState::kOmegaL) =
-            (spec.initialForwardMps + (params.halfTrackWidthM * spec.initialYawRateRadps)) *
-            params.invWheelRadiusM;
-        state(MazeMap::VehicleState::kOmegaR) =
-            (spec.initialForwardMps - (params.halfTrackWidthM * spec.initialYawRateRadps)) *
-            params.invWheelRadiusM;
-        MazeMap::VehicleState::NormalizeStateVector(state);
+        MazeMap::VehicleState state{};
+        state.SetOrientation(spec.initialYawRad);
+        state.SetVelocity(spec.initialForwardMps);
+        state.SetRotationalVelocity(spec.initialYawRateRadps);
+        float leftOmegaRadps = 0.0f;
+        float rightOmegaRadps = 0.0f;
+        MazeMap::Vehicle::WheelOmegasFromBodyVelocity(
+            spec.initialForwardMps,
+            spec.initialYawRateRadps,
+            leftOmegaRadps,
+            rightOmegaRadps);
+        state.SetWheelSpeedLeft(leftOmegaRadps);
+        state.SetWheelSpeedRight(rightOmegaRadps);
         return state;
     }
 
     void PublishTruthToRuntime(
         MazeMap::VehicleState& runtimeState,
-        const MazeMap::VehicleState::StateVector& truth,
+        const MazeMap::VehicleState& truth,
         const WheelObservationState& wheels,
         float leftDistanceDeltaM,
         float rightDistanceDeltaM,
         float dtSeconds,
-        const MazeMap::PlantModel::PreparedParams& params) noexcept
+        bool advanceTime) noexcept
     {
         SensorSnapshot snapshot{};
-        snapshot.gyroRawRadps = truth(MazeMap::VehicleState::kR);
-        snapshot.gyroRadps = truth(MazeMap::VehicleState::kR);
+        snapshot.gyroRawRadps = truth.GetRotationalVelocity();
+        snapshot.gyroRadps = truth.GetRotationalVelocity();
         snapshot.encoderObservationValid = true;
         snapshot.leftEncoderDistanceM = wheels.leftDistanceM;
         snapshot.rightEncoderDistanceM = wheels.rightDistanceM;
         snapshot.encoderObservation.leftDistanceDeltaM = leftDistanceDeltaM;
         snapshot.encoderObservation.rightDistanceDeltaM = rightDistanceDeltaM;
-        snapshot.encoderObservation.leftVelocityMps = truth(MazeMap::VehicleState::kOmegaL) * params.wheelRadiusM;
-        snapshot.encoderObservation.rightVelocityMps = truth(MazeMap::VehicleState::kOmegaR) * params.wheelRadiusM;
-        snapshot.encoderObservation.omegaLeftRadps = truth(MazeMap::VehicleState::kOmegaL);
-        snapshot.encoderObservation.omegaRightRadps = truth(MazeMap::VehicleState::kOmegaR);
+        snapshot.encoderObservation.leftVelocityMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedLeft());
+        snapshot.encoderObservation.rightVelocityMps =
+            MazeMap::Vehicle::WheelLinearVelocityFromOmega(truth.GetWheelSpeedRight());
+        snapshot.encoderObservation.omegaLeftRadps = truth.GetWheelSpeedLeft();
+        snapshot.encoderObservation.omegaRightRadps = truth.GetWheelSpeedRight();
 
-        runtimeState.SetPosition(Eigen::Vector2f(truth(MazeMap::VehicleState::kPx), truth(MazeMap::VehicleState::kPy)));
-        runtimeState.SetOrientation(truth(MazeMap::VehicleState::kPsi));
-        runtimeState.SetVelocity(truth(MazeMap::VehicleState::kU));
-        runtimeState.SetLateralVelocity(truth(MazeMap::VehicleState::kV));
-        runtimeState.SetRotationalVelocity(truth(MazeMap::VehicleState::kR));
-        runtimeState.SetWheelSpeedLeft(truth(MazeMap::VehicleState::kOmegaL));
-        runtimeState.SetWheelSpeedRight(truth(MazeMap::VehicleState::kOmegaR));
-        runtimeState.SetGyroBiasZ(truth(MazeMap::VehicleState::kBgz));
+        runtimeState.SetPosition(truth.GetPosition());
+        runtimeState.SetOrientation(truth.GetOrientation());
+        runtimeState.SetVelocity(truth.GetVelocity());
+        runtimeState.SetLateralVelocity(truth.GetLateralVelocity());
+        runtimeState.SetRotationalVelocity(truth.GetRotationalVelocity());
+        runtimeState.SetWheelSpeedLeft(truth.GetWheelSpeedLeft());
+        runtimeState.SetWheelSpeedRight(truth.GetWheelSpeedRight());
+        runtimeState.SetGyroBiasZ(truth.GetGyroBiasZ());
         runtimeState.SetLongitudinalAcceleration(0.0f);
         runtimeState.SetLateralAcceleration(0.0f);
         runtimeState.SetYawAcceleration(0.0f);
-        runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
+        if (advanceTime)
+        {
+            runtimeState.SetTime(runtimeState.GetTime() + dtSeconds);
+        }
         runtimeState.SetTimestampUs(static_cast<std::uint32_t>(runtimeState.GetTime() * 1000000.0f));
         runtimeState.SetSensorSnapshot(snapshot);
     }
 
-    void AdvanceTruth(
-        const MazeMap::PlantModel& plant,
+    bool AdvanceTruth(
+        MazeMap::PlantModel& plant,
         MazeMap::VehicleState& runtimeState,
-        MazeMap::VehicleState::StateVector& truth,
         WheelObservationState& wheels,
-        const CommandVector& control,
-        const MazeMap::PlantModel::PreparedParams& params) noexcept
+        const CommandVector& control) noexcept
     {
-        const MazeMap::VehicleState::StateVector previous = truth;
-        truth = plant.integrate(previous, control, kTickSeconds, params);
+        const float previousLeftWheelSpeedRadps = runtimeState.GetWheelSpeedLeft();
+        const float previousRightWheelSpeedRadps = runtimeState.GetWheelSpeedRight();
+        plant.integrate(control, kTickSeconds);
 
         const float leftDeltaM =
             0.5f *
-            (previous(MazeMap::VehicleState::kOmegaL) + truth(MazeMap::VehicleState::kOmegaL)) *
-            params.wheelRadiusM *
+            (previousLeftWheelSpeedRadps + runtimeState.GetWheelSpeedLeft()) *
+            MazeMap::Vehicle::GetDriveWheelRadiusM() *
             kTickSeconds;
         const float rightDeltaM =
             0.5f *
-            (previous(MazeMap::VehicleState::kOmegaR) + truth(MazeMap::VehicleState::kOmegaR)) *
-            params.wheelRadiusM *
+            (previousRightWheelSpeedRadps + runtimeState.GetWheelSpeedRight()) *
+            MazeMap::Vehicle::GetDriveWheelRadiusM() *
             kTickSeconds;
         wheels.leftDistanceM += leftDeltaM;
         wheels.rightDistanceM += rightDeltaM;
-        PublishTruthToRuntime(runtimeState, truth, wheels, leftDeltaM, rightDeltaM, kTickSeconds, params);
+        PublishTruthToRuntime(runtimeState, runtimeState, wheels, leftDeltaM, rightDeltaM, kTickSeconds, false);
+        return VehicleStateIsFinite(runtimeState);
     }
 
-    MazeMap::VehicleState::StateVector BuildAcceptanceTruthState(
+    MazeMap::VehicleState BuildAcceptanceTruthState(
         const float forwardMps,
-        const float yawRad,
-        const MazeMap::PlantModel::PreparedParams& params) noexcept
+        const float yawRad) noexcept
     {
-        MazeMap::VehicleState::StateVector state = MazeMap::VehicleState::StateVector::Zero();
-        state(MazeMap::VehicleState::kPsi) = yawRad;
-        state(MazeMap::VehicleState::kU) = forwardMps;
-        state(MazeMap::VehicleState::kOmegaL) = forwardMps * params.invWheelRadiusM;
-        state(MazeMap::VehicleState::kOmegaR) = forwardMps * params.invWheelRadiusM;
-        MazeMap::VehicleState::NormalizeStateVector(state);
+        MazeMap::VehicleState state{};
+        state.SetOrientation(yawRad);
+        state.SetVelocity(forwardMps);
+        state.SetWheelSpeedLeft(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
+        state.SetWheelSpeedRight(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(forwardMps));
         return state;
     }
 
@@ -999,7 +1016,7 @@ namespace
         return wholeCounts;
     }
 
-    void ApplyEncoderObservation(
+    bool ApplyEncoderObservation(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
         const float leftDistanceDeltaM,
         const float rightDistanceDeltaM,
@@ -1053,12 +1070,14 @@ namespace
         MazeMap::Estimator& estimator = runtime.Estimator();
         if (estimator.HasFault())
         {
-            return;
+            return false;
         }
 
-        if (std::isfinite(dtSeconds) && (dtSeconds > 0.0f) && !estimator.predict(dtSeconds, appliedControl))
+        if (std::isfinite(dtSeconds) &&
+            (dtSeconds > 0.0f) &&
+            !estimator.predict(dtSeconds, appliedControl))
         {
-            return;
+            return false;
         }
 
         if (snapshot.encoderObservationValid)
@@ -1071,22 +1090,22 @@ namespace
             const MazeMap::MeasurementUpdateResult yawUpdate = estimator.updateYawRate(snapshot.gyroRawRadps);
             if (!yawUpdate.accepted)
             {
-                return;
+                return false;
             }
         }
 
         MazeMap::ImuAccelObs accelObservation{};
         (void)estimator.updatePlanarAccel(accelObservation);
+        return !estimator.HasFault();
     }
 
     void PrimeDriveForSmoothEntry(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
-        MazeMap::VehicleState::StateVector& truth,
+        MazeMap::VehicleState& truth,
         float& leftEncoderRemainderCounts,
-        float& rightEncoderRemainderCounts,
-        const MazeMap::PlantModel::PreparedParams& params)
+        float& rightEncoderRemainderCounts)
     {
-        truth = BuildAcceptanceTruthState(kSmoothManeuverEntrySpeedMps, 0.0f, params);
+        truth = BuildAcceptanceTruthState(kSmoothManeuverEntrySpeedMps, 0.0f);
 
         const float distancePerCountM = MazeMap::Vehicle::DriveEncoderDistanceFromCounts(1);
         float projectedLeftEncoderRemainderCounts = leftEncoderRemainderCounts;
@@ -1101,7 +1120,11 @@ namespace
             0.5f * static_cast<float>(projectedLeftCounts + projectedRightCounts) * distancePerCountM;
 
         (void)runtime.Estimator().ResetPose(0.0f, -projectedForwardDistanceM, 0.0f);
-        ApplyEncoderObservation(
+        MazeMap::VehicleState& runtimeState = runtime.RuntimeState();
+        runtimeState.SetVelocity(kSmoothManeuverEntrySpeedMps);
+        runtimeState.SetWheelSpeedLeft(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
+        runtimeState.SetWheelSpeedRight(MazeMap::Vehicle::WheelOmegaFromLinearVelocity(kSmoothManeuverEntrySpeedMps));
+        (void)ApplyEncoderObservation(
             runtime,
             kSmoothManeuverEntrySpeedMps * kTickSeconds,
             kSmoothManeuverEntrySpeedMps * kTickSeconds,
@@ -1112,33 +1135,34 @@ namespace
             CommandVector::Brake());
     }
 
-    void AdvanceRuntimeDriveCycle(
+    bool AdvanceRuntimeDriveCycle(
         MazeMap::App::Internal::SharedRobotRuntime& runtime,
-        MazeMap::VehicleState::StateVector& truth,
+        MazeMap::PlantModel& truthPlant,
+        MazeMap::VehicleState& truth,
         float& leftEncoderRemainderCounts,
         float& rightEncoderRemainderCounts,
-        const CommandVector& control,
-        const MazeMap::PlantModel::PreparedParams& params)
+        const CommandVector& control)
     {
-        const MazeMap::VehicleState::StateVector previousTruth = truth;
-        truth = runtime.Plant().integrate(truth, control, kTickSeconds, params);
+        const float previousLeftWheelSpeedRadps = truth.GetWheelSpeedLeft();
+        const float previousRightWheelSpeedRadps = truth.GetWheelSpeedRight();
+        truthPlant.integrate(control, kTickSeconds);
 
         const float leftDistanceDeltaM =
             0.5f *
-            (previousTruth(MazeMap::VehicleState::kOmegaL) + truth(MazeMap::VehicleState::kOmegaL)) *
-            params.wheelRadiusM *
+            (previousLeftWheelSpeedRadps + truth.GetWheelSpeedLeft()) *
+            MazeMap::Vehicle::GetDriveWheelRadiusM() *
             kTickSeconds;
         const float rightDistanceDeltaM =
             0.5f *
-            (previousTruth(MazeMap::VehicleState::kOmegaR) + truth(MazeMap::VehicleState::kOmegaR)) *
-            params.wheelRadiusM *
+            (previousRightWheelSpeedRadps + truth.GetWheelSpeedRight()) *
+            MazeMap::Vehicle::GetDriveWheelRadiusM() *
             kTickSeconds;
 
-        ApplyEncoderObservation(
+        return ApplyEncoderObservation(
             runtime,
             leftDistanceDeltaM,
             rightDistanceDeltaM,
-            truth(MazeMap::VehicleState::kR),
+            truth.GetRotationalVelocity(),
             leftEncoderRemainderCounts,
             rightEncoderRemainderCounts,
             kTickSeconds,
@@ -1178,18 +1202,19 @@ namespace
 
     void CaptureAcceptanceFinalState(
         AcceptanceMetrics& metrics,
-        const MazeMap::VehicleState::StateVector& truth,
+        const MazeMap::VehicleState& truth,
         const WheelObservationState& wheels) noexcept
     {
-        metrics.truthFinite = metrics.truthFinite && truth.allFinite();
-        if (!truth.allFinite())
+        const bool truthFinite = VehicleStateIsFinite(truth);
+        metrics.truthFinite = metrics.truthFinite && truthFinite;
+        if (!truthFinite)
         {
             ++metrics.nonFiniteCount;
         }
         metrics.encoderAverageDistanceM = AverageEncoderDistanceM(wheels);
-        metrics.finalXM = truth(MazeMap::VehicleState::kPx);
-        metrics.finalYM = truth(MazeMap::VehicleState::kPy);
-        metrics.finalYawRad = truth(MazeMap::VehicleState::kPsi);
+        metrics.finalXM = truth.GetPositionX();
+        metrics.finalYM = truth.GetPositionY();
+        metrics.finalYawRad = truth.GetOrientation();
         metrics.elapsedSeconds = static_cast<float>(metrics.appliedTicks) * kTickSeconds;
     }
 
@@ -1334,11 +1359,15 @@ namespace
         RebuildRuntimeDriveBaseForCandidate(runtime, cluster);
         ScopedFanDuty fanDuty(runtime.Vehicle(), kFanDuty);
 
-        const MazeMap::PlantParams rawParams = MazeMap::PlantParams::Default();
-        const MazeMap::PlantModel::PreparedParams params = MazeMap::PlantModel::Prepare(rawParams);
         WheelObservationState wheels{};
-        MazeMap::VehicleState::StateVector truth = BuildAcceptanceTruthState(0.0f, 0.0f, params);
-        PublishTruthToRuntime(runtime.RuntimeState(), truth, wheels, 0.0f, 0.0f, 0.0f, params);
+        PublishTruthToRuntime(
+            runtime.RuntimeState(),
+            BuildAcceptanceTruthState(0.0f, 0.0f),
+            wheels,
+            0.0f,
+            0.0f,
+            0.0f,
+            true);
 
         AcceptanceMetrics metrics{};
         metrics.name = "drive_primitive_start_straight_completes";
@@ -1367,17 +1396,17 @@ namespace
             }
 
             RecordAcceptanceTelemetry(metrics, control, runtime.DriveBase().LastTelemetry());
-            AdvanceTruth(runtime.Plant(), runtime.RuntimeState(), truth, wheels, control, params);
+            const bool advanced = AdvanceTruth(runtime.Plant(), runtime.RuntimeState(), wheels, control);
             ++metrics.appliedTicks;
-            metrics.truthFinite = metrics.truthFinite && truth.allFinite();
-            if (!truth.allFinite())
+            metrics.truthFinite = metrics.truthFinite && advanced && VehicleStateIsFinite(runtime.RuntimeState());
+            if (!advanced || !VehicleStateIsFinite(runtime.RuntimeState()))
             {
                 ++metrics.nonFiniteCount;
                 break;
             }
         }
 
-        CaptureAcceptanceFinalState(metrics, truth, wheels);
+        CaptureAcceptanceFinalState(metrics, runtime.RuntimeState(), wheels);
         FinalizeAcceptance(metrics, metrics.completed);
         return metrics;
     }
@@ -1519,8 +1548,6 @@ namespace
         RebuildRuntimeDriveBaseForCandidate(runtime, cluster);
         ScopedFanDuty fanDuty(runtime.Vehicle(), kFanDuty);
 
-        const MazeMap::PlantParams rawParams = MazeMap::PlantParams::Default();
-        const MazeMap::PlantModel::PreparedParams params = MazeMap::PlantModel::Prepare(rawParams);
         float leftEncoderRemainderCounts = 0.0f;
         float rightEncoderRemainderCounts = 0.0f;
         ManeuverAcceptanceTrace trace{};
@@ -1532,13 +1559,21 @@ namespace
                 runtime,
                 trace.truth,
                 leftEncoderRemainderCounts,
-                rightEncoderRemainderCounts,
-                params);
+                rightEncoderRemainderCounts);
         }
         else
         {
-            trace.truth = BuildAcceptanceTruthState(0.0f, 0.0f, params);
+            trace.truth = BuildAcceptanceTruthState(0.0f, 0.0f);
+            PublishTruthToRuntime(
+                runtime.RuntimeState(),
+                trace.truth,
+                trace.wheels,
+                0.0f,
+                0.0f,
+                0.0f,
+                true);
         }
+        MazeMap::PlantModel truthPlant(runtime.Vehicle(), trace.truth);
 
         MazeMap::ManeuverInstance maneuver(
             code,
@@ -1567,17 +1602,17 @@ namespace
             }
 
             RecordManeuverTraceTelemetry(trace, control, runtime.DriveBase().LastTelemetry());
-            AdvanceRuntimeDriveCycle(
+            const bool advanced = AdvanceRuntimeDriveCycle(
                 runtime,
+                truthPlant,
                 trace.truth,
                 leftEncoderRemainderCounts,
                 rightEncoderRemainderCounts,
-                control,
-                params);
+                control);
             ++trace.appliedTicks;
             trace.elapsedSeconds = static_cast<float>(trace.appliedTicks) * kTickSeconds;
-            trace.truthFinite = trace.truthFinite && trace.truth.allFinite();
-            if (!trace.truth.allFinite())
+            trace.truthFinite = trace.truthFinite && advanced && VehicleStateIsFinite(trace.truth);
+            if (!advanced || !VehicleStateIsFinite(trace.truth))
             {
                 ++trace.nonFiniteCount;
                 break;
@@ -2054,16 +2089,13 @@ namespace
     {
         MazeMap::Vehicle vehicle{};
         vehicle.SetFanDuty(kFanDuty);
-        MazeMap::VehicleState runtimeState{};
+        MazeMap::VehicleState runtimeState = BuildInitialState(spec);
         MazeMap::PlantModel plant(vehicle, runtimeState);
-        const MazeMap::PlantParams rawParams = MazeMap::PlantParams::Default();
-        const MazeMap::PlantModel::PreparedParams params = MazeMap::PlantModel::Prepare(rawParams);
         MazeMap::PDCluster cluster = BuildCandidateCluster(gains);
         MazeMap::DriveBase driveBase(plant, runtimeState, cluster);
 
         WheelObservationState wheels{};
-        MazeMap::VehicleState::StateVector truth = BuildInitialState(spec, params);
-        PublishTruthToRuntime(runtimeState, truth, wheels, 0.0f, 0.0f, 0.0f, params);
+        PublishTruthToRuntime(runtimeState, runtimeState, wheels, 0.0f, 0.0f, 0.0f, true);
         driveBase.ClearCommandEvidence();
 
         ScenarioMetrics metrics{};
@@ -2090,13 +2122,13 @@ namespace
         metrics.yawAccelStepMetricActive = metrics.yawRateStepActive || metrics.headingStepActive;
         metrics.settlingTimeS = spec.durationS;
 
-        const float initialError = SignalError(spec, truth);
+        const float initialError = SignalError(spec, runtimeState);
         const float initialAbsError = std::fabs(initialError);
         metrics.minimumAbsError = initialAbsError;
-        metrics.maxAbsForwardVelocityMps = std::fabs(truth(MazeMap::VehicleState::kU));
-        metrics.maxAbsYawRateRadps = std::fabs(truth(MazeMap::VehicleState::kR));
+        metrics.maxAbsForwardVelocityMps = std::fabs(runtimeState.GetVelocity());
+        metrics.maxAbsYawRateRadps = std::fabs(runtimeState.GetRotationalVelocity());
         metrics.maxAbsKinematicLateralAccelMps2 =
-            std::fabs(truth(MazeMap::VehicleState::kU) * truth(MazeMap::VehicleState::kR));
+            std::fabs(runtimeState.GetVelocity() * runtimeState.GetRotationalVelocity());
         const float scenarioScale = ScenarioScale(spec);
         const float crossingDeadband =
             (std::max)((std::max)(spec.tolerance * 0.10f, scenarioScale * 0.001f), 1.0e-5f);
@@ -2152,18 +2184,19 @@ namespace
                 ++plantClipSamples;
             }
 
-            const MazeMap::VehicleState::StateVector previousTruth = truth;
-            AdvanceTruth(plant, runtimeState, truth, wheels, control, params);
+            const float previousForwardMps = runtimeState.GetVelocity();
+            const float previousYawRateRadps = runtimeState.GetRotationalVelocity();
+            const bool advanced = AdvanceTruth(plant, runtimeState, wheels, control);
             ++metrics.samples;
 
             const float forwardAccelMps2 =
-                (truth(MazeMap::VehicleState::kU) - previousTruth(MazeMap::VehicleState::kU)) / kTickSeconds;
+                (runtimeState.GetVelocity() - previousForwardMps) / kTickSeconds;
             const float yawAccelRadps2 =
-                (truth(MazeMap::VehicleState::kR) - previousTruth(MazeMap::VehicleState::kR)) / kTickSeconds;
+                (runtimeState.GetRotationalVelocity() - previousYawRateRadps) / kTickSeconds;
             metrics.maxAbsForwardVelocityMps =
-                (std::max)(metrics.maxAbsForwardVelocityMps, std::fabs(truth(MazeMap::VehicleState::kU)));
+                (std::max)(metrics.maxAbsForwardVelocityMps, std::fabs(runtimeState.GetVelocity()));
             metrics.maxAbsYawRateRadps =
-                (std::max)(metrics.maxAbsYawRateRadps, std::fabs(truth(MazeMap::VehicleState::kR)));
+                (std::max)(metrics.maxAbsYawRateRadps, std::fabs(runtimeState.GetRotationalVelocity()));
             metrics.maxAbsForwardAccelMps2 =
                 (std::max)(metrics.maxAbsForwardAccelMps2, std::fabs(forwardAccelMps2));
             metrics.maxAbsYawAccelRadps2 =
@@ -2171,11 +2204,11 @@ namespace
             metrics.maxAbsKinematicLateralAccelMps2 =
                 (std::max)(
                     metrics.maxAbsKinematicLateralAccelMps2,
-                    std::fabs(truth(MazeMap::VehicleState::kU) * truth(MazeMap::VehicleState::kR)));
+                    std::fabs(runtimeState.GetVelocity() * runtimeState.GetRotationalVelocity()));
 
             if (metrics.forwardVelocityStepActive && (sample < kVelocityStepRmsWindowTicks))
             {
-                const float velocityErrorMps = spec.targetForwardMps - truth(MazeMap::VehicleState::kU);
+                const float velocityErrorMps = spec.targetForwardMps - runtimeState.GetVelocity();
                 if (std::isfinite(velocityErrorMps))
                 {
                     first500VelocitySquaredError +=
@@ -2186,7 +2219,7 @@ namespace
 
             if (metrics.yawRateStepActive && (sample < kYawRateStepRmsWindowTicks))
             {
-                const float yawRateErrorRadps = spec.targetYawRateRadps - truth(MazeMap::VehicleState::kR);
+                const float yawRateErrorRadps = spec.targetYawRateRadps - runtimeState.GetRotationalVelocity();
                 if (std::isfinite(yawRateErrorRadps))
                 {
                     first500YawRateSquaredError +=
@@ -2239,7 +2272,7 @@ namespace
                 ++metrics.first100YawAccelErrorSamples;
             }
 
-            const float error = SignalError(spec, truth);
+            const float error = SignalError(spec, runtimeState);
             const float absError = std::fabs(error);
             metrics.minimumAbsError = (std::min)(metrics.minimumAbsError, absError);
             metrics.integratedAbsoluteError += static_cast<double>(absError) * kTickSeconds;
@@ -2284,7 +2317,7 @@ namespace
                 ++metrics.lateWindowSamples;
             }
 
-            if (!truth.allFinite())
+            if (!advanced || !VehicleStateIsFinite(runtimeState))
             {
                 ++metrics.nonFiniteCount;
                 metrics.failed = true;
@@ -2292,8 +2325,8 @@ namespace
             }
         }
 
-        metrics.finalValue = SignalValue(truth, spec.signal);
-        metrics.finalError = SignalError(spec, truth);
+        metrics.finalValue = SignalValue(runtimeState, spec.signal);
+        metrics.finalError = SignalError(spec, runtimeState);
         metrics.overshoot = (std::max)(0.0f, overshoot);
         if (metrics.samples > 0)
         {

@@ -10,7 +10,6 @@
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
-#include <limits>
 
 #ifndef MAZEMAP_PLANTMODEL_VALIDATE_INVERSE
 #define MAZEMAP_PLANTMODEL_VALIDATE_INVERSE 0
@@ -18,25 +17,37 @@
 
 namespace
 {
-    using MazeMap::ContactForce;
-    using MazeMap::ContactForces;
     using MazeMap::MotorEncoderDrive;
-    using MazeMap::MotionRegime;
-    using MazeMap::PlantDerivatives;
     using MazeMap::PlantModel;
-    using MazeMap::PlantParams;
-    using MazeMap::SlipTargets;
+    using MazeMap::Vehicle;
     using MazeMap::VehicleState;
-    using MazeMap::WheelKinematics;
     using CommandVector = MazeMap::App::Internal::CommandVector;
-
-    using PreparedParams = PlantModel::PreparedParams;
 
     constexpr uint8_t kFrontLeft = 0U;
     constexpr uint8_t kFrontRight = 1U;
     constexpr uint8_t kRearLeft = 2U;
     constexpr uint8_t kRearRight = 3U;
     constexpr float kSignEpsilon = 1.0e-6f;
+    constexpr float kForceEpsilonN = 1.0e-4f;
+    constexpr float kRollingSpeedRegularizationMps = 0.05f;
+    constexpr float kRollingFrictionTorqueNm = 0.00372f;
+    constexpr float kReliableLaunchDriveCommand = 0.30f;
+    constexpr float kStaticFrictionMaxSpeedMps = 0.005f;
+    constexpr float kViscousFrictionNmPerRadps = 0.0f;
+    constexpr float kLateralVelocityDampingNsPerM = 0.0f;
+    constexpr float kYawRateDampingNmsPerRad = 0.0f;
+    constexpr float kFrontLoadFraction = 0.5f;
+    constexpr float kFrontLongitudinalForceSplit = 0.5f;
+    constexpr float kMuFront = 1.65f;
+    constexpr float kMuRear = 1.65f;
+    constexpr float kStopEnterSpeedMps = 0.02f;
+    constexpr float kStopExitSpeedMps = 0.05f;
+    constexpr float kStopEnterYawRateRadps = 0.20f;
+    constexpr float kStopExitYawRateRadps = 0.50f;
+    constexpr float kStopEnterWheelSpeedRadps = 2.0f;
+    constexpr float kStopExitWheelSpeedRadps = 5.0f;
+    constexpr float kStopEnterCommand = 0.03f;
+    constexpr float kStopExitCommand = 0.06f;
 
     bool EmitPlantDebugTextLine(
         void* context,
@@ -57,44 +68,9 @@ namespace
         return ok;
     }
 
-    struct RollingContactEvaluation
-    {
-        ContactForces forces{};
-        float maxUtilization = 0.0f;
-        float leftBankForwardForceN = 0.0f;
-        float rightBankForwardForceN = 0.0f;
-        float frontRightForceN = 0.0f;
-        float rearRightForceN = 0.0f;
-        float sumForwardForceN = 0.0f;
-        float sumRightForceN = 0.0f;
-    };
-
-    struct ContactPatchLateralStiffness
-    {
-        std::array<float, 4> contactNPerRad{};
-    };
-
     inline float ResolvePositiveCalibration(float value) noexcept
     {
         return (std::isfinite(value) && (value > 0.0f)) ? value : 0.0f;
-    }
-
-    inline ContactPatchLateralStiffness BuildContactPatchLateralStiffness(
-        float frontLeftNPerRad,
-        float frontRightNPerRad,
-        float rearLeftNPerRad,
-        float rearRightNPerRad) noexcept
-    {
-        ContactPatchLateralStiffness stiffness{};
-        stiffness.contactNPerRad[kFrontLeft] =
-            ResolvePositiveCalibration(frontLeftNPerRad);
-        stiffness.contactNPerRad[kFrontRight] =
-            ResolvePositiveCalibration(frontRightNPerRad);
-        stiffness.contactNPerRad[kRearLeft] =
-            ResolvePositiveCalibration(rearLeftNPerRad);
-        stiffness.contactNPerRad[kRearRight] =
-            ResolvePositiveCalibration(rearRightNPerRad);
-        return stiffness;
     }
 
     inline float ClampUnit(float value) noexcept
@@ -124,13 +100,8 @@ namespace
         return static_cast<float>(fallbackSign);
     }
 
-    inline float ResolvePhysicalTrackWidthM(const MazeMap::Vehicle& vehicle, const PreparedParams& params) noexcept
+    inline float ResolvePhysicalTrackWidthM(const Vehicle& vehicle) noexcept
     {
-        if (std::isfinite(params.trackWidthM) && (params.trackWidthM > 0.0f))
-        {
-            return params.trackWidthM;
-        }
-
         const float physicalTrackWidthM = vehicle.GetTrackWidth();
         return
             (std::isfinite(physicalTrackWidthM) && (physicalTrackWidthM > 0.0f)) ?
@@ -180,18 +151,19 @@ namespace
 
     inline float ComputeLateralScrubWeight(
         float rightVelocityMps,
-        float yawRateRadps,
-        const PreparedParams& params) noexcept
+        float yawRateRadps) noexcept
     {
-        const float frontLateralSpeedMps = rightVelocityMps + (params.longitudinalOffsetM * yawRateRadps);
-        const float rearLateralSpeedMps = rightVelocityMps - (params.longitudinalOffsetM * yawRateRadps);
+        const float longitudinalOffsetM =
+            std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+        const float frontLateralSpeedMps = rightVelocityMps + (longitudinalOffsetM * yawRateRadps);
+        const float rearLateralSpeedMps = rightVelocityMps - (longitudinalOffsetM * yawRateRadps);
         const float lateralScrubSpeedMps =
             (std::max)(std::fabs(frontLateralSpeedMps), std::fabs(rearLateralSpeedMps));
         return
             std::isfinite(lateralScrubSpeedMps) ?
             SmoothStep(
-                params.stopEnterSpeedMps,
-                params.stopExitSpeedMps,
+                kStopEnterSpeedMps,
+                kStopExitSpeedMps,
                 lateralScrubSpeedMps) :
             0.0f;
     }
@@ -201,12 +173,16 @@ namespace
         float rightVelocityMps,
         float yawRateRadps,
         float omegaLeftRadps,
-        float omegaRightRadps,
-        const PreparedParams& params) noexcept
+        float omegaRightRadps) noexcept
     {
-        const float yawSpeedMps = std::fabs(yawRateRadps * params.yawLeverArmM);
-        const float leftWheelSpeedMps = std::fabs(params.wheelRadiusM * omegaLeftRadps);
-        const float rightWheelSpeedMps = std::fabs(params.wheelRadiusM * omegaRightRadps);
+        const float halfTrackWidthM = 0.5f * std::fabs(Vehicle::GetPhysicalModel().trackWidthM);
+        const float longitudinalOffsetM =
+            std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+        const float yawLeverArmM = (std::max)(longitudinalOffsetM, halfTrackWidthM);
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float yawSpeedMps = std::fabs(yawRateRadps * yawLeverArmM);
+        const float leftWheelSpeedMps = std::fabs(wheelRadiusM * omegaLeftRadps);
+        const float rightWheelSpeedMps = std::fabs(wheelRadiusM * omegaRightRadps);
         return
             (std::max)(
                 (std::max)(
@@ -221,8 +197,7 @@ namespace
         float yawRateRadps,
         float omegaLeftRadps,
         float omegaRightRadps,
-        float commandNorm,
-        const PreparedParams& params) noexcept
+        float commandNorm) noexcept
     {
         return
             (ComputeSpeedNormMps(
@@ -230,13 +205,12 @@ namespace
                 rightVelocityMps,
                 yawRateRadps,
                 omegaLeftRadps,
-                omegaRightRadps,
-                params) < params.stopEnterSpeedMps) &&
-            (std::fabs(yawRateRadps) < params.stopEnterYawRateRadps) &&
-            (std::fabs(omegaLeftRadps) < params.stopEnterWheelSpeedRadps) &&
-            (std::fabs(omegaRightRadps) < params.stopEnterWheelSpeedRadps) &&
-            (commandNorm < params.stopEnterCommand) &&
-            (ComputeLateralScrubWeight(rightVelocityMps, yawRateRadps, params) <= 0.0f);
+                omegaRightRadps) < kStopEnterSpeedMps) &&
+            (std::fabs(yawRateRadps) < kStopEnterYawRateRadps) &&
+            (std::fabs(omegaLeftRadps) < kStopEnterWheelSpeedRadps) &&
+            (std::fabs(omegaRightRadps) < kStopEnterWheelSpeedRadps) &&
+            (commandNorm < kStopEnterCommand) &&
+            (ComputeLateralScrubWeight(rightVelocityMps, yawRateRadps) <= 0.0f);
     }
 
     inline bool ShouldSnapToZeroFast(
@@ -245,8 +219,7 @@ namespace
         float yawRateRadps,
         float omegaLeftRadps,
         float omegaRightRadps,
-        float commandNorm,
-        const PreparedParams& params) noexcept
+        float commandNorm) noexcept
     {
         return
             (ComputeSpeedNormMps(
@@ -254,12 +227,11 @@ namespace
                 rightVelocityMps,
                 yawRateRadps,
                 omegaLeftRadps,
-                omegaRightRadps,
-                params) < params.stopEnterSpeedMps) &&
-            (std::fabs(yawRateRadps) < params.stopEnterYawRateRadps) &&
-            (std::fabs(omegaLeftRadps) < params.stopEnterWheelSpeedRadps) &&
-            (std::fabs(omegaRightRadps) < params.stopEnterWheelSpeedRadps) &&
-            (commandNorm < params.stopEnterCommand);
+                omegaRightRadps) < kStopEnterSpeedMps) &&
+            (std::fabs(yawRateRadps) < kStopEnterYawRateRadps) &&
+            (std::fabs(omegaLeftRadps) < kStopEnterWheelSpeedRadps) &&
+            (std::fabs(omegaRightRadps) < kStopEnterWheelSpeedRadps) &&
+            (commandNorm < kStopEnterCommand);
     }
 
     inline bool ShouldReportStoppedDiagnosticsFast(
@@ -267,8 +239,7 @@ namespace
         float rightVelocityMps,
         float yawRateRadps,
         float omegaLeftRadps,
-        float omegaRightRadps,
-        const PreparedParams& params) noexcept
+        float omegaRightRadps) noexcept
     {
         return
             (ComputeSpeedNormMps(
@@ -276,11 +247,10 @@ namespace
                 rightVelocityMps,
                 yawRateRadps,
                 omegaLeftRadps,
-                omegaRightRadps,
-                params) < params.stopEnterSpeedMps) &&
-            (std::fabs(yawRateRadps) < params.stopEnterYawRateRadps) &&
-            (std::fabs(omegaLeftRadps) < params.stopEnterWheelSpeedRadps) &&
-            (std::fabs(omegaRightRadps) < params.stopEnterWheelSpeedRadps);
+                omegaRightRadps) < kStopEnterSpeedMps) &&
+            (std::fabs(yawRateRadps) < kStopEnterYawRateRadps) &&
+            (std::fabs(omegaLeftRadps) < kStopEnterWheelSpeedRadps) &&
+            (std::fabs(omegaRightRadps) < kStopEnterWheelSpeedRadps);
     }
 
     inline float ResolveRollingMotionWeight(
@@ -289,8 +259,7 @@ namespace
         float yawRateRadps,
         float omegaLeftRadps,
         float omegaRightRadps,
-        float commandNorm,
-        const PreparedParams& params) noexcept
+        float commandNorm) noexcept
     {
         const float speedNormMps =
             ComputeSpeedNormMps(
@@ -298,16 +267,15 @@ namespace
                 rightVelocityMps,
                 yawRateRadps,
                 omegaLeftRadps,
-                omegaRightRadps,
-                params);
+                omegaRightRadps);
         const float speedWeight =
-            SmoothStep(params.stopEnterSpeedMps, params.stopExitSpeedMps, speedNormMps);
+            SmoothStep(kStopEnterSpeedMps, kStopExitSpeedMps, speedNormMps);
         const float yawRateWeight =
-            SmoothStep(params.stopEnterYawRateRadps, params.stopExitYawRateRadps, std::fabs(yawRateRadps));
+            SmoothStep(kStopEnterYawRateRadps, kStopExitYawRateRadps, std::fabs(yawRateRadps));
         const float commandWeight =
-            SmoothStep(params.stopEnterCommand, params.stopExitCommand, commandNorm);
+            SmoothStep(kStopEnterCommand, kStopExitCommand, commandNorm);
         const float rollWeight = (std::max)((std::max)(speedWeight, yawRateWeight), commandWeight);
-        const float lateralScrubWeight = ComputeLateralScrubWeight(rightVelocityMps, yawRateRadps, params);
+        const float lateralScrubWeight = ComputeLateralScrubWeight(rightVelocityMps, yawRateRadps);
         return (std::max)(rollWeight, lateralScrubWeight);
     }
 
@@ -347,357 +315,27 @@ namespace
             value;
     }
 
-    inline ContactForce BuildClampedContactForce(
-        float rawForwardForceN,
-        float rawRightForceN,
-        float normalForceN,
-        float peakMu,
-        float forceEpsilonN) noexcept
-    {
-        ContactForce contact{};
-        const float rawMagnitudeSquaredN2 =
-            (rawForwardForceN * rawForwardForceN) + (rawRightForceN * rawRightForceN);
-        const float rawMagnitudeN = MazeMap::Math::Sqrtf(rawMagnitudeSquaredN2);
-        const float maxForceN = (std::max)(0.0f, peakMu * normalForceN);
-        const float forceScale = maxForceN / (std::max)(rawMagnitudeN, forceEpsilonN);
-        const float scale = (forceScale < 1.0f) ? forceScale : 1.0f;
-        const float saturationDenominatorN = (maxForceN > forceEpsilonN) ? maxForceN : forceEpsilonN;
-        const float utilization = rawMagnitudeN / saturationDenominatorN;
+} // namespace
 
-        contact.forwardForceN = scale * rawForwardForceN;
-        contact.rightForceN = scale * rawRightForceN;
-        contact.normalForceN = normalForceN;
-        contact.saturation = (utilization < 1.0f) ? utilization : 1.0f;
-        contact.preProjectionUtilization = utilization;
-        return contact;
-    }
-
-    inline float ClampSustainedContactRightForce(
-        float rawRightForceN,
-        float axleLoadFraction,
-        const PreparedParams& params) noexcept
-    {
-        return ClampMagnitudeFast(
-            rawRightForceN,
-            0.5f * axleLoadFraction * params.lateralForceSustainedLimitN);
-    }
-
-    inline RollingContactEvaluation EvaluateContactForces(
-        float leftBankForwardForceRawN,
-        float rightBankForwardForceRawN,
-        const std::array<float, 4>& contactRightForceRawN,
-        float fanDutyCycle,
-        const PreparedParams& params) noexcept
-    {
-        RollingContactEvaluation evaluation{};
-        const float clampedFanDutyCycle = Clamp01(fanDutyCycle);
-        const float totalN = params.baseNormalLoadN + (clampedFanDutyCycle * params.fanDownforceAtFullDutyN);
-        const float frontTotalN = params.frontLoadFraction * totalN;
-        const float rearTotalN = params.rearLoadFraction * totalN;
-        const float flN = 0.5f * frontTotalN;
-        const float frN = flN;
-        const float rlN = 0.5f * rearTotalN;
-        const float rrN = rlN;
-        const float denominator = (std::max)(totalN, params.forceEpsilonN);
-        const float envelopeMu =
-            (params.combinedAccelPeakTimesMass > 0.0f) ?
-            (params.combinedAccelPeakTimesMass / denominator) :
-            0.0f;
-        const float peakFrontMu = params.useEnvelopeMuFront ? envelopeMu : params.muFrontBase;
-        const float peakRearMu = params.useEnvelopeMuRear ? envelopeMu : params.muRearBase;
-
-        const float fxFlRaw = params.lambdaFront * leftBankForwardForceRawN;
-        const float fxRlRaw = params.lambdaRear * leftBankForwardForceRawN;
-        const float fxFrRaw = params.lambdaFront * rightBankForwardForceRawN;
-        const float fxRrRaw = params.lambdaRear * rightBankForwardForceRawN;
-
-        const float fyFlRaw =
-            ClampSustainedContactRightForce(
-                contactRightForceRawN[kFrontLeft],
-                params.frontLoadFraction,
-                params);
-        const float fyFrRaw =
-            ClampSustainedContactRightForce(
-                contactRightForceRawN[kFrontRight],
-                params.frontLoadFraction,
-                params);
-        const float fyRlRaw =
-            ClampSustainedContactRightForce(
-                contactRightForceRawN[kRearLeft],
-                params.rearLoadFraction,
-                params);
-        const float fyRrRaw =
-            ClampSustainedContactRightForce(
-                contactRightForceRawN[kRearRight],
-                params.rearLoadFraction,
-                params);
-
-        ContactForce& fl = evaluation.forces.contacts[kFrontLeft];
-        ContactForce& fr = evaluation.forces.contacts[kFrontRight];
-        ContactForce& rl = evaluation.forces.contacts[kRearLeft];
-        ContactForce& rr = evaluation.forces.contacts[kRearRight];
-
-        fl = BuildClampedContactForce(
-            fxFlRaw,
-            fyFlRaw,
-            flN,
-            peakFrontMu,
-            params.forceEpsilonN);
-        fr = BuildClampedContactForce(
-            fxFrRaw,
-            fyFrRaw,
-            frN,
-            peakFrontMu,
-            params.forceEpsilonN);
-        rl = BuildClampedContactForce(
-            fxRlRaw,
-            fyRlRaw,
-            rlN,
-            peakRearMu,
-            params.forceEpsilonN);
-        rr = BuildClampedContactForce(
-            fxRrRaw,
-            fyRrRaw,
-            rrN,
-            peakRearMu,
-            params.forceEpsilonN);
-
-        evaluation.leftBankForwardForceN = fl.forwardForceN + rl.forwardForceN;
-        evaluation.rightBankForwardForceN = fr.forwardForceN + rr.forwardForceN;
-        evaluation.frontRightForceN = fl.rightForceN + fr.rightForceN;
-        evaluation.rearRightForceN = rl.rightForceN + rr.rightForceN;
-        evaluation.sumForwardForceN = evaluation.leftBankForwardForceN + evaluation.rightBankForwardForceN;
-        evaluation.sumRightForceN = evaluation.frontRightForceN + evaluation.rearRightForceN;
-        evaluation.maxUtilization =
-            (std::max)(
-                (std::max)(fl.preProjectionUtilization, fr.preProjectionUtilization),
-                (std::max)(rl.preProjectionUtilization, rr.preProjectionUtilization));
-        return evaluation;
-    }
-
-    inline std::array<float, 4> ZeroContactRightForces() noexcept
-    {
-        return {};
-    }
-
-    inline std::array<float, 4> BuildLateralContactRightForces(
-        const SlipTargets& targets,
-        const ContactPatchLateralStiffness& stiffness) noexcept
-    {
-        std::array<float, 4> forces{};
-        forces[kFrontLeft] =
-            -stiffness.contactNPerRad[kFrontLeft] *
-            std::atan(targets.lateralRatio[kFrontLeft]);
-        forces[kFrontRight] =
-            -stiffness.contactNPerRad[kFrontRight] *
-            std::atan(targets.lateralRatio[kFrontRight]);
-        forces[kRearLeft] =
-            -stiffness.contactNPerRad[kRearLeft] *
-            std::atan(targets.lateralRatio[kRearLeft]);
-        forces[kRearRight] =
-            -stiffness.contactNPerRad[kRearRight] *
-            std::atan(targets.lateralRatio[kRearRight]);
-        return forces;
-    }
-
-    inline float ComputeContactYawMomentNm(
-        const RollingContactEvaluation& evaluation,
-        const PreparedParams& params) noexcept
-    {
-        return
-            (params.halfTrackWidthM *
-                (evaluation.leftBankForwardForceN - evaluation.rightBankForwardForceN)) +
-            (params.longitudinalOffsetM *
-                (evaluation.frontRightForceN - evaluation.rearRightForceN));
-    }
-
-    inline WheelKinematics BuildWheelKinematics(
-        float forwardVelocityMps,
-        float rightVelocityMps,
-        float yawRateRadps,
-        const PreparedParams& params) noexcept
-    {
-        WheelKinematics kinematics{};
-        const float leftBankVelocityMps = forwardVelocityMps + (params.halfTrackWidthM * yawRateRadps);
-        const float rightBankVelocityMps = forwardVelocityMps - (params.halfTrackWidthM * yawRateRadps);
-        const float frontLateralVelocityMps = rightVelocityMps + (params.longitudinalOffsetM * yawRateRadps);
-        const float rearLateralVelocityMps = rightVelocityMps - (params.longitudinalOffsetM * yawRateRadps);
-
-        kinematics.leftBankForwardVelocityMps = leftBankVelocityMps;
-        kinematics.rightBankForwardVelocityMps = rightBankVelocityMps;
-
-        kinematics.contacts[kFrontLeft].forwardVelocityMps = leftBankVelocityMps;
-        kinematics.contacts[kFrontRight].forwardVelocityMps = rightBankVelocityMps;
-        kinematics.contacts[kRearLeft].forwardVelocityMps = leftBankVelocityMps;
-        kinematics.contacts[kRearRight].forwardVelocityMps = rightBankVelocityMps;
-
-        kinematics.contacts[kFrontLeft].rightVelocityMps = frontLateralVelocityMps;
-        kinematics.contacts[kFrontRight].rightVelocityMps = frontLateralVelocityMps;
-        kinematics.contacts[kRearLeft].rightVelocityMps = rearLateralVelocityMps;
-        kinematics.contacts[kRearRight].rightVelocityMps = rearLateralVelocityMps;
-        return kinematics;
-    }
-
-    inline SlipTargets ComputeRollingSlipTargets(
-        float omegaLeftRadps,
-        float omegaRightRadps,
-        const WheelKinematics& kinematics,
-        const PreparedParams& params) noexcept
-    {
-        SlipTargets targets{};
-        const float leftCircumferentialVelocityMps = params.wheelRadiusM * omegaLeftRadps;
-        const float rightCircumferentialVelocityMps = params.wheelRadiusM * omegaRightRadps;
-        const float uRefLeft =
-            ComputeRegularizedLongitudinalSpeedMps(
-                kinematics.leftBankForwardVelocityMps,
-                params.rollingRegularizationMps);
-        const float uRefRight =
-            ComputeRegularizedLongitudinalSpeedMps(
-                kinematics.rightBankForwardVelocityMps,
-                params.rollingRegularizationMps);
-
-        const float invURefLeft = 1.0f / uRefLeft;
-        const float invURefRight = 1.0f / uRefRight;
-
-        targets.kappaLeft = (leftCircumferentialVelocityMps - kinematics.leftBankForwardVelocityMps) * invURefLeft;
-        targets.kappaRight = (rightCircumferentialVelocityMps - kinematics.rightBankForwardVelocityMps) * invURefRight;
-        for (std::size_t index = 0; index < targets.lateralRatio.size(); ++index)
-        {
-            const float contactReferenceSpeedMps =
-                ComputeRegularizedLongitudinalSpeedMps(
-                    kinematics.contacts[index].forwardVelocityMps,
-                    params.rollingRegularizationMps);
-            targets.lateralRatio[index] =
-                kinematics.contacts[index].rightVelocityMps / contactReferenceSpeedMps;
-        }
-        return targets;
-    }
-
-    inline RollingContactEvaluation EvaluateRollingState(
-        float omegaLeftRadps,
-        float omegaRightRadps,
-        const WheelKinematics& kinematics,
-        const ContactPatchLateralStiffness& lateralStiffness,
-        float fanDutyCycle,
-        const PreparedParams& params) noexcept
-    {
-        const SlipTargets targets =
-            ComputeRollingSlipTargets(
-                omegaLeftRadps,
-                omegaRightRadps,
-                kinematics,
-                params);
-
-        return EvaluateContactForces(
-            params.longitudinalTireStiffnessN * targets.kappaLeft,
-            params.longitudinalTireStiffnessN * targets.kappaRight,
-            BuildLateralContactRightForces(targets, lateralStiffness),
-            fanDutyCycle,
-            params);
-    }
-
-    inline ContactForces BlendContactForces(const ContactForces& rollingForces, float rollWeight) noexcept
-    {
-        if (rollWeight <= 0.0f)
-        {
-            ContactForces zeroed = rollingForces;
-            for (ContactForce& contact : zeroed.contacts)
-            {
-                contact.forwardForceN = 0.0f;
-                contact.rightForceN = 0.0f;
-                contact.saturation = 0.0f;
-                contact.preProjectionUtilization = 0.0f;
-            }
-            return zeroed;
-        }
-
-        if (rollWeight >= 1.0f)
-        {
-            return rollingForces;
-        }
-
-        ContactForces blended = rollingForces;
-        for (ContactForce& contact : blended.contacts)
-        {
-            contact.forwardForceN *= rollWeight;
-            contact.rightForceN *= rollWeight;
-            contact.saturation *= rollWeight;
-            contact.preProjectionUtilization *= rollWeight;
-        }
-        return blended;
-    }
-
-    inline PlantModel::StateVector BuildDriveCommandOperatingState(
-        const PlantModel::StateVector& currentState,
-        const PreparedParams& params) noexcept
-    {
-        PlantModel::StateVector state = PlantModel::StateVector::Zero();
-        state(VehicleState::kPx) =
-            std::isfinite(currentState(VehicleState::kPx)) ? currentState(VehicleState::kPx) : 0.0f;
-        state(VehicleState::kPy) =
-            std::isfinite(currentState(VehicleState::kPy)) ? currentState(VehicleState::kPy) : 0.0f;
-        state(VehicleState::kPsi) =
-            std::isfinite(currentState(VehicleState::kPsi)) ? currentState(VehicleState::kPsi) : 0.0f;
-        state(VehicleState::kU) =
-            std::isfinite(currentState(VehicleState::kU)) ? currentState(VehicleState::kU) : 0.0f;
-        state(VehicleState::kV) =
-            std::isfinite(currentState(VehicleState::kV)) ? currentState(VehicleState::kV) : 0.0f;
-        state(VehicleState::kR) =
-            std::isfinite(currentState(VehicleState::kR)) ? currentState(VehicleState::kR) : 0.0f;
-
-        const float fallbackLeftWheelSpeedRadps =
-            (params.wheelRadiusM > 0.0f) ?
-            ((state(VehicleState::kU) + (params.halfTrackWidthM * state(VehicleState::kR))) * params.invWheelRadiusM) :
-            0.0f;
-        const float fallbackRightWheelSpeedRadps =
-            (params.wheelRadiusM > 0.0f) ?
-            ((state(VehicleState::kU) - (params.halfTrackWidthM * state(VehicleState::kR))) * params.invWheelRadiusM) :
-            0.0f;
-
-        state(VehicleState::kOmegaL) =
-            std::isfinite(currentState(VehicleState::kOmegaL)) ?
-            currentState(VehicleState::kOmegaL) :
-            fallbackLeftWheelSpeedRadps;
-        state(VehicleState::kOmegaR) =
-            std::isfinite(currentState(VehicleState::kOmegaR)) ?
-            currentState(VehicleState::kOmegaR) :
-            fallbackRightWheelSpeedRadps;
-        state(VehicleState::kBgz) =
-            std::isfinite(currentState(VehicleState::kBgz)) ? currentState(VehicleState::kBgz) : 0.0f;
-        VehicleState::NormalizeStateVector(state);
-        return state;
-    }
-
-    inline PlantModel::StateVector BuildReducedDriveCommandOperatingState(
-        float forwardVelocityMps,
-        float yawRateRadps,
-        const PreparedParams& params) noexcept
-    {
-        PlantModel::StateVector state = PlantModel::StateVector::Zero();
-        state(VehicleState::kU) = forwardVelocityMps;
-        state(VehicleState::kR) = yawRateRadps;
-        // Reduced overloads do not provide observed wheel state. Mark wheel speeds unknown so
-        // BuildDriveCommandOperatingState(...) uses the rolling-kinematic fallback instead of
-        // incorrectly treating literal zeros as a stopped-wheel operating point.
-        state(VehicleState::kOmegaL) = (std::numeric_limits<float>::quiet_NaN)();
-        state(VehicleState::kOmegaR) = (std::numeric_limits<float>::quiet_NaN)();
-        return BuildDriveCommandOperatingState(state, params);
-    }
-
+namespace
+{
     inline float DriveFrictionTorqueFast(
         float wheelBankSpeedRadps,
         float wheelTorqueRequestNm,
-        const PreparedParams& params) noexcept
+        float staticFrictionTorqueNm) noexcept
     {
-        const float viscousFrictionTorqueNm = params.viscousFrictionNmPerRadps * wheelBankSpeedRadps;
-        if (std::fabs(wheelBankSpeedRadps) <= params.staticFrictionSpeedThresholdRadps)
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float staticFrictionSpeedThresholdRadps =
+            (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps / wheelRadiusM) : 0.0f;
+        const float viscousFrictionTorqueNm = kViscousFrictionNmPerRadps * wheelBankSpeedRadps;
+        if (std::fabs(wheelBankSpeedRadps) <= staticFrictionSpeedThresholdRadps)
         {
             const float sign = SignedDirectionFast(wheelTorqueRequestNm, wheelBankSpeedRadps);
-            return (params.staticFrictionTorqueNm * sign) + viscousFrictionTorqueNm;
+            return (staticFrictionTorqueNm * sign) + viscousFrictionTorqueNm;
         }
 
         const float sign = SignedDirectionFast(wheelBankSpeedRadps, wheelTorqueRequestNm);
-        return (params.rollingFrictionTorqueNm * sign) + viscousFrictionTorqueNm;
+        return (kRollingFrictionTorqueNm * sign) + viscousFrictionTorqueNm;
     }
 
     inline float SmoothDirection(float value, float epsilon) noexcept
@@ -713,23 +351,27 @@ namespace
     inline float DriveFrictionTorqueSmooth(
         float wheelBankSpeedRadps,
         float wheelTorqueRequestNm,
-        const PreparedParams& params) noexcept
+        float staticFrictionTorqueNm) noexcept
     {
-        const float viscousFrictionTorqueNm = params.viscousFrictionNmPerRadps * wheelBankSpeedRadps;
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float invWheelRadiusM = (wheelRadiusM > 0.0f) ? (1.0f / wheelRadiusM) : 0.0f;
+        const float staticFrictionSpeedThresholdRadps =
+            (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps * invWheelRadiusM) : 0.0f;
+        const float viscousFrictionTorqueNm = kViscousFrictionNmPerRadps * wheelBankSpeedRadps;
         const float speedScaleRadps =
             (std::max)(
                 1.0e-4f,
                 (std::max)(
-                    params.staticFrictionSpeedThresholdRadps,
-                    params.rollingRegularizationMps * params.invWheelRadiusM));
+                    staticFrictionSpeedThresholdRadps,
+                    kRollingSpeedRegularizationMps * invWheelRadiusM));
         const float rollingBlend =
             SmoothStep(speedScaleRadps, 2.0f * speedScaleRadps, std::fabs(wheelBankSpeedRadps));
         const float staticBlend = 1.0f - rollingBlend;
         const float staticDirection = SmoothDirection(wheelTorqueRequestNm, speedScaleRadps);
         const float rollingDirection = SmoothDirection(wheelBankSpeedRadps, speedScaleRadps);
         const float coulombTorqueNm =
-            (staticBlend * params.staticFrictionTorqueNm * staticDirection) +
-            (rollingBlend * params.rollingFrictionTorqueNm * rollingDirection);
+            (staticBlend * staticFrictionTorqueNm * staticDirection) +
+            (rollingBlend * kRollingFrictionTorqueNm * rollingDirection);
         return coulombTorqueNm + viscousFrictionTorqueNm;
     }
 
@@ -737,21 +379,12 @@ namespace
 
 namespace MazeMap
 {
-    PlantModel::PlantModel(const Vehicle& vehicle, const VehicleState& runtimeState) noexcept
-        : _preparedParams(Prepare(BuildParamsFromVehicle(vehicle)))
-        , _vehicle(vehicle)
+    PlantModel::PlantModel(const Vehicle& vehicle, VehicleState& runtimeState) noexcept
+        : _vehicle(vehicle)
         , _runtimeState(runtimeState)
         , _leftDrive(vehicle.GetLeftMotorEncoderDrive())
         , _rightDrive(vehicle.GetRightMotorEncoderDrive())
     {
-    }
-
-    float PlantModel::wallObservationNoHitRangeM() const noexcept
-    {
-        return
-            (std::isfinite(_preparedParams.raw.noHitRangeM) && (_preparedParams.raw.noHitRangeM > 0.0f)) ?
-            _preparedParams.raw.noHitRangeM :
-            0.30f;
     }
 
     bool PlantModel::WriteUkfPlantDebugTextDump(void* context, DebugTextSink sink) const noexcept
@@ -761,68 +394,92 @@ namespace MazeMap
             return false;
         }
 
-        const PlantParams& params = _preparedParams.raw;
+        const float massKg = _vehicle.GetMass();
+        const float trackWidthM = _vehicle.GetTrackWidth();
+        const float halfTrackWidthM = 0.5f * trackWidthM;
+        const float contactPatchLongitudinalOffsetM =
+            Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM;
+        const float equivalentWheelInertiaKgM2 =
+            0.5f * (_leftDrive.getEquivalentWheelInertiaKgM2() + _rightDrive.getEquivalentWheelInertiaKgM2());
+        const float motorCurrentLimitA =
+            (_leftDrive.getResistance() > 0.0f) ?
+            (_leftDrive.getVoltage() / _leftDrive.getResistance()) :
+            2.4f;
+        const float staticFrictionTorqueNm =
+            (std::max)(
+                0.0f,
+                _leftDrive.getTorqueFromCommand(
+                    kReliableLaunchDriveCommand,
+                    0.0f,
+                    _vehicle.GetBatteryVoltage()));
 
         if (!EmitPlantDebugTextLine(
                 context,
                 sink,
                 "ukf_dump_params_mass_geometry",
                 "mass_kg=%.9g;effective_longitudinal_mass_kg=%.9g;yaw_inertia_kg_m2=%.9g;track_width_m=%.9g;contact_patch_longitudinal_offset_m=%.9g;wheel_radius_m=%.9g;equivalent_wheel_inertia_kg_m2=%.9g",
-                static_cast<double>(params.massKg),
-                static_cast<double>(params.effectiveLongitudinalMassKg),
-                static_cast<double>(params.yawInertiaKgM2),
-                static_cast<double>(params.trackWidthM),
-                static_cast<double>(params.contactPatchLongitudinalOffsetM),
-                static_cast<double>(params.wheelRadiusM),
-                static_cast<double>(params.equivalentWheelInertiaKgM2)) ||
+                static_cast<double>(massKg),
+                static_cast<double>(massKg),
+                static_cast<double>(_vehicle.GetYawInertia()),
+                static_cast<double>(trackWidthM),
+                static_cast<double>(contactPatchLongitudinalOffsetM),
+                static_cast<double>(Vehicle::GetDriveWheelRadiusM()),
+                static_cast<double>(equivalentWheelInertiaKgM2)) ||
             !EmitPlantDebugTextLine(
                 context,
                 sink,
                 "ukf_dump_params_drive_electrical",
                 "supply_voltage_v=%.9g;drive_resistance_ohms=%.9g;torque_constant_nm_per_a=%.9g;speed_constant_radps_per_volt=%.9g;no_load_current_a=%.9g;motor_current_limit_a=%.9g;gear_ratio=%.9g;encoder_counts_per_motor_rev=%u",
-                static_cast<double>(params.supplyVoltageV),
-                static_cast<double>(params.driveResistanceOhms),
-                static_cast<double>(params.torqueConstantNmPerA),
-                static_cast<double>(params.speedConstantRadpsPerVolt),
-                static_cast<double>(params.noLoadCurrentA),
-                static_cast<double>(params.motorCurrentLimitA),
-                static_cast<double>(params.gearRatio),
-                static_cast<unsigned>(params.encoderCountsPerMotorRev)) ||
+                static_cast<double>(_vehicle.GetBatteryVoltage()),
+                static_cast<double>(_leftDrive.getResistance()),
+                static_cast<double>(_leftDrive.getTorqueConstant()),
+                static_cast<double>(_leftDrive.getSpeedConstant()),
+                static_cast<double>(_leftDrive.getNoLoadCurrent()),
+                static_cast<double>(motorCurrentLimitA),
+                static_cast<double>(_leftDrive.getGearRatio()),
+                static_cast<unsigned>(_leftDrive.getPulsesPerRev())) ||
             !EmitPlantDebugTextLine(
                 context,
                 sink,
                 "ukf_dump_params_tire_friction",
                 "drivetrain_efficiency=%.9g;rolling_friction_torque_nm=%.9g;viscous_friction_nm_per_radps=%.9g;longitudinal_tire_stiffness_n=%.9g;mu_front=%.9g;mu_rear=%.9g;front_load_fraction=%.9g",
-                static_cast<double>(params.drivetrainEfficiency),
-                static_cast<double>(params.rollingFrictionTorqueNm),
-                static_cast<double>(params.viscousFrictionNmPerRadps),
-                static_cast<double>(params.longitudinalTireStiffnessN),
-                static_cast<double>(params.muFront),
-                static_cast<double>(params.muRear),
-                static_cast<double>(params.frontLoadFraction)) ||
+                1.0,
+                static_cast<double>(kRollingFrictionTorqueNm),
+                static_cast<double>(kViscousFrictionNmPerRadps),
+                static_cast<double>(
+                    0.5f * (_leftDrive.getLongitudinalTireStiffnessN() + _rightDrive.getLongitudinalTireStiffnessN())),
+                static_cast<double>(kMuFront),
+                static_cast<double>(kMuRear),
+                static_cast<double>(kFrontLoadFraction)) ||
             !EmitPlantDebugTextLine(
                 context,
                 sink,
                 "ukf_dump_params_static_friction",
                 "static_friction_torque_nm=%.9g;static_friction_max_speed_mps=%.9g",
-                static_cast<double>(params.staticFrictionTorqueNm),
-                static_cast<double>(params.staticFrictionMaxSpeedMps)) ||
+                static_cast<double>(staticFrictionTorqueNm),
+                static_cast<double>(kStaticFrictionMaxSpeedMps)) ||
             !EmitPlantDebugTextLine(
                 context,
                 sink,
                 "ukf_dump_params_misc",
                 "velocity_epsilon_mps=%.9g;force_epsilon_n=%.9g;fan_downforce_at_full_duty_n=%.9g;no_hit_range_m=%.9g",
-                static_cast<double>(params.velocityEpsilonMps),
-                static_cast<double>(params.forceEpsilonN),
-                static_cast<double>(params.fanDownforceAtFullDutyN),
-                static_cast<double>(params.noHitRangeM)))
+                static_cast<double>(kRollingSpeedRegularizationMps),
+                static_cast<double>(kForceEpsilonN),
+                static_cast<double>(_vehicle.GetFanDownforceAtFullDuty()),
+                static_cast<double>(_vehicle.FrontLeft.GetNoHitRangeM())))
         {
             return false;
         }
 
-        for (std::size_t index = 0; index < params.contactPositionsBodyM.size(); ++index)
+        const std::array<Eigen::Vector2f, 4> contactPositionsBodyM = {
+            Eigen::Vector2f(-halfTrackWidthM, std::fabs(contactPatchLongitudinalOffsetM)),
+            Eigen::Vector2f(halfTrackWidthM, std::fabs(contactPatchLongitudinalOffsetM)),
+            Eigen::Vector2f(-halfTrackWidthM, -std::fabs(contactPatchLongitudinalOffsetM)),
+            Eigen::Vector2f(halfTrackWidthM, -std::fabs(contactPatchLongitudinalOffsetM))
+        };
+        for (std::size_t index = 0; index < contactPositionsBodyM.size(); ++index)
         {
-            const Eigen::Vector2f& position = params.contactPositionsBodyM[index];
+            const Eigen::Vector2f& position = contactPositionsBodyM[index];
             if (!EmitPlantDebugTextLine(
                     context,
                     sink,
@@ -854,11 +511,11 @@ namespace MazeMap
                 static_cast<double>(sensor.clockwiseYawSign()));
         };
         return
-            emitSensorMount("ukf_dump_sensor_front_left", params.frontLeftSensor) &&
-            emitSensorMount("ukf_dump_sensor_front_right", params.frontRightSensor) &&
-            emitSensorMount("ukf_dump_sensor_side_left", params.sideLeftSensor) &&
-            emitSensorMount("ukf_dump_sensor_side_right", params.sideRightSensor) &&
-            emitSensorMount("ukf_dump_imu_mount", params.backLeftImuMount);
+            emitSensorMount("ukf_dump_sensor_front_left", Vehicle::GetFrontLeftSensorMount()) &&
+            emitSensorMount("ukf_dump_sensor_front_right", Vehicle::GetFrontRightSensorMount()) &&
+            emitSensorMount("ukf_dump_sensor_side_left", Vehicle::GetSideLeftSensorMount()) &&
+            emitSensorMount("ukf_dump_sensor_side_right", Vehicle::GetSideRightSensorMount()) &&
+            emitSensorMount("ukf_dump_imu_mount", Vehicle::GetBackLeftImuMount());
     }
 
     PlantModel::StateVector PlantModel::BuildBoundStateVector() const noexcept
@@ -873,8 +530,20 @@ namespace MazeMap
         state(VehicleState::kOmegaL) = _runtimeState.GetWheelSpeedLeft();
         state(VehicleState::kOmegaR) = _runtimeState.GetWheelSpeedRight();
         state(VehicleState::kBgz) = _runtimeState.GetGyroBiasZ();
-        VehicleState::NormalizeStateVector(state);
+        state(VehicleState::kPsi) = NormalizeAngle(state(VehicleState::kPsi));
         return state;
+    }
+
+    void PlantModel::ApplyStateVectorToBoundState(const StateVector& state) noexcept
+    {
+        _runtimeState.SetPosition(Eigen::Vector2f(state(VehicleState::kPx), state(VehicleState::kPy)));
+        _runtimeState.SetOrientation(state(VehicleState::kPsi));
+        _runtimeState.SetVelocity(state(VehicleState::kU));
+        _runtimeState.SetLateralVelocity(state(VehicleState::kV));
+        _runtimeState.SetRotationalVelocity(state(VehicleState::kR));
+        _runtimeState.SetWheelSpeedLeft(state(VehicleState::kOmegaL));
+        _runtimeState.SetWheelSpeedRight(state(VehicleState::kOmegaR));
+        _runtimeState.SetGyroBiasZ(state(VehicleState::kBgz));
     }
 
     void PlantModel::resolveAppliedBankTorques(
@@ -903,239 +572,15 @@ namespace MazeMap
                 batteryVoltageV);
     }
 
-    PlantParams PlantModel::BuildParamsFromVehicle(const Vehicle& vehicle) noexcept
-    {
-        PlantParams params{};
-        constexpr float kReliableLaunchDriveCommand = 0.30f;
-        const MotorEncoderDrive& leftDrive = vehicle._leftMotor;
-        const MotorEncoderDrive& rightDrive = vehicle._rightMotor;
-        const VehiclePhysicalModel& physical = vehicle.GetPhysicalModel();
-        params.massKg = vehicle.GetMass();
-        params.yawInertiaKgM2 = vehicle.GetYawInertia();
-        params.trackWidthM = vehicle.GetTrackWidth();
-        params.wheelRadiusM = leftDrive.getWheelRadius();
-        params.supplyVoltageV = leftDrive.getVoltage();
-        params.driveResistanceOhms = leftDrive.getResistance();
-        params.torqueConstantNmPerA = leftDrive.getTorqueConstant();
-        params.speedConstantRadpsPerVolt = leftDrive.getSpeedConstant();
-        params.noLoadCurrentA = leftDrive.getNoLoadCurrent();
-        params.gearRatio = leftDrive.getGearRatio();
-        params.encoderCountsPerMotorRev = leftDrive.getPulsesPerRev();
-        params.equivalentWheelInertiaKgM2 =
-            0.5f * (leftDrive.getEquivalentWheelInertiaKgM2() + rightDrive.getEquivalentWheelInertiaKgM2());
-        params.effectiveLongitudinalMassKg = params.massKg;
-        params.combinedAccelSustainedMps2 =
-            Vehicle::GetSustainedLateralAccelerationReferenceMps2();
-        params.longitudinalTireStiffnessN =
-            0.5f * (leftDrive.getLongitudinalTireStiffnessN() + rightDrive.getLongitudinalTireStiffnessN());
-        params.contactPatchLongitudinalOffsetM = physical.driveWheelLongitudinalOffsetM;
-        params.motorCurrentLimitA =
-            (leftDrive.getResistance() > 0.0f) ?
-            (leftDrive.getVoltage() / leftDrive.getResistance()) :
-            2.4f;
-        if ((params.driveResistanceOhms > 0.0f) &&
-            (params.torqueConstantNmPerA > 0.0f) &&
-            (params.gearRatio > 0.0f) &&
-            (params.supplyVoltageV > 0.0f))
-        {
-            float breakawayCurrentA =
-                (kReliableLaunchDriveCommand * params.supplyVoltageV) /
-                params.driveResistanceOhms;
-            if (params.motorCurrentLimitA > 0.0f)
-            {
-                breakawayCurrentA =
-                    (std::clamp)(breakawayCurrentA, -params.motorCurrentLimitA, params.motorCurrentLimitA);
-            }
-
-            const float breakawayLoadCurrentA =
-                (std::max)(0.0f, breakawayCurrentA - params.noLoadCurrentA);
-            params.staticFrictionTorqueNm =
-                params.torqueConstantNmPerA *
-                breakawayLoadCurrentA *
-                params.gearRatio *
-                params.drivetrainEfficiency;
-        }
-        params.frontLeftSensor = vehicle.GetFrontLeftSensorMount();
-        params.frontRightSensor = vehicle.GetFrontRightSensorMount();
-        params.sideLeftSensor = vehicle.GetSideLeftSensorMount();
-        params.sideRightSensor = vehicle.GetSideRightSensorMount();
-        params.backLeftImuMount = vehicle.GetBackLeftImuMount();
-
-        const float frontContactY = std::fabs(params.contactPatchLongitudinalOffsetM);
-        const float halfTrackWidthM = 0.5f * params.trackWidthM;
-        params.contactPositionsBodyM[kFrontLeft] = Eigen::Vector2f(-halfTrackWidthM, frontContactY);
-        params.contactPositionsBodyM[kFrontRight] = Eigen::Vector2f(halfTrackWidthM, frontContactY);
-        params.contactPositionsBodyM[kRearLeft] = Eigen::Vector2f(-halfTrackWidthM, -frontContactY);
-        params.contactPositionsBodyM[kRearRight] = Eigen::Vector2f(halfTrackWidthM, -frontContactY);
-        return params;
-    }
-
-    PlantParams PlantParams::Default() noexcept
-    {
-        static const Vehicle defaultVehicle;
-        return PlantModel::BuildParamsFromVehicle(defaultVehicle);
-    }
-
-    PlantModel::PreparedParams PlantModel::Prepare(const PlantParams& params) noexcept
-    {
-        PreparedParams prepared{};
-        prepared.raw = params;
-
-        prepared.forceEpsilonN =
-            (std::isfinite(params.forceEpsilonN) && (params.forceEpsilonN > 0.0f)) ?
-            params.forceEpsilonN :
-            1.0e-4f;
-
-        prepared.trackWidthM = std::fabs(params.trackWidthM);
-        prepared.halfTrackWidthM = 0.5f * prepared.trackWidthM;
-        prepared.invTrackWidthM = (prepared.trackWidthM > 0.0f) ? (1.0f / prepared.trackWidthM) : 0.0f;
-
-        prepared.wheelRadiusM =
-            (std::isfinite(params.wheelRadiusM) && (params.wheelRadiusM > 0.0f)) ?
-            params.wheelRadiusM :
-            0.0f;
-        prepared.invWheelRadiusM = (prepared.wheelRadiusM > 0.0f) ? (1.0f / prepared.wheelRadiusM) : 0.0f;
-        prepared.longitudinalOffsetM = std::fabs(params.contactPatchLongitudinalOffsetM);
-        prepared.yawLeverArmM = (std::max)(prepared.longitudinalOffsetM, prepared.halfTrackWidthM);
-
-        prepared.longitudinalMassKg =
-            (std::isfinite(params.effectiveLongitudinalMassKg) && (params.effectiveLongitudinalMassKg > 0.0f)) ?
-            params.effectiveLongitudinalMassKg :
-            ((std::isfinite(params.massKg) && (params.massKg > 0.0f)) ? params.massKg : 1.0f);
-        prepared.invLongitudinalMassKg = 1.0f / prepared.longitudinalMassKg;
-
-        prepared.lateralMassKg =
-            (std::isfinite(params.effectiveLateralMassKg) && (params.effectiveLateralMassKg > 0.0f)) ?
-            params.effectiveLateralMassKg :
-            ((std::isfinite(params.massKg) && (params.massKg > 0.0f)) ? params.massKg : 1.0f);
-        prepared.invLateralMassKg = 1.0f / prepared.lateralMassKg;
-
-        prepared.yawInertiaKgM2 =
-            (std::isfinite(params.yawInertiaKgM2) && (params.yawInertiaKgM2 > 0.0f)) ?
-            params.yawInertiaKgM2 :
-            1.0f;
-        prepared.invYawInertiaKgM2 = 1.0f / prepared.yawInertiaKgM2;
-
-        prepared.wheelInertiaKgM2 =
-            (std::isfinite(params.equivalentWheelInertiaKgM2) && (params.equivalentWheelInertiaKgM2 > 0.0f)) ?
-            params.equivalentWheelInertiaKgM2 :
-            1.0f;
-        prepared.invWheelInertiaKgM2 = 1.0f / prepared.wheelInertiaKgM2;
-
-        prepared.rollingRegularizationMps =
-            (std::isfinite(params.rollingSpeedRegularizationMps) && (params.rollingSpeedRegularizationMps > 0.0f)) ?
-            params.rollingSpeedRegularizationMps :
-            ((std::isfinite(params.velocityEpsilonMps) && (params.velocityEpsilonMps > 0.0f)) ?
-                params.velocityEpsilonMps :
-                1.0e-3f);
-
-        prepared.staticFrictionTorqueNm =
-            (std::isfinite(params.staticFrictionTorqueNm) && (params.staticFrictionTorqueNm > 0.0f)) ?
-            params.staticFrictionTorqueNm :
-            0.0f;
-        prepared.staticFrictionSpeedThresholdRadps =
-            (prepared.wheelRadiusM > 0.0f) ?
-            (((std::isfinite(params.staticFrictionMaxSpeedMps) && (params.staticFrictionMaxSpeedMps > 0.0f)) ?
-                params.staticFrictionMaxSpeedMps :
-                0.0f) * prepared.invWheelRadiusM) :
-            0.0f;
-
-        prepared.longitudinalTireStiffnessN = params.longitudinalTireStiffnessN;
-        prepared.invLongitudinalTireStiffnessN =
-            (std::fabs(prepared.longitudinalTireStiffnessN) > prepared.forceEpsilonN) ?
-            (1.0f / prepared.longitudinalTireStiffnessN) :
-            0.0f;
-
-        prepared.lateralDampingNPerM = (std::max)(0.0f, params.lateralVelocityDampingNsPerM);
-        prepared.yawDampingNmPerRadps = (std::max)(0.0f, params.yawRateDampingNmsPerRad);
-        prepared.lateralDampingOverMass = prepared.lateralDampingNPerM * prepared.invLateralMassKg;
-        prepared.yawDampingOverInertia = prepared.yawDampingNmPerRadps * prepared.invYawInertiaKgM2;
-
-        prepared.baseNormalLoadN = params.massKg * GRAVITY_MPS2;
-        prepared.fanDownforceAtFullDutyN = params.fanDownforceAtFullDutyN;
-        prepared.frontLoadFraction =
-            std::isfinite(params.frontLoadFraction) ? Clamp01(params.frontLoadFraction) : 0.5f;
-        prepared.rearLoadFraction = 1.0f - prepared.frontLoadFraction;
-        prepared.lambdaFront =
-            std::isfinite(params.frontLongitudinalForceSplit) ? Clamp01(params.frontLongitudinalForceSplit) : 0.5f;
-        prepared.lambdaRear = 1.0f - prepared.lambdaFront;
-
-        const bool haveCombinedPeak =
-            std::isfinite(params.combinedAccelPeakMps2) &&
-            (params.combinedAccelPeakMps2 > 0.0f) &&
-            std::isfinite(params.massKg) &&
-            (params.massKg > 0.0f);
-        prepared.useEnvelopeMuFront =
-            !((std::isfinite(params.muFrontPeak) && (params.muFrontPeak > 0.0f))) &&
-            haveCombinedPeak;
-        prepared.useEnvelopeMuRear =
-            !((std::isfinite(params.muRearPeak) && (params.muRearPeak > 0.0f))) &&
-            haveCombinedPeak;
-
-        prepared.muFrontBase =
-            (std::isfinite(params.muFrontPeak) && (params.muFrontPeak > 0.0f)) ?
-            params.muFrontPeak :
-            (std::max)(0.0f, params.muFront);
-        prepared.muRearBase =
-            (std::isfinite(params.muRearPeak) && (params.muRearPeak > 0.0f)) ?
-            params.muRearPeak :
-            (std::max)(0.0f, params.muRear);
-        prepared.combinedAccelPeakTimesMass =
-            haveCombinedPeak ? (params.combinedAccelPeakMps2 * params.massKg) : 0.0f;
-        prepared.lateralForceSustainedLimitN =
-            (std::isfinite(params.combinedAccelSustainedMps2) &&
-             (params.combinedAccelSustainedMps2 > 0.0f) &&
-             std::isfinite(params.massKg) &&
-             (params.massKg > 0.0f)) ?
-            (params.combinedAccelSustainedMps2 * params.massKg) :
-            0.0f;
-
-        prepared.combinedAccelNominalMps2 =
-            (std::isfinite(params.combinedAccelNominalMps2) && (params.combinedAccelNominalMps2 > 0.0f)) ?
-            params.combinedAccelNominalMps2 :
-            ((std::isfinite(params.combinedAccelPeakMps2) && (params.combinedAccelPeakMps2 > 0.0f)) ?
-                params.combinedAccelPeakMps2 :
-                (std::numeric_limits<float>::infinity)());
-        prepared.combinedAccelNominalSq =
-            std::isfinite(prepared.combinedAccelNominalMps2) ?
-            (prepared.combinedAccelNominalMps2 * prepared.combinedAccelNominalMps2) :
-            (std::numeric_limits<float>::infinity)();
-
-        prepared.supplyVoltageV = params.supplyVoltageV;
-        prepared.rollingFrictionTorqueNm = params.rollingFrictionTorqueNm;
-        prepared.viscousFrictionNmPerRadps = params.viscousFrictionNmPerRadps;
-
-        prepared.stopEnterSpeedMps = params.stopEnterSpeedMps;
-        prepared.stopExitSpeedMps = params.stopExitSpeedMps;
-        prepared.stopEnterYawRateRadps = params.stopEnterYawRateRadps;
-        prepared.stopExitYawRateRadps = params.stopExitYawRateRadps;
-        prepared.stopEnterWheelSpeedRadps = params.stopEnterWheelSpeedRadps;
-        prepared.stopExitWheelSpeedRadps = params.stopExitWheelSpeedRadps;
-        prepared.stopEnterCommand = params.stopEnterCommand;
-        prepared.stopExitCommand = params.stopExitCommand;
-
-        return prepared;
-    }
-
-    PlantDerivatives PlantModel::forwardStep(
+    PlantModel::PlantDerivatives PlantModel::forwardStep(
         const App::Internal::CommandVector& control) const noexcept
     {
-        return forwardStep(BuildBoundStateVector(), control, _preparedParams);
+        return forwardStep(BuildBoundStateVector(), control);
     }
 
-    PlantDerivatives PlantModel::forwardStep(
+    PlantModel::PlantDerivatives PlantModel::forwardStep(
         const StateVector& state,
-        const App::Internal::CommandVector& control,
-        const PlantParams& params) const noexcept
-    {
-        const PreparedParams prepared = Prepare(params);
-        return forwardStep(state, control, prepared);
-    }
-
-    PlantDerivatives PlantModel::forwardStep(
-        const StateVector& state,
-        const App::Internal::CommandVector& control,
-        const PreparedParams& params) const noexcept
+        const App::Internal::CommandVector& control) const noexcept
     {
         float leftDriveTorqueNm = 0.0f;
         float rightDriveTorqueNm = 0.0f;
@@ -1150,22 +595,17 @@ namespace MazeMap
             state,
             leftDriveTorqueNm,
             rightDriveTorqueNm,
-            activityNorm,
-            params);
+            activityNorm);
     }
 
     PlantModel::WheelOnlyMeasurementPrediction PlantModel::predictWheelOnlyMeasurement(
-        const StateVector& state,
-        const PreparedParams& params) const noexcept
+        const StateVector& state) const noexcept
     {
         WheelOnlyMeasurementPrediction prediction{};
-        const float wheelRadiusM =
-            (std::isfinite(params.wheelRadiusM) && (params.wheelRadiusM > 0.0f)) ?
-            params.wheelRadiusM :
-            0.0f;
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
         const float trackWidthM =
-            (std::isfinite(params.trackWidthM) && (params.trackWidthM > 0.0f)) ?
-            params.trackWidthM :
+            (std::isfinite(_vehicle.GetTrackWidth()) && (_vehicle.GetTrackWidth() > 0.0f)) ?
+            _vehicle.GetTrackWidth() :
             0.0f;
         prediction.forwardSpeedMps = std::isfinite(state(VehicleState::kU)) ? state(VehicleState::kU) : 0.0f;
         prediction.yawRateRadps = std::isfinite(state(VehicleState::kR)) ? state(VehicleState::kR) : 0.0f;
@@ -1180,55 +620,58 @@ namespace MazeMap
         return prediction;
     }
 
-    PlantDerivatives PlantModel::forwardStepFromAppliedBankTorques(
+    PlantModel::PlantDerivatives PlantModel::forwardStepFromAppliedBankTorques(
         const StateVector& state,
         float leftAppliedBankTorqueNm,
         float rightAppliedBankTorqueNm) const noexcept
-    {
-        return forwardStepFromAppliedBankTorques(
-            state,
-            leftAppliedBankTorqueNm,
-            rightAppliedBankTorqueNm,
-            _preparedParams);
-    }
-
-    PlantDerivatives PlantModel::forwardStepFromAppliedBankTorques(
-        const StateVector& state,
-        float leftAppliedBankTorqueNm,
-        float rightAppliedBankTorqueNm,
-        const PlantParams& params) const noexcept
-    {
-        const PreparedParams prepared = Prepare(params);
-        return forwardStepFromAppliedBankTorques(
-            state,
-            leftAppliedBankTorqueNm,
-            rightAppliedBankTorqueNm,
-            prepared);
-    }
-
-    PlantDerivatives PlantModel::forwardStepFromAppliedBankTorques(
-        const StateVector& state,
-        float leftAppliedBankTorqueNm,
-        float rightAppliedBankTorqueNm,
-        const PreparedParams& params) const noexcept
     {
         return evaluateAppliedBankTorqueStep(
             state,
             leftAppliedBankTorqueNm,
             rightAppliedBankTorqueNm,
-            (std::max)(std::fabs(leftAppliedBankTorqueNm), std::fabs(rightAppliedBankTorqueNm)),
-            params);
+            (std::max)(std::fabs(leftAppliedBankTorqueNm), std::fabs(rightAppliedBankTorqueNm)));
     }
 
-    PlantDerivatives PlantModel::evaluateAppliedBankTorqueStep(
+    PlantModel::PlantDerivatives PlantModel::evaluateAppliedBankTorqueStep(
         const StateVector& state,
         float leftAppliedBankTorqueNm,
         float rightAppliedBankTorqueNm,
-        float activityNorm,
-        const PreparedParams& params) const noexcept
+        float activityNorm) const noexcept
     {
         const float fanDutyCycle = _vehicle.GetFanDuty();
         PlantDerivatives derivatives{};
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float invWheelRadiusM = (wheelRadiusM > 0.0f) ? (1.0f / wheelRadiusM) : 0.0f;
+        const float staticFrictionTorqueNm =
+            (std::max)(
+                0.0f,
+                _leftDrive.getTorqueFromCommand(
+                    kReliableLaunchDriveCommand,
+                    0.0f,
+                    _vehicle.GetBatteryVoltage()));
+        const float staticFrictionSpeedThresholdRadps =
+            (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps * invWheelRadiusM) : 0.0f;
+        const float massKg =
+            (std::isfinite(_vehicle.GetMass()) && (_vehicle.GetMass() > 0.0f)) ?
+            _vehicle.GetMass() :
+            1.0f;
+        const float invMassKg = 1.0f / massKg;
+        const float yawInertiaKgM2 =
+            (std::isfinite(_vehicle.GetYawInertia()) && (_vehicle.GetYawInertia() > 0.0f)) ?
+            _vehicle.GetYawInertia() :
+            1.0f;
+        const float invYawInertiaKgM2 = 1.0f / yawInertiaKgM2;
+        const float wheelInertiaKgM2 =
+            0.5f * (_leftDrive.getEquivalentWheelInertiaKgM2() + _rightDrive.getEquivalentWheelInertiaKgM2());
+        const float resolvedWheelInertiaKgM2 =
+            (std::isfinite(wheelInertiaKgM2) && (wheelInertiaKgM2 > 0.0f)) ?
+            wheelInertiaKgM2 :
+            1.0f;
+        const float invWheelInertiaKgM2 = 1.0f / resolvedWheelInertiaKgM2;
+        const float longitudinalTireStiffnessN =
+            0.5f * (_leftDrive.getLongitudinalTireStiffnessN() + _rightDrive.getLongitudinalTireStiffnessN());
+        const float lateralDampingOverMass = kLateralVelocityDampingNsPerM * invMassKg;
+        const float yawDampingOverInertia = kYawRateDampingNmsPerRad * invYawInertiaKgM2;
 
         const float forwardVelocityMps = state(VehicleState::kU);
         const float rightVelocityMps = state(VehicleState::kV);
@@ -1239,14 +682,37 @@ namespace MazeMap
         const float commandNorm =
             std::isfinite(activityNorm) ? std::fabs(activityNorm) : 0.0f;
 
-        derivatives.wheelKinematics =
-            BuildWheelKinematics(forwardVelocityMps, rightVelocityMps, yawRateRadps, params);
-        const ContactPatchLateralStiffness lateralStiffness =
-            BuildContactPatchLateralStiffness(
-                _leftDrive.getFrontLateralTireStiffnessNPerRad(),
-                _rightDrive.getFrontLateralTireStiffnessNPerRad(),
-                _leftDrive.getRearLateralTireStiffnessNPerRad(),
-                _rightDrive.getRearLateralTireStiffnessNPerRad());
+        derivatives.wheelKinematics = wheelKinematics(state);
+        const float frontLeftLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_leftDrive.getFrontLateralTireStiffnessNPerRad());
+        const float frontRightLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_rightDrive.getFrontLateralTireStiffnessNPerRad());
+        const float rearLeftLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_leftDrive.getRearLateralTireStiffnessNPerRad());
+        const float rearRightLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_rightDrive.getRearLateralTireStiffnessNPerRad());
+        const float contactMassKg = _vehicle.GetMass();
+        const float totalNormalLoadN =
+            (contactMassKg * GRAVITY_MPS2) + (Clamp01(fanDutyCycle) * _vehicle.GetFanDownforceAtFullDuty());
+        const float frontWheelNormalLoadN = 0.5f * kFrontLoadFraction * totalNormalLoadN;
+        const float rearWheelNormalLoadN = 0.5f * (1.0f - kFrontLoadFraction) * totalNormalLoadN;
+        const float contactEnvelopeMu =
+            (std::isfinite(_vehicle.GetPeakCombinedAcceleration()) &&
+             (_vehicle.GetPeakCombinedAcceleration() > 0.0f) &&
+             std::isfinite(contactMassKg) &&
+             (contactMassKg > 0.0f)) ?
+            ((_vehicle.GetPeakCombinedAcceleration() * contactMassKg) / (std::max)(totalNormalLoadN, kForceEpsilonN)) :
+            0.0f;
+        const float peakFrontMu = (contactEnvelopeMu > 0.0f) ? contactEnvelopeMu : kMuFront;
+        const float peakRearMu = (contactEnvelopeMu > 0.0f) ? contactEnvelopeMu : kMuRear;
+        const float sustainedAccelMps2 = _vehicle.GetMaxLateralAcceleration();
+        const float lateralForceSustainedLimitN =
+            (std::isfinite(sustainedAccelMps2) &&
+             (sustainedAccelMps2 > 0.0f) &&
+             std::isfinite(contactMassKg) &&
+             (contactMassKg > 0.0f)) ?
+            (sustainedAccelMps2 * contactMassKg) :
+            0.0f;
 
         if (IsStoppedFast(
             forwardVelocityMps,
@@ -1254,16 +720,12 @@ namespace MazeMap
             yawRateRadps,
             omegaLeftRadps,
             omegaRightRadps,
-            commandNorm,
-            params))
+            commandNorm))
         {
-            derivatives.contactForces =
-                EvaluateContactForces(
-                    0.0f,
-                    0.0f,
-                    ZeroContactRightForces(),
-                    fanDutyCycle,
-                    params).forces;
+            derivatives.contactForces.contacts[kFrontLeft].normalForceN = frontWheelNormalLoadN;
+            derivatives.contactForces.contacts[kFrontRight].normalForceN = frontWheelNormalLoadN;
+            derivatives.contactForces.contacts[kRearLeft].normalForceN = rearWheelNormalLoadN;
+            derivatives.contactForces.contacts[kRearRight].normalForceN = rearWheelNormalLoadN;
             derivatives.regime = MotionRegime::StoppedHold;
             return derivatives;
         }
@@ -1275,45 +737,134 @@ namespace MazeMap
                 yawRateRadps,
                 omegaLeftRadps,
                 omegaRightRadps,
-                commandNorm,
-                params);
+                commandNorm);
 
-        RollingContactEvaluation rollingForces{};
+        ContactForces rollingContactForces{};
+        float rollingMaxUtilization = 0.0f;
+        float leftBankForwardForceN = 0.0f;
+        float rightBankForwardForceN = 0.0f;
+        float frontRightForceN = 0.0f;
+        float rearRightForceN = 0.0f;
+        float sumForwardForceN = 0.0f;
+        float sumRightForceN = 0.0f;
+        float leftBankForwardForceRawN = 0.0f;
+        float rightBankForwardForceRawN = 0.0f;
+        float frontLeftRightForceRawN = 0.0f;
+        float frontRightRightForceRawN = 0.0f;
+        float rearLeftRightForceRawN = 0.0f;
+        float rearRightRightForceRawN = 0.0f;
         if (motionWeight > 0.0f)
         {
-            rollingForces =
-                EvaluateRollingState(
-                    omegaLeftRadps,
-                    omegaRightRadps,
-                    derivatives.wheelKinematics,
-                    lateralStiffness,
-                    fanDutyCycle,
-                    params);
-        }
-        else
-        {
-            rollingForces =
-                EvaluateContactForces(
-                    0.0f,
-                    0.0f,
-                    ZeroContactRightForces(),
-                    fanDutyCycle,
-                    params);
+            const SlipTargets targets = slipTargets(state, derivatives.wheelKinematics);
+            frontLeftRightForceRawN =
+                -frontLeftLateralStiffnessNPerRad *
+                std::atan(targets.lateralRatio[kFrontLeft]);
+            frontRightRightForceRawN =
+                -frontRightLateralStiffnessNPerRad *
+                std::atan(targets.lateralRatio[kFrontRight]);
+            rearLeftRightForceRawN =
+                -rearLeftLateralStiffnessNPerRad *
+                std::atan(targets.lateralRatio[kRearLeft]);
+            rearRightRightForceRawN =
+                -rearRightLateralStiffnessNPerRad *
+                std::atan(targets.lateralRatio[kRearRight]);
+            leftBankForwardForceRawN = longitudinalTireStiffnessN * targets.kappaLeft;
+            rightBankForwardForceRawN = longitudinalTireStiffnessN * targets.kappaRight;
         }
 
-        const float yawMomentNm = ComputeContactYawMomentNm(rollingForces, params);
-        const float leftPreFrictionWheelTorqueNm =
-            leftAppliedBankTorqueNm - (params.wheelRadiusM * rollingForces.leftBankForwardForceN);
-        const float rightPreFrictionWheelTorqueNm =
-            rightAppliedBankTorqueNm - (params.wheelRadiusM * rollingForces.rightBankForwardForceN);
+        const float lambdaRear = 1.0f - kFrontLongitudinalForceSplit;
+        const float fxFlRaw = kFrontLongitudinalForceSplit * leftBankForwardForceRawN;
+        const float fxRlRaw = lambdaRear * leftBankForwardForceRawN;
+        const float fxFrRaw = kFrontLongitudinalForceSplit * rightBankForwardForceRawN;
+        const float fxRrRaw = lambdaRear * rightBankForwardForceRawN;
+        const float fyFlRaw =
+            ClampMagnitudeFast(frontLeftRightForceRawN, 0.5f * kFrontLoadFraction * lateralForceSustainedLimitN);
+        const float fyFrRaw =
+            ClampMagnitudeFast(frontRightRightForceRawN, 0.5f * kFrontLoadFraction * lateralForceSustainedLimitN);
+        const float fyRlRaw =
+            ClampMagnitudeFast(rearLeftRightForceRawN, 0.5f * (1.0f - kFrontLoadFraction) * lateralForceSustainedLimitN);
+        const float fyRrRaw =
+            ClampMagnitudeFast(rearRightRightForceRawN, 0.5f * (1.0f - kFrontLoadFraction) * lateralForceSustainedLimitN);
+
+        ContactForce& fl = rollingContactForces.contacts[kFrontLeft];
+        const float flRawMagnitudeN = MazeMap::Math::Sqrtf((fxFlRaw * fxFlRaw) + (fyFlRaw * fyFlRaw));
+        const float flMaxForceN = (std::max)(0.0f, peakFrontMu * frontWheelNormalLoadN);
+        const float flScale = (std::min)(flMaxForceN / (std::max)(flRawMagnitudeN, kForceEpsilonN), 1.0f);
+        const float flSaturationDenominatorN =
+            (flMaxForceN > kForceEpsilonN) ? flMaxForceN : kForceEpsilonN;
+        fl.forwardForceN = flScale * fxFlRaw;
+        fl.rightForceN = flScale * fyFlRaw;
+        fl.normalForceN = frontWheelNormalLoadN;
+        fl.preProjectionUtilization = flRawMagnitudeN / flSaturationDenominatorN;
+        fl.saturation = (fl.preProjectionUtilization < 1.0f) ? fl.preProjectionUtilization : 1.0f;
+
+        ContactForce& fr = rollingContactForces.contacts[kFrontRight];
+        const float frRawMagnitudeN = MazeMap::Math::Sqrtf((fxFrRaw * fxFrRaw) + (fyFrRaw * fyFrRaw));
+        const float frMaxForceN = (std::max)(0.0f, peakFrontMu * frontWheelNormalLoadN);
+        const float frScale = (std::min)(frMaxForceN / (std::max)(frRawMagnitudeN, kForceEpsilonN), 1.0f);
+        const float frSaturationDenominatorN =
+            (frMaxForceN > kForceEpsilonN) ? frMaxForceN : kForceEpsilonN;
+        fr.forwardForceN = frScale * fxFrRaw;
+        fr.rightForceN = frScale * fyFrRaw;
+        fr.normalForceN = frontWheelNormalLoadN;
+        fr.preProjectionUtilization = frRawMagnitudeN / frSaturationDenominatorN;
+        fr.saturation = (fr.preProjectionUtilization < 1.0f) ? fr.preProjectionUtilization : 1.0f;
+
+        ContactForce& rl = rollingContactForces.contacts[kRearLeft];
+        const float rlRawMagnitudeN = MazeMap::Math::Sqrtf((fxRlRaw * fxRlRaw) + (fyRlRaw * fyRlRaw));
+        const float rlMaxForceN = (std::max)(0.0f, peakRearMu * rearWheelNormalLoadN);
+        const float rlScale = (std::min)(rlMaxForceN / (std::max)(rlRawMagnitudeN, kForceEpsilonN), 1.0f);
+        const float rlSaturationDenominatorN =
+            (rlMaxForceN > kForceEpsilonN) ? rlMaxForceN : kForceEpsilonN;
+        rl.forwardForceN = rlScale * fxRlRaw;
+        rl.rightForceN = rlScale * fyRlRaw;
+        rl.normalForceN = rearWheelNormalLoadN;
+        rl.preProjectionUtilization = rlRawMagnitudeN / rlSaturationDenominatorN;
+        rl.saturation = (rl.preProjectionUtilization < 1.0f) ? rl.preProjectionUtilization : 1.0f;
+
+        ContactForce& rr = rollingContactForces.contacts[kRearRight];
+        const float rrRawMagnitudeN = MazeMap::Math::Sqrtf((fxRrRaw * fxRrRaw) + (fyRrRaw * fyRrRaw));
+        const float rrMaxForceN = (std::max)(0.0f, peakRearMu * rearWheelNormalLoadN);
+        const float rrScale = (std::min)(rrMaxForceN / (std::max)(rrRawMagnitudeN, kForceEpsilonN), 1.0f);
+        const float rrSaturationDenominatorN =
+            (rrMaxForceN > kForceEpsilonN) ? rrMaxForceN : kForceEpsilonN;
+        rr.forwardForceN = rrScale * fxRrRaw;
+        rr.rightForceN = rrScale * fyRrRaw;
+        rr.normalForceN = rearWheelNormalLoadN;
+        rr.preProjectionUtilization = rrRawMagnitudeN / rrSaturationDenominatorN;
+        rr.saturation = (rr.preProjectionUtilization < 1.0f) ? rr.preProjectionUtilization : 1.0f;
+
+        leftBankForwardForceN = fl.forwardForceN + rl.forwardForceN;
+        rightBankForwardForceN = fr.forwardForceN + rr.forwardForceN;
+        frontRightForceN = fl.rightForceN + fr.rightForceN;
+        rearRightForceN = rl.rightForceN + rr.rightForceN;
+        sumForwardForceN = leftBankForwardForceN + rightBankForwardForceN;
+        sumRightForceN = frontRightForceN + rearRightForceN;
+        rollingMaxUtilization =
+            (std::max)(
+                (std::max)(fl.preProjectionUtilization, fr.preProjectionUtilization),
+                (std::max)(rl.preProjectionUtilization, rr.preProjectionUtilization));
+
+        const float contactYawHalfTrackWidthM = 0.5f * std::fabs(_vehicle.GetTrackWidth());
+        const float contactYawLongitudinalOffsetM =
+            std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+        float yawMomentNm =
+            (contactYawHalfTrackWidthM *
+                (leftBankForwardForceN - rightBankForwardForceN)) +
+            (contactYawLongitudinalOffsetM *
+                (frontRightForceN - rearRightForceN));
+        float leftPreFrictionWheelTorqueNm =
+            leftAppliedBankTorqueNm - (wheelRadiusM * leftBankForwardForceN);
+        float rightPreFrictionWheelTorqueNm =
+            rightAppliedBankTorqueNm - (wheelRadiusM * rightBankForwardForceN);
         const float leftViscousFrictionTorqueNm =
-            params.viscousFrictionNmPerRadps * omegaLeftRadps;
+            kViscousFrictionNmPerRadps * omegaLeftRadps;
         const float rightViscousFrictionTorqueNm =
-            params.viscousFrictionNmPerRadps * omegaRightRadps;
+            kViscousFrictionNmPerRadps * omegaRightRadps;
         float leftFrictionTorqueNm = leftViscousFrictionTorqueNm;
         float rightFrictionTorqueNm = rightViscousFrictionTorqueNm;
-        if ((std::fabs(omegaLeftRadps) <= params.staticFrictionSpeedThresholdRadps) &&
-            (std::fabs(omegaRightRadps) <= params.staticFrictionSpeedThresholdRadps))
+        if ((std::fabs(omegaLeftRadps) <= staticFrictionSpeedThresholdRadps) &&
+            (std::fabs(omegaRightRadps) <= staticFrictionSpeedThresholdRadps))
         {
             const int leftTorqueSign =
                 (leftPreFrictionWheelTorqueNm > kSignEpsilon) -
@@ -1328,10 +879,10 @@ namespace MazeMap
                 (omegaRightRadps > kSignEpsilon) -
                 (omegaRightRadps < -kSignEpsilon);
             leftFrictionTorqueNm +=
-                params.staticFrictionTorqueNm *
+                staticFrictionTorqueNm *
                 static_cast<float>((leftTorqueSign != 0) ? leftTorqueSign : leftSpeedSign);
             rightFrictionTorqueNm +=
-                params.staticFrictionTorqueNm *
+                staticFrictionTorqueNm *
                 static_cast<float>((rightTorqueSign != 0) ? rightTorqueSign : rightSpeedSign);
         }
         else
@@ -1343,7 +894,7 @@ namespace MazeMap
                 (leftPreFrictionWheelTorqueNm > kSignEpsilon) -
                 (leftPreFrictionWheelTorqueNm < -kSignEpsilon);
             leftFrictionTorqueNm +=
-                params.rollingFrictionTorqueNm *
+                kRollingFrictionTorqueNm *
                 static_cast<float>((leftSpeedSign != 0) ? leftSpeedSign : leftTorqueSign);
 
             const int rightSpeedSign =
@@ -1353,20 +904,184 @@ namespace MazeMap
                 (rightPreFrictionWheelTorqueNm > kSignEpsilon) -
                 (rightPreFrictionWheelTorqueNm < -kSignEpsilon);
             rightFrictionTorqueNm +=
-                params.rollingFrictionTorqueNm *
+                kRollingFrictionTorqueNm *
                 static_cast<float>((rightSpeedSign != 0) ? rightSpeedSign : rightTorqueSign);
+        }
+
+        if ((commandNorm >= kStopEnterCommand) && (wheelRadiusM > kForceEpsilonN))
+        {
+            float leftDriveTorqueNm = leftAppliedBankTorqueNm - leftFrictionTorqueNm;
+            float rightDriveTorqueNm = rightAppliedBankTorqueNm - rightFrictionTorqueNm;
+            if ((std::fabs(omegaLeftRadps) <= staticFrictionSpeedThresholdRadps) &&
+                (std::fabs(leftAppliedBankTorqueNm) <= staticFrictionTorqueNm))
+            {
+                leftDriveTorqueNm = 0.0f;
+            }
+            if ((std::fabs(omegaRightRadps) <= staticFrictionSpeedThresholdRadps) &&
+                (std::fabs(rightAppliedBankTorqueNm) <= staticFrictionTorqueNm))
+            {
+                rightDriveTorqueNm = 0.0f;
+            }
+
+            const float halfTrackWidthM = 0.5f * std::fabs(_vehicle.GetTrackWidth());
+            if (halfTrackWidthM > 0.0f)
+            {
+                const float lowSpeedWeight =
+                    1.0f -
+                    SmoothStep(
+                        kStopEnterSpeedMps,
+                        kStopExitSpeedMps,
+                        ComputeSpeedNormMps(
+                            forwardVelocityMps,
+                            rightVelocityMps,
+                            yawRateRadps,
+                            omegaLeftRadps,
+                            omegaRightRadps));
+                const float driveYawMomentNm =
+                    halfTrackWidthM * ((leftDriveTorqueNm - rightDriveTorqueNm) * invWheelRadiusM);
+                const int driveYawSign =
+                    (driveYawMomentNm > kSignEpsilon) - (driveYawMomentNm < -kSignEpsilon);
+                const float yawScrubMomentNm =
+                    lowSpeedWeight *
+                    std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM) *
+                    _vehicle.GetMass() *
+                    Vehicle::GetSustainedLateralAccelerationReferenceMps2();
+                const float appliedYawScrubMomentNm =
+                    static_cast<float>(driveYawSign) *
+                    (std::min)(std::fabs(driveYawMomentNm), yawScrubMomentNm);
+                const float bankScrubTorqueNm =
+                    (0.5f * wheelRadiusM * appliedYawScrubMomentNm) / halfTrackWidthM;
+                leftDriveTorqueNm -= bankScrubTorqueNm;
+                rightDriveTorqueNm += bankScrubTorqueNm;
+            }
+
+            frontLeftRightForceRawN = rollingContactForces.contacts[kFrontLeft].rightForceN;
+            frontRightRightForceRawN = rollingContactForces.contacts[kFrontRight].rightForceN;
+            rearLeftRightForceRawN = rollingContactForces.contacts[kRearLeft].rightForceN;
+            rearRightRightForceRawN = rollingContactForces.contacts[kRearRight].rightForceN;
+
+            leftBankForwardForceRawN = leftDriveTorqueNm * invWheelRadiusM;
+            rightBankForwardForceRawN = rightDriveTorqueNm * invWheelRadiusM;
+            if (halfTrackWidthM > 0.0f)
+            {
+                const float wheelMassKg = resolvedWheelInertiaKgM2 * invWheelRadiusM * invWheelRadiusM;
+                const float yawAccelerationForceScale = (halfTrackWidthM * halfTrackWidthM) * invYawInertiaKgM2;
+                const float diagonal =
+                    1.0f + (wheelMassKg * (invMassKg + yawAccelerationForceScale));
+                const float offDiagonal =
+                    wheelMassKg * (invMassKg - yawAccelerationForceScale);
+                const float determinant = (diagonal * diagonal) - (offDiagonal * offDiagonal);
+                if (std::isfinite(determinant) && (std::fabs(determinant) > kForceEpsilonN))
+                {
+                    const float unsprungLeftBankForwardForceRawN =
+                        ((diagonal * leftBankForwardForceRawN) -
+                         (offDiagonal * rightBankForwardForceRawN)) /
+                        determinant;
+                    const float unsprungRightBankForwardForceRawN =
+                        ((diagonal * rightBankForwardForceRawN) -
+                         (offDiagonal * leftBankForwardForceRawN)) /
+                        determinant;
+                    leftBankForwardForceRawN = unsprungLeftBankForwardForceRawN;
+                    rightBankForwardForceRawN = unsprungRightBankForwardForceRawN;
+                }
+            }
+
+            const float updatedFxFlRaw = kFrontLongitudinalForceSplit * leftBankForwardForceRawN;
+            const float updatedFxRlRaw = lambdaRear * leftBankForwardForceRawN;
+            const float updatedFxFrRaw = kFrontLongitudinalForceSplit * rightBankForwardForceRawN;
+            const float updatedFxRrRaw = lambdaRear * rightBankForwardForceRawN;
+            const float updatedFyFlRaw =
+                ClampMagnitudeFast(frontLeftRightForceRawN, 0.5f * kFrontLoadFraction * lateralForceSustainedLimitN);
+            const float updatedFyFrRaw =
+                ClampMagnitudeFast(frontRightRightForceRawN, 0.5f * kFrontLoadFraction * lateralForceSustainedLimitN);
+            const float updatedFyRlRaw =
+                ClampMagnitudeFast(rearLeftRightForceRawN, 0.5f * (1.0f - kFrontLoadFraction) * lateralForceSustainedLimitN);
+            const float updatedFyRrRaw =
+                ClampMagnitudeFast(rearRightRightForceRawN, 0.5f * (1.0f - kFrontLoadFraction) * lateralForceSustainedLimitN);
+
+            const float updatedFlRawMagnitudeN =
+                MazeMap::Math::Sqrtf((updatedFxFlRaw * updatedFxFlRaw) + (updatedFyFlRaw * updatedFyFlRaw));
+            const float updatedFlMaxForceN = (std::max)(0.0f, peakFrontMu * frontWheelNormalLoadN);
+            const float updatedFlScale =
+                (std::min)(updatedFlMaxForceN / (std::max)(updatedFlRawMagnitudeN, kForceEpsilonN), 1.0f);
+            const float updatedFlSaturationDenominatorN =
+                (updatedFlMaxForceN > kForceEpsilonN) ? updatedFlMaxForceN : kForceEpsilonN;
+            fl.forwardForceN = updatedFlScale * updatedFxFlRaw;
+            fl.rightForceN = updatedFlScale * updatedFyFlRaw;
+            fl.normalForceN = frontWheelNormalLoadN;
+            fl.preProjectionUtilization = updatedFlRawMagnitudeN / updatedFlSaturationDenominatorN;
+            fl.saturation = (fl.preProjectionUtilization < 1.0f) ? fl.preProjectionUtilization : 1.0f;
+
+            const float updatedFrRawMagnitudeN =
+                MazeMap::Math::Sqrtf((updatedFxFrRaw * updatedFxFrRaw) + (updatedFyFrRaw * updatedFyFrRaw));
+            const float updatedFrMaxForceN = (std::max)(0.0f, peakFrontMu * frontWheelNormalLoadN);
+            const float updatedFrScale =
+                (std::min)(updatedFrMaxForceN / (std::max)(updatedFrRawMagnitudeN, kForceEpsilonN), 1.0f);
+            const float updatedFrSaturationDenominatorN =
+                (updatedFrMaxForceN > kForceEpsilonN) ? updatedFrMaxForceN : kForceEpsilonN;
+            fr.forwardForceN = updatedFrScale * updatedFxFrRaw;
+            fr.rightForceN = updatedFrScale * updatedFyFrRaw;
+            fr.normalForceN = frontWheelNormalLoadN;
+            fr.preProjectionUtilization = updatedFrRawMagnitudeN / updatedFrSaturationDenominatorN;
+            fr.saturation = (fr.preProjectionUtilization < 1.0f) ? fr.preProjectionUtilization : 1.0f;
+
+            const float updatedRlRawMagnitudeN =
+                MazeMap::Math::Sqrtf((updatedFxRlRaw * updatedFxRlRaw) + (updatedFyRlRaw * updatedFyRlRaw));
+            const float updatedRlMaxForceN = (std::max)(0.0f, peakRearMu * rearWheelNormalLoadN);
+            const float updatedRlScale =
+                (std::min)(updatedRlMaxForceN / (std::max)(updatedRlRawMagnitudeN, kForceEpsilonN), 1.0f);
+            const float updatedRlSaturationDenominatorN =
+                (updatedRlMaxForceN > kForceEpsilonN) ? updatedRlMaxForceN : kForceEpsilonN;
+            rl.forwardForceN = updatedRlScale * updatedFxRlRaw;
+            rl.rightForceN = updatedRlScale * updatedFyRlRaw;
+            rl.normalForceN = rearWheelNormalLoadN;
+            rl.preProjectionUtilization = updatedRlRawMagnitudeN / updatedRlSaturationDenominatorN;
+            rl.saturation = (rl.preProjectionUtilization < 1.0f) ? rl.preProjectionUtilization : 1.0f;
+
+            const float updatedRrRawMagnitudeN =
+                MazeMap::Math::Sqrtf((updatedFxRrRaw * updatedFxRrRaw) + (updatedFyRrRaw * updatedFyRrRaw));
+            const float updatedRrMaxForceN = (std::max)(0.0f, peakRearMu * rearWheelNormalLoadN);
+            const float updatedRrScale =
+                (std::min)(updatedRrMaxForceN / (std::max)(updatedRrRawMagnitudeN, kForceEpsilonN), 1.0f);
+            const float updatedRrSaturationDenominatorN =
+                (updatedRrMaxForceN > kForceEpsilonN) ? updatedRrMaxForceN : kForceEpsilonN;
+            rr.forwardForceN = updatedRrScale * updatedFxRrRaw;
+            rr.rightForceN = updatedRrScale * updatedFyRrRaw;
+            rr.normalForceN = rearWheelNormalLoadN;
+            rr.preProjectionUtilization = updatedRrRawMagnitudeN / updatedRrSaturationDenominatorN;
+            rr.saturation = (rr.preProjectionUtilization < 1.0f) ? rr.preProjectionUtilization : 1.0f;
+
+            leftBankForwardForceN = fl.forwardForceN + rl.forwardForceN;
+            rightBankForwardForceN = fr.forwardForceN + rr.forwardForceN;
+            frontRightForceN = fl.rightForceN + fr.rightForceN;
+            rearRightForceN = rl.rightForceN + rr.rightForceN;
+            sumForwardForceN = leftBankForwardForceN + rightBankForwardForceN;
+            sumRightForceN = frontRightForceN + rearRightForceN;
+            rollingMaxUtilization =
+                (std::max)(
+                    (std::max)(fl.preProjectionUtilization, fr.preProjectionUtilization),
+                    (std::max)(rl.preProjectionUtilization, rr.preProjectionUtilization));
+            yawMomentNm =
+                (contactYawHalfTrackWidthM *
+                    (leftBankForwardForceN - rightBankForwardForceN)) +
+                (contactYawLongitudinalOffsetM *
+                    (frontRightForceN - rearRightForceN));
+            leftPreFrictionWheelTorqueNm =
+                leftAppliedBankTorqueNm - (wheelRadiusM * leftBankForwardForceN);
+            rightPreFrictionWheelTorqueNm =
+                rightAppliedBankTorqueNm - (wheelRadiusM * rightBankForwardForceN);
         }
 
         float leftNetWheelTorqueNm = leftPreFrictionWheelTorqueNm - leftFrictionTorqueNm;
         float rightNetWheelTorqueNm = rightPreFrictionWheelTorqueNm - rightFrictionTorqueNm;
-        if ((std::fabs(omegaLeftRadps) <= params.staticFrictionSpeedThresholdRadps) &&
-            (std::fabs(leftPreFrictionWheelTorqueNm) <= params.staticFrictionTorqueNm) &&
+        if ((std::fabs(omegaLeftRadps) <= staticFrictionSpeedThresholdRadps) &&
+            (std::fabs(leftPreFrictionWheelTorqueNm) <= staticFrictionTorqueNm) &&
             (SignedDirectionFast(leftPreFrictionWheelTorqueNm, 0.0f) != 0.0f))
         {
             leftNetWheelTorqueNm = 0.0f;
         }
-        if ((std::fabs(omegaRightRadps) <= params.staticFrictionSpeedThresholdRadps) &&
-            (std::fabs(rightPreFrictionWheelTorqueNm) <= params.staticFrictionTorqueNm) &&
+        if ((std::fabs(omegaRightRadps) <= staticFrictionSpeedThresholdRadps) &&
+            (std::fabs(rightPreFrictionWheelTorqueNm) <= staticFrictionTorqueNm) &&
             (SignedDirectionFast(rightPreFrictionWheelTorqueNm, 0.0f) != 0.0f))
         {
             rightNetWheelTorqueNm = 0.0f;
@@ -1383,19 +1098,19 @@ namespace MazeMap
         const float psiDot = yawRateRadps * motionWeight;
         const float uDot =
             ((yawRateRadps * rightVelocityMps) +
-             (rollingForces.sumForwardForceN * params.invLongitudinalMassKg)) *
+             (sumForwardForceN * invMassKg)) *
             motionWeight;
         const float vDot =
             ((-yawRateRadps * forwardVelocityMps) +
-             (rollingForces.sumRightForceN * params.invLateralMassKg) -
-             (params.lateralDampingOverMass * rightVelocityMps)) *
+             (sumRightForceN * invMassKg) -
+             (lateralDampingOverMass * rightVelocityMps)) *
             motionWeight;
         const float rDot =
-            ((yawMomentNm * params.invYawInertiaKgM2) -
-             (params.yawDampingOverInertia * yawRateRadps)) *
+            ((yawMomentNm * invYawInertiaKgM2) -
+             (yawDampingOverInertia * yawRateRadps)) *
             motionWeight;
-        const float omegaLDot = (leftNetWheelTorqueNm * params.invWheelInertiaKgM2) * motionWeight;
-        const float omegaRDot = (rightNetWheelTorqueNm * params.invWheelInertiaKgM2) * motionWeight;
+        const float omegaLDot = (leftNetWheelTorqueNm * invWheelInertiaKgM2) * motionWeight;
+        const float omegaRDot = (rightNetWheelTorqueNm * invWheelInertiaKgM2) * motionWeight;
 
         derivatives.stateDot(VehicleState::kPx) = pxDot;
         derivatives.stateDot(VehicleState::kPy) = pyDot;
@@ -1407,9 +1122,29 @@ namespace MazeMap
         derivatives.stateDot(VehicleState::kOmegaR) = omegaRDot;
         derivatives.stateDot(VehicleState::kBgz) = 0.0f;
 
-        derivatives.contactForces = BlendContactForces(rollingForces.forces, motionWeight);
+        derivatives.contactForces = rollingContactForces;
+        if (motionWeight <= 0.0f)
+        {
+            for (ContactForce& contact : derivatives.contactForces.contacts)
+            {
+                contact.forwardForceN = 0.0f;
+                contact.rightForceN = 0.0f;
+                contact.saturation = 0.0f;
+                contact.preProjectionUtilization = 0.0f;
+            }
+        }
+        else if (motionWeight < 1.0f)
+        {
+            for (ContactForce& contact : derivatives.contactForces.contacts)
+            {
+                contact.forwardForceN *= motionWeight;
+                contact.rightForceN *= motionWeight;
+                contact.saturation *= motionWeight;
+                contact.preProjectionUtilization *= motionWeight;
+            }
+        }
         derivatives.maxContactUtilization =
-            (motionWeight >= 1.0f) ? rollingForces.maxUtilization : (motionWeight * rollingForces.maxUtilization);
+            (motionWeight >= 1.0f) ? rollingMaxUtilization : (motionWeight * rollingMaxUtilization);
 
         if (motionWeight < 0.5f)
         {
@@ -1418,12 +1153,8 @@ namespace MazeMap
         }
         else
         {
-            derivatives.slipTargets = ComputeRollingSlipTargets(
-                omegaLeftRadps,
-                omegaRightRadps,
-                derivatives.wheelKinematics,
-                params);
-            if (rollingForces.maxUtilization >= (1.0f - 1.0e-4f))
+            derivatives.slipTargets = slipTargets(state, derivatives.wheelKinematics);
+            if (rollingMaxUtilization >= (1.0f - 1.0e-4f))
             {
                 derivatives.regime = MotionRegime::RollingSaturated;
             }
@@ -1437,7 +1168,7 @@ namespace MazeMap
         const float originAccelForwardMps2 = derivatives.stateDot(VehicleState::kU) - (yawRateRadps * rightVelocityMps);
         derivatives.originAccelBodyMps2 = Eigen::Vector2f(originAccelRightMps2, originAccelForwardMps2);
 
-        const Eigen::Vector2f imuLeverArmBodyM = params.raw.backLeftImuMount.positionBodyM();
+        const Eigen::Vector2f imuLeverArmBodyM = Vehicle::GetBackLeftImuMount().positionBodyM();
         const float yawRateSquaredRadps2 = yawRateRadps * yawRateRadps;
         derivatives.imuAccelBodyMps2 = Eigen::Vector2f(
             originAccelRightMps2 -
@@ -1458,21 +1189,6 @@ namespace MazeMap
         float rightAppliedBankTorqueNm,
         float dtS) const noexcept
     {
-        return integrateAppliedBankTorques(
-            state,
-            leftAppliedBankTorqueNm,
-            rightAppliedBankTorqueNm,
-            _preparedParams,
-            dtS);
-    }
-
-    PlantModel::StateVector PlantModel::integrateAppliedBankTorques(
-        const StateVector& state,
-        float leftAppliedBankTorqueNm,
-        float rightAppliedBankTorqueNm,
-        const PreparedParams& params,
-        float dtS) const noexcept
-    {
         if (!(std::isfinite(dtS) && (dtS > 0.0f)))
         {
             return state;
@@ -1483,8 +1199,7 @@ namespace MazeMap
                 state,
                 leftAppliedBankTorqueNm,
                 rightAppliedBankTorqueNm,
-                (std::max)(std::fabs(leftAppliedBankTorqueNm), std::fabs(rightAppliedBankTorqueNm)),
-                params);
+                (std::max)(std::fabs(leftAppliedBankTorqueNm), std::fabs(rightAppliedBankTorqueNm)));
         return advanceStateFromDerivatives(state, evaluatedStep, dtS);
     }
 
@@ -1507,7 +1222,7 @@ namespace MazeMap
         nextState(VehicleState::kR) += dtS * evaluatedStep.stateDot(VehicleState::kR);
 
         nextState(VehicleState::kPsi) =
-            VehicleState::NormalizeAngle(
+            NormalizeAngle(
                 currentState(VehicleState::kPsi) + (dtS * nextState(VehicleState::kR)));
 
         float sineHeading = 0.0f;
@@ -1523,49 +1238,47 @@ namespace MazeMap
         nextState(VehicleState::kPy) += dtS * worldForwardVelocityMps;
 
         nextState(VehicleState::kBgz) += dtS * evaluatedStep.stateDot(VehicleState::kBgz);
-        nextState(VehicleState::kPsi) = VehicleState::NormalizeAngle(nextState(VehicleState::kPsi));
+        nextState(VehicleState::kPsi) = NormalizeAngle(nextState(VehicleState::kPsi));
         return nextState;
     }
 
-    WheelKinematics PlantModel::wheelKinematics(const StateVector& state, const PlantParams& params) const noexcept
+    PlantModel::WheelKinematics PlantModel::wheelKinematics(const StateVector& state) const noexcept
     {
-        const PreparedParams prepared = Prepare(params);
-        return wheelKinematics(state, prepared);
+        WheelKinematics kinematics{};
+        const float forwardVelocityMps = state(VehicleState::kU);
+        const float rightVelocityMps = state(VehicleState::kV);
+        const float yawRateRadps = state(VehicleState::kR);
+        const float halfTrackWidthM = 0.5f * std::fabs(_vehicle.GetTrackWidth());
+        const float longitudinalOffsetM =
+            std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+        const float leftBankVelocityMps = forwardVelocityMps + (halfTrackWidthM * yawRateRadps);
+        const float rightBankVelocityMps = forwardVelocityMps - (halfTrackWidthM * yawRateRadps);
+        const float frontLateralVelocityMps = rightVelocityMps + (longitudinalOffsetM * yawRateRadps);
+        const float rearLateralVelocityMps = rightVelocityMps - (longitudinalOffsetM * yawRateRadps);
+
+        kinematics.leftBankForwardVelocityMps = leftBankVelocityMps;
+        kinematics.rightBankForwardVelocityMps = rightBankVelocityMps;
+
+        kinematics.contacts[kFrontLeft].forwardVelocityMps = leftBankVelocityMps;
+        kinematics.contacts[kFrontRight].forwardVelocityMps = rightBankVelocityMps;
+        kinematics.contacts[kRearLeft].forwardVelocityMps = leftBankVelocityMps;
+        kinematics.contacts[kRearRight].forwardVelocityMps = rightBankVelocityMps;
+
+        kinematics.contacts[kFrontLeft].rightVelocityMps = frontLateralVelocityMps;
+        kinematics.contacts[kFrontRight].rightVelocityMps = frontLateralVelocityMps;
+        kinematics.contacts[kRearLeft].rightVelocityMps = rearLateralVelocityMps;
+        kinematics.contacts[kRearRight].rightVelocityMps = rearLateralVelocityMps;
+        return kinematics;
     }
 
-    WheelKinematics PlantModel::wheelKinematics(const StateVector& state, const PreparedParams& params) const noexcept
+    PlantModel::SlipTargets PlantModel::slipTargets(const StateVector& state) const noexcept
     {
-        return BuildWheelKinematics(
-            state(VehicleState::kU),
-            state(VehicleState::kV),
-            state(VehicleState::kR),
-            params);
+        return slipTargets(state, wheelKinematics(state));
     }
 
-    SlipTargets PlantModel::slipTargets(const StateVector& state, const PlantParams& params) const noexcept
-    {
-        const PreparedParams prepared = Prepare(params);
-        return slipTargets(state, prepared);
-    }
-
-    SlipTargets PlantModel::slipTargets(const StateVector& state, const PreparedParams& params) const noexcept
-    {
-        return slipTargets(state, wheelKinematics(state, params), params);
-    }
-
-    SlipTargets PlantModel::slipTargets(
+    PlantModel::SlipTargets PlantModel::slipTargets(
         const StateVector& state,
-        const WheelKinematics& kinematics,
-        const PlantParams& params) const noexcept
-    {
-        const PreparedParams prepared = Prepare(params);
-        return slipTargets(state, kinematics, prepared);
-    }
-
-    SlipTargets PlantModel::slipTargets(
-        const StateVector& state,
-        const WheelKinematics& kinematics,
-        const PreparedParams& params) const noexcept
+        const WheelKinematics& kinematics) const noexcept
     {
         const float forwardVelocityMps = state(VehicleState::kU);
         const float rightVelocityMps = state(VehicleState::kV);
@@ -1578,281 +1291,311 @@ namespace MazeMap
             rightVelocityMps,
             yawRateRadps,
             omegaLeftRadps,
-            omegaRightRadps,
-            params))
+            omegaRightRadps))
         {
             return SlipTargets{};
         }
 
-        return ComputeRollingSlipTargets(
-            omegaLeftRadps,
-            omegaRightRadps,
-            kinematics,
-            params);
+        SlipTargets targets{};
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float leftCircumferentialVelocityMps = wheelRadiusM * omegaLeftRadps;
+        const float rightCircumferentialVelocityMps = wheelRadiusM * omegaRightRadps;
+        const float uRefLeft =
+            ComputeRegularizedLongitudinalSpeedMps(
+                kinematics.leftBankForwardVelocityMps,
+                kRollingSpeedRegularizationMps);
+        const float uRefRight =
+            ComputeRegularizedLongitudinalSpeedMps(
+                kinematics.rightBankForwardVelocityMps,
+                kRollingSpeedRegularizationMps);
+
+        targets.kappaLeft =
+            (leftCircumferentialVelocityMps - kinematics.leftBankForwardVelocityMps) *
+            (1.0f / uRefLeft);
+        targets.kappaRight =
+            (rightCircumferentialVelocityMps - kinematics.rightBankForwardVelocityMps) *
+            (1.0f / uRefRight);
+        for (std::size_t index = 0; index < targets.lateralRatio.size(); ++index)
+        {
+            const float contactReferenceSpeedMps =
+                ComputeRegularizedLongitudinalSpeedMps(
+                    kinematics.contacts[index].forwardVelocityMps,
+                    kRollingSpeedRegularizationMps);
+            targets.lateralRatio[index] =
+                kinematics.contacts[index].rightVelocityMps / contactReferenceSpeedMps;
+        }
+        return targets;
     }
 
-    ContactForces PlantModel::tireForces(const StateVector& state, const PlantParams& params) const noexcept
-    {
-        const PreparedParams prepared = Prepare(params);
-        return tireForces(state, prepared);
-    }
-
-    ContactForces PlantModel::tireForces(const StateVector& state, const PreparedParams& params) const noexcept
+    PlantModel::ContactForces PlantModel::tireForces(const StateVector& state) const noexcept
     {
         return tireForces(
             state,
-            App::Internal::CommandVector(0.0f, 0.0f),
-            params);
+            App::Internal::CommandVector(0.0f, 0.0f));
     }
 
-    ContactForces PlantModel::tireForces(
+    PlantModel::ContactForces PlantModel::tireForces(
         const StateVector& state,
-        const App::Internal::CommandVector& control,
-        const PlantParams& params) const noexcept
+        const App::Internal::CommandVector& control) const noexcept
     {
-        const PreparedParams prepared = Prepare(params);
-        return tireForces(state, control, prepared);
-    }
-
-    ContactForces PlantModel::tireForces(
-        const StateVector& state,
-        const App::Internal::CommandVector& control,
-        const PreparedParams& params) const noexcept
-    {
-        const float fanDutyCycle = _vehicle.GetFanDuty();
-        const float forwardVelocityMps = state(VehicleState::kU);
-        const float rightVelocityMps = state(VehicleState::kV);
-        const float yawRateRadps = state(VehicleState::kR);
-        const float omegaLeftRadps = state(VehicleState::kOmegaL);
-        const float omegaRightRadps = state(VehicleState::kOmegaR);
-        const float commandNorm =
-            (std::max)(std::fabs(control.LeftCommand()), std::fabs(control.RightCommand()));
-
-        const float rollWeight =
-            ResolveRollingMotionWeight(
-                forwardVelocityMps,
-                rightVelocityMps,
-                yawRateRadps,
-                omegaLeftRadps,
-                omegaRightRadps,
-                commandNorm,
-                params);
-        if (rollWeight <= 0.0f)
-        {
-            return EvaluateContactForces(
-                0.0f,
-                0.0f,
-                ZeroContactRightForces(),
-                fanDutyCycle,
-                params).forces;
-        }
-
-        const WheelKinematics kinematics =
-            BuildWheelKinematics(forwardVelocityMps, rightVelocityMps, yawRateRadps, params);
-        const ContactPatchLateralStiffness lateralStiffness =
-            BuildContactPatchLateralStiffness(
-                _leftDrive.getFrontLateralTireStiffnessNPerRad(),
-                _rightDrive.getFrontLateralTireStiffnessNPerRad(),
-                _leftDrive.getRearLateralTireStiffnessNPerRad(),
-                _rightDrive.getRearLateralTireStiffnessNPerRad());
-        const RollingContactEvaluation rolling =
-            EvaluateRollingState(
-                omegaLeftRadps,
-                omegaRightRadps,
-                kinematics,
-                lateralStiffness,
-                fanDutyCycle,
-                params);
-        return BlendContactForces(rolling.forces, rollWeight);
+        return forwardStep(state, control).contactForces;
     }
 
     Eigen::Vector2f PlantModel::imuPlanarAcceleration(
         const StateVector& state,
         const App::Internal::CommandVector& control) const noexcept
     {
-        return imuPlanarAcceleration(state, control, _preparedParams);
+        return forwardStep(state, control).imuAccelBodyMps2;
     }
 
-    Eigen::Vector2f PlantModel::imuPlanarAcceleration(
-        const StateVector& state,
+    float PlantModel::contactSaturation(
         const App::Internal::CommandVector& control,
-        const PlantParams& params) const noexcept
+        uint8_t contactIndex) const noexcept
     {
-        const PreparedParams prepared = Prepare(params);
-        return imuPlanarAcceleration(state, control, prepared);
+        const ContactForces forces = tireForces(BuildBoundStateVector(), control);
+        return (contactIndex < forces.contacts.size()) ?
+            forces.contacts[contactIndex].saturation :
+            0.0f;
     }
 
-    Eigen::Vector2f PlantModel::imuPlanarAcceleration(
-        const StateVector& state,
+    float PlantModel::contactPreProjectionUtilization(
         const App::Internal::CommandVector& control,
-        const PreparedParams& params) const noexcept
+        uint8_t contactIndex) const noexcept
     {
-        return forwardStep(state, control, params).imuAccelBodyMps2;
+        const ContactForces forces = tireForces(BuildBoundStateVector(), control);
+        return (contactIndex < forces.contacts.size()) ?
+            forces.contacts[contactIndex].preProjectionUtilization :
+            0.0f;
     }
 
-    PlantModel::StateVector PlantModel::integrate(
-        const StateVector& state,
-        const App::Internal::CommandVector& control,
-        float dt,
-        const PlantParams& params) const noexcept
+    float PlantModel::contactLateralSlipAngleRad(uint8_t contactIndex) const noexcept
     {
-        const PreparedParams prepared = Prepare(params);
-        return integrate(state, control, dt, prepared);
+        const SlipTargets targets = slipTargets(BuildBoundStateVector());
+        return (contactIndex < targets.lateralRatio.size()) ?
+            std::atan(targets.lateralRatio[contactIndex]) :
+            0.0f;
     }
 
-    PlantModel::StateVector PlantModel::integrate(
-        const StateVector& state,
-        const App::Internal::CommandVector& control,
-        float dt,
-        const PreparedParams& params) const noexcept
+    float PlantModel::backLeftImuRightAccelerationMps2(
+        const App::Internal::CommandVector& control) const noexcept
+    {
+        return imuPlanarAcceleration(BuildBoundStateVector(), control).x();
+    }
+
+    float PlantModel::backLeftImuForwardAccelerationMps2(
+        const App::Internal::CommandVector& control) const noexcept
+    {
+        return imuPlanarAcceleration(BuildBoundStateVector(), control).y();
+    }
+
+    void PlantModel::integrate(const App::Internal::CommandVector& control, float dt) noexcept
     {
         if (!(std::isfinite(dt) && (dt > 0.0f)))
         {
-            return state;
+            return;
         }
 
+        const StateVector currentState = BuildBoundStateVector();
         const float commandNorm =
             (std::max)(std::fabs(control.LeftCommand()), std::fabs(control.RightCommand()));
-        const PlantDerivatives derivatives = forwardStep(state, control, params);
-        StateVector implicitState = state + (dt * derivatives.stateDot);
-        implicitState(VehicleState::kPsi) = VehicleState::NormalizeAngle(implicitState(VehicleState::kPsi));
+        const PlantDerivatives derivatives = forwardStep(currentState, control);
+        StateVector nextState = currentState + (dt * derivatives.stateDot);
+        nextState(VehicleState::kPsi) = NormalizeAngle(nextState(VehicleState::kPsi));
 
         if (ShouldSnapToZeroFast(
-            implicitState(VehicleState::kU),
-            implicitState(VehicleState::kV),
-            implicitState(VehicleState::kR),
-            implicitState(VehicleState::kOmegaL),
-            implicitState(VehicleState::kOmegaR),
-            commandNorm,
-            params))
+            nextState(VehicleState::kU),
+            nextState(VehicleState::kV),
+            nextState(VehicleState::kR),
+            nextState(VehicleState::kOmegaL),
+            nextState(VehicleState::kOmegaR),
+            commandNorm))
         {
-            implicitState(VehicleState::kU) = 0.0f;
-            implicitState(VehicleState::kV) = 0.0f;
-            implicitState(VehicleState::kR) = 0.0f;
-            implicitState(VehicleState::kOmegaL) = 0.0f;
-            implicitState(VehicleState::kOmegaR) = 0.0f;
+            nextState(VehicleState::kU) = 0.0f;
+            nextState(VehicleState::kV) = 0.0f;
+            nextState(VehicleState::kR) = 0.0f;
+            nextState(VehicleState::kOmegaL) = 0.0f;
+            nextState(VehicleState::kOmegaR) = 0.0f;
         }
 
-        return implicitState;
+        ApplyStateVectorToBoundState(nextState);
+        _runtimeState.SetTime(_runtimeState.GetTime() + dt);
+        _runtimeState.SetCurrentCommand(control);
+        _runtimeState.SetLongitudinalAcceleration(derivatives.longitudinalAccelMps2);
+        _runtimeState.SetLateralAcceleration(derivatives.lateralAccelMps2);
+        _runtimeState.SetYawAcceleration(derivatives.yawAccelRadps2);
     }
 
     App::Internal::CommandVector PlantModel::ComputeFeedforward(
         float desiredAccelMps2,
         float desiredYawAccelRadps2) const noexcept
     {
-        return ComputeFeedforwardFromState(
-            BuildBoundStateVector(),
-            desiredAccelMps2,
-            desiredYawAccelRadps2);
-    }
-
-    App::Internal::CommandVector PlantModel::ComputeFeedforwardFromState(
-        const StateVector& currentState,
-        float desiredAccelMps2,
-        float desiredYawAccelRadps2) const noexcept
-    {
-        const PreparedParams& params = _preparedParams;
-        const StateVector operatingState = BuildDriveCommandOperatingState(currentState, params);
-        const float forwardVelocityMps = operatingState(VehicleState::kU);
-        const float rightVelocityMps = operatingState(VehicleState::kV);
-        const float yawRateRadps = operatingState(VehicleState::kR);
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float invWheelRadiusM = (wheelRadiusM > 0.0f) ? (1.0f / wheelRadiusM) : 0.0f;
+        const float trackWidthM = std::fabs(_vehicle.GetTrackWidth());
+        const float halfTrackWidthM = 0.5f * trackWidthM;
+        const float invTrackWidthM = (trackWidthM > 0.0f) ? (1.0f / trackWidthM) : 0.0f;
+        const float longitudinalOffsetM =
+            std::fabs(Vehicle::GetPhysicalModel().driveWheelLongitudinalOffsetM);
+        const float massKg =
+            (std::isfinite(_vehicle.GetMass()) && (_vehicle.GetMass() > 0.0f)) ?
+            _vehicle.GetMass() :
+            1.0f;
+        const float yawInertiaKgM2 =
+            (std::isfinite(_vehicle.GetYawInertia()) && (_vehicle.GetYawInertia() > 0.0f)) ?
+            _vehicle.GetYawInertia() :
+            1.0f;
+        const float wheelInertiaKgM2 =
+            0.5f * (_leftDrive.getEquivalentWheelInertiaKgM2() + _rightDrive.getEquivalentWheelInertiaKgM2());
+        const float resolvedWheelInertiaKgM2 =
+            (std::isfinite(wheelInertiaKgM2) && (wheelInertiaKgM2 > 0.0f)) ?
+            wheelInertiaKgM2 :
+            1.0f;
+        const float sustainedAccelMps2 = _vehicle.GetMaxLateralAcceleration();
+        const float lateralForceSustainedLimitN =
+            (std::isfinite(sustainedAccelMps2) && (sustainedAccelMps2 > 0.0f)) ?
+            (sustainedAccelMps2 * massKg) :
+            0.0f;
+        const float staticFrictionTorqueNm =
+            (std::max)(
+                0.0f,
+                _leftDrive.getTorqueFromCommand(
+                    kReliableLaunchDriveCommand,
+                    0.0f,
+                    _vehicle.GetBatteryVoltage()));
+        const float staticFrictionSpeedThresholdRadps =
+            (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps * invWheelRadiusM) : 0.0f;
+        const float runtimeForwardVelocityMps = _runtimeState.GetVelocity();
+        const float runtimeRightVelocityMps = _runtimeState.GetLateralVelocity();
+        const float runtimeYawRateRadps = _runtimeState.GetRotationalVelocity();
+        const float forwardVelocityMps =
+            std::isfinite(runtimeForwardVelocityMps) ? runtimeForwardVelocityMps : 0.0f;
+        const float rightVelocityMps =
+            std::isfinite(runtimeRightVelocityMps) ? runtimeRightVelocityMps : 0.0f;
+        const float yawRateRadps =
+            std::isfinite(runtimeYawRateRadps) ? runtimeYawRateRadps : 0.0f;
         const float uRefBody =
             MazeMap::Math::Sqrtf(
                 (forwardVelocityMps * forwardVelocityMps) +
-                (params.rollingRegularizationMps * params.rollingRegularizationMps));
+                (kRollingSpeedRegularizationMps * kRollingSpeedRegularizationMps));
 
         const float wheelInertiaOverRadiusSqKg =
-            params.wheelInertiaKgM2 * params.invWheelRadiusM * params.invWheelRadiusM;
+            resolvedWheelInertiaKgM2 * invWheelRadiusM * invWheelRadiusM;
         const float leftBankAccelMps2 =
-            desiredAccelMps2 + (params.halfTrackWidthM * desiredYawAccelRadps2);
+            desiredAccelMps2 + (halfTrackWidthM * desiredYawAccelRadps2);
         const float rightBankAccelMps2 =
-            desiredAccelMps2 - (params.halfTrackWidthM * desiredYawAccelRadps2);
+            desiredAccelMps2 - (halfTrackWidthM * desiredYawAccelRadps2);
         const float commonForceRequestN =
             0.5f *
-            params.longitudinalMassKg *
+            massKg *
             (desiredAccelMps2 - (yawRateRadps * rightVelocityMps));
         const float frontLateralVelocityMps =
-            rightVelocityMps + (params.longitudinalOffsetM * yawRateRadps);
+            rightVelocityMps + (longitudinalOffsetM * yawRateRadps);
         const float rearLateralVelocityMps =
-            rightVelocityMps - (params.longitudinalOffsetM * yawRateRadps);
+            rightVelocityMps - (longitudinalOffsetM * yawRateRadps);
         const float alphaFront = std::atan(frontLateralVelocityMps / uRefBody);
         const float alphaRear = std::atan(rearLateralVelocityMps / uRefBody);
-        const ContactPatchLateralStiffness lateralStiffness =
-            BuildContactPatchLateralStiffness(
-                _leftDrive.getFrontLateralTireStiffnessNPerRad(),
-                _rightDrive.getFrontLateralTireStiffnessNPerRad(),
-                _leftDrive.getRearLateralTireStiffnessNPerRad(),
-                _rightDrive.getRearLateralTireStiffnessNPerRad());
+        const float frontLeftLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_leftDrive.getFrontLateralTireStiffnessNPerRad());
+        const float frontRightLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_rightDrive.getFrontLateralTireStiffnessNPerRad());
+        const float rearLeftLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_leftDrive.getRearLateralTireStiffnessNPerRad());
+        const float rearRightLateralStiffnessNPerRad =
+            ResolvePositiveCalibration(_rightDrive.getRearLateralTireStiffnessNPerRad());
         const float frontAxleRightForceRawN =
-            -(lateralStiffness.contactNPerRad[kFrontLeft] +
-              lateralStiffness.contactNPerRad[kFrontRight]) * alphaFront;
+            -(frontLeftLateralStiffnessNPerRad + frontRightLateralStiffnessNPerRad) * alphaFront;
         const float rearAxleRightForceRawN =
-            -(lateralStiffness.contactNPerRad[kRearLeft] +
-              lateralStiffness.contactNPerRad[kRearRight]) * alphaRear;
+            -(rearLeftLateralStiffnessNPerRad + rearRightLateralStiffnessNPerRad) * alphaRear;
         const float frontAxleRightForceLimitN =
-            params.frontLoadFraction * params.lateralForceSustainedLimitN;
+            kFrontLoadFraction * lateralForceSustainedLimitN;
         const float rearAxleRightForceLimitN =
-            params.rearLoadFraction * params.lateralForceSustainedLimitN;
+            (1.0f - kFrontLoadFraction) * lateralForceSustainedLimitN;
         const float frontAxleRightForceN =
-            (frontAxleRightForceLimitN > params.forceEpsilonN) ?
+            (frontAxleRightForceLimitN > kForceEpsilonN) ?
             (std::clamp)(
                 frontAxleRightForceRawN,
                 -frontAxleRightForceLimitN,
                 frontAxleRightForceLimitN) :
             frontAxleRightForceRawN;
         const float rearAxleRightForceN =
-            (rearAxleRightForceLimitN > params.forceEpsilonN) ?
+            (rearAxleRightForceLimitN > kForceEpsilonN) ?
             (std::clamp)(
                 rearAxleRightForceRawN,
                 -rearAxleRightForceLimitN,
                 rearAxleRightForceLimitN) :
             rearAxleRightForceRawN;
         const float lateralYawMomentNm =
-            params.longitudinalOffsetM * (frontAxleRightForceN - rearAxleRightForceN);
+            longitudinalOffsetM * (frontAxleRightForceN - rearAxleRightForceN);
+        const int requestedYawSign =
+            (desiredYawAccelRadps2 > kSignEpsilon) -
+            (desiredYawAccelRadps2 < -kSignEpsilon);
+        const float lowYawSpeedWeight =
+            1.0f -
+            SmoothStep(
+                kStopEnterYawRateRadps,
+                kStopExitYawRateRadps,
+                std::fabs(yawRateRadps));
+        const float yawScrubBreakawayMomentNm =
+            lowYawSpeedWeight *
+            static_cast<float>(requestedYawSign) *
+            longitudinalOffsetM *
+            massKg *
+            Vehicle::GetSustainedLateralAccelerationReferenceMps2();
         const float requestedYawMomentNm =
-            (params.yawInertiaKgM2 * desiredYawAccelRadps2) +
-            (params.yawDampingNmPerRadps * yawRateRadps) -
-            lateralYawMomentNm;
-        const float differentialForceRequestN = -requestedYawMomentNm * params.invTrackWidthM;
+            (yawInertiaKgM2 * desiredYawAccelRadps2) +
+            (kYawRateDampingNmsPerRad * yawRateRadps) -
+            lateralYawMomentNm +
+            yawScrubBreakawayMomentNm;
+        const float differentialForceRequestN = -requestedYawMomentNm * invTrackWidthM;
         const float leftForceCommandN =
             commonForceRequestN - differentialForceRequestN;
         const float rightForceCommandN =
             commonForceRequestN + differentialForceRequestN;
 
-        const float leftWheelSpeedRadps = operatingState(VehicleState::kOmegaL);
-        const float rightWheelSpeedRadps = operatingState(VehicleState::kOmegaR);
+        const float leftWheelSpeedRadps =
+            (wheelRadiusM > 0.0f) ?
+            ((forwardVelocityMps + (halfTrackWidthM * yawRateRadps)) * invWheelRadiusM) :
+            0.0f;
+        const float rightWheelSpeedRadps =
+            (wheelRadiusM > 0.0f) ?
+            ((forwardVelocityMps - (halfTrackWidthM * yawRateRadps)) * invWheelRadiusM) :
+            0.0f;
         const float leftWheelInertiaForceN =
             wheelInertiaOverRadiusSqKg * leftBankAccelMps2;
         const float rightWheelInertiaForceN =
             wheelInertiaOverRadiusSqKg * rightBankAccelMps2;
         const float leftWheelTorqueRequestNm =
-            params.wheelRadiusM * (leftForceCommandN + leftWheelInertiaForceN);
+            wheelRadiusM * (leftForceCommandN + leftWheelInertiaForceN);
         const float rightWheelTorqueRequestNm =
-            params.wheelRadiusM * (rightForceCommandN + rightWheelInertiaForceN);
+            wheelRadiusM * (rightForceCommandN + rightWheelInertiaForceN);
 
         const float leftViscousFrictionTorqueNm =
-            params.viscousFrictionNmPerRadps * leftWheelSpeedRadps;
+            kViscousFrictionNmPerRadps * leftWheelSpeedRadps;
         const float rightViscousFrictionTorqueNm =
-            params.viscousFrictionNmPerRadps * rightWheelSpeedRadps;
+            kViscousFrictionNmPerRadps * rightWheelSpeedRadps;
         float leftFrictionTorqueNm = leftViscousFrictionTorqueNm;
         float rightFrictionTorqueNm = rightViscousFrictionTorqueNm;
-        if ((std::fabs(leftWheelSpeedRadps) <= params.staticFrictionSpeedThresholdRadps) &&
-            (std::fabs(rightWheelSpeedRadps) <= params.staticFrictionSpeedThresholdRadps))
+        if ((std::fabs(leftWheelSpeedRadps) <= staticFrictionSpeedThresholdRadps) &&
+            (std::fabs(rightWheelSpeedRadps) <= staticFrictionSpeedThresholdRadps))
         {
-            const float commonWheelTorqueRequestNm =
-                0.5f * (leftWheelTorqueRequestNm + rightWheelTorqueRequestNm);
-            const int commonTorqueSign =
-                (commonWheelTorqueRequestNm > kSignEpsilon) -
-                (commonWheelTorqueRequestNm < -kSignEpsilon);
-            const float commonWheelSpeedRadps =
-                0.5f * (leftWheelSpeedRadps + rightWheelSpeedRadps);
-            const int commonSpeedSign =
-                (commonWheelSpeedRadps > kSignEpsilon) -
-                (commonWheelSpeedRadps < -kSignEpsilon);
-            const float commonStictionSign =
-                static_cast<float>((commonTorqueSign != 0) ? commonTorqueSign : commonSpeedSign);
-            leftFrictionTorqueNm += params.staticFrictionTorqueNm * commonStictionSign;
-            rightFrictionTorqueNm += params.staticFrictionTorqueNm * commonStictionSign;
+            const int leftTorqueSign =
+                (leftWheelTorqueRequestNm > kSignEpsilon) -
+                (leftWheelTorqueRequestNm < -kSignEpsilon);
+            const int leftSpeedSign =
+                (leftWheelSpeedRadps > kSignEpsilon) -
+                (leftWheelSpeedRadps < -kSignEpsilon);
+            const int rightTorqueSign =
+                (rightWheelTorqueRequestNm > kSignEpsilon) -
+                (rightWheelTorqueRequestNm < -kSignEpsilon);
+            const int rightSpeedSign =
+                (rightWheelSpeedRadps > kSignEpsilon) -
+                (rightWheelSpeedRadps < -kSignEpsilon);
+            leftFrictionTorqueNm +=
+                staticFrictionTorqueNm *
+                static_cast<float>((leftTorqueSign != 0) ? leftTorqueSign : leftSpeedSign);
+            rightFrictionTorqueNm +=
+                staticFrictionTorqueNm *
+                static_cast<float>((rightTorqueSign != 0) ? rightTorqueSign : rightSpeedSign);
         }
         else
         {
@@ -1863,7 +1606,7 @@ namespace MazeMap
                 (leftWheelTorqueRequestNm > kSignEpsilon) -
                 (leftWheelTorqueRequestNm < -kSignEpsilon);
             leftFrictionTorqueNm +=
-                params.rollingFrictionTorqueNm *
+                kRollingFrictionTorqueNm *
                 static_cast<float>((leftSpeedSign != 0) ? leftSpeedSign : leftTorqueSign);
 
             const int rightSpeedSign =
@@ -1873,7 +1616,7 @@ namespace MazeMap
                 (rightWheelTorqueRequestNm > kSignEpsilon) -
                 (rightWheelTorqueRequestNm < -kSignEpsilon);
             rightFrictionTorqueNm +=
-                params.rollingFrictionTorqueNm *
+                kRollingFrictionTorqueNm *
                 static_cast<float>((rightSpeedSign != 0) ? rightSpeedSign : rightTorqueSign);
         }
 
@@ -1881,11 +1624,11 @@ namespace MazeMap
             _leftDrive.getCommandFromTorque(
                 leftWheelTorqueRequestNm + leftFrictionTorqueNm,
                 leftWheelSpeedRadps,
-                params.supplyVoltageV),
+                _vehicle.GetBatteryVoltage()),
             _rightDrive.getCommandFromTorque(
                 rightWheelTorqueRequestNm + rightFrictionTorqueNm,
                 rightWheelSpeedRadps,
-                params.supplyVoltageV));
+                _vehicle.GetBatteryVoltage()));
     }
 
     Eigen::Matrix<float, 2, 2> PlantModel::encoderPairCovarianceRadps(
@@ -1893,7 +1636,8 @@ namespace MazeMap
         float yawRateSigmaRadps) const noexcept
     {
         Eigen::Matrix<float, 2, 2> covariance = Eigen::Matrix<float, 2, 2>::Zero();
-        if (!(_preparedParams.wheelRadiusM > 0.0f) || !std::isfinite(_preparedParams.wheelRadiusM))
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        if (!(wheelRadiusM > 0.0f) || !std::isfinite(wheelRadiusM))
         {
             covariance(0, 0) = 1.0f;
             covariance(1, 1) = 1.0f;
@@ -1908,14 +1652,15 @@ namespace MazeMap
             (std::isfinite(yawRateSigmaRadps) && (yawRateSigmaRadps > 0.0f)) ?
             yawRateSigmaRadps :
             1.0f;
-        const float halfTrackWidthM = 0.5f * ResolvePhysicalTrackWidthM(_vehicle, _preparedParams);
+        const float halfTrackWidthM = 0.5f * ResolvePhysicalTrackWidthM(_vehicle);
         const float varianceUMps2 = resolvedLinearSigmaMps * resolvedLinearSigmaMps;
         const float varianceYawRateRadps2 = resolvedYawSigmaRadps * resolvedYawSigmaRadps;
         const float varianceWheelLinearMps2 =
             varianceUMps2 + ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2);
         const float covarianceWheelLinearMps2 =
             varianceUMps2 - ((halfTrackWidthM * halfTrackWidthM) * varianceYawRateRadps2);
-        const float invWheelRadius2 = _preparedParams.invWheelRadiusM * _preparedParams.invWheelRadiusM;
+        const float invWheelRadiusM = 1.0f / wheelRadiusM;
+        const float invWheelRadius2 = invWheelRadiusM * invWheelRadiusM;
         covariance(0, 0) = varianceWheelLinearMps2 * invWheelRadius2;
         covariance(1, 1) = varianceWheelLinearMps2 * invWheelRadius2;
         covariance(0, 1) = covarianceWheelLinearMps2 * invWheelRadius2;
@@ -1954,7 +1699,8 @@ namespace MazeMap
 
     float PlantModel::stationaryEncoderOmegaSigmaRadps(float stationaryLinearSpeedSigmaMps) const noexcept
     {
-        if (!(_preparedParams.wheelRadiusM > 0.0f) || !std::isfinite(_preparedParams.wheelRadiusM))
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        if (!(wheelRadiusM > 0.0f) || !std::isfinite(wheelRadiusM))
         {
             return 1.0f;
         }
@@ -1963,31 +1709,33 @@ namespace MazeMap
             (std::isfinite(stationaryLinearSpeedSigmaMps) && (stationaryLinearSpeedSigmaMps > 0.0f)) ?
             stationaryLinearSpeedSigmaMps :
             1.0f;
-        return resolvedStationarySigmaMps * _preparedParams.invWheelRadiusM;
+        return resolvedStationarySigmaMps / wheelRadiusM;
     }
 
     float PlantModel::measuredLinearSpeedMps(const EncoderObs& observation) const noexcept
     {
-        if (!(_preparedParams.wheelRadiusM > 0.0f) || !std::isfinite(_preparedParams.wheelRadiusM))
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        if (!(wheelRadiusM > 0.0f) || !std::isfinite(wheelRadiusM))
         {
             return 0.0f;
         }
 
-        return 0.5f * _preparedParams.wheelRadiusM * (observation.omegaLeftRadps + observation.omegaRightRadps);
+        return 0.5f * wheelRadiusM * (observation.omegaLeftRadps + observation.omegaRightRadps);
     }
 
     float PlantModel::measuredYawRateRadps(const EncoderObs& observation) const noexcept
     {
-        const float trackWidthM = ResolvePhysicalTrackWidthM(_vehicle, _preparedParams);
-        if (!(_preparedParams.wheelRadiusM > 0.0f) ||
-            !std::isfinite(_preparedParams.wheelRadiusM) ||
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float trackWidthM = ResolvePhysicalTrackWidthM(_vehicle);
+        if (!(wheelRadiusM > 0.0f) ||
+            !std::isfinite(wheelRadiusM) ||
             !(trackWidthM > 0.0f) ||
             !std::isfinite(trackWidthM))
         {
             return 0.0f;
         }
 
-        return _preparedParams.wheelRadiusM * (observation.omegaLeftRadps - observation.omegaRightRadps) / trackWidthM;
+        return wheelRadiusM * (observation.omegaLeftRadps - observation.omegaRightRadps) / trackWidthM;
     }
 
     float PlantModel::measuredYawRateVarianceRadps2(
@@ -1996,9 +1744,10 @@ namespace MazeMap
         float generalLinearSpeedSigmaMps,
         float generalYawRateSigmaRadps) const noexcept
     {
-        const float trackWidthM = ResolvePhysicalTrackWidthM(_vehicle, _preparedParams);
-        if (!(_preparedParams.wheelRadiusM > 0.0f) ||
-            !std::isfinite(_preparedParams.wheelRadiusM) ||
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float trackWidthM = ResolvePhysicalTrackWidthM(_vehicle);
+        if (!(wheelRadiusM > 0.0f) ||
+            !std::isfinite(wheelRadiusM) ||
             !(trackWidthM > 0.0f) ||
             !std::isfinite(trackWidthM))
         {
@@ -2011,9 +1760,9 @@ namespace MazeMap
             zeroWheelObservation ?
             (Eigen::Matrix<float, 2, 2>::Identity() *
                 (stationaryEncoderOmegaSigmaRadps(stationaryLinearSpeedSigmaMps) *
-                 stationaryEncoderOmegaSigmaRadps(stationaryLinearSpeedSigmaMps))) :
+                  stationaryEncoderOmegaSigmaRadps(stationaryLinearSpeedSigmaMps))) :
             encoderPairCovarianceRadps(generalLinearSpeedSigmaMps, generalYawRateSigmaRadps);
-        const float yawScale = _preparedParams.wheelRadiusM / trackWidthM;
+        const float yawScale = wheelRadiusM / trackWidthM;
         const float variance =
             (yawScale * yawScale) *
             (wheelCovarianceRadps2(0, 0) +
@@ -2045,8 +1794,8 @@ namespace MazeMap
     Eigen::Vector2f PlantModel::wheelLinearVelocityFromBodyState(const StateVector& state) const noexcept
     {
         const float trackWidthM =
-            (std::isfinite(_preparedParams.trackWidthM) && (_preparedParams.trackWidthM > 0.0f)) ?
-            _preparedParams.trackWidthM :
+            (std::isfinite(_vehicle.GetTrackWidth()) && (_vehicle.GetTrackWidth() > 0.0f)) ?
+            _vehicle.GetTrackWidth() :
             0.0f;
         const float forwardSpeedMps =
             std::isfinite(state(VehicleState::kU)) ? state(VehicleState::kU) : 0.0f;
@@ -2061,9 +1810,9 @@ namespace MazeMap
     float PlantModel::sustainedCombinedAccelerationUsage(float accelerationMps2) const noexcept
     {
         const float limit =
-            (std::isfinite(_preparedParams.raw.combinedAccelSustainedMps2) &&
-             (_preparedParams.raw.combinedAccelSustainedMps2 > 0.0f)) ?
-            _preparedParams.raw.combinedAccelSustainedMps2 :
+            (std::isfinite(Vehicle::GetSustainedLateralAccelerationReferenceMps2()) &&
+             (Vehicle::GetSustainedLateralAccelerationReferenceMps2() > 0.0f)) ?
+            Vehicle::GetSustainedLateralAccelerationReferenceMps2() :
             1.0f;
         return std::fabs(accelerationMps2) / limit;
     }
@@ -2071,9 +1820,9 @@ namespace MazeMap
     float PlantModel::nominalCombinedAccelerationUsage(float accelerationMps2) const noexcept
     {
         const float limit =
-            (std::isfinite(_preparedParams.raw.combinedAccelNominalMps2) &&
-             (_preparedParams.raw.combinedAccelNominalMps2 > 0.0f)) ?
-            _preparedParams.raw.combinedAccelNominalMps2 :
+            (std::isfinite(_vehicle.GetNominalCombinedAcceleration()) &&
+             (_vehicle.GetNominalCombinedAcceleration() > 0.0f)) ?
+            _vehicle.GetNominalCombinedAcceleration() :
             1.0f;
         return std::fabs(accelerationMps2) / limit;
     }
@@ -2081,9 +1830,9 @@ namespace MazeMap
     float PlantModel::peakCombinedAccelerationUsage(float accelerationMps2) const noexcept
     {
         const float limit =
-            (std::isfinite(_preparedParams.raw.combinedAccelPeakMps2) &&
-             (_preparedParams.raw.combinedAccelPeakMps2 > 0.0f)) ?
-            _preparedParams.raw.combinedAccelPeakMps2 :
+            (std::isfinite(_vehicle.GetPeakCombinedAcceleration()) &&
+             (_vehicle.GetPeakCombinedAcceleration() > 0.0f)) ?
+            _vehicle.GetPeakCombinedAcceleration() :
             1.0f;
         return std::fabs(accelerationMps2) / limit;
     }
@@ -2091,132 +1840,199 @@ namespace MazeMap
     float PlantModel::stopExitYawRateUsage(float yawRateRadps) const noexcept
     {
         const float limit =
-            (std::isfinite(_preparedParams.stopExitYawRateRadps) &&
-             (_preparedParams.stopExitYawRateRadps > 0.0f)) ?
-            _preparedParams.stopExitYawRateRadps :
+            (std::isfinite(kStopExitYawRateRadps) &&
+             (kStopExitYawRateRadps > 0.0f)) ?
+            kStopExitYawRateRadps :
             1.0f;
         return std::fabs(yawRateRadps) / limit;
     }
 
+    float PlantModel::totalForwardContactForceN(const App::Internal::CommandVector& control) const noexcept
+    {
+        return forwardStep(control).contactForces.SumForwardForceN();
+    }
+
+    float PlantModel::totalRightContactForceN(const App::Internal::CommandVector& control) const noexcept
+    {
+        return forwardStep(control).contactForces.SumRightForceN();
+    }
+
+    float PlantModel::leftBankForwardContactForceN(const App::Internal::CommandVector& control) const noexcept
+    {
+        return forwardStep(control).contactForces.LeftBankForwardForceN();
+    }
+
+    float PlantModel::rightBankForwardContactForceN(const App::Internal::CommandVector& control) const noexcept
+    {
+        return forwardStep(control).contactForces.RightBankForwardForceN();
+    }
+
+    float PlantModel::contactRightForceN(
+        const App::Internal::CommandVector& control,
+        uint8_t contactIndex) const noexcept
+    {
+        const ContactForces forces = forwardStep(control).contactForces;
+        return (contactIndex < forces.contacts.size()) ?
+            forces.contacts[contactIndex].rightForceN :
+            0.0f;
+    }
+
+    float PlantModel::contactForwardForceN(
+        const App::Internal::CommandVector& control,
+        uint8_t contactIndex) const noexcept
+    {
+        const ContactForces forces = forwardStep(control).contactForces;
+        return (contactIndex < forces.contacts.size()) ?
+            forces.contacts[contactIndex].forwardForceN :
+            0.0f;
+    }
+
+    float PlantModel::contactNormalLoadN(uint8_t contactIndex) const noexcept
+    {
+        if (contactIndex < 4U)
+        {
+            return forwardStep(ZeroControlVector()).contactForces.contacts[contactIndex].normalForceN;
+        }
+        return 0.0f;
+    }
+
+    float PlantModel::totalContactNormalLoadN() const noexcept
+    {
+        const ContactForces forces = forwardStep(ZeroControlVector()).contactForces;
+        return
+            forces.contacts[0].normalForceN +
+            forces.contacts[1].normalForceN +
+            forces.contacts[2].normalForceN +
+            forces.contacts[3].normalForceN;
+    }
+
     void PlantModel::velocityTargetTechnicalLimits(
         float& maxLongitudinalAccelMps2,
         float& maxYawAccelRadps2) const noexcept
     {
         velocityTargetTechnicalLimits(
-            BuildBoundStateVector(),
-            _preparedParams,
+            _runtimeState.GetVelocity(),
+            _runtimeState.GetRotationalVelocity(),
             maxLongitudinalAccelMps2,
             maxYawAccelRadps2);
     }
 
     void PlantModel::velocityTargetTechnicalLimits(
-        const StateVector& currentState,
-        const PlantParams& params,
-        float& maxLongitudinalAccelMps2,
-        float& maxYawAccelRadps2) const noexcept
-    {
-        const PreparedParams prepared = Prepare(params);
-        velocityTargetTechnicalLimits(
-            currentState,
-            prepared,
-            maxLongitudinalAccelMps2,
-            maxYawAccelRadps2);
-    }
-
-    void PlantModel::velocityTargetTechnicalLimits(
-        const StateVector& currentState,
-        const PreparedParams& params,
+        float forwardVelocityMps,
+        float yawRateRadps,
         float& maxLongitudinalAccelMps2,
         float& maxYawAccelRadps2) const noexcept
     {
         maxLongitudinalAccelMps2 = 0.0f;
         maxYawAccelRadps2 = 0.0f;
 
-        if (!(std::isfinite(params.wheelRadiusM) &&
-            std::isfinite(params.trackWidthM) &&
-            (params.wheelRadiusM > params.forceEpsilonN)))
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        const float trackWidthM = std::fabs(_vehicle.GetTrackWidth());
+        if (!(std::isfinite(wheelRadiusM) &&
+            std::isfinite(trackWidthM) &&
+            (wheelRadiusM > kForceEpsilonN)))
         {
             return;
         }
 
-        const StateVector operatingState = BuildDriveCommandOperatingState(currentState, params);
+        const float invWheelRadiusM = 1.0f / wheelRadiusM;
+        const float halfTrackWidthM = 0.5f * trackWidthM;
+        const float massKg =
+            (std::isfinite(_vehicle.GetMass()) && (_vehicle.GetMass() > 0.0f)) ?
+            _vehicle.GetMass() :
+            1.0f;
+        const float yawInertiaKgM2 =
+            (std::isfinite(_vehicle.GetYawInertia()) && (_vehicle.GetYawInertia() > 0.0f)) ?
+            _vehicle.GetYawInertia() :
+            1.0f;
+        const float resolvedForwardVelocityMps =
+            std::isfinite(forwardVelocityMps) ? forwardVelocityMps : 0.0f;
+        const float resolvedYawRateRadps =
+            std::isfinite(yawRateRadps) ? yawRateRadps : 0.0f;
         const float leftBankSpeedRadps =
-            (operatingState(VehicleState::kU) + (params.halfTrackWidthM * operatingState(VehicleState::kR))) *
-            params.invWheelRadiusM;
+            (resolvedForwardVelocityMps + (halfTrackWidthM * resolvedYawRateRadps)) *
+            invWheelRadiusM;
         const float rightBankSpeedRadps =
-            (operatingState(VehicleState::kU) - (params.halfTrackWidthM * operatingState(VehicleState::kR))) *
-            params.invWheelRadiusM;
-        const auto BankForceCapacityN =
-            [&params](const MotorEncoderDrive& drive, float wheelBankSpeedRadps) noexcept
-        {
-            const float positiveTorqueNm =
-                drive.getTorqueFromCommand(1.0f, wheelBankSpeedRadps, params.supplyVoltageV);
-            const float negativeTorqueNm =
-                drive.getTorqueFromCommand(-1.0f, wheelBankSpeedRadps, params.supplyVoltageV);
-            const float symmetricTorqueNm =
-                (std::min)(std::fabs(positiveTorqueNm), std::fabs(negativeTorqueNm));
-            return
-                (std::isfinite(symmetricTorqueNm) && (params.wheelRadiusM > params.forceEpsilonN)) ?
-                (symmetricTorqueNm / params.wheelRadiusM) :
-                0.0f;
-        };
-        const float leftBankForceN = BankForceCapacityN(_leftDrive, leftBankSpeedRadps);
-        const float rightBankForceN = BankForceCapacityN(_rightDrive, rightBankSpeedRadps);
+            (resolvedForwardVelocityMps - (halfTrackWidthM * resolvedYawRateRadps)) *
+            invWheelRadiusM;
+        const float batteryVoltageV = _vehicle.GetBatteryVoltage();
+        const float leftPositiveTorqueNm =
+            _leftDrive.getTorqueFromCommand(1.0f, leftBankSpeedRadps, batteryVoltageV);
+        const float leftNegativeTorqueNm =
+            _leftDrive.getTorqueFromCommand(-1.0f, leftBankSpeedRadps, batteryVoltageV);
+        const float rightPositiveTorqueNm =
+            _rightDrive.getTorqueFromCommand(1.0f, rightBankSpeedRadps, batteryVoltageV);
+        const float rightNegativeTorqueNm =
+            _rightDrive.getTorqueFromCommand(-1.0f, rightBankSpeedRadps, batteryVoltageV);
+        const float leftSymmetricTorqueNm =
+            (std::min)(std::fabs(leftPositiveTorqueNm), std::fabs(leftNegativeTorqueNm));
+        const float rightSymmetricTorqueNm =
+            (std::min)(std::fabs(rightPositiveTorqueNm), std::fabs(rightNegativeTorqueNm));
+        const float leftBankForceN =
+            (std::isfinite(leftSymmetricTorqueNm) && (wheelRadiusM > kForceEpsilonN)) ?
+            (leftSymmetricTorqueNm / wheelRadiusM) :
+            0.0f;
+        const float rightBankForceN =
+            (std::isfinite(rightSymmetricTorqueNm) && (wheelRadiusM > kForceEpsilonN)) ?
+            (rightSymmetricTorqueNm / wheelRadiusM) :
+            0.0f;
         const float maxBankForceN =
             (std::min)(
                 (std::max)(0.0f, leftBankForceN),
                 (std::max)(0.0f, rightBankForceN));
         maxLongitudinalAccelMps2 =
-            (2.0f * maxBankForceN) * params.invLongitudinalMassKg;
+            (2.0f * maxBankForceN) / massKg;
         maxYawAccelRadps2 =
-            (params.trackWidthM * maxBankForceN) * params.invYawInertiaKgM2;
-    }
-
-    void PlantModel::velocityTargetTechnicalLimits(
-        float forwardVelocityMps,
-        float yawRateRadps,
-        const PlantParams& params,
-        float& maxLongitudinalAccelMps2,
-        float& maxYawAccelRadps2) const noexcept
-    {
-        const PreparedParams prepared = Prepare(params);
-        velocityTargetTechnicalLimits(
-            forwardVelocityMps,
-            yawRateRadps,
-            prepared,
-            maxLongitudinalAccelMps2,
-            maxYawAccelRadps2);
-    }
-
-    void PlantModel::velocityTargetTechnicalLimits(
-        float forwardVelocityMps,
-        float yawRateRadps,
-        const PreparedParams& params,
-        float& maxLongitudinalAccelMps2,
-        float& maxYawAccelRadps2) const noexcept
-    {
-        velocityTargetTechnicalLimits(
-            BuildReducedDriveCommandOperatingState(forwardVelocityMps, yawRateRadps, params),
-            params,
-            maxLongitudinalAccelMps2,
-            maxYawAccelRadps2);
+            (trackWidthM * maxBankForceN) / yawInertiaKgM2;
     }
 
     float PlantModel::driveFrictionTorque(
         float wheelBankSpeedRadps,
-        float wheelTorqueRequestNm,
-        const PlantParams& params) const noexcept
+        float wheelTorqueRequestNm) const noexcept
     {
-        const PreparedParams prepared = Prepare(params);
-        return driveFrictionTorque(wheelBankSpeedRadps, wheelTorqueRequestNm, prepared);
+        return DriveFrictionTorqueFast(wheelBankSpeedRadps, wheelTorqueRequestNm, staticFrictionTorqueNm());
     }
 
-    float PlantModel::driveFrictionTorque(
-        float wheelBankSpeedRadps,
-        float wheelTorqueRequestNm,
-        const PreparedParams& params) const noexcept
+    float PlantModel::staticFrictionTorqueNm() const noexcept
     {
-        return DriveFrictionTorqueFast(wheelBankSpeedRadps, wheelTorqueRequestNm, params);
+        return
+            (std::max)(
+                0.0f,
+                _leftDrive.getTorqueFromCommand(
+                    kReliableLaunchDriveCommand,
+                    0.0f,
+                    _vehicle.GetBatteryVoltage()));
+    }
+
+    float PlantModel::rollingFrictionTorqueNm() const noexcept
+    {
+        return kRollingFrictionTorqueNm;
+    }
+
+    float PlantModel::staticFrictionSpeedThresholdRadps() const noexcept
+    {
+        const float wheelRadiusM = Vehicle::GetDriveWheelRadiusM();
+        return (wheelRadiusM > 0.0f) ? (kStaticFrictionMaxSpeedMps / wheelRadiusM) : 0.0f;
+    }
+
+    float PlantModel::leftDriveEquivalentWheelInertiaKgM2() const noexcept
+    {
+        return _leftDrive.getEquivalentWheelInertiaKgM2();
+    }
+
+    float PlantModel::rightDriveEquivalentWheelInertiaKgM2() const noexcept
+    {
+        return _rightDrive.getEquivalentWheelInertiaKgM2();
+    }
+
+    float PlantModel::leftDriveLongitudinalTireStiffnessN() const noexcept
+    {
+        return _leftDrive.getLongitudinalTireStiffnessN();
+    }
+
+    float PlantModel::rightDriveLongitudinalTireStiffnessN() const noexcept
+    {
+        return _rightDrive.getLongitudinalTireStiffnessN();
     }
 }
 
